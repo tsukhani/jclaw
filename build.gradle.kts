@@ -1,8 +1,6 @@
 import net.ltgt.gradle.errorprone.CheckSeverity
 import net.ltgt.gradle.errorprone.errorprone
 import org.gradle.process.CommandLineArgumentProvider
-import java.nio.file.FileSystems
-import java.nio.file.Files
 
 plugins {
     id("org.playframework.play1")
@@ -751,34 +749,16 @@ if (providers.gradleProperty("jclaw.stripDebugInfo").orNull == "true") {
 // driver-bundle is Node.js for all five Playwright platforms (~194 MB, near half the bundle).
 // A bundle install, and the Docker image built from the bundle, downloads its one platform's
 // official Node on first browser use (services.browser.PlaywrightNode), so the zip needs none.
-// Dev, tests and `play run` keep the jar on the classpath.
-abstract class DropZipEntries : DefaultTask() {
-    // Rewritten in place, so neither an input nor an output to Gradle's up-to-date check.
-    @get:Internal abstract val archive: RegularFileProperty
-    @get:Input abstract val entryPattern: Property<String>
-
-    @TaskAction
-    fun drop() {
-        val zip = archive.get().asFile.toPath()
-        val pattern = Regex(entryPattern.get())
-        val dropped = FileSystems.newFileSystem(zip).use { fs ->
-            val matches = Files.walk(fs.getPath("/")).use { paths ->
-                paths.filter { pattern.matches(it.toString()) }.toList()
-            }
-            // Loud rather than silent: a renamed or removed jar means this step is stale.
-            require(matches.isNotEmpty()) { "no entry in ${zip.fileName} matches ${entryPattern.get()}" }
-            matches.forEach { Files.delete(it) }
-            matches.size
+// Dev, tests and `play run` keep the jar on the classpath. playBundle fills both lib/ and the
+// launcher's .classpath from playClasspath, so filtering it keeps the jar out of both.
+tasks.named<play.gradle.PlayBundleTask>("playBundle") {
+    // Snapshot the sources first: filtering playClasspath into itself would be circular.
+    val resolved = files(playClasspath.from.toList())
+    playClasspath.setFrom(resolved.filter { !it.name.startsWith("driver-bundle-") })
+    doFirst {
+        // Loud rather than silent: a renamed or removed jar means this filter is stale.
+        check(resolved.any { it.name.startsWith("driver-bundle-") }) {
+            "no driver-bundle jar on playBundle's classpath; the Playwright filter in build.gradle.kts is stale"
         }
-        // zipfs rewrites the archive on close, so the size is only final after use{}.
-        logger.lifecycle("Bundle trimmed to ${zip.toAbsolutePath()} (${Files.size(zip) / 1024 / 1024} MB; entries dropped: $dropped)")
     }
 }
-
-val dropBundledPlaywrightDriver = tasks.register<DropZipEntries>("dropBundledPlaywrightDriver") {
-    description = "Remove Playwright's all-platform driver-bundle jar from the release bundle"
-    archive.set(tasks.named<play.gradle.PlayBundleTask>("playBundle").flatMap { it.outputFile })
-    entryPattern.set("/[^/]+/lib/driver-bundle-[0-9.]+\\.jar")
-    outputs.upToDateWhen { false }
-}
-tasks.named("playBundle") { finalizedBy(dropBundledPlaywrightDriver) }
