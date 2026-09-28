@@ -113,9 +113,9 @@ class ScrapeLadderTest extends UnitTest {
         }
         assertEquals(ScrapeRung.IMPERSONATE, BlockClassifier.nextRung(ScrapeReason.DATADOME, 403, ScrapeRung.PLAIN));
         assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.DATADOME, 403, ScrapeRung.IMPERSONATE));
-
-        var banned = plain(ScrapeReason.GEO_BLOCK, null);
-        assertSame(banned, ScrapeLadder.climb("https://example.test/", banned));
+        assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.DATADOME, 451, ScrapeRung.PLAIN),
+                "a stated refusal is never escalated, whoever serves it");
+        assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.DATADOME, 404, ScrapeRung.PLAIN));
     }
 
     @Test

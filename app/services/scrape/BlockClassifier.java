@@ -176,10 +176,12 @@ public final class BlockClassifier {
      * As {@link #nextRung(ScrapeReason, ScrapeRung)} for an attempt that ended on
      * {@code status} (0 when it was not refused). A challenge read off a refused response
      * routes as that status alone did: whether a detected challenge should skip rung 2 is a
-     * separate, measured decision (JCLAW-1304).
+     * separate, measured decision (JCLAW-1304). A DataDome refusal routes the same way, so a
+     * 451 naming DataDome still stops as a policy block.
      */
     public static ScrapeRung nextRung(ScrapeReason reason, int status, ScrapeRung attempted) {
-        boolean challenge = reason == ScrapeReason.JS_CHALLENGE || reason == ScrapeReason.TURNSTILE;
+        boolean challenge = reason == ScrapeReason.JS_CHALLENGE || reason == ScrapeReason.TURNSTILE
+                || reason == ScrapeReason.DATADOME;
         return nextRung(challenge && status >= 400 ? statusReason(status) : reason, attempted);
     }
 
