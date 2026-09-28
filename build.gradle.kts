@@ -761,14 +761,17 @@ abstract class DropZipEntries : DefaultTask() {
     fun drop() {
         val zip = archive.get().asFile.toPath()
         val pattern = Regex(entryPattern.get())
-        FileSystems.newFileSystem(zip).use { fs ->
+        val dropped = FileSystems.newFileSystem(zip).use { fs ->
             val matches = Files.walk(fs.getPath("/")).use { paths ->
                 paths.filter { pattern.matches(it.toString()) }.toList()
             }
             // Loud rather than silent: a renamed or removed jar means this step is stale.
             require(matches.isNotEmpty()) { "no entry in ${zip.fileName} matches ${entryPattern.get()}" }
             matches.forEach { Files.delete(it) }
+            matches.size
         }
+        // zipfs rewrites the archive on close, so the size is only final after use{}.
+        logger.lifecycle("Bundle trimmed to ${zip.toAbsolutePath()} (${Files.size(zip) / 1024 / 1024} MB; entries dropped: $dropped)")
     }
 }
 
