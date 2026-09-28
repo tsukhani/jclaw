@@ -101,8 +101,10 @@
     // which is why the lone `renovate/typescript-7.x` branch recurred weekly
     // and never merged. Tracking: vuejs/language-tools#5381 (waiting on a
     // Volar port, likely gated on TS 7.1). TS 6.x minors/patches still flow.
-    // Lift to <8 (or drop) once a vue-tsc release > 3.3.7 supports the native
-    // compiler, and bump typescript + vue-tsc + @vue/language-core together.
+    // Lift to <8 (or drop) once vue-tsc/index.js no longer resolves
+    // `typescript/lib/tsc`, and bump typescript + vue-tsc + @vue/language-core
+    // together. Its `@typescript/typescript6` alias branch runs TS 6 under the
+    // `typescript` name; it is not native-compiler support.
     {
       matchPackageNames: ["typescript"],
       allowedVersions: "<7",
@@ -132,22 +134,6 @@
       matchPackageNames: ["vitest", "@vitest/**", "@vue/test-utils", "happy-dom"],
     },
 
-    // Disable Renovate's package-replacement preset for the regex
-    // (customManager) manager. Replacements assume a Maven-style
-    // groupId:artifactId coordinate when computing the replaceString,
-    // which doesn't match Play 1.x's `groupId -> artifactId` arrow
-    // form that our customManager extracts. Renovate logs "Cannot find
-    // replaceString in current file content" every cycle if we don't
-    // suppress this. Version updates (the actual value of the
-    // customManager) still work — those use the regex's literal match
-    // as the replaceString. If a Play 1.x dep ever genuinely needs a
-    // groupId/artifactId rename, we do it manually.
-    {
-      matchManagers: ["custom.regex"],
-      matchUpdateTypes: ["replacement"],
-      enabled: false,
-    },
-
     // Auto-merge patch and minor bumps directly to main via signed git push,
     // skipping Bitbucket's merge UI (which can't sign commits on Bitbucket
     // Server 7.21.10 — see JCLAW-180). Renovate runs as a catch-all here:
@@ -174,26 +160,6 @@
       matchManagers: ["gradle", "gradle-wrapper"],
       matchUpdateTypes: ["minor"],
       automerge: false,
-    },
-
-    // OpenTelemetry semconv: never automerge, and check the compile by hand.
-    // semconv v1.42.0 deprecated every gen_ai.* convention and moved it to
-    // open-telemetry/semantic-conventions-genai, which has published no release
-    // and has no artifact on Maven Central — so there is nothing to migrate to.
-    // Measured against 1.43.0-alpha: all 53 fields of GenAiIncubatingAttributes
-    // carry @Deprecated, and GenAiSpans plus LatencyTrace use 17 of the
-    // deprecated constants between them (verified 2026-09-09).
-    // They are deprecated, not removed. A later release may delete them, and
-    // that fails the build rather than warning. The catch-all above automerges
-    // every patch, which would land that removal unreviewed, so this rule turns
-    // automerge off for the whole group and a green compile is the gate. Drop it
-    // once a GenAI artifact exists and those two classes move onto it.
-    {
-      matchPackageNames: ["io.opentelemetry.semconv:**"],
-      automerge: false,
-      prBodyNotes: [
-        ":warning: `GenAiSpans` and `LatencyTrace` use 17 `gen_ai.*` constants that are deprecated upstream and may be **removed** in a release. Run `./gradlew compileJava` on this branch before merging — a removal breaks the build rather than warning.",
-      ],
     },
 
     // The play1 fork pin. See the custom manager below for why this can never
