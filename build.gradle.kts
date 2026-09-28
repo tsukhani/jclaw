@@ -687,7 +687,7 @@ dependencies {
 // configuration-cache compatible (delete()/sync() on the project script are not):
 // clean the output dir, run ProGuard dir->dir, then Sync the result back over
 // precompiled/java so playDist / playBundle zip the stripped classes.
-val proguard: Configuration by configurations.creating
+val proguard = configurations.create("proguard")
 dependencies {
     // Debug-strip engine only. The `proguard` configuration is on no compile or
     // runtime classpath, so nothing here reaches the dist.
@@ -696,11 +696,11 @@ dependencies {
 
 val strippedPrecompiledDir = layout.buildDirectory.dir("proguard/precompiled-java")
 
-val cleanStrippedPrecompiled by tasks.registering(Delete::class) {
+val cleanStrippedPrecompiled = tasks.register<Delete>("cleanStrippedPrecompiled") {
     delete(strippedPrecompiledDir)
 }
 
-val proguardStripPrecompiled by tasks.registering(JavaExec::class) {
+val proguardStripPrecompiled = tasks.register<JavaExec>("proguardStripPrecompiled") {
     description = "Run ProGuard to strip local-variable name tables from precompiled/java"
     dependsOn("playPrecompile", cleanStrippedPrecompiled)
     mustRunAfter("playPrecompile")
@@ -733,7 +733,7 @@ val proguardStripPrecompiled by tasks.registering(JavaExec::class) {
 
 // Swap the stripped classes back over the originals. Sync mirrors, so a stale
 // class from a prior run cannot survive into the dist.
-val stripPrecompiledDebugInfo by tasks.registering(Sync::class) {
+val stripPrecompiledDebugInfo = tasks.register<Sync>("stripPrecompiledDebugInfo") {
     description = "Replace precompiled/java with its debug-stripped copy (release hardening)"
     dependsOn(proguardStripPrecompiled)
     from(strippedPrecompiledDir)
@@ -772,7 +772,7 @@ abstract class DropZipEntries : DefaultTask() {
     }
 }
 
-val dropBundledPlaywrightDriver by tasks.registering(DropZipEntries::class) {
+val dropBundledPlaywrightDriver = tasks.register<DropZipEntries>("dropBundledPlaywrightDriver") {
     description = "Remove Playwright's all-platform driver-bundle jar from the release bundle"
     archive.set(tasks.named<play.gradle.PlayBundleTask>("playBundle").flatMap { it.outputFile })
     entryPattern.set("/[^/]+/lib/driver-bundle-[0-9.]+\\.jar")
