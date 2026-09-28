@@ -35,6 +35,18 @@ class UtilsFilenamesTest extends UnitTest {
     }
 
     @Test
+    void extensionOfRejectsLeadingDotHiddenFileInsideAPath() {
+        assertEquals("", Filenames.extensionOf("dir/.gitignore"));
+        assertEquals("", Filenames.extensionOf("a\\b\\.env"));
+    }
+
+    @Test
+    void extensionOfTakesTheLastDotOfTheName() {
+        assertEquals(".pdf", Filenames.extensionOf("report.pdf"));
+        assertEquals(".gz", Filenames.extensionOf("dir/archive.tar.gz"));
+    }
+
+    @Test
     void extensionOfRejectsTrailingDot() {
         assertEquals("",
                 Filenames.extensionOf("foo."));
