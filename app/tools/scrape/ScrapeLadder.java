@@ -88,12 +88,25 @@ public final class ScrapeLadder {
      * refused with {@code status} (0 when it was not refused).
      *
      * <p>A caller holding a budget must ask before claiming a slot: {@code climb} returns
-     * without a request when the classifier names an uninstalled rung, so claiming first
-     * spends the budget on a page nothing was attempted for and reports an escalation
-     * that never happened.
+     * without a request when no installed rung is left to try, so claiming first spends the
+     * budget on a page nothing was attempted for and reports an escalation that never happened.
      */
     public static boolean wouldAttempt(ScrapeReason reason, int status) {
-        return isInstalled(BlockClassifier.nextRung(reason, status, ScrapeRung.PLAIN));
+        return isInstalled(nextInstalledRung(reason, status, ScrapeRung.PLAIN));
+    }
+
+    /**
+     * The rung {@link #climb} tries after {@code reason} on {@code attempted}: the classifier's
+     * pick, or the first installed rung above it when that one is switched off, so turning
+     * impersonation off does not also keep a refused page from the browser. {@link ScrapeRung#NONE}
+     * when nothing installed is left.
+     */
+    public static ScrapeRung nextInstalledRung(ScrapeReason reason, int status, ScrapeRung attempted) {
+        var next = BlockClassifier.nextRung(reason, status, attempted);
+        while (next != ScrapeRung.NONE && !isInstalled(next)) {
+            next = BlockClassifier.nextRung(reason, status, next);
+        }
+        return next;
     }
 
     /**
@@ -119,8 +132,8 @@ public final class ScrapeLadder {
         String challenge = null;
 
         while (true) {
-            var next = BlockClassifier.nextRung(last.reason(), last.status(), attempted);
-            if (!isInstalled(next)) return best.withChallenge(challenge);
+            var next = nextInstalledRung(last.reason(), last.status(), attempted);
+            if (next == ScrapeRung.NONE) return best.withChallenge(challenge);
 
             last = attempt(next, url, language);
             attempted = next;

@@ -163,6 +163,19 @@ class ScrapeLadderTest extends UnitTest {
     }
 
     @Test
+    void aRungSwitchedOffIsClimbedPastNotStoppedAt() {
+        assumeTrue(RenderedFetcher.available(), "rung 3 is not installed here, so nothing above rung 2 can be reached");
+        config.set(FetchSidecarManager.CFG_ENABLED, "false");
+        assertEquals(ScrapeRung.BROWSER, ScrapeLadder.nextInstalledRung(ScrapeReason.TRUST_BLOCK, 403, ScrapeRung.PLAIN),
+                "a refusal the impersonation rung would have taken goes on to the browser");
+        assertTrue(ScrapeLadder.wouldAttempt(ScrapeReason.TRUST_BLOCK, 403), "and the budget check agrees");
+
+        config.set(StealthSidecarManager.CFG_ENABLED, "false");
+        assertEquals(ScrapeRung.NONE, ScrapeLadder.nextInstalledRung(ScrapeReason.TRUST_BLOCK, 403, ScrapeRung.PLAIN));
+        assertFalse(ScrapeLadder.wouldAttempt(ScrapeReason.TRUST_BLOCK, 403));
+    }
+
+    @Test
     void theLadderStopsWhenNothingFurtherWouldHelp() {
         // POLICY_BLOCK is a licensing or geo refusal. No transport defeats it, and a
         // ladder that kept climbing would spend a browser render to be refused again.
