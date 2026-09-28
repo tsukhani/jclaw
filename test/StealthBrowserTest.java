@@ -294,13 +294,13 @@ class StealthBrowserTest extends UnitTest {
     }
 
     @Test
-    void theTurnstileClickIsOffUntilTheOperatorTurnsItOn() {
+    void theTurnstileClickIsOnUntilTheOperatorTurnsItOff() {
         config.delete(StealthSidecarManager.CFG_SOLVE_TURNSTILE);
-        assertFalse(solveTurnstileSent(), "an absent key means off");
-        config.set(StealthSidecarManager.CFG_SOLVE_TURNSTILE, "true");
-        assertTrue(solveTurnstileSent(), "read per render, so no restart is needed");
+        assertTrue(solveTurnstileSent(), "an absent key means on");
         config.set(StealthSidecarManager.CFG_SOLVE_TURNSTILE, "false");
-        assertFalse(solveTurnstileSent());
+        assertFalse(solveTurnstileSent(), "read per render, so no restart is needed");
+        config.set(StealthSidecarManager.CFG_SOLVE_TURNSTILE, "true");
+        assertTrue(solveTurnstileSent());
     }
 
     private static boolean solveTurnstileSent() {

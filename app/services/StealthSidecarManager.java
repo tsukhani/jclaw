@@ -25,13 +25,13 @@ public final class StealthSidecarManager {
     private static final String IDENTITY = "patchright-chromium";
 
     /** Public because Play's tests live in the default package. */
-    public static final String CFG_ENABLED = "scrape.stealth.enabled";
+    public static final String CFG_ENABLED = "web_scrape.stealth.enabled";
 
     /** Public because Play's tests live in the default package. */
-    public static final String CFG_SOLVE_TURNSTILE = "scrape.stealth.solveTurnstile";
+    public static final String CFG_SOLVE_TURNSTILE = "web_scrape.stealth.solve-turnstile";
 
     private static final LocalSidecarDaemon DAEMON = new LocalSidecarDaemon(new LocalSidecarDaemon.Config(
-            "sidecar/stealth", "data/stealth-sidecar", "scrape.stealth", 9532, 300,
+            "sidecar/stealth", "data/stealth-sidecar", "web_scrape.stealth", 9532, 300,
             "scrape", "stealth-sidecar", "stealth browser sidecar",
             "the first launch installs Patchright and may download a Chromium build",
             ScrapeSidecarException::new));
@@ -50,9 +50,9 @@ public final class StealthSidecarManager {
     }
 
     /** Whether a render may click the checkbox of a Cloudflare challenge gate (JCLAW-1306). Read per
-     *  render; absent means off. */
+     *  render; absent means on. */
     public static boolean solveTurnstile() {
-        return ConfigService.getBoolean(CFG_SOLVE_TURNSTILE, false);
+        return ConfigService.getBoolean(CFG_SOLVE_TURNSTILE, true);
     }
 
     /** Base URL of a healthy sidecar, spawning it if needed. Single-flight (JCLAW-830). */

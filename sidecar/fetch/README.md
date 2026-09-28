@@ -103,14 +103,14 @@ Keys live in the Config DB (Settings), not `conf/application.conf`; none is seed
 
 | Key | Default | Read by | Meaning |
 |---|---|---|---|
-| `scrape.impersonate.enabled` | `true` | `FetchSidecarManager.available` | `false` takes rung 2 out of the ladder without touching the sidecar |
-| `scrape.impersonate.profile` | `chrome` | `FetchSidecarManager.profile` | the impersonation profile, passed as `--model`; repinning it respawns (see above) |
-| `scrape.impersonate.port` | `9533` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
-| `scrape.impersonate.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the process drains and exits after that long without a fetch |
-| `scrape.impersonate.startupTimeoutSeconds` | `180` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
+| `web_scrape.impersonate.enabled` | `true` | `FetchSidecarManager.available` | `false` takes rung 2 out of the ladder without touching the sidecar |
+| `web_scrape.impersonate.profile` | `chrome` | `FetchSidecarManager.profile` | the impersonation profile, passed as `--model`; repinning it respawns (see above) |
+| `web_scrape.impersonate.port` | `9533` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
+| `web_scrape.impersonate.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the process drains and exits after that long without a fetch |
+| `web_scrape.impersonate.startupTimeoutSeconds` | `180` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
 
-`LocalSidecarDaemon` also reads `scrape.impersonate.timeoutSeconds` (exported as
-`SIDECAR_REQUEST_TIMEOUT_SEC`) and `scrape.impersonate.hfToken` (exported as `HF_TOKEN`) for
+`LocalSidecarDaemon` also reads `web_scrape.impersonate.timeoutSeconds` (exported as
+`SIDECAR_REQUEST_TIMEOUT_SEC`) and `web_scrape.impersonate.hfToken` (exported as `HF_TOKEN`) for
 every sidecar it launches; this one reads neither variable, so the two keys have no effect here.
 
 ## Authentication

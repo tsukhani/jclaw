@@ -185,15 +185,15 @@ headless inside 10 s with no click once every surface agreed, while with the sit
 flag described under [One story on every surface](#one-story-on-every-surface) each click drew
 a fresh checkbox and three never passed.
 
-**The click is off unless the operator turns it on** with `scrape.stealth.solveTurnstile`, which
-the JVM reads per render and sends as `solveTurnstile`. With it on, the checkbox of a `managed` or
-`interactive` gate is clicked once Turnstile's frame is visible: at most three clicks, 8 s apart,
-each at the checkbox's offset inside the frame whose URL starts
-`https://challenges.cloudflare.com/cdn-cgi/challenge-platform/`, clamped to that frame's bounding
-box. No other frame, and no point outside that box, is ever clicked. A `non-interactive` or
-`unknown` challenge is only waited on, and with the switch off so is every challenge. A Turnstile
-widget inside a page with content carries no `_cf_chl_opt`, so it is not a gate: never waited
-on, never clicked.
+**The click is on unless the operator turns it off** with `web_scrape.stealth.solve-turnstile`
+(Settings > Web Scraping > Escalation), which the JVM reads per render and sends as
+`solveTurnstile`. With it on, the checkbox of a `managed` or `interactive` gate is clicked once
+Turnstile's frame is visible: at most three clicks, 8 s apart, each at the checkbox's offset inside
+the frame whose URL starts `https://challenges.cloudflare.com/cdn-cgi/challenge-platform/`, clamped
+to that frame's bounding box. No other frame, and no point outside that box, is ever clicked. A
+`non-interactive` or `unknown` challenge is only waited on, and with the switch off so is every
+challenge. A Turnstile widget inside a page with content carries no `_cf_chl_opt`, so it is not a
+gate: never waited on, never clicked.
 
 The click only starts Turnstile's own check of the browser; whether that passes is down to the
 fingerprint — see [One story on every surface](#one-story-on-every-surface). Everything the solve
@@ -379,14 +379,14 @@ Keys live in the Config DB (Settings), not `conf/application.conf`; none is seed
 
 | Key | Default | Read by | Meaning |
 |---|---|---|---|
-| `scrape.stealth.enabled` | `true` | `StealthSidecarManager.available` | `false` takes rung 3 out of the ladder without touching the sidecar |
-| `scrape.stealth.port` | `9532` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
-| `scrape.stealth.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the process exits after that long without a render |
-| `scrape.stealth.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
-| `scrape.stealth.solveTurnstile` | `false` | `StealthSidecarManager.solveTurnstile`, per render | `true` lets a render click a Cloudflare gate's checkbox — see [Cloudflare challenges](#cloudflare-challenges) |
+| `web_scrape.stealth.enabled` | `true` | `StealthSidecarManager.available` | `false` takes rung 3 out of the ladder without touching the sidecar |
+| `web_scrape.stealth.port` | `9532` | `LocalSidecarDaemon.port()` | loopback port; passed as `--port` and used for every call |
+| `web_scrape.stealth.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the process exits after that long without a render |
+| `web_scrape.stealth.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
+| `web_scrape.stealth.solve-turnstile` | `true` | `StealthSidecarManager.solveTurnstile`, per render | `true` lets a render click a Cloudflare gate's checkbox — see [Cloudflare challenges](#cloudflare-challenges) |
 
-`LocalSidecarDaemon` also reads `scrape.stealth.timeoutSeconds` (exported as
-`SIDECAR_REQUEST_TIMEOUT_SEC`) and `scrape.stealth.hfToken` (exported as `HF_TOKEN`) for every
+`LocalSidecarDaemon` also reads `web_scrape.stealth.timeoutSeconds` (exported as
+`SIDECAR_REQUEST_TIMEOUT_SEC`) and `web_scrape.stealth.hfToken` (exported as `HF_TOKEN`) for every
 sidecar it launches; this one reads neither variable, so the two keys have no effect here.
 
 `serve.py` flags: `--host` (`127.0.0.1`), `--port`, `--model` (`patchright-chromium` — the

@@ -218,7 +218,7 @@ public final class BlockClassifier {
      *
      * <p>{@link ScrapeReason#TURNSTILE} goes to {@link ScrapeRung#BROWSER} with
      * {@link ScrapeReason#JS_CHALLENGE}: the stealth sidecar waits a challenge out, and clicks a
-     * gate page's checkbox when {@code scrape.stealth.solveTurnstile} is on (JCLAW-1306).
+     * gate page's checkbox when {@code web_scrape.stealth.solve-turnstile} is on (JCLAW-1306).
      *
      * <p>{@link ScrapeReason#TIMEOUT} stays at {@link ScrapeRung#NONE}: an origin too
      * slow to answer a plain fetch will not answer a browser faster, and a render is the

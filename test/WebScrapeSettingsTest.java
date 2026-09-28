@@ -1,6 +1,8 @@
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
+import services.FetchSidecarManager;
+import services.StealthSidecarManager;
 import tools.scrape.WebScrapeSettings;
 
 import java.io.IOException;
@@ -60,11 +62,22 @@ class WebScrapeSettingsTest extends UnitTest {
 
     @Test
     void togglesTakeOnlyTrueOrFalse() {
-        for (var key : List.of(WebScrapeSettings.RESPECT_ROBOTS, WebScrapeSettings.SEED_FROM_SITEMAP)) {
+        for (var key : List.of(WebScrapeSettings.RESPECT_ROBOTS, WebScrapeSettings.SEED_FROM_SITEMAP,
+                StealthSidecarManager.CFG_ENABLED, StealthSidecarManager.CFG_SOLVE_TURNSTILE, FetchSidecarManager.CFG_ENABLED)) {
             assertNull(reject(key, "true"), key);
             assertNull(reject(key, "FALSE"), key);
             // The reader treats anything but "false" as on, so a typo would silently stay on.
             assertNotNull(reject(key, "no"), key);
+        }
+    }
+
+    @Test
+    void theImpersonationProfileMustBeShapedLikeOne() {
+        for (var profile : List.of("chrome", "chrome146", "safari18_0_ios", "edge_101")) {
+            assertNull(reject(FetchSidecarManager.CFG_PROFILE, profile), profile);
+        }
+        for (var profile : List.of("", "Chrome", "chrome 146", "--model")) {
+            assertNotNull(reject(FetchSidecarManager.CFG_PROFILE, profile), profile);
         }
     }
 
@@ -105,6 +118,9 @@ class WebScrapeSettingsTest extends UnitTest {
             }
         }
 
+        // A sidecar's config prefix is a namespace for keys built at runtime, not a key.
+        var namespaces = keys.stream().filter(k -> keys.stream().anyMatch(o -> o.startsWith(k + "."))).toList();
+        namespaces.forEach(keys::remove);
         assertTrue(keys.size() >= 10, "the scan must find the keys it guards, found " + keys);
         var missing = keys.stream().filter(k -> !panel.contains("'" + k + "'")).toList();
         assertEquals(List.of(), missing, "web_scrape keys with no row in Settings > Web Scraping");

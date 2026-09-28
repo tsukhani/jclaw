@@ -541,11 +541,15 @@ describe('Settings page — Web Scraping section', () => {
     const component = await mountSettingsSection('web-scraping')
 
     expect(component.html()).toMatch(/<h2[^>]*>\s*Web Scraping\s*</)
-    expect(component.findAll('[data-testid^="web-scrape-row-"]')).toHaveLength(17)
+    expect(component.findAll('[data-testid^="web-scrape-row-"]')).toHaveLength(21)
     expect(component.find('[data-testid="web-scrape-row-max-pages"]').text()).toContain('40')
     expect(component.find('[data-testid="web-scrape-row-max-depth"]').text()).toContain('2')
     expect(component.find('[data-testid="web-scrape-row-timeout-seconds"]').text()).toContain('60')
     expect(component.find('[data-testid="web-scrape-row-language"]').text()).toContain('en')
+    expect(component.find('[data-testid="web-scrape-row-impersonate.profile"]').text()).toContain('chrome')
+    for (const label of ['impersonate.enabled', 'stealth.enabled', 'stealth.solve-turnstile']) {
+      expect(component.find(`[data-testid="web-scrape-row-${label}"] button[aria-pressed]`).attributes('aria-pressed'), label).toBe('true')
+    }
   })
 
   it('turns robots.txt off with one click on its toggle', async () => {

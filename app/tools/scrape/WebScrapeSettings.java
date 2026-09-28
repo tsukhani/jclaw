@@ -2,6 +2,8 @@ package tools.scrape;
 
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
+import services.FetchSidecarManager;
+import services.StealthSidecarManager;
 
 import java.util.regex.Pattern;
 
@@ -41,6 +43,9 @@ public final class WebScrapeSettings {
     // The language is also sent verbatim in an Accept-Language header, so nothing but a code gets through.
     // The possessive repeat keeps the regex engine from recursing per subtag on a very long value.
     private static final Pattern LANGUAGE_CODE = Pattern.compile("[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})*+");
+
+    // The shape of a curl_cffi target (chrome, chrome146, safari18_0_ios); whether this build knows it is the sidecar's call.
+    private static final Pattern PROFILE_NAME = Pattern.compile("[a-z][a-z0-9_]*+");
 
     /** Preferred language for pages that declare translations. English by default; the
      *  per-call {@code language} argument overrides it, following the respectRobots
@@ -111,9 +116,12 @@ public final class WebScrapeSettings {
                     wholeNumber(key, v, 0, Integer.MAX_VALUE);
             case CONCURRENCY -> wholeNumber(key, v, 1, MAX_CONCURRENCY);
             case JOB_MAX_CONCURRENT -> wholeNumber(key, v, 1, MAX_JOB_CONCURRENCY);
-            case RESPECT_ROBOTS, SEED_FROM_SITEMAP, PROXY_ENABLED ->
+            case RESPECT_ROBOTS, SEED_FROM_SITEMAP, PROXY_ENABLED, StealthSidecarManager.CFG_ENABLED,
+                    StealthSidecarManager.CFG_SOLVE_TURNSTILE, FetchSidecarManager.CFG_ENABLED ->
                     "true".equalsIgnoreCase(v) || "false".equalsIgnoreCase(v) ? null
                             : key + " must be true or false.";
+            case FetchSidecarManager.CFG_PROFILE -> PROFILE_NAME.matcher(v).matches() ? null
+                    : key + " must be an impersonation profile such as chrome or safari18_0.";
             case LANGUAGE -> LANGUAGE_CODE.matcher(v).matches() ? null
                     : key + " must be a language code such as en, ja or pt-BR.";
             case PROXY_URL -> ScrapeProxy.urlRejection(v);

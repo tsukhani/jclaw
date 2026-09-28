@@ -127,6 +127,35 @@ const GROUPS: { label: string, fields: SettingField[] }[] = [
     ],
   },
   {
+    label: 'Escalation',
+    fields: [
+      {
+        key: 'web_scrape.impersonate.enabled',
+        kind: 'boolean',
+        fallback: 'true',
+        tip: 'Retry a blocked page with a client that presents a real browser\'s network fingerprint. Off skips this step. Applies to web_fetch too.',
+      },
+      {
+        key: 'web_scrape.impersonate.profile',
+        kind: 'text',
+        fallback: 'chrome',
+        tip: 'The browser that client presents. chrome follows the newest Chrome it knows; pin one such as chrome146 or safari18_0 for the same fingerprint on every machine.',
+      },
+      {
+        key: 'web_scrape.stealth.enabled',
+        kind: 'boolean',
+        fallback: 'true',
+        tip: 'Render a page that is still blocked in a stealth browser, the last step. Needs uv; the first use installs Patchright and may download a Chromium build. Applies to web_fetch too.',
+      },
+      {
+        key: 'web_scrape.stealth.solve-turnstile',
+        kind: 'boolean',
+        fallback: 'true',
+        tip: 'Click the checkbox on a Cloudflare challenge page that waiting does not clear: at most three clicks, only inside Cloudflare\'s challenge frame. A checkbox inside an ordinary page is never clicked.',
+      },
+    ],
+  },
+  {
     label: 'Proxy',
     fields: [
       {

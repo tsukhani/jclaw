@@ -580,7 +580,7 @@ The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](
 
 ## Web Scraping
 
-Every setting the `web_scrape` tool reads, in four groups. Changes apply live; no restart needed.
+Every setting the `web_scrape` tool reads, in five groups. Changes apply live; no restart needed.
 
 **Crawl**
 
@@ -613,6 +613,17 @@ Every setting the `web_scrape` tool reads, in four groups. Changes apply live; n
 | `web_scrape.job.max-concurrent`  | 2       | Background scrapes running at once, 1–8. The rest wait their turn and start in the order they were queued. |
 
 A background scrape keeps running after the chat turn that started it. Like `max-pages` above, the two limits are the default when an agent leaves the value out and the ceiling when it asks for more; `max-depth` applies to background scrapes too. They bound what an agent may ask for, not a scrape you start yourself. `timeout-seconds` does not apply to background scrapes, which are bounded in minutes instead. Each running job fetches with its own set of workers, so `max-concurrent` multiplies `concurrency`.
+
+**Escalation**
+
+When a plain fetch is blocked, `web_fetch` and `web_scrape` retry the page with slower, more browser-like fetchers, so these apply to both tools.
+
+| Key                                  | Default  | Meaning                                                                          |
+|--------------------------------------|----------|----------------------------------------------------------------------------------|
+| `web_scrape.impersonate.enabled`     | on       | Retry a blocked page with a client that presents a real browser's network fingerprint. Off skips this step. |
+| `web_scrape.impersonate.profile`     | `chrome` | The browser that client presents. `chrome` follows the newest Chrome it knows; pin one such as `chrome146` or `safari18_0` for the same fingerprint on every machine. |
+| `web_scrape.stealth.enabled`         | on       | Render a page that is still blocked in a stealth browser, the last step. Needs `uv`; the first use installs Patchright and may download a Chromium build. |
+| `web_scrape.stealth.solve-turnstile` | on       | Click the checkbox on a Cloudflare challenge page that waiting does not clear: at most three clicks, only inside Cloudflare's challenge frame. A checkbox inside an ordinary page is never clicked. |
 
 **Proxy**
 

@@ -11,8 +11,10 @@ import play.jobs.OnApplicationStart;
 import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
+import services.FetchSidecarManager;
 import services.InternalApiTokenService;
 import services.SkillPromotionService;
+import services.StealthSidecarManager;
 import services.Tx;
 import services.UvProbe;
 import services.decision.DecisionSettings;
@@ -28,6 +30,7 @@ import utils.HttpFactories;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.List;
 
 /**
  * Seeds default runtime configuration and default agent on first startup.
@@ -477,6 +480,16 @@ public class DefaultConfigJob extends Job<Void> {
 
         // JCLAW-1302: the TypeSafe key moved to Decision Providers; neither consumer needs it re-entered.
         renameKeyIfPresent(DecisionSettings.LEGACY_API_KEY, DecisionSettings.API_KEY);
+
+        // The scrape sidecars' keys moved under web_scrape.*, where Settings > Web Scraping edits them.
+        for (var sidecar : List.of("stealth", "impersonate")) {
+            for (var suffix : List.of("enabled", "port", "timeoutSeconds", "idleTimeoutMinutes",
+                    "startupTimeoutSeconds", "hfToken")) {
+                renameKeyIfPresent("scrape.%s.%s".formatted(sidecar, suffix), "web_scrape.%s.%s".formatted(sidecar, suffix));
+            }
+        }
+        renameKeyIfPresent("scrape.stealth.solveTurnstile", StealthSidecarManager.CFG_SOLVE_TURNSTILE);
+        renameKeyIfPresent("scrape.impersonate.profile", FetchSidecarManager.CFG_PROFILE);
     }
 
     private void seedIfAbsent(String key, String value) {

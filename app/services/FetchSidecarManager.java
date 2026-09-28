@@ -26,11 +26,11 @@ public final class FetchSidecarManager {
 
     /** Public because Play's tests live in the default package and cannot reach a
      *  package-private seam. */
-    public static final String CFG_PROFILE = "scrape.impersonate.profile";
-    public static final String CFG_ENABLED = "scrape.impersonate.enabled";
+    public static final String CFG_PROFILE = "web_scrape.impersonate.profile";
+    public static final String CFG_ENABLED = "web_scrape.impersonate.enabled";
 
     private static final LocalSidecarDaemon DAEMON = new LocalSidecarDaemon(new LocalSidecarDaemon.Config(
-            "sidecar/fetch", "data/fetch-sidecar", "scrape.impersonate", 9533, 180,
+            "sidecar/fetch", "data/fetch-sidecar", "web_scrape.impersonate", 9533, 180,
             "scrape", "fetch-sidecar", "fetch sidecar",
             "the first launch installs curl_cffi (a few MB); it is not a model download",
             ScrapeSidecarException::new));
