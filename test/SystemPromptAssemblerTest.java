@@ -309,6 +309,7 @@ class SystemPromptAssemblerTest extends UnitTest {
         assertTrue(prompt.contains("4000 characters") || prompt.contains("inline photos"),
                 "guidance body should include Telegram-specific hints");
         assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
+        assertFalse(prompt.contains("language hint structure"), "only web chat draws the structure fence");
     }
 
     @Test
@@ -321,6 +322,8 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "guidance body should include web-specific hints");
         assertTrue(prompt.contains("language hint lewis"),
                 "web guidance must teach the lewis fence the chat draws");
+        assertTrue(prompt.contains("language hint structure"),
+                "web guidance must teach the structure fence the chat draws in 3D");
     }
 
     @Test
@@ -341,6 +344,7 @@ class SystemPromptAssemblerTest extends UnitTest {
         assertFalse(prompt.contains("admin chat UI"),
                 "voice must NOT get the web-UI markdown guidance");
         assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
+        assertFalse(prompt.contains("language hint structure"), "only web chat draws the structure fence");
     }
 
     @Test
@@ -350,6 +354,7 @@ class SystemPromptAssemblerTest extends UnitTest {
         assertFalse(prompt.contains("Channel Guidance"),
                 "slack has no registered guidance — section must be omitted");
         assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
+        assertFalse(prompt.contains("language hint structure"), "only web chat draws the structure fence");
     }
 
     @Test
@@ -358,6 +363,7 @@ class SystemPromptAssemblerTest extends UnitTest {
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "whatsapp").systemPrompt();
         assertFalse(prompt.contains("Channel Guidance"));
         assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
+        assertFalse(prompt.contains("language hint structure"), "only web chat draws the structure fence");
     }
 
     @Test

@@ -7,6 +7,7 @@ import type { Conversation, Message } from '~/types/api'
 import { computeUsageCostBreakdown } from '~/utils/usage-cost'
 import { routeClassLabel, routeDescription } from '~/utils/model-route'
 import { renderMarkdown } from '~/utils/chat-markdown'
+import { vStructureViewers } from '~/utils/structure/directive'
 
 const route = useRoute()
 const router = useRouter()
@@ -364,6 +365,7 @@ function exportConversation() {
             <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify before returning. -->
             <div
               v-if="msg.role === 'assistant' && msg.content"
+              v-structure-viewers="conversation?.agentId ?? null"
               class="prose-chat bg-muted border border-border px-3 py-2 text-sm text-fg-primary"
               data-testid="message-body-rendered"
               v-html="renderMarkdown(msg.content, conversation?.agentId ?? null)"

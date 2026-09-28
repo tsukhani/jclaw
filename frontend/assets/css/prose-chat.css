@@ -106,6 +106,19 @@ figure.lewis { margin: 0.5em 0; }
 figure.lewis svg { display: block; max-width: 100%; height: auto; }
 .lewis-error { font-size: 0.875em; color: var(--fg-muted); }
 
+/* Structure fences: the host keeps a fixed height, so a viewer mounting or leaving near the viewport never shifts the transcript. */
+figure.structure-view { margin: 0.75em 0; max-width: 42rem; }
+figure.structure-view > [hidden] { display: none; }
+figure.structure-view figcaption, .structure-note, .structure-error { font-size: 0.875em; color: var(--fg-muted); margin-top: 0.35em; }
+.structure-host { min-height: 22.5rem; }
+
+/* Opaque, and read by the viewer as its WebGL background: translucent polyhedra fade out over a transparent canvas. */
+.structure-canvas { position: relative; height: 20rem; overflow: hidden; background: var(--surface); border: 1px solid rgb(0,0,0,8%); }
+.structure-gl-host, .structure-gl { position: absolute; inset: 0; }
+.structure-status { position: absolute; inset: 0; display: grid; place-items: center; margin: 0; color: var(--fg-muted); font-size: 0.875em; }
+.structure-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; margin-top: 0.5rem; font-size: 0.75rem; }
+.structure-toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+
 .prose-chat table {
   /* Auto layout — each table sizes its columns from its own content. The
      prior approach pinned the first column to 14em + nowrap so a tools
@@ -160,6 +173,7 @@ html.dark .prose-chat h2,
 html.dark .prose-chat h3 { color: #e5e5e5; }
 html.dark .prose-chat code { background: rgb(255,255,255,6%); color: inherit; }
 html.dark .prose-chat pre { background: rgb(255,255,255,4%); border-color: rgb(255,255,255,8%); }
+html.dark .prose-chat .structure-canvas { border-color: rgb(255,255,255,8%); }
 html.dark .prose-chat a { color: #a3a3a3; }
 
 /* Effective background here is approximately #1d2a25 (emerald 10% over the

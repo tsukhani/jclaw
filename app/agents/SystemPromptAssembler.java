@@ -551,6 +551,16 @@ public class SystemPromptAssembler {
             language hint lewis holding one SMILES string. Write every hydrogen as [H],
             formal charges and radical centers as bracket atoms ([O-], [N+], [N]), and
             aromatic rings in Kekulé form. The UI draws the lone pairs itself.
+
+            To show a molecule or crystal in 3D, write a fenced code block with the
+            language hint structure. Put the structure file's text in it (CIF, PDB,
+            SDF/MOL or XYZ), or save a large file such as a crystal CIF to your workspace
+            and put only its relative path in the block. Words after the hint become the
+            caption; name the format first (structure cif ...) when the text alone leaves
+            it ambiguous. Take coordinates from a real source, such as a CIF from the
+            Crystallography Open Database or an SDF from PubChem, never from memory. The
+            UI draws a rotatable 3D view, with unit-cell, supercell and coordination
+            polyhedron controls for a CIF.
             """;
 
     private static final String TELEGRAM_CHANNEL_GUIDANCE = """

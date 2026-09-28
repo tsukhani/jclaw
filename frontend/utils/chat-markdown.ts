@@ -19,6 +19,7 @@ import katex, { type KatexOptions } from 'katex'
 // mhchem adds \ce / \pu, so chemical formulas, equations and units typeset through the same KaTeX path as math.
 import 'katex/contrib/mhchem'
 import { ensureLewisLoaded, isLewisLoaded, lewisVersion, renderLewis } from '~/utils/lewis'
+import { parseStructureFence } from '~/utils/structure/fence'
 import { rewriteWorkspaceLinks } from '~/utils/markdown-links'
 import type { MessageUsage } from '~/utils/usage-cost'
 
@@ -71,11 +72,27 @@ function lewisBlock(token: Tokens.Code): string {
     : `${codeBlock(token)}<p class="lewis-error">${escapeHtml(result.error)}</p>`
 }
 
+// Set while the streaming bubble parses: its innerHTML is replaced on every token, which would tear down a live viewer.
+let parsingStream = false
+
+// The figure keeps the code block: utils/structure/directive.ts reads the structure from it and hides it once a viewer mounts.
+function structureBlock(token: Tokens.Code): string {
+  const spec = parseStructureFence(token.lang ?? '', token.text)
+  if ('error' in spec) return `${codeBlock(token)}<p class="structure-error">${escapeHtml(spec.error)}</p>`
+  const caption = spec.caption ? `<figcaption>${escapeHtml(spec.caption)}</figcaption>` : ''
+  return parsingStream
+    ? `<figure class="structure-view structure-pending">${codeBlock(token)}${caption}<p class="structure-note">The 3D view appears when the reply is complete.</p></figure>`
+    : `<figure class="structure-view" data-info="${escapeHtml(token.lang ?? '').replaceAll('"', '&quot;')}">${codeBlock(token)}${caption}</figure>`
+}
+
 // Marked keeps the whole info string in `lang`, so ```Lewis water still names the lewis fence.
-chatRenderer.code = (token: Tokens.Code) =>
-  (token.lang ?? '').split(/\s/, 1)[0]!.toLowerCase() === 'lewis' && fenceIsClosed(token.raw)
-    ? lewisBlock(token)
-    : codeBlock(token)
+chatRenderer.code = (token: Tokens.Code) => {
+  const hint = (token.lang ?? '').split(/\s/, 1)[0]!.toLowerCase()
+  if (!fenceIsClosed(token.raw)) return codeBlock(token)
+  if (hint === 'lewis') return lewisBlock(token)
+  if (hint === 'structure') return structureBlock(token)
+  return codeBlock(token)
+}
 
 // Its own instance keeps math off the skills page and the guide. Dollar math follows Pandoc's rule — the
 // opening $ is followed by a non-space, the closing one follows a non-space and precedes no digit — so
@@ -203,5 +220,11 @@ export function renderMarkdown(text: string, agentId: number | null = null): str
 // 200-entry LRU before the cache helped any historical message.
 export function renderMarkdownStreaming(text: string, agentId: number | null = null): string {
   if (!text) return ''
-  return renderMarkdownInner(text, agentId)
+  parsingStream = true
+  try {
+    return renderMarkdownInner(text, agentId)
+  }
+  finally {
+    parsingStream = false
+  }
 }

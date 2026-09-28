@@ -15,6 +15,7 @@ import {
   UsersIcon,
 } from '@heroicons/vue/24/outline'
 import { formatTokensPerSec, renderMarkdown } from '~/utils/chat-markdown'
+import { vStructureViewers } from '~/utils/structure/directive'
 import { formatUsageCost, formatUsageCostTooltip, providerMetricRows } from '~/utils/usage-cost'
 import { routeClassLabel, routeDescription, routeOf } from '~/utils/model-route'
 import { thinkingHeaderLabel } from '~/utils/thinking'
@@ -224,6 +225,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
         <!-- eslint-disable vue/no-v-html -- renderMarkdown runs content through DOMPurify (see renderMarkdown above) before returning. -->
         <div
           v-if="msg.messageKind === 'subagent_send'"
+          v-structure-viewers="agentId"
           class="prose-chat inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base break-words"
           v-html="renderMarkdown(msg.content ?? '', agentId)"
         />
@@ -397,6 +399,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
         -->
         <div
           v-if="msg._key === streamingMessageKey ? !!streamContent : !!msg.content"
+          v-structure-viewers="agentId"
           class="prose-chat text-fg-primary text-base overflow-x-auto break-words"
           v-html="msg._key === streamingMessageKey ? streamContentHtml : renderMarkdown(msg.content ?? '', agentId)"
         />
