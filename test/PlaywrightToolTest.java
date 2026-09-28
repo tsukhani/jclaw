@@ -1158,6 +1158,7 @@ class PlaywrightToolTest extends UnitTest {
     void theLaunchArgsCarryTheProxyAndBothScreenFlags() {
         assertEquals(List.of("--proxy-server=socks5://127.0.0.1:4711",
                         "--proxy-bypass-list=<-loopback>",
+                        "--webrtc-ip-handling-policy=disable_non_proxied_udp",
                         "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"),
                 PlaywrightBrowserTool.launchArgs(4711),
                 "deleting one of these unscreens a whole class of traffic, and Chromium reports neither");
