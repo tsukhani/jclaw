@@ -16,7 +16,7 @@ Protocol (--host defaults to 127.0.0.1; the server binds whatever it is given):
   GET  /health   -> 200 {status, model, curl_cffi, profile_supported, reason}
                     "model" is the impersonation profile, so the JVM's
                     isHealthy(expectedModel) respawns when an operator repins it.
-  GET  /capability-> 200 {kind, runnable, profile, profileKnown, profileCount, chromeMajor, reason}
+  GET  /capability-> 200 {kind, runnable, profile, profileKnown, profileCount, reason}
   (CLI) --probe  -> the same capability JSON on stdout, one-shot, no server
   POST /fetch {url, pins?, headers?, profile?, timeoutMs?, maxBytes?, proxy?}
         -> 200  upstream body verbatim; upstream status and Location ride in
@@ -60,7 +60,6 @@ import argparse
 import hmac
 import json
 import os
-import re
 import sys
 import threading
 import time
@@ -146,27 +145,6 @@ def _supported_profiles():
         return ()
 
 
-# chrome133a is a second Chrome 133 fingerprint, not another version.
-_DESKTOP_CHROME = re.compile(r"chrome(\d+)[a-z]?")
-
-
-def _resolve_alias(profile):
-    """The versioned profile curl_cffi impersonates for `profile`, which may be a rolling alias."""
-    try:
-        from curl_cffi.requests.impersonate import resolve_latest_browser_type
-    except Exception:
-        return profile
-    return resolve_latest_browser_type(profile)
-
-
-def chrome_major(profile, resolve=_resolve_alias):
-    """The desktop Chrome major version `profile` impersonates, or None: another browser, a mobile
-    profile, or an alias this build cannot resolve. The JVM hands a browser's clearance to this
-    rung only when it equals the browser's own (JCLAW-1307)."""
-    matched = _DESKTOP_CHROME.fullmatch(resolve(profile) or "")
-    return int(matched.group(1)) if matched else None
-
-
 def capability(profile):
     profiles = _supported_profiles()
     if curl_requests is None:
@@ -175,7 +153,6 @@ def capability(profile):
         return {"kind": "fetch", "runnable": False, "profile": profile,
                 "profileKnown": False,
                 "profileCount": len(profiles),
-                "chromeMajor": None,
                 "reason": "curl_cffi unavailable (%s)" % _IMPORT_ERROR}
     # An unknown name is reported rather than rejected: curl_cffi accepts rolling
     # aliases ("chrome") that are absent from the literal list on some builds.
@@ -183,7 +160,6 @@ def capability(profile):
     return {"kind": "fetch", "runnable": True, "profile": profile,
             "profileKnown": known,
             "profileCount": len(profiles),
-            "chromeMajor": chrome_major(profile),
             "reason": "" if known else "profile %r not in this build's list" % profile}
 
 

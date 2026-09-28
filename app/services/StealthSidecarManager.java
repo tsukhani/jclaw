@@ -4,7 +4,6 @@ import play.Play;
 import services.scrape.ScrapeSidecarException;
 
 import java.io.File;
-import java.util.List;
 
 /**
  * Lifecycle for the stealth rendering sidecar — escalation rung 3 (JCLAW-1088).
@@ -31,14 +30,11 @@ public final class StealthSidecarManager {
     /** Public because Play's tests live in the default package. */
     public static final String CFG_SOLVE_TURNSTILE = "scrape.stealth.solveTurnstile";
 
-    /** Public because Play's tests live in the default package. */
-    public static final String CFG_MAX_SESSIONS = "scrape.stealth.maxSessions";
-
     private static final LocalSidecarDaemon DAEMON = new LocalSidecarDaemon(new LocalSidecarDaemon.Config(
             "sidecar/stealth", "data/stealth-sidecar", "scrape.stealth", 9532, 300,
             "scrape", "stealth-sidecar", "stealth browser sidecar",
             "the first launch installs Patchright and may download a Chromium build",
-            ScrapeSidecarException::new, StealthSidecarManager::sessionArgs));
+            ScrapeSidecarException::new));
 
     private StealthSidecarManager() {}
 
@@ -59,18 +55,6 @@ public final class StealthSidecarManager {
         return ConfigService.getBoolean(CFG_SOLVE_TURNSTILE, false);
     }
 
-    /**
-     * The sidecar's cap on live crawl sessions (JCLAW-1307) as launch arguments, read when it
-     * spawns. Absent keeps the sidecar's own default; 0 refuses every session, so each crawl
-     * falls back to a browser per render.
-     *
-     * <p>Public because Play's tests live in the default package.
-     */
-    public static List<String> sessionArgs() {
-        int cap = ConfigService.getInt(CFG_MAX_SESSIONS, -1);
-        return cap < 0 ? List.of() : List.of("--max-sessions", String.valueOf(cap));
-    }
-
     /** Base URL of a healthy sidecar, spawning it if needed. Single-flight (JCLAW-830). */
     public static String ensureRunning() {
         if (DAEMON.isHealthy(IDENTITY)) return DAEMON.baseUrl();
@@ -84,11 +68,6 @@ public final class StealthSidecarManager {
             DAEMON.awaitHealthy();
             return DAEMON.baseUrl();
         });
-    }
-
-    /** Where the sidecar listens, whether or not it is running. */
-    public static String baseUrl() {
-        return DAEMON.baseUrl();
     }
 
     public static String authToken() {

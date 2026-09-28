@@ -98,9 +98,7 @@ everything from reading as a pass.)
 | `GET /health` | `{status, model, patchright, channel, browser_ready}` |
 | `GET /capability` | `{kind, runnable, channel, reason}` |
 | `POST /render` | rendered HTML; outcome in `X-Upstream-*` / `X-Settled-Status` / `X-Challenge` / `X-Blocked-Hosts*` |
-| `POST /session/open` | `{id}` of a new [session](#sessions); `429` when every session is open |
-| `POST /session/close` | `{closed}` |
-| `POST /shutdown` | closes every session, then exits, so a restarted JVM can evict an orphan |
+| `POST /shutdown` | exits, so a restarted JVM can evict an orphan |
 | `--probe` (CLI) | capability JSON on stdout, no browser launched |
 | `--self-check [--language L]` (CLI) | renders a loopback fixture with a render's own launch and reports whether every surface agrees — see [Self-check](#self-check) |
 
@@ -127,7 +125,6 @@ agree on the page and in its workers — see [One story on every surface](#one-s
 | `X-Blocked-Hosts` | up to 20 hosts the route gate aborted |
 | `X-Blocked-Hosts-Count` | how many it aborted in total, since the list above is clipped |
 | `X-Upstream-Truncated` | `true` when the body was cut at `maxBytes` |
-| `X-Clearance` / `X-Clearance-User-Agent` | a session render's `cf_clearance` for its host and the User-Agent the browser sent, only when the request set `clearance` and the browser holds one |
 
 The two status headers differ on exactly the case this rung exists for: an interstitial
 served with 403 that then resolves itself client-side ends its window on 200, and the
@@ -154,41 +151,6 @@ would cap one rung and uncap the other.
 `pins` that is not one, a `timeoutMs`/`settleMs`/`challengeMs`/`maxBytes` that will not parse as a
 number, a `solveTurnstile` that is not `true` or `false`, a negative `maxBytes`, or a pin whose
 target is not a public address. `502` is a failed navigation.
-
-## Sessions
-
-A crawl renders each host in one **session**: a browser and context kept open across its
-renders, so a Cloudflare clearance the browser earns on one page is sent with the next
-(JCLAW-1307). A single `web_fetch` still launches a browser per render.
-
-`POST /session/open` takes `{host, pins?, language?, proxy?}` and answers `{id}`. The browser is
-launched then, with the language, the proxy and the `--host-resolver-rules` pin of that moment,
-and keeps them for its life: a pin may name only the session's own host and must be a public
-address, as on a render. The context carries the same route and WebSocket gates a render's does,
-so every other host the page reaches is still range-checked. `POST /render` with `session` renders
-in that context and takes no `pins` or `proxy` of its own (`400`); a URL on any other host is
-`400`, and an unknown, closed or lost session `404`, on which the JVM opens a new one. With
-`clearance: true` the response carries the browser's `cf_clearance` for the host and its
-User-Agent — the JVM asks only when `scrape.impersonate.clearanceHandoff` is on.
-
-Nothing reaches disk. The context has no user data dir, so the cookies live in the browser's
-memory, and a session closes when:
-
-- the JVM closes it — every crawl closes its sessions when it ends, fails or is cancelled;
-- it goes unused for `--session-idle-min` (5) minutes, checked every 15 s;
-- the sidecar exits, on `/shutdown` or its own idle timeout, which closes every browser first
-  (bounded at 5 s).
-
-At most `--max-sessions` (4, or `scrape.stealth.maxSessions`) are open at once. Past that
-`/session/open` answers `429` and the crawl renders that page with a browser of its own, so `0`
-turns sessions off. The bound is memory: each open session is a
-live Chromium besides the ones rendering.
-
-Patchright's sync API binds each object to the thread that made it, so a session's browser
-lives on a thread of its own and renders one page at a time. The JVM queues a host's pages
-before they reach it, where no call timeout runs and a queued page gives up once the crawl must
-stop, and each still holds one of the render slots below. Serial is also the point: a host's second page reuses the clearance the first earned
-rather than meeting the challenge beside it.
 
 ## Cloudflare challenges
 
@@ -386,8 +348,8 @@ the launch arguments, the context options and the verdict without a browser.
 
 ## Concurrency
 
-Outside a [session](#sessions) a browser is launched per render, because the DNS pin is a
-launch argument and cannot be varied on a shared instance. Renders run in parallel behind `--max-concurrent`
+A browser is launched per render, because the DNS pin is a launch argument and cannot
+be varied on a shared instance. Renders run in parallel behind `--max-concurrent`
 (default 4) rather than a mutex — serializing them turns a 150-page corpus run into a
 twenty-minute one. The bound is memory, not safety: each permit is a live headless
 Chromium. One `sync_playwright()` context per thread is safe; sharing one across
@@ -411,7 +373,6 @@ Keys live in the Config DB (Settings), not `conf/application.conf`; none is seed
 | `scrape.stealth.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the process exits after that long without a render |
 | `scrape.stealth.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
 | `scrape.stealth.solveTurnstile` | `false` | `StealthSidecarManager.solveTurnstile`, per render | `true` lets a render click a Cloudflare gate's checkbox — see [Cloudflare challenges](#cloudflare-challenges) |
-| `scrape.stealth.maxSessions` | `4` | `StealthSidecarManager.sessionArgs`, at spawn | passed as `--max-sessions`; `0` refuses every crawl session, so each page gets a browser of its own |
 
 `LocalSidecarDaemon` also reads `scrape.stealth.timeoutSeconds` (exported as
 `SIDECAR_REQUEST_TIMEOUT_SEC`) and `scrape.stealth.hfToken` (exported as `HF_TOKEN`) for every
@@ -420,10 +381,8 @@ sidecar it launches; this one reads neither variable, so the two keys have no ef
 `serve.py` flags: `--host` (`127.0.0.1`), `--port`, `--model` (`patchright-chromium` — the
 identity `/health` echoes and the JVM's health check expects), `--cache-dir`
 (`data/stealth-sidecar`), `--idle-timeout-min` (`15`), `--max-concurrent` (`4`; the daemon's
-argv has no slot for it, so the JVM always gets the default), `--max-sessions` (`4`, set from
-`scrape.stealth.maxSessions`), `--session-idle-min` (`5`, on the same terms as
-`--max-concurrent`), `--no-auth`, `--probe`, `--self-check` with
-`--language` (`en`).
+argv has no slot for it, so the JVM always gets the default), `--no-auth`, `--probe`,
+`--self-check` with `--language` (`en`).
 
 ## Authentication
 

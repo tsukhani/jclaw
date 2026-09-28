@@ -246,17 +246,6 @@ class StealthBrowserTest extends UnitTest {
         assertFalse(solveTurnstileSent());
     }
 
-    @Test
-    void theSessionCapReachesTheSidecarOnlyWhenTheOperatorSetsOne() {
-        config.delete(StealthSidecarManager.CFG_MAX_SESSIONS);
-        assertEquals(List.of(), StealthSidecarManager.sessionArgs(), "absent keeps the sidecar's own default");
-        config.set(StealthSidecarManager.CFG_MAX_SESSIONS, "0");
-        assertEquals(List.of("--max-sessions", "0"), StealthSidecarManager.sessionArgs(),
-                "0 is passed through: the sidecar then refuses every session");
-        config.set(StealthSidecarManager.CFG_MAX_SESSIONS, "6");
-        assertEquals(List.of("--max-sessions", "6"), StealthSidecarManager.sessionArgs());
-    }
-
     private static boolean solveTurnstileSent() {
         return RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject())
                 .get("solveTurnstile").getAsBoolean();

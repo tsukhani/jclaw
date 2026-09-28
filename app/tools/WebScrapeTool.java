@@ -24,7 +24,6 @@ import tools.scrape.ScrapeJobRequest;
 import tools.scrape.ScrapeLadder;
 import tools.scrape.ScrapeOutput;
 import tools.scrape.ScrapeProxy;
-import tools.scrape.ScrapeSessions;
 import tools.scrape.SitemapSeeder;
 import tools.scrape.WebScrapeSettings;
 import utils.AppClock;
@@ -152,18 +151,6 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private static final DateTimeFormatter SAVE_STAMP =
             DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss").withZone(ZoneOffset.UTC);
-
-    /** How each crawl reaches the scrape sidecars; every crawl opens its own sessions through it. */
-    private final ScrapeSessions.Sidecars sidecars;
-
-    public WebScrapeTool() {
-        this(ScrapeSessions.LIVE);
-    }
-
-    /** A tool whose crawls reach {@code sidecars} in place of the live ones. */
-    public WebScrapeTool(ScrapeSessions.Sidecars sidecars) {
-        this.sidecars = sidecars;
-    }
 
     @Override public String name() { return "web_scrape"; }
     @Override public String category() { return "Web"; }
@@ -525,15 +512,13 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         int depth = 0;
         noteDiscovered(state, level.size());
 
-        // Declared first so it closes last, once the pool has finished every page that could render.
-        try (var sessions = new ScrapeSessions(sidecars, state::stopRequested);
-             var pool = Executors.newFixedThreadPool(configConcurrency())) {
+        try (var pool = Executors.newFixedThreadPool(configConcurrency())) {
             while (!level.isEmpty()) {
                 var admitted = withinBudget(admit(level, respectRobots, state), maxPages, state);
                 if (admitted.isEmpty()) {
                     break;
                 }
-                var fetched = fetchLevel(pool, admitted, respectRobots, language, depth, state, sessions);
+                var fetched = fetchLevel(pool, admitted, respectRobots, language, depth, state);
                 if (state.stoppedBecause != null || exhausted(state)
                         || depth >= maxDepth) {
                     break;
@@ -610,14 +595,14 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      */
     private List<PageHarvest> fetchLevel(ExecutorService pool, List<URI> admitted,
                                          boolean respectRobots, String language,
-                                         int depth, CrawlState state, ScrapeSessions sessions) {
+                                         int depth, CrawlState state) {
         var replays = new ArrayList<CrawlListener.@Nullable Recorded>(admitted.size());
         var futures = new ArrayList<Future<@Nullable Outcome>>(admitted.size());
         for (var uri : admitted) {
             var recorded = state.recorded.remove(uri.toString());
             replays.add(recorded);
             futures.add(recorded != null ? CompletableFuture.completedFuture(null)
-                    : pool.submit(() -> fetchOne(uri, respectRobots, language, state, sessions)));
+                    : pool.submit(() -> fetchOne(uri, respectRobots, language, state)));
         }
         var fetched = new ArrayList<PageHarvest>();
         for (int i = 0; i < futures.size(); i++) {
@@ -909,8 +894,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     }
 
     /** Null when the page was never fetched because the crawl had to stop first. */
-    private @Nullable Outcome fetchOne(URI uri, boolean respectRobots, String language, CrawlState state,
-                                       ScrapeSessions sessions) {
+    private @Nullable Outcome fetchOne(URI uri, boolean respectRobots, String language, CrawlState state) {
         if (state.stopRequested()) return null;
         try {
             RobotsCache.awaitSlot(uri, respectRobots
@@ -938,7 +922,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             // site, and a broken link on it is the site's problem, not the run's.
             plain = classified(uri, null, ScrapeObservation.failed(uri.toString(), e));
         }
-        return escalate(uri, plain, state, language, sessions);
+        return escalate(uri, plain, state, language);
     }
 
     /**
@@ -949,11 +933,11 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      * that failed still spent the seconds, and refunding would let one pathological host
      * consume the whole crawl one retry at a time.
      */
-    private Outcome escalate(URI uri, Outcome plain, CrawlState state, String language, ScrapeSessions sessions) {
-        if (plain.usable() || !ScrapeLadder.available(sessions)) return plain;
+    private Outcome escalate(URI uri, Outcome plain, CrawlState state, String language) {
+        if (plain.usable() || !ScrapeLadder.available()) return plain;
         // Ask before claiming: a reason no installed rung addresses would spend the slot
         // without issuing a request, and be counted in the "escalated N pages" line.
-        if (!ScrapeLadder.wouldAttempt(plain.reason(), plain.status(), sessions)) return plain;
+        if (!ScrapeLadder.wouldAttempt(plain.reason(), plain.status())) return plain;
         // Checked between levels alone this bounds nothing: rung 2 waits up to 90s and
         // rung 3 up to 120s, so a 60s crawl could block an agent turn for minutes. A
         // climb already in flight keeps running — the rungs have no cancellation seam.
@@ -976,7 +960,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         var best = ScrapeLadder.climb(uri.toString(),
                 new ScrapeLadder.Attempt(ScrapeRung.PLAIN, plain.fetched(), plain.text(),
                         plain.reason(), plain.detail(), plain.status()),
-                language, sessions);
+                language);
         if (best.servedBy() == ScrapeRung.PLAIN) return plain;
         EventLogger.info(EVENT_CATEGORY, "%s: served by %s after %s at PLAIN"
                 .formatted(uri, best.servedBy(), plain.reason()), null);

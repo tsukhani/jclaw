@@ -1,7 +1,6 @@
 package tools.scrape;
 
 import com.google.gson.JsonObject;
-import com.google.gson.JsonParser;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -15,11 +14,8 @@ import utils.SsrfGuard;
 import utils.WebExtraction;
 
 import java.io.IOException;
-import java.net.URI;
 import java.time.Duration;
-import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.OptionalInt;
 
 /**
  * Rung 2 of the escalation ladder: fetch through the TLS-impersonating sidecar
@@ -147,58 +143,5 @@ public final class ImpersonatedFetcher {
     public static WebExtraction.FetchResult fetch(String url, Map<String, String> headers)
             throws IOException {
         return WebExtraction.fetch(url, headers, transport());
-    }
-
-    /** As {@link #fetch(String, Map)}, with {@code hostHeaders} added to each hop {@link #scoped} admits. */
-    public static WebExtraction.FetchResult fetch(String url, Map<String, String> headers, String host,
-                                                  Map<String, String> hostHeaders) throws IOException {
-        return WebExtraction.fetch(url, headers, scoped(transport(), host, hostHeaders));
-    }
-
-    /**
-     * {@code base} with {@code extra} merged into the headers of every https exchange with {@code host}
-     * and no other: a redirect walk hands one header map to every hop, and a cookie issued to one host
-     * must not follow a redirect to another. Public because Play's tests live in the default package.
-     */
-    public static WebExtraction.Transport scoped(WebExtraction.Transport base, String host,
-                                                 Map<String, String> extra) {
-        return (uri, headers) -> {
-            if (!admits(uri, host)) return base.exchange(uri, headers);
-            var merged = new LinkedHashMap<>(headers);
-            merged.putAll(extra);
-            return base.exchange(uri, merged);
-        };
-    }
-
-    private static boolean admits(URI uri, String host) {
-        var target = uri.getHost();
-        return "https".equalsIgnoreCase(uri.getScheme()) && target != null
-                && ScrapeSessions.hostKey(target).equals(host);
-    }
-
-    /**
-     * The desktop Chrome major version the sidecar's profile impersonates, as its {@code /capability}
-     * reports it; empty for any other browser or an alias it cannot resolve (JCLAW-1307).
-     */
-    public static OptionalInt chromeMajor() throws IOException {
-        var request = new Request.Builder()
-                .url(FetchSidecarManager.ensureRunning() + "/capability")
-                .header(LocalSidecarDaemon.AUTH_HEADER, FetchSidecarManager.authToken())
-                .get()
-                .build();
-        try (var response = CLIENT.newCall(request).execute()) {
-            var body = response.body().string();
-            if (!response.isSuccessful()) {
-                throw new ScrapeSidecarException("fetch sidecar returned HTTP %d for /capability"
-                        .formatted(response.code()), null);
-            }
-            try {
-                var major = JsonParser.parseString(body).getAsJsonObject().get("chromeMajor");
-                return major == null || major.isJsonNull() ? OptionalInt.empty() : OptionalInt.of(major.getAsInt());
-            } catch (RuntimeException e) {
-                throw new ScrapeSidecarException("fetch sidecar sent an unreadable capability: "
-                        + truncate(body), e);
-            }
-        }
     }
 }

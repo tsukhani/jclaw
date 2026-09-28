@@ -44,15 +44,6 @@ that tracks the newest Chrome this build knows; pin an exact one (`chrome146`)
 when you need reproducibility across machines. `--probe` prints the profile list
 size and whether the requested name is known.
 
-`chromeMajor` in `/capability` is the desktop Chrome version the profile impersonates once
-curl_cffi resolves an alias (`chrome` is `chrome146` on 0.16.0), or `null` for another browser
-or a mobile profile. A crawl hands this rung a browser session's `cf_clearance` and its exact
-User-Agent only when that number equals the browser's own Chrome major, and only with
-`scrape.impersonate.clearanceHandoff` on (JCLAW-1307) — the one case in which the JVM sends a
-`User-Agent` here, since pairing this profile's ClientHello with another version's string is
-the mismatch this rung exists to avoid. The cookie goes to the session's host over https and
-to no redirect target beyond it.
-
 **A static JA3 is not a concern here.** Chrome ≥110 permutes its TLS extension
 order per connection, and `curl_cffi` does the same — three consecutive requests
 on one profile produced three different JA3 hashes and one unchanging JA4
@@ -69,7 +60,7 @@ code enforces.
 | Route | Result |
 |---|---|
 | `GET /health` | `{status, model, curl_cffi, profile_supported, reason}` — `model` is the profile, so repinning it in config makes the JVM's health check respawn |
-| `GET /capability` | `{kind, runnable, profile, profileKnown, profileCount, chromeMajor, reason}` — the same keys whether or not the install is usable |
+| `GET /capability` | `{kind, runnable, profile, profileKnown, profileCount, reason}` — the same keys whether or not the install is usable |
 | `POST /fetch` | upstream body verbatim; see below |
 | `POST /shutdown` | answers, lets in-flight fetches finish — up to 45 s (`DRAIN_TIMEOUT_S`, the same budget the idle exit uses) — then exits, so a restarted JVM can evict an orphan |
 | `--probe` (CLI) | the capability JSON on stdout, no server, no port |
