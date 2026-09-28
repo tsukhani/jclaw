@@ -110,6 +110,8 @@ class ScrapeLadderTest extends UnitTest {
                     BlockClassifier.nextRung(ScrapeReason.DATADOME, 403, attempted), "DATADOME after " + attempted);
             assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.GEO_BLOCK, 403, attempted),
                     "every rung leaves from the banned country, so none follows " + attempted);
+            assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.IP_BLOCK, 403, attempted),
+                    "every rung leaves from the banned network or address, so none follows " + attempted);
         }
         assertEquals(ScrapeRung.IMPERSONATE, BlockClassifier.nextRung(ScrapeReason.DATADOME, 403, ScrapeRung.PLAIN));
         assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.DATADOME, 403, ScrapeRung.IMPERSONATE));

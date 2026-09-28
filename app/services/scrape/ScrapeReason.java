@@ -26,6 +26,8 @@ public enum ScrapeReason {
     DATADOME,
     /** Cloudflare Error 1009, a country ban every rung shares; a {@code web_scrape.proxy.*} egress in another country lifts it. */
     GEO_BLOCK,
+    /** Cloudflare Errors 1005–1008, a ban on this host's ASN or IP every rung shares; a {@code web_scrape.proxy.*} egress elsewhere lifts it. */
+    IP_BLOCK,
     /** Blocked by a non-Cloudflare WAF. Excluded from the epic's numerator and denominator. */
     OTHER_WAF,
     /** We were not blocked — the origin served a page with no server-rendered text.

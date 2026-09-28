@@ -47,6 +47,8 @@ public final class BlockClassifier {
      *  in the HTML template's feedback script, {@code error_code: 1009} in the front matter of
      *  the markdown rung 1's Accept asks for. The body is lowercased before matching. */
     private static final Pattern GEO_BLOCK_CODE = Pattern.compile("error[ _]?code:\\s*1009(?!\\d)");
+    /** Cloudflare's ASN ban (1005) and IP bans (1006–1008), in the same three forms as 1009. */
+    private static final Pattern IP_BLOCK_CODE = Pattern.compile("error[ _]?code:\\s*100[5-8](?!\\d)");
 
     private static final String[] TURNSTILE_MARKERS = {
             "challenges.cloudflare.com/turnstile", "cf-turnstile"
@@ -132,6 +134,7 @@ public final class BlockClassifier {
             // From the body, not DataDome's x-datadome header: rungs 2 and 3 forward none.
             if (obs.rawBody().contains(DATADOME_HOST)) return ScrapeReason.DATADOME;
             if (GEO_BLOCK_CODE.matcher(obs.rawBody()).find()) return ScrapeReason.GEO_BLOCK;
+            if (IP_BLOCK_CODE.matcher(obs.rawBody()).find()) return ScrapeReason.IP_BLOCK;
             return statusReason(obs.status());
         }
         return classifyError(obs.resolvedError().toLowerCase(Locale.ROOT));
@@ -226,8 +229,9 @@ public final class BlockClassifier {
      * and the answer to that is identification, not evasion — which is the lane the epic
      * descoped.
      *
-     * <p>{@link ScrapeReason#GEO_BLOCK} maps to {@link ScrapeRung#NONE}: every rung leaves
-     * from the same egress, so each arrives from the country the origin bans.
+     * <p>{@link ScrapeReason#GEO_BLOCK} and {@link ScrapeReason#IP_BLOCK} map to {@link ScrapeRung#NONE}:
+     * every rung leaves from the same egress, so each arrives from the country, network or address the
+     * origin bans.
      */
     public static ScrapeRung nextRung(ScrapeReason reason) {
         return switch (reason) {
@@ -239,7 +243,7 @@ public final class BlockClassifier {
             // where a different TLS fingerprint cannot. Skips IMPERSONATE for the same
             // reason THIN_CONTENT does.
             case ERROR -> ScrapeRung.BROWSER;
-            case OK, POLICY_BLOCK, GEO_BLOCK, OTHER_WAF, ROBOTS_DISALLOWED, TIMEOUT, NOT_FOUND ->
+            case OK, POLICY_BLOCK, GEO_BLOCK, IP_BLOCK, OTHER_WAF, ROBOTS_DISALLOWED, TIMEOUT, NOT_FOUND ->
                     ScrapeRung.NONE;
         };
     }

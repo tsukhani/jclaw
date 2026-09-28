@@ -429,8 +429,27 @@ class ScrapeHarnessTest extends UnitTest {
     @Test
     void anyOtherCloudflareRefusalStaysATrustBlock() {
         assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(refused(403, CF_BLOCK_PAGE, Map.of())));
-        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(refused(403, "error code: 1020", Map.of())));
-        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(refused(403, "error code: 10090", Map.of())));
+        for (var code : new String[] {"1004", "1010", "1020", "10090"}) {
+            assertEquals(ScrapeReason.TRUST_BLOCK,
+                    BlockClassifier.classify(refused(403, "error code: " + code, Map.of())), code);
+        }
+    }
+
+    @Test
+    void aCloudflareAsnOrIpBanIsAnIpBlockInEveryForm() {
+        // No 1005-1008 capture yet: Cloudflare serves every 1xxx error from one template, so these
+        // are the 1009 captures above with only the code changed.
+        for (var code : new String[] {"1005", "1006", "1007", "1008"}) {
+            var plainText = new WebExtraction.HttpStatusException(403, REFUSED_URL,
+                    ("error code: " + code + "\n").getBytes(StandardCharsets.UTF_8), "text/plain; charset=UTF-8",
+                    Map.of());
+            assertEquals(ScrapeReason.IP_BLOCK,
+                    BlockClassifier.classify(ScrapeObservation.failed(REFUSED_URL, plainText)), code);
+            assertEquals(ScrapeReason.IP_BLOCK,
+                    BlockClassifier.classify(refused(403, GEO_BLOCK_PAGE.replace("1009", code), Map.of())), code);
+            assertEquals(ScrapeReason.IP_BLOCK,
+                    BlockClassifier.classify(refused(403, GEO_BLOCK_MARKDOWN.replace("1009", code), Map.of())), code);
+        }
     }
 
     @Test
