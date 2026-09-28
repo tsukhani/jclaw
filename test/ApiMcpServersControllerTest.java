@@ -228,7 +228,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         // load). Spin until the delete's cascade is globally visible; normally
         // one no-spin read.
         awaitCommitted(() -> AgentSkillAllowedTool.count("skillName = ?1", "mcp:clean") == 0L,
-                "delete must cascade through stop() and clear allowlist rows");
+                () -> "delete must cascade through stop() and clear allowlist rows; " + cleanupDiagnostics());
     }
 
     // ==================== JCLAW-388: requiresApproval flag round-trip ====================
@@ -350,6 +350,11 @@ class ApiMcpServersControllerTest extends FunctionalTest {
      *  TestEngine (a fresh-VT commit not yet visible to a later request's
      *  connection). Normally returns on the first read with no sleep. */
     private static void awaitCommitted(java.util.concurrent.Callable<Boolean> cond, String msg) {
+        awaitCommitted(cond, () -> msg);
+    }
+
+    private static void awaitCommitted(java.util.concurrent.Callable<Boolean> cond,
+                                       java.util.function.Supplier<String> msg) {
         // 10s, not 2s (JCLAW-615 follow-up): the barrier polls every 10ms and
         // returns on the first success, so a generous deadline costs nothing
         // when timing is healthy — but 2s expired on a heavily loaded box.
@@ -358,6 +363,19 @@ class ApiMcpServersControllerTest extends FunctionalTest {
             if (Boolean.TRUE.equals(commitInFreshTx(cond))) return;
             try { Thread.sleep(10); } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
         }
-        org.junit.jupiter.api.Assertions.fail(msg);
+        org.junit.jupiter.api.Assertions.fail(msg.get());
+    }
+
+    /** What stop()'s cleanup left behind. It logs and swallows a failed delete, so a timeout names
+     *  which it was: a "Failed to clear allowlist" event, or rows still unseen with none logged. */
+    private static String cleanupDiagnostics() {
+        services.EventLogger.flush();
+        return commitInFreshTx(() -> {
+            java.util.List<models.EventLog> events = models.EventLog.find("category = ?1 and message like ?2",
+                    "MCP_TOOL_UNREGISTER", "%'clean'%").fetch();
+            return "rows left %d, unregister events %s".formatted(
+                    AgentSkillAllowedTool.count("skillName = ?1", "mcp:clean"),
+                    events.stream().map(e -> e.level + " " + e.message).toList());
+        });
     }
 }
