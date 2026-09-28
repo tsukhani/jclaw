@@ -120,8 +120,9 @@ export function molecularFormula(molecule: Molecule): string {
 }
 
 function bracketAtom(atom: MoleculeAtom): string {
-  const charge = atom.charge === 0 ? '' : `${atom.charge > 0 ? '+' : '-'}${Math.abs(atom.charge) === 1 ? '' : Math.abs(atom.charge)}`
-  return `[${atom.element}${charge}]`
+  if (atom.charge === 0) return `[${atom.element}]`
+  const magnitude = Math.abs(atom.charge)
+  return `[${atom.element}${atom.charge > 0 ? '+' : '-'}${magnitude === 1 ? '' : magnitude}]`
 }
 
 /**

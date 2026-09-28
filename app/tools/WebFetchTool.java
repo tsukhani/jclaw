@@ -301,10 +301,14 @@ public class WebFetchTool implements ToolRegistry.Tool {
     private static ScrapeLadder.Attempt climb(String url, WebExtraction.@Nullable FetchResult fetched,
                                               @Nullable String text, @Nullable Exception failure, Agent agent) {
         var error = failure == null ? null : failure.getMessage();
-        var obs = fetched != null ? ScrapeObservation.of(fetched, text)
-                : failure instanceof WebExtraction.HttpStatusException refusal
-                        ? ScrapeObservation.refused(url, refusal)
-                        : ScrapeObservation.failed(url, error == null ? "fetch failed" : error);
+        ScrapeObservation obs;
+        if (fetched != null) {
+            obs = ScrapeObservation.of(fetched, text);
+        } else if (failure instanceof WebExtraction.HttpStatusException refusal) {
+            obs = ScrapeObservation.refused(url, refusal);
+        } else {
+            obs = ScrapeObservation.failed(url, error == null ? "fetch failed" : error);
+        }
         var plain = new ScrapeLadder.Attempt(
                 ScrapeRung.PLAIN, fetched, text, BlockClassifier.classify(obs), error, obs.status());
         // Ask before claiming, as the crawler does: a reason no installed rung addresses

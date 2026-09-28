@@ -51,7 +51,7 @@ function fenceIsClosed(raw: string): boolean {
   const lines = raw.trimEnd().split('\n')
   const open = /^ {0,3}(`{3,}|~{3,})/.exec(lines[0] ?? '')?.[1]
   const close = lines.length > 1 ? /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(lines.at(-1)!)?.[1] : undefined
-  return !!open && !!close && close[0] === open[0] && close.length >= open.length
+  return !!open && !!close && close.startsWith(open)
 }
 
 function escapeHtml(text: string): string {

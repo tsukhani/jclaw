@@ -88,14 +88,7 @@ public final class BlockClassifier {
 
     public static ScrapeReason classify(ScrapeObservation obs, int minChars) {
         if (obs == null) return ScrapeReason.ERROR;
-        if (obs.failed()) {
-            // Not from the message: it names the URL, and "timeout" or "robots.txt" in a path would decide.
-            if (obs.status() >= 400) {
-                var challenge = cloudflareChallenge(obs);
-                return challenge != null ? challenge : statusReason(obs.status());
-            }
-            return classifyError(obs.resolvedError().toLowerCase(Locale.ROOT));
-        }
+        if (obs.failed()) return classifyFailure(obs);
 
         var raw = obs.rawBody() == null ? "" : obs.rawBody();
 
@@ -122,6 +115,15 @@ public final class BlockClassifier {
         // Content-free and no gate marker: the origin served us, there is simply nothing
         // server-rendered to read. A rendering gap, not an anti-bot one.
         return ScrapeReason.THIN_CONTENT;
+    }
+
+    private static ScrapeReason classifyFailure(ScrapeObservation obs) {
+        // Not from the message: it names the URL, and "timeout" or "robots.txt" in a path would decide.
+        if (obs.status() >= 400) {
+            var challenge = cloudflareChallenge(obs);
+            return challenge != null ? challenge : statusReason(obs.status());
+        }
+        return classifyError(obs.resolvedError().toLowerCase(Locale.ROOT));
     }
 
     private static boolean unsupportedClient(String raw, int textLength) {

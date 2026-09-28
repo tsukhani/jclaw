@@ -188,7 +188,7 @@ class ScrapeSidecarContractTest extends UnitTest {
                                   "default_challenge": serve.DEFAULT_CHALLENGE_MS,
                                   "slots": serve.DEFAULT_MAX_CONCURRENT}))
                 """);
-        assertEquals(out.get("slots").getAsInt(), RenderedFetcher.RENDER_SLOTS,
+        assertEquals(RenderedFetcher.RENDER_SLOTS, out.get("slots").getAsInt(),
                 "the JVM must queue renders for the permits the sidecar has, or they queue inside its timeout");
         // A standing challenge is polled in place of the settle window, never after it.
         long wait = Math.max(out.get("settle").getAsLong(), out.get("challenge").getAsLong());

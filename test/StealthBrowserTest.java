@@ -268,7 +268,7 @@ class StealthBrowserTest extends UnitTest {
                     everyoneIn.countDown();
                     try {
                         release.await(30, TimeUnit.SECONDS);
-                    } catch (InterruptedException e) {
+                    } catch (InterruptedException _) {
                         Thread.currentThread().interrupt();
                     }
                     inside.decrementAndGet();

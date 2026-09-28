@@ -149,7 +149,7 @@ public final class RenderedFetcher {
     public static <T> T inRenderSlot(SidecarCall<T> call) throws IOException {
         try {
             SLOTS.acquire();
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             throw new InterruptedIOException("interrupted waiting for a render slot");
         }
