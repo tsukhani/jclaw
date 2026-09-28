@@ -476,6 +476,33 @@ class WebFetchToolTest extends UnitTest {
     }
 
     @Test
+    void aPageHiddenBehindAnOpenDialogIsStillExtracted() {
+        // indeed.com's shape: a dialog open over a page marked aria-hidden, wrapper and sections alike, which
+        // the strip removed whole. Readability picks the dialog's prose, so only the fallback recovers the page.
+        var cards = new StringBuilder();
+        for (int section = 0; section < 4; section++) {
+            cards.append("<div aria-hidden=\"true\"><ul>");
+            for (int i = section * 10; i < section * 10 + 10; i++) {
+                cards.append("<li><a href=\"/job/").append(i).append("\"><h3>HIDDENPAGE job ").append(i)
+                        .append("</h3><span>Analyst role in Kuala Lumpur, posted today by an employer</span></a></li>");
+            }
+            cards.append("</ul></div>");
+        }
+        var consent = "<p>We use cookies and similar technologies to run this site, to understand how it is used, "
+                + "and, with your permission, to personalise what you see. You can accept all of them, reject the "
+                + "optional ones, or choose which purposes to allow, and you can change your mind at any time from "
+                + "the privacy settings linked in the footer of every page, where the full list of partners and "
+                + "purposes is also published.</p>";
+        var html = "<html><head><title>Jobs</title></head><body><div aria-hidden=\"true\"><main><h1>Find jobs</h1>"
+                + cards + "<span aria-hidden=\"true\">ICONGLYPH</span></main></div>"
+                + "<div role=\"dialog\">" + consent.repeat(2) + "</div></body></html>";
+        var text = WebExtraction.extractText(html, "https://jobs.test/");
+
+        assertTrue(text.contains("HIDDENPAGE job 39"), "the page under the dialog is the content: " + text);
+        assertFalse(text.contains("ICONGLYPH"), "a small aria-hidden element is still decoration: " + text);
+    }
+
+    @Test
     void anArticleKeepsReadabilitysCut() {
         var paragraph = "<p>ARTICLEBODY Readability exists for pages like this one, where a single long run of prose "
                 + "carries the content, commas separate its clauses, and the surrounding page adds little that a "

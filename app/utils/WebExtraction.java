@@ -75,6 +75,9 @@ public final class WebExtraction {
      *  hold this share of the page's text. Articles measured 0.89-0.99, nih.gov's homepage 0.13. */
     private static final double MIN_READABILITY_SHARE = 0.25;
 
+    /** Below this, aria-hidden text is decoration; indeed.com's hidden page sections run 300 to 700 chars. */
+    private static final int ARIA_HIDDEN_DECORATION_CHARS = 80;
+
     /** Cap on the raw response bytes buffered into the heap per fetch. The body
      *  comes from an untrusted, LLM-supplied URL and the {@link SsrfGuard} client
      *  sets no read/body limit, so a large or slow response — multiplied across
@@ -583,9 +586,15 @@ public final class WebExtraction {
         doc.select("script, style, noscript, iframe, svg, canvas, nav, footer, " +
                    "header, aside, form, button, input, select, textarea, " +
                    "[role=navigation], [role=banner], [role=complementary], " +
-                   "[aria-hidden=true], .hidden, .sr-only, .visually-hidden").remove();
+                   ".hidden, .sr-only, .visually-hidden").remove();
         // jsoup always yields a <body> (creating an empty one if absent), so no null guard is needed.
         var page = doc.body();
+        // Decoration hidden from screen readers is short: icons, glyphs, repeated labels. Longer hidden text is
+        // content under an open dialog; indeed.com hides its page that way, section by section, and kept 100 of
+        // its 2,286 characters when every aria-hidden element was stripped.
+        for (var hidden : page.select("[aria-hidden=true]")) {
+            if (hidden.text().length() < ARIA_HIDDEN_DECORATION_CHARS) hidden.remove();
+        }
         if (contentHtml == null || contentHtml.isBlank()
                 || articleChars < MIN_READABILITY_SHARE * page.text().length()) {
             if (title == null || title.isBlank()) title = doc.title();
