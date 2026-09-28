@@ -348,6 +348,82 @@ class ScrapeHarnessTest extends UnitTest {
                 "rungs 2 and 3 see no origin header, so the inline options suffice");
     }
 
+    // ==================== Named refusals (JCLAW-1320) ====================
+
+    /** Rung 3's render of g2.com on 2026-09-28: DataDome's device check behind Cloudflare's CDN,
+     *  which still injects its detection script. {@code cid}, {@code hsh}, {@code e} and {@code cookie} redacted. */
+    private static final String DATADOME_INTERSTITIAL = """
+            <html lang="en"><head><title>g2.com</title></head><body style="margin:0">
+            <script data-cfasync="false">var dd={'rt':'i','cid':'REDACTED','hsh':'REDACTED','b':1639491,'s':48621,
+            'e':'REDACTED','qp':'','host':'geo.captcha-delivery.com','cookie':'REDACTED'}</script>
+            <script data-cfasync="false" src="https://ct.captcha-delivery.com/i.js"></script>
+            <iframe src="https://geo.captcha-delivery.com/interstitial/?initialCid=REDACTED&amp;hash=REDACTED&amp;cid=REDACTED&amp;referer=https%3A%2F%2Fwww.g2.com%2F&amp;s=48621&amp;e=REDACTED&amp;b=1639491&amp;dm=cd"
+             title="DataDome Device Check" width="100%" height="100%"></iframe>
+            <script>(function(){var s=document.createElement('script');
+            s.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.head.appendChild(s);})();</script>
+            </body></html>""";
+
+    /** Rung 1's answer from klook.com the same day: the captcha, redacted as above. */
+    private static final String DATADOME_CAPTCHA = """
+            <html lang="en"><head><title>klook.com</title></head><body style="margin:0">
+            <p id="cmsg">Please enable JS and disable any ad blocker</p>
+            <script data-cfasync="false">var dd={'rt':'c','cid':'REDACTED','hsh':'REDACTED','t':'bv','rr':'','qp':'',
+            's':37675,'e':'REDACTED','host':'geo.captcha-delivery.com','cookie':'REDACTED'}</script>
+            <script data-cfasync="false" src="https://ct.captcha-delivery.com/c.js"></script></body></html>""";
+
+    /** Rung 3's render of hostgator.com.br: Cloudflare's Error 1009 template, its code in the feedback script. */
+    private static final String GEO_BLOCK_PAGE = """
+            <!DOCTYPE html><html class="no-js" lang="en-US"><head>
+            <title>Access denied | www.hostgator.com.br used Cloudflare to restrict access | www.hostgator.com.br | Cloudflare</title>
+            <link rel="stylesheet" id="cf_styles-css" href="/cdn-cgi/styles/main.css"><script>
+            (function(){var e=function(a){var b=new XMLHttpRequest;a={event:"feedback clicked",
+            properties:{errorCode: 1009 },helpful:a,version: 1 };b.open("POST","https://sparrow.cloudflare.com/api/v1/event");
+            b.send(JSON.stringify(a))};})();
+            </script></head><body><div id="cf-wrapper"><div id="cf-error-details">
+            <h1><span data-translate="error">Error</span><span>1009</span></h1><h2>Access denied</h2>
+            </div></div></body></html>""";
+
+    private static final String DATADOME_SCRIPT =
+            "<script data-cfasync=\"false\" src=\"https://ct.captcha-delivery.com/i.js\"></script>";
+
+    @Test
+    void aDataDomeRefusalIsNamedFromItsBody() {
+        assertEquals(ScrapeReason.DATADOME, BlockClassifier.classify(refused(403, DATADOME_INTERSTITIAL, Map.of())),
+                "the interstitial, whose Cloudflare detection script is not a challenge");
+        assertEquals(ScrapeReason.DATADOME, BlockClassifier.classify(refused(403, DATADOME_CAPTCHA, Map.of())));
+    }
+
+    @Test
+    void aCloudflare1009IsAGeoBlockInEitherForm() {
+        var plainText = new WebExtraction.HttpStatusException(403, REFUSED_URL,
+                "error code: 1009\n".getBytes(StandardCharsets.UTF_8), "text/plain; charset=UTF-8", Map.of());
+        assertEquals(ScrapeReason.GEO_BLOCK, BlockClassifier.classify(ScrapeObservation.failed(REFUSED_URL, plainText)));
+        assertEquals(ScrapeReason.GEO_BLOCK, BlockClassifier.classify(refused(403, GEO_BLOCK_PAGE, Map.of())));
+    }
+
+    @Test
+    void anyOtherCloudflareRefusalStaysATrustBlock() {
+        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(refused(403, CF_BLOCK_PAGE, Map.of())));
+        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(refused(403, "error code: 1020", Map.of())));
+        assertEquals(ScrapeReason.TRUST_BLOCK, BlockClassifier.classify(refused(403, "error code: 10090", Map.of())));
+    }
+
+    @Test
+    void aCloudflareChallengeIsReadBeforeADataDomeMarker() {
+        var both = MANAGED_EN.replace("</body>", DATADOME_SCRIPT + "</body>");
+        assertEquals(ScrapeReason.JS_CHALLENGE, BlockClassifier.classify(refused(403, both, Map.of())));
+        assertEquals(ScrapeReason.JS_CHALLENGE, BlockClassifier.classify(refused(403, both, CF_CHALLENGE)));
+    }
+
+    @Test
+    void aPageServedWith200IsNeverANamedRefusal() {
+        assertEquals(ScrapeReason.JS_CHALLENGE, BlockClassifier.classify(obs(DATADOME_CAPTCHA, "")),
+                "a thin DataDome page stays a challenge");
+        assertEquals(ScrapeReason.OK, BlockClassifier.classify(obs(
+                "<html><body><p>Cloudflare answers error code: 1009 when a country is banned.</p></body></html>",
+                ARTICLE_TEXT)));
+    }
+
     /** A stealth-sidecar answer: always 200, with the origin's outcome in its headers. */
     private static Response render(String body, String... headers) {
         var b = new Response.Builder()

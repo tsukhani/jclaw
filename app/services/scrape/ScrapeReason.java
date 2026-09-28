@@ -22,6 +22,10 @@ public enum ScrapeReason {
     POLICY_BLOCK,
     /** Scored too low to be served, without a named policy. Identification would not help. */
     TRUST_BLOCK,
+    /** Refused with DataDome's device check or captcha, which scores the client and climbs as a 403 does. */
+    DATADOME,
+    /** Cloudflare Error 1009: the origin bans the egress's country, which every rung shares. */
+    GEO_BLOCK,
     /** Blocked by a non-Cloudflare WAF. Excluded from the epic's numerator and denominator. */
     OTHER_WAF,
     /** We were not blocked — the origin served a page with no server-rendered text.

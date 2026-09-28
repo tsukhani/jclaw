@@ -104,6 +104,21 @@ class ScrapeLadderTest extends UnitTest {
     }
 
     @Test
+    void aDataDomeRefusalClimbsAsATrustBlockAndAGeoBlockStops() {
+        for (var attempted : ScrapeRung.values()) {
+            assertEquals(BlockClassifier.nextRung(ScrapeReason.TRUST_BLOCK, 403, attempted),
+                    BlockClassifier.nextRung(ScrapeReason.DATADOME, 403, attempted), "DATADOME after " + attempted);
+            assertEquals(ScrapeRung.NONE, BlockClassifier.nextRung(ScrapeReason.GEO_BLOCK, 403, attempted),
+                    "every rung leaves from the banned country, so none follows " + attempted);
+        }
+        assertEquals(ScrapeRung.IMPERSONATE, BlockClassifier.nextRung(ScrapeReason.DATADOME, 403, ScrapeRung.PLAIN));
+        assertEquals(ScrapeRung.BROWSER, BlockClassifier.nextRung(ScrapeReason.DATADOME, 403, ScrapeRung.IMPERSONATE));
+
+        var banned = plain(ScrapeReason.GEO_BLOCK, null);
+        assertSame(banned, ScrapeLadder.climb("https://example.test/", banned));
+    }
+
+    @Test
     void aChallengeReadOffARefusalStillClimbsThroughRungTwo() {
         // JCLAW-1304 names the challenge behind a 403; skipping rung 2 for one is a separate,
         // measured decision, so until then it routes exactly as the bare status did.
