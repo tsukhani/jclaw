@@ -9,7 +9,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.ConfigService;
 import tools.WebScrapeTool;
 import utils.RobotsCache;
 
@@ -41,13 +40,12 @@ class WebScrapeConcurrencyTest extends UnitTest {
     private static final String SEED = "https://conc.test/";
 
     private final ScrapeClientSwap swap = new ScrapeClientSwap();
+    private final ScrapeConfigGuard config = new ScrapeConfigGuard();
     private RouteInterceptor routes;
-    private String originalConcurrency;
 
     @BeforeEach
     void setup() throws Exception {
         routes = new RouteInterceptor();
-        originalConcurrency = ConfigService.get(CFG_CONCURRENCY, "");
         swap.install(new OkHttpClient.Builder()
                 .addInterceptor(routes).callTimeout(20, TimeUnit.SECONDS).build());
         RobotsCache.resetForTest();
@@ -56,7 +54,7 @@ class WebScrapeConcurrencyTest extends UnitTest {
     @AfterEach
     void teardown() throws Exception {
         try {
-            ConfigService.set(CFG_CONCURRENCY, originalConcurrency);
+            config.restore();
             RobotsCache.resetForTest();
         } finally {
             swap.restore();
@@ -89,7 +87,7 @@ class WebScrapeConcurrencyTest extends UnitTest {
 
     @Test
     void aLevelIsFetchedConcurrently() {
-        ConfigService.set(CFG_CONCURRENCY, "4");
+        config.set(CFG_CONCURRENCY, "4");
         seedFourHosts();
         routes.holdMillis = 250;
 
@@ -101,7 +99,7 @@ class WebScrapeConcurrencyTest extends UnitTest {
 
     @Test
     void concurrencyOneKeepsTheCrawlStrictlySequential() {
-        ConfigService.set(CFG_CONCURRENCY, "1");
+        config.set(CFG_CONCURRENCY, "1");
         seedFourHosts();
         routes.holdMillis = 100;
 
@@ -113,7 +111,7 @@ class WebScrapeConcurrencyTest extends UnitTest {
 
     @Test
     void theCapIsClampedSoConfigCannotAskForUnboundedFanOut() {
-        ConfigService.set(CFG_CONCURRENCY, "9999");
+        config.set(CFG_CONCURRENCY, "9999");
         seedFourHosts();
         routes.holdMillis = 150;
 
@@ -127,7 +125,7 @@ class WebScrapeConcurrencyTest extends UnitTest {
 
     @Test
     void pageOrderIsDiscoveryOrderNotCompletionOrder() {
-        ConfigService.set(CFG_CONCURRENCY, "4");
+        config.set(CFG_CONCURRENCY, "4");
         // First link is slowest, last is fastest: completion order is the reverse of
         // discovery order, so any output ordered by completion would show it.
         routes.put(SEED, page("Home",
@@ -153,7 +151,7 @@ class WebScrapeConcurrencyTest extends UnitTest {
 
     @Test
     void theBudgetStaysExactUnderConcurrency() {
-        ConfigService.set(CFG_CONCURRENCY, "8");
+        config.set(CFG_CONCURRENCY, "8");
         seedFourHosts();
 
         var out = scrape("{\"url\":\"" + SEED + "\",\"maxDepth\":1,\"maxPages\":3}");

@@ -29,15 +29,15 @@ final class ScrapeConfigGuard {
     void set(String key, String value) {
         acquire();
         remember(key);
+        // No clearCache: set() seeds the cache so a crawl's own threads see the value before this
+        // test's transaction commits, and clearing it hands them the uncommitted database instead.
         ConfigService.set(key, value);
-        ConfigService.clearCache();
     }
 
     void delete(String key) {
         acquire();
         remember(key);
         ConfigService.delete(key);
-        ConfigService.clearCache();
     }
 
     /** Restore every key this guard touched. Safe to call when nothing was touched. */
@@ -50,7 +50,6 @@ final class ScrapeConfigGuard {
             }
         });
         prior.clear();
-        ConfigService.clearCache();
         if (held) {
             held = false;
             CONFIG_LOCK.unlock();

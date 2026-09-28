@@ -13,7 +13,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
-import services.ConfigService;
 import services.FetchSidecarManager;
 import services.StealthSidecarManager;
 import services.scrape.BlockClassifier;
@@ -89,7 +88,6 @@ class WebFetchToolTest extends UnitTest {
     void teardown() throws Exception {
         CLIENT_FIELD.set(null, originalClient);
         scrapeConfig.restore();
-        ConfigService.delete(CFG_ALLOWLIST);
         if (originalMaxBodyBytes == null) {
             Play.configuration.remove(CFG_MAX_BODY_BYTES);
         } else {
@@ -103,9 +101,9 @@ class WebFetchToolTest extends UnitTest {
         Play.configuration.setProperty(CFG_MAX_BODY_BYTES, Long.toString(bytes));
     }
 
-    /** Configure the operator outbound-host allowlist. Deleted again in teardown. */
-    private static void setAllowlist(String hosts) {
-        ConfigService.set(CFG_ALLOWLIST, hosts);
+    /** Configure the operator outbound-host allowlist. Restored in teardown. */
+    private void setAllowlist(String hosts) {
+        scrapeConfig.set(CFG_ALLOWLIST, hosts);
     }
 
     /** A response body with an unknown ({@code -1}) declared length, so the
@@ -598,6 +596,8 @@ class WebFetchToolTest extends UnitTest {
 
     @Test
     void unsetAllowlistLeavesEveryHostReachable() {
+        // Through the guard, so another suite's allowlist cannot be read in the middle of this one.
+        scrapeConfig.delete(CFG_ALLOWLIST);
         queue.enqueue(ok("hello", "text/plain"));
         var result = new WebFetchTool().execute("{\"url\":\"http://anything.test/\"}", null);
         assertEquals("hello", result,

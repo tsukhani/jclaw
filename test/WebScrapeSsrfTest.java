@@ -9,7 +9,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.ConfigService;
 import tools.WebScrapeTool;
 
 import java.io.IOException;
@@ -41,13 +40,12 @@ class WebScrapeSsrfTest extends UnitTest {
     private static final String CFG_ALLOWLIST = "web_fetch.allowlist";
 
     private final ScrapeClientSwap swap = new ScrapeClientSwap();
+    private final ScrapeConfigGuard config = new ScrapeConfigGuard();
     private RouteInterceptor routes;
-    private String originalAllowlist;
 
     @BeforeEach
     void setup() throws Exception {
         routes = new RouteInterceptor();
-        originalAllowlist = ConfigService.get(CFG_ALLOWLIST, "");
         swap.install(new OkHttpClient.Builder()
                 .addInterceptor(routes)
                 .callTimeout(5, TimeUnit.SECONDS)
@@ -57,7 +55,7 @@ class WebScrapeSsrfTest extends UnitTest {
     @AfterEach
     void teardown() throws Exception {
         try {
-            ConfigService.set(CFG_ALLOWLIST, originalAllowlist);
+            config.restore();
         } finally {
             swap.restore();
         }
@@ -153,7 +151,7 @@ class WebScrapeSsrfTest extends UnitTest {
 
     @Test
     void theAllowlistContainsEgressAcrossTheWholeCrawlNotJustTheSeed() {
-        ConfigService.set(CFG_ALLOWLIST, "site.test");
+        config.set(CFG_ALLOWLIST, "site.test");
         routes.put("https://site.test/", pageLinking("Home", "https://elsewhere.test/x", "/inside"));
         routes.put("https://site.test/inside", pageLinking("Inside"));
         routes.put("https://elsewhere.test/x", pageLinking("Outside"));

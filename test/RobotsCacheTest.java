@@ -9,7 +9,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.ConfigService;
 import tools.WebScrapeTool;
 import utils.RobotsCache;
 
@@ -41,16 +40,15 @@ class RobotsCacheTest extends UnitTest {
             new RobotsCache.Identity("Mozilla/5.0 (compatible; JClaw/1.0)", "jclaw");
 
     private final ScrapeClientSwap swap = new ScrapeClientSwap();
+    private final ScrapeConfigGuard config = new ScrapeConfigGuard();
     private RouteInterceptor routes;
     private OkHttpClient client;
-    private String originalRespect;
 
     @BeforeEach
     void setup() throws Exception {
         routes = new RouteInterceptor();
         client = new OkHttpClient.Builder()
                 .addInterceptor(routes).callTimeout(5, TimeUnit.SECONDS).build();
-        originalRespect = ConfigService.get(CFG_RESPECT, "true");
         swap.install(client);
         RobotsCache.resetForTest();
     }
@@ -58,7 +56,7 @@ class RobotsCacheTest extends UnitTest {
     @AfterEach
     void teardown() throws Exception {
         try {
-            ConfigService.set(CFG_RESPECT, originalRespect);
+            config.restore();
             RobotsCache.resetForTest();
         } finally {
             swap.restore();
@@ -180,7 +178,7 @@ class RobotsCacheTest extends UnitTest {
     void aPerCallOverrideIgnoresRobotsWithoutTouchingConfig() {
         // The operator asking in chat is the case this exists for: config stays on, one
         // request opts out.
-        ConfigService.set(CFG_RESPECT, "true");
+        config.set(CFG_RESPECT, "true");
         routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /\n", "text/plain");
         routes.put(HOST + "/", page("Home", "/private/secret"));
         routes.put(HOST + "/private/secret", page("Secret"));
@@ -193,7 +191,7 @@ class RobotsCacheTest extends UnitTest {
     @Test
     void omittingTheArgumentKeepsRobotsHonored() {
         // Opt-out per call, never by omission.
-        ConfigService.set(CFG_RESPECT, "true");
+        config.set(CFG_RESPECT, "true");
         routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /private\n", "text/plain");
         routes.put(HOST + "/", page("Home", "/private/secret"));
         routes.put(HOST + "/private/secret", page("Secret"));
@@ -205,7 +203,7 @@ class RobotsCacheTest extends UnitTest {
 
     @Test
     void theArgumentCanAlsoRestoreRobotsWhenConfigTurnedThemOff() {
-        ConfigService.set(CFG_RESPECT, "false");
+        config.set(CFG_RESPECT, "false");
         routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /private\n", "text/plain");
         routes.put(HOST + "/", page("Home", "/private/secret"));
         routes.put(HOST + "/private/secret", page("Secret"));
@@ -216,7 +214,7 @@ class RobotsCacheTest extends UnitTest {
 
     @Test
     void turningOffRespectRobotsIgnoresTheRulesButStillPaces() {
-        ConfigService.set(CFG_RESPECT, "false");
+        config.set(CFG_RESPECT, "false");
         routes.put(HOST + "/robots.txt", "User-agent: *\nDisallow: /\n", "text/plain");
         routes.put(HOST + "/", page("Home", "/private/secret"));
         routes.put(HOST + "/private/secret", page("Secret"));

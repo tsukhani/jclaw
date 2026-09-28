@@ -13,7 +13,6 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
-import services.ConfigService;
 import services.Tx;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeJobService;
@@ -56,6 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WebScrapeToolTest extends UnitTest {
 
     private final ScrapeClientSwap swap = new ScrapeClientSwap();
+    private final ScrapeConfigGuard config = new ScrapeConfigGuard();
     private RouteInterceptor routes;
 
     @BeforeEach
@@ -69,7 +69,11 @@ class WebScrapeToolTest extends UnitTest {
 
     @AfterEach
     void teardown() throws Exception {
-        swap.restore();
+        try {
+            config.restore();
+        } finally {
+            swap.restore();
+        }
     }
 
     private String scrape(String json) {
@@ -168,21 +172,12 @@ class WebScrapeToolTest extends UnitTest {
         routes.put("https://site.test/b", page("B", "/c"));
         routes.put("https://site.test/c", page("C"));
         var request = "{\"url\":\"https://site.test/\",\"maxDepth\":3}";
-        var originalDepth = ConfigService.get(WebScrapeSettings.MAX_DEPTH);
-        try {
-            assertFalse(scrape(request).contains("# C"), "the default ceiling of 2 caps a request for 3");
+        assertFalse(scrape(request).contains("# C"), "the default ceiling of 2 caps a request for 3");
 
-            // Raised, never lowered: the scrape classes running concurrently pass depths of
-            // 2 or less, which a higher ceiling leaves untouched.
-            ConfigService.set(WebScrapeSettings.MAX_DEPTH, "3");
-            assertTrue(scrape(request).contains("# C"), "a Settings ceiling of 3 must admit depth 3");
-        } finally {
-            if (originalDepth == null) {
-                ConfigService.delete(WebScrapeSettings.MAX_DEPTH);
-            } else {
-                ConfigService.set(WebScrapeSettings.MAX_DEPTH, originalDepth);
-            }
-        }
+        // Raised, never lowered: the scrape classes running concurrently pass depths of
+        // 2 or less, which a higher ceiling leaves untouched.
+        config.set(WebScrapeSettings.MAX_DEPTH, "3");
+        assertTrue(scrape(request).contains("# C"), "a Settings ceiling of 3 must admit depth 3");
     }
 
     @Test
