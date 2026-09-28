@@ -642,7 +642,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
      *  invites a retry loop. */
     private static void recordOutcome(Outcome outcome, URI uri, int depth, CrawlState state,
                                       List<PageHarvest> fetched) {
-        if (!outcome.usable()) {
+        if (!outcome.delivered()) {
             var why = "%s%s%s".formatted(outcome.reason(),
                     outcome.detail() == null ? "" : ": " + outcome.detail(),
                     outcome.nextRung() == ScrapeRung.NONE ? "" : "; needs " + outcome.nextRung());
@@ -880,16 +880,23 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             return reason == ScrapeReason.OK;
         }
 
-        /** Valid only when {@link #usable()} — a non-OK outcome retrieved no page. */
+        /** Whether the page reaches the caller. A thin page the ladder did not improve was still
+         *  fetched, so it is delivered as it is: only a page that could not be fetched is a failure. */
+        boolean delivered() {
+            return usable() || reason == ScrapeReason.THIN_CONTENT && fetched != null;
+        }
+
+        /** Valid only when {@link #delivered()} — anything else retrieved no page. */
         WebExtraction.FetchResult resolvedFetched() {
-            if (fetched == null) throw new IllegalStateException("outcome not usable: " + reason);
+            if (fetched == null) throw new IllegalStateException("outcome not delivered: " + reason);
             return fetched;
         }
 
-        /** Valid only when {@link #usable()} — a non-OK outcome extracted no text. */
+        /** Valid only when {@link #delivered()}; a thin page may have no readable text at all. */
         String resolvedText() {
-            if (text == null) throw new IllegalStateException("outcome not usable: " + reason);
-            return text;
+            if (text != null) return text;
+            if (delivered()) return "";
+            throw new IllegalStateException("outcome not delivered: " + reason);
         }
     }
 

@@ -13,6 +13,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
+import services.FetchSidecarManager;
+import services.StealthSidecarManager;
 import services.Tx;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeJobService;
@@ -199,6 +201,20 @@ class WebScrapeToolTest extends UnitTest {
 
         assertTrue(out.contains("# One") && out.contains("# Two"),
                 "a query parameter can select a different page");
+    }
+
+    @Test
+    void aShortPageIsDeliveredAndItsLinksFollowed() {
+        config.set(FetchSidecarManager.CFG_ENABLED, "false");
+        config.set(StealthSidecarManager.CFG_ENABLED, "false");
+        routes.put("https://site.test/", "<html><head><title>Tiny</title></head><body><p>Just a short note.</p>"
+                + "<a href=\"/good\">next</a></body></html>");
+        routes.put("https://site.test/good", page("Good"));
+        var out = scrape("{\"url\":\"https://site.test/\",\"maxDepth\":1}");
+
+        assertFalse(out.contains("Not retrieved"), out);
+        assertTrue(out.contains("Just a short note."), "a page under the thin-content floor was still fetched");
+        assertTrue(out.contains("# Good"), "and its links are followed");
     }
 
     @Test
