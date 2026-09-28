@@ -383,6 +383,27 @@ class ScrapeHarnessTest extends UnitTest {
             <h1><span data-translate="error">Error</span><span>1009</span></h1><h2>Access denied</h2>
             </div></div></body></html>""";
 
+    /** Rung 1's answer from hostgator.com.br: Cloudflare's 1009 served as markdown, ray id redacted. */
+    private static final String GEO_BLOCK_MARKDOWN = """
+            ---
+            error_code: 1009
+            error_name: country_banned
+            error_category: access_denied
+            status: 403
+            ray_id: REDACTED
+            zone: hostgator.com.br
+            cloudflare_error: true
+            retryable: false
+            owner_action_required: true
+            ---
+
+            # Error 1009: Access denied
+
+            ## What Happened
+
+            The site owner has blocked the country or region associated with your IP address.
+            """;
+
     private static final String DATADOME_SCRIPT =
             "<script data-cfasync=\"false\" src=\"https://ct.captcha-delivery.com/i.js\"></script>";
 
@@ -394,11 +415,15 @@ class ScrapeHarnessTest extends UnitTest {
     }
 
     @Test
-    void aCloudflare1009IsAGeoBlockInEitherForm() {
+    void aCloudflare1009IsAGeoBlockInEveryForm() {
         var plainText = new WebExtraction.HttpStatusException(403, REFUSED_URL,
                 "error code: 1009\n".getBytes(StandardCharsets.UTF_8), "text/plain; charset=UTF-8", Map.of());
         assertEquals(ScrapeReason.GEO_BLOCK, BlockClassifier.classify(ScrapeObservation.failed(REFUSED_URL, plainText)));
         assertEquals(ScrapeReason.GEO_BLOCK, BlockClassifier.classify(refused(403, GEO_BLOCK_PAGE, Map.of())));
+        var markdown = new WebExtraction.HttpStatusException(403, REFUSED_URL,
+                GEO_BLOCK_MARKDOWN.getBytes(StandardCharsets.UTF_8), "text/markdown; charset=utf-8", Map.of());
+        assertEquals(ScrapeReason.GEO_BLOCK, BlockClassifier.classify(ScrapeObservation.failed(REFUSED_URL, markdown)),
+                "what Cloudflare answers rung 1's markdown-first Accept with");
     }
 
     @Test

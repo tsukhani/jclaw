@@ -44,8 +44,9 @@ public final class BlockClassifier {
     /** The host DataDome serves its device check and captcha from, as a script or an iframe. */
     private static final String DATADOME_HOST = "captcha-delivery.com";
     /** Cloudflare's country ban: {@code error code: 1009} as plain text, {@code errorCode: 1009}
-     *  in the HTML template's feedback script. The body is lowercased before matching. */
-    private static final Pattern GEO_BLOCK_CODE = Pattern.compile("error ?code:\\s*1009(?!\\d)");
+     *  in the HTML template's feedback script, {@code error_code: 1009} in the front matter of
+     *  the markdown rung 1's Accept asks for. The body is lowercased before matching. */
+    private static final Pattern GEO_BLOCK_CODE = Pattern.compile("error[ _]?code:\\s*1009(?!\\d)");
 
     private static final String[] TURNSTILE_MARKERS = {
             "challenges.cloudflare.com/turnstile", "cf-turnstile"
