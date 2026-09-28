@@ -1,5 +1,6 @@
 package tools.scrape;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonObject;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
@@ -12,6 +13,8 @@ import services.LocalSidecarDaemon;
 import services.StealthSidecarManager;
 import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeSidecarException;
+import tools.BrowserScreenLog;
+import tools.BrowserScreenProxy;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.SsrfGuard;
@@ -39,7 +42,12 @@ import java.util.concurrent.Semaphore;
  *       browser's;</li>
  *   <li>the sidecar's route interceptor range-checks every further host the page
  *       reaches — redirects and subresources both — and aborts the non-public ones,
- *       reporting them back in {@code X-Blocked-Hosts}, which this class logs.</li>
+ *       reporting them back in {@code X-Blocked-Hosts}, which this class logs;</li>
+ *   <li>the browser is launched behind a {@link BrowserScreenProxy} opened here for the render
+ *       (JCLAW-1315), so every TCP connection it makes — a Worker's WebSocket and TURN over TCP,
+ *       which neither interceptor sees, included — is screened by {@link SsrfGuard} in this JVM,
+ *       then carried by the operator's scrape proxy when one is set. The sidecar is never sent the
+ *       operator's proxy or its credentials.</li>
  * </ol>
  */
 public final class RenderedFetcher {
@@ -125,17 +133,37 @@ public final class RenderedFetcher {
             if (parts.length == 3) pins.addProperty(parts[1], parts[2]);
         });
 
-        var request = new Request.Builder()
-                .url(baseUrl + "/render")
-                .header(LocalSidecarDaemon.AUTH_HEADER, StealthSidecarManager.authToken())
-                .post(RequestBody.create(renderRequest(url, language, pins).toString(), JSON))
-                .build();
-
+        // Opened inside the slot, so a render queued for one holds no listener.
         return inRenderSlot(() -> {
-            try (var response = CLIENT.newCall(request).execute()) {
-                return rendered(response, url);
+            try (var screen = openScreen(url)) {
+                var body = renderRequest(url, language, pins, screen.port()).toString();
+                var request = new Request.Builder()
+                        .url(baseUrl + "/render")
+                        .header(LocalSidecarDaemon.AUTH_HEADER, StealthSidecarManager.authToken())
+                        .post(RequestBody.create(body, JSON))
+                        .build();
+                try (var response = CLIENT.newCall(request).execute()) {
+                    return rendered(response, url);
+                }
             }
         });
+    }
+
+    /**
+     * The render's network screen, carried through the operator's scrape proxy when one is set, its
+     * refusals logged under this rung's category. A screen that cannot start fails the render rather
+     * than letting the browser launch unscreened. Public because Play's tests live in the default package.
+     */
+    @MustBeClosed
+    public static BrowserScreenProxy openScreen(String url) {
+        var upstream = ScrapeProxy.current().orElse(null);
+        var log = new BrowserScreenLog((level, message) ->
+                EventLogger.record(level, EVENT_CATEGORY, "%s: %s".formatted(url, message), null));
+        try {
+            return new BrowserScreenProxy(log, upstream);
+        } catch (IOException e) {
+            throw new ScrapeSidecarException("the render's network screen could not start: " + e.getMessage(), e);
+        }
     }
 
     /** One call to the sidecar. Public because Play's tests live in the default package. */
@@ -160,8 +188,11 @@ public final class RenderedFetcher {
         }
     }
 
-    /** The body of one render request. Public because Play's tests live in the default package. */
-    public static JsonObject renderRequest(String url, String language, JsonObject pins) {
+    /**
+     * The body of one render request, launching the browser behind the screen listening on
+     * {@code screenPort}. Public because Play's tests live in the default package.
+     */
+    public static JsonObject renderRequest(String url, String language, JsonObject pins, int screenPort) {
         var payload = new JsonObject();
         payload.addProperty("url", url);
         payload.addProperty("language", language);
@@ -170,7 +201,9 @@ public final class RenderedFetcher {
         payload.addProperty("timeoutMs", NAVIGATION_TIMEOUT.toMillis());
         payload.addProperty("challengeMs", CHALLENGE_BUDGET.toMillis());
         payload.addProperty("solveTurnstile", StealthSidecarManager.solveTurnstile());
-        ScrapeProxy.current().ifPresent(proxy -> payload.add("proxy", proxy.toJson()));
+        var proxy = new JsonObject();
+        proxy.addProperty("url", "socks5://127.0.0.1:" + screenPort);
+        payload.add("proxy", proxy);
         return payload;
     }
 

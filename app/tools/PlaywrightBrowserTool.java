@@ -542,7 +542,6 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
             // Before the install and the driver: a browser nothing screens must not be launched, and
             // one that will be refused must not be downloaded first either.
             try {
-                if (screenFailsForTest()) throw new IOException("bound port in use");
                 proxy = new BrowserScreenProxy(log);
             } catch (IOException e) {
                 throw new IllegalStateException("the browser's network screen could not start: " + e.getMessage(), e);
@@ -577,25 +576,15 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         }
     }
 
-    private static final ScopedValue<Boolean> SCREEN_FAILS_FOR_TEST = ScopedValue.newInstance();
-
-    /** Whether a test asked this thread's next launch to find its screen unable to start. */
-    private static boolean screenFailsForTest() {
-        return SCREEN_FAILS_FOR_TEST.isBound();
-    }
-
     /**
-     * Test seam (JCLAW-1288): run {@code body} with the network screen failing to start, so the one
-     * path that must never launch a browser can be taken on demand — an ephemeral bind does not fail
-     * when asked. Bound on this thread only, which is the thread {@code launchSession} runs on.
-     * {@code CapabilityRulesTest} fails the build if anything in {@code app/} calls it.
-     *
-     * <p>It stands in for the constructor, not for the throw: a future constructor that failed with
-     * an unchecked exception would still fail the launch closed, through the outer guard, but would
-     * no longer carry the message this seam's test asserts.
+     * Test seam (JCLAW-1288): run {@code body} with every {@link BrowserScreenProxy} it opens failing to
+     * start, so the one path that must never launch a browser can be taken on demand — this tool's, and
+     * a stealth render's (JCLAW-1315). Bound on this thread only, which is the thread
+     * {@code launchSession} and a render's screen both open on. {@code CapabilityRulesTest} fails the
+     * build if anything in {@code app/} calls it.
      */
     public static <T> T callWithFailingScreenForTest(Supplier<T> body) {
-        return ScopedValue.where(SCREEN_FAILS_FOR_TEST, Boolean.TRUE).call(body::get);
+        return ScopedValue.where(BrowserScreenProxy.FAILS_FOR_TEST, Boolean.TRUE).call(body::get);
     }
 
     /**

@@ -2,9 +2,12 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import tools.BrowserScreenLog;
 import tools.BrowserScreenProxy;
+import tools.scrape.ScrapeProxy;
 import utils.SsrfGuard;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -12,8 +15,10 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * The SOCKS5 screen itself (JCLAW-1283), driven as a client rather than through Chromium, so the
@@ -242,5 +247,238 @@ class BrowserScreenProxyTest extends UnitTest {
                 () -> BrowserScreenProxy.destinationsFor("127.0.0.1", 8080, "http://localhost:8080"),
                 "a permitted origin naming a host rather than an address is not honoured: what it "
                         + "resolves to would go unscreened");
+    }
+
+    // ─── JCLAW-1315: an upstream, the operator's scrape proxy for a stealth render ─────────────────
+
+    /** A public literal, so the screen passes it with no resolver and no origin permitted. */
+    private static final String PUBLIC_HOST = "1.1.1.1";
+    private static final int PUBLIC_PORT = 443;
+
+    /** A loopback stand-in for the operator's proxy, counting connections and running {@code session} on each in turn. */
+    private static final class StubUpstream implements AutoCloseable {
+
+        interface Session {
+            void run(Socket socket) throws IOException;
+        }
+
+        private final ServerSocket listener;
+        private final AtomicInteger connections = new AtomicInteger();
+
+        StubUpstream(Session session) throws IOException {
+            listener = new ServerSocket(0, 10, InetAddress.getLoopbackAddress());
+            Thread.ofPlatform().daemon().start(() -> {
+                while (!listener.isClosed()) {
+                    try (var socket = listener.accept()) {
+                        connections.incrementAndGet();
+                        session.run(socket);
+                    } catch (IOException _) {
+                        if (listener.isClosed()) return;
+                    }
+                }
+            });
+        }
+
+        int port() {
+            return listener.getLocalPort();
+        }
+
+        int connections() {
+            return connections.get();
+        }
+
+        @Override
+        public void close() {
+            try {
+                listener.close();
+            } catch (IOException _) { /* best-effort */ }
+        }
+    }
+
+    /** Answer "pong" to the four bytes the client sends once its tunnel is open. */
+    private static void pong(Socket socket) throws IOException {
+        socket.getInputStream().readNBytes(4);
+        socket.getOutputStream().write("pong".getBytes(StandardCharsets.US_ASCII));
+        socket.getOutputStream().flush();
+    }
+
+    /** An HTTP request head, through its blank line. */
+    private static String head(InputStream in) throws IOException {
+        var head = new ByteArrayOutputStream();
+        while (!head.toString(StandardCharsets.ISO_8859_1).endsWith("\r\n\r\n")) {
+            int b = in.read();
+            if (b == -1) break;
+            head.write(b);
+        }
+        return head.toString(StandardCharsets.ISO_8859_1);
+    }
+
+    /** An HTTP proxy that records each request head and answers {@code status}, tunnelling on a 2xx. */
+    private static StubUpstream httpProxy(List<String> heads, String status) throws IOException {
+        return new StubUpstream(socket -> {
+            heads.add(head(socket.getInputStream()));
+            socket.getOutputStream().write((status + "\r\nVia: stub\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+            socket.getOutputStream().flush();
+            if (status.startsWith("HTTP/1.1 2")) pong(socket);
+        });
+    }
+
+    /** Send "ping" through an open tunnel and return the answer. */
+    private static String ping(Socket client) throws IOException {
+        client.getOutputStream().write("ping".getBytes(StandardCharsets.US_ASCII));
+        client.getOutputStream().flush();
+        return new String(client.getInputStream().readNBytes(4), StandardCharsets.US_ASCII);
+    }
+
+    @Test
+    void anHttpUpstreamIsSentConnectByNameWithTheOperatorsBasicCredential() throws Exception {
+        var heads = new CopyOnWriteArrayList<String>();
+        var lines = new CopyOnWriteArrayList<String>();
+        try (var upstream = httpProxy(heads, "HTTP/1.1 200 Connection established");
+             var proxy = new BrowserScreenProxy(sinkLog(lines),
+                     new ScrapeProxy(ScrapeProxy.Kind.HTTP, "127.0.0.1", upstream.port(), "user", "pass"));
+             var client = new Socket(InetAddress.getLoopbackAddress(), proxy.port())) {
+            assertEquals(REP_OK, replyTo(client, byName(CMD_CONNECT, PUBLIC_HOST, PUBLIC_PORT)));
+            assertEquals("pong", ping(client), "the tunnel starts after the proxy's header block, not inside it");
+        }
+        assertEquals(List.of("CONNECT 1.1.1.1:443 HTTP/1.1\r\nHost: 1.1.1.1:443\r\n"
+                + "Proxy-Authorization: Basic dXNlcjpwYXNz\r\n\r\n"), heads);
+        assertEquals(List.of(), lines);
+    }
+
+    @Test
+    void anIpv6LiteralNamedAsADomainIsBracketedInTheConnectLine() throws Exception {
+        var heads = new CopyOnWriteArrayList<String>();
+        try (var upstream = httpProxy(heads, "HTTP/1.1 200 Connection established");
+             var proxy = new BrowserScreenProxy(sinkLog(new CopyOnWriteArrayList<>()),
+                     new ScrapeProxy(ScrapeProxy.Kind.HTTP, "127.0.0.1", upstream.port(), null, null));
+             var client = new Socket(InetAddress.getLoopbackAddress(), proxy.port())) {
+            assertEquals(REP_OK, replyTo(client, byName(CMD_CONNECT, "2606:4700:4700::1111", PUBLIC_PORT)));
+            assertEquals("pong", ping(client));
+        }
+        assertTrue(heads.getFirst().startsWith("CONNECT [2606:4700:4700::1111]:443 HTTP/1.1\r\n"), heads.toString());
+    }
+
+    @Test
+    void aSocksUpstreamIsGreetedWithoutAuthenticationAndSentTheDestinationAsAName() throws Exception {
+        var greetings = new CopyOnWriteArrayList<String>();
+        var requests = new CopyOnWriteArrayList<String>();
+        var lines = new CopyOnWriteArrayList<String>();
+        try (var upstream = new StubUpstream(socket -> {
+            var in = socket.getInputStream();
+            var out = socket.getOutputStream();
+            var greeting = in.readNBytes(2);
+            greetings.add(Arrays.toString(greeting) + Arrays.toString(in.readNBytes(greeting[1])));
+            out.write(new byte[] {5, 0});
+            out.flush();
+            var request = in.readNBytes(5);
+            var name = new String(in.readNBytes(request[4]), StandardCharsets.US_ASCII);
+            var port = ByteBuffer.wrap(in.readNBytes(2)).getShort() & 0xFFFF;
+            requests.add("cmd=" + request[1] + " atyp=" + request[3] + " " + name + ":" + port);
+            out.write(new byte[] {5, REP_OK, 0, 1, 0, 0, 0, 0, 0, 0});
+            out.flush();
+            pong(socket);
+        });
+             var proxy = new BrowserScreenProxy(sinkLog(lines),
+                     new ScrapeProxy(ScrapeProxy.Kind.SOCKS5, "127.0.0.1", upstream.port(), null, null));
+             var client = new Socket(InetAddress.getLoopbackAddress(), proxy.port())) {
+            assertEquals(REP_OK, replyTo(client, byName(CMD_CONNECT, PUBLIC_HOST, PUBLIC_PORT)));
+            assertEquals("pong", ping(client));
+        }
+        assertEquals(List.of("[5, 1][0]"), greetings, "one method offered: no authentication");
+        assertEquals(List.of("cmd=1 atyp=" + ATYP_DOMAIN + " 1.1.1.1:443"), requests,
+                "a CONNECT naming the destination, which the proxy resolves");
+        assertEquals(List.of(), lines);
+    }
+
+    /**
+     * Every upstream failure is the one reply every transport failure gets, with the reason on the
+     * event log — and it fails that connection only: the next one through the same screen still opens.
+     */
+    @Test
+    void anUpstreamThatRefusesTheTunnelFailsThatConnectionOnly() throws Exception {
+        var heads = new CopyOnWriteArrayList<String>();
+        var lines = new CopyOnWriteArrayList<String>();
+        var answers = new AtomicInteger();
+        try (var upstream = new StubUpstream(socket -> {
+            heads.add(head(socket.getInputStream()));
+            var status = answers.getAndIncrement() == 0
+                    ? "HTTP/1.1 407 Proxy Authentication Required" : "HTTP/1.1 200 Connection established";
+            socket.getOutputStream().write((status + "\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1));
+            socket.getOutputStream().flush();
+            if (status.contains(" 200 ")) pong(socket);
+        });
+             var proxy = new BrowserScreenProxy(sinkLog(lines),
+                     new ScrapeProxy(ScrapeProxy.Kind.HTTP, "127.0.0.1", upstream.port(), null, null))) {
+            try (var client = new Socket(InetAddress.getLoopbackAddress(), proxy.port())) {
+                assertEquals(REP_HOST_UNREACHABLE, replyTo(client, byName(CMD_CONNECT, PUBLIC_HOST, PUBLIC_PORT)));
+            }
+            try (var client = new Socket(InetAddress.getLoopbackAddress(), proxy.port())) {
+                assertEquals(REP_OK, replyTo(client, byName(CMD_CONNECT, PUBLIC_HOST, PUBLIC_PORT)));
+                assertEquals("pong", ping(client));
+            }
+        }
+        assertFalse(heads.getFirst().contains("Proxy-Authorization"), "no credential configured, none sent: " + heads);
+        assertEquals(List.of("WARN Browser network screen: cannot reach host 1.1.1.1 through the scrape proxy: "
+                + "the proxy answered HTTP/1.1 407 Proxy Authentication Required"), lines);
+    }
+
+    @Test
+    void anUpstreamThatIsDownOrAnswersSocksFailureGetsTheSameReply() throws Exception {
+        int dead;
+        try (var probe = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            dead = probe.getLocalPort();
+        }
+        var lines = new CopyOnWriteArrayList<String>();
+        try (var proxy = new BrowserScreenProxy(sinkLog(lines),
+                new ScrapeProxy(ScrapeProxy.Kind.HTTP, "127.0.0.1", dead, null, null));
+             var client = new Socket(InetAddress.getLoopbackAddress(), proxy.port())) {
+            assertEquals(REP_HOST_UNREACHABLE, replyTo(client, byName(CMD_CONNECT, PUBLIC_HOST, PUBLIC_PORT)));
+        }
+        try (var upstream = new StubUpstream(socket -> {
+            var in = socket.getInputStream();
+            in.readNBytes(3);
+            socket.getOutputStream().write(new byte[] {5, 0});
+            socket.getOutputStream().flush();
+            in.readNBytes(7 + PUBLIC_HOST.length());
+            socket.getOutputStream().write(new byte[] {5, 0x05, 0, 1, 0, 0, 0, 0, 0, 0}); // connection refused
+            socket.getOutputStream().flush();
+        });
+             var proxy = new BrowserScreenProxy(sinkLog(lines),
+                     new ScrapeProxy(ScrapeProxy.Kind.SOCKS5, "127.0.0.1", upstream.port(), null, null));
+             var client = new Socket(InetAddress.getLoopbackAddress(), proxy.port())) {
+            assertEquals(REP_HOST_UNREACHABLE, replyTo(client, byName(CMD_CONNECT, PUBLIC_HOST, PUBLIC_PORT)));
+        }
+        assertEquals(2, lines.size(), lines.toString());
+        assertTrue(lines.get(0).startsWith("WARN Browser network screen: cannot reach host 1.1.1.1 through the scrape proxy: "),
+                lines.toString());
+        assertTrue(lines.get(1).endsWith("the proxy answered CONNECT with SOCKS5 reply 5"), lines.toString());
+    }
+
+    @Test
+    void aDestinationTheGuardRefusesNeverReachesTheUpstream() throws Exception {
+        var heads = new CopyOnWriteArrayList<String>();
+        var lines = new CopyOnWriteArrayList<String>();
+        try (var upstream = httpProxy(heads, "HTTP/1.1 200 Connection established");
+             var proxy = new BrowserScreenProxy(sinkLog(lines),
+                     new ScrapeProxy(ScrapeProxy.Kind.HTTP, "127.0.0.1", upstream.port(), "user", "pass"));
+             var client = new Socket(InetAddress.getLoopbackAddress(), proxy.port())) {
+            assertEquals(REP_NOT_ALLOWED, replyTo(client, byName(CMD_CONNECT, "127.0.0.1", 8080)));
+            assertEquals(0, upstream.connections(), "the screen refuses before the proxy is contacted");
+        }
+        assertEquals(List.of("WARN Browser refused a request to blocked host 127.0.0.1"), lines);
+    }
+
+    @Test
+    void anUpstreamAtALinkLocalAddressIsNeverDialled() throws Exception {
+        // The provider rule, as for every ScrapeProxy use: loopback and the LAN pass, the metadata address does not.
+        var lines = new CopyOnWriteArrayList<String>();
+        try (var proxy = new BrowserScreenProxy(sinkLog(lines),
+                new ScrapeProxy(ScrapeProxy.Kind.HTTP, "169.254.169.254", 80, null, null));
+             var client = new Socket(InetAddress.getLoopbackAddress(), proxy.port())) {
+            assertEquals(REP_HOST_UNREACHABLE, replyTo(client, byName(CMD_CONNECT, PUBLIC_HOST, PUBLIC_PORT)));
+        }
+        assertEquals(1, lines.size(), lines.toString());
+        assertTrue(lines.getFirst().contains("resolves to blocked address 169.254.169.254"), lines.toString());
     }
 }

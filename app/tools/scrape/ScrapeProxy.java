@@ -31,7 +31,8 @@ import java.util.Optional;
  * narrows it further for rung 2, where curl resolves locally and keeps the guard's address pin.
  *
  * <p>Credentials are HTTP-only. A SOCKS5 username would need a JVM-wide
- * {@link java.net.Authenticator} on rung 1, and Chromium cannot authenticate to SOCKS at all.
+ * {@link java.net.Authenticator} on rung 1, and rung 3's network screen, which talks to this
+ * proxy for the browser, greets a SOCKS5 proxy with no authentication only.
  */
 public record ScrapeProxy(Kind kind, String host, int port,
                           @Nullable String username, @Nullable String password) {
@@ -97,7 +98,7 @@ public record ScrapeProxy(Kind kind, String host, int port,
         return builder.build();
     }
 
-    /** The shape both sidecars read from a request's {@code proxy} field. */
+    /** The shape the fetch sidecar reads from a request's {@code proxy} field; a render's names the JVM's screen instead. */
     public JsonObject toJson() {
         var json = new JsonObject();
         json.addProperty("url", (kind == Kind.SOCKS5 ? "socks5" : "http") + "://" + host + ":" + port);
@@ -137,6 +138,9 @@ public record ScrapeProxy(Kind kind, String host, int port,
         }
         if (uri.getHost() == null || uri.getPort() <= 0) {
             return WebScrapeSettings.PROXY_URL + " needs a host and a port, e.g. http://proxy.example:8080.";
+        }
+        if (uri.getPort() > 65_535) {
+            return WebScrapeSettings.PROXY_URL + " has a port above 65535.";
         }
         if ((uri.getRawPath() != null && !uri.getRawPath().isEmpty() && !uri.getRawPath().equals("/"))
                 || uri.getRawQuery() != null) {

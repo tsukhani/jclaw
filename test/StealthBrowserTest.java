@@ -13,11 +13,18 @@ import services.StealthSidecarManager;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
+import services.scrape.ScrapeSidecarException;
+import tools.PlaywrightBrowserTool;
 import tools.scrape.RenderedFetcher;
+import tools.scrape.WebScrapeSettings;
 import utils.SsrfGuard;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.InputStreamReader;
 import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -225,9 +232,59 @@ class StealthBrowserTest extends UnitTest {
 
     // ==================== The render request (JCLAW-1306) ====================
 
+    private static final int SCREEN_PORT = 4711;
+
+    @Test
+    void theBrowserIsPointedAtTheScreenAndNeverSentTheOperatorsProxy() {
+        // JCLAW-1315: the screen forwards through the operator's proxy itself, so the sidecar holds none of it.
+        config.set(WebScrapeSettings.PROXY_URL, "http://proxy.example:3128");
+        config.set(WebScrapeSettings.PROXY_USERNAME, "scrape-user");
+        config.set(WebScrapeSettings.PROXY_PASSWORD, "scrape-pass");
+        var sent = RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject(), SCREEN_PORT);
+        assertEquals("{\"url\":\"socks5://127.0.0.1:" + SCREEN_PORT + "\"}", sent.get("proxy").toString());
+        var body = sent.toString();
+        for (var operatorValue : List.of("proxy.example", "scrape-user", "scrape-pass")) {
+            assertFalse(body.contains(operatorValue), "the render request carries " + operatorValue + ": " + body);
+        }
+    }
+
+    @Test
+    void aRendersScreenCarriesItsConnectionsThroughTheOperatorsProxy() throws Exception {
+        try (var stub = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+            stub.setSoTimeout(10_000);
+            config.set(WebScrapeSettings.PROXY_URL, "http://127.0.0.1:" + stub.getLocalPort());
+            config.set(WebScrapeSettings.PROXY_ENABLED, "true");
+            try (var screen = RenderedFetcher.openScreen("https://8.8.8.8/");
+                 var client = new Socket(InetAddress.getLoopbackAddress(), screen.port())) {
+                var name = "1.1.1.1".getBytes(StandardCharsets.US_ASCII);
+                var out = client.getOutputStream();
+                out.write(new byte[] {5, 1, 0}); // greeting: no authentication
+                out.write(new byte[] {5, 1, 0, 3, (byte) name.length}); // CONNECT by name
+                out.write(name);
+                out.write(new byte[] {1, (byte) 0xBB}); // port 443
+                out.flush();
+                try (var upstream = stub.accept()) {
+                    upstream.setSoTimeout(10_000);
+                    var requestLine = new BufferedReader(new InputStreamReader(
+                            upstream.getInputStream(), StandardCharsets.ISO_8859_1)).readLine();
+                    assertEquals("CONNECT 1.1.1.1:443 HTTP/1.1", requestLine);
+                }
+            }
+        }
+    }
+
+    @Test
+    void aScreenThatCannotStartFailsTheRenderAsTheSidecarsErrorNotTheOrigins() {
+        // The request is built from the open screen's port, so a render with no screen has nothing to send.
+        var failure = PlaywrightBrowserTool.callWithFailingScreenForTest(() -> assertThrows(
+                ScrapeSidecarException.class, () -> RenderedFetcher.openScreen("https://8.8.8.8/")));
+        assertTrue(failure.getMessage().startsWith("the render's network screen could not start"),
+                failure.getMessage());
+    }
+
     @Test
     void everyRenderStatesItsBudgetsAndTheyFitInsideTheCallTimeout() {
-        var sent = RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject());
+        var sent = RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject(), SCREEN_PORT);
         long navigation = sent.get("timeoutMs").getAsLong();
         long challenge = sent.get("challengeMs").getAsLong();
         assertTrue(challenge > 0, "the sidecar reads a zero budget as its own default: " + sent);
@@ -247,7 +304,7 @@ class StealthBrowserTest extends UnitTest {
     }
 
     private static boolean solveTurnstileSent() {
-        return RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject())
+        return RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject(), SCREEN_PORT)
                 .get("solveTurnstile").getAsBoolean();
     }
 

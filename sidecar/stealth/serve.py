@@ -38,8 +38,8 @@ because moving the launch out of the JVM moves the pinning with it:
 
   1. --host-resolver-rules MAP clauses, supplied by the JVM from its own
      SsrfGuard resolution, pin the entry host to the address the guard actually
-     validated. That closes the DNS-rebinding window between the guard's
-     lookup and the browser's.
+     validated. Behind the screen (4) the browser sends names, so the screen's own
+     lookup, not this pin, decides where a connection goes.
   2. Route interceptors re-check every request the page makes — redirects and
      subresources included, which the launch pin alone does not cover — and
      abort any host that resolves to a non-public address. Registered on the
@@ -48,6 +48,13 @@ because moving the launch out of the JVM moves the pinning with it:
      socket to loopback could read it and write the reply into the DOM we return.
   3. WebRTC's UDP reaches neither interceptor, so the launch refuses UDP that does not go
      through a proxy (JCLAW-1305).
+  4. Every TCP connection the browser opens goes through the render's `proxy`, which the JVM
+     sets to a SOCKS5 screen of its own (JCLAW-1315): SsrfGuard checks each destination there,
+     and the screen carries it through the operator's scrape proxy when one is set. It is the
+     layer nothing on the page steps around — a Worker's WebSocket and TURN over TCP pass
+     neither interceptor and are refused there — and nothing bypasses it: Patchright adds
+     <-loopback> to the bypass list, subtracting Chromium's implicit loopback and link-local
+     bypass. Layers 1-3 sit in front of it.
 
 Both interceptors fail CLOSED. A URL whose host cannot be parsed is aborted rather
 than allowed, and a scheme that is not http/https/data/blob/about is aborted too.
@@ -592,7 +599,7 @@ def _active_channel():
 
 
 def _launch_proxy(proxy):
-    """Playwright launch settings for the operator's scrape proxy (JCLAW-1271), or None.
+    """Playwright launch settings for the render's proxy — the JVM's network screen (JCLAW-1315) — or None.
 
     Checked on the provider rule, since a proxy may sit on loopback or the LAN; the route gate
     still range-checks every host the page reaches either way. Raises ValueError naming the fault.
@@ -605,7 +612,9 @@ def _launch_proxy(proxy):
     if not is_allowed_proxy_host(parts.hostname):
         raise ValueError("proxy host is link-local, multicast or unresolvable")
     host = "[%s]" % parts.hostname if ":" in parts.hostname else parts.hostname
-    settings = {"server": "%s://%s:%d" % (parts.scheme, host, parts.port)}
+    # Patchright adds this only while PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK is unset;
+    # without it Chromium dials loopback and link-local directly, around the JVM's screen.
+    settings = {"server": "%s://%s:%d" % (parts.scheme, host, parts.port), "bypass": "<-loopback>"}
     if proxy.get("username"):
         settings["username"] = proxy["username"]
         settings["password"] = proxy.get("password") or ""

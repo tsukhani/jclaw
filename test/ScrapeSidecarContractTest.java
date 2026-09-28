@@ -201,7 +201,7 @@ class ScrapeSidecarContractTest extends UnitTest {
         assertTrue(out.get("default_challenge").getAsLong() <= out.get("challenge").getAsLong(),
                 "and for the challenge budget");
 
-        var sent = RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject());
+        var sent = RenderedFetcher.renderRequest("https://8.8.8.8/", "en", new JsonObject(), 4711);
         assertTrue(sent.get("timeoutMs").getAsLong() <= out.get("timeout").getAsLong(),
                 "the navigation timeout the JVM sends must survive the sidecar's clamp: " + sent);
         assertTrue(sent.get("challengeMs").getAsLong() <= out.get("challenge").getAsLong(),
@@ -333,9 +333,9 @@ class ScrapeSidecarContractTest extends UnitTest {
                 }))
                 """);
         assertTrue(out.get("none").isJsonNull());
-        assertEquals("{\"server\":\"http://127.0.0.1:3128\",\"username\":\"u\",\"password\":\"p\"}",
-                out.get("http").toString());
-        assertEquals("{\"server\":\"socks5://127.0.0.1:1080\"}", out.get("socks").toString());
+        assertEquals("{\"server\":\"http://127.0.0.1:3128\",\"bypass\":\"<-loopback>\",\"username\":\"u\","
+                + "\"password\":\"p\"}", out.get("http").toString());
+        assertEquals("{\"server\":\"socks5://127.0.0.1:1080\",\"bypass\":\"<-loopback>\"}", out.get("socks").toString());
         assertTrue(out.get("linkLocalRefused").getAsBoolean());
         assertTrue(out.get("schemeRefused").getAsBoolean());
         var launches = out.getAsJsonArray("launches");
@@ -343,6 +343,47 @@ class ScrapeSidecarContractTest extends UnitTest {
         for (var launch : launches) {
             assertEquals(out.get("http"), launch, "every launch carries the proxy: " + launches);
         }
+    }
+
+    @Test
+    void theRenderHandlerLaunchesThroughTheProxyTheRequestNames() throws Exception {
+        // JCLAW-1315: the JVM names its network screen here, so a handler that dropped the field would
+        // launch the browser unscreened. The real handler on a spare port, with the render stubbed.
+        var out = probe("sidecar/stealth", """
+                import sys, json, threading, urllib.request, urllib.error
+                sys.path.insert(0, sys.argv[1])
+                import serve
+                from http.server import ThreadingHTTPServer
+
+                launched = []
+
+                def fake_render(self, url, pins, timeout_ms, settle_ms, challenge_ms, solve, wait_until,
+                                language, proxy=None):
+                    launched.append(proxy)
+                    return {"html": "<html>ok</html>", "status": 200, "settledStatus": 200, "mitigated": None,
+                            "url": url, "challenge": None, "blocked": set()}
+
+                serve.sync_playwright = object()  # the handler refuses before reading a body without it
+                serve.Handler._render = fake_render
+                serve.Handler.token = None
+                serve.Handler.state = serve.SidecarState("patchright-chromium", 0, 1)
+                server = ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
+                threading.Thread(target=server.serve_forever, daemon=True).start()
+                body = {"url": "http://93.184.215.14/", "proxy": {"url": "socks5://127.0.0.1:4711"}}
+                req = urllib.request.Request("http://127.0.0.1:%d/render" % server.server_address[1],
+                                             data=json.dumps(body).encode(), method="POST",
+                                             headers={"Content-Type": "application/json"})
+                try:
+                    with urllib.request.urlopen(req) as r:
+                        status = r.status
+                except urllib.error.HTTPError as e:
+                    status = e.code
+                server.shutdown()
+                print("PROBE:" + json.dumps({"status": status, "launched": launched}))
+                """);
+        assertEquals(200, out.get("status").getAsInt(), out.toString());
+        assertEquals("[{\"server\":\"socks5://127.0.0.1:4711\",\"bypass\":\"<-loopback>\"}]",
+                out.get("launched").toString());
     }
 
     @Test

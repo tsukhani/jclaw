@@ -618,7 +618,7 @@ A background scrape keeps running after the chat turn that started it. Like `max
 
 | Key                          | Default   | Meaning                                                                                  |
 |------------------------------|-----------|------------------------------------------------------------------------------------------|
-| `web_scrape.proxy.url`       | *(unset)* | Send `web_fetch` and `web_scrape` through this proxy, as `http://host:port` or `socks5://host:port`. Unset, they connect directly. Nothing outside scraping uses it. |
+| `web_scrape.proxy.url`       | *(unset)* | Send `web_fetch` and `web_scrape` through this proxy, as `http://host:port` or `socks5://host:port`. Unset, they connect directly. Nothing outside scraping uses it. An `http://` proxy must allow `CONNECT` to any port, 80 included: rendered pages tunnel every connection through it, which Squid's default (443 only) refuses. |
 | `web_scrape.proxy.username`  | *(unset)* | Username for an `http://` proxy that asks for one.                                       |
 | `web_scrape.proxy.password`  | *(unset)* | Password for an `http://` proxy. Masked like every other secret, and never shown back.   |
 | `web_scrape.proxy.enabled`   | on        | Turn the proxy off without clearing its address.                                         |

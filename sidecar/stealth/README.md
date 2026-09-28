@@ -36,14 +36,14 @@ launches and drives; the stealth survives.
 ## SSRF containment moved with the launch
 
 `--host-resolver-rules` is a launch-time flag. Moving the launch out of the JVM moved
-the pinning with it, so the containment is rebuilt here in two layers (JCLAW-731).
+the pinning with it, so the containment is rebuilt here in four layers (JCLAW-731).
 `PlaywrightBrowserTool` no longer pins at launch: since JCLAW-1283 it screens every
-connection through an in-JVM SOCKS5 proxy, so only the route gate below is shared with it.
+connection through an in-JVM SOCKS5 proxy, which renders now share with it (layer 4) along with the route gate.
 
 1. **Launch pin.** The JVM resolves and validates the entry host with `SsrfGuard` and
    sends the address it actually approved. The sidecar turns it into a `MAP` clause, so
-   the browser connects only where the guard checked — closing the rebinding window
-   between our lookup and the browser's. Verified enforced: a `MAP` to `127.0.0.1`
+   the browser's own lookups answer only what the guard checked; behind the screen (layer 4) it
+   sends names, so the screen's lookup decides where connections go. Verified enforced: a `MAP` to `127.0.0.1`
    makes the navigation fail rather than silently resolving normally.
 2. **Route gate.** The launch pin covers the entry host only. A page also follows
    redirects and pulls subresources, so every request is intercepted, its host resolved
@@ -81,6 +81,15 @@ connection through an in-JVM SOCKS5 proxy, so only the route gate below is share
    headless Playwright resolves to the shell — which is why JCLAW-1286 found the force spelling
    the one that works there. The [self-check](#self-check) aims the same probe at a socket of its
    own and reports a datagram as a problem.
+4. **The JVM's network screen.** Each render launches the browser behind a SOCKS5 proxy the JVM
+   opens for it (`BrowserScreenProxy`, JCLAW-1315), so every TCP connection is checked by
+   `SsrfGuard` before it is made, then carried by the operator's scrape proxy when one is set —
+   as an HTTP `CONNECT` for every port, 80 included, so an HTTP proxy limiting `CONNECT` to 443
+   (Squid's default) fails them.
+   It covers what the route gates cannot see: measured, a dedicated Worker's WebSocket and TURN
+   over TCP reached a loopback listener with only the gates in place, and nothing reaches it
+   through the screen (`StealthNetworkScreenTest`). Patchright adds `<-loopback>` to the bypass
+   list, so loopback and link-local destinations go through the screen too.
 
 Layer 2 is a **second implementation of a security check**, which is a real cost. It
 lives in `ssrf.py` — stdlib-only, no Patchright import — and `StealthBrowserTest` runs
@@ -105,8 +114,10 @@ everything from reading as a pass.)
 `channel` is the browser the most recent render actually launched, not the one asked
 for — see [Looking like a real browser](#looking-like-a-real-browser).
 
-`POST /render` takes `{url, pins?, language?, timeoutMs?, settleMs?, challengeMs?, solveTurnstile?, waitUntil?, maxBytes?, proxy?}`. `proxy` is the operator's
-scrape proxy (`{url, username?, password?}`), given to the browser at launch; it is checked on
+`POST /render` takes `{url, pins?, language?, timeoutMs?, settleMs?, challengeMs?, solveTurnstile?, waitUntil?, maxBytes?, proxy?}`. `proxy`
+(`{url, username?, password?}`) is given to the browser at launch; the JVM always sends its own
+network screen there, `socks5://127.0.0.1:<port>`, and forwards through the operator's scrape
+proxy itself, so the sidecar never holds that proxy's credentials (layer 4 above). It is checked on
 the provider rule (loopback and LAN allowed; link-local, multicast, unspecified and unresolvable
 refused with `400`). The route gate still range-checks every host the page reaches either way.
 Defaults: `timeoutMs` `35000`, `settleMs` `4000`, `challengeMs` `30000`, `solveTurnstile` `false`,
@@ -331,8 +342,8 @@ explicit primary subtag. The self-check reports it. Two-part tags (`de-DE`, `en-
 
 ### Self-check
 
-`uv run serve.py --self-check --language de-DE` launches the browser exactly as a render does —
-the same flags, context options and CDP overrides — loads a fixture page from a loopback server
+`uv run serve.py --self-check --language de-DE` launches the browser as a render does, without the
+JVM's screen — the same flags, context options and CDP overrides — loads a fixture page from a loopback server
 it starts itself, and prints what the page, a cross-site iframe (`localhost`, where the page is
 `127.0.0.1`), their dedicated Workers and each request's headers said, with `problems` listing
 every disagreement. Exit `0` means none, `1` at least one, and `2` that it could not run, with

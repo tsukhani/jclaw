@@ -117,6 +117,14 @@ class ScrapeProxyTest extends UnitTest {
     }
 
     @Test
+    void aPortOutsideTheTcpRangeIsRefused() {
+        // URI parses any digits as the port; past 65535 the screen's socket address would throw instead of logging.
+        assertNull(ScrapeProxy.urlRejection("http://proxy.example:65535", false));
+        assertNotNull(ScrapeProxy.urlRejection("http://proxy.example:65536", false));
+        assertNotNull(ScrapeProxy.urlRejection("socks5://proxy.example:99999", false));
+    }
+
+    @Test
     void credentialsAreRefusedForSocksFromEitherSide() {
         assertNotNull(ScrapeProxy.urlRejection("socks5://proxy.example:1080", true));
         assertNotNull(ScrapeProxy.credentialRejection("scraper", "socks5://proxy.example:1080"));
