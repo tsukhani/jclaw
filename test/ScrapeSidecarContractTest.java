@@ -603,21 +603,36 @@ class ScrapeSidecarContractTest extends UnitTest {
                     def click(self, x, y, delay=0):
                         self.clicks.append([x, y])
                         if self.page.clears_on_click:
-                            self.page.html = "<html><body>the article</body></html>"
+                            self.page.html = PARTIAL if self.page.parse_ms else ARTICLE
+
+                ARTICLE = "<html><body>the article</body></html>"
+                # What the page behind a cleared challenge holds while its HTML is still arriving: no marker, no text.
+                PARTIAL = "<html><head><title>the article</title></head><body>"
 
                 class Page:
-                    def __init__(self, html, clock, frames=None, clears_on_click=False, clears_after_waits=None):
+                    def __init__(self, html, clock, frames=None, clears_on_click=False, clears_after_waits=None,
+                                 parse_ms=0):
                         self.html, self.clock = html, clock
                         self.frames = [Frame(FRAME, BOX)] if frames is None else frames
                         self.clears_on_click, self.clears_after_waits = clears_on_click, clears_after_waits
-                        self.mouse, self.waits = Mouse(self), []
+                        self.parse_ms, self.mouse, self.waits, self.events = parse_ms, Mouse(self), [], []
                     def content(self):
                         return self.html
                     def wait_for_timeout(self, ms):
                         self.waits.append(ms)
+                        self.events.append("wait:%d" % ms)
                         self.clock.now += ms / 1000.0
                         if self.clears_after_waits == len(self.waits):
-                            self.html = "<html><body>the article</body></html>"
+                            self.html = ARTICLE
+                    def wait_for_load_state(self, state, timeout):
+                        self.events.append("%s:%d" % (state, timeout))
+                        if self.html != PARTIAL:
+                            return
+                        if self.parse_ms > timeout:
+                            self.clock.now += timeout / 1000.0
+                            raise TimeoutError("still loading")
+                        self.clock.now += self.parse_ms / 1000.0
+                        self.html = ARTICLE
 
                 def gate(kind):
                     return "<title>Un instant</title><script>window._cf_chl_opt={cType: '%s'};</script>" % kind
@@ -626,7 +641,8 @@ class ScrapeSidecarContractTest extends UnitTest {
                     clock = Clock()
                     page = Page(html, clock, **kw)
                     report = serve._settle(page, {"mitigated": None}, 4000, 45000, solve, clock, random.Random(7))
-                    return {"report": report, "clicks": page.mouse.clicks, "waited": sum(page.waits)}
+                    return {"report": report, "clicks": page.mouse.clicks, "waited": sum(page.waits),
+                            "events": page.events, "captured": page.content(), "elapsed": clock.now * 1000}
 
                 inside = all(
                     box["x"] < p[0] < box["x"] + box["width"] and box["y"] < p[1] < box["y"] + box["height"]
@@ -637,6 +653,8 @@ class ScrapeSidecarContractTest extends UnitTest {
                     "cap": run(gate("interactive"), True),
                     "off": run(gate("interactive"), False),
                     "clickClears": run(gate("managed"), True, clears_on_click=True),
+                    "clearsIntoLoadingPage": run(gate("interactive"), True, clears_on_click=True, parse_ms=6000),
+                    "parseTimesOut": run(gate("interactive"), True, clears_on_click=True, parse_ms=120000),
                     "nonInteractive": run(gate("non-interactive"), True, clears_after_waits=3),
                     "noChallenge": run("<html><body>the article</body></html>", True),
                     "embeddedWidget": run('<script src="https://challenges.cloudflare.com/turnstile/v0/api.js">'
@@ -672,6 +690,21 @@ class ScrapeSidecarContractTest extends UnitTest {
         assertEquals("managed; cleared; clicks=1", cleared.get("report").getAsString());
         assertTrue(cleared.get("waited").getAsDouble() >= 4_000,
                 "the page behind a cleared challenge still gets the settle window to render");
+
+        var loading = out.getAsJsonObject("clearsIntoLoadingPage");
+        assertEquals("interactive; cleared; clicks=1", loading.get("report").getAsString());
+        assertEquals("<html><body>the article</body></html>", loading.get("captured").getAsString(),
+                "a clear that lands on a page still downloading waits for it to be parsed, then captures all of it");
+        var events = loading.getAsJsonArray("events").toString();
+        assertTrue(events.endsWith("\"domcontentloaded:44500\",\"wait:4000\"]"),
+                "parsed within what was left of the budget, then given the full settle window: " + events);
+        assertTrue(loading.get("elapsed").getAsDouble() <= 45_000, "inside the challenge budget: " + loading);
+
+        var timedOut = out.getAsJsonObject("parseTimesOut");
+        assertEquals("interactive; cleared; clicks=1", timedOut.get("report").getAsString(),
+                "a page that never finishes parsing is no new failure: it is captured as it is");
+        assertEquals("<html><head><title>the article</title></head><body>", timedOut.get("captured").getAsString());
+        assertTrue(timedOut.get("elapsed").getAsDouble() <= 45_000 + 1, "and the wait stays inside the budget: " + timedOut);
 
         var nonInteractive = out.getAsJsonObject("nonInteractive");
         assertEquals("non-interactive; cleared", nonInteractive.get("report").getAsString());

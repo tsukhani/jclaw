@@ -174,10 +174,11 @@ script alone is not a challenge: Cloudflare loads its detection script from ther
 pages too. `challenge_type` is the pure function, and `ScrapeSidecarContractTest` runs it beside
 the classifier on the same bodies so the two sides cannot drift apart.
 
-With no challenge the render settles for `settleMs`, as it always has. With one, the settle
-window is replaced by a poll every 500 ms until both markers are gone or `challengeMs` runs out.
-Once the markers are gone, the page behind the challenge gets what is left of the budget, up to
-`settleMs`, to render. `X-Challenge` reports the type and whether it cleared.
+With no challenge the render settles for `settleMs`, as it always has. With one, the settle window
+is replaced by a poll every 500 ms until both markers are gone or `challengeMs` runs out. Once the
+markers are gone, the page behind the challenge first finishes parsing, since it carries no marker
+while its HTML is still arriving either, and then gets up to `settleMs` to render, all within what
+is left of the budget. `X-Challenge` reports the type and whether it cleared.
 
 Waiting, not clicking, is what clears a managed challenge: Turnstile scores the browser, and a
 click only asks it to score again. Measured on 2026-09-28, `nih.gov` and `ancestry.com` cleared

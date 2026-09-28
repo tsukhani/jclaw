@@ -446,11 +446,25 @@ def _settle(page, navigation, settle_ms, challenge_ms, solve, clock=time.monoton
         return None
     started = clock()
     outcome, clicks = await_challenge(page, standing, challenge_ms, solve, clock, rng)
-    left_ms = challenge_ms - (clock() - started) * 1000
-    if outcome == CLEARED and settle_ms > 0 and left_ms > 0:
-        # The page behind the challenge renders inside what is left of the same budget.
-        page.wait_for_timeout(min(settle_ms, left_ms))
+    if outcome == CLEARED:
+        # The page behind the challenge has no marker while it is still downloading either, so it is
+        # parsed before it settles, both inside what is left of the same budget.
+        _await_parsed(page, challenge_ms - (clock() - started) * 1000)
+        left_ms = challenge_ms - (clock() - started) * 1000
+        if settle_ms > 0 and left_ms > 0:
+            page.wait_for_timeout(min(settle_ms, left_ms))
     return "%s; %s%s" % (kind, outcome, "; clicks=%d" % clicks if clicks else "")
+
+
+def _await_parsed(page, budget_ms):
+    """Wait up to `budget_ms` for the current document's DOMContentLoaded; one that has not reached it
+    by then is captured as it is."""
+    if budget_ms <= 0:
+        return
+    try:
+        page.wait_for_load_state("domcontentloaded", timeout=budget_ms)
+    except Exception:
+        pass
 
 
 class _ResolveBudget:
