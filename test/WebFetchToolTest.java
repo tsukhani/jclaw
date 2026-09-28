@@ -444,6 +444,55 @@ class WebFetchToolTest extends UnitTest {
         assertFalse(result.contains("FOOTERBOILER"), "fallback strips footer: " + result);
     }
 
+    /** nih.gov's homepage shape: an alert of plain paragraphs beside blocks whose prose sits inside link-wrapped
+     *  list items, which Readability drops as link-dense. */
+    private static String portalPage() {
+        var page = new StringBuilder("<html><head><title>Portal</title></head><body><header>HEAD</header>"
+                + "<div id=\"block-sitealert\"><div><p><strong>PORTALNOTICE Websites Are Changing</strong></p>"
+                + "<p>The institute is moving the launch of its new website to the fall, to ensure the best possible "
+                + "experience for everyone who relies on it for health information, research, funding opportunities "
+                + "and other resources.</p><div><a href=\"/modernization\">Get the latest updates</a></div></div></div>");
+        for (var block : List.of("featured", "glance")) {
+            page.append("<div id=\"block-").append(block).append("\"><ul>");
+            for (int i = 0; i < 5; i++) {
+                page.append("<li><a href=\"/").append(block).append('/').append(i).append("\"><div><h3>Story ")
+                        .append(i).append("</h3></div><div><p>CARDTEXT ").append(block).append(' ').append(i)
+                        .append(": researchers found that a part of the brain changes with age, and the finding "
+                                + "may guide new treatments.</p></div></a></li>");
+            }
+            page.append("</ul></div>");
+        }
+        return page.append("<footer>FOOTERBOILER</footer></body></html>").toString();
+    }
+
+    @Test
+    void aPortalKeepsTheBlocksReadabilityDrops() {
+        var text = WebExtraction.extractText(portalPage(), "https://portal.test/");
+
+        assertTrue(text.contains("PORTALNOTICE"), text);
+        assertTrue(text.contains("CARDTEXT featured 4") && text.contains("CARDTEXT glance 4"),
+                "Readability kept only the alert, a sixth of the page, so the whole page is extracted: " + text);
+        assertFalse(text.contains("FOOTERBOILER"), "the fallback still strips boilerplate: " + text);
+    }
+
+    @Test
+    void anArticleKeepsReadabilitysCut() {
+        var paragraph = "<p>ARTICLEBODY Readability exists for pages like this one, where a single long run of prose "
+                + "carries the content, commas separate its clauses, and the surrounding page adds little that a "
+                + "reader came for; it keeps the prose and drops the rest.</p>";
+        var html = new StringBuilder("<html><head><title>Article</title></head><body><article><h1>Heading</h1>");
+        html.append(paragraph.repeat(8)).append("</article>");
+        for (int i = 0; i < 6; i++) {
+            html.append("<div class=\"related\"><a href=\"/r/").append(i).append("\">RELATEDTEASER story ")
+                    .append(i).append("</a></div>");
+        }
+        var text = WebExtraction.extractText(html.append("</body></html>").toString(), "https://news.test/a");
+
+        assertTrue(text.contains("ARTICLEBODY"), text);
+        assertFalse(text.contains("RELATEDTEASER"),
+                "Readability's pick holds nearly all the page, so its cleaner cut stands: " + text);
+    }
+
     @Test
     void textModePdfExtractedWithTika() throws Exception {
         var pdf = makePdf("PDF-EXTRACTED-CONTENT hello world");

@@ -71,6 +71,10 @@ public final class WebExtraction {
      *  and non-article fragments aren't article-shaped enough to score well. */
     private static final int MIN_READABILITY_CHARS = 200;
 
+    /** Readability keeps one block, so on a portal it can keep a banner and drop the page: its pick must
+     *  hold this share of the page's text. Articles measured 0.89-0.99, nih.gov's homepage 0.13. */
+    private static final double MIN_READABILITY_SHARE = 0.25;
+
     /** Cap on the raw response bytes buffered into the heap per fetch. The body
      *  comes from an untrusted, LLM-supplied URL and the {@link SsrfGuard} client
      *  sets no read/body limit, so a large or slow response — multiplied across
@@ -561,6 +565,7 @@ public final class WebExtraction {
     private static Readable readable(String html, String url) {
         String contentHtml = null;
         String title = null;
+        int articleChars = 0;
 
         try {
             var article = new Readability4J(url, html).parse();
@@ -568,20 +573,23 @@ public final class WebExtraction {
             if (articleText != null && articleText.strip().length() >= MIN_READABILITY_CHARS) {
                 contentHtml = article.getContent();
                 title = article.getTitle();
+                articleChars = articleText.strip().length();
             }
         } catch (Exception _) {
             // fall through to the Jsoup boilerplate-strip fallback
         }
 
-        if (contentHtml == null || contentHtml.isBlank()) {
-            var doc = Jsoup.parse(html, url);
-            doc.select("script, style, noscript, iframe, svg, canvas, nav, footer, " +
-                       "header, aside, form, button, input, select, textarea, " +
-                       "[role=navigation], [role=banner], [role=complementary], " +
-                       "[aria-hidden=true], .hidden, .sr-only, .visually-hidden").remove();
-            title = doc.title();
-            // jsoup always yields a <body> (creating an empty one if absent), so no null guard is needed.
-            contentHtml = doc.body().html();
+        var doc = Jsoup.parse(html, url);
+        doc.select("script, style, noscript, iframe, svg, canvas, nav, footer, " +
+                   "header, aside, form, button, input, select, textarea, " +
+                   "[role=navigation], [role=banner], [role=complementary], " +
+                   "[aria-hidden=true], .hidden, .sr-only, .visually-hidden").remove();
+        // jsoup always yields a <body> (creating an empty one if absent), so no null guard is needed.
+        var page = doc.body();
+        if (contentHtml == null || contentHtml.isBlank()
+                || articleChars < MIN_READABILITY_SHARE * page.text().length()) {
+            if (title == null || title.isBlank()) title = doc.title();
+            contentHtml = page.html();
         }
         return new Readable(contentHtml, title);
     }
