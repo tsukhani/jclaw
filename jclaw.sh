@@ -2500,13 +2500,17 @@ do_setup() {
     # that keeps existing module settings AND re-registers the IDE; -y skips
     # the prompts that would otherwise hang in non-interactive contexts;
     # --directory pins it to this clone (otherwise it asks).
+    # BMAD offers quick-update only over a complete install; a fresh clone holds
+    # just the tracked _bmad/custom/config.toml, and there only `update` is valid.
+    local bmad_action=quick-update
+    [[ -f "$SCRIPT_DIR/_bmad/_config/manifest.yaml" ]] || bmad_action=update
     if ! command -v npx &>/dev/null; then
         echo "    Warning: npx not on PATH. Install Node.js to enable BMAD."
         echo "             Then re-run: ${INVOKE} setup"
     else
         npx bmad-method install \
             --directory "$SCRIPT_DIR" \
-            --action quick-update \
+            --action "$bmad_action" \
             --tools claude-code \
             -y 2>&1 | tail -5
     fi

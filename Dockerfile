@@ -233,6 +233,7 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
         openssl \
         tesseract-ocr \
         ffmpeg \
+        tini \
         libasound2t64 libatk-bridge2.0-0t64 libatk1.0-0t64 libatspi2.0-0t64 \
         libcairo2 libcups2t64 libdbus-1-3 libdrm2 libgbm1 libglib2.0-0t64 \
         libnspr4 libnss3 libpango-1.0-0 libwayland-client0 libx11-6 \
@@ -240,7 +241,9 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
         libxkbcommon0 libxrandr2 && \
     rm -rf /var/lib/apt/lists/*
 
-# Combined into one ENV block — three values, one layer.
+# Combined into one ENV block — four values, one layer.
+# LANG: without a UTF-8 locale the JVM encodes process arguments and file
+# names as ASCII (sun.jnu.encoding), so `exec` would turn "café" into "caf?".
 # JCLAW_CONTAINER makes the in-app upgrade refuse: here the image is the
 # upgrade unit, and a tree swap under /app is discarded by the next
 # `docker compose up`. Read by UpgradeService.isContainer and jclaw.sh's
@@ -248,6 +251,7 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
 # PLAYWRIGHT_BROWSERS_PATH puts the first-use Chromium on the data volume beside the
 # driver's Node.js (data/playwright-node), so neither re-downloads on an image upgrade.
 ENV JAVA_HOME=/usr/lib/jvm/zulu25 \
+    LANG=C.UTF-8 \
     PLAYWRIGHT_BROWSERS_PATH=/app/data/pw-browsers \
     JCLAW_CONTAINER=1
 
@@ -280,7 +284,10 @@ WORKDIR /app
 # self-signed pair with mkcert-signed PEMs (Chrome's QUIC stack only
 # negotiates h3 against a cert whose chain validates against the system
 # trust store).
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+#
+# tini is PID 1: it forwards signals to the JVM and reaps the orphans that
+# sidecars, ffmpeg and shell commands leave, which a JVM at PID 1 never does.
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/docker-entrypoint.sh"]
 
 # 9000: HTTP/1.1. 9443: HTTP/2 over TLS (TCP) and HTTP/3 over QUIC (UDP).
 # Both 9443 entries are required — Compose must publish UDP separately
@@ -329,11 +336,12 @@ EXPOSE 9443/udp
 # `./play run` (foreground) NOT `./play start` (daemonized). The
 # launcher's `start` subcommand does `nohup java ... &; echo $! > pid;
 # return`, intended for SSH/host-bg use; in a container that exits the
-# script (PID 1), so Docker tears the container down with the JVM still
-# in the background — clean exit 0, no application logs, container
+# script (tini's child), so Docker tears the container down with the JVM
+# still in the background — clean exit 0, no application logs, container
 # stops. `run` does `exec "${JAVA_CMD[@]}"` so the JVM replaces the
-# shell, inherits PID 1, and `docker stop`'s SIGTERM lands on Play's
-# graceful-shutdown hooks rather than on a script that's already gone.
+# shell as tini's child, and the SIGTERM tini forwards from `docker stop`
+# lands on Play's graceful-shutdown hooks rather than on a script that's
+# already gone.
 #
 # Shell-form CMD is required for env-var expansion. The `sh -c` shell
 # is itself replaced by `bash ./play` (exec), which is itself replaced

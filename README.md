@@ -324,7 +324,7 @@ Dependencies are automatically installed when you start with `jclaw.sh`.
 
 ### Dev Container (Recommended)
 
-The fastest way to start coding without installing any of the [Prerequisites](#runtime-prerequisites) on your host machine is to use the included dev container. The `.devcontainer/Dockerfile` ships a pinned toolchain (Java 25, Python 3, Node 26, pnpm, the Play fork at the version recorded in `.play-version`, tesseract-ocr) on top of Ubuntu 26.04 LTS — all the prerequisites listed above, already installed.
+The fastest way to start coding without installing any of the [Prerequisites](#runtime-prerequisites) on your host machine is to use the included dev container. The `.devcontainer/Dockerfile` ships a pinned toolchain (Java 25, Python 3, Node 26, pnpm, the Play fork at the version recorded in `.play-version`, tesseract-ocr, ffmpeg, uv, Claude Code) on top of Ubuntu 26.04 LTS — all the prerequisites listed above, already installed.
 
 #### Host prerequisites
 

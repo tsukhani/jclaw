@@ -512,7 +512,9 @@ pipeline {
                         // changes infrequently (Java/Node/Play/base bumps every
                         // few months at most for a project this size), and any
                         // historical state is recoverable from git via
-                        // `git checkout <sha> && docker buildx build .devcontainer/`.
+                        // `git checkout <sha> && docker buildx build -f .devcontainer/Dockerfile .`.
+                        // The context is the repo root, as devcontainer.json's
+                        // is: the Dockerfile COPYs .play-version from there.
                         // GHCR's untagged-orphan accumulation rate at this
                         // publish cadence is negligible; if it ever becomes a
                         // storage concern, add a cleanup stage modeled on
@@ -525,7 +527,8 @@ pipeline {
                                     --platform linux/amd64,linux/arm64 \\
                                     -t ghcr.io/tsukhani/jclaw-devcontainer:latest \\
                                     --push \\
-                                    .devcontainer/
+                                    -f .devcontainer/Dockerfile \\
+                                    .
                             '''
                         }
                     }
