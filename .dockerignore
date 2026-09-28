@@ -1,5 +1,5 @@
 # Build artifacts. Stage 1 (bundle-stage) regenerates everything below
-# from source via `gradle playBundle`, so any host-side leftovers would
+# from source via `./gradlew playBundle`, so any host-side leftovers would
 # just be wasted copy time at best, stale-overwrite hazards at worst.
 dist/
 build/

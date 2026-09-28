@@ -9,8 +9,8 @@
 # bundle stage rebuilds them fresh from source rather than reusing
 # possibly-stale host artifacts.
 #
-# Cache layering principle: stable instructions come first (apt, gradle
-# install, play1 fork install — change rarely), volatile come last (the
+# Cache layering principle: stable instructions come first (apt, play1
+# fork install — change rarely), volatile come last (the
 # source-tree COPY + playBundle RUN — change every iteration). Inside
 # Stage 1's build RUN, BuildKit cache mounts persist Gradle's dep cache,
 # pnpm's content-addressed store, and the project's resolved
@@ -20,8 +20,9 @@
 # no application state; missing them just reverts to clean rebuilds.
 
 # ── Stage 1: Build the playBundle zip ──────────────────────────────────────
-# Azul Zulu 25 JDK (Ubuntu noble base) + Gradle 9.5 + Node 26 + Play 1.13.x.
-# `gradle playBundle` runs the play1 plugin's full pipeline:
+# Azul Zulu 25 JDK (Ubuntu noble base) + Node 26 + Play 1.13.x; Gradle is
+# the version the repo's wrapper pins. `./gradlew playBundle` runs the play1
+# plugin's full pipeline:
 #   1. pnpm install + pnpm run generate (Nuxt SPA → frontend/.output/public/)
 #   2. copy frontend SPA into public/spa/
 #   3. javac on app/, template precompile → precompiled/
@@ -54,8 +55,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG TARGETARCH
 ARG BUILDARCH
 
-# Toolchain. unzip extracts the Gradle dist + the play1 release zip + the
-# bundle. curl/git fetch the play1 fork. Node 26 runs Nuxt and vitest; pnpm is
+# Toolchain. unzip extracts the play1 release zip + the bundle. curl/git fetch the play1 fork. Node 26 runs Nuxt and vitest; pnpm is
 # installed on its own because Node 25+ no longer ships corepack, and corepack
 # could not launch pnpm 12 regardless — it is a per-platform native binary now.
 # pnpm reads the version pinned in frontend/package.json's "packageManager"
@@ -87,17 +87,6 @@ RUN retry() { n=0; until "$@"; do n=$((n + 1)); [ "$n" -ge 5 ] && return 1; slee
 # "pnpm: not found" immediately after a successful install.
 ENV PNPM_HOME=/root/.local/share/pnpm
 ENV PATH=$PNPM_HOME/bin:$PATH
-
-# Gradle 9.5 — pinned to match gradle/wrapper/gradle-wrapper.properties
-# (distributionUrl = gradle-9.5.0-bin.zip). Installing the binary directly
-# rather than driving `./gradlew` saves a network round-trip on each
-# clean build and gives a deterministic toolchain regardless of the
-# wrapper jar's state in the source tree.
-RUN curl -fsSL --retry 5 --retry-all-errors \
-        https://services.gradle.org/distributions/gradle-9.5.0-bin.zip -o /tmp/gradle.zip && \
-    unzip -q /tmp/gradle.zip -d /opt && \
-    ln -s /opt/gradle-9.5.0/bin/gradle /usr/local/bin/gradle && \
-    rm /tmp/gradle.zip
 
 # Play 1.13.x — tsukhani/play1 fork at /opt/play1, matching the path
 # build.gradle.kts (frameworkPath) and settings.gradle.kts (includeBuild)
@@ -141,7 +130,8 @@ COPY . /src/
 # behind by an emulated build serves the wrong lightningcss binding to a
 # native one.
 #   /root/.gradle              [per-target] Gradle's user cache — resolved
-#                              jars, dep metadata, configuration cache.
+#                              jars, dep metadata, configuration cache,
+#                              and the distribution ./gradlew downloads.
 #                              ~500 MB warm. Gradle takes exclusive locks
 #                              on this tree, so a shared id would serialise
 #                              the two target builds for their whole run.
@@ -168,7 +158,7 @@ COPY . /src/
 # unpacked tree gets COPY'd into Stage 2, the zip would just be dead
 # weight on the way through).
 #
-# Deliberately NOT running `gradle playSecret` here. Baking a secret into
+# Deliberately NOT running `./gradlew playSecret` here. Baking a secret into
 # the image is a layer-caching anti-pattern: a cold cache regenerates it
 # needlessly on every source change; a warm cache reuses the same secret
 # across rebuilds, leaking it as an admin-session-forgery primitive
@@ -179,7 +169,7 @@ RUN --mount=type=cache,target=/root/.gradle,id=gradle-${BUILDARCH}-${TARGETARCH}
     --mount=type=cache,target=/root/.local/share/pnpm/store \
     --mount=type=cache,target=/src/frontend/node_modules,id=node_modules-${BUILDARCH}-${TARGETARCH} \
     git init -q && \
-    gradle --no-daemon playBundle -PtargetArch=${TARGETARCH} && \
+    ./gradlew --no-daemon playBundle -PtargetArch=${TARGETARCH} && \
     mkdir /staging && \
     unzip -q dist/jclaw-bundle.zip -d /staging && \
     rm dist/jclaw-bundle.zip
