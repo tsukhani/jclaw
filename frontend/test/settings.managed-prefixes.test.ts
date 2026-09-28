@@ -85,3 +85,35 @@ describe('unmanaged-config banner — every key the UI saves is under a managed 
     expect([...NOT_CONFIG_KEYS].filter(k => !found.has(k))).toEqual([])
   })
 })
+
+// application.conf documents every unseeded Config DB key (AGENTS.md). One that no UI saves is set only through the
+// API, so the scan above never sees it, and the banner calls it stale the moment an operator sets it.
+const FILE_ONLY_PREFIXES = [
+  'application.', 'apps.', 'attachments.', 'cache.', 'certificate.', 'date.', 'db.', 'hibernate.', 'http.', 'https.',
+  'java.', 'jclaw.', 'jpa.', 'jpda.', 'jvm.', 'mail.', 'mimetype.', 'openapi.', 'play.',
+  'slack.webhook.', 'whatsapp.webhook.', // kept in the file so nothing that writes the config table can loosen them
+]
+
+/** Keys the file sets or documents in a commented-out line. A `%profile.` override is Play's, never a row. */
+function documentedKeys(): string[] {
+  const conf = readFileSync(join(ROOT, '..', 'conf', 'application.conf'), 'utf8')
+  return [...new Set([...conf.matchAll(/^#?[ \t]*([a-z][\w-]*\.[\w.-]+)[ \t]*=/gm)].map(m => m[1]!))]
+}
+
+describe('unmanaged-config banner — every key application.conf documents is managed or file-only', () => {
+  const keys = documentedKeys()
+  const unmanaged = keys.filter(k => !MANAGED_PREFIXES.some(p => k.startsWith(p)))
+
+  it('finds the keys it is meant to check', () => {
+    expect(keys.length).toBeGreaterThan(100)
+  })
+
+  it('claims every documented key', () => {
+    expect(unmanaged.filter(k => !FILE_ONLY_PREFIXES.some(p => k.startsWith(p))), 'add the owning prefix to '
+    + 'MANAGED_PREFIXES, or, if Play reads the key from application.conf alone, to FILE_ONLY_PREFIXES in this test').toEqual([])
+  })
+
+  it('lists no FILE_ONLY_PREFIXES entry the file no longer uses', () => {
+    expect(FILE_ONLY_PREFIXES.filter(p => !unmanaged.some(k => k.startsWith(p)))).toEqual([])
+  })
+})

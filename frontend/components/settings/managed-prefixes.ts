@@ -27,6 +27,7 @@ export const MANAGED_PREFIXES: readonly string[] = [
   'db.backup.', // JCLAW-1165: backup directory, retention and daily schedule — Settings (Database)
   'web_fetch.', // JCLAW-773: outbound-host allowlist — operator-set through the Settings API, no UI surface
   'web_scrape.', // Crawl, robots and sitemap settings for web_scrape — Settings (Web Scraping)
+  'scrape.', // JCLAW-1306: stealth sidecar keys (scrape.stealth.*) — operator-set through the Settings API, no UI surface
   'browser.', // JCLAW-1274: browser tool engine — Settings (Browser)
   'decision.', // JCLAW-1302: decision providers' keys (decision.jev.apiKey) — Settings (Decision Providers)
   'playwright.', // JCLAW-172: namespace retired but kept in the prefix list
