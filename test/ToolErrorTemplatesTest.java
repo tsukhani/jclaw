@@ -88,7 +88,7 @@ class ToolErrorTemplatesTest extends UnitTest {
         var types = m.getParameterTypes();
         var args = new Object[types.length];
         for (int i = 0; i < types.length; i++) {
-            args[i] = types[i] == int.class ? 1 : "sample";
+            args[i] = types[i] == int.class ? 1 : types[i] == boolean.class ? Boolean.TRUE : "sample";
         }
         return args;
     }
@@ -138,9 +138,22 @@ class ToolErrorTemplatesTest extends UnitTest {
      */
     @Test
     void aFetchFailureDescribesTheFallbacksWithoutTheCodebasesOwnVocabulary() {
-        var t = ToolErrorTemplates.webFetchFailed("https://example.com/", "HTTP 403");
-        assertFalse(t.whatToCheck().contains("ladder"), t.whatToCheck());
-        assertTrue(t.whatToCheck().contains("fallback"), t.whatToCheck());
+        for (boolean tried : new boolean[] {true, false}) {
+            var t = ToolErrorTemplates.webFetchFailed("https://example.com/", "HTTP 403", tried);
+            assertFalse(t.whatToCheck().contains("ladder"), t.whatToCheck());
+            assertTrue(t.whatToCheck().contains("fallback"), t.whatToCheck());
+            assertEquals(tried, t.whatToCheck().contains("failed as well"), t.whatToCheck());
+        }
+    }
+
+    @Test
+    void anEgressBanNamesWhatIsBannedAndNeverSendsTheModelBackToTheSameSite() {
+        var country = ToolErrorTemplates.webEgressBanned("https://example.com/", "HTTP 403", true);
+        var address = ToolErrorTemplates.webEgressBanned("https://example.com/", "HTTP 403", false);
+        assertEquals(ToolErrorTemplates.WEB_EGRESS_BANNED, country.code());
+        assertTrue(country.whatToCheck().contains("country"), country.whatToCheck());
+        assertTrue(address.whatToCheck().contains("network or address"), address.whatToCheck());
+        assertTrue(country.howToRetry().contains("will be refused too"), country.howToRetry());
     }
 
     @Test

@@ -53,6 +53,7 @@ public final class ToolErrorTemplates {
     public static final String WEB_TLS_FAILED = "web_tls_failed";
     public static final String WEB_BLOCKED = "web_blocked";
     public static final String WEB_FETCH_FAILED = "web_fetch_failed";
+    public static final String WEB_EGRESS_BANNED = "web_egress_banned";
     public static final String WEB_BAD_URL = "web_bad_url";
     public static final String WEB_BAD_ARGUMENT = "web_bad_argument";
 
@@ -336,12 +337,32 @@ public final class ToolErrorTemplates {
                 null);
     }
 
-    public static ErrorTemplate webFetchFailed(String url, String detail) {
+    /** {@code fallbacksTried} is false when no fallback was attempted: none could help, none is installed, or the budget is spent. */
+    public static ErrorTemplate webFetchFailed(String url, String detail, boolean fallbacksTried) {
         return new ErrorTemplate(WEB_FETCH_FAILED,
                 "Fetching %s failed: %s".formatted(url, detail),
-                "The site answered with an error, commonly a 4xx or 5xx, and every fallback way of "
-                        + "fetching the page failed as well.",
+                fallbacksTried
+                        ? "The site answered with an error, commonly a 4xx or 5xx, and every fallback way of "
+                                + "fetching the page failed as well."
+                        : "The site answered with an error, commonly a 4xx or 5xx. No fallback way of fetching "
+                                + "the page was tried.",
                 "Try a different URL on the same site, or a search to find another source for the content.");
+    }
+
+    /**
+     * The site's CDN bans this server's egress — its country ({@code geo}) or its network or address —
+     * so every way of fetching it from here is refused alike. Split from {@link #webFetchFailed}
+     * because another URL on the same site is exactly the wrong remedy.
+     */
+    public static ErrorTemplate webEgressBanned(String url, String detail, boolean geo) {
+        var banned = geo ? "country" : "network or address";
+        return new ErrorTemplate(WEB_EGRESS_BANNED,
+                "Fetching %s was refused: %s".formatted(url, detail),
+                "The site bans this server's %s, so every way of fetching it from here is refused alike; "
+                        .formatted(banned) + "no fallback was tried.",
+                "Another URL on the same site will be refused too. Find another source for the content, or "
+                        + "tell the user the site blocks this server's " + banned
+                        + ": the operator can route scraping through a proxy elsewhere.");
     }
 
     // --- MCP (JCLAW-1132 follow-up) ---

@@ -12,6 +12,7 @@ import services.ConfigService;
 import services.EventLogger;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeObservation;
+import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
 import tools.scrape.ScrapeLadder;
 import tools.scrape.ScrapeOutput;
@@ -221,7 +222,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
         try {
             var fetched = WebExtraction.fetch(url, ScrapeProxy.client(CLIENT), headersFor(output));
             var text = WebExtraction.toText(fetched);
-            var best = climb(url, fetched, text, null, agent);
+            var best = climb(url, fetched, text, null, agent).best();
             var body = best.fetched() == null ? fetched : best.fetched();
             var extracted = best.text() == null ? text : best.text();
             return ToolRegistry.ToolResult.text(render(output, url, body, extracted, best.servedBy(), agent));
@@ -271,13 +272,14 @@ public class WebFetchTool implements ToolRegistry.Tool {
         // unreachable (JCLAW-1099). The SSRF, host-allowlist and TLS branches above
         // deliberately do NOT escalate: those are our own refusals, and retrying
         // them through a different transport would be a way around the guard.
-        var escalated = climb(url, null, null, e, agent);
+        var climb = climb(url, null, null, e, agent);
+        var escalated = climb.best();
         if (escalated.usable()) {
             var escalatedBody = escalated.fetched();
             return ToolRegistry.ToolResult.text(escalatedBody == null ? escalated.resolvedText()
                     : render(output, url, escalatedBody, escalated.resolvedText(), escalated.servedBy(), agent));
         }
-        return ToolRegistry.ToolResult.error(classifyFetchFailure(url, e));
+        return ToolRegistry.ToolResult.error(classifyFetchFailure(url, e, escalated.reason(), climb.climbed()));
     }
 
     /**
@@ -286,20 +288,26 @@ public class WebFetchTool implements ToolRegistry.Tool {
      * ladder has given up they still need their own remedy: a timeout means wait, a refused
      * connection means the port or scheme is wrong, and retrying longer cannot fix the second.
      */
-    private static ErrorTemplate classifyFetchFailure(String url, Exception e) {
+    private static ErrorTemplate classifyFetchFailure(String url, Exception e, ScrapeReason reason, boolean climbed) {
         var cause = e.getCause();
         boolean unreachable = e instanceof ConnectException || e instanceof NoRouteToHostException
                 || cause instanceof ConnectException || cause instanceof NoRouteToHostException;
         var detail = String.valueOf(e.getMessage());
-        return unreachable
-                ? ToolErrorTemplates.webHostUnreachable(url, detail)
-                : ToolErrorTemplates.webFetchFailed(url, detail);
+        if (unreachable) return ToolErrorTemplates.webHostUnreachable(url, detail);
+        return switch (reason) {
+            case GEO_BLOCK -> ToolErrorTemplates.webEgressBanned(url, detail, true);
+            case IP_BLOCK -> ToolErrorTemplates.webEgressBanned(url, detail, false);
+            default -> ToolErrorTemplates.webFetchFailed(url, detail, climbed);
+        };
     }
+
+    /** The ladder's best attempt, and whether any rung past the first was tried for it. */
+    private record Climb(ScrapeLadder.Attempt best, boolean climbed) {}
 
     /** Hand one URL to the ladder, classifying the plain attempt the way the crawler and
      *  the harness both do so all three agree on what counts as a failure. */
-    private static ScrapeLadder.Attempt climb(String url, WebExtraction.@Nullable FetchResult fetched,
-                                              @Nullable String text, @Nullable Exception failure, Agent agent) {
+    private static Climb climb(String url, WebExtraction.@Nullable FetchResult fetched,
+                               @Nullable String text, @Nullable Exception failure, Agent agent) {
         var error = failure == null ? null : failure.getMessage();
         ScrapeObservation obs;
         if (fetched != null) {
@@ -313,14 +321,14 @@ public class WebFetchTool implements ToolRegistry.Tool {
                 ScrapeRung.PLAIN, fetched, text, BlockClassifier.classify(obs), error, obs.status());
         // Ask before claiming, as the crawler does: a reason no installed rung addresses
         // would spend the budget without a request ever being issued.
-        if (plain.usable() || !ScrapeLadder.wouldAttempt(plain.reason(), plain.status())) return plain;
+        if (plain.usable() || !ScrapeLadder.wouldAttempt(plain.reason(), plain.status())) return new Climb(plain, false);
         if (!claimEscalation(agent)) {
             EventLogger.info(EVENT_CATEGORY,
                     "%s: not escalated, this agent's budget for the minute is spent".formatted(url),
                     "%s; raise %s to escalate more often".formatted(plain.reason(), CFG_MAX_ESCALATIONS));
-            return plain;
+            return new Climb(plain, false);
         }
-        return ScrapeLadder.climb(url, plain);
+        return new Climb(ScrapeLadder.climb(url, plain), true);
     }
 
     /**

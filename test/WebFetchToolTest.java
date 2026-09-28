@@ -905,7 +905,25 @@ class WebFetchToolTest extends UnitTest {
         var result = new WebFetchTool().executeRich("{\"url\":\"" + url + "\"}", null);
 
         assertEquals(ToolRegistry.ToolResult.error(
-                ToolErrorTemplates.webFetchFailed(url, "HTTP 403 fetching " + url)), result);
+                ToolErrorTemplates.webFetchFailed(url, "HTTP 403 fetching " + url, false)), result);
         assertFalse(result.text().contains("_cf_chl_opt"), "the body is the classifier's, not the agent's");
+        assertFalse(result.text().contains("failed as well"), "no fallback ran, so none is reported as failing");
+    }
+
+    @Test
+    void aCountryBanIsReportedAsOneRatherThanAsAFailureToRetryElsewhereOnTheSite() {
+        queue.enqueue(new Response.Builder()
+                .code(403)
+                .message("Forbidden")
+                .addHeader("Content-Type", "text/plain; charset=UTF-8")
+                .addHeader("Server", "cloudflare")
+                .body(ResponseBody.create("error code: 1009", MediaType.parse("text/plain"))));
+        var url = "http://example.test/";
+
+        var result = new WebFetchTool().executeRich("{\"url\":\"" + url + "\"}", null);
+
+        assertEquals(ToolRegistry.ToolResult.error(
+                ToolErrorTemplates.webEgressBanned(url, "HTTP 403 fetching " + url, true)), result);
+        assertFalse(result.text().contains("Try a different URL on the same site"), result.text());
     }
 }
