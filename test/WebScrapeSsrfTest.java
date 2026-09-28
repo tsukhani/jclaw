@@ -13,7 +13,6 @@ import services.ConfigService;
 import tools.WebScrapeTool;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -39,28 +38,17 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class WebScrapeSsrfTest extends UnitTest {
 
-    private static final Field CLIENT_FIELD;
-    static {
-        try {
-            CLIENT_FIELD = WebScrapeTool.class.getDeclaredField("CLIENT");
-            CLIENT_FIELD.setAccessible(true);
-        } catch (NoSuchFieldException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     private static final String CFG_ALLOWLIST = "web_fetch.allowlist";
 
+    private final ScrapeClientSwap swap = new ScrapeClientSwap();
     private RouteInterceptor routes;
-    private OkHttpClient original;
     private String originalAllowlist;
 
     @BeforeEach
     void setup() throws Exception {
         routes = new RouteInterceptor();
-        original = (OkHttpClient) CLIENT_FIELD.get(null);
         originalAllowlist = ConfigService.get(CFG_ALLOWLIST, "");
-        CLIENT_FIELD.set(null, new OkHttpClient.Builder()
+        swap.install(new OkHttpClient.Builder()
                 .addInterceptor(routes)
                 .callTimeout(5, TimeUnit.SECONDS)
                 .build());
@@ -68,8 +56,11 @@ class WebScrapeSsrfTest extends UnitTest {
 
     @AfterEach
     void teardown() throws Exception {
-        CLIENT_FIELD.set(null, original);
-        ConfigService.set(CFG_ALLOWLIST, originalAllowlist);
+        try {
+            ConfigService.set(CFG_ALLOWLIST, originalAllowlist);
+        } finally {
+            swap.restore();
+        }
     }
 
     private String scrape(String json) {

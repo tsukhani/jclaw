@@ -22,7 +22,6 @@ import tools.WebScrapeTool;
 import tools.scrape.WebScrapeSettings;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
@@ -56,24 +55,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class WebScrapeToolTest extends UnitTest {
 
-    private static final Field CLIENT_FIELD;
-    static {
-        try {
-            CLIENT_FIELD = WebScrapeTool.class.getDeclaredField("CLIENT");
-            CLIENT_FIELD.setAccessible(true);
-        } catch (NoSuchFieldException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
+    private final ScrapeClientSwap swap = new ScrapeClientSwap();
     private RouteInterceptor routes;
-    private OkHttpClient original;
 
     @BeforeEach
     void setup() throws Exception {
         routes = new RouteInterceptor();
-        original = (OkHttpClient) CLIENT_FIELD.get(null);
-        CLIENT_FIELD.set(null, new OkHttpClient.Builder()
+        swap.install(new OkHttpClient.Builder()
                 .addInterceptor(routes)
                 .callTimeout(5, TimeUnit.SECONDS)
                 .build());
@@ -81,7 +69,7 @@ class WebScrapeToolTest extends UnitTest {
 
     @AfterEach
     void teardown() throws Exception {
-        CLIENT_FIELD.set(null, original);
+        swap.restore();
     }
 
     private String scrape(String json) {

@@ -606,9 +606,10 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * 169.254.169.254 reaches the proxy with the flag and is dialled directly without it, so dropping it
      * would unscreen the cloud-metadata address. WebRTC is UDP, which a SOCKS5 CONNECT proxy cannot carry:
      * without the third flag, STUN, TURN and a data channel's connectivity checks all reached loopback
-     * listeners the proxy never saw (JCLAW-1286). Chromium honors only the {@code force} spelling and
-     * ignores {@code --webrtc-ip-handling-policy} silently, so a wrong value fails no faster than a
-     * missing one — which is why a live test holds the behavior and an ungated one holds this list.
+     * listeners the proxy never saw (JCLAW-1286). The headless shell this launches honors only the
+     * {@code force} spelling and ignores {@code --webrtc-ip-handling-policy} silently (the full build is
+     * the other way round, JCLAW-1305), so a wrong value fails no faster than a missing one — which is
+     * why a live test holds the behavior and an ungated one holds this list.
      *
      * <p>Exposed for tests.
      */

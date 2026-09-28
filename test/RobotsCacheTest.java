@@ -14,7 +14,6 @@ import tools.WebScrapeTool;
 import utils.RobotsCache;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -36,42 +35,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class RobotsCacheTest extends UnitTest {
 
-    private static final Field CLIENT_FIELD;
-    static {
-        try {
-            CLIENT_FIELD = WebScrapeTool.class.getDeclaredField("CLIENT");
-            CLIENT_FIELD.setAccessible(true);
-        } catch (NoSuchFieldException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     private static final String HOST = "https://robots.test";
     private static final String CFG_RESPECT = "web_scrape.respect-robots";
     private static final RobotsCache.Identity ID =
             new RobotsCache.Identity("Mozilla/5.0 (compatible; JClaw/1.0)", "jclaw");
 
+    private final ScrapeClientSwap swap = new ScrapeClientSwap();
     private RouteInterceptor routes;
     private OkHttpClient client;
-    private OkHttpClient original;
     private String originalRespect;
 
     @BeforeEach
     void setup() throws Exception {
-        RobotsCache.resetForTest();
         routes = new RouteInterceptor();
         client = new OkHttpClient.Builder()
                 .addInterceptor(routes).callTimeout(5, TimeUnit.SECONDS).build();
-        original = (OkHttpClient) CLIENT_FIELD.get(null);
         originalRespect = ConfigService.get(CFG_RESPECT, "true");
-        CLIENT_FIELD.set(null, client);
+        swap.install(client);
+        RobotsCache.resetForTest();
     }
 
     @AfterEach
     void teardown() throws Exception {
-        CLIENT_FIELD.set(null, original);
-        ConfigService.set(CFG_RESPECT, originalRespect);
-        RobotsCache.resetForTest();
+        try {
+            ConfigService.set(CFG_RESPECT, originalRespect);
+            RobotsCache.resetForTest();
+        } finally {
+            swap.restore();
+        }
     }
 
     private static String page(String title, String... hrefs) {

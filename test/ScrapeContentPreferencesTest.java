@@ -13,7 +13,6 @@ import tools.WebScrapeTool;
 import utils.RobotsCache;
 
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -29,38 +28,30 @@ import java.util.concurrent.TimeUnit;
  */
 class ScrapeContentPreferencesTest extends UnitTest {
 
-    private static final Field CLIENT_FIELD;
-    static {
-        try {
-            CLIENT_FIELD = WebScrapeTool.class.getDeclaredField("CLIENT");
-            CLIENT_FIELD.setAccessible(true);
-        } catch (NoSuchFieldException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     private static final String HOST = "https://prefs.test";
     private static final String CFG_LANGUAGE = "web_scrape.language";
 
+    private final ScrapeClientSwap swap = new ScrapeClientSwap();
     private final ScrapeConfigGuard config = new ScrapeConfigGuard();
     private RouteInterceptor routes;
-    private OkHttpClient original;
 
     @BeforeEach
     void setup() throws Exception {
-        RobotsCache.resetForTest();
         routes = new RouteInterceptor();
-        original = (OkHttpClient) CLIENT_FIELD.get(null);
-        CLIENT_FIELD.set(null, new OkHttpClient.Builder()
+        swap.install(new OkHttpClient.Builder()
                 .addInterceptor(routes).callTimeout(5, TimeUnit.SECONDS).build());
+        RobotsCache.resetForTest();
         routes.put(HOST + "/robots.txt", "User-agent: *\nAllow: /\n", "text/plain");
     }
 
     @AfterEach
     void teardown() throws Exception {
-        CLIENT_FIELD.set(null, original);
-        config.restore();
-        RobotsCache.resetForTest();
+        try {
+            config.restore();
+            RobotsCache.resetForTest();
+        } finally {
+            swap.restore();
+        }
     }
 
     /** Bounded prefix for an assertion message: a crawl that returned nothing at all is
