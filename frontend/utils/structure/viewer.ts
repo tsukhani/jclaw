@@ -99,7 +99,8 @@ function jmolColor(elem: string): number {
   return (lib?.elementColors.Jmol[elem] as number | undefined) ?? 0xff1493
 }
 
-const key = (p: Vec3) => p.map(x => x.toFixed(2)).join(',')
+// Integer hundredths: toFixed(2) prints float noise below zero as "-0.00", splitting one position into two keys.
+const key = (p: Vec3) => p.map(x => Math.round(x * 100)).join(',')
 
 function drawPolyhedra(viewer: GLViewer, model: GLModel, sites: Site[], cell: Parameters<typeof ligandShell>[2]) {
   // A shape repaints every vertex in its own color when drawn (GLShape.ts:1448), so each element color gets its own shapes.
