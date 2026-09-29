@@ -19,8 +19,9 @@ public final class Filenames {
      *
      * <p>Extension rules:
      * <ul>
-     *   <li>A dot must be present and not at position 0 (leading dot = hidden
-     *       file with no extension, e.g. {@code .gitignore}).</li>
+     *   <li>A dot must be present and not the first character of the name
+     *       after the last separator (leading dot = hidden file with no
+     *       extension, e.g. {@code .gitignore} or {@code dir/.gitignore}).</li>
      *   <li>The dot must not be at the end of the string (trailing dot = no
      *       extension, e.g. {@code foo.}).</li>
      *   <li>If the candidate contains path separators ({@code /} or
@@ -45,10 +46,9 @@ public final class Filenames {
     private static @Nullable String candidateExtension(@Nullable String s) {
         if (s == null) return null;
         int dot = s.lastIndexOf('.');
-        if (dot <= 0) return null;
         if (dot == s.length() - 1) return null;
         int slash = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\'));
-        if (dot < slash) return null;
+        if (dot <= slash + 1) return null;
         return s.substring(dot);
     }
 }
