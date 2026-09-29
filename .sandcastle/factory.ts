@@ -2,14 +2,26 @@
 // which allowlists egress and holds the model credential. See gateway/gateway.mjs.
 import * as fs from "node:fs";
 import * as os from "node:os";
+import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
+import { createBindMountSandboxProvider, type BindMountCreateOptions, type BindMountSandboxProvider, type BindMountSandboxProviderConfig } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { ENV_FILE, FACTORY_HOME, HERE } from "./paths.ts";
+import { CLONE, ENV_FILE, FACTORY_HOME, HERE } from "./paths.ts";
 
 // Sandcastle and every docker call here inherit this: the local images are native, and a shell that exports another
 // platform makes Docker emulate them or fail to find them.
 process.env.DOCKER_DEFAULT_PLATFORM = `linux/${process.arch === "x64" ? "amd64" : process.arch}`;
+
+// Git on the Mac, the harness's and Sandcastle's alike, runs no hooks and no fsmonitor whatever a repository's config
+// says: sandboxes write into the clone's .git, and its hooks would otherwise run here, outside Docker.
+const HOST_GIT = [["core.hooksPath", "/dev/null"], ["core.fsmonitor", "false"]];
+const gitConfigBase = Number(process.env.GIT_CONFIG_COUNT ?? 0);
+HOST_GIT.forEach(([key, value], i) => {
+  process.env[`GIT_CONFIG_KEY_${gitConfigBase + i}`] = key;
+  process.env[`GIT_CONFIG_VALUE_${gitConfigBase + i}`] = value;
+});
+process.env.GIT_CONFIG_COUNT = String(gitConfigBase + HOST_GIT.length);
 
 export const IMAGE = "jclaw-devcontainer:local";
 const NETWORK = "jclaw-factory";
@@ -27,8 +39,12 @@ const GATEWAY_RUN = [
   "-v", `${GATEWAY_DIR}:/gateway:ro`, "-v", `${ENV_FILE}:/run/factory/credential.env:ro`,
   GATEWAY_IMAGE, "/gateway/gateway.mjs",
 ];
-// A running gateway created any other way is replaced when idle.
-const GATEWAY_CONFIG = createHash("sha256").update(JSON.stringify(GATEWAY_RUN)).digest("hex").slice(0, 12);
+// A running gateway created any other way, or from other code or allowlist, is replaced when idle.
+const GATEWAY_CONFIG = createHash("sha256")
+  .update(JSON.stringify(GATEWAY_RUN))
+  .update(fs.readdirSync(GATEWAY_DIR).sort().map((f) => fs.readFileSync(path.join(GATEWAY_DIR, f), "utf8")).join("\0"))
+  .digest("hex")
+  .slice(0, 12);
 const PROXY = `http://${GATEWAY}:3128`;
 const NO_PROXY = `localhost,127.0.0.1,::1,${GATEWAY}`;
 
@@ -106,7 +122,7 @@ export const ensureGradleSeed = () => {
   );
 };
 
-export const factorySandbox = () =>
+const dockerSandbox = () =>
   docker({
     imageName: IMAGE,
     // The image's own user; macOS file sharing lets it write the host-owned worktree.
@@ -128,8 +144,49 @@ export const factorySandbox = () =>
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1",
       DISABLE_AUTOUPDATER: "1",
       GRADLE_RO_DEP_CACHE: "/opt/gradle-seed/caches",
+      // The clone's .git is read-only here apart from objects and agent refs, so gc could only fail.
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0: "gc.auto",
+      GIT_CONFIG_VALUE_0: "0",
     },
   });
+
+// Sandcastle's Docker provider takes no memory or process limit; each sandbox peaks near 5 GB during the full suite.
+const SANDBOX_MEMORY = "6g";
+const SANDBOX_PIDS = "8192";
+const COMMON_GIT = path.join(CLONE, ".git");
+
+// Sandcastle bind-mounts the clone's whole .git, whose hooks, config and info/attributes git on the Mac honours. Here it
+// is read-only, except what a commit writes: objects, the agent branches and their reflogs, and this sandbox's own
+// worktree directory. Other worktrees and main stay out of reach.
+export const factorySandbox = () => {
+  // docker() is built by createBindMountSandboxProvider, which keeps `create` on the object without typing it.
+  const inner = dockerSandbox() as unknown as BindMountSandboxProvider & Pick<BindMountSandboxProviderConfig, "create">;
+  if (typeof inner.create !== "function") throw new Error("Sandcastle's docker() no longer exposes create; the .git lockdown cannot apply");
+  return createBindMountSandboxProvider({
+    name: inner.name,
+    env: inner.env,
+    sandboxHomedir: inner.sandboxHomedir,
+    create: async (options: BindMountCreateOptions) => {
+      const gitdir = fs.readFileSync(path.join(options.worktreePath, ".git"), "utf8").match(/^gitdir:\s*(.+)$/m)?.[1].trim();
+      if (!gitdir || path.dirname(path.resolve(gitdir)) !== path.join(COMMON_GIT, "worktrees")) {
+        throw new Error(`${options.worktreePath} is not a worktree of ${CLONE}`);
+      }
+      const writable = [path.join(COMMON_GIT, "objects"), path.join(COMMON_GIT, "refs/heads/agent"), path.join(COMMON_GIT, "logs/refs/heads/agent"), path.resolve(gitdir)];
+      for (const dir of writable) fs.mkdirSync(dir, { recursive: true });
+      if (!options.mounts.some((m) => path.resolve(m.hostPath) === COMMON_GIT)) throw new Error(`Sandcastle no longer mounts ${COMMON_GIT}; refusing to guess`);
+      const mounts = [
+        ...options.mounts.map((m) => (path.resolve(m.hostPath) === COMMON_GIT ? { ...m, readonly: true } : m)),
+        ...writable.map((dir) => ({ hostPath: dir, sandboxPath: dir, readonly: false })),
+      ];
+      const handle = await inner.create({ ...options, mounts });
+      // Docker names a container's host after its ID.
+      const id = (await handle.exec("cat /etc/hostname")).stdout.trim();
+      dockerCli("update", "--memory", SANDBOX_MEMORY, "--memory-swap", SANDBOX_MEMORY, "--pids-limit", SANDBOX_PIDS, id);
+      return handle;
+    },
+  });
+};
 
 // WebFetch's preflight goes straight to api.anthropic.com, which the allowlist refuses by design.
 const CLAUDE_SETTINGS = `mkdir -p ~/.claude && printf '{"skipWebFetchPreflight":true}' > ~/.claude/settings.json`;

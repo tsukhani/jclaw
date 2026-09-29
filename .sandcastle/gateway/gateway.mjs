@@ -51,8 +51,15 @@ proxy.on("connect", (req, client, head) => {
   client.on("error", () => upstream.destroy());
 });
 
+// Model calls only: every other Anthropic endpoint would run on the operator's credential too.
+const MODEL_ROUTES = new Set(["/v1/messages", "/v1/messages/count_tokens"]);
 const HOP_BY_HOP = new Set(["connection", "keep-alive", "proxy-authorization", "proxy-connection", "te", "trailer", "upgrade", "host"]);
 const anthropic = http.createServer((req, res) => {
+  if (req.method !== "POST" || !MODEL_ROUTES.has(new URL(req.url ?? "/", "http://gateway").pathname)) {
+    log({ route: "anthropic", method: req.method, path: req.url, allowed: false });
+    res.writeHead(403).end();
+    return;
+  }
   const headers = Object.fromEntries(
     Object.entries(req.headers).filter(([k]) => !HOP_BY_HOP.has(k) && k !== "authorization" && k !== "x-api-key"),
   );

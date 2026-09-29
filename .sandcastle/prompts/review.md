@@ -31,6 +31,8 @@ Review branch `{{SOURCE_BRANCH}}`, which implements Jira ticket {{KEY}}: {{SUMMA
 3. Check that the tests pin the new behaviour and would fail without it.
 4. Check that every point of the human reviewer's feedback, if any, is addressed, and that the lessons are followed.
 
+Git prints `error: Unable to create '…/packed-refs.lock': Read-only file system` after commits: expected, since the repository's shared metadata is read-only here, and the commit still succeeded.
+
 If you change code, run `./jclaw.sh diagnostics` and the affected test classes with `./gradlew playAutotest -Ptests=...`, then commit on this branch. Do not run the full suite, do not push, and do not call Jira.
 
 When done, output <promise>COMPLETE</promise>.

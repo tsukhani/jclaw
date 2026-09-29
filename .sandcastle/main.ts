@@ -8,7 +8,7 @@ import * as sandcastle from "@ai-hero/sandcastle";
 import { z } from "zod";
 import { assertReady, ensureGradleSeed, factoryHooks, factorySandbox, gatewayUp, planHooks } from "./factory.ts";
 import { FACTORY_HEADER, addLabel, claim, comment, inReview, intake, orphaned, promptContext, rejectionFeedback, removeLabel, snapshotToState, transitionTo, type Snapshot } from "./jira.ts";
-import { pickNonOverlapping } from "./plan.ts";
+import { pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, STATE } from "./paths.ts";
 
 const REPO = CLONE;
@@ -178,9 +178,13 @@ const processStory = async (picked: Snapshot): Promise<void> => {
   };
 
   // The Jira comment carries the harness's own facts beside the agent's brief: the agent cannot see the gates.
-  const reviewComment = (brief: Brief | undefined) => {
+  const reviewComment = (brief: Brief | undefined, sensitive: string[]) => {
     const lines = [`${FACTORY_HEADER}: ready for review`, `Local branch {{${branch}}} in the checkout of this comment's author, not pushed: merge it into main to ship it with /deploy. Model: ${MODEL}.`];
     if (feedback !== undefined) lines.push("Reworked after your review.");
+    if (sensitive.length > 0) {
+      lines.push("", "h4. (!) Runs on your Mac once merged", ...sensitive.map((f) => `* {{${f}}}`),
+        "These files run during build, test, commit or push, or instruct later agents: read them line by line before merging.");
+    }
     lines.push("");
     if (brief) {
       lines.push(brief.summary, "", "h4. Acceptance criteria", ...brief.acceptanceCriteria.map((c) => `* ${c.met ? "(/)" : "(x)"} ${c.criterion}: ${c.evidence}`));
@@ -209,9 +213,11 @@ const processStory = async (picked: Snapshot): Promise<void> => {
     const brief = await build();
     // A local branch in the operator's checkout, where merging it into main puts it in the next /deploy.
     gitIn(CHECKOUT, "fetch", "--quiet", REPO, `${branch}:${branch}`);
+    const sensitive = sensitivePaths(gitIn(REPO, "diff", "--name-only", `main...${branch}`).split("\n").filter(Boolean));
+    if (sensitive.length > 0) console.log(`[${key}] changes files that run on the Mac once merged: ${sensitive.join(", ")}`);
     await transitionTo(key, "Review");
     await removeLabel(key, "afk-running");
-    await comment(key, reviewComment(brief));
+    await comment(key, reviewComment(brief, sensitive));
     fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, model: MODEL, timings, gates, brief, environmentFailures: [...environmentFailures] }, null, 2));
     console.log(`[${key} done] → Review\n` + execFileSync("/usr/bin/git", ["-C", REPO, "log", "--stat", "--format=%h %an %s", `main..${branch}`], { encoding: "utf8" }));
   } catch (error) {

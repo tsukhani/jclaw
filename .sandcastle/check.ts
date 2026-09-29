@@ -1,6 +1,6 @@
 // Offline checks: rejectionFeedback and pickNonOverlapping on synthetic tickets. `npm run check`.
 import { rejectionFeedback, type Snapshot } from "./jira.ts";
-import { pickNonOverlapping } from "./plan.ts";
+import { pickNonOverlapping, sensitivePaths } from "./plan.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
   key: "T-1", summary: "", description: "", blockedBy: [], updated: "", fetchedAt: "",
@@ -27,3 +27,7 @@ check("a file awaiting review blocks", keys(pickNonOverlapping([s("A"), s("B")],
 check("unknown files wait while anything is in flight", keys(pickNonOverlapping([s("A")], new Map(), inFlight)), { picked: [], deferred: ["A"] });
 check("unknown files run alone when nothing is", keys(pickNonOverlapping([s("A"), s("B")], files({ B: ["b"] }), new Map())), { picked: ["A"], deferred: ["B"] });
 console.log(pickNonOverlapping([s("A")], files({ A: ["test/SsrfGuardTest.java"] }), inFlight).deferred[0].reason);
+
+check("sensitive paths are flagged, ordinary ones are not",
+  sensitivePaths([".githooks/pre-push", "app/utils/Filenames.java", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", "test/FooTest.java", ".sandcastle/main.ts", "docs/AGENTS.md"]),
+  [".githooks/pre-push", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", ".sandcastle/main.ts"]);

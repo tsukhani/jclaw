@@ -31,7 +31,8 @@ console.log(docker("run", "--rm", "--entrypoint", "sh", IMAGE, "-c",
     "echo sk-ant-in-env=$(env | grep -c sk-ant); " +
     "for u in https://registry.npmjs.org/-/ping https://repo.maven.apache.org/maven2/ https://example.com https://api.anthropic.com/v1/models http://host.docker.internal:9000/api/status; do " +
     "printf '%-48s %s\\n' $u \"$(curl -sS -m 10 -o /dev/null -w '%{http_code}' $u 2>&1 | tail -1)\"; done; " +
-    "printf '%-48s %s\\n' 'direct, bypassing the proxy' \"$(curl -sS -m 10 --noproxy '*' -o /dev/null -w '%{http_code}' https://registry.npmjs.org/-/ping 2>&1 | tail -1)\"",
+    "printf '%-48s %s\\n' 'direct, bypassing the proxy' \"$(curl -sS -m 10 --noproxy '*' -o /dev/null -w '%{http_code}' https://registry.npmjs.org/-/ping 2>&1 | tail -1)\"; " +
+    "printf '%-48s %s\\n' 'model route, GET /v1/models (403 = refused)' \"$(curl -s -m 10 -o /dev/null -w '%{http_code}' http://jclaw-factory-gateway:8080/v1/models)\"",
   );
   console.log("== from a sandbox\n" + r.stdout);
   const turn = await sandbox.run({ name: "gateway turn", agent: sandcastle.claudeCode("claude-sonnet-5"), prompt: "Reply with the single word ok, then output <promise>COMPLETE</promise>.", logging: { type: "file", path: `${LOGS}/gateway-check.log` } });

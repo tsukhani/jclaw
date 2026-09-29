@@ -27,6 +27,7 @@ Recent history on this branch:
 - `./jclaw.sh diagnostics` prints compile errors as a JSON array; `[]` means the tree compiles.
 - `./gradlew playAutotest -Ptests=ClassA,ClassB` runs chosen test classes (about a minute). Never pipe it; afterwards check `ls test-result | grep failed.html`.
 - `./gradlew spotlessApply` after any change that moves imports.
+- Git prints `error: Unable to create '…/packed-refs.lock': Read-only file system` after commits and branch switches. That is expected: the repository's shared metadata is read-only in this sandbox, and the commit or switch still succeeded (`git log -1` shows it).
 - Do NOT run the full suite (`play autotest` with no filter, `./jclaw.sh test`, `./jclaw.sh diagnostics --tests`). The harness runs it after you finish and will hand you any failures.
 
 # COMMIT

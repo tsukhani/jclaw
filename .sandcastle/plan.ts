@@ -31,3 +31,13 @@ export const pickNonOverlapping = <T extends { key: string }>(
   }
   return { picked, deferred };
 };
+
+// Files that run on the operator's Mac once a branch is merged (git hooks, build, install and CI scripts, the factory
+// itself) or that instruct every later agent: a review must read these line by line.
+const SENSITIVE = [
+  /^\.githooks\//, /^\.sandcastle\//, /^\.devcontainer\//, /^\.claude\//, /^gradle\/wrapper\//, /^gradlew(\.bat)?$/,
+  /^jclaw\.sh$/, /^(build|settings)\.gradle\.kts$/, /^\.play-version$/, /(^|\/)package\.json$/,
+  /(^|\/)(pnpm-lock\.yaml|package-lock\.json)$/, /(^|\/)Dockerfile$/, /^docker-entrypoint\.sh$/, /^Jenkinsfile/,
+  /^(AGENTS|CLAUDE)\.md$/,
+];
+export const sensitivePaths = (files: string[]): string[] => files.filter((f) => SENSITIVE.some((r) => r.test(f)));
