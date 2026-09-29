@@ -15,7 +15,7 @@
 # .play-version, so all this Dockerfile needs to do is land the framework
 # tree at /opt/play1, downloaded from the GitHub release .play-version names.
 
-FROM ubuntu:26.04
+FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
 ENV DEBIAN_FRONTEND=noninteractive
 # Without a UTF-8 locale the JVM encodes process arguments and file names as ASCII (sun.jnu.encoding).
@@ -120,6 +120,9 @@ ARG AGENT_UID=1000
 ARG AGENT_GID=1000
 RUN groupmod -o -g "$AGENT_GID" -n agent ubuntu && \
     usermod -o -u "$AGENT_UID" -g "$AGENT_GID" -d /home/agent -m -l agent ubuntu
+# Sandcastle cannot start a container with no-new-privileges, so leave nothing setuid or setgid to escalate through;
+# sudo is not installed, so no workflow here relies on them.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} +
 USER agent
 
 # pnpm, uv and Claude Code install into the user's home: a root-owned install
@@ -133,14 +136,22 @@ USER agent
 # says "pnpm: not found" immediately after a successful install.
 ENV PNPM_HOME=/home/agent/.local/share/pnpm
 ENV PATH=/home/agent/.local/bin:$PNPM_HOME/bin:$PATH
+# renovate: datasource=npm depName=pnpm
+ARG PNPM_VERSION=12.6.0
+# renovate: datasource=github-releases depName=astral-sh/uv
+ARG UV_VERSION=0.12.19
+# renovate: datasource=npm depName=@anthropic-ai/claude-code
+ARG CLAUDE_CODE_VERSION=2.1.283
 RUN retry() { n=0; until "$@"; do n=$((n + 1)); [ "$n" -ge 5 ] && return 1; sleep $((n * 3)); done; }; \
     curl -fsSL --retry 5 --retry-all-errors https://get.pnpm.io/install.sh -o /tmp/pnpm-install.sh && \
-    curl -fsSL --retry 5 --retry-all-errors https://astral.sh/uv/install.sh -o /tmp/uv-install.sh && \
+    curl -fsSL --retry 5 --retry-all-errors "https://astral.sh/uv/${UV_VERSION}/install.sh" -o /tmp/uv-install.sh && \
     curl -fsSL --retry 5 --retry-all-errors https://claude.ai/install.sh -o /tmp/claude-install.sh && \
-    retry env ENV=/home/agent/.bashrc SHELL=/bin/bash sh /tmp/pnpm-install.sh && \
+    retry env PNPM_VERSION="$PNPM_VERSION" ENV=/home/agent/.bashrc SHELL=/bin/bash sh /tmp/pnpm-install.sh && \
     retry env UV_NO_MODIFY_PATH=1 sh /tmp/uv-install.sh && \
-    retry bash /tmp/claude-install.sh && \
-    pnpm --version && uv --version && claude --version && \
+    retry bash /tmp/claude-install.sh "$CLAUDE_CODE_VERSION" && \
+    test "$(pnpm --version)" = "$PNPM_VERSION" && \
+    test "$(uv --version | cut -d' ' -f2)" = "$UV_VERSION" && \
+    test "$(claude --version | cut -d' ' -f1)" = "$CLAUDE_CODE_VERSION" && \
     rm -f /tmp/pnpm-install.sh /tmp/uv-install.sh /tmp/claude-install.sh
 
 # WORKDIR matches the Dev Containers default mount path so Cursor /

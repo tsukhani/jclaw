@@ -195,5 +195,12 @@
       extractVersionTemplate: "^v(?<version>.+)$",
       versioningTemplate: "semver",
     },
+    // The devcontainer (and AFK factory sandbox) image installs pnpm, uv and Claude Code at the versions its
+    // `# renovate:` annotations name, one per `ARG <NAME>_VERSION=` line below each.
+    {
+      customType: "regex",
+      managerFilePatterns: ["^\\.devcontainer/Dockerfile$"],
+      matchStrings: ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG \\w+=(?<currentValue>\\S+)"],
+    },
   ],
 }
