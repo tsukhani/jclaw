@@ -8,6 +8,7 @@
 import { ChevronDownIcon, ExclamationTriangleIcon } from '@heroicons/vue/24/outline'
 import type { ConfigEntry } from '~/types/api'
 import { isManagedKey } from './managed-prefixes'
+import { isSensitiveKey } from '~/utils/secrets'
 
 const { configData } = useSettingsConfig()
 
@@ -58,7 +59,7 @@ const expanded = ref(false)
         class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
       >
         <span class="text-xs font-mono text-fg-muted w-64 max-sm:w-full shrink-0 truncate">{{ entry.key }}</span>
-        <span class="flex-1 text-sm text-fg-muted font-mono truncate">{{ entry.value }}</span>
+        <span class="flex-1 text-sm text-fg-muted font-mono truncate">{{ entry.value && isSensitiveKey(entry.key) ? '••••••••' : entry.value }}</span>
       </div>
     </div>
   </div>

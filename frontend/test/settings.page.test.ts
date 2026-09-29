@@ -204,8 +204,9 @@ describe('Settings page — provider section', () => {
     const component = await mountSettingsSection('providers')
 
     const html = component.html()
-    expect(html).toContain('sk-test-****')
-    expect(html).not.toContain('sk-test-real-key')
+    // A saved key renders as dots: neither the key nor the server's mask of it reaches the DOM.
+    expect(html).toContain('••••••••')
+    expect(html).not.toContain('sk-test')
   })
 })
 

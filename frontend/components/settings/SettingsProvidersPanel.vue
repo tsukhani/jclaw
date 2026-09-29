@@ -18,6 +18,7 @@ import {
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { isDeclaredToolIncapable, isLocalProvider } from '~/composables/useProviders'
+import { isSensitiveKey } from '~/utils/secrets'
 import type { Agent, ApiErrorDetails, ConfigEntry, DiscoveredModel, DiscoverModelsResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
 import SettingsConfigField from './SettingsConfigField.vue'
 
@@ -46,11 +47,6 @@ function paymentModalityFor(name: string): 'PER_TOKEN' | 'SUBSCRIPTION' {
 }
 function subscriptionMonthlyFor(name: string): number {
   return providerInfoMap.value.get(name)?.subscriptionMonthlyUsd ?? 0
-}
-
-function isSensitive(key: string) {
-  const lower = key.toLowerCase()
-  return ['key', 'secret', 'password', 'token'].some(s => lower.includes(s))
 }
 
 // JCLAW-28 follow-up: opt-in nightly LiteLLM pricing refresh. Off by
@@ -825,10 +821,23 @@ const groupedProviders = computed(() => {
             class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
           >
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">{{ entry.key.split('.').slice(2).join('.') }}</span>
-            <template v-if="editingKey === entry.key">
+            <SecretField
+              v-if="isSensitiveKey(entry.key)"
+              v-model="editValue"
+              :saved="!!entry.value"
+              :editing="editingKey === entry.key"
+              :label="entry.key"
+              removable
+              :busy="saving"
+              @edit="editingKey = entry.key"
+              @save="updateEntry(entry.key)"
+              @cancel="editingKey = null"
+              @remove="editValue = ''; updateEntry(entry.key)"
+            />
+            <template v-else-if="editingKey === entry.key">
               <input
                 v-model="editValue"
-                :type="isSensitive(entry.key) ? 'password' : 'text'"
+                type="text"
                 :aria-label="`Edit value for ${entry.key}`"
                 class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
               >

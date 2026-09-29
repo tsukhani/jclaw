@@ -57,6 +57,18 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
+    void aSecretsMaskReadBackIsRefusedInsteadOfSavedOverIt() {
+        // JCLAW-1330: saving what a read returned would replace the key with its first four characters.
+        var key = "search.exa.apiKey";
+        assertNull(ConfigService.setWithSideEffects(key, "sk-real-key-123"));
+        var rejected = ConfigService.setWithSideEffects(key, ConfigService.maskValue(key, "sk-real-key-123"));
+        assertNotNull(rejected, "the mask must be refused at the write");
+        assertTrue(rejected.contains(key), rejected);
+        assertEquals("sk-real-key-123", ConfigService.get(key), "the secret survives");
+        assertNull(ConfigService.setWithSideEffects("jclaw1330.note", "a****"), "only a secret's mask is refused");
+    }
+
+    @Test
     void theJevKeyIsTheOnlyDecisionProviderSetting() {
         // JCLAW-1302: consumer settings stay with their consumers, so any other decision.* key is refused.
         assertTrue(ConfigService.isSensitive(DecisionSettings.API_KEY), "the JEV key is masked on every read");

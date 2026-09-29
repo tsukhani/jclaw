@@ -3,7 +3,7 @@
 // question with a probability per choice rather than with text. A card holds what the provider's
 // consumers share — its key and its circuit breaker — and links to each consumer, where the settings
 // that belong to that consumer alone stay.
-import { CheckIcon, PencilIcon, SpeakerWaveIcon, XMarkIcon } from '@heroicons/vue/24/outline'
+import { SpeakerWaveIcon } from '@heroicons/vue/24/outline'
 
 const { configData, saving, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
 
@@ -13,17 +13,7 @@ function configValue(key: string): string {
   return configData.value?.entries?.find(e => e.key === key)?.value ?? ''
 }
 
-// The stored key comes back masked, so the editor starts blank rather than saving the mask back.
 const keyConfigured = computed(() => configValue(API_KEY).trim().length > 0)
-function startEditKey() {
-  editingKey.value = API_KEY
-  editValue.value = ''
-}
-// Saving the editor untouched would store a blank key over the real one, so it cancels instead.
-function saveKey() {
-  if (!editValue.value.trim()) editingKey.value = null
-  else updateEntry(API_KEY)
-}
 
 // In use means the consumer has chosen JEV; without a key it still falls back to its default.
 const consumers = computed(() => [
@@ -124,54 +114,18 @@ function playJevClip() {
       <div class="divide-y divide-border">
         <div class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">apiKey</span>
-          <template v-if="editingKey === API_KEY">
-            <input
-              v-model="editValue"
-              type="password"
-              autocomplete="new-password"
-              aria-label="TypeSafe API key"
-              placeholder="Your TypeSafe API key"
-              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            >
-            <button
-              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-              title="Save"
-              :disabled="saving"
-              @click="saveKey()"
-            >
-              <CheckIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Cancel"
-              @click="editingKey = null"
-            >
-              <XMarkIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
-          <template v-else>
-            <span
-              class="flex-1 text-sm text-fg-primary font-mono truncate"
-              data-testid="decision-jev-key"
-            >{{ keyConfigured ? '••••••••' : '(not set)' }}</span>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              :title="keyConfigured ? 'Change key' : 'Set key'"
-              aria-label="Edit TypeSafe API key"
-              @click="startEditKey()"
-            >
-              <PencilIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
+          <SecretField
+            v-model="editValue"
+            :saved="keyConfigured"
+            :editing="editingKey === API_KEY"
+            label="TypeSafe API key"
+            placeholder="Your TypeSafe API key"
+            :busy="saving"
+            data-testid="decision-jev-key"
+            @edit="editingKey = API_KEY"
+            @save="updateEntry(API_KEY)"
+            @cancel="editingKey = null"
+          />
         </div>
         <ApiErrorAlert
           v-if="editingKey === API_KEY"

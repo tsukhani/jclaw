@@ -702,58 +702,61 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
           </span>
         </label>
 
-        <label
-          for="binding-bot-token"
+        <div
           class="block"
         >
           <span class="block text-xs text-fg-muted mb-1">botToken</span>
-          <input
-            id="binding-bot-token"
+          <SecretField
+            :key="editing?.id ?? 'new'"
             v-model="form.botToken"
-            type="password"
-            :placeholder="editing ? 'leave blank to keep existing token' : 'xoxb-…'"
-            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
-                   focus:outline-hidden focus:border-ring transition-colors"
-          >
-        </label>
+            form
+            :saved="!!editing"
+            input-id="binding-bot-token"
+            label="botToken"
+            placeholder="xoxb-…"
+            input-class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring transition-colors"
+          />
+        </div>
 
-        <label
+        <div
           v-if="!isSocket"
-          for="binding-signing-secret"
           class="block"
         >
           <span class="block text-xs text-fg-muted mb-1">signingSecret</span>
-          <input
-            id="binding-signing-secret"
+          <SecretField
+            :key="editing?.id ?? 'new'"
             v-model="form.signingSecret"
-            type="password"
-            :placeholder="editing ? 'leave blank to keep existing secret' : 'App Credentials → Signing Secret'"
-            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
-                   focus:outline-hidden focus:border-ring transition-colors"
-          >
-        </label>
+            form
+            :saved="!!editing?.hasSigningSecret"
+            input-id="binding-signing-secret"
+            label="signingSecret"
+            placeholder="App Credentials → Signing Secret"
+            input-class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring transition-colors"
+          />
+        </div>
 
-        <label
+        <div
           v-if="isSocket"
-          for="binding-app-token"
           class="block"
         >
           <span class="block text-xs text-fg-muted mb-1">appToken</span>
-          <input
-            id="binding-app-token"
+          <SecretField
+            :key="editing?.id ?? 'new'"
             v-model="form.appToken"
-            type="password"
-            :placeholder="editing ? 'leave blank to keep existing app token' : 'xapp-…'"
-            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
-                   focus:outline-hidden focus:border-ring transition-colors"
-          >
+            form
+            :saved="!!editing?.hasAppToken"
+            input-id="binding-app-token"
+            label="appToken"
+            placeholder="xapp-…"
+            input-class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring transition-colors"
+          />
           <span class="mt-1 block text-xs text-fg-muted">
             App-level token with the
             <code class="font-mono px-1 bg-muted text-fg-strong">connections:write</code>
             scope (Basic Information → App-Level Tokens). Enable Socket Mode in the app
             first; you still subscribe to bot events, but no Request URL is needed.
           </span>
-        </label>
+        </div>
 
         <label
           for="binding-agent"

@@ -283,6 +283,13 @@ public class ConfigService {
             return capped;
         }
 
+        // JCLAW-1330: a secret reads back as its mask, so a client that saves what it read would
+        // replace the secret with its first four characters.
+        if (isSensitive(key) && value.endsWith(MASK_SUFFIX)) {
+            return "That is the saved value's mask, not a new value. Enter the whole new value, or leave "
+                    + key + " unchanged.";
+        }
+
         // Shell exec privileges are restricted to the main agent
         if (key.matches("agent\\..+\\.shell\\.(bypassAllowlist|allowGlobalPaths)")) {
             var agentName = key.split("\\.")[1];
@@ -672,6 +679,8 @@ public class ConfigService {
         cache.invalidateAll();
     }
 
+    private static final String MASK_SUFFIX = "****";
+
     private static final Set<String> SENSITIVE_PATTERNS = Set.of(
             "key", "secret", "password", "token"
     );
@@ -684,7 +693,7 @@ public class ConfigService {
     public static @Nullable String maskValue(String key, String value) {
         if (value == null) return null;
         if (isSensitive(key) && value.length() > 4) {
-            return value.substring(0, 4) + "****";
+            return value.substring(0, 4) + MASK_SUFFIX;
         }
         return value;
     }

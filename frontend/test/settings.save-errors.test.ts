@@ -87,7 +87,6 @@ describe('Settings — a refused save explains itself beside the open editor (JC
     'coding',
     'providers',
     'search',
-    'malware',
   ])('%s', async (sectionId) => {
     setupApi()
     const component = await mountSection(sectionId)
@@ -109,13 +108,27 @@ describe('Settings — a refused save explains itself beside the open editor (JC
     await expectRefusalShown(component)
   })
 
+  // A secret's editor saves nothing when left blank, so these type a value first.
   it('image-generation', async () => {
     setupApi([{ key: 'imagegen.provider', value: 'bfl' }])
     const component = await mountSection('image-generation')
     await component.find('button[aria-label="Edit Black Forest Labs API key"]').trigger('click')
     await flushPromises()
 
+    await component.find('input[aria-label="Black Forest Labs API key"]').setValue('bfl-new-key')
     await component.find('button[title="Save"]').trigger('click')
     await expectRefusalShown(component)
+  })
+
+  it('malware', async () => {
+    setupApi()
+    const component = await mountSection('malware')
+    await component.find('button[aria-label="Edit MalwareBazaar (abuse.ch) authKey"]').trigger('click')
+    await flushPromises()
+
+    await component.find('input[aria-label="MalwareBazaar (abuse.ch) authKey"]').setValue('mb-new-key')
+    await component.find('button[title="Save"]').trigger('click')
+    await expectRefusalShown(component)
+    expect(component.find('button[title="Save"]').exists(), 'the editor stays open after a refusal').toBe(true)
   })
 })

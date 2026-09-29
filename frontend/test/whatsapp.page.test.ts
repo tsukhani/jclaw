@@ -145,17 +145,23 @@ describe('whatsapp bindings page — transport choice + cards (JCLAW-444)', () =
     expect(saveBtn!.attributes('disabled')).toBeUndefined()
   })
 
-  it('leaves secret fields blank-to-keep when editing (placeholders, not values)', async () => {
-    bindingsResponse = [binding({ id: 7 })]
+  it('shows saved secrets as dots when editing, and opens an empty input to change one', async () => {
+    bindingsResponse = [binding({ id: 7, hasAppSecret: false })]
     const c = await mountSuspended(WhatsApp)
     await c.find('[aria-label="Edit binding"]').trigger('click')
     await nextTick()
-    // phoneNumberId (an identifier) is pre-filled; secrets are blank with a keep hint.
+    // phoneNumberId (an identifier) is pre-filled; a saved secret is never shown back.
     const phone = c.find('#binding-phone-number-id').element as HTMLInputElement
     expect(phone.value).toBe('phone-123')
+    expect(c.find('#binding-access-token').exists()).toBe(false)
+    expect(c.html()).toContain('••••••••')
+    // One that was never saved is an input straight away.
+    expect(c.find('#binding-app-secret').exists()).toBe(true)
+
+    await c.find('[aria-label="Edit accessToken"]').trigger('click')
     const token = c.find('#binding-access-token').element as HTMLInputElement
+    expect(token.type).toBe('password')
     expect(token.value).toBe('')
-    expect(token.placeholder).toContain('leave blank to keep')
   })
 })
 

@@ -7,7 +7,6 @@
 // state, host capability) each drive their own poll loop + lifecycle. Config
 // reads/writes go through the shared store; API-key checks + the shared
 // inline config-row editor are injected from it.
-import { CheckIcon, PencilIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 
 const { configData, saving, refresh, saveField, apiKeyConfigured, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
 
@@ -29,6 +28,7 @@ watch(imagegenProvider, (v) => {
 const providerSave = useSaveAttempt()
 const imagegenProviderError = providerSave.saveError
 const imagegenEnabled = computed(() => imagegenProvider.value.trim().length > 0)
+// BFL and Replicate are image-gen only, so their API keys are set in this panel, not in LLM Providers.
 const bflApiKeyConfigured = computed(() => apiKeyConfigured('bfl'))
 
 // Master toggle: off clears the provider; on defaults to the first cloud provider that has a key
@@ -55,18 +55,6 @@ async function setImagegenProvider(value: string) {
   if (await providerSave.attempt(() => $fetch('/api/config', { method: 'POST', body: { key: 'imagegen.provider', value } }))) refresh()
   else chosenImagegenProvider.value = imagegenProvider.value
   saving.value = false
-}
-// BFL is image-gen only, so its API key is set here (not in LLM Providers). Reuses the shared
-// editingKey/editValue/updateEntry flow; editValue starts blank so the operator types a fresh key
-// (the stored value is masked and must not be saved back verbatim).
-function startEditBflKey() {
-  editingKey.value = 'provider.bfl.apiKey'
-  editValue.value = ''
-}
-// Replicate is also image-gen only → its API key is set in this section too.
-function startEditReplicateKey() {
-  editingKey.value = 'provider.replicate.apiKey'
-  editValue.value = ''
 }
 
 // Replicate image-model dropdown — mirrors the videogen catalog. Replicate curates a `text-to-image`
@@ -185,15 +173,10 @@ watch(imageCapability, () => {
 })
 onUnmounted(() => stopImageCapPolling())
 // Optional HF token (imagegen.local.hfToken) — passed to the sidecar as HF_TOKEN.
-// Set inline here; the stored value is masked so editValue starts blank.
 const hfTokenConfigured = computed(() => {
   const v = configData.value?.entries?.find(e => e.key === 'imagegen.local.hfToken')?.value
   return !!v && v.trim().length > 0
 })
-function startEditHfToken() {
-  editingKey.value = 'imagegen.local.hfToken'
-  editValue.value = ''
-}
 const fluxModelDownloadPct = computed(() => {
   const s = imagegenLocalState.value
   if (!s || s.totalBytes === 0) return 0
@@ -334,49 +317,19 @@ onUnmounted(() => stopImagegenLocalPolling())
           </label>
           <div class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Black Forest Labs API key</span>
-            <template v-if="editingKey === 'provider.bfl.apiKey'">
-              <input
-                v-model="editValue"
-                type="password"
-                aria-label="Black Forest Labs API key"
-                placeholder="Your BFL API key from bfl.ai"
-                class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              >
-              <button
-                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                title="Save"
-                @click="updateEntry('provider.bfl.apiKey')"
-              >
-                <CheckIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Cancel"
-                @click="editingKey = null"
-              >
-                <XMarkIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-            <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ bflApiKeyConfigured ? '••••••••' : '(not set)' }}</span>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                :title="bflApiKeyConfigured ? 'Change key' : 'Set key'"
-                aria-label="Edit Black Forest Labs API key"
-                @click="startEditBflKey()"
-              >
-                <PencilIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
+            <SecretField
+              v-model="editValue"
+              :saved="bflApiKeyConfigured"
+              :editing="editingKey === 'provider.bfl.apiKey'"
+              label="Black Forest Labs API key"
+              placeholder="Your BFL API key from bfl.ai"
+              removable
+              :busy="saving"
+              @edit="editingKey = 'provider.bfl.apiKey'"
+              @save="updateEntry('provider.bfl.apiKey')"
+              @cancel="editingKey = null"
+              @remove="editValue = ''; updateEntry('provider.bfl.apiKey')"
+            />
           </div>
           <ApiErrorAlert
             v-if="editingKey === 'provider.bfl.apiKey'"
@@ -451,49 +404,19 @@ onUnmounted(() => stopImagegenLocalPolling())
           </label>
           <div class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
             <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Replicate API key</span>
-            <template v-if="editingKey === 'provider.replicate.apiKey'">
-              <input
-                v-model="editValue"
-                type="password"
-                aria-label="Replicate API key"
-                placeholder="Your Replicate API token from replicate.com"
-                class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-              >
-              <button
-                class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                title="Save"
-                @click="updateEntry('provider.replicate.apiKey')"
-              >
-                <CheckIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                title="Cancel"
-                @click="editingKey = null"
-              >
-                <XMarkIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
-            <template v-else>
-              <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ replicateApiKeyConfigured ? '••••••••' : '(not set)' }}</span>
-              <button
-                class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                :title="replicateApiKeyConfigured ? 'Change key' : 'Set key'"
-                aria-label="Edit Replicate API key"
-                @click="startEditReplicateKey()"
-              >
-                <PencilIcon
-                  class="w-3.5 h-3.5"
-                  aria-hidden="true"
-                />
-              </button>
-            </template>
+            <SecretField
+              v-model="editValue"
+              :saved="replicateApiKeyConfigured"
+              :editing="editingKey === 'provider.replicate.apiKey'"
+              label="Replicate API key"
+              placeholder="Your Replicate API token from replicate.com"
+              removable
+              :busy="saving"
+              @edit="editingKey = 'provider.replicate.apiKey'"
+              @save="updateEntry('provider.replicate.apiKey')"
+              @cancel="editingKey = null"
+              @remove="editValue = ''; updateEntry('provider.replicate.apiKey')"
+            />
           </div>
           <ApiErrorAlert
             v-if="editingKey === 'provider.replicate.apiKey'"
@@ -728,49 +651,19 @@ onUnmounted(() => stopImagegenLocalPolling())
             </div>
             <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
               <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Hugging Face token (optional)</span>
-              <template v-if="editingKey === 'imagegen.local.hfToken'">
-                <input
-                  v-model="editValue"
-                  type="password"
-                  aria-label="Hugging Face token"
-                  placeholder="hf_… — higher rate limits and gated models"
-                  class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-                >
-                <button
-                  class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-                  title="Save"
-                  @click="updateEntry('imagegen.local.hfToken')"
-                >
-                  <CheckIcon
-                    class="w-3.5 h-3.5"
-                    aria-hidden="true"
-                  />
-                </button>
-                <button
-                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                  title="Cancel"
-                  @click="editingKey = null"
-                >
-                  <XMarkIcon
-                    class="w-3.5 h-3.5"
-                    aria-hidden="true"
-                  />
-                </button>
-              </template>
-              <template v-else>
-                <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ hfTokenConfigured ? '••••••••' : '(not set)' }}</span>
-                <button
-                  class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-                  :title="hfTokenConfigured ? 'Change token' : 'Set token'"
-                  aria-label="Edit Hugging Face token"
-                  @click="startEditHfToken()"
-                >
-                  <PencilIcon
-                    class="w-3.5 h-3.5"
-                    aria-hidden="true"
-                  />
-                </button>
-              </template>
+              <SecretField
+                v-model="editValue"
+                :saved="hfTokenConfigured"
+                :editing="editingKey === 'imagegen.local.hfToken'"
+                label="Hugging Face token"
+                placeholder="hf_… — higher rate limits and gated models"
+                removable
+                :busy="saving"
+                @edit="editingKey = 'imagegen.local.hfToken'"
+                @save="updateEntry('imagegen.local.hfToken')"
+                @cancel="editingKey = null"
+                @remove="editValue = ''; updateEntry('imagegen.local.hfToken')"
+              />
             </div>
             <ApiErrorAlert
               v-if="editingKey === 'imagegen.local.hfToken'"

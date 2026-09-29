@@ -50,6 +50,8 @@ const dataimpulse = reactive<DataImpulseFields>(emptyDataImpulse())
 const manual = reactive({ url: '', username: '' })
 const dataimpulsePassword = ref('')
 const manualPassword = ref('')
+const dataimpulsePasswordEditing = ref(false)
+const manualPasswordEditing = ref(false)
 const errors = ref<DataImpulseErrors & { password?: string }>({})
 const manualErrors = ref<ManualErrors>({})
 
@@ -61,12 +63,17 @@ watch([storedUrl, storedUsername], () => {
   Object.assign(manual, parsed.manual)
   errors.value = {}
   manualErrors.value = {}
+  dataimpulsePasswordEditing.value = false
+  manualPasswordEditing.value = false
 }, { immediate: true })
 
 const manualIsSocks = computed(() => /^socks5:/i.test(manual.url.trim()))
 const preview = computed(() => Object.keys(validateDataImpulse(dataimpulse)).length ? null : composeDataImpulse(dataimpulse))
+// A card shows the saved password only while a save would keep it: the same host, and not SOCKS5.
+const dataimpulseKeepsPassword = computed(() => keepsStoredPassword(composeDataImpulse(dataimpulse).url, storedProxy.value))
+const manualKeepsPassword = computed(() => !manualIsSocks.value && keepsStoredPassword(manual.url, storedProxy.value))
 const passwordHint = computed(() => storedHasPassword.value
-  ? `The saved password belongs to ${proxyHost(storedUrl.value) || 'the proxy it was saved with'}. Leave this blank to keep it there; saving another host clears it.`
+  ? `The saved password belongs to ${proxyHost(storedUrl.value) || 'the proxy it was saved with'}; saving another host clears it.`
   : '')
 
 const { saveError, attempt } = useSaveAttempt()
@@ -76,7 +83,7 @@ function validate(): boolean {
   errors.value = {}
   manualErrors.value = {}
   if (provider.value === 'dataimpulse') {
-    const needsPassword = !keepsStoredPassword(composeDataImpulse(dataimpulse).url, storedProxy.value)
+    const needsPassword = !dataimpulseKeepsPassword.value
     const password = credentialError(dataimpulsePassword.value, needsPassword, 'DataImpulse proxy password')
     errors.value = { ...validateDataImpulse(dataimpulse), ...(password ? { password } : {}) }
   }
@@ -104,6 +111,8 @@ async function save() {
   })) {
     dataimpulsePassword.value = ''
     manualPassword.value = ''
+    dataimpulsePasswordEditing.value = false
+    manualPasswordEditing.value = false
   }
   // After a refusal too: the writes before it landed, and the cards should show them.
   await refresh()
@@ -260,21 +269,23 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
             </p>
           </div>
           <div class="px-4 py-2 space-y-1">
-            <label
-              for="proxy-dataimpulse-password"
-              class="flex max-sm:flex-wrap items-center gap-3"
-            >
+            <div class="flex max-sm:flex-wrap items-center gap-3">
               <span :class="FIELD_LABEL">password</span>
-              <input
-                id="proxy-dataimpulse-password"
+              <SecretField
                 v-model="dataimpulsePassword"
-                type="password"
-                autocomplete="new-password"
-                :aria-invalid="!!errors.password"
-                :aria-describedby="errors.password ? 'proxy-dataimpulse-password-error' : passwordHint ? 'proxy-dataimpulse-password-hint' : undefined"
-                :class="INPUT"
-              >
-            </label>
+                v-model:editing="dataimpulsePasswordEditing"
+                form
+                :saved="dataimpulseKeepsPassword"
+                input-id="proxy-dataimpulse-password"
+                label="DataImpulse proxy password"
+                :input-class="INPUT"
+                :input-attrs="{
+                  'aria-invalid': !!errors.password,
+                  'aria-describedby': errors.password ? 'proxy-dataimpulse-password-error' : passwordHint && !dataimpulseKeepsPassword ? 'proxy-dataimpulse-password-hint' : undefined,
+                }"
+                data-testid="proxy-dataimpulse-password-field"
+              />
+            </div>
             <p
               v-if="errors.password"
               id="proxy-dataimpulse-password-error"
@@ -283,7 +294,7 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
               {{ errors.password }}
             </p>
             <p
-              v-else-if="passwordHint"
+              v-else-if="passwordHint && !dataimpulseKeepsPassword"
               id="proxy-dataimpulse-password-hint"
               class="text-xs text-fg-muted sm:ml-51"
             >
@@ -504,22 +515,24 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
             </p>
           </div>
           <div class="px-4 py-2 space-y-1">
-            <label
-              for="proxy-manual-password"
-              class="flex max-sm:flex-wrap items-center gap-3"
-            >
+            <div class="flex max-sm:flex-wrap items-center gap-3">
               <span :class="FIELD_LABEL">password</span>
-              <input
-                id="proxy-manual-password"
+              <SecretField
                 v-model="manualPassword"
-                type="password"
-                autocomplete="new-password"
-                :disabled="manualIsSocks"
-                :aria-invalid="!!manualErrors.password"
-                :aria-describedby="manualErrors.password ? 'proxy-manual-password-error' : passwordHint && !manualIsSocks ? 'proxy-manual-password-hint' : undefined"
-                :class="INPUT"
-              >
-            </label>
+                v-model:editing="manualPasswordEditing"
+                form
+                :saved="manualKeepsPassword"
+                input-id="proxy-manual-password"
+                label="proxy password"
+                :input-class="INPUT"
+                :input-attrs="{
+                  'disabled': manualIsSocks,
+                  'aria-invalid': !!manualErrors.password,
+                  'aria-describedby': manualErrors.password ? 'proxy-manual-password-error' : passwordHint && !manualIsSocks && !manualKeepsPassword ? 'proxy-manual-password-hint' : undefined,
+                }"
+                data-testid="proxy-manual-password-field"
+              />
+            </div>
             <p
               v-if="manualErrors.password"
               id="proxy-manual-password-error"
@@ -528,7 +541,7 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
               {{ manualErrors.password }}
             </p>
             <p
-              v-else-if="passwordHint && !manualIsSocks"
+              v-else-if="passwordHint && !manualIsSocks && !manualKeepsPassword"
               id="proxy-manual-password-hint"
               class="text-xs text-fg-muted sm:ml-51"
             >

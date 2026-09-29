@@ -4,6 +4,8 @@ The [Settings](/settings) page is the operator's control panel. Configuration is
 
 This page summarizes each section. The settings page itself is the source of truth for current defaults and available knobs; hover any field's info icon for an inline tooltip.
 
+A saved secret (an API key, token, password or secret header) is never shown back, in Settings or on the channel pages: it appears as `••••••••` with a pencil. The pencil opens an empty field for a whole new value; saving it blank keeps the one already saved, and where a secret can be removed, the editor's **Remove** button does it. A value that is only the saved one's mask, as the API reads it back, is refused rather than saved over it.
+
 ## Timezone
 
 Operator-wide settings.
@@ -92,7 +94,7 @@ Exports traces and metrics to an OpenTelemetry collector over OTLP. Off by defau
 | `otel.enabled` | `false` | Master switch. |
 | `otel.exporter.endpoint` | `http://localhost:4318` | Collector base URL; `/v1/traces` and `/v1/metrics` are appended for http/protobuf. |
 | `otel.exporter.protocol` | `http/protobuf` | `http/protobuf` or `grpc`. |
-| `otel.exporter.secretHeaders` | (empty) | Comma-separated `name=value` pairs sent with every export — vendor auth goes here. Masked once saved, so editing means retyping the whole value; save it empty to clear. |
+| `otel.exporter.secretHeaders` | (empty) | Comma-separated `name=value` pairs sent with every export — vendor auth goes here. Shown as dots once saved; **Remove** clears them. |
 | `otel.service.name` | `jclaw` | How this instance is named in the collector. |
 | `otel.traces.sampler.ratio` | `1.0` | Share of root spans recorded, 0–1. |
 | `otel.metrics.interval.seconds` | `60` | Seconds between metric exports. Has no row in the panel and is **read at JVM start only** — set it through `POST /api/config` and restart. |
@@ -276,7 +278,7 @@ Those are the rows a new install starts with. Any other OpenAI-compatible provid
 
 For each provider you can:
 
-- Set the **API key** — stored as plain text in the Config DB, because it is a credential for the provider's API and has to be sent as written, and masked whenever it is shown, so editing it means retyping the whole value.
+- Set the **API key** — stored as plain text in the Config DB, because it is a credential for the provider's API and has to be sent as written, and never shown back once saved.
 - Set the **base URL** (most providers ship with a sensible default).
 - Mark **Enabled / disabled** to hide the provider from the agent picker.
 - Set **local** — the provider's Remote/Local classification. It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp; absent means remote. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.
@@ -363,7 +365,7 @@ The proxy that `web_fetch` and `web_scrape` send their requests through. It cove
 - **DataImpulse** fills in DataImpulse's gateway and login syntax from a few fields.
 - **Manual** takes any proxy's address and credentials as they are.
 
-The card marked **saved** is the one in effect. Whichever card you use, only the `web_scrape.proxy.*` keys below are stored: a card writes the URL, username and password from its fields and reads them back when the page opens, and the **enabled** switch below the cards is the fourth. Saving a proxy also switches it on. A saved password stays with the host it was saved for: left blank, it is kept while the host stays the same, and saving a different host clears the stored username and password before the new URL is written, so a password never reaches another proxy. A proxy is shown in the DataImpulse card when its address is `http://gw.dataimpulse.com` or `http://74.81.81.81` on port 823 or on a sticky port from 10000 to 20000; any other address opens in Manual.
+The card marked **saved** is the one in effect. Whichever card you use, only the `web_scrape.proxy.*` keys below are stored: a card writes the URL, username and password from its fields and reads them back when the page opens, and the **enabled** switch below the cards is the fourth. Saving a proxy also switches it on. A saved password stays with the host it was saved for: it shows as dots and is kept while the host stays the same, and saving a different host clears the stored username and password before the new URL is written, so a password never reaches another proxy. A proxy is shown in the DataImpulse card when its address is `http://gw.dataimpulse.com` or `http://74.81.81.81` on port 823 or on a sticky port from 10000 to 20000; any other address opens in Manual.
 
 **DataImpulse**
 
@@ -372,7 +374,7 @@ Your login and password are under **Proxy Access** in the [DataImpulse dashboard
 | Field             | Meaning                                                                                  |
 |-------------------|------------------------------------------------------------------------------------------|
 | login             | Your proxy login, as the dashboard shows it, without any parameters.                     |
-| password          | Your proxy password. Required unless one is already saved for DataImpulse; left blank, that one is kept. |
+| password          | Your proxy password. A saved one shows as dots while the card connects to the host it was saved for, and is kept unless you change it. Required otherwise. |
 | country           | Two-letter country codes, separated by commas: `de`, or `de,au`. Empty uses any country. |
 | rotation          | **Rotating** gives a new IP address for every request, on port 823. **Sticky** keeps one address for a session, on port 10000. |
 | session minutes   | Sticky only: how long one address is kept, 1 to 120. Empty uses DataImpulse's default of 30. |
@@ -515,7 +517,7 @@ Master toggle, then a backend radio group:
 
   With Self-Hosted selected, an optional **Hugging Face token** row (`imagegen.local.hfToken`) takes a Read token, which lifts Hugging Face rate limits, speeds downloads and unlocks gated models. Klein 4B downloads without one. The on-device diarization path under [Transcription](#settings-transcription) reuses this token for its gated weights.
 
-Cloud radios are disabled until their key is set (amber **no API key** badge). Saved keys are masked, so editing one means retyping the whole value. Changes apply live.
+Cloud radios are disabled until their key is set (amber **no API key** badge). Changes apply live.
 
 ## Video Interpretation
 

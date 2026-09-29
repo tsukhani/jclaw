@@ -571,50 +571,53 @@ onBeforeUnmount(stopPoll)
             >
           </label>
 
-          <label
-            for="binding-access-token"
+          <div
             class="block"
           >
             <span class="block text-xs text-fg-muted mb-1">accessToken</span>
-            <input
-              id="binding-access-token"
+            <SecretField
+              :key="editing?.id ?? 'new'"
               v-model="form.accessToken"
-              type="password"
-              :placeholder="editing ? 'leave blank to keep existing token' : 'Graph API access token'"
-              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
-                     focus:outline-hidden focus:border-ring transition-colors"
-            >
-          </label>
+              form
+              :saved="!!editing?.hasAccessToken"
+              input-id="binding-access-token"
+              label="accessToken"
+              placeholder="Graph API access token"
+              input-class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring transition-colors"
+            />
+          </div>
 
-          <label
-            for="binding-app-secret"
+          <div
             class="block"
           >
             <span class="block text-xs text-fg-muted mb-1">appSecret</span>
-            <input
-              id="binding-app-secret"
+            <SecretField
+              :key="editing?.id ?? 'new'"
               v-model="form.appSecret"
-              type="password"
-              :placeholder="editing ? 'leave blank to keep existing secret' : 'App secret (for inbound webhook)'"
-              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
-                     focus:outline-hidden focus:border-ring transition-colors"
-            >
-          </label>
+              form
+              :saved="!!editing?.hasAppSecret"
+              input-id="binding-app-secret"
+              label="appSecret"
+              placeholder="App secret (for inbound webhook)"
+              input-class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring transition-colors"
+            />
+          </div>
 
-          <label
-            for="binding-verify-token"
+          <div
             class="block"
           >
             <span class="block text-xs text-fg-muted mb-1">verifyToken</span>
-            <input
-              id="binding-verify-token"
+            <SecretField
+              :key="editing?.id ?? 'new'"
               v-model="form.verifyToken"
-              type="password"
-              :placeholder="editing ? 'leave blank to keep existing token' : 'Your chosen webhook verify token'"
-              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
-                     focus:outline-hidden focus:border-ring transition-colors"
-            >
-          </label>
+              form
+              :saved="!!editing?.hasVerifyToken"
+              input-id="binding-verify-token"
+              label="verifyToken"
+              placeholder="Your chosen webhook verify token"
+              input-class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring transition-colors"
+            />
+          </div>
 
           <!-- JCLAW-445: optional pre-approved template for out-of-window replies. -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">

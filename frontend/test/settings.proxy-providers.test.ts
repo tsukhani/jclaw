@@ -120,7 +120,9 @@ describe('Settings page — Proxy Providers', () => {
       { key: USERNAME_KEY, value: 'abc' },
       { key: PASSWORD_KEY, value: 's3cret' },
     ])
-    expect(inputValue(component, '#proxy-dataimpulse-password')).toBe('')
+    // The saved password shows as dots, not as an empty box that reads as lost.
+    expect(component.find('#proxy-dataimpulse-password').exists()).toBe(false)
+    expect(component.find('[data-testid="proxy-dataimpulse-password-field"]').text()).toBe('••••••••')
     expect(component.find('[data-testid="proxy-saved-dataimpulse"]').exists()).toBe(true)
   })
 
@@ -153,10 +155,34 @@ describe('Settings page — Proxy Providers', () => {
     expect(inputValue(component, '#proxy-dataimpulse-countries')).toBe('de,au')
     expect((component.find('#proxy-dataimpulse-sticky').element as HTMLInputElement).checked).toBe(true)
     expect(inputValue(component, '#proxy-dataimpulse-minutes')).toBe('45')
+    expect(component.find('[data-testid="proxy-dataimpulse-password-field"]').text()).toBe('••••••••')
+    expect(component.html()).not.toContain('abcd')
+
+    await component.find('[aria-label="Edit DataImpulse proxy password"]').trigger('click')
     const password = component.find('#proxy-dataimpulse-password')
     expect(password.attributes('type')).toBe('password')
     expect((password.element as HTMLInputElement).value).toBe('')
-    expect(component.html()).not.toContain('abcd')
+  })
+
+  it('changes the saved password through the pencil, and the X keeps the saved one', async () => {
+    stored.set(URL_KEY, 'http://gw.dataimpulse.com:823')
+    stored.set(USERNAME_KEY, 'abc')
+    stored.set(PASSWORD_KEY, 'abcdef-secret')
+    endpoints()
+    const component = await mountPanel()
+
+    await component.find('[aria-label="Edit DataImpulse proxy password"]').trigger('click')
+    await component.find('#proxy-dataimpulse-password').setValue('typed')
+    await component.find('[aria-label="Keep the saved DataImpulse proxy password"]').trigger('click')
+    expect(component.find('[data-testid="proxy-dataimpulse-password-field"]').text()).toBe('••••••••')
+    await save(component)
+    expect(posted).toEqual([])
+
+    await component.find('[aria-label="Edit DataImpulse proxy password"]').trigger('click')
+    await component.find('#proxy-dataimpulse-password').setValue('new-secret')
+    await save(component)
+    expect(posted).toEqual([{ key: PASSWORD_KEY, value: 'new-secret' }])
+    expect(component.find('[data-testid="proxy-dataimpulse-password-field"]').text()).toBe('••••••••')
   })
 
   it('keeps the saved password when the field is left blank', async () => {
@@ -346,11 +372,14 @@ describe('Settings page — Proxy Providers', () => {
     endpoints()
     const component = await mountPanel()
 
-    expect(component.find('#proxy-dataimpulse-password-hint').text()).toContain('gw.dataimpulse.com')
+    expect(component.find('#proxy-dataimpulse-password-hint').exists()).toBe(false)
     await choose(component, 'manual')
     await component.find('#proxy-manual-url').setValue('http://proxy.example:3128')
     await component.find('#proxy-manual-username').setValue('scraper')
-    expect(component.find('#proxy-manual-password-hint').text()).toContain('saving another host clears it')
+    expect(component.find('#proxy-manual-password').exists()).toBe(true)
+    const hint = component.find('#proxy-manual-password-hint').text()
+    expect(hint).toContain('gw.dataimpulse.com')
+    expect(hint).toContain('saving another host clears it')
     await save(component)
 
     expect(posted).toEqual([

@@ -123,7 +123,7 @@ async function sendTestSpan() {
 const rows: { field: Field, label: string, hint: string }[] = [
   { field: 'endpoint', label: 'exporter.endpoint', hint: 'Collector base URL; /v1/traces and /v1/metrics are appended for http/protobuf' },
   { field: 'protocol', label: 'exporter.protocol', hint: 'http/protobuf or grpc' },
-  { field: 'headers', label: 'exporter.secretHeaders', hint: 'name=value,name=value sent with every export — vendor auth goes here; leave empty to clear' },
+  { field: 'headers', label: 'exporter.secretHeaders', hint: 'name=value,name=value sent with every export — vendor auth goes here; the trash button removes them' },
   { field: 'service', label: 'service.name', hint: 'How this instance is named in the collector' },
   { field: 'ratio', label: 'traces.sampler.ratio', hint: 'Share of requests recorded, 0 to 1' },
 ]
@@ -186,7 +186,21 @@ const rows: { field: Field, label: string, hint: string }[] = [
             class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0"
             :title="row.hint"
           >{{ row.label }}</span>
-          <template v-if="editing === row.field">
+          <SecretField
+            v-if="row.field === 'headers'"
+            v-model="draft"
+            :saved="!!otel.headers"
+            :editing="editing === 'headers'"
+            :label="row.label"
+            placeholder="Authorization=Bearer …"
+            removable
+            :busy="saving"
+            @edit="startEdit('headers')"
+            @save="save('headers')"
+            @cancel="editing = null"
+            @remove="draft = ''; save('headers')"
+          />
+          <template v-else-if="editing === row.field">
             <select
               v-if="row.field === 'protocol'"
               v-model="draft"
@@ -203,8 +217,7 @@ const rows: { field: Field, label: string, hint: string }[] = [
             <input
               v-else
               v-model="draft"
-              :type="row.field === 'headers' ? 'password' : 'text'"
-              :placeholder="row.field === 'headers' ? 'Authorization=Bearer …' : ''"
+              type="text"
               :aria-label="row.label"
               class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
               @keydown.enter="save(row.field)"

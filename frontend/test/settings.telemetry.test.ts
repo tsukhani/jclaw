@@ -77,6 +77,34 @@ describe('Settings page — Telemetry', () => {
     expect(text).toContain('not exporting')
   })
 
+  it('shows saved headers as dots, keeps them on a blank save, and removes them only through Remove', async () => {
+    let deleted = 0
+    baseEndpoints({ entries: [{ key: 'otel.exporter.secretHeaders', value: 'Auth****' }] })
+    registerEndpoint('/api/config/otel.exporter.secretHeaders', {
+      method: 'DELETE',
+      handler: () => {
+        deleted++
+        return { status: 'ok' }
+      },
+    })
+    const component = await mountTelemetry()
+    expect(component.html()).not.toContain('Auth')
+    expect(component.html()).toContain('••••••••')
+
+    await component.find('button[aria-label="Edit exporter.secretHeaders"]').trigger('click')
+    expect((component.find('input[aria-label="exporter.secretHeaders"]').element as HTMLInputElement).value).toBe('')
+    await component.find('button[aria-label="Save exporter.secretHeaders"]').trigger('click')
+    await flushPromises()
+    expect(posted).toEqual([])
+    expect(deleted).toBe(0)
+
+    await component.find('button[aria-label="Edit exporter.secretHeaders"]').trigger('click')
+    await component.find('button[aria-label="Remove exporter.secretHeaders"]').trigger('click')
+    await flushPromises()
+    expect(deleted).toBe(1)
+    expect(posted).toEqual([])
+  })
+
   it('turning export on is one otel.enabled write', async () => {
     baseEndpoints()
     const component = await mountTelemetry()

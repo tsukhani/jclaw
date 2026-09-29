@@ -538,20 +538,21 @@ async function testBinding(binding: TelegramBindingSummary) {
       </div>
 
       <div class="space-y-3">
-        <label
-          for="binding-bot-token"
+        <div
           class="block"
         >
           <span class="block text-xs text-fg-muted mb-1">botToken</span>
-          <input
-            id="binding-bot-token"
+          <SecretField
+            :key="editing?.id ?? 'new'"
             v-model="form.botToken"
-            type="password"
-            :placeholder="editing ? 'leave blank to keep existing token' : '123456:ABC-DEF…'"
-            class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
-                   focus:outline-hidden focus:border-ring transition-colors"
-          >
-        </label>
+            form
+            :saved="!!editing"
+            input-id="binding-bot-token"
+            label="botToken"
+            placeholder="123456:ABC-DEF…"
+            input-class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring transition-colors"
+          />
+        </div>
 
         <label
           for="binding-agent"

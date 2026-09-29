@@ -77,16 +77,6 @@ function searchBaseUrl(providerId: string): string {
   return entries.find(e => e.key === `search.${providerId}.baseUrl`)?.value ?? ''
 }
 
-function searchApiKeyEntry(providerId: string) {
-  const def = SEARCH_PROVIDERS[providerId]!
-  const key = `search.${providerId}.apiKey`
-  const entries = configData.value?.entries ?? []
-  const existing = entries.find(e => e.key === key)
-  return existing
-    ? { ...existing, label: 'apiKey', placeholder: def.apiKeyPlaceholder }
-    : { key, value: '', label: 'apiKey', placeholder: def.apiKeyPlaceholder }
-}
-
 function searchBaseUrlEntry(providerId: string) {
   const key = `search.${providerId}.baseUrl`
   const entries = configData.value?.entries ?? []
@@ -284,48 +274,18 @@ function onSearchDragEnd() {
         <!-- apiKey -->
         <div class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">apiKey</span>
-          <template v-if="editingKey === `search.${id}.apiKey`">
-            <input
-              v-model="editValue"
-              type="password"
-              :placeholder="SEARCH_PROVIDERS[id]!.apiKeyPlaceholder"
-              aria-label="API key"
-              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
-            >
-            <button
-              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
-              title="Save"
-              @click="updateEntry(`search.${id}.apiKey`)"
-            >
-              <CheckIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Cancel"
-              @click="editingKey = null"
-            >
-              <XMarkIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
-          <template v-else>
-            <span class="flex-1 text-sm text-fg-primary font-mono truncate">{{ searchApiKeyEntry(id).value || '(not set)' }}</span>
-            <button
-              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
-              title="Edit"
-              @click="startEdit(searchApiKeyEntry(id))"
-            >
-              <PencilIcon
-                class="w-3.5 h-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </template>
+          <SecretField
+            v-model="editValue"
+            :saved="!!searchApiKey(id)"
+            :editing="editingKey === `search.${id}.apiKey`"
+            :label="`${SEARCH_PROVIDERS[id]!.label} API key`"
+            :placeholder="SEARCH_PROVIDERS[id]!.apiKeyPlaceholder"
+            removable
+            @edit="editingKey = `search.${id}.apiKey`"
+            @save="updateEntry(`search.${id}.apiKey`)"
+            @cancel="editingKey = null"
+            @remove="editValue = ''; updateEntry(`search.${id}.apiKey`)"
+          />
         </div>
         <!-- baseUrl -->
         <div class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3">
