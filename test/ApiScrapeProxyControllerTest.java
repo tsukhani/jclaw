@@ -10,6 +10,7 @@ import play.test.FunctionalTest;
 import tools.scrape.ScrapeProxyCheck;
 import tools.scrape.WebScrapeSettings;
 
+import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.function.Supplier;
@@ -98,6 +99,10 @@ class ApiScrapeProxyControllerTest extends FunctionalTest {
         assertTrue(result.get("ok").getAsBoolean(), result.toString());
         assertEquals("203.0.113.7", result.get("ip").getAsString());
         assertTrue(result.get("ms").getAsLong() >= 0, result.toString());
+        var host = result.getAsJsonObject("proxy");
+        assertEquals("127.0.0.1", host.get("host").getAsString());
+        assertEquals("127.0.0.1", host.get("address").getAsString());
+        assertTrue(host.get("reverseName").isJsonNull(), result.toString());
         // An absolute request target is what a client sends only to a proxy.
         assertEquals(ECHO, proxy.takeRequest().getTarget());
     }
@@ -138,6 +143,38 @@ class ApiScrapeProxyControllerTest extends FunctionalTest {
     }
 
     @Test
+    void aNamedProxyThatDoesNotAnswerSaysWhereItsNameResolved() throws Exception {
+        String closed;
+        try (var gone = new MockWebServer()) {
+            gone.start();
+            closed = "http://localhost:" + gone.getPort();
+        }
+        login();
+
+        var result = withSavedProxy(closed, "true", "", "", this::testConnection);
+
+        assertFalse(result.get("ok").getAsBoolean(), result.toString());
+        var host = result.getAsJsonObject("proxy");
+        assertEquals("localhost", host.get("host").getAsString());
+        assertTrue(InetAddress.ofLiteral(host.get("address").getAsString()).isLoopbackAddress(), result.toString());
+        assertTrue(host.get("reverseName").getAsString().contains("localhost"), result.toString());
+    }
+
+    @Test
+    void aProxyNameThatDoesNotResolveHasNoAddress() {
+        login();
+
+        var result = withSavedProxy("http://no-such-proxy.invalid:8080", "true", "", "", this::testConnection);
+
+        assertFalse(result.get("ok").getAsBoolean(), result.toString());
+        assertTrue(result.get("error").getAsString().startsWith("Nothing answered through the proxy"), result.toString());
+        var host = result.getAsJsonObject("proxy");
+        assertEquals("no-such-proxy.invalid", host.get("host").getAsString());
+        assertTrue(host.get("address").isJsonNull(), result.toString());
+        assertTrue(host.get("reverseName").isJsonNull(), result.toString());
+    }
+
+    @Test
     void anEchoThatIsNotAnAddressIsNotReportedAsTheEgressIp() {
         proxy.enqueue(new MockResponse.Builder().code(200).body("deadbeef").build());
         login();
@@ -173,6 +210,7 @@ class ApiScrapeProxyControllerTest extends FunctionalTest {
 
         assertFalse(result.get("ok").getAsBoolean(), result.toString());
         assertTrue(result.get("error").getAsString().contains("No proxy configured"), result.toString());
+        assertTrue(result.get("proxy").isJsonNull(), result.toString());
         assertEquals(0, proxy.getRequestCount());
     }
 

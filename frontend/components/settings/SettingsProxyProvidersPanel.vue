@@ -126,6 +126,7 @@ interface ProxyTestResult {
   status?: number | null
   reason?: string | null
   error?: string | null
+  proxy?: { host: string, address?: string | null, reverseName?: string | null } | null
 }
 
 const testRun = useSaveAttempt()
@@ -133,6 +134,11 @@ const testError = testRun.saveError
 const testing = ref(false)
 const testResult = ref<ProxyTestResult | null>(null)
 const canTest = computed(() => storedUrl.value !== '' && enabled.value)
+// A literal host is its own address, so only a name has a resolution worth showing.
+const resolution = computed(() => {
+  const proxy = testResult.value?.proxy
+  return proxy && proxy.address !== proxy.host ? proxy : null
+})
 
 async function testConnection() {
   testing.value = true
@@ -225,8 +231,8 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
               class="w-3 h-3"
               aria-hidden="true"
             /></a>.
-            JClaw connects to <span class="font-mono">{{ DATAIMPULSE.host }}</span> over HTTP, which every
-            fetch can use, and puts the country and session in the login as DataImpulse expects.
+            JClaw connects to DataImpulse's gateway over HTTP, which every fetch can use, and puts the
+            country and session in the login as DataImpulse expects.
           </p>
           <div class="px-4 py-2 space-y-1">
             <label
@@ -377,6 +383,52 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
               class="text-xs text-danger sm:ml-51"
             >
               {{ errors.sessionMinutes }}
+            </p>
+          </div>
+          <div
+            role="radiogroup"
+            aria-labelledby="proxy-dataimpulse-gateway-label"
+            class="px-4 py-2 space-y-1"
+          >
+            <div class="flex max-sm:flex-wrap items-center gap-3">
+              <span
+                id="proxy-dataimpulse-gateway-label"
+                :class="FIELD_LABEL"
+              >gateway</span>
+              <div class="flex-1 min-w-0 flex flex-wrap gap-x-4 gap-y-1">
+                <label
+                  for="proxy-dataimpulse-gateway-hostname"
+                  class="flex items-center gap-2 text-sm text-fg-primary cursor-pointer"
+                >
+                  <input
+                    id="proxy-dataimpulse-gateway-hostname"
+                    v-model="dataimpulse.gateway"
+                    type="radio"
+                    name="proxy-dataimpulse-gateway"
+                    value="hostname"
+                    class="accent-emerald-600"
+                  >
+                  <span class="font-mono">{{ DATAIMPULSE.host }}</span>
+                </label>
+                <label
+                  for="proxy-dataimpulse-gateway-ip"
+                  class="flex items-center gap-2 text-sm text-fg-primary cursor-pointer"
+                >
+                  <input
+                    id="proxy-dataimpulse-gateway-ip"
+                    v-model="dataimpulse.gateway"
+                    type="radio"
+                    name="proxy-dataimpulse-gateway"
+                    value="ip"
+                    class="accent-emerald-600"
+                  >
+                  <span class="font-mono">{{ DATAIMPULSE.ipHost }}</span>
+                </label>
+              </div>
+            </div>
+            <p class="text-xs text-fg-muted sm:ml-51">
+              The same gateway either way. DataImpulse recommends the name, and publishes the address for
+              networks whose DNS blocks it; the address may change.
             </p>
           </div>
           <p
@@ -583,6 +635,20 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
             v-else-if="testResult"
             class="text-danger"
           >{{ testResult.error }}</span>
+          <p
+            v-if="resolution"
+            class="mt-1 text-xs text-fg-muted"
+            data-testid="proxy-test-resolution"
+          >
+            <span class="font-mono">{{ resolution.host }}</span>
+            <template v-if="resolution.address">
+              resolved to <span class="font-mono">{{ resolution.address }}</span> <span v-if="resolution.reverseName">(<span class="font-mono">{{ resolution.reverseName }}</span>)</span>
+              on this machine.
+            </template>
+            <template v-else>
+              did not resolve on this machine.
+            </template>
+          </p>
         </div>
         <ApiErrorAlert :error="testError" />
       </div>

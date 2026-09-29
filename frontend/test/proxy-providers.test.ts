@@ -46,6 +46,12 @@ describe('composeDataImpulse', () => {
     expect(composeDataImpulse(dataImpulse({ login: 'abc', rotation: 'sticky', stickyPort: 9000 })).url)
       .toBe('http://gw.dataimpulse.com:10000')
   })
+
+  it('connects to the IP gateway on the same ports when it is chosen', () => {
+    expect(composeDataImpulse(dataImpulse({ login: 'abc', gateway: 'ip' })).url).toBe('http://74.81.81.81:823')
+    expect(composeDataImpulse(dataImpulse({ login: 'abc', gateway: 'ip', rotation: 'sticky', stickyPort: 12345 })).url)
+      .toBe('http://74.81.81.81:12345')
+  })
 })
 
 describe('parseProxy', () => {
@@ -63,6 +69,13 @@ describe('parseProxy', () => {
 
   it('recognizes the gateway whatever the host\'s case', () => {
     expect(parseProxy('http://GW.DataImpulse.com:823/', 'abc').provider).toBe('dataimpulse')
+  })
+
+  it('reads a config on the IP gateway back into the DataImpulse card', () => {
+    const parsed = parseProxy('http://74.81.81.81:823', 'abc__cr.de')
+    expect(parsed.provider).toBe('dataimpulse')
+    expect(parsed.dataimpulse).toMatchObject({ gateway: 'ip', login: 'abc', countries: 'de', rotation: 'rotating' })
+    expect(parseProxy('http://gw.dataimpulse.com:823', 'abc').dataimpulse.gateway).toBe('hostname')
   })
 
   it('shows any other proxy in the Manual card with its raw fields', () => {
@@ -96,6 +109,7 @@ describe('parse and compose round-trip', () => {
     ['http://gw.dataimpulse.com:823', 'abc__cr.us;anon.1'],
     // A session length on the rotating port is kept as it is, not dropped as an unused field.
     ['http://gw.dataimpulse.com:823', 'abc__cr.us;sessttl.45'],
+    ['http://74.81.81.81:10000', 'abc__cr.us;sessttl.45'],
   ]
   for (const [url, username] of stored) {
     it(`${url} ${username}`, () => {
@@ -216,6 +230,16 @@ describe('planProxyWrites', () => {
       { field: 'username', value: 'scraper' },
     ])
     expect(keepsStoredPassword('http://proxy.example:3128', stored)).toBe(false)
+  })
+
+  it('treats a switch between the gateway\'s name and its address as another host', () => {
+    const stored = { url: 'http://gw.dataimpulse.com:823', username: 'abc', hasPassword: true, enabled: true }
+    expect(planProxyWrites({ url: 'http://74.81.81.81:823', username: 'abc' }, '', stored)).toEqual([
+      { field: 'username', value: '' },
+      { field: 'password', value: '' },
+      { field: 'url', value: 'http://74.81.81.81:823' },
+      { field: 'username', value: 'abc' },
+    ])
   })
 
   it('writes the password as typed', () => {

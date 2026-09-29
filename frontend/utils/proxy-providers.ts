@@ -8,6 +8,7 @@
 
 export type ProxyProviderId = 'none' | 'dataimpulse' | 'manual'
 export type ProxyRotation = 'rotating' | 'sticky'
+export type DataImpulseGateway = 'hostname' | 'ip'
 
 /** The stored keys a save writes, named by their suffix under web_scrape.proxy. */
 export type ProxyField = 'url' | 'username' | 'password' | 'enabled'
@@ -15,6 +16,8 @@ export type ProxyField = 'url' | 'username' | 'password' | 'enabled'
 // HTTP only: ScrapeProxy refuses credentials on socks5, and an HTTP proxy serves all three rungs.
 export const DATAIMPULSE = {
   host: 'gw.dataimpulse.com',
+  // DataImpulse's Connection Hosts page offers it for networks that cannot use the hostname, and warns it may change.
+  ipHost: '74.81.81.81',
   rotatingPort: 823,
   stickyPortMin: 10000,
   stickyPortMax: 20000,
@@ -25,6 +28,7 @@ export const DATAIMPULSE = {
 } as const
 
 export interface DataImpulseFields {
+  gateway: DataImpulseGateway
   login: string
   /** Comma-separated two-letter country codes; empty targets any country. */
   countries: string
@@ -63,15 +67,19 @@ const COUNTRY_PARAM = 'cr.'
 const SESSION_PARAM = 'sessttl.'
 
 export function emptyDataImpulse(): DataImpulseFields {
-  return { login: '', countries: '', rotation: 'rotating', sessionMinutes: '', stickyPort: DATAIMPULSE.stickyPortMin, extraParams: [] }
+  return { gateway: 'hostname', login: '', countries: '', rotation: 'rotating', sessionMinutes: '', stickyPort: DATAIMPULSE.stickyPortMin, extraParams: [] }
 }
 
 function isStickyPort(port: number): boolean {
   return Number.isInteger(port) && port >= DATAIMPULSE.stickyPortMin && port <= DATAIMPULSE.stickyPortMax
 }
 
-/** The port of a URL the DataImpulse card can show, or null when the Manual card must. */
-function dataImpulsePort(url: string): number | null {
+function gatewayHost(gateway: DataImpulseGateway): string {
+  return gateway === 'ip' ? DATAIMPULSE.ipHost : DATAIMPULSE.host
+}
+
+/** The gateway and port of a URL the DataImpulse card can show, or null when the Manual card must. */
+function dataImpulseEndpoint(url: string): { gateway: DataImpulseGateway, port: number } | null {
   let parsed: URL
   try {
     parsed = new URL(url)
@@ -79,10 +87,12 @@ function dataImpulsePort(url: string): number | null {
   catch {
     return null
   }
-  if (parsed.protocol !== 'http:' || parsed.hostname.toLowerCase() !== DATAIMPULSE.host) return null
+  const host = parsed.hostname.toLowerCase()
+  const gateway = host === DATAIMPULSE.host ? 'hostname' : host === DATAIMPULSE.ipHost ? 'ip' : null
+  if (parsed.protocol !== 'http:' || gateway === null) return null
   if (parsed.username || parsed.password || parsed.search || !['', '/'].includes(parsed.pathname)) return null
   const port = Number(parsed.port)
-  return port === DATAIMPULSE.rotatingPort || isStickyPort(port) ? port : null
+  return port === DATAIMPULSE.rotatingPort || isStickyPort(port) ? { gateway, port } : null
 }
 
 // A session length means nothing on the rotating port, so there it stays an unmodeled parameter.
@@ -112,14 +122,15 @@ function parseDataImpulseUsername(username: string, sticky: boolean): Pick<DataI
 export function parseProxy(url: string, username: string): ParsedProxy {
   const storedUrl = url.trim()
   const manual = { url: storedUrl, username: username.trim() }
-  const port = storedUrl ? dataImpulsePort(storedUrl) : null
-  if (storedUrl && port === null) return { provider: 'manual', dataimpulse: emptyDataImpulse(), manual }
+  const endpoint = storedUrl ? dataImpulseEndpoint(storedUrl) : null
+  if (storedUrl && endpoint === null) return { provider: 'manual', dataimpulse: emptyDataImpulse(), manual }
   // With no URL the credentials stay stored but unused, so either card may take them back up.
-  const sticky = port !== null && port !== DATAIMPULSE.rotatingPort
+  const sticky = endpoint !== null && endpoint.port !== DATAIMPULSE.rotatingPort
   const dataimpulse: DataImpulseFields = {
     ...parseDataImpulseUsername(username, sticky),
+    gateway: endpoint?.gateway ?? 'hostname',
     rotation: sticky ? 'sticky' : 'rotating',
-    stickyPort: sticky ? port : DATAIMPULSE.stickyPortMin,
+    stickyPort: sticky ? endpoint.port : DATAIMPULSE.stickyPortMin,
   }
   return { provider: storedUrl ? 'dataimpulse' : 'none', dataimpulse, manual }
 }
@@ -140,7 +151,7 @@ export function composeDataImpulse(fields: DataImpulseFields): { url: string, us
   params.push(...fields.extraParams.filter(p => !(minutes && p.startsWith(SESSION_PARAM))))
   const login = fields.login.trim()
   return {
-    url: `http://${DATAIMPULSE.host}:${port}`,
+    url: `http://${gatewayHost(fields.gateway)}:${port}`,
     username: params.length ? login + PARAMS_SEPARATOR + params.join(';') : login,
   }
 }

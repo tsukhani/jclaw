@@ -414,6 +414,64 @@ describe('Settings page — Proxy Providers', () => {
     expect(component.find('[data-testid="proxy-test-result"]').text()).toBe('Nothing answered through the proxy: timeout')
   })
 
+  it('says where the proxy\'s name resolved, so a filtering resolver\'s block page is recognizable', async () => {
+    stored.set(URL_KEY, 'http://gw.dataimpulse.com:823')
+    stored.set(USERNAME_KEY, 'abc')
+    endpoints({ test: {
+      ok: false, ip: null, ms: 30000, status: null, reason: null, error: 'Nothing answered through the proxy: timeout',
+      proxy: { host: 'gw.dataimpulse.com', address: '146.112.61.106', reverseName: 'hit-adult.opendns.com' },
+    } })
+    const component = await mountPanel()
+
+    await component.find('[data-testid="proxy-test"]').trigger('click')
+    await flushPromises()
+
+    expect(component.find('[data-testid="proxy-test-resolution"]').text().replace(/\s+/g, ' '))
+      .toBe('gw.dataimpulse.com resolved to 146.112.61.106 (hit-adult.opendns.com) on this machine.')
+  })
+
+  it('says when the proxy\'s name did not resolve, and nothing for an address', async () => {
+    stored.set(URL_KEY, 'http://proxy.example:3128')
+    endpoints({ test: {
+      ok: false, ip: null, ms: 5, status: null, reason: null, error: 'Nothing answered through the proxy: proxy.example',
+      proxy: { host: 'proxy.example', address: null, reverseName: null },
+    } })
+    const component = await mountPanel()
+
+    await component.find('[data-testid="proxy-test"]').trigger('click')
+    await flushPromises()
+
+    expect(component.find('[data-testid="proxy-test-resolution"]').text().replace(/\s+/g, ' '))
+      .toBe('proxy.example did not resolve on this machine.')
+
+    stored.set(URL_KEY, 'http://74.81.81.81:823')
+    endpoints({ test: { ok: true, ip: '203.0.113.7', ms: 400, status: 200, reason: 'OK', error: null,
+      proxy: { host: '74.81.81.81', address: '74.81.81.81', reverseName: null } } })
+    const literal = await mountPanel()
+    await literal.find('[data-testid="proxy-test"]').trigger('click')
+    await flushPromises()
+
+    expect(literal.find('[data-testid="proxy-test-result"]').text()).toContain('203.0.113.7')
+    expect(literal.find('[data-testid="proxy-test-resolution"]').exists()).toBe(false)
+  })
+
+  it('reads a proxy on DataImpulse\'s IP gateway into its card, and saves the gateway chosen', async () => {
+    stored.set(URL_KEY, 'http://74.81.81.81:823')
+    stored.set(USERNAME_KEY, 'abc')
+    endpoints()
+    const component = await mountPanel()
+
+    expect((component.find('#proxy-provider-dataimpulse').element as HTMLInputElement).checked).toBe(true)
+    expect((component.find('#proxy-dataimpulse-gateway-ip').element as HTMLInputElement).checked).toBe(true)
+
+    await component.find('#proxy-dataimpulse-gateway-hostname').setValue(true)
+    await component.find('#proxy-dataimpulse-password').setValue('pw')
+    await save(component)
+
+    expect(posted).toContainEqual({ key: URL_KEY, value: 'http://gw.dataimpulse.com:823' })
+    expect(posted.at(-1)).toEqual({ key: PASSWORD_KEY, value: 'pw' })
+  })
+
   it('shows only the error when the echo answered 2xx with something other than an address', async () => {
     stored.set(URL_KEY, 'http://proxy.example:3128')
     endpoints({ test: { ok: false, ip: null, ms: 80, status: 200, reason: 'OK', error: 'The IP echo answered with something that is not an address.' } })

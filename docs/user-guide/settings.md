@@ -363,7 +363,7 @@ The proxy that `web_fetch` and `web_scrape` send their requests through. It cove
 - **DataImpulse** fills in DataImpulse's gateway and login syntax from a few fields.
 - **Manual** takes any proxy's address and credentials as they are.
 
-The card marked **saved** is the one in effect. Whichever card you use, only the `web_scrape.proxy.*` keys below are stored: a card writes the URL, username and password from its fields and reads them back when the page opens, and the **enabled** switch below the cards is the fourth. Saving a proxy also switches it on. A saved password stays with the host it was saved for: left blank, it is kept while the host stays the same, and saving a different host clears the stored username and password before the new URL is written, so a password never reaches another proxy. A proxy is shown in the DataImpulse card when its address is `http://gw.dataimpulse.com` on port 823 or on a sticky port from 10000 to 20000; any other address opens in Manual.
+The card marked **saved** is the one in effect. Whichever card you use, only the `web_scrape.proxy.*` keys below are stored: a card writes the URL, username and password from its fields and reads them back when the page opens, and the **enabled** switch below the cards is the fourth. Saving a proxy also switches it on. A saved password stays with the host it was saved for: left blank, it is kept while the host stays the same, and saving a different host clears the stored username and password before the new URL is written, so a password never reaches another proxy. A proxy is shown in the DataImpulse card when its address is `http://gw.dataimpulse.com` or `http://74.81.81.81` on port 823 or on a sticky port from 10000 to 20000; any other address opens in Manual.
 
 **DataImpulse**
 
@@ -376,6 +376,7 @@ Your login and password are under **Proxy Access** in the [DataImpulse dashboard
 | country           | Two-letter country codes, separated by commas: `de`, or `de,au`. Empty uses any country. |
 | rotation          | **Rotating** gives a new IP address for every request, on port 823. **Sticky** keeps one address for a session, on port 10000. |
 | session minutes   | Sticky only: how long one address is kept, 1 to 120. Empty uses DataImpulse's default of 30. |
+| gateway           | Where JClaw connects: `gw.dataimpulse.com`, which DataImpulse recommends, or `74.81.81.81`, the same gateway by its address, for a network whose DNS blocks the name. DataImpulse says the address may change. Switching between them counts as another host, so the password must be entered again. |
 
 The card shows what it will save. Sticky, in the United States, for 45 minutes, for example, saves `http://gw.dataimpulse.com:10000` with the username `LOGIN__cr.us;sessttl.45`. It always connects over HTTP, which every kind of fetch can use: DataImpulse needs your login, and a `socks5://` proxy is used without credentials. A parameter added to the username by hand that the card does not show is kept when you save. DataImpulse's state, city, ZIP and ASN targeting cost extra, so the card does not offer them.
 
@@ -398,7 +399,7 @@ Behind a proxy, JClaw still checks every address before a request leaves, and re
 
 **Test connection**
 
-**Test connection** sends one request through the saved proxy to `http://api.ipify.org/` and shows the address it arrived from and how long it took. When the request is refused, the panel shows the status and reason it got, such as DataImpulse's `407 TRAFFIC_EXHAUSTED`, rather than a general failure. The request is plain `http` so that an `http://` proxy relays it itself and its answer reaches the panel. That also means a passing test does not show that the proxy allows `CONNECT`, which `https` pages and rendered pages need, to port 443 at least. It tests what is saved, not what is typed, and it is unavailable until a proxy is saved and switched on; with none, nothing is sent. Each test uses a little of a paid plan's traffic, and agents cannot run it.
+**Test connection** sends one request through the saved proxy to `http://api.ipify.org/` and shows the address it arrived from and how long it took. When the request is refused, the panel shows the status and reason it got, such as DataImpulse's `407 TRAFFIC_EXHAUSTED`, rather than a general failure. The request is plain `http` so that an `http://` proxy relays it itself and its answer reaches the panel. That also means a passing test does not show that the proxy allows `CONNECT`, which `https` pages and rendered pages need, to port 443 at least. When the proxy is saved by name, the result also says what the name resolved to on this machine, and after a failure the name that address belongs to: a filtering DNS service that blocks the proxy's domain shows up as its own block page, such as `hit-adult.opendns.com`. It tests what is saved, not what is typed, and it is unavailable until a proxy is saved and switched on; with none, nothing is sent. Each test uses a little of a paid plan's traffic, and agents cannot run it.
 
 ## Transcription
 
