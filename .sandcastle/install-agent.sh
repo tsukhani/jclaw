@@ -8,17 +8,34 @@ PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 FACTORY_HOME="${FACTORY_HOME:-$HOME/.jclaw-factory}"
 
-launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 if [[ "${1:-}" == "--remove" ]]; then
+    launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
     rm -f "$PLIST"
     echo "removed $LABEL"
     exit 0
 fi
 
+fail() { echo "install-agent: $*" >&2; exit 1; }
+[[ "$(uname)" == Darwin ]] || fail "LaunchAgents are macOS only"
+command -v node >/dev/null || fail "node is not on PATH (Node 24 or newer)"
+node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)' || fail "Node 24 or newer is required, found $(node --version)"
+command -v docker >/dev/null || fail "docker is not on PATH: install Docker Desktop"
+docker info >/dev/null 2>&1 || fail "Docker is not running: start Docker Desktop"
+mkdir -p "$FACTORY_HOME/logs" "$(dirname "$PLIST")"
+chmod 700 "$FACTORY_HOME"
+[[ -f "$FACTORY_HOME/.env" ]] || fail "missing $FACTORY_HOME/.env: the model credential, CLAUDE_CODE_OAUTH_TOKEN=… (from \`claude setup-token\`) or ANTHROPIC_API_KEY=…"
+if [[ ! -f "$FACTORY_HOME/jira.env" ]] && ! grep -q '"jira-confluence"' "$HOME/.claude.json" 2>/dev/null; then
+    fail "missing $FACTORY_HOME/jira.env: JIRA_URL=… and JIRA_PERSONAL_TOKEN=… (a Jira personal access token)"
+fi
+chmod 600 "$FACTORY_HOME/.env" "$FACTORY_HOME"/jira.env 2>/dev/null || true
+if ! docker image inspect jclaw-devcontainer:local >/dev/null 2>&1; then
+    echo "building the sandbox image jclaw-devcontainer:local (several minutes, once)"
+    docker build -f "$HERE/../.devcontainer/Dockerfile" -t jclaw-devcontainer:local "$HERE/.."
+fi
+
 NODE_DIR="$(dirname "$(command -v node)")"
 DOCKER_DIR="$(dirname "$(command -v docker)")"
 [[ -x "$HERE/node_modules/.bin/tsx" ]] || (cd "$HERE" && npm ci --no-audit --no-fund)
-mkdir -p "$FACTORY_HOME/logs" "$(dirname "$PLIST")"
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -42,5 +59,7 @@ cat > "$PLIST" <<PLIST
 </plist>
 PLIST
 plutil -lint "$PLIST" >/dev/null
+# Replacing a running agent interrupts its stories; the new one resumes them.
+launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
 launchctl bootstrap "$DOMAIN" "$PLIST"
 echo "installed $LABEL; log: $FACTORY_HOME/logs/factory.log"

@@ -1,6 +1,7 @@
 // The factory's sandbox: agent containers on an internal network whose only exit is the gateway,
 // which allowlists egress and holds the model credential. See gateway/gateway.mjs.
 import * as fs from "node:fs";
+import * as os from "node:os";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
@@ -72,11 +73,15 @@ export const ensureGateway = () => {
 // out; each sandbox keeps a private one and reads dependencies from here through GRADLE_RO_DEP_CACHE.
 const GRADLE_SEED = `${FACTORY_HOME}/gradle-seed`;
 export const ensureGradleSeed = () => {
-  if (!fs.existsSync(`${GRADLE_SEED}/caches/modules-2`)) {
+  if (!fs.existsSync(`${GRADLE_SEED}/caches`)) {
     fs.mkdirSync(`${GRADLE_SEED}/caches`, { recursive: true });
     fs.mkdirSync(`${GRADLE_SEED}/wrapper`, { recursive: true });
-    execFileSync("cp", ["-a", `${FACTORY_HOME}/gradle-home/caches/modules-2`, `${GRADLE_SEED}/caches/`]);
-    execFileSync("cp", ["-a", `${FACTORY_HOME}/gradle-home/wrapper/dists`, `${GRADLE_SEED}/wrapper/`]);
+    // A developer who builds JClaw already holds its dependencies; without them each sandbox downloads its own.
+    const source = [`${FACTORY_HOME}/gradle-home`, `${os.homedir()}/.gradle`].find((d) => fs.existsSync(`${d}/caches/modules-2`));
+    if (source) {
+      execFileSync("cp", ["-a", `${source}/caches/modules-2`, `${GRADLE_SEED}/caches/`]);
+      if (fs.existsSync(`${source}/wrapper/dists`)) execFileSync("cp", ["-a", `${source}/wrapper/dists`, `${GRADLE_SEED}/wrapper/`]);
+    }
     // Gradle refuses a read-only cache that still carries lock or GC state.
     execFileSync("find", [GRADLE_SEED, "(", "-name", "*.lock", "-o", "-name", "gc.properties", ")", "-delete"]);
   }

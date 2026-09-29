@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { z } from "zod";
 import { assertReady, ensureGradleSeed, factoryHooks, factorySandbox, gatewayUp, planHooks } from "./factory.ts";
-import { FACTORY_HEADER, addLabel, comment, inReview, intake, orphaned, promptContext, rejectionFeedback, removeLabel, snapshotToState, transitionTo, type Snapshot } from "./jira.ts";
+import { FACTORY_HEADER, addLabel, claim, comment, inReview, intake, orphaned, promptContext, rejectionFeedback, removeLabel, snapshotToState, transitionTo, type Snapshot } from "./jira.ts";
 import { pickNonOverlapping } from "./plan.ts";
 import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, STATE } from "./paths.ts";
 
@@ -61,6 +61,7 @@ const processStory = async (picked: Snapshot): Promise<void> => {
     try {
       git("rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
     } catch {
+      if (feedback !== undefined) throw new Error(`${branch} is not on this machine, so another developer's harness built it: assign the story to them`);
       git("branch", branch, "main");
     }
     const alreadyAhead = Number(git("rev-list", "--count", `main..${branch}`));
@@ -178,7 +179,7 @@ const processStory = async (picked: Snapshot): Promise<void> => {
 
   // The Jira comment carries the harness's own facts beside the agent's brief: the agent cannot see the gates.
   const reviewComment = (brief: Brief | undefined) => {
-    const lines = [`${FACTORY_HEADER}: ready for review`, `Local branch {{${branch}}} in the main checkout, not pushed: merge it into main to ship it with /deploy. Model: ${MODEL}.`];
+    const lines = [`${FACTORY_HEADER}: ready for review`, `Local branch {{${branch}}} in the checkout of this comment's author, not pushed: merge it into main to ship it with /deploy. Model: ${MODEL}.`];
     if (feedback !== undefined) lines.push("Reworked after your review.");
     lines.push("");
     if (brief) {
@@ -197,6 +198,10 @@ const processStory = async (picked: Snapshot): Promise<void> => {
     return lines.join("\n");
   };
 
+  if (!(await claim(key))) {
+    console.log(`[${key}] claimed by another harness; leaving it`);
+    return;
+  }
   await transitionTo(key, "In Progress");
   await addLabel(key, "afk-running");
   try {
@@ -322,7 +327,7 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   for (const d of deferred) note(d.key, `[plan] ${d.key} waits: ${d.reason}`);
   const starting = picked.slice(0, free);
   if (starting.length === 0) return [];
-  console.log(`[plan] starting ${starting.map((s) => s.key).join(", ")} from main at ${gitIn(REPO, "rev-parse", "--short", "main")}`);
+  console.log(`[plan] starting ${starting.map((s) => s.key).join(", ")}; main is at ${gitIn(REPO, "rev-parse", "--short", "main")}`);
   if (process.env.FACTORY_PLAN_ONLY) return [];
   return starting.map((s) => {
     running.set(s.key, files.get(s.key));

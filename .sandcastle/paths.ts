@@ -10,3 +10,4 @@ export const CLONE = path.join(FACTORY_HOME, "jclaw");
 export const LOGS = path.join(FACTORY_HOME, "logs");
 export const STATE = path.join(FACTORY_HOME, "state");
 export const ENV_FILE = path.join(FACTORY_HOME, ".env");
+export const JIRA_ENV_FILE = path.join(FACTORY_HOME, "jira.env");

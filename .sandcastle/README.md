@@ -21,20 +21,38 @@ Sandboxes use the devcontainer image and sit on the `jclaw-factory` Docker netwo
 exit is the gateway container (`gateway/gateway.mjs`, a distroless Node image). It forwards model calls, injecting the
 credential so that no sandbox ever holds it, and proxies HTTPS to the hosts in `gateway/egress-allowlist.txt`.
 
-## Setup
+## Setup on a Mac
 
-1. Build the sandbox image: `docker build -f .devcontainer/Dockerfile -t jclaw-devcontainer:local .` (from the repo root).
-2. Put the model credential in `~/.jclaw-factory/.env` as `CLAUDE_CODE_OAUTH_TOKEN=…` (from `claude setup-token`) or
-   `ANTHROPIC_API_KEY=…`, then run `chmod 600` on it.
-3. Run `./install-agent.sh`. It installs dependencies and a LaunchAgent that starts the harness at login and restarts it
-   if it exits. On first start the harness clones this checkout into `~/.jclaw-factory/jclaw` and creates the gateway.
+Prerequisites: Docker Desktop running, Node 24 or newer, a JClaw checkout, and a Jira personal access token.
+
+1. Create `~/.jclaw-factory/.env` holding the model credential: `CLAUDE_CODE_OAUTH_TOKEN=…` (from `claude setup-token`) or
+   `ANTHROPIC_API_KEY=…`.
+2. Create `~/.jclaw-factory/jira.env` holding `JIRA_URL=…` and `JIRA_PERSONAL_TOKEN=…`. It is optional if your Claude Code
+   config already has the `jira-confluence` MCP server. The Jira token stays out of `.env` because the gateway loads
+   that file, so no container ever holds it.
+3. Run `.sandcastle/install-agent.sh`. It checks the prerequisites, builds the sandbox image `jclaw-devcontainer:local`
+   if it is missing (several minutes, once), installs dependencies, and loads the LaunchAgent `com.jclaw.factory`. The
+   agent starts the harness at login and restarts it if it exits.
+
+On first start the harness clones your checkout into `~/.jclaw-factory/jclaw`, creates the gateway, and seeds the
+sandboxes' Gradle cache from `~/.gradle`. Without that cache, each sandbox downloads its dependencies through the
+gateway. Re-run the installer after moving the checkout or changing your Node install, because the agent records both
+paths.
+
+## Several developers
+
+Each developer's harness takes unassigned `afk` stories and its own. It claims a story by assigning it to its Jira user,
+because every JCLAW transition is global, so moving a story locks nothing. The claim is best effort: it re-reads the
+assignment two seconds later before moving the story to In Progress. A story's branch lives only on the machine that
+built it, so a rejected story stays assigned to that developer and only their harness reworks it. Another harness that
+picks it up blocks it with a note saying so. Run one harness per Jira user.
 
 ## Operating
 
 - **Watch:** `tail -f ~/.jclaw-factory/logs/factory.log`. Each story's phases are logged under `~/.jclaw-factory/logs/<KEY>-*`.
 - **Pause:** `docker stop jclaw-factory-gateway`. No new stories start, and stories already running fail. Resume with
   `docker start jclaw-factory-gateway`. The harness never restarts a gateway you stopped.
-- **Stop the harness:** `./install-agent.sh --remove`. Stories it was running are interrupted: they carry the
+- **Stop the harness:** `.sandcastle/install-agent.sh --remove`. Stories it was running are interrupted: they carry the
   `afk-running` label, and the next start moves them back to To Do and resumes them from their branch.
 - **Review:** merge `agent/<KEY>` into `main`. Mark the story Done only once it is merged, because Done is what lets the
   stories it blocks start.
