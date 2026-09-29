@@ -24,7 +24,14 @@ the credential from `~/.jclaw-factory/.env`, mounted read-only, not from its env
 the container's config for `docker inspect` to show.
 The gateway reaches the internet through its own network, `jclaw-factory-egress`, which no other container joins. On
 Docker's default bridge, any container could reach the gateway's ports and have your credential attached to its model
-calls. `gateway-check.ts` checks this from a container on the default bridge.
+calls. `gateway-check.ts` checks this from a container on the default bridge. The gateway forwards model calls only
+(`POST /v1/messages` and `count_tokens`); every other Anthropic endpoint is refused.
+
+Inside a sandbox, the clone's `.git` is read-only apart from what a commit writes: objects, the `agent/` branches and
+the sandbox's own worktree directory. Git on the Mac honours `.git`'s hooks, config and attributes whenever Sandcastle
+or the harness runs it in the clone, so a sandbox that could write them could run code outside Docker. As a second
+guard, git on the Mac runs with hooks and fsmonitor switched off. Each sandbox is capped at 6 GB of memory and 8192
+processes.
 
 ## Setup on a Mac
 
@@ -59,8 +66,10 @@ picks it up blocks it with a note saying so. Run one harness per Jira user.
   `docker start jclaw-factory-gateway`. The harness never restarts a gateway you stopped.
 - **Stop the harness:** `.sandcastle/install-agent.sh --remove`. Stories it was running are interrupted: they carry the
   `afk-running` label, and the next start moves them back to To Do and resumes them from their branch.
-- **Review:** merge `agent/<KEY>` into `main`. Mark the story Done only once it is merged, because Done is what lets the
-  stories it blocks start.
+- **Review:** merge `agent/<KEY>` into `main`. When a branch changes files that run on your Mac once merged (git
+  hooks, build, install and CI scripts, package manifests, this harness, `AGENTS.md` or `CLAUDE.md`), the review
+  comment lists them under "(!) Runs on your Mac once merged": read those line by line. Mark the story Done only once it
+  is merged, because Done is what lets the stories it blocks start.
 - **Reject:** move the story back to To Do with a comment saying what to change. The next round reworks it on the same
   branch. The general rule behind your comment goes into `~/.jclaw-factory/lessons.md`, which every prompt includes;
   promote a lesson into `AGENTS.md`, or delete it there.
@@ -83,4 +92,5 @@ review or a story already running.
 ## Checks
 
 - `npm run check`: typecheck plus the offline logic checks.
-- `npx tsx gateway-check.ts`: live lockdown check. It spends one small model call.
+- `npx tsx gateway-check.ts`: live check of the gateway and egress. It spends one small model call.
+- `npx tsx sandbox-check.ts`: live check of a sandbox's `.git` lockdown and limits, and of hook-free git on the Mac.
