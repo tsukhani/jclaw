@@ -4,12 +4,19 @@
 // Local only: branches are never pushed, and the agent never touches Jira.
 import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
+import { format } from "node:util";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { z } from "zod";
 import { assertReady, ensureGradleSeed, ensureImage, factoryHooks, factorySandbox, gatewayUp, planHooks } from "./factory.ts";
 import { FACTORY_HEADER, addLabel, claim, comment, inReview, intake, orphaned, promptContext, rejectionFeedback, removeLabel, snapshotToState, transitionTo, type Snapshot } from "./jira.ts";
 import { pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, STATE } from "./paths.ts";
+
+// Sandcastle's lines too: one log spans every launchd restart. Local time, to read beside `pmset -g log`.
+for (const level of ["log", "error", "warn"] as const) {
+  const write = console[level].bind(console);
+  console[level] = (...args: unknown[]) => write(`${new Date().toLocaleString("sv-SE")} ${format(...args)}`);
+}
 
 const REPO = CLONE;
 const MODEL = process.env.FACTORY_MODEL ?? "claude-opus-5-5";
@@ -242,6 +249,14 @@ const note = (topic: string, message: string) => {
   if (lastSaid.get(topic) !== message) console.log(message);
   lastSaid.set(topic, message);
 };
+// fetch rejects with a bare "fetch failed"; the reason (ENOTFOUND, ECONNRESET, a connect timeout) is on its cause.
+const errorText = (error: unknown): string => {
+  if (!(error instanceof Error)) return String(error);
+  const text = error.message || error.name;
+  const code = (error as { code?: unknown }).code;
+  const own = typeof code === "string" && !text.includes(code) ? `${text} (${code})` : text;
+  return error.cause === undefined ? own : `${own}: ${errorText(error.cause)}`;
+};
 
 const changedOn = (key: string): string[] => {
   try {
@@ -438,7 +453,7 @@ while (true) {
         }
         lastSaid.delete("round");
       } catch (error) {
-        note("round", `[factory] round failed, retrying next poll: ${error instanceof Error ? error.message : String(error)}`);
+        note("round", `[factory] round failed, retrying next poll: ${errorText(error)}`);
       }
     }
   }
