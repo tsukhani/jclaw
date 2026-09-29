@@ -46,10 +46,14 @@ public record ScrapeProxy(Kind kind, String host, int port,
      *         API. Scraping direct while the operator expects a proxy would be the silent failure.
      */
     public static Optional<ScrapeProxy> current() {
-        return parse(ConfigService.get(WebScrapeSettings.PROXY_URL, ""),
-                ConfigService.get(WebScrapeSettings.PROXY_ENABLED, "true"),
-                ConfigService.get(WebScrapeSettings.PROXY_USERNAME, ""),
-                ConfigService.get(WebScrapeSettings.PROXY_PASSWORD, ""));
+        var url = ConfigService.get(WebScrapeSettings.PROXY_URL, "");
+        var enabled = ConfigService.get(WebScrapeSettings.PROXY_ENABLED, "true");
+        // On a DataImpulse gateway the active plan's credentials replace the generic keys (JCLAW-1334).
+        var plan = DataImpulsePlans.active(url);
+        return plan.isPresent()
+                ? parse(url, enabled, plan.get().username(), plan.get().password())
+                : parse(url, enabled, ConfigService.get(WebScrapeSettings.PROXY_USERNAME, ""),
+                        ConfigService.get(WebScrapeSettings.PROXY_PASSWORD, ""));
     }
 
     /** {@link #current} over given values — public so a test need not write the process-wide keys. */

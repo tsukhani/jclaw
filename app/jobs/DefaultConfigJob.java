@@ -26,6 +26,8 @@ import services.tts.TtsModel;
 import tools.ShellExecTool;
 import tools.SubagentSpawnTool;
 import tools.SubagentYieldTool;
+import tools.scrape.DataImpulsePlans;
+import tools.scrape.WebScrapeSettings;
 import utils.HttpFactories;
 
 import java.io.IOException;
@@ -490,6 +492,33 @@ public class DefaultConfigJob extends Job<Void> {
         }
         renameKeyIfPresent("scrape.stealth.solveTurnstile", StealthSidecarManager.CFG_SOLVE_TURNSTILE);
         renameKeyIfPresent("scrape.impersonate.profile", FetchSidecarManager.CFG_PROFILE);
+
+        moveDataImpulseCredentialsToAPlan();
+    }
+
+    /**
+     * JCLAW-1334: DataImpulse credentials moved from the generic proxy keys into per-plan keys. The card
+     * was always labelled residential, so a stored login becomes the Residential plan's. A no-op once a
+     * plan is set.
+     */
+    private void moveDataImpulseCredentialsToAPlan() {
+        var url = ConfigService.get(WebScrapeSettings.PROXY_URL, "");
+        var username = ConfigService.get(WebScrapeSettings.PROXY_USERNAME, "");
+        if (!DataImpulsePlans.isGateway(url) || username.isBlank()
+                || !ConfigService.get(WebScrapeSettings.PROXY_DATAIMPULSE_PLAN, "").isBlank()) {
+            return;
+        }
+        var plan = "residential";
+        var parts = DataImpulsePlans.splitUsername(username);
+        var password = ConfigService.get(WebScrapeSettings.PROXY_PASSWORD, "");
+        ConfigService.set(DataImpulsePlans.loginKey(plan), parts[0]);
+        if (!password.isBlank()) ConfigService.set(DataImpulsePlans.passwordKey(plan), password);
+        if (!parts[1].isBlank()) ConfigService.set(WebScrapeSettings.PROXY_DATAIMPULSE_TARGETING, parts[1]);
+        ConfigService.set(WebScrapeSettings.PROXY_DATAIMPULSE_PLAN, plan);
+        ConfigService.delete(WebScrapeSettings.PROXY_USERNAME);
+        ConfigService.delete(WebScrapeSettings.PROXY_PASSWORD);
+        ConfigService.clearCache();
+        EventLogger.info("system", "DataImpulse proxy credentials moved to the Residential plan");
     }
 
     private void seedIfAbsent(String key, String value) {

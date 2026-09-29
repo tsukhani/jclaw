@@ -6,15 +6,19 @@ import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
 /**
- * Settings > Proxy Providers (JCLAW-1323): the DataImpulse and Manual cards compose the four
+ * Settings > Proxy Providers (JCLAW-1323): the DataImpulse and Manual cards compose the
  * web_scrape.proxy.* keys and read them back, write them in the order the backend's cross-key checks
- * accept, and test the saved proxy.
+ * accept, and test the saved proxy. DataImpulse keeps a login and password per plan (JCLAW-1334).
  */
 
 const URL_KEY = 'web_scrape.proxy.url'
 const USERNAME_KEY = 'web_scrape.proxy.username'
 const PASSWORD_KEY = 'web_scrape.proxy.password'
 const ENABLED_KEY = 'web_scrape.proxy.enabled'
+const PLAN_KEY = 'web_scrape.proxy.dataimpulse.plan'
+const TARGETING_KEY = 'web_scrape.proxy.dataimpulse.targeting'
+const loginKey = (plan: string) => `web_scrape.proxy.dataimpulse.${plan}.login`
+const passwordKey = (plan: string) => `web_scrape.proxy.dataimpulse.${plan}.password`
 
 let stored: Map<string, string>
 let posted: Array<{ key: string, value: string }>
@@ -30,7 +34,7 @@ function endpoints(opts: { refuse?: string, test?: Record<string, unknown>, test
     // The API masks a secret on every read, as ConfigService.maskValue does.
     handler: () => ({
       entries: [...stored].map(([key, value]) => ({
-        key, value: key === PASSWORD_KEY && value.length > 4 ? `${value.slice(0, 4)}****` : value, updatedAt: '2026-09-28T00:00:00Z',
+        key, value: key.endsWith('password') && value.length > 4 ? `${value.slice(0, 4)}****` : value, updatedAt: '2026-09-28T00:00:00Z',
       })),
     }),
   })
@@ -86,6 +90,23 @@ function inputValue(component: Panel, selector: string): string {
   return (component.find(selector).element as HTMLInputElement).value
 }
 
+function checked(component: Panel, selector: string): boolean {
+  return (component.find(selector).element as HTMLInputElement).checked
+}
+
+function useDisabled(component: Panel, plan: string): boolean {
+  return component.find(`#proxy-dataimpulse-use-${plan}`).attributes('disabled') !== undefined
+}
+
+/** A DataImpulse proxy on the gateway, as the backend stores it once a plan is chosen. */
+function seedDataImpulse(url = 'http://gw.dataimpulse.com:823', targeting = '') {
+  stored.set(URL_KEY, url)
+  stored.set(loginKey('residential'), 'abc')
+  stored.set(passwordKey('residential'), 'abcdef-secret')
+  stored.set(PLAN_KEY, 'residential')
+  if (targeting) stored.set(TARGETING_KEY, targeting)
+}
+
 describe('Settings page — Proxy Providers', () => {
   beforeEach(() => {
     clearNuxtData()
@@ -105,34 +126,60 @@ describe('Settings page — Proxy Providers', () => {
     expect(component.find('[data-testid="proxy-enabled"]').exists()).toBe(false)
   })
 
-  it('saves a rotating DataImpulse proxy for any country, URL first', async () => {
+  it('saves a rotating DataImpulse proxy for any country, plan credentials first', async () => {
     endpoints()
     const component = await mountPanel()
 
     await choose(component, 'dataimpulse')
     expect(component.find('[data-testid="proxy-dataimpulse-dashboard"]').attributes('href')).toBe('https://app.dataimpulse.com/')
-    await component.find('#proxy-dataimpulse-login').setValue('abc')
-    await component.find('#proxy-dataimpulse-password').setValue('s3cret')
+    expect(component.find('[data-testid="proxy-dataimpulse-plans"]').findAll('input[type="radio"]')).toHaveLength(4)
+    await component.find('#proxy-dataimpulse-residential-login').setValue('abc')
+    await component.find('#proxy-dataimpulse-residential-password').setValue('s3cret')
+    await component.find('#proxy-dataimpulse-use-residential').setValue(true)
     await save(component)
 
     expect(posted).toEqual([
+      { key: loginKey('residential'), value: 'abc' },
+      { key: passwordKey('residential'), value: 's3cret' },
       { key: URL_KEY, value: 'http://gw.dataimpulse.com:823' },
-      { key: USERNAME_KEY, value: 'abc' },
-      { key: PASSWORD_KEY, value: 's3cret' },
+      { key: PLAN_KEY, value: 'residential' },
     ])
     // The saved password shows as dots, not as an empty box that reads as lost.
-    expect(component.find('#proxy-dataimpulse-password').exists()).toBe(false)
-    expect(component.find('[data-testid="proxy-dataimpulse-password-field"]').text()).toBe('••••••••')
+    expect(component.find('#proxy-dataimpulse-residential-password').exists()).toBe(false)
+    expect(component.find('[data-testid="proxy-dataimpulse-residential-password-field"]').text()).toBe('••••••••')
+    expect(component.find('[aria-label="Edit DataImpulse Residential password"]').exists()).toBe(true)
     expect(component.find('[data-testid="proxy-saved-dataimpulse"]').exists()).toBe(true)
   })
 
-  it('composes countries and a sticky session into the login', async () => {
+  it('enables a plan\'s use radio only once it has both a login and a password', async () => {
+    stored.set(loginKey('mobile'), 'saved-login')
+    stored.set(passwordKey('premium-residential'), 'abcdef-secret')
+    endpoints()
+    const component = await mountPanel()
+    await choose(component, 'dataimpulse')
+
+    for (const plan of ['residential', 'premium-residential', 'mobile', 'datacenter']) {
+      expect(useDisabled(component, plan), plan).toBe(true)
+    }
+    await component.find('#proxy-dataimpulse-datacenter-login').setValue('dc')
+    expect(useDisabled(component, 'datacenter')).toBe(true)
+    await component.find('#proxy-dataimpulse-datacenter-password').setValue('dc-pass')
+    expect(useDisabled(component, 'datacenter')).toBe(false)
+    // A saved password counts as much as a typed one.
+    await component.find('#proxy-dataimpulse-premium-residential-login').setValue('pr')
+    expect(useDisabled(component, 'premium-residential')).toBe(false)
+    await component.find('#proxy-dataimpulse-datacenter-login').setValue('')
+    expect(useDisabled(component, 'datacenter')).toBe(true)
+  })
+
+  it('composes countries and a sticky session into the shared targeting', async () => {
     endpoints()
     const component = await mountPanel()
 
     await choose(component, 'dataimpulse')
-    await component.find('#proxy-dataimpulse-login').setValue('abc')
-    await component.find('#proxy-dataimpulse-password').setValue('s3cret')
+    await component.find('#proxy-dataimpulse-residential-login').setValue('abc')
+    await component.find('#proxy-dataimpulse-residential-password').setValue('s3cret')
+    await component.find('#proxy-dataimpulse-use-residential').setValue(true)
     await component.find('#proxy-dataimpulse-countries').setValue('us')
     await component.find('#proxy-dataimpulse-sticky').setValue(true)
     await component.find('#proxy-dataimpulse-minutes').setValue('45')
@@ -140,75 +187,88 @@ describe('Settings page — Proxy Providers', () => {
     await save(component)
 
     expect(stored.get(URL_KEY)).toBe('http://gw.dataimpulse.com:10000')
-    expect(stored.get(USERNAME_KEY)).toBe('abc__cr.us;sessttl.45')
+    expect(stored.get(TARGETING_KEY)).toBe('cr.us;sessttl.45')
+    expect(stored.has(USERNAME_KEY)).toBe(false)
   })
 
   it('reads a saved DataImpulse proxy back into its card, without the password', async () => {
-    stored.set(URL_KEY, 'http://gw.dataimpulse.com:10000')
-    stored.set(USERNAME_KEY, 'abc__cr.de,au;sessttl.45')
-    stored.set(PASSWORD_KEY, 'abcdef-secret')
+    seedDataImpulse('http://gw.dataimpulse.com:10000', 'cr.de,au;sessttl.45')
+    stored.set(loginKey('mobile'), 'mob')
     endpoints()
     const component = await mountPanel()
 
-    expect((component.find('#proxy-provider-dataimpulse').element as HTMLInputElement).checked).toBe(true)
-    expect(inputValue(component, '#proxy-dataimpulse-login')).toBe('abc')
+    expect(checked(component, '#proxy-provider-dataimpulse')).toBe(true)
+    expect(checked(component, '#proxy-dataimpulse-use-residential')).toBe(true)
+    expect(inputValue(component, '#proxy-dataimpulse-residential-login')).toBe('abc')
+    expect(inputValue(component, '#proxy-dataimpulse-mobile-login')).toBe('mob')
     expect(inputValue(component, '#proxy-dataimpulse-countries')).toBe('de,au')
-    expect((component.find('#proxy-dataimpulse-sticky').element as HTMLInputElement).checked).toBe(true)
+    expect(checked(component, '#proxy-dataimpulse-sticky')).toBe(true)
     expect(inputValue(component, '#proxy-dataimpulse-minutes')).toBe('45')
-    expect(component.find('[data-testid="proxy-dataimpulse-password-field"]').text()).toBe('••••••••')
+    expect(component.find('[data-testid="proxy-dataimpulse-residential-password-field"]').text()).toBe('••••••••')
+    expect(component.find('#proxy-dataimpulse-mobile-password').exists()).toBe(true)
     expect(component.html()).not.toContain('abcd')
 
-    await component.find('[aria-label="Edit DataImpulse proxy password"]').trigger('click')
-    const password = component.find('#proxy-dataimpulse-password')
+    await component.find('[aria-label="Edit DataImpulse Residential password"]').trigger('click')
+    const password = component.find('#proxy-dataimpulse-residential-password')
     expect(password.attributes('type')).toBe('password')
     expect((password.element as HTMLInputElement).value).toBe('')
   })
 
-  it('changes the saved password through the pencil, and the X keeps the saved one', async () => {
-    stored.set(URL_KEY, 'http://gw.dataimpulse.com:823')
-    stored.set(USERNAME_KEY, 'abc')
-    stored.set(PASSWORD_KEY, 'abcdef-secret')
+  it('changes a saved plan password through the pencil, and the X keeps the saved one', async () => {
+    seedDataImpulse()
     endpoints()
     const component = await mountPanel()
 
-    await component.find('[aria-label="Edit DataImpulse proxy password"]').trigger('click')
-    await component.find('#proxy-dataimpulse-password').setValue('typed')
-    await component.find('[aria-label="Keep the saved DataImpulse proxy password"]').trigger('click')
-    expect(component.find('[data-testid="proxy-dataimpulse-password-field"]').text()).toBe('••••••••')
+    await component.find('[aria-label="Edit DataImpulse Residential password"]').trigger('click')
+    await component.find('#proxy-dataimpulse-residential-password').setValue('typed')
+    await component.find('[aria-label="Keep the saved DataImpulse Residential password"]').trigger('click')
+    expect(component.find('[data-testid="proxy-dataimpulse-residential-password-field"]').text()).toBe('••••••••')
     await save(component)
     expect(posted).toEqual([])
 
-    await component.find('[aria-label="Edit DataImpulse proxy password"]').trigger('click')
-    await component.find('#proxy-dataimpulse-password').setValue('new-secret')
+    await component.find('[aria-label="Edit DataImpulse Residential password"]').trigger('click')
+    await component.find('#proxy-dataimpulse-residential-password').setValue('new-secret')
     await save(component)
-    expect(posted).toEqual([{ key: PASSWORD_KEY, value: 'new-secret' }])
-    expect(component.find('[data-testid="proxy-dataimpulse-password-field"]').text()).toBe('••••••••')
+    expect(posted).toEqual([{ key: passwordKey('residential'), value: 'new-secret' }])
+    expect(component.find('[data-testid="proxy-dataimpulse-residential-password-field"]').text()).toBe('••••••••')
   })
 
-  it('keeps the saved password when the field is left blank', async () => {
-    stored.set(URL_KEY, 'http://gw.dataimpulse.com:823')
-    stored.set(USERNAME_KEY, 'abc')
-    stored.set(PASSWORD_KEY, 'abcdef-secret')
+  it('keeps the saved password on a save that leaves it untouched', async () => {
+    seedDataImpulse()
     endpoints()
     const component = await mountPanel()
 
     await component.find('#proxy-dataimpulse-countries').setValue('de')
     await save(component)
 
-    expect(posted).toEqual([{ key: USERNAME_KEY, value: 'abc__cr.de' }])
+    expect(posted).toEqual([{ key: TARGETING_KEY, value: 'cr.de' }])
+    expect(stored.get(passwordKey('residential'))).toBe('abcdef-secret')
   })
 
-  it('keeps username parameters it does not model', async () => {
-    stored.set(URL_KEY, 'http://gw.dataimpulse.com:823')
-    stored.set(USERNAME_KEY, 'abc__cr.us;anon.1')
-    stored.set(PASSWORD_KEY, 'abcdef-secret')
+  it('switching the plan writes the plan and nothing else', async () => {
+    seedDataImpulse('http://gw.dataimpulse.com:823', 'cr.de')
+    stored.set(loginKey('mobile'), 'mob')
+    stored.set(passwordKey('mobile'), 'mobile-secret')
+    endpoints()
+    const component = await mountPanel()
+
+    expect(component.find('[data-testid="proxy-dataimpulse-preview"]').text()).toContain('abc__cr.de')
+    await component.find('#proxy-dataimpulse-use-mobile').setValue(true)
+    expect(component.find('[data-testid="proxy-dataimpulse-preview"]').text()).toContain('mob__cr.de')
+    await save(component)
+
+    expect(posted).toEqual([{ key: PLAN_KEY, value: 'mobile' }])
+  })
+
+  it('keeps targeting parameters it does not model', async () => {
+    seedDataImpulse('http://gw.dataimpulse.com:823', 'cr.us;anon.1')
     endpoints()
     const component = await mountPanel()
 
     await component.find('#proxy-dataimpulse-countries').setValue('de')
     await save(component)
 
-    expect(stored.get(USERNAME_KEY)).toBe('abc__cr.de;anon.1')
+    expect(stored.get(TARGETING_KEY)).toBe('cr.de;anon.1')
   })
 
   it('shows any other proxy in the Manual card with its raw fields', async () => {
@@ -220,13 +280,31 @@ describe('Settings page — Proxy Providers', () => {
     expect((component.find('#proxy-provider-manual').element as HTMLInputElement).checked).toBe(true)
     expect(inputValue(component, '#proxy-manual-url')).toBe('http://proxy.example:3128')
     expect(inputValue(component, '#proxy-manual-username')).toBe('scraper')
-    expect(component.find('#proxy-dataimpulse-login').exists()).toBe(false)
+    expect(component.find('#proxy-dataimpulse-residential-login').exists()).toBe(false)
+  })
+
+  it('Manual keeps the plan credentials stored and saves the generic keys', async () => {
+    seedDataImpulse()
+    endpoints()
+    const component = await mountPanel()
+
+    await choose(component, 'manual')
+    await component.find('#proxy-manual-url').setValue('http://proxy.example:3128')
+    await component.find('#proxy-manual-username').setValue('scraper')
+    await component.find('#proxy-manual-password').setValue('pw')
+    await save(component)
+
+    expect(posted).toEqual([
+      { key: URL_KEY, value: 'http://proxy.example:3128' },
+      { key: USERNAME_KEY, value: 'scraper' },
+      { key: PASSWORD_KEY, value: 'pw' },
+    ])
+    expect(stored.get(PLAN_KEY)).toBe('residential')
+    expect(stored.get(passwordKey('residential'))).toBe('abcdef-secret')
   })
 
   it('None clears the URL and leaves the credentials stored', async () => {
-    stored.set(URL_KEY, 'http://gw.dataimpulse.com:823')
-    stored.set(USERNAME_KEY, 'abc')
-    stored.set(PASSWORD_KEY, 'abcdef-secret')
+    seedDataImpulse()
     endpoints()
     const component = await mountPanel()
 
@@ -234,7 +312,8 @@ describe('Settings page — Proxy Providers', () => {
     await save(component)
 
     expect(posted).toEqual([{ key: URL_KEY, value: '' }])
-    expect(stored.get(USERNAME_KEY)).toBe('abc')
+    expect(stored.get(loginKey('residential'))).toBe('abc')
+    expect(stored.get(PLAN_KEY)).toBe('residential')
   })
 
   it('names each bad field inline and writes nothing', async () => {
@@ -242,6 +321,7 @@ describe('Settings page — Proxy Providers', () => {
     const component = await mountPanel()
 
     await choose(component, 'dataimpulse')
+    await component.find('#proxy-dataimpulse-mobile-login').setValue('abc def')
     await component.find('#proxy-dataimpulse-countries').setValue('germany')
     await component.find('#proxy-dataimpulse-sticky').setValue(true)
     await component.find('#proxy-dataimpulse-minutes').setValue('200')
@@ -249,10 +329,12 @@ describe('Settings page — Proxy Providers', () => {
 
     expect(posted).toEqual([])
     expect(component.find('[data-testid="proxy-dataimpulse-preview"]').exists()).toBe(false)
-    for (const id of ['login', 'password', 'countries', 'minutes']) {
+    expect(component.find('#proxy-dataimpulse-plan-error').text()).toBe('Choose the plan the proxy uses.')
+    for (const id of ['mobile-login', 'countries', 'minutes']) {
       expect(component.find(`#proxy-dataimpulse-${id}-error`).exists(), id).toBe(true)
       expect(component.find(`#proxy-dataimpulse-${id}`).attributes('aria-invalid'), id).toBe('true')
     }
+    expect(component.find('#proxy-dataimpulse-residential-login').attributes('aria-invalid')).toBe('false')
 
     await component.find('#proxy-dataimpulse-minutes').setValue('0')
     await save(component)
@@ -372,7 +454,6 @@ describe('Settings page — Proxy Providers', () => {
     endpoints()
     const component = await mountPanel()
 
-    expect(component.find('#proxy-dataimpulse-password-hint').exists()).toBe(false)
     await choose(component, 'manual')
     await component.find('#proxy-manual-url').setValue('http://proxy.example:3128')
     await component.find('#proxy-manual-username').setValue('scraper')
@@ -390,18 +471,26 @@ describe('Settings page — Proxy Providers', () => {
     ])
   })
 
-  it('asks for a DataImpulse password when the saved one belongs to another host', async () => {
+  it('moving from Manual to DataImpulse clears the Manual proxy\'s password and uses the plan\'s', async () => {
     stored.set(URL_KEY, 'http://proxy.example:3128')
     stored.set(PASSWORD_KEY, 'abcdef-secret')
     endpoints()
     const component = await mountPanel()
 
     await choose(component, 'dataimpulse')
-    await component.find('#proxy-dataimpulse-login').setValue('abc')
+    await component.find('#proxy-dataimpulse-residential-login').setValue('abc')
+    expect(useDisabled(component, 'residential')).toBe(true)
+    await component.find('#proxy-dataimpulse-residential-password').setValue('res')
+    await component.find('#proxy-dataimpulse-use-residential').setValue(true)
     await save(component)
 
-    expect(component.find('#proxy-dataimpulse-password-error').exists()).toBe(true)
-    expect(posted).toEqual([])
+    expect(posted).toEqual([
+      { key: loginKey('residential'), value: 'abc' },
+      { key: passwordKey('residential'), value: 'res' },
+      { key: PASSWORD_KEY, value: '' },
+      { key: URL_KEY, value: 'http://gw.dataimpulse.com:823' },
+      { key: PLAN_KEY, value: 'residential' },
+    ])
   })
 
   it('refuses a Manual URL the backend would refuse, including an empty one, before writing anything', async () => {
@@ -485,20 +574,19 @@ describe('Settings page — Proxy Providers', () => {
   })
 
   it('reads a proxy on DataImpulse\'s IP gateway into its card, and saves the gateway chosen', async () => {
-    stored.set(URL_KEY, 'http://74.81.81.81:823')
-    stored.set(USERNAME_KEY, 'abc')
+    seedDataImpulse('http://74.81.81.81:823')
     endpoints()
     const component = await mountPanel()
 
-    expect((component.find('#proxy-provider-dataimpulse').element as HTMLInputElement).checked).toBe(true)
-    expect((component.find('#proxy-dataimpulse-gateway-ip').element as HTMLInputElement).checked).toBe(true)
+    expect(checked(component, '#proxy-provider-dataimpulse')).toBe(true)
+    expect(checked(component, '#proxy-dataimpulse-gateway-ip')).toBe(true)
 
     await component.find('#proxy-dataimpulse-gateway-hostname').setValue(true)
-    await component.find('#proxy-dataimpulse-password').setValue('pw')
     await save(component)
 
-    expect(posted).toContainEqual({ key: URL_KEY, value: 'http://gw.dataimpulse.com:823' })
-    expect(posted.at(-1)).toEqual({ key: PASSWORD_KEY, value: 'pw' })
+    // Plan passwords only go to DataImpulse, so the saved one follows the gateway's name.
+    expect(posted).toEqual([{ key: URL_KEY, value: 'http://gw.dataimpulse.com:823' }])
+    expect(stored.get(passwordKey('residential'))).toBe('abcdef-secret')
   })
 
   it('shows only the error when the echo answered 2xx with something other than an address', async () => {

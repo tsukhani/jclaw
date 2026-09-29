@@ -1,24 +1,30 @@
 <script setup lang="ts">
-// Proxy Providers settings panel (JCLAW-1323). The four web_scrape.proxy.* keys stay the only stored state:
-// a preset composes the URL and username from its own fields and parses them back, so every scrape rung
-// reads the keys it always did. WebScrapeSettingsTest requires each key's literal in this file.
+// Proxy Providers settings panel (JCLAW-1323). The web_scrape.proxy.* keys stay the only stored state: a
+// preset composes them from its own fields and parses them back, and DataImpulse keeps a login and password
+// per plan (JCLAW-1334). WebScrapeSettingsTest requires each fixed key's literal in this file.
 import { ArrowTopRightOnSquareIcon } from '@heroicons/vue/24/outline'
 import {
   composeDataImpulse,
   composeProxy,
   credentialError,
   DATAIMPULSE,
+  DATAIMPULSE_PLANS,
   emptyDataImpulse,
+  isPlanId,
   keepsStoredPassword,
   parseProxy,
   planProxyWrites,
+  planRecord,
+  planUsable,
   proxyHost,
+  proxyKey,
   validateDataImpulse,
   validateManual,
   type DataImpulseErrors,
   type DataImpulseFields,
   type ManualErrors,
   type ProxyProviderId,
+  type StoredPlans,
   type StoredProxy,
 } from '~/utils/proxy-providers'
 
@@ -29,6 +35,8 @@ const KEYS = {
   username: 'web_scrape.proxy.username',
   password: 'web_scrape.proxy.password',
   enabled: 'web_scrape.proxy.enabled',
+  plan: 'web_scrape.proxy.dataimpulse.plan',
+  targeting: 'web_scrape.proxy.dataimpulse.targeting',
 } as const
 
 function stored(key: string): string {
@@ -40,37 +48,57 @@ const storedUsername = computed(() => stored(KEYS.username))
 const storedHasPassword = computed(() => stored(KEYS.password) !== '')
 // The backend treats anything but "false" as on.
 const enabled = computed(() => stored(KEYS.enabled).toLowerCase() !== 'false')
-const saved = computed(() => parseProxy(storedUrl.value, storedUsername.value))
+const storedPlans = computed<StoredPlans>(() => {
+  const plan = stored(KEYS.plan)
+  return {
+    plan: isPlanId(plan) ? plan : '',
+    targeting: stored(KEYS.targeting),
+    logins: planRecord(p => stored(proxyKey(`${p}.login`))),
+    hasPassword: planRecord(p => stored(proxyKey(`${p}.password`)) !== ''),
+  }
+})
+// A string, so the watch below sees a change of value rather than every recomputed object.
+const storedPlansSnapshot = computed(() => JSON.stringify(storedPlans.value))
+const saved = computed(() => parseProxy(storedUrl.value, storedUsername.value, storedPlans.value))
 const storedProxy = computed<StoredProxy>(() => ({
   url: storedUrl.value, username: storedUsername.value, hasPassword: storedHasPassword.value, enabled: enabled.value,
+  dataimpulse: storedPlans.value,
 }))
 
 const provider = ref<ProxyProviderId>('none')
 const dataimpulse = reactive<DataImpulseFields>(emptyDataImpulse())
 const manual = reactive({ url: '', username: '' })
-const dataimpulsePassword = ref('')
+const planPasswords = reactive(planRecord(() => ''))
+const planPasswordEditing = reactive(planRecord(() => false))
 const manualPassword = ref('')
-const dataimpulsePasswordEditing = ref(false)
 const manualPasswordEditing = ref(false)
-const errors = ref<DataImpulseErrors & { password?: string }>({})
+const errors = ref<DataImpulseErrors>({})
 const manualErrors = ref<ManualErrors>({})
 
-// Keyed on the two strings, so the enabled toggle's refresh does not wipe a half-typed card.
-watch([storedUrl, storedUsername], () => {
+function resetPlanPasswords() {
+  for (const { id } of DATAIMPULSE_PLANS) {
+    planPasswords[id] = ''
+    planPasswordEditing[id] = false
+  }
+}
+
+// Keyed on strings, so the enabled toggle's refresh does not wipe a half-typed card.
+watch([storedUrl, storedUsername, storedPlansSnapshot], () => {
   const parsed = saved.value
   provider.value = parsed.provider
   Object.assign(dataimpulse, parsed.dataimpulse)
   Object.assign(manual, parsed.manual)
   errors.value = {}
   manualErrors.value = {}
-  dataimpulsePasswordEditing.value = false
+  resetPlanPasswords()
   manualPasswordEditing.value = false
 }, { immediate: true })
 
 const manualIsSocks = computed(() => /^socks5:/i.test(manual.url.trim()))
-const preview = computed(() => Object.keys(validateDataImpulse(dataimpulse)).length ? null : composeDataImpulse(dataimpulse))
+// Plan passwords only ever go to the DataImpulse gateway, so a saved one is kept whatever the host.
+const planHasPassword = computed(() => planRecord(p => storedPlans.value.hasPassword[p] || planPasswords[p].trim() !== ''))
+const preview = computed(() => Object.keys(validateDataImpulse(dataimpulse, planHasPassword.value)).length ? null : composeDataImpulse(dataimpulse))
 // A card shows the saved password only while a save would keep it: the same host, and not SOCKS5.
-const dataimpulseKeepsPassword = computed(() => keepsStoredPassword(composeDataImpulse(dataimpulse).url, storedProxy.value))
 const manualKeepsPassword = computed(() => !manualIsSocks.value && keepsStoredPassword(manual.url, storedProxy.value))
 const passwordHint = computed(() => storedHasPassword.value
   ? `The saved password belongs to ${proxyHost(storedUrl.value) || 'the proxy it was saved with'}; saving another host clears it.`
@@ -83,9 +111,12 @@ function validate(): boolean {
   errors.value = {}
   manualErrors.value = {}
   if (provider.value === 'dataimpulse') {
-    const needsPassword = !dataimpulseKeepsPassword.value
-    const password = credentialError(dataimpulsePassword.value, needsPassword, 'DataImpulse proxy password')
-    errors.value = { ...validateDataImpulse(dataimpulse), ...(password ? { password } : {}) }
+    const found: DataImpulseErrors = validateDataImpulse(dataimpulse, planHasPassword.value)
+    for (const { id, label } of DATAIMPULSE_PLANS) {
+      const password = credentialError(planPasswords[id], false, `DataImpulse ${label} password`)
+      if (password) found[`${id}.password`] = password
+    }
+    errors.value = found
   }
   if (provider.value === 'manual') {
     manualErrors.value = manualIsSocks.value
@@ -97,21 +128,19 @@ function validate(): boolean {
 
 async function save() {
   if (!validate()) return
-  const password = provider.value === 'dataimpulse'
-    ? dataimpulsePassword.value
-    : provider.value === 'manual' ? manualPassword.value : ''
-  const writes = planProxyWrites(composeProxy(provider.value, { dataimpulse, manual }), password, storedProxy.value)
+  const password = provider.value === 'manual' ? manualPassword.value : ''
+  const writes = planProxyWrites(composeProxy(provider.value, { dataimpulse, manual }), password, storedProxy.value,
+    provider.value === 'dataimpulse' ? planPasswords : {})
   saving.value = true
   testResult.value = null
   testError.value = null
   if (await attempt(async () => {
     for (const write of writes) {
-      await $fetch('/api/config', { method: 'POST', body: { key: KEYS[write.field], value: write.value } })
+      await $fetch('/api/config', { method: 'POST', body: { key: proxyKey(write.field), value: write.value } })
     }
   })) {
-    dataimpulsePassword.value = ''
+    resetPlanPasswords()
     manualPassword.value = ''
-    dataimpulsePasswordEditing.value = false
     manualPasswordEditing.value = false
   }
   // After a refusal too: the writes before it landed, and the cards should show them.
@@ -168,7 +197,7 @@ function duration(ms: number): string {
 
 const PROVIDERS: { id: ProxyProviderId, label: string, detail: string }[] = [
   { id: 'none', label: 'None', detail: 'connect directly' },
-  { id: 'dataimpulse', label: 'DataImpulse', detail: 'residential proxies' },
+  { id: 'dataimpulse', label: 'DataImpulse', detail: 'residential, mobile and datacenter proxies' },
   { id: 'manual', label: 'Manual', detail: 'any HTTP or SOCKS5 proxy' },
 ]
 
@@ -229,7 +258,7 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
           class="border-t border-border divide-y divide-border"
         >
           <p class="px-4 py-2.5 text-xs text-fg-muted">
-            Your login and password are under Proxy Access in the
+            Each plan's login and password are under Proxy Access in the
             <a
               :href="DATAIMPULSE.dashboardUrl"
               target="_blank"
@@ -241,64 +270,94 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
               aria-hidden="true"
             /></a>.
             JClaw connects to DataImpulse's gateway over HTTP, which every fetch can use, and puts the
-            country and session in the login as DataImpulse expects.
+            country and session after the chosen plan's login as DataImpulse expects. Every plan shares
+            the gateway, country, rotation and session below.
           </p>
-          <div class="px-4 py-2 space-y-1">
-            <label
-              for="proxy-dataimpulse-login"
-              class="flex max-sm:flex-wrap items-center gap-3"
-            >
-              <span :class="FIELD_LABEL">login</span>
-              <input
-                id="proxy-dataimpulse-login"
-                v-model="dataimpulse.login"
-                type="text"
-                autocomplete="off"
-                spellcheck="false"
-                :aria-invalid="!!errors.login"
-                :aria-describedby="errors.login ? 'proxy-dataimpulse-login-error' : undefined"
-                :class="INPUT"
-              >
-            </label>
+          <div
+            role="radiogroup"
+            aria-labelledby="proxy-dataimpulse-plan-label"
+            :aria-describedby="errors.plan ? 'proxy-dataimpulse-plan-error' : undefined"
+            class="px-4 py-2 space-y-2"
+            data-testid="proxy-dataimpulse-plans"
+          >
             <p
-              v-if="errors.login"
-              id="proxy-dataimpulse-login-error"
-              class="text-xs text-danger sm:ml-51"
+              id="proxy-dataimpulse-plan-label"
+              class="text-xs text-fg-muted"
             >
-              {{ errors.login }}
+              Each plan has its own login and password. Choose the plan the proxy uses; the others stay saved.
             </p>
-          </div>
-          <div class="px-4 py-2 space-y-1">
-            <div class="flex max-sm:flex-wrap items-center gap-3">
-              <span :class="FIELD_LABEL">password</span>
-              <SecretField
-                v-model="dataimpulsePassword"
-                v-model:editing="dataimpulsePasswordEditing"
-                form
-                :saved="dataimpulseKeepsPassword"
-                input-id="proxy-dataimpulse-password"
-                label="DataImpulse proxy password"
-                :input-class="INPUT"
-                :input-attrs="{
-                  'aria-invalid': !!errors.password,
-                  'aria-describedby': errors.password ? 'proxy-dataimpulse-password-error' : passwordHint && !dataimpulseKeepsPassword ? 'proxy-dataimpulse-password-hint' : undefined,
-                }"
-                data-testid="proxy-dataimpulse-password-field"
-              />
+            <div
+              v-for="plan in DATAIMPULSE_PLANS"
+              :key="plan.id"
+              class="space-y-1"
+              :data-testid="`proxy-dataimpulse-plan-${plan.id}`"
+            >
+              <div class="flex max-sm:flex-wrap items-center gap-3">
+                <label
+                  :for="`proxy-dataimpulse-use-${plan.id}`"
+                  :class="FIELD_LABEL"
+                  class="flex items-center gap-2 cursor-pointer"
+                >
+                  <input
+                    :id="`proxy-dataimpulse-use-${plan.id}`"
+                    v-model="dataimpulse.plan"
+                    type="radio"
+                    name="proxy-dataimpulse-plan"
+                    :value="plan.id"
+                    :disabled="!planUsable(dataimpulse, plan.id, planHasPassword)"
+                    class="accent-emerald-600"
+                  >
+                  {{ plan.label }}
+                </label>
+                <input
+                  :id="`proxy-dataimpulse-${plan.id}-login`"
+                  v-model="dataimpulse.logins[plan.id]"
+                  type="text"
+                  autocomplete="off"
+                  spellcheck="false"
+                  placeholder="login"
+                  :aria-label="`${plan.label} login`"
+                  :aria-invalid="!!errors[`${plan.id}.login`]"
+                  :aria-describedby="errors[`${plan.id}.login`] ? `proxy-dataimpulse-${plan.id}-login-error` : undefined"
+                  :class="INPUT"
+                >
+                <SecretField
+                  v-model="planPasswords[plan.id]"
+                  v-model:editing="planPasswordEditing[plan.id]"
+                  form
+                  :saved="storedPlans.hasPassword[plan.id]"
+                  :input-id="`proxy-dataimpulse-${plan.id}-password`"
+                  :label="`DataImpulse ${plan.label} password`"
+                  placeholder="password"
+                  :input-class="INPUT"
+                  :input-attrs="{
+                    'aria-invalid': !!errors[`${plan.id}.password`],
+                    'aria-describedby': errors[`${plan.id}.password`] ? `proxy-dataimpulse-${plan.id}-password-error` : undefined,
+                  }"
+                  :data-testid="`proxy-dataimpulse-${plan.id}-password-field`"
+                />
+              </div>
+              <p
+                v-if="errors[`${plan.id}.login`]"
+                :id="`proxy-dataimpulse-${plan.id}-login-error`"
+                class="text-xs text-danger sm:ml-51"
+              >
+                {{ errors[`${plan.id}.login`] }}
+              </p>
+              <p
+                v-if="errors[`${plan.id}.password`]"
+                :id="`proxy-dataimpulse-${plan.id}-password-error`"
+                class="text-xs text-danger sm:ml-51"
+              >
+                {{ errors[`${plan.id}.password`] }}
+              </p>
             </div>
             <p
-              v-if="errors.password"
-              id="proxy-dataimpulse-password-error"
-              class="text-xs text-danger sm:ml-51"
+              v-if="errors.plan"
+              id="proxy-dataimpulse-plan-error"
+              class="text-xs text-danger"
             >
-              {{ errors.password }}
-            </p>
-            <p
-              v-else-if="passwordHint && !dataimpulseKeepsPassword"
-              id="proxy-dataimpulse-password-hint"
-              class="text-xs text-fg-muted sm:ml-51"
-            >
-              {{ passwordHint }}
+              {{ errors.plan }}
             </p>
           </div>
           <div class="px-4 py-2 space-y-1">
