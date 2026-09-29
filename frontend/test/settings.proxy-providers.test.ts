@@ -303,6 +303,19 @@ describe('Settings page — Proxy Providers', () => {
     expect(stored.get(passwordKey('residential'))).toBe('abcdef-secret')
   })
 
+  it('moving from Manual back to DataImpulse keeps the stored targeting', async () => {
+    seedDataImpulse('http://proxy.example:3128', 'cr.de;anon.1')
+    endpoints()
+    const component = await mountPanel()
+
+    await choose(component, 'dataimpulse')
+    expect(inputValue(component, '#proxy-dataimpulse-countries')).toBe('de')
+    await save(component)
+
+    expect(posted).toEqual([{ key: URL_KEY, value: 'http://gw.dataimpulse.com:823' }])
+    expect(stored.get(TARGETING_KEY)).toBe('cr.de;anon.1')
+  })
+
   it('None clears the URL and leaves the credentials stored', async () => {
     seedDataImpulse()
     endpoints()

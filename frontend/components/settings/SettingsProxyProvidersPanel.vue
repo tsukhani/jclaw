@@ -506,7 +506,7 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
             class="px-4 py-2 text-xs text-fg-muted break-all"
             data-testid="proxy-dataimpulse-preview"
           >
-            Saves <span class="font-mono">{{ preview.url }}</span> with the username
+            Connects to <span class="font-mono">{{ preview.url }}</span> with the username
             <span class="font-mono">{{ preview.username }}</span>.
           </p>
         </div>

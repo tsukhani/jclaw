@@ -106,10 +106,10 @@ describe('parseProxy', () => {
   })
 
   it('shows any other proxy in the Manual card with its raw fields, keeping the plans for the DataImpulse card', () => {
-    const parsed = parseProxy('http://proxy.example:3128', 'scraper', plans({ plan: 'mobile' }))
+    const parsed = parseProxy('http://proxy.example:3128', 'scraper', plans({ plan: 'mobile', targeting: 'cr.de;anon.1' }))
     expect(parsed.provider).toBe('manual')
     expect(parsed.manual).toEqual({ url: 'http://proxy.example:3128', username: 'scraper' })
-    expect(parsed.dataimpulse).toMatchObject({ plan: 'mobile', logins: { residential: 'abc' } })
+    expect(parsed.dataimpulse).toMatchObject({ plan: 'mobile', logins: { residential: 'abc' }, countries: 'de', extraParams: ['anon.1'] })
   })
 
   it('leaves a DataImpulse URL the card cannot write to the Manual card', () => {

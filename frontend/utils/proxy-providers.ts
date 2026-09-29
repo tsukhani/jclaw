@@ -163,10 +163,7 @@ export function parseProxy(url: string, username: string, plans: StoredPlans = e
   const storedUrl = url.trim()
   const manual = { url: storedUrl, username: username.trim() }
   const endpoint = storedUrl ? dataImpulseEndpoint(storedUrl) : null
-  if (storedUrl && endpoint === null) {
-    return { provider: 'manual', dataimpulse: { ...emptyDataImpulse(), plan: plans.plan, logins: { ...plans.logins } }, manual }
-  }
-  // With no URL the credentials stay stored but unused, so either card may take them back up.
+  // Under None or Manual the plans and targeting stay stored but unused, so the DataImpulse card takes them back up.
   const sticky = endpoint !== null && endpoint.port !== DATAIMPULSE.rotatingPort
   const dataimpulse: DataImpulseFields = {
     ...parseTargeting(plans.targeting, sticky),
@@ -176,7 +173,7 @@ export function parseProxy(url: string, username: string, plans: StoredPlans = e
     rotation: sticky ? 'sticky' : 'rotating',
     stickyPort: sticky ? endpoint.port : DATAIMPULSE.stickyPortMin,
   }
-  return { provider: storedUrl ? 'dataimpulse' : 'none', dataimpulse, manual }
+  return { provider: !storedUrl ? 'none' : endpoint === null ? 'manual' : 'dataimpulse', dataimpulse, manual }
 }
 
 function normalizeCountries(countries: string): string {

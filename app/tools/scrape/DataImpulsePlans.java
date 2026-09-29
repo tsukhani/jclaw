@@ -4,10 +4,11 @@ import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 
 import java.net.URI;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Optional;
+import java.util.SequencedMap;
 import java.util.Set;
 
 /**
@@ -20,7 +21,7 @@ public final class DataImpulsePlans {
     public static final String PREFIX = "web_scrape.proxy.dataimpulse.";
 
     /** Plan id to the label the dashboard gives it, in the dashboard's order. */
-    public static final Map<String, String> PLANS = plans();
+    public static final SequencedMap<String, String> PLANS = plans();
 
     private static final Set<String> GATEWAY_HOSTS = Set.of("gw.dataimpulse.com", "74.81.81.81");
 
@@ -34,13 +35,13 @@ public final class DataImpulsePlans {
 
     private DataImpulsePlans() {}
 
-    private static Map<String, String> plans() {
+    private static SequencedMap<String, String> plans() {
         var plans = new LinkedHashMap<String, String>();
         plans.put("residential", "Residential");
         plans.put("premium-residential", "Premium Residential");
         plans.put("mobile", "Mobile");
         plans.put("datacenter", "Datacenter");
-        return plans;
+        return Collections.unmodifiableSequencedMap(plans);
     }
 
     public static String loginKey(String plan) {

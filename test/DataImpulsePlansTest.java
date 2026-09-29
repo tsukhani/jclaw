@@ -85,6 +85,8 @@ class DataImpulsePlansTest extends UnitTest {
         assertEquals("generic", ScrapeProxy.current().orElseThrow().username());
         assertFalse(DataImpulsePlans.isGateway("socks5://gw.dataimpulse.com:824"), "SOCKS5 carries no credentials");
         assertFalse(DataImpulsePlans.isGateway("http://gw.dataimpulse.com.example:823"));
+        assertTrue(DataImpulsePlans.isGateway("http://GW.DataImpulse.com:823/"), "the host's case does not matter");
+        assertTrue(DataImpulsePlans.isGateway(" http://74.81.81.81:15000 "));
     }
 
     @Test
