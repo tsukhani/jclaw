@@ -1,0 +1,63 @@
+# AFK factory
+
+A local harness on [Sandcastle](https://github.com/mattpocock/sandcastle) that works Jira stories unattended. It picks
+`afk`-labelled stories in To Do from the active sprint and, for each one, in its own Docker sandbox:
+implement → full-suite gate (the harness runs it, baselined against `main`, with up to two repair rounds) → review agent →
+brief. It then copies the branch `agent/<KEY>` into this checkout, moves the ticket to Review and comments the brief. It
+never pushes: you merge the branch into `main` and ship it with `/deploy`.
+
+## Layout
+
+| Where | What |
+|---|---|
+| `.sandcastle/` (this directory) | Harness code, prompts, and the gateway |
+| `~/.jclaw-factory/` (`FACTORY_HOME`) | Everything the harness writes: the clone it works in (`jclaw/`), `logs/`, `state/`, the Gradle seed, `lessons.md`, and `.env` holding the model credential |
+
+Nothing the harness writes lives in the checkout, because `/deploy` stages the whole working tree.
+
+## Isolation
+
+Sandboxes use the devcontainer image and sit on the `jclaw-factory` Docker network, which has no route out. Their only
+exit is the gateway container (`gateway/gateway.mjs`, a distroless Node image). It forwards model calls, injecting the
+credential so that no sandbox ever holds it, and proxies HTTPS to the hosts in `gateway/egress-allowlist.txt`.
+
+## Setup
+
+1. Build the sandbox image: `docker build -f .devcontainer/Dockerfile -t jclaw-devcontainer:local .` (from the repo root).
+2. Put the model credential in `~/.jclaw-factory/.env` as `CLAUDE_CODE_OAUTH_TOKEN=…` (from `claude setup-token`) or
+   `ANTHROPIC_API_KEY=…`, then run `chmod 600` on it.
+3. Run `./install-agent.sh`. It installs dependencies and a LaunchAgent that starts the harness at login and restarts it
+   if it exits. On first start the harness clones this checkout into `~/.jclaw-factory/jclaw` and creates the gateway.
+
+## Operating
+
+- **Watch:** `tail -f ~/.jclaw-factory/logs/factory.log`. Each story's phases are logged under `~/.jclaw-factory/logs/<KEY>-*`.
+- **Pause:** `docker stop jclaw-factory-gateway`. No new stories start, and stories already running fail. Resume with
+  `docker start jclaw-factory-gateway`. The harness never restarts a gateway you stopped.
+- **Stop the harness:** `./install-agent.sh --remove`. Stories it was running are interrupted: they carry the
+  `afk-running` label, and the next start moves them back to To Do and resumes them from their branch.
+- **Review:** merge `agent/<KEY>` into `main`. Mark the story Done only once it is merged, because Done is what lets the
+  stories it blocks start.
+- **Reject:** move the story back to To Do with a comment saying what to change. The next round reworks it on the same
+  branch. The general rule behind your comment goes into `~/.jclaw-factory/lessons.md`, which every prompt includes;
+  promote a lesson into `AGENTS.md`, or delete it there.
+- **Blocked:** a story the factory gave up on carries `afk-blocked` and a comment explaining why. Remove the label to retry.
+
+Stories wait while a blocker is not Done, and while the files they are predicted to change overlap a branch awaiting
+review or a story already running.
+
+## Settings
+
+| Variable | Default | |
+|---|---|---|
+| `FACTORY_MAX_PARALLEL` | 2 | Stories at once; each sandbox peaks near 5 GB |
+| `FACTORY_POLL_SECONDS` | 120 | How often Jira is polled |
+| `FACTORY_MODEL` | `claude-opus-5-5` | |
+| `FACTORY_HOME` | `~/.jclaw-factory` | |
+| `FACTORY_TICKET` | | Run these keys (comma-separated) for one round, then exit |
+| `FACTORY_PLAN_ONLY` | | Print the plan for one round and exit, changing nothing |
+
+## Checks
+
+- `npm run check`: typecheck plus the offline logic checks.
+- `npx tsx gateway-check.ts`: live lockdown check. It spends one small model call.

@@ -36,6 +36,7 @@ Jenkinsfile.renovate
 .githooks/
 .devcontainer/
 .claude/
+.sandcastle/
 renovate.json5
 # Build-time coverage artifacts (Jenkins only; not for the prod zip).
 # bin/ + conf/jacoco-agent.properties ship in the source repo so the

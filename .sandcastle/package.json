@@ -1,0 +1,18 @@
+{
+  "name": "jclaw-afk-factory",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx main.ts",
+    "check": "tsc --noEmit -p . && tsx check.ts"
+  },
+  "dependencies": {
+    "@ai-hero/sandcastle": "0.12.0",
+    "tsx": "4.21.0",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "typescript": "^5.9.3"
+  }
+}

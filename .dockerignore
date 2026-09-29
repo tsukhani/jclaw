@@ -75,3 +75,6 @@ _bmad-output/
 # build context.
 lib/
 modules/
+
+# The AFK factory harness runs from a checkout and never enters an image.
+.sandcastle/

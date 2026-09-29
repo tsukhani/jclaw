@@ -1,0 +1,20 @@
+# Hostnames agent containers may CONNECT to on 443. A leading dot matches subdomains.
+# api.anthropic.com is deliberately absent: model traffic must take the gateway's credential-injecting route.
+
+# Gradle wrapper, plugin portal and Maven Central (build.gradle.kts, settings.gradle.kts)
+services.gradle.org
+downloads.gradle.org
+plugins.gradle.org
+plugins-artifacts.gradle.org
+repo.maven.apache.org
+repo1.maven.org
+
+# pnpm (and the pnpm version frontend/package.json pins) and uv's PyPI
+registry.npmjs.org
+pypi.org
+files.pythonhosted.org
+
+# GitHub reads: release assets (Gradle distributions, sherpa-onnx, uv's managed Pythons) and raw source
+github.com
+codeload.github.com
+.githubusercontent.com
