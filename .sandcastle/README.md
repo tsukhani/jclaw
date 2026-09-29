@@ -51,6 +51,17 @@ sandboxes' Gradle cache from `~/.gradle`. Without that cache, each sandbox downl
 gateway. Re-run the installer after moving the checkout or changing your Node install, because the agent records both
 paths.
 
+## Following main
+
+The factory takes its versions from main:
+- **The sandbox image** is rebuilt from main's `.devcontainer/Dockerfile` before a round plans or starts stories,
+  whenever main has moved. That Dockerfile reads the Play fork from `.play-version` and pnpm from
+  `frontend/package.json`, and pins the base image, uv and Claude Code for Renovate to move. If a build fails, stories
+  wait until main is fixed (`~/.jclaw-factory/logs/image-build.log`).
+- **The gateway** is replaced when its image pin, code or allowlist changes on main.
+- **The harness itself** exits, while idle, when `.sandcastle/` changes on main, and launchd starts it again on the new
+  code. `run.sh`, which the LaunchAgent runs, reinstalls its dependencies first whenever `package-lock.json` changed.
+
 ## Several developers
 
 Each developer's harness takes unassigned `afk` stories and its own. It claims a story by assigning it to its Jira user,
