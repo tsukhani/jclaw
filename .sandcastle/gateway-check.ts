@@ -2,7 +2,7 @@
 // Spends one small model call. `npx tsx gateway-check.ts`
 import { execFileSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
-import { ensureGateway, ensureGradleSeed, factorySandbox, planHooks } from "./factory.ts";
+import { IMAGE, ensureGateway, ensureGradleSeed, factorySandbox, planHooks } from "./factory.ts";
 import { CLONE, LOGS } from "./paths.ts";
 
 const docker = (...a: string[]) => {
@@ -15,6 +15,13 @@ console.log("== gateway container");
 console.log(docker("inspect", "jclaw-factory-gateway", "--format",
   "image={{.Config.Image}}\nuser={{.Config.User}} readOnlyRootfs={{.HostConfig.ReadonlyRootfs}} capDrop={{.HostConfig.CapDrop}} secOpt={{.HostConfig.SecurityOpt}} mem={{.HostConfig.Memory}} pids={{.HostConfig.PidsLimit}}\nnetworks={{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}"));
 console.log("shell in gateway: " + docker("exec", "jclaw-factory-gateway", "sh", "-c", "true"));
+
+// A container outside the factory, on Docker's default bridge, must reach none of the gateway's addresses.
+const ips = docker("inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", "jclaw-factory-gateway").split(" ").filter(Boolean);
+const probes = ips.flatMap((ip) => [`http://${ip}:8080/v1/models`, `http://${ip}:3128/`]);
+console.log("== from a container on the default bridge (000 = unreachable)");
+console.log(docker("run", "--rm", "--entrypoint", "sh", IMAGE, "-c",
+  probes.map((u) => `printf '%-40s %s\\n' ${u} $(curl -s -m 5 -o /dev/null -w '%{http_code}' ${u})`).join("; ")));
 
 {
   await using sandbox = await sandcastle.createSandbox({ cwd: CLONE, branch: "factory/gateway-check", sandbox: factorySandbox(), hooks: planHooks });

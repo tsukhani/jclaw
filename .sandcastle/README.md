@@ -20,6 +20,9 @@ Nothing the harness writes lives in the checkout, because `/deploy` stages the w
 Sandboxes use the devcontainer image and sit on the `jclaw-factory` Docker network, which has no route out. Their only
 exit is the gateway container (`gateway/gateway.mjs`, a distroless Node image). It forwards model calls, injecting the
 credential so that no sandbox ever holds it, and proxies HTTPS to the hosts in `gateway/egress-allowlist.txt`.
+The gateway reaches the internet through its own network, `jclaw-factory-egress`, which no other container joins. On
+Docker's default bridge, any container could reach the gateway's ports and have your credential attached to its model
+calls. `gateway-check.ts` checks this from a container on the default bridge.
 
 ## Setup on a Mac
 

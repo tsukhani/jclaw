@@ -13,13 +13,19 @@ process.env.DOCKER_DEFAULT_PLATFORM = `linux/${process.arch === "x64" ? "amd64" 
 
 export const IMAGE = "jclaw-devcontainer:local";
 const NETWORK = "jclaw-factory";
+// The gateway's own way out. On Docker's default bridge any other container could reach its ports and have the
+// credential attached to its model calls; no other container ever joins this network.
+const EGRESS_NETWORK = "jclaw-factory-egress";
 const GATEWAY = "jclaw-factory-gateway";
 // The one container that reaches the internet and holds the credential runs Node and nothing else: no shell, no package
 // manager, non-root. Pinned by digest so a re-tag upstream cannot change it.
 const GATEWAY_IMAGE = "gcr.io/distroless/nodejs24-debian13@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d";
 const GATEWAY_DIR = `${HERE}/gateway`;
-// A running gateway built from anything else (another image, mount or credential file) is replaced when idle.
-const GATEWAY_CONFIG = createHash("sha256").update([GATEWAY_IMAGE, GATEWAY_DIR, ENV_FILE].join("\n")).digest("hex").slice(0, 12);
+// A running gateway built from anything else (another image, mount, credential file or network) is replaced when idle.
+const GATEWAY_CONFIG = createHash("sha256")
+  .update([GATEWAY_IMAGE, GATEWAY_DIR, ENV_FILE, EGRESS_NETWORK].join("\n"))
+  .digest("hex")
+  .slice(0, 12);
 const PROXY = `http://${GATEWAY}:3128`;
 const NO_PROXY = `localhost,127.0.0.1,::1,${GATEWAY}`;
 
@@ -33,7 +39,8 @@ const createGateway = () => {
     // Nothing to remove.
   }
   dockerCli(
-    "run", "-d", "--name", GATEWAY, "--env-file", ENV_FILE, "--restart", "unless-stopped", "--label", `factory.config=${GATEWAY_CONFIG}`,
+    "run", "-d", "--name", GATEWAY, "--network", EGRESS_NETWORK, "--env-file", ENV_FILE, "--restart", "unless-stopped",
+    "--label", `factory.config=${GATEWAY_CONFIG}`,
     "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "256m", "--pids-limit", "64",
     "-v", `${GATEWAY_DIR}:/gateway:ro`, GATEWAY_IMAGE, "/gateway/gateway.mjs",
   );
@@ -44,10 +51,12 @@ const createGateway = () => {
 // brings it back after a crash or a Docker restart); one the operator stopped is never started here, which is how the
 // operator pauses the factory. A stale one is replaced only while `idle`, since running agents talk through it.
 export const gatewayUp = (idle: boolean): boolean => {
-  try {
-    dockerCli("network", "inspect", NETWORK);
-  } catch {
-    dockerCli("network", "create", "--internal", NETWORK);
+  for (const [network, internal] of [[NETWORK, true], [EGRESS_NETWORK, false]] as const) {
+    try {
+      dockerCli("network", "inspect", network);
+    } catch {
+      dockerCli("network", "create", ...(internal ? ["--internal"] : []), network);
+    }
   }
   let state: string;
   try {
