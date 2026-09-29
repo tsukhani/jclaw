@@ -282,11 +282,9 @@ class SsrfGuardTest extends UnitTest {
 
     @Test
     void assertUrlSafeRejectsIpv4DecimalLoopback() {
-        // 2130706433 == 0x7F000001 == 127.0.0.1. Java's InetAddress resolves
-        // bare decimal integers as packed IPv4. isLikelyIpLiteral misses
-        // this form (no dots), so the guard relies on the subsequent
-        // DNS-resolution pass in assertUrlSafe to catch the resolved
-        // loopback via isUnsafe.
+        // 2130706433 == 0x7F000001 == 127.0.0.1. isLikelyIpLiteral counts an all-digit
+        // host as a literal, so assertSafeScheme parses it with InetAddress, which reads
+        // a bare decimal as packed IPv4, and refuses the loopback before any DNS lookup.
         assertThrows(SecurityException.class,
                 () -> SsrfGuard.assertUrlSafe("http://2130706433/"));
     }
