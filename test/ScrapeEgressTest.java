@@ -4,16 +4,16 @@ import mockwebserver3.MockWebServer;
 import mockwebserver3.RecordedRequest;
 import models.ScrapeJob;
 import okhttp3.OkHttpClient;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.jspecify.annotations.Nullable;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.scrape.ScrapeReason;
 import tools.WebScrapeTool;
 import tools.scrape.CrawlListener;
 import tools.scrape.ScrapeJobRequest;
-import services.scrape.ScrapeReason;
 import tools.scrape.WebScrapeSettings;
 
 import java.time.Duration;
