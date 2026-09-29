@@ -12,6 +12,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.Tx;
 import services.decision.DecisionSettings;
+import services.telemetry.OtelConfig;
 import tools.jev.JevSettings;
 import tools.scrape.WebScrapeSettings;
 import utils.HttpFactories;
@@ -287,6 +288,33 @@ class ConfigServiceTest extends UnitTest {
         assertTrue(ConfigService.isSensitive("telegram.bot.token"));
         assertFalse(ConfigService.isSensitive("provider.openrouter.baseUrl"));
         assertFalse(ConfigService.isSensitive("jclaw.workspace.path"));
+    }
+
+    @Test
+    void everyCredentialStaysSensitiveAndNamesThatMerelyContainAWordDoNot() {
+        // JCLAW-1332: the frontend's utils/secrets.ts test carries the same two lists.
+        for (var key : new String[] {
+                "provider.openai.apiKey", "search.exa.apiKey", "scanner.malwarebazaar.authKey",
+                "scanner.virustotal.apiKey", "imagegen.local.hfToken", "diarize.hfToken", DecisionSettings.API_KEY,
+                WebScrapeSettings.PROXY_PASSWORD, OtelConfig.KEY_SECRET_HEADERS, "jclaw.skills.catalog.github.token",
+                "http.proxyPassword", "auth.internal.apiToken", "application.secret", "certificate.password",
+                "OPENAI_API_KEY", "GITHUB_TOKEN", "AWS_SECRET_ACCESS_KEY", "API_KEYS", "webhookSecret"}) {
+            assertTrue(ConfigService.isSensitive(key), key);
+        }
+        for (var key : new String[] {
+                "telegram.keyboardScope", "chat.stream.token_coalesce_chars", "chat.compactionReserveTokens",
+                "memory.autocapture.maxTokens", "auth.password.breach-check.enabled", "certificate.key.file",
+                "web_scrape.proxy.username", "TOKENIZERS_PARALLELISM", "NODE_ENV", ""}) {
+            assertFalse(ConfigService.isSensitive(key), key);
+        }
+    }
+
+    @Test
+    void aSettingThatOnlyLooksLikeASecretReadsBackUnmasked() {
+        assertEquals("group", ConfigService.maskValue("telegram.keyboardScope", "group"));
+        assertEquals("15000", ConfigService.maskValue("chat.compactionReserveTokens", "15000"));
+        assertNull(ConfigService.setWithSideEffects("jclaw1332.maxTokens", "24****"),
+                "a value that ends like a mask is only refused for a secret");
     }
 
     @Test

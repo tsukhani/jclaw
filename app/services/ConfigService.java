@@ -44,6 +44,7 @@ import utils.TokenCoalescer;
 
 import java.time.Duration;
 import java.time.ZoneId;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -681,13 +682,22 @@ public class ConfigService {
 
     private static final String MASK_SUFFIX = "****";
 
-    private static final Set<String> SENSITIVE_PATTERNS = Set.of(
-            "key", "secret", "password", "token"
-    );
+    private static final Pattern WORD_BREAK = Pattern.compile("(?<=[a-z0-9])(?=[A-Z])|[^A-Za-z0-9]+");
 
+    /**
+     * Whether a key names a credential, read from the words of its last segment: the last word ends in
+     * key, keys or token, or any word contains secret or password. A substring match (JCLAW-1332) took
+     * {@code keyboardScope} and {@code maxTokens} for secrets. Also decides which MCP env values are masked.
+     */
     public static boolean isSensitive(String key) {
-        var lower = key.toLowerCase();
-        return SENSITIVE_PATTERNS.stream().anyMatch(lower::contains);
+        var words = Arrays.stream(WORD_BREAK.split(key.substring(key.lastIndexOf('.') + 1)))
+                .filter(w -> !w.isEmpty())
+                .map(w -> w.toLowerCase(Locale.ROOT))
+                .toList();
+        if (words.isEmpty()) return false;
+        var last = words.getLast();
+        return last.endsWith("key") || last.endsWith("keys") || last.endsWith("token")
+                || words.stream().anyMatch(w -> w.contains("secret") || w.contains("password"));
     }
 
     public static @Nullable String maskValue(String key, String value) {
