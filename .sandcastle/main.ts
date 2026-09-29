@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { z } from "zod";
-import { assertReady, ensureGradleSeed, factoryHooks, factorySandbox, gatewayUp, planHooks } from "./factory.ts";
+import { assertReady, ensureGradleSeed, ensureImage, factoryHooks, factorySandbox, gatewayUp, planHooks } from "./factory.ts";
 import { FACTORY_HEADER, addLabel, claim, comment, inReview, intake, orphaned, promptContext, rejectionFeedback, removeLabel, snapshotToState, transitionTo, type Snapshot } from "./jira.ts";
 import { pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, STATE } from "./paths.ts";
@@ -308,6 +308,7 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   // ff-only: nothing in the factory commits to main, so a divergence is for a human to look at, not to merge.
   gitIn(REPO, "fetch", "--quiet", "origin", "main");
   gitIn(REPO, "merge", "--ff-only", "--quiet", "origin/main");
+  if (!ensureImage(REPO, gitIn(REPO, "rev-parse", "main"), `${LOGS}/image-build.log`)) return [];
 
   // A story pinned by FACTORY_TICKET may itself be in review; its own branch is not someone else's work.
   const inFlight = new Map<string, string>();
@@ -391,11 +392,28 @@ for (const key of process.env.FACTORY_PLAN_ONLY ? [] : await orphaned()) {
   console.log(`[factory] ${key}: interrupted by the last stop, back to To Do`);
 }
 
+// The factory's own code, as main has it: an idle harness under launchd restarts to load a change.
+const factoryCode = () => {
+  try {
+    return gitIn(CHECKOUT, "rev-parse", "main:.sandcastle");
+  } catch {
+    return "";
+  }
+};
+const CODE_AT_START = factoryCode();
+
 ensureGradleSeed();
 const runs = new Set<Promise<void>>();
 let firstRound = true;
 console.log(`[factory] ${ONE_ROUND ? "one round" : `watching the active sprint every ${POLL_SECONDS}s`}; ${LIMIT} at a time`);
 while (true) {
+  if (!ONE_ROUND && running.size === 0 && factoryCode() !== CODE_AT_START) {
+    if (process.env.FACTORY_SUPERVISED) {
+      console.log("[factory] the factory's code changed on main; exiting so launchd restarts it on the new code");
+      process.exit(0);
+    }
+    note("code", "[factory] the factory's code changed on main; restart it to load the change");
+  }
   if (!ONE_ROUND || firstRound) {
     firstRound = false;
     let gateway: boolean | string;

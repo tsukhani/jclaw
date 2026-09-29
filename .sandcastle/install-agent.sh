@@ -33,7 +33,7 @@ fi
 
 NODE_DIR="$(dirname "$(command -v node)")"
 DOCKER_DIR="$(dirname "$(command -v docker)")"
-[[ -x "$HERE/node_modules/.bin/tsx" ]] || (cd "$HERE" && npm ci --no-audit --no-fund)
+"$HERE/run.sh" --install-only
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -41,12 +41,13 @@ cat > "$PLIST" <<PLIST
 <dict>
   <key>Label</key><string>$LABEL</string>
   <key>ProgramArguments</key>
-  <array><string>$HERE/node_modules/.bin/tsx</string><string>main.ts</string></array>
+  <array><string>$HERE/run.sh</string></array>
   <key>WorkingDirectory</key><string>$HERE</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PATH</key><string>$NODE_DIR:$DOCKER_DIR:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>FACTORY_HOME</key><string>$FACTORY_HOME</string>
+    <key>FACTORY_SUPERVISED</key><string>launchd</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

@@ -30,8 +30,8 @@ const NETWORK = "jclaw-factory";
 const EGRESS_NETWORK = "jclaw-factory-egress";
 const GATEWAY = "jclaw-factory-gateway";
 // The one container that reaches the internet and holds the credential runs Node and nothing else: no shell, no package
-// manager, non-root. Pinned by digest so a re-tag upstream cannot change it.
-const GATEWAY_IMAGE = "gcr.io/distroless/nodejs24-debian13@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d";
+// manager, non-root. Pinned by digest so a re-tag upstream cannot change it; Renovate moves the digest (renovate.json5).
+const GATEWAY_IMAGE = "gcr.io/distroless/nodejs24-debian13:nonroot@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d";
 const GATEWAY_DIR = `${HERE}/gateway`;
 const GATEWAY_RUN = [
   "--name", GATEWAY, "--network", EGRESS_NETWORK, "--restart", "unless-stopped",
@@ -50,6 +50,30 @@ const NO_PROXY = `localhost,127.0.0.1,::1,${GATEWAY}`;
 
 const dockerCli = (...args: string[]) =>
   execFileSync("docker", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+
+// The sandbox image is built from main's .devcontainer/Dockerfile, which reads .play-version and frontend/package.json,
+// so rebuilding whenever main moves keeps the toolchain on the versions the repo pins. The layer cache makes a move
+// that touches none of those inputs a matter of seconds. On failure the stale image stays, and the caller waits.
+export const ensureImage = (clone: string, main: string, log: string): boolean => {
+  let built = "";
+  try {
+    built = dockerCli("image", "inspect", "-f", '{{index .Config.Labels "factory.main"}}', IMAGE);
+  } catch {
+    // Not built yet.
+  }
+  if (built === main) return true;
+  console.log(`[factory] building the sandbox image from main at ${main.slice(0, 8)}`);
+  const out = fs.openSync(log, "w");
+  try {
+    execFileSync("docker", ["build", "-f", `${clone}/.devcontainer/Dockerfile`, "--label", `factory.main=${main}`, "-t", IMAGE, clone], { stdio: ["ignore", out, out] });
+    return true;
+  } catch {
+    console.log(`[factory] the sandbox image did not build; stories wait for main to fix it (${log})`);
+    return false;
+  } finally {
+    fs.closeSync(out);
+  }
+};
 
 const createGateway = () => {
   try {

@@ -136,13 +136,15 @@ USER agent
 # says "pnpm: not found" immediately after a successful install.
 ENV PNPM_HOME=/home/agent/.local/share/pnpm
 ENV PATH=/home/agent/.local/bin:$PNPM_HOME/bin:$PATH
-# renovate: datasource=npm depName=pnpm
-ARG PNPM_VERSION=12.6.0
+# pnpm is the version frontend/package.json's `packageManager` pins, so the image follows the repo. uv and Claude Code
+# are pinned nowhere else in the repo, so their pins live here.
+COPY --chown=agent frontend/package.json /tmp/frontend-package.json
 # renovate: datasource=github-releases depName=astral-sh/uv
 ARG UV_VERSION=0.12.19
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
 ARG CLAUDE_CODE_VERSION=2.1.283
 RUN retry() { n=0; until "$@"; do n=$((n + 1)); [ "$n" -ge 5 ] && return 1; sleep $((n * 3)); done; }; \
+    PNPM_VERSION=$(node -p "require('/tmp/frontend-package.json').packageManager.replace(/^pnpm@/, '').split('+')[0]") && \
     curl -fsSL --retry 5 --retry-all-errors https://get.pnpm.io/install.sh -o /tmp/pnpm-install.sh && \
     curl -fsSL --retry 5 --retry-all-errors "https://astral.sh/uv/${UV_VERSION}/install.sh" -o /tmp/uv-install.sh && \
     curl -fsSL --retry 5 --retry-all-errors https://claude.ai/install.sh -o /tmp/claude-install.sh && \
@@ -152,7 +154,7 @@ RUN retry() { n=0; until "$@"; do n=$((n + 1)); [ "$n" -ge 5 ] && return 1; slee
     test "$(pnpm --version)" = "$PNPM_VERSION" && \
     test "$(uv --version | cut -d' ' -f2)" = "$UV_VERSION" && \
     test "$(claude --version | cut -d' ' -f1)" = "$CLAUDE_CODE_VERSION" && \
-    rm -f /tmp/pnpm-install.sh /tmp/uv-install.sh /tmp/claude-install.sh
+    rm -f /tmp/pnpm-install.sh /tmp/uv-install.sh /tmp/claude-install.sh /tmp/frontend-package.json
 
 # WORKDIR matches the Dev Containers default mount path so Cursor /
 # Codespaces / JetBrains Gateway find the project at the expected location;

@@ -162,6 +162,17 @@
       automerge: false,
     },
 
+    // The AFK factory's Sandcastle. Before 1.0 it ships breaking changes as patch releases, and
+    // .sandcastle/factory.ts wraps its Docker provider's internals to lock the sandbox's .git down, so a
+    // bump is reviewed and `npx tsx sandbox-check.ts` run before merging.
+    {
+      matchPackageNames: ["@ai-hero/sandcastle"],
+      automerge: false,
+      prBodyNotes: [
+        ":warning: Run `cd .sandcastle && npm ci && npx tsx sandbox-check.ts` before merging: the factory's `.git` lockdown wraps Sandcastle's Docker provider.",
+      ],
+    },
+
     // The play1 fork pin. See the custom manager below for why this can never
     // automerge: the matching checkout in /opt/play1 is a step no PR can take.
     {
@@ -201,6 +212,13 @@
       customType: "regex",
       managerFilePatterns: ["^\\.devcontainer/Dockerfile$"],
       matchStrings: ["# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\s+ARG \\w+=(?<currentValue>\\S+)"],
+    },
+    // The AFK factory's gateway image, pinned by tag and digest in a TypeScript string.
+    {
+      customType: "regex",
+      managerFilePatterns: ["^\\.sandcastle/factory\\.ts$"],
+      matchStrings: ["\"(?<depName>gcr\\.io/distroless/[\\w-]+):(?<currentValue>[\\w.-]+)@(?<currentDigest>sha256:[a-f0-9]{64})\""],
+      datasourceTemplate: "docker",
     },
   ],
 }
