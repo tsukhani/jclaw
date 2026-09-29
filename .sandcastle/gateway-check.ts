@@ -15,6 +15,8 @@ console.log("== gateway container");
 console.log(docker("inspect", "jclaw-factory-gateway", "--format",
   "image={{.Config.Image}}\nuser={{.Config.User}} readOnlyRootfs={{.HostConfig.ReadonlyRootfs}} capDrop={{.HostConfig.CapDrop}} secOpt={{.HostConfig.SecurityOpt}} mem={{.HostConfig.Memory}} pids={{.HostConfig.PidsLimit}}\nnetworks={{range $k, $v := .NetworkSettings.Networks}}{{$k}} {{end}}"));
 console.log("shell in gateway: " + docker("exec", "jclaw-factory-gateway", "sh", "-c", "true"));
+const configEnv = docker("inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", "jclaw-factory-gateway").split("\n");
+console.log("credentials in the container's config (docker inspect): " + configEnv.filter((l) => /sk-ant|TOKEN=|_KEY=/.test(l)).length);
 
 // A container outside the factory, on Docker's default bridge, must reach none of the gateway's addresses.
 const ips = docker("inspect", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}", "jclaw-factory-gateway").split(" ").filter(Boolean);

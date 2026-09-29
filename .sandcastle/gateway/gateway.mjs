@@ -6,8 +6,15 @@ import * as http from "node:http";
 import * as https from "node:https";
 import * as net from "node:net";
 
-const credential = process.env.CLAUDE_CODE_OAUTH_TOKEN || process.env.ANTHROPIC_API_KEY;
-if (!credential) throw new Error("gateway needs CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY");
+// A read-only mount, not the environment: Docker keeps a container's environment in its config, where `docker inspect`
+// shows it to anyone with Docker access.
+const CREDENTIAL_FILE = "/run/factory/credential.env";
+const vars = Object.fromEntries(
+  fs.readFileSync(CREDENTIAL_FILE, "utf8").split("\n").map((l) => l.trim()).filter((l) => l.includes("=") && !l.startsWith("#"))
+    .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
+);
+const credential = vars.CLAUDE_CODE_OAUTH_TOKEN || vars.ANTHROPIC_API_KEY;
+if (!credential) throw new Error(`${CREDENTIAL_FILE} needs CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY`);
 
 // One hostname per line; a leading dot matches that domain's subdomains.
 const allowlist = fs

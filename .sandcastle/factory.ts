@@ -21,11 +21,14 @@ const GATEWAY = "jclaw-factory-gateway";
 // manager, non-root. Pinned by digest so a re-tag upstream cannot change it.
 const GATEWAY_IMAGE = "gcr.io/distroless/nodejs24-debian13@sha256:bb6b03d81066993293a10feda7250e8e1cc034035fe9b61cfceededa7c8bf04d";
 const GATEWAY_DIR = `${HERE}/gateway`;
-// A running gateway built from anything else (another image, mount, credential file or network) is replaced when idle.
-const GATEWAY_CONFIG = createHash("sha256")
-  .update([GATEWAY_IMAGE, GATEWAY_DIR, ENV_FILE, EGRESS_NETWORK].join("\n"))
-  .digest("hex")
-  .slice(0, 12);
+const GATEWAY_RUN = [
+  "--name", GATEWAY, "--network", EGRESS_NETWORK, "--restart", "unless-stopped",
+  "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "256m", "--pids-limit", "64",
+  "-v", `${GATEWAY_DIR}:/gateway:ro`, "-v", `${ENV_FILE}:/run/factory/credential.env:ro`,
+  GATEWAY_IMAGE, "/gateway/gateway.mjs",
+];
+// A running gateway created any other way is replaced when idle.
+const GATEWAY_CONFIG = createHash("sha256").update(JSON.stringify(GATEWAY_RUN)).digest("hex").slice(0, 12);
 const PROXY = `http://${GATEWAY}:3128`;
 const NO_PROXY = `localhost,127.0.0.1,::1,${GATEWAY}`;
 
@@ -38,12 +41,7 @@ const createGateway = () => {
   } catch {
     // Nothing to remove.
   }
-  dockerCli(
-    "run", "-d", "--name", GATEWAY, "--network", EGRESS_NETWORK, "--env-file", ENV_FILE, "--restart", "unless-stopped",
-    "--label", `factory.config=${GATEWAY_CONFIG}`,
-    "--read-only", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--memory", "256m", "--pids-limit", "64",
-    "-v", `${GATEWAY_DIR}:/gateway:ro`, GATEWAY_IMAGE, "/gateway/gateway.mjs",
-  );
+  dockerCli("run", "-d", "--label", `factory.config=${GATEWAY_CONFIG}`, ...GATEWAY_RUN);
   dockerCli("network", "connect", NETWORK, GATEWAY);
 };
 

@@ -19,7 +19,9 @@ Nothing the harness writes lives in the checkout, because `/deploy` stages the w
 
 Sandboxes use the devcontainer image and sit on the `jclaw-factory` Docker network, which has no route out. Their only
 exit is the gateway container (`gateway/gateway.mjs`, a distroless Node image). It forwards model calls, injecting the
-credential so that no sandbox ever holds it, and proxies HTTPS to the hosts in `gateway/egress-allowlist.txt`.
+credential so that no sandbox ever holds it, and proxies HTTPS to the hosts in `gateway/egress-allowlist.txt`. It reads
+the credential from `~/.jclaw-factory/.env`, mounted read-only, not from its environment, which Docker would keep in
+the container's config for `docker inspect` to show.
 The gateway reaches the internet through its own network, `jclaw-factory-egress`, which no other container joins. On
 Docker's default bridge, any container could reach the gateway's ports and have your credential attached to its model
 calls. `gateway-check.ts` checks this from a container on the default bridge.
@@ -30,9 +32,9 @@ Prerequisites: Docker Desktop running, Node 24 or newer, a JClaw checkout, and a
 
 1. Create `~/.jclaw-factory/.env` holding the model credential: `CLAUDE_CODE_OAUTH_TOKEN=…` (from `claude setup-token`) or
    `ANTHROPIC_API_KEY=…`.
-2. Create `~/.jclaw-factory/jira.env` holding `JIRA_URL=…` and `JIRA_PERSONAL_TOKEN=…`. It is optional if your Claude Code
-   config already has the `jira-confluence` MCP server. The Jira token stays out of `.env` because the gateway loads
-   that file, so no container ever holds it.
+2. Create `~/.jclaw-factory/jira.env` holding `JIRA_URL=…` and `JIRA_PERSONAL_TOKEN=…`, the only place the harness reads
+   Jira access from. The token stays out of `.env` because the gateway mounts that file, so no container ever holds
+   it.
 3. Run `.sandcastle/install-agent.sh`. It checks the prerequisites, builds the sandbox image `jclaw-devcontainer:local`
    if it is missing (several minutes, once), installs dependencies, and loads the LaunchAgent `com.jclaw.factory`. The
    agent starts the harness at login and restarts it if it exits.
