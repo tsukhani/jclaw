@@ -59,7 +59,12 @@ cat > "$PLIST" <<PLIST
 </plist>
 PLIST
 plutil -lint "$PLIST" >/dev/null
-# Replacing a running agent interrupts its stories; the new one resumes them.
+# Replacing a running agent interrupts its stories; the new one resumes them. bootout returns before launchd has let go
+# of the job, and bootstrapping it meanwhile fails with "5: Input/output error".
 launchctl bootout "$DOMAIN/$LABEL" 2>/dev/null || true
+for _ in $(seq 1 30); do
+    launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break
+    sleep 1
+done
 launchctl bootstrap "$DOMAIN" "$PLIST"
 echo "installed $LABEL; log: $FACTORY_HOME/logs/factory.log"
