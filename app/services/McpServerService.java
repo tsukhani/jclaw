@@ -197,6 +197,37 @@ public final class McpServerService {
     }
 
     /**
+     * Puts a stored secret back wherever {@code body} carries its mask (JCLAW-1331): the read masks env values
+     * with sensitive names and every header value, so a form or an agent that saves what it read sends masks.
+     *
+     * @return why the body cannot be saved, a mask that matches nothing stored under its name, or null
+     */
+    public static @Nullable String restoreMaskedSecrets(JsonObject body, TransportConfig stored) {
+        var env = restoreMasked(body, "env", stored.env(), false);
+        return env != null ? env : restoreMasked(body, "headers", stored.headers(), true);
+    }
+
+    private static @Nullable String restoreMasked(JsonObject body, String field, Map<String, String> stored,
+                                                  boolean everyValueSecret) {
+        if (!body.has(field) || !body.get(field).isJsonObject()) return null;
+        var submitted = body.getAsJsonObject(field);
+        var restored = new LinkedHashMap<String, String>();
+        for (var name : submitted.keySet()) {
+            var element = submitted.get(name);
+            if (!element.isJsonPrimitive()) continue;
+            var value = element.getAsString();
+            if (!value.endsWith("****") || !(everyValueSecret || ConfigService.isSensitive(name))) continue;
+            var prior = stored.get(name);
+            if (prior == null || !value.equals(everyValueSecret ? maskSecret(prior) : ConfigService.maskValue(name, prior))) {
+                return name + " holds a saved secret's mask rather than a value: enter the value again.";
+            }
+            restored.put(name, prior);
+        }
+        restored.forEach(submitted::addProperty);
+        return null;
+    }
+
+    /**
      * Build a {@code configJson} string from the form-shape JSON the API
      * received. Discards fields that don't apply to the chosen transport
      * so the stored row is canonical.

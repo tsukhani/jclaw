@@ -215,6 +215,40 @@ describe('MCP Servers page', () => {
       .toBe('GITHUB_TOKEN')
   })
 
+  it('shows a saved secret as dots and sends its mask back untouched, which keeps it (JCLAW-1331)', async () => {
+    setupApi([server({ env: { GITHUB_TOKEN: 'ghp_****', NODE_ENV: 'production' } })])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    await clickText(c, 'Edit')
+
+    expect(c.find('form').html()).not.toContain('ghp_')
+    const values = c.findAll('input[aria-label="Environment variable value"]')
+    expect(values.map(v => (v.element as HTMLInputElement).value)).toEqual(['production'])
+
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(putBody).toBeTruthy())
+    expect(putBody!.env).toEqual({ GITHUB_TOKEN: 'ghp_****', NODE_ENV: 'production' })
+  })
+
+  it('sends a changed secret as typed, and asks for a value once a saved one is renamed', async () => {
+    setupApi([server({ transport: 'HTTP', command: null, args: [], env: {}, url: 'https://x.test/mcp',
+      headers: { 'Authorization': 'Bear****', 'X-Tier': 'gold****' } })])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    await clickText(c, 'Edit')
+
+    expect(c.findAll('input[aria-label="Header value"]')).toHaveLength(0)
+    await clickLabel(c, 'Edit Header value')
+    await c.find('input[aria-label="Header value"]').setValue('Bearer new')
+    const names = c.findAll('input[aria-label="Header name"]')
+    await names[1]!.setValue('X-Plan')
+    expect(c.findAll('input[aria-label="Header value"]')).toHaveLength(2)
+
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(putBody).toBeTruthy())
+    expect(putBody!.headers).toEqual({ 'Authorization': 'Bearer new', 'X-Plan': '' })
+  })
+
   it('flips a server\'s enabled flag without sending the rest of the form', async () => {
     setupApi([server()])
     const c = await mountSuspended(McpServers)

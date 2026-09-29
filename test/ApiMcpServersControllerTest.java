@@ -1,3 +1,5 @@
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import mcp.McpConnectionManager;
 import models.AgentSkillAllowedTool;
 import org.junit.jupiter.api.AfterEach;
@@ -231,6 +233,73 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                 () -> "delete must cascade through stop() and clear allowlist rows; " + cleanupDiagnostics());
     }
 
+    // ==================== JCLAW-1331: masked secrets written back ====================
+
+    @Test
+    void savingAStdioServerAsItWasReadKeepsItsSecretEnvValues() throws Exception {
+        login();
+        var view = created("""
+                {"name":"keeps","enabled":false,"transport":"STDIO","command":"node","args":["s.js"],
+                 "env":{"GITHUB_TOKEN":"ghp_real_secret","NODE_ENV":"production"}}
+                """);
+        var env = view.getAsJsonObject("env");
+        assertEquals("ghp_****", env.get("GITHUB_TOKEN").getAsString(), view.toString());
+
+        var body = new JsonObject();
+        body.addProperty("name", "kept");
+        body.addProperty("command", "node");
+        body.add("args", view.get("args"));
+        body.add("env", env);
+        assertIsOk(PUT("/api/mcp-servers/" + view.get("id").getAsLong(), "application/json", body.toString()));
+
+        var stored = storedConfig(view.get("id").getAsLong(), "kept");
+        assertTrue(stored.contains("\"GITHUB_TOKEN\":\"ghp_real_secret\""), stored);
+        assertTrue(stored.contains("\"NODE_ENV\":\"production\""), stored);
+    }
+
+    @Test
+    void savingAnHttpServerAsItWasReadKeepsItsHeaderValues() throws Exception {
+        login();
+        var view = created("""
+                {"name":"remote-keeps","enabled":false,"transport":"HTTP","url":"http://127.0.0.1:1/mcp",
+                 "headers":{"Authorization":"Bearer real-token","X-Tier":"gold"}}
+                """);
+        var headers = view.getAsJsonObject("headers");
+        assertEquals("Bear****", headers.get("Authorization").getAsString(), view.toString());
+
+        var body = new JsonObject();
+        body.addProperty("name", "remote-kept");
+        body.addProperty("url", "http://127.0.0.1:1/mcp");
+        body.add("headers", headers);
+        assertIsOk(PUT("/api/mcp-servers/" + view.get("id").getAsLong(), "application/json", body.toString()));
+
+        var stored = storedConfig(view.get("id").getAsLong(), "remote-kept");
+        assertTrue(stored.contains("\"Authorization\":\"Bearer real-token\""), stored);
+        assertTrue(stored.contains("\"X-Tier\":\"gold\""), stored);
+    }
+
+    @Test
+    void aMaskThatMatchesNothingStoredUnderItsNameIsRefused() throws Exception {
+        login();
+        var view = created("""
+                {"name":"renamed","enabled":false,"transport":"STDIO","command":"node",
+                 "env":{"GITHUB_TOKEN":"ghp_real_secret"}}
+                """);
+        var id = view.get("id").getAsLong();
+
+        var renamed = PUT("/api/mcp-servers/" + id, "application/json",
+                "{\"command\":\"node\",\"env\":{\"GH_TOKEN\":\"ghp_****\"}}");
+        assertStatus(400, renamed);
+        assertTrue(getContent(renamed).contains("GH_TOKEN"), getContent(renamed));
+        assertTrue(storedConfig(id, "renamed").contains("ghp_real_secret"));
+
+        var copied = POST("/api/mcp-servers", "application/json", """
+                {"name":"copy","enabled":false,"transport":"HTTP","url":"http://127.0.0.1:1/mcp",
+                 "headers":{"Authorization":"Bear****"}}
+                """);
+        assertStatus(400, copied);
+    }
+
     // ==================== JCLAW-388: requiresApproval flag round-trip ====================
 
     @Test
@@ -312,6 +381,19 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                 """;
         var response = POST("/api/auth/login", "application/json", body);
         assertIsOk(response);
+    }
+
+    private JsonObject created(String body) {
+        var resp = POST("/api/mcp-servers", "application/json", body);
+        assertIsOk(resp);
+        return JsonParser.parseString(getContent(resp)).getAsJsonObject();
+    }
+
+    /** The row's stored config once a fresh Tx sees the update that renamed it to {@code name}. */
+    private static String storedConfig(long id, String name) {
+        awaitCommitted(() -> name.equals(commitInFreshTx(() -> models.McpServer.<models.McpServer>findById(id).name)),
+                "the update never became visible to a fresh Tx");
+        return commitInFreshTx(() -> models.McpServer.<models.McpServer>findById(id).configJson);
     }
 
     private String createHttpServer(String name, String url, boolean enabled) {

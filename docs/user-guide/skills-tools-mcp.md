@@ -199,6 +199,8 @@ When you click **Add server**, you pick one:
 | **Endpoint URL** | Full URL to the server's MCP endpoint.                                          |
 | **Headers**    | Auth headers, etc. Common keys: `Authorization`, `X-Api-Key`.                     |
 
+Once saved, a header value and an environment variable whose name marks it as a secret (one ending in `KEY`, `KEYS` or `TOKEN`, or containing `SECRET` or `PASSWORD`, such as `GITHUB_TOKEN`) show as `••••••••` with a pencil, like every saved secret. Leaving one untouched keeps it when you save; the pencil takes a whole new value. Renaming a saved secret means entering its value again.
+
 ### Testing a server
 
 Each row has a **Test connection** button, and the add/edit form has one too. JClaw connects, lists the server's tools, and reports back. A successful test means the server is reachable and speaks MCP; if it fails, the error message is surfaced inline so you can fix the config.

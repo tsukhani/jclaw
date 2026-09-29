@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Breaker, McpServer, McpTestResult } from '~/types/api'
+import { isSensitiveKey } from '~/utils/secrets'
 import { ArrowPathIcon, BeakerIcon, BoltIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 
 const { data: servers, refresh } = await useFetch<McpServer[]>('/api/mcp-servers')
@@ -10,7 +11,8 @@ const { confirm } = useConfirm()
 
 type TransportKind = 'STDIO' | 'HTTP'
 
-interface KeyValueRow { key: string, value: string }
+// A secret loaded from the server keeps the name and mask it came with (JCLAW-1331).
+interface KeyValueRow { key: string, value: string, savedKey?: string, savedMask?: string }
 interface FormState {
   id: number | null
   name: string
@@ -95,10 +97,20 @@ function blankForm(): FormState {
   }
 }
 
+function savedSecret(key: string, mask: string): KeyValueRow {
+  return { key, value: '', savedKey: key, savedMask: mask }
+}
+
+// Renamed, a secret is no longer the one saved under that name, so it needs a value again.
+function isSavedSecret(row: KeyValueRow): boolean {
+  return row.savedMask !== undefined && row.key.trim() === row.savedKey
+}
+
 function formFromServer(s: McpServer): FormState {
-  const envRows = Object.entries(s.env || {}).map(([key, value]) => ({ key, value }))
+  // The server masks env values with sensitive names and every header value, as ConfigService does.
+  const envRows = Object.entries(s.env || {}).map(([key, value]) => isSensitiveKey(key) ? savedSecret(key, value) : { key, value })
   if (envRows.length === 0) envRows.push({ key: '', value: '' })
-  const headerRows = Object.entries(s.headers || {}).map(([key, value]) => ({ key, value }))
+  const headerRows = Object.entries(s.headers || {}).map(([key, value]) => savedSecret(key, value))
   if (headerRows.length === 0) headerRows.push({ key: '', value: '' })
   return {
     id: s.id,
@@ -137,7 +149,8 @@ function cancelEdit() {
 function rowsToMap(rows: KeyValueRow[]): Record<string, string> {
   const out: Record<string, string> = {}
   for (const r of rows) {
-    if (r.key.trim()) out[r.key.trim()] = r.value
+    // An untouched secret goes back as its mask, which the server swaps for the stored value.
+    if (r.key.trim()) out[r.key.trim()] = r.value === '' && isSavedSecret(r) ? r.savedMask! : r.value
   }
   return out
 }
@@ -451,7 +464,17 @@ function removeHeaderRow(i: number) {
                   aria-label="Environment variable name"
                   class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                 >
+                <SecretField
+                  v-if="isSensitiveKey(row.key)"
+                  v-model="row.value"
+                  form
+                  :saved="isSavedSecret(row)"
+                  label="Environment variable value"
+                  placeholder="value"
+                  input-class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                />
                 <input
+                  v-else
                   v-model="row.value"
                   type="text"
                   placeholder="value"
@@ -514,13 +537,14 @@ function removeHeaderRow(i: number) {
                   aria-label="Header name"
                   class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                 >
-                <input
+                <SecretField
                   v-model="row.value"
-                  type="text"
+                  form
+                  :saved="isSavedSecret(row)"
+                  label="Header value"
                   placeholder="value"
-                  aria-label="Header value"
-                  class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
-                >
+                  input-class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                />
                 <button
                   type="button"
                   class="text-fg-muted hover:text-red-700 dark:hover:text-red-400 p-1"
@@ -901,7 +925,17 @@ function removeHeaderRow(i: number) {
                             aria-label="Environment variable name"
                             class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                           >
+                          <SecretField
+                            v-if="isSensitiveKey(row.key)"
+                            v-model="row.value"
+                            form
+                            :saved="isSavedSecret(row)"
+                            label="Environment variable value"
+                            placeholder="value"
+                            input-class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                          />
                           <input
+                            v-else
                             v-model="row.value"
                             type="text"
                             placeholder="value"
@@ -963,13 +997,14 @@ function removeHeaderRow(i: number) {
                             aria-label="Header name"
                             class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
                           >
-                          <input
+                          <SecretField
                             v-model="row.value"
-                            type="text"
+                            form
+                            :saved="isSavedSecret(row)"
+                            label="Header value"
                             placeholder="value"
-                            aria-label="Header value"
-                            class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
-                          >
+                            input-class="flex-1 min-w-0 bg-surface border border-input text-xs text-fg-strong px-2 py-1 font-mono focus:outline-hidden"
+                          />
                           <button
                             type="button"
                             class="text-fg-muted hover:text-red-700 dark:hover:text-red-400 p-1"

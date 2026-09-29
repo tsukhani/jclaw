@@ -108,6 +108,7 @@ public class ApiMcpServersController extends Controller {
                 && !body.get(KEY_REQUIRES_APPROVAL).isJsonNull()
                 && body.get(KEY_REQUIRES_APPROVAL).getAsBoolean();
         row.transport = transport;
+        restoreMaskedSecrets(body, McpServerService.TransportConfig.empty());
         row.configJson = McpServerService.composeConfigJson(transport, body);
         try {
             McpServerService.validate(row);
@@ -138,6 +139,7 @@ public class ApiMcpServersController extends Controller {
         // (under the OLD name) before re-syncing under the new one. Otherwise
         // McpConnectionManager would carry a stale entry forever.
         var priorName = row.name;
+        var priorConfig = McpServerService.explodeConfigJson(row.transport, row.configJson);
         applyRenameIfPresent(row, body);
         if (body.has(KEY_ENABLED) && !body.get(KEY_ENABLED).isJsonNull()) {
             row.enabled = body.get(KEY_ENABLED).getAsBoolean();
@@ -157,6 +159,7 @@ public class ApiMcpServersController extends Controller {
             // `transport` but carries a new `command` rewrites what an existing STDIO server
             // executes, which is the same authority as creating one.
             requireMainForStdio(row.transport);
+            restoreMaskedSecrets(body, priorConfig);
             row.configJson = McpServerService.composeConfigJson(row.transport, body);
         }
         try {
@@ -229,6 +232,11 @@ public class ApiMcpServersController extends Controller {
      * allowlist. That is the operator's authority to delegate, and {@code main} holds it;
      * a custom agent gets HTTP transports only (JCLAW-1270).
      */
+    private static void restoreMaskedSecrets(JsonObject body, McpServerService.TransportConfig stored) {
+        var refusal = McpServerService.restoreMaskedSecrets(body, stored);
+        if (refusal != null) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, refusal);
+    }
+
     private static void requireMainForStdio(McpServer.Transport transport) {
         if (transport == McpServer.Transport.STDIO && !RequestPrincipal.isOperatorOrMainAgent()) {
             ApiResponses.error(403, ApiResponses.AGENT_SCOPE,
