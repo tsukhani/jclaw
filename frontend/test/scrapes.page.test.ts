@@ -14,7 +14,7 @@ function job(id: number, state: ScrapeJobState, extra: Partial<ScrapeJob> = {}):
     folder: `scrapes/${id}`, combinedFile: null,
     options: { url: `https://site${id}.test/docs`, maxPages: 30, maxDepth: 2, maxMinutes: 60, sameHostOnly: true,
       respectRobots: true, seedFromSitemap: true, language: 'en', format: 'markdown', metadata: false },
-    runtimeSeconds: 75, interruptions: 0, createdAt: '2026-09-22T10:00:00Z', startedAt: null, completedAt: null,
+    runtimeSeconds: 75, interruptions: 0, egress: null, createdAt: '2026-09-22T10:00:00Z', startedAt: null, completedAt: null,
     ...extra,
   }
 }
@@ -42,6 +42,22 @@ afterEach(() => {
 })
 
 describe('Scrapes page', () => {
+  it('marks a job that went through a proxy, naming it on hover, and no other (JCLAW-1333)', async () => {
+    registerEndpoint('/api/scrape-jobs', listing(
+      job(1, 'SUCCEEDED', { egress: ['http://74.81.81.81:823'] }),
+      job(2, 'SUCCEEDED', { egress: ['direct'] }),
+      job(3, 'SUCCEEDED', { egress: null })))
+
+    const page = await mountSuspended(Scrapes)
+    await settle()
+
+    const badge = page.find('[data-testid="scrape-proxy-1"]')
+    expect(badge.text()).toBe('proxy')
+    expect(badge.attributes('title')).toBe('Went through DataImpulse, 74.81.81.81:823')
+    expect(page.find('[data-testid="scrape-proxy-2"]').exists()).toBe(false)
+    expect(page.find('[data-testid="scrape-proxy-3"]').exists()).toBe(false)
+  })
+
   it('lists each job with its site, agent, state in words and its progress', async () => {
     registerEndpoint('/api/scrape-jobs', listing(job(1, 'RUNNING'), job(2, 'INTERRUPTED')))
 

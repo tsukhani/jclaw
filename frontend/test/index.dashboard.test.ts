@@ -83,7 +83,7 @@ describe('Dashboard — Recent Activity scrapes view (JCLAW-1273)', () => {
           folder: 'scrapes/12', combinedFile: null,
           options: { url: 'https://docs.example.test/', maxPages: 500, maxDepth: 2, maxMinutes: 60, sameHostOnly: true,
             respectRobots: true, seedFromSitemap: true, language: 'en', format: 'markdown', metadata: false },
-          runtimeSeconds: 40, interruptions: 0, createdAt: '2026-09-22T10:00:00Z', startedAt: null, completedAt: null,
+          runtimeSeconds: 40, interruptions: 0, egress: null, createdAt: '2026-09-22T10:00:00Z', startedAt: null, completedAt: null,
         }]
       })
       // The 5 s tick refreshes Chat Cost too, so its stub needs the refresh the page calls.

@@ -9,7 +9,7 @@ A background scrape starts one of two ways:
 
 ## The Scrapes page
 
-Every background scrape, newest first: the site, the agent whose workspace receives the pages, its state, how many pages it has read of those it can reach, and how long it has been running. Filter by agent or by state. While any listed scrape is waiting or running, the list refreshes itself every few seconds; it stops once none is.
+Every background scrape, newest first: the site, the agent whose workspace receives the pages, its state, how many pages it has read of those it can reach, and how long it has been running. A scrape that went through a proxy is marked **proxy**; hover over the mark to see which. Filter by agent or by state. While any listed scrape is waiting or running, the list refreshes itself every few seconds; it stops once none is.
 
 | State | Meaning |
 |---|---|
@@ -32,7 +32,9 @@ A scrape that was running when JClaw stopped continues on its own once JClaw is 
 
 ## A scrape's page
 
-Open a scrape to see its state and why it stopped, the limits and options it runs with, and every page it has tried in the order it read them: the address, whether it was read or blocked (and by what), which fetcher read it, and how much text it kept. New pages appear as the scrape reads them.
+Open a scrape to see its state and why it stopped, the limits and options it runs with, the proxy it went through, and every page it has tried in the order it read them: the address, whether it was read or blocked (and by what), which fetcher read it, and how much text it kept. New pages appear as the scrape reads them.
+
+A scrape reads the proxy setting once, when it starts, and keeps it to the end: switching the proxy off or changing it in Settings applies to the next scrape. **Proxy** names the proxy (DataImpulse, when it recognizes the address), says *none, connected directly*, or says *not recorded* for a scrape that ran before JClaw kept track. A scrape resumed after a restart reads the setting again, so one that went out two ways lists both, in order.
 
 Select a page to read what the scrape kept of it: Markdown rendered, plain text as it is, or a JSON record laid out for reading. **The viewer loads nothing from the site.** Images and embedded media in a page appear as links, so reading a scraped page never contacts that site from your browser, which does not go through a scraping proxy.
 

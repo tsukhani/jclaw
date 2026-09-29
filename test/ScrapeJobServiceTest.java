@@ -389,6 +389,20 @@ class ScrapeJobServiceTest extends UnitTest {
                 "a resume starts the count again");
     }
 
+    @Test
+    void aJobRecordsWhereItsCrawlWentOut() {
+        var agent = agent("sj-egress");
+        var id = submit(agent, null, (request, listener, resume) -> {
+            listener.egress("http://74.81.81.81:823");
+            listener.page(fetched("https://jobs.test/a", "# Alpha"));
+            return new WebScrapeTool.JobCrawl("Scraped 1 page\n", null, null);
+        }, NO_TURN);
+        awaitEnd(id);
+
+        assertEquals(List.of("http://74.81.81.81:823"),
+                fresh(() -> ScrapeJob.<ScrapeJob>findById(id).egressRoutes()));
+    }
+
     // ==================== deletion ====================
 
     @Test

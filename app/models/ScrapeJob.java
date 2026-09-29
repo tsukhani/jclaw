@@ -1,5 +1,7 @@
 package models;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonParser;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -13,10 +15,13 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.Model;
 import utils.AppClock;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * A crawl that runs as a background job rather than inside an agent's turn (JCLAW-1272). Its pages
@@ -106,6 +111,13 @@ public class ScrapeJob extends Model {
     @Column(columnDefinition = "TEXT")
     public String summary;
 
+    public static final String DIRECT = "direct";
+
+    /** Where each run went out, in order, as a JSON array of proxy URLs and {@link #DIRECT}; null on a job that
+     *  ran before JCLAW-1333 recorded it. */
+    @Column(columnDefinition = "TEXT")
+    public String egress;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 
@@ -118,5 +130,25 @@ public class ScrapeJob extends Model {
     @PrePersist
     void onCreate() {
         if (createdAt == null) createdAt = AppClock.now();
+    }
+
+    /** Null when the job ran before its egress was recorded. */
+    public @Nullable List<String> egressRoutes() {
+        if (egress == null) return null;
+        var routes = new ArrayList<String>();
+        JsonParser.parseString(egress).getAsJsonArray().forEach(route -> routes.add(route.getAsString()));
+        return routes;
+    }
+
+    /** Adds a run's way out, a proxy URL or null for direct, unless an earlier run went the same way. */
+    public void recordEgress(@Nullable String proxyUrl) {
+        var recorded = egressRoutes();
+        var routes = recorded == null ? new ArrayList<String>() : recorded;
+        var route = proxyUrl == null ? DIRECT : proxyUrl;
+        if (routes.contains(route)) return;
+        routes.add(route);
+        var array = new JsonArray();
+        routes.forEach(array::add);
+        egress = array.toString();
     }
 }

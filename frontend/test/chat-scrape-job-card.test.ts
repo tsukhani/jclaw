@@ -19,7 +19,7 @@ function job(id: number, state: ScrapeJobState, pagesRead: number): ScrapeJob {
     folder: `scrapes/${id}`, combinedFile: null,
     options: { url: 'https://docs.example.test/guide', maxPages: 120, maxDepth: 2, maxMinutes: 60, sameHostOnly: true,
       respectRobots: true, seedFromSitemap: true, language: 'en', format: 'markdown', metadata: false },
-    runtimeSeconds: 20, interruptions: 0, createdAt: '2026-09-22T10:00:00Z', startedAt: null, completedAt: null,
+    runtimeSeconds: 20, interruptions: 0, egress: null, createdAt: '2026-09-22T10:00:00Z', startedAt: null, completedAt: null,
   }
 }
 

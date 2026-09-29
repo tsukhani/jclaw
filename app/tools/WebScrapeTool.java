@@ -421,6 +421,10 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         final boolean seedFromSitemap;
         /** Set for a background job (JCLAW-1272); null for a crawl inside a turn. */
         final @Nullable CrawlListener listener;
+        /** Read once when the crawl starts (JCLAW-1333), so a change in Settings applies from the next crawl. */
+        Optional<ScrapeProxy> proxy = Optional.empty();
+        /** The rung-1 client, through {@link #proxy}. */
+        OkHttpClient client = CLIENT;
         /** Pages an earlier run read, by requested URL, each taken out as it is replayed. */
         final Map<String, CrawlListener.Recorded> recorded;
         /** Which harvested links the crawl may follow; set once the seed is known. */
@@ -465,6 +469,12 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             escalationsOutOfTime++;
         }
 
+        void pinProxy(Optional<ScrapeProxy> pinned) {
+            proxy = pinned;
+            client = pinned.map(p -> p.apply(CLIENT)).orElse(CLIENT);
+            if (listener != null) listener.egress(pinned.map(ScrapeProxy::url).orElse(null));
+        }
+
         CrawlState(ScrapeOutput.Request output, boolean save) {
             this(output, save, save ? MAX_SAVED_CHARS : MAX_TOTAL_CHARS, Duration.ofSeconds(configTimeoutSeconds()),
                     Duration.ofSeconds(configTimeoutSeconds()), WebScrapeSettings.seedFromSitemap(), null, Map.of());
@@ -505,6 +515,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private void crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
                        boolean respectRobots, String language, CrawlState state) {
+        state.pinProxy(ScrapeProxy.current());
         state.deadline = System.nanoTime() + state.timeLeft.toNanos();
         state.inScope = link -> !sameHostOnly || sameHost(link, seed);
         state.seen.add(canonical(seed));
@@ -554,7 +565,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 state.refused.add(new Refusal(uri.toString(), e.getMessage()));
                 continue;
             }
-            if (respectRobots && !RobotsCache.isAllowed(uri, client(), IDENTITY)) {
+            if (respectRobots && !RobotsCache.isAllowed(uri, state.client, IDENTITY)) {
                 state.refused.add(new Refusal(uri.toString(), ROBOTS_REFUSAL));
                 continue;
             }
@@ -820,7 +831,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         if (fetched.stream().noneMatch(PageHarvest::markdown)) return;
 
         try {
-            var html = WebExtraction.fetch(seed.toString(), client(),
+            var html = WebExtraction.fetch(seed.toString(), state.client,
                     Map.of("User-Agent", IDENTITY.userAgentHeader(),
                             "Accept", "text/html",
                             "Accept-Language", language + ", *;q=0.5"));
@@ -853,7 +864,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
     private List<URI> withSitemapSeeds(List<URI> harvested, URI seed, boolean sameHostOnly,
                                        boolean respectRobots, CrawlState state) {
         if (!respectRobots || !state.seedFromSitemap) return harvested;
-        var seeds = SitemapSeeder.seedsFor(seed, client(), IDENTITY,
+        var seeds = SitemapSeeder.seedsFor(seed, state.client, IDENTITY,
                 uri -> (!sameHostOnly || sameHost(uri, seed))
                         && !underSuppressedLocale(uri, state)
                         && !state.seen.contains(canonical(uri)));
@@ -905,7 +916,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         if (state.stopRequested()) return null;
         try {
             RobotsCache.awaitSlot(uri, respectRobots
-                    ? RobotsCache.delayMillis(uri, client(), IDENTITY)
+                    ? RobotsCache.delayMillis(uri, state.client, IDENTITY)
                     : RobotsCache.DEFAULT_DELAY_MS);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
@@ -915,7 +926,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         if (state.stopRequested()) return null;
         Outcome plain;
         try {
-            var fetched = WebExtraction.fetch(uri.toString(), client(),
+            var fetched = WebExtraction.fetch(uri.toString(), state.client,
                     headersFor(language, state.output.needsHtml()));
             var text = WebExtraction.toText(fetched);
             plain = classified(uri, fetched, ScrapeObservation.of(fetched, text));
@@ -967,7 +978,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         var best = ScrapeLadder.climb(uri.toString(),
                 new ScrapeLadder.Attempt(ScrapeRung.PLAIN, plain.fetched(), plain.text(),
                         plain.reason(), plain.detail(), plain.status()),
-                language);
+                language, state.proxy);
         if (best.servedBy() == ScrapeRung.PLAIN) return plain;
         EventLogger.info(EVENT_CATEGORY, "%s: served by %s after %s at PLAIN"
                 .formatted(uri, best.servedBy(), plain.reason()), null);

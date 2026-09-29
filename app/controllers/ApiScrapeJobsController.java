@@ -52,12 +52,14 @@ public class ApiScrapeJobsController extends Controller {
      * @param combinedFile   the workspace path of the file combining every page, once it exists
      * @param runtimeSeconds time spent running, across every run; what its time limit counts
      * @param interruptions  times a stopped app left it running since it was last resumed
+     * @param egress         where each run went out, a proxy's URL or {@code "direct"}; null for a job from
+     *                       before that was recorded
      */
     public record ScrapeJobView(Long id, Long agentId, String agentName, @Nullable Long conversationId,
                                 String url, String state, int pagesRead, int pagesFetched, int pagesDiscovered,
                                 @Nullable String stopReason, @Nullable String errorMessage, @Nullable String summary,
                                 String folder, @Nullable String combinedFile, JsonObject options,
-                                long runtimeSeconds, int interruptions,
+                                long runtimeSeconds, int interruptions, @Nullable List<String> egress,
                                 String createdAt, @Nullable String startedAt, @Nullable String completedAt) {
 
         static ScrapeJobView of(ScrapeJob job) {
@@ -69,7 +71,7 @@ public class ApiScrapeJobsController extends Controller {
                     job.url, job.state.name(), job.pagesRead, job.pagesFetched, job.pagesDiscovered,
                     job.stopReason, job.errorMessage, job.summary, ScrapeJobFiles.folder(job.id),
                     ScrapeJobFiles.existing(job.agent.name, combined) == null ? null : combined, options,
-                    job.runtimeMillis / 1000, job.interruptions,
+                    job.runtimeMillis / 1000, job.interruptions, job.egressRoutes(),
                     job.createdAt.toString(), iso(job.startedAt), iso(job.completedAt));
         }
     }

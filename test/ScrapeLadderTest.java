@@ -306,7 +306,7 @@ class ScrapeLadderTest extends UnitTest {
         // headers when that test was written, so a "ja" crawl escalated to the browser
         // silently returned English. These pin the plumbing rather than the value.
         assertNotNull(assertDoesNotThrow(() -> ScrapeLadder.class
-                .getDeclaredMethod("attempt", ScrapeRung.class, String.class, String.class)),
+                .getDeclaredMethod("attempt", ScrapeRung.class, String.class, String.class, java.util.Optional.class)),
                 "the ladder must carry a language into each rung it attempts");
         assertNotNull(assertDoesNotThrow(() -> tools.scrape.RenderedFetcher.class
                 .getMethod("fetch", String.class, String.class)),

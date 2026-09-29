@@ -25,6 +25,12 @@ public interface CrawlListener {
     boolean stopRequested();
 
     /**
+     * Where the crawl goes out, told once before its first fetch: a proxy's {@code ScrapeProxy#url()}, or null
+     * for a direct connection. The crawl keeps it even if the setting changes while it runs (JCLAW-1333).
+     */
+    default void egress(@Nullable String proxyUrl) {}
+
+    /**
      * @param requested the URL the crawl queued, which is how a resumed crawl recognizes the page;
      *                  {@code url} is where it ended up after redirects
      * @param content   the page as the job's format renders it — Markdown, plain text, or its JSON

@@ -26,6 +26,7 @@ import java.io.InterruptedIOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.Optional;
 import java.util.concurrent.Semaphore;
 
 /**
@@ -119,6 +120,11 @@ public final class RenderedFetcher {
      * marker in the output to explain the difference.
      */
     public static Render render(String url, String language) throws IOException {
+        return render(url, language, ScrapeProxy.current());
+    }
+
+    /** As {@link #render(String, String)}, through the proxy a crawl pinned when it started. */
+    public static Render render(String url, String language, Optional<ScrapeProxy> proxy) throws IOException {
         // Authoritative check stays in the JVM. hostResolverRule throws every
         // SecurityException assertUrlSafe does, so an unsafe entry URL never reaches
         // the browser.
@@ -135,7 +141,7 @@ public final class RenderedFetcher {
 
         // Opened inside the slot, so a render queued for one holds no listener.
         return inRenderSlot(() -> {
-            try (var screen = openScreen(url)) {
+            try (var screen = openScreen(url, proxy)) {
                 var body = renderRequest(url, language, pins, screen.port()).toString();
                 var request = new Request.Builder()
                         .url(baseUrl + "/render")
@@ -156,7 +162,13 @@ public final class RenderedFetcher {
      */
     @MustBeClosed
     public static BrowserScreenProxy openScreen(String url) {
-        var upstream = ScrapeProxy.current().orElse(null);
+        return openScreen(url, ScrapeProxy.current());
+    }
+
+    /** As {@link #openScreen(String)}, carried through {@code proxy} rather than the current setting. */
+    @MustBeClosed
+    public static BrowserScreenProxy openScreen(String url, Optional<ScrapeProxy> proxy) {
+        var upstream = proxy.orElse(null);
         var log = new BrowserScreenLog((level, message) ->
                 EventLogger.record(level, EVENT_CATEGORY, "%s: %s".formatted(url, message), null));
         try {

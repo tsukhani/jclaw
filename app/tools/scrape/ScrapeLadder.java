@@ -9,6 +9,7 @@ import services.scrape.ScrapeSidecarException;
 import utils.WebExtraction;
 
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Climbs the escalation ladder for one URL (JCLAW-1099).
@@ -124,6 +125,11 @@ public final class ScrapeLadder {
     /** As {@link #climb(String, Attempt)}, carrying the caller's language preference so
      *  an escalated page comes back in the language the unescalated one would have. */
     public static Attempt climb(String url, Attempt plain, String language) {
+        return plain.usable() ? plain : climb(url, plain, language, ScrapeProxy.current());
+    }
+
+    /** As {@link #climb(String, Attempt, String)}, through the proxy a crawl pinned when it started. */
+    public static Attempt climb(String url, Attempt plain, String language, Optional<ScrapeProxy> proxy) {
         if (plain.usable()) return plain;
 
         var best = plain;
@@ -135,7 +141,7 @@ public final class ScrapeLadder {
             var next = nextInstalledRung(last.reason(), last.status(), attempted);
             if (next == ScrapeRung.NONE) return best.withChallenge(challenge);
 
-            last = attempt(next, url, language);
+            last = attempt(next, url, language, proxy);
             attempted = next;
             if (last.usable()) return last;
             if (last.challenge() != null) challenge = last.challenge();
@@ -144,16 +150,16 @@ public final class ScrapeLadder {
     }
 
     /** Run one URL through {@code rung}, classifying the result the way the harness does. */
-    private static Attempt attempt(ScrapeRung rung, String url, String language) {
+    private static Attempt attempt(ScrapeRung rung, String url, String language, Optional<ScrapeProxy> proxy) {
         try {
             WebExtraction.FetchResult fetched;
             String challenge = null;
             if (rung == ScrapeRung.BROWSER) {
-                var render = RenderedFetcher.render(url, language);
+                var render = RenderedFetcher.render(url, language, proxy);
                 fetched = render.fetched();
                 challenge = render.challenge();
             } else {
-                fetched = ImpersonatedFetcher.fetch(url, impersonatedHeaders(language));
+                fetched = ImpersonatedFetcher.fetch(url, impersonatedHeaders(language), proxy);
             }
             var text = WebExtraction.toText(fetched);
             var obs = ScrapeObservation.of(fetched, text);

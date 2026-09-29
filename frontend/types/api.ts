@@ -234,6 +234,8 @@ export interface ScrapeJob {
   runtimeSeconds: number
   /** Times a stopped app left it running since it was last resumed. */
   interruptions: number
+  /** Where each run went out, a proxy's address or "direct"; null for a job from before that was recorded. */
+  egress: string[] | null
   createdAt: string
   startedAt: string | null
   completedAt: string | null

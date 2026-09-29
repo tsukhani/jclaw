@@ -624,6 +624,17 @@ public final class ScrapeJobService {
         }
 
         @Override
+        public void egress(@Nullable String proxyUrl) {
+            Tx.run(() -> {
+                ScrapeJob job = ScrapeJob.findById(jobId);
+                if (job != null) {
+                    job.recordEgress(proxyUrl);
+                    job.save();
+                }
+            });
+        }
+
+        @Override
         public void discovered(int urls) {
             Tx.run(() -> {
                 ScrapeJob job = ScrapeJob.findById(jobId);

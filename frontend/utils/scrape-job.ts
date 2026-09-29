@@ -1,4 +1,5 @@
 import type { ScrapeJob, ScrapeJobState } from '~/types/api'
+import { parseProxy } from '~/utils/proxy-providers'
 
 /**
  * Background scrape job helpers (JCLAW-1273), shared by the Scrapes page, its detail view, the
@@ -72,6 +73,22 @@ export function scrapeSite(url: string): string {
   catch {
     return url
   }
+}
+
+/** The proxies a job's runs went through (JCLAW-1333); empty when it went direct or ran before that was recorded. */
+export function scrapeProxies(job: Pick<ScrapeJob, 'egress'>): string[] {
+  return (job.egress ?? []).filter(route => route !== 'direct')
+}
+
+/** "DataImpulse, 74.81.81.81:823" when a preset recognizes the proxy, otherwise its address. */
+export function proxyLabel(url: string): string {
+  return parseProxy(url, '').provider === 'dataimpulse' ? `DataImpulse, ${url.replace(/^\w+:\/\//, '')}` : url
+}
+
+/** Where the job went out, in the order its runs did: a resumed run can go out another way. */
+export function egressDescription(egress: string[] | null): string {
+  if (egress === null) return 'not recorded'
+  return egress.map(route => route === 'direct' ? 'none, connected directly' : proxyLabel(route)).join(', then ')
 }
 
 /** "1 h 5 min", "4 min 12 s", "38 s". */

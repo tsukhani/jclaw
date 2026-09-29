@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { GlobeAltIcon, PlusIcon } from '@heroicons/vue/24/outline'
 import type { Agent, ApiErrorDetails, ScrapeJob, ScrapeJobState } from '~/types/api'
-import { SCRAPE_STATE_LABEL, SCRAPE_STATES, formatRuntime, isActive, scrapeSite } from '~/utils/scrape-job'
+import { SCRAPE_STATE_LABEL, SCRAPE_STATES, formatRuntime, isActive, proxyLabel, scrapeProxies, scrapeSite } from '~/utils/scrape-job'
 import ScrapeJobActions from '~/components/scrapes/ScrapeJobActions.vue'
 import ScrapeJobProgress from '~/components/scrapes/ScrapeJobProgress.vue'
 import ScrapeJobStateBadge from '~/components/scrapes/ScrapeJobStateBadge.vue'
@@ -229,13 +229,21 @@ const { pause, resume, stop, remove, actionError, busy } = useScrapeJobActions((
             :data-testid="`scrape-row-${job.id}`"
           >
             <td class="px-4 py-2.5 max-w-80">
-              <NuxtLink
-                :to="`/scrapes/${job.id}`"
-                class="block truncate text-fg-primary hover:underline"
-                :title="job.url"
-              >
-                {{ scrapeSite(job.url) }}
-              </NuxtLink>
+              <div class="flex items-center gap-2 min-w-0">
+                <NuxtLink
+                  :to="`/scrapes/${job.id}`"
+                  class="block truncate text-fg-primary hover:underline"
+                  :title="job.url"
+                >
+                  {{ scrapeSite(job.url) }}
+                </NuxtLink>
+                <span
+                  v-if="scrapeProxies(job).length"
+                  class="shrink-0 text-[10px] text-fg-muted border border-border px-1"
+                  :title="`Went through ${scrapeProxies(job).map(proxyLabel).join(', then ')}`"
+                  :data-testid="`scrape-proxy-${job.id}`"
+                >proxy</span>
+              </div>
             </td>
             <td class="px-4 py-2.5 text-fg-primary">
               {{ job.agentName }}

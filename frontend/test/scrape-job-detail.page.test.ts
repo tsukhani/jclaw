@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, mockNuxtImport, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { clearNuxtData } from '#app'
 import type { H3Event } from 'h3'
 import { getQuery } from 'h3'
 import ScrapeJobDetail from '~/pages/scrapes/[id].vue'
@@ -18,7 +19,7 @@ function job(state: ScrapeJobState, extra: Partial<ScrapeJob> = {}): ScrapeJob {
     folder: 'scrapes/7', combinedFile: null,
     options: { url: 'https://docs.example.test/', maxPages: 500, maxDepth: 2, maxMinutes: 60, sameHostOnly: true,
       respectRobots: true, seedFromSitemap: true, language: 'en', format: 'markdown', metadata: false },
-    runtimeSeconds: 30, interruptions: 0, createdAt: '2026-09-22T10:00:00Z', startedAt: null, completedAt: null,
+    runtimeSeconds: 30, interruptions: 0, egress: null, createdAt: '2026-09-22T10:00:00Z', startedAt: null, completedAt: null,
     ...extra,
   }
 }
@@ -131,6 +132,26 @@ describe('Scrape job detail', () => {
     expect(header).toContain('Restarts of JClaw stopped this scrape 3 times')
     expect(header).toContain('waits to be resumed')
     view.unmount()
+  })
+
+  it('names the proxy the job went through, or says it went direct or was not recorded (JCLAW-1333)', async () => {
+    const cases: Array<[string[] | null, string]> = [
+      [['http://74.81.81.81:823'], 'DataImpulse, 74.81.81.81:823'],
+      [['socks5://10.0.0.5:1080'], 'socks5://10.0.0.5:1080'],
+      [['http://74.81.81.81:823', 'direct'], 'DataImpulse, 74.81.81.81:823, then none, connected directly'],
+      [['direct'], 'none, connected directly'],
+      [null, 'not recorded'],
+    ]
+    for (const [egress, expected] of cases) {
+      clearNuxtData()
+      routeParams.value = { id: '7' }
+      registerEndpoint('/api/scrape-jobs/7/pages', () => [])
+      registerEndpoint('/api/scrape-jobs/7', () => job('SUCCEEDED', { egress }))
+      const view = await mountSuspended(ScrapeJobDetail)
+      await settle()
+      expect(view.find('[data-testid="scrape-proxy"]').text()).toBe(expected)
+      view.unmount()
+    }
   })
 
   it('says when a job continued after a restart, and offers its combined file', async () => {

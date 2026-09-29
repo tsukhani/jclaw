@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ArrowDownTrayIcon, ArrowTopRightOnSquareIcon } from '@heroicons/vue/24/outline'
 import type { ApiErrorDetails, ScrapeJob, ScrapeJobPage, ScrapeJobPageContent } from '~/types/api'
-import { formatRuntime, isActive, isEnded, scrapeSite } from '~/utils/scrape-job'
+import { egressDescription, formatRuntime, isActive, isEnded, scrapeSite } from '~/utils/scrape-job'
 import ScrapeJobActions from '~/components/scrapes/ScrapeJobActions.vue'
 import ScrapeJobProgress from '~/components/scrapes/ScrapeJobProgress.vue'
 import ScrapeJobStateBadge from '~/components/scrapes/ScrapeJobStateBadge.vue'
@@ -260,6 +260,15 @@ const extractFields = computed(() => Object.entries(job.value?.options.extract ?
             {{ job.options.format }}{{ job.options.metadata ? ', with metadata' : '' }},
             language {{ job.options.language }},
             {{ job.options.respectRobots ? 'honouring robots.txt' : 'ignoring robots.txt' }}{{ job.options.seedFromSitemap ? ', seeded from sitemaps' : '' }}
+          </dd>
+          <dt class="text-fg-muted">
+            Proxy
+          </dt>
+          <dd
+            class="text-fg-primary"
+            data-testid="scrape-proxy"
+          >
+            {{ egressDescription(job.egress) }}
           </dd>
           <template v-if="extractFields.length">
             <dt class="text-fg-muted">

@@ -98,10 +98,15 @@ public record ScrapeProxy(Kind kind, String host, int port,
         return builder.build();
     }
 
+    /** The proxy's address without its credentials, which the URL setting never carries: what a scrape job records. */
+    public String url() {
+        return (kind == Kind.SOCKS5 ? "socks5" : "http") + "://" + host + ":" + port;
+    }
+
     /** The shape the fetch sidecar reads from a request's {@code proxy} field; a render's names the JVM's screen instead. */
     public JsonObject toJson() {
         var json = new JsonObject();
-        json.addProperty("url", (kind == Kind.SOCKS5 ? "socks5" : "http") + "://" + host + ":" + port);
+        json.addProperty("url", url());
         if (username != null) json.addProperty("username", username);
         if (password != null) json.addProperty("password", password);
         return json;

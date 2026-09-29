@@ -16,6 +16,8 @@ import utils.WebExtraction;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * Rung 2 of the escalation ladder: fetch through the TLS-impersonating sidecar
@@ -63,6 +65,15 @@ public final class ImpersonatedFetcher {
      * does not reach.
      */
     public static WebExtraction.Transport transport() {
+        return transport(ScrapeProxy::current);
+    }
+
+    /** As {@link #transport()}, going out through {@code proxy} whatever the setting says by then. */
+    public static WebExtraction.Transport transport(Optional<ScrapeProxy> proxy) {
+        return transport(() -> proxy);
+    }
+
+    private static WebExtraction.Transport transport(Supplier<Optional<ScrapeProxy>> proxy) {
         return (uri, headers) -> {
             // The guard runs here as well as in the redirect walk, and it pins:
             // hostResolverRule throws everything assertUrlSafe does AND returns the
@@ -86,7 +97,7 @@ public final class ImpersonatedFetcher {
             payload.add("pins", pins);
             payload.addProperty("timeoutMs", CALL_TIMEOUT.toMillis() / 2);
             payload.addProperty("maxBytes", WebExtraction.maxBodyBytes());
-            ScrapeProxy.current().ifPresent(proxy -> payload.add("proxy", proxy.toJson()));
+            proxy.get().ifPresent(p -> payload.add("proxy", p.toJson()));
             var hdrs = new JsonObject();
             headers.forEach(hdrs::addProperty);
             payload.add("headers", hdrs);
@@ -143,5 +154,11 @@ public final class ImpersonatedFetcher {
     public static WebExtraction.FetchResult fetch(String url, Map<String, String> headers)
             throws IOException {
         return WebExtraction.fetch(url, headers, transport());
+    }
+
+    /** As {@link #fetch(String, Map)}, through the proxy a crawl pinned when it started. */
+    public static WebExtraction.FetchResult fetch(String url, Map<String, String> headers, Optional<ScrapeProxy> proxy)
+            throws IOException {
+        return WebExtraction.fetch(url, headers, transport(proxy));
     }
 }
