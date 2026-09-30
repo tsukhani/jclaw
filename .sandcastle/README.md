@@ -206,7 +206,10 @@ Jira user.
   `docker start jclaw-factory-gateway`.
 - **Stop the harness:** `.sandcastle/install-agent.sh --remove`.
 - **Review:** merge `agent/<KEY>` into `main`. Read any file listed under "(!) Runs on your Mac once merged" line by line.
-  Mark the story Done only once it is merged, because Done is what lets the stories it blocks start.
+  The agent's commits are unsigned, because the sandbox holds no key, and GitHub's `main` refuses unsigned commits. So
+  re-sign them as you merge: `git rebase --force-rebase --gpg-sign main agent/<KEY>`, then
+  `git merge --no-ff agent/<KEY>`. Mark the story Done only once it is merged, because Done is what lets the stories it
+  blocks start.
 - **Reject:** move the story back to To Do with a comment saying what to change. The next round reworks it on the same
   branch. The general rule behind your comment goes into `~/.jclaw-factory/lessons.md`, which every prompt includes.
   Promote a lesson into `AGENTS.md`, or delete it there.

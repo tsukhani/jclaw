@@ -190,7 +190,7 @@ const processStory = async (picked: Snapshot): Promise<void> => {
 
   // The Jira comment carries the harness's own facts beside the agent's brief: the agent cannot see the gates.
   const reviewComment = (brief: Brief | undefined, sensitive: string[]) => {
-    const lines = [`${FACTORY_HEADER}: ready for review`, `Local branch {{${branch}}} in the checkout of this comment's author, not pushed: merge it into main to ship it with /deploy. Model: ${MODEL}.`];
+    const lines = [`${FACTORY_HEADER}: ready for review`, `Local branch {{${branch}}} in the checkout of this comment's author, not pushed. Its commits are unsigned, which GitHub's main refuses, so re-sign them as you merge: {{git rebase --force-rebase --gpg-sign main ${branch}}}, then {{git merge --no-ff ${branch}}}; /deploy ships it. Model: ${MODEL}.`];
     if (feedback !== undefined) lines.push("Reworked after your review.");
     if (sensitive.length > 0) {
       lines.push("", "h4. (!) Runs on your Mac once merged", ...sensitive.map((f) => `* {{${f}}}`),

@@ -22,6 +22,17 @@ Reject anything else with a clear message; do not guess.
 
 ---
 
+**Preflight: every commit either remote would receive is signed**
+
+GitHub's `main` refuses unsigned commits and Bitbucket does not, so one unsigned commit lets `origin` take the release after the full suite while `github` refuses it, leaving the remotes apart. Check before bumping anything:
+
+```bash
+/usr/bin/git fetch -q origin && /usr/bin/git fetch -q github
+for r in origin github; do /usr/bin/git log "$r/main..HEAD" --format='%G? %h %an | %s'; done | grep -v '^G ' | sort -u
+```
+
+If that prints anything, stop and list it. The usual source is an AFK factory branch merged without re-signing; `.sandcastle/README.md` gives the signed merge. A listed commit already on `origin` can only be re-signed by a force-push, so that is the user's decision.
+
 **Phase 1: Bump the version**
 
 1. Read `conf/application.conf` and find the single line that starts with `application.version=`. If missing, stop and tell the user — this command only runs against a project that already uses that key.
@@ -104,7 +115,7 @@ Reject anything else with a clear message; do not guess.
 14. Confirm both remotes exist via `/usr/bin/git remote`. This project ships with two: `origin` (Bitbucket) and `github` (GitHub). If either is missing, stop and tell the user — do not silently push to only one.
 15. Push to `origin` first: `/usr/bin/git push --follow-tags origin HEAD`. The `--follow-tags` flag pushes both the branch HEAD and any annotated tags reachable from it (i.e., the `v<NEW_VERSION>` tag we just created), so the commit and tag land in one atomic operation per remote. Report the result.
 16. Push to `github`: `/usr/bin/git push --follow-tags github HEAD`. Report the result.
-17. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually. If the failure is `required_signatures hook declined` from GitHub, that means the commit isn't signed — fix local signing config (see CLAUDE.md / SSH signing setup) and re-run; do NOT bypass.
+17. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually. If GitHub answers `GH006: Protected branch update failed … Commits must have verified signatures`, it lists the unsigned commits: the preflight should have caught them, so report them rather than bypass.
 
 **Phase 4: Report**
 
