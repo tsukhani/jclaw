@@ -60,12 +60,12 @@ function playJevClip() {
         <span class="text-sm font-medium text-fg-strong">JEV (TypeSafe AI)</span>
         <span
           v-if="keyConfigured"
-          class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+          class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
           data-testid="decision-jev-status"
         >configured</span>
         <span
           v-else
-          class="text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
+          class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
           data-testid="decision-jev-status"
         >needs API key</span>
       </div>
@@ -151,11 +151,11 @@ function playJevClip() {
               <span class="text-xs text-fg-muted">{{ c.detail }}</span>
               <span
                 v-if="c.inUse"
-                class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+                class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
               >in use</span>
               <span
                 v-else
-                class="text-[10px] text-fg-muted border border-input px-1"
+                class="text-xs text-fg-muted border border-input px-1"
               >not in use</span>
             </li>
           </ul>

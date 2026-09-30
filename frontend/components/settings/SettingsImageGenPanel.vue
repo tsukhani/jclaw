@@ -256,7 +256,7 @@ onUnmounted(() => stopImagegenLocalPolling())
           type="button"
           :aria-pressed="imagegenEnabled"
           aria-label="Enable image generation"
-          :class="imagegenEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+          :class="imagegenEnabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0'"
           class="relative w-9 h-5 rounded-full transition-colors"
           @click="toggleImagegenEnabled"
         >

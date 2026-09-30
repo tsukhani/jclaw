@@ -373,7 +373,7 @@ onUnmounted(() => stopTranscriptionPolling())
           type="button"
           :aria-pressed="transcriptionEnabled"
           aria-label="Enable transcription"
-          :class="transcriptionEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+          :class="transcriptionEnabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0'"
           class="relative w-9 h-5 rounded-full transition-colors"
           @click="toggleTranscriptionEnabled"
         >
@@ -618,7 +618,7 @@ onUnmounted(() => stopTranscriptionPolling())
           type="button"
           :aria-pressed="diarizationEnabled"
           aria-label="Enable speaker diarization"
-          :class="diarizationEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+          :class="diarizationEnabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0'"
           class="relative w-9 h-5 rounded-full transition-colors"
           @click="toggleDiarizationEnabled"
         >

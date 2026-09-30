@@ -688,7 +688,7 @@ function removeHeaderRow(i: number) {
                   <button
                     type="button"
                     class="relative w-9 h-5 rounded-full transition-colors"
-                    :class="server.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-neutral-300'"
+                    :class="server.enabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-neutral-300 ring-1 ring-inset ring-input dark:ring-0'"
                     :title="server.enabled ? 'Disable' : 'Enable'"
                     role="switch"
                     :aria-checked="server.enabled"

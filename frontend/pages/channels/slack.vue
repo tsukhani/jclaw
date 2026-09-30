@@ -355,7 +355,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
       <button
         type="button"
         aria-label="Dismiss warning"
-        class="text-amber-700 dark:text-amber-300 hover:text-amber-200 bg-transparent border-0 cursor-pointer"
+        class="text-amber-700 dark:text-amber-300 hover:text-amber-800 dark:hover:text-amber-200 bg-transparent border-0 cursor-pointer"
         @click="scopeNotice = ''"
       >
         ×
@@ -407,7 +407,7 @@ const SETUP_EVENTS = ['message.channels', 'message.groups', 'message.im', 'messa
               class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full
                      transition-colors focus:outline-hidden focus:ring-1 focus:ring-ring
                      disabled:cursor-not-allowed disabled:opacity-60"
-              :class="b.enabled ? 'bg-emerald-500' : 'bg-muted border border-border'"
+              :class="b.enabled ? 'bg-emerald-600' : 'bg-muted border border-border'"
               @click="toggleEnabled(b)"
             >
               <span

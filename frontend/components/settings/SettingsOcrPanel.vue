@@ -98,7 +98,7 @@ async function toggleOcrBackend(backend: { name: string, configKey: string, avai
           :class="[
             'relative w-9 h-5 shrink-0 rounded-full transition-colors',
             backend.available
-              ? (backend.enabled ? 'bg-emerald-600 hover:bg-emerald-500 cursor-pointer' : 'bg-muted hover:bg-muted cursor-pointer')
+              ? (backend.enabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600 cursor-pointer' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0 cursor-pointer')
               : 'bg-muted cursor-not-allowed',
           ]"
           @click="toggleOcrBackend(backend)"

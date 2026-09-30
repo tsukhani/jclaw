@@ -248,7 +248,7 @@ async function setVideoModel(value: string) {
           type="button"
           :aria-pressed="videoEnabled"
           aria-label="Enable a dedicated video model"
-          :class="videoEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+          :class="videoEnabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0'"
           class="relative w-9 h-5 rounded-full transition-colors"
           @click="toggleVideoEnabled"
         >

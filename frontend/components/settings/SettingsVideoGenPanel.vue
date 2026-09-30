@@ -251,7 +251,7 @@ onUnmounted(() => stopVideoCapPolling())
           aria-label="Enable video generation"
           :disabled="!videogenEnabled && !replicateApiKeyConfigured"
           :class="[
-            videogenEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted',
+            videogenEnabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0',
             (!videogenEnabled && !replicateApiKeyConfigured) ? 'opacity-50 cursor-not-allowed' : '',
           ]"
           class="relative w-9 h-5 rounded-full transition-colors"

@@ -670,7 +670,7 @@ const groupedProviders = computed(() => {
           type="button"
           :aria-pressed="priceRefreshEnabled"
           aria-label="Auto-update model prices nightly"
-          :class="priceRefreshEnabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+          :class="priceRefreshEnabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0'"
           class="relative w-9 h-5 shrink-0 rounded-full transition-colors"
           @click="togglePriceRefresh"
         >
@@ -776,7 +776,7 @@ const groupedProviders = computed(() => {
               :title="isProviderEnabled(name)
                 ? 'Hide this provider from the model selector'
                 : 'Show this provider in the model selector'"
-              :class="isProviderEnabled(name) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+              :class="isProviderEnabled(name) ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0'"
               class="ml-auto relative w-9 h-5 shrink-0 rounded-full transition-colors"
               @click="toggleProviderEnabled(name)"
             >
@@ -1097,7 +1097,7 @@ const groupedProviders = computed(() => {
               :title="usesNativeApi(name)
                 ? 'Send chat requests to the OpenAI-compatible endpoint'
                 : 'Send chat requests to the native /api/chat endpoint'"
-              :class="usesNativeApi(name) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+              :class="usesNativeApi(name) ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0'"
               class="relative w-9 h-5 shrink-0 rounded-full transition-colors"
               @click="toggleNativeApi(name)"
             >

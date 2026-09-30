@@ -250,7 +250,7 @@ async function save(key: string, value: string) {
                 :aria-pressed="isOn(field)"
                 :aria-label="labelOf(field)"
                 :disabled="saving"
-                :class="isOn(field) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+                :class="isOn(field) ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0'"
                 class="relative w-9 h-5 rounded-full transition-colors"
                 @click="save(field.key, isOn(field) ? 'false' : 'true')"
               >

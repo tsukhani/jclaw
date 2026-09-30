@@ -243,12 +243,12 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
           <span class="flex-1 text-xs text-fg-muted">{{ p.detail }}</span>
           <span
             v-if="saved.provider === p.id"
-            class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+            class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
             :data-testid="`proxy-saved-${p.id}`"
           >saved</span>
           <span
             v-if="saved.provider === p.id && p.id !== 'none' && !enabled"
-            class="text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
+            class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
             :data-testid="`proxy-switched-off-${p.id}`"
           >switched off</span>
         </label>
@@ -650,7 +650,7 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
           :aria-pressed="enabled"
           aria-label="enabled"
           :disabled="saving || testing"
-          :class="enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+          :class="enabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0'"
           class="relative w-9 h-5 rounded-full transition-colors"
           data-testid="proxy-enabled"
           @click="toggleEnabled"
@@ -660,7 +660,7 @@ const FIELD_LABEL = 'text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0
             class="block w-4 h-4 bg-white rounded-full transition-transform"
           />
         </button>
-        <span class="ml-auto text-[11px] text-fg-muted">
+        <span class="ml-auto text-xs text-fg-muted">
           {{ enabled ? 'on' : 'off' }}
         </span>
       </div>

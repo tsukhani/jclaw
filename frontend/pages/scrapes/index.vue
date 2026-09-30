@@ -239,7 +239,7 @@ const { pause, resume, stop, remove, actionError, busy } = useScrapeJobActions((
                 </NuxtLink>
                 <span
                   v-if="scrapeProxies(job).length"
-                  class="shrink-0 text-[10px] text-fg-muted border border-border px-1"
+                  class="shrink-0 text-xs text-fg-muted border border-border px-1"
                   :title="`Went through ${scrapeProxies(job).map(proxyLabel).join(', then ')}`"
                   :data-testid="`scrape-proxy-${job.id}`"
                 >proxy</span>

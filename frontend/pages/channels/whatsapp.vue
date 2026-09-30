@@ -367,7 +367,7 @@ onBeforeUnmount(stopPoll)
               class="relative inline-flex h-5 w-9 shrink-0 items-center rounded-full
                      transition-colors focus:outline-hidden focus:ring-1 focus:ring-ring
                      disabled:cursor-not-allowed disabled:opacity-60"
-              :class="b.enabled ? 'bg-emerald-500' : 'bg-muted border border-border'"
+              :class="b.enabled ? 'bg-emerald-600' : 'bg-muted border border-border'"
               @click="toggleEnabled(b)"
             >
               <span

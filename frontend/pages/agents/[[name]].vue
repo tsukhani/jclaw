@@ -1623,7 +1623,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               >provider not configured</span>
               <!-- Enabled toggle -->
               <button
-                :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
+                :class="agent.enabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600 ring-1 ring-inset ring-input dark:ring-0'"
                 class="relative w-9 h-5 rounded-full transition-colors"
                 :title="agent.enabled ? 'Disable agent' : 'Enable agent'"
                 role="switch"
@@ -1931,7 +1931,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           >
             <div
               class="relative w-9 h-5 rounded-full transition-colors duration-200"
-              :class="acpAllowed ? 'bg-emerald-500' : 'bg-muted'"
+              :class="acpAllowed ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
             >
               <div
                 class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -1970,7 +1970,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           >
             <div
               class="relative w-9 h-5 rounded-full transition-colors duration-200"
-              :class="memoryAutocaptureEnabled ? 'bg-emerald-500' : 'bg-muted'"
+              :class="memoryAutocaptureEnabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
             >
               <div
                 class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -2126,7 +2126,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           >
             <div
               class="relative w-9 h-5 rounded-full transition-colors duration-200"
-              :class="compressionEnabled ? 'bg-emerald-500' : 'bg-muted'"
+              :class="compressionEnabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
             >
               <div
                 class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -2159,7 +2159,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             >
               <div
                 class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                :class="(compressionEnabled && compressionJson) ? 'bg-emerald-500' : 'bg-muted'"
+                :class="(compressionEnabled && compressionJson) ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -2190,7 +2190,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             >
               <div
                 class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                :class="(compressionEnabled && compressionCode) ? 'bg-emerald-500' : 'bg-muted'"
+                :class="(compressionEnabled && compressionCode) ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -2221,7 +2221,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             >
               <div
                 class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                :class="(compressionEnabled && compressionText) ? 'bg-emerald-500' : 'bg-muted'"
+                :class="(compressionEnabled && compressionText) ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -2283,7 +2283,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :aria-checked="execBypassAllowlist"
               aria-label="Bypass allowlist"
               :disabled="savingExec"
-              :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
+              :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600 ring-1 ring-inset ring-input dark:ring-0'"
               class="relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50"
               @click="toggleExecConfig('bypassAllowlist')"
             >
@@ -2306,7 +2306,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :aria-checked="execAllowGlobalPaths"
               aria-label="Allow global paths"
               :disabled="savingExec"
-              :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600'"
+              :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600 ring-1 ring-inset ring-input dark:ring-0'"
               class="relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50"
               @click="toggleExecConfig('allowGlobalPaths')"
             >
@@ -2434,7 +2434,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           >
             <div
               class="relative w-9 h-5 rounded-full transition-colors duration-200"
-              :class="allAgentSkillsEnabled ? 'bg-emerald-500' : 'bg-muted'"
+              :class="allAgentSkillsEnabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
             >
               <div
                 class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -2521,7 +2521,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
             >
               <div
                 class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'bg-emerald-500' : 'bg-muted'"
+                :class="(!skillDisabledTools(skill).length && skill.enabled) ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -2566,7 +2566,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
           >
             <div
               class="relative w-9 h-5 rounded-full transition-colors duration-200"
-              :class="allAgentToolsEnabled ? 'bg-emerald-500' : 'bg-muted'"
+              :class="allAgentToolsEnabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
             >
               <div
                 class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -2628,7 +2628,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   >
                     <div
                       class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                      :class="row.enabled ? 'bg-emerald-500' : 'bg-muted'"
+                      :class="row.enabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
                     >
                       <div
                         class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -2674,7 +2674,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
                   >
                     <div
                       class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                      :class="row.tool.enabled ? 'bg-emerald-500' : 'bg-muted'"
+                      :class="row.tool.enabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
                     >
                       <div
                         class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"
@@ -2754,7 +2754,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               >
                 <div
                   class="relative w-9 h-5 rounded-full transition-colors duration-200"
-                  :class="row.enabled ? 'bg-emerald-500' : 'bg-muted'"
+                  :class="row.enabled ? 'bg-emerald-600' : 'bg-muted ring-1 ring-inset ring-input dark:ring-0'"
                 >
                   <div
                     class="absolute top-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-all duration-200"

@@ -235,19 +235,19 @@ function onSearchDragEnd() {
           <span class="text-sm font-medium text-fg-strong">{{ SEARCH_PROVIDERS[id]!.label }}</span>
           <span
             v-if="searchActive(id)"
-            class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+            class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
           >active</span>
           <span
             v-else-if="searchEnabled(id)"
-            class="text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
+            class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
           >needs API key</span>
           <span
             v-else
-            class="text-[10px] text-fg-muted border border-input px-1"
+            class="text-xs text-fg-muted border border-input px-1"
           >disabled</span>
         </div>
         <button
-          :class="searchEnabled(id) ? 'bg-emerald-600 hover:bg-emerald-500' : 'bg-muted hover:bg-muted'"
+          :class="searchEnabled(id) ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0'"
           class="relative w-9 h-5 rounded-full transition-colors"
           :title="searchEnabled(id) ? 'Disable provider' : 'Enable provider'"
           role="switch"

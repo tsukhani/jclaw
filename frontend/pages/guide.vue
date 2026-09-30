@@ -309,7 +309,7 @@ const tocItems = computed(() => sections.map(s => ({
           aria-label="Scroll to the top"
           class="group hidden xl:flex xl:flex-col xl:items-center shrink-0 xl:sticky xl:top-4 cursor-pointer
                  hover:brightness-110 focus-visible:outline focus-visible:outline-2
-                 focus-visible:outline-emerald-500 focus-visible:outline-offset-4
+                 focus-visible:outline-emerald-600 dark:focus-visible:outline-emerald-500 focus-visible:outline-offset-4
                  rounded-lg transition"
           @click="scrollToTop"
         >
@@ -335,7 +335,7 @@ const tocItems = computed(() => sections.map(s => ({
             <span
               v-if="scrolledDown"
               aria-hidden="true"
-              class="mt-2 flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400 whitespace-nowrap transition-colors group-hover:text-emerald-500 dark:group-hover:text-emerald-300"
+              class="mt-2 flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400 whitespace-nowrap transition-colors group-hover:text-emerald-800 dark:group-hover:text-emerald-300"
             >
               <ArrowUpIcon
                 class="w-3.5 h-3.5 shrink-0"
