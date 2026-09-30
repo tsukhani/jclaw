@@ -1,3 +1,36 @@
+import { z } from "zod";
+
+// What the planner predicts for one story: the files it will change, and whether to build it with BMAD and why.
+export type StoryPlan = { files: Set<string>; bmad: boolean; why: string };
+const PlanAnswer = z.record(z.string(), z.object({ files: z.array(z.string()), bmad: z.boolean(), why: z.string() }));
+
+// The planner's <plan> JSON by story key, or undefined when it does not parse.
+export const parsePlan = (raw: string | undefined): Map<string, StoryPlan> | undefined => {
+  if (raw === undefined) return undefined;
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch {
+    return undefined;
+  }
+  const parsed = PlanAnswer.safeParse(json);
+  if (!parsed.success) return undefined;
+  return new Map(
+    Object.entries(parsed.data).map(([key, p]) => [key, { files: new Set(p.files.map((f) => f.replace(/^\.\//, ""))), bmad: p.bmad, why: p.why.trim() }]),
+  );
+};
+
+export type BuildMode = { bmad: boolean; why: string };
+
+// A label settles it, and `no-bmad` wins because the harness writes `bmad` itself. Otherwise the planner decides, and a
+// story it gave no verdict runs plain.
+export const buildMode = (labels: string[], plan: StoryPlan | undefined): BuildMode => {
+  if (labels.includes("no-bmad")) return { bmad: false, why: "labelled no-bmad" };
+  if (labels.includes("bmad")) return { bmad: true, why: "labelled bmad" };
+  if (plan) return { bmad: plan.bmad, why: plan.why };
+  return { bmad: false, why: "the planner gave no verdict" };
+};
+
 // Two stories that change the same file conflict at merge time even when each passes its own gate. In board order, a
 // story is picked unless its files meet those of a branch awaiting review (`owners`) or of a story picked before it.
 // A story whose files are unknown (absent from `files`) runs only when nothing else is in flight, and then alone.

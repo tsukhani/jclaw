@@ -1,6 +1,6 @@
 // Offline checks: rejectionFeedback and pickNonOverlapping on synthetic tickets. `npm run check`.
 import { rejectionFeedback, type Snapshot } from "./jira.ts";
-import { pickNonOverlapping, sensitivePaths } from "./plan.ts";
+import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
   key: "T-1", summary: "", description: "", labels: [], blockedBy: [], updated: "", fetchedAt: "",
@@ -31,3 +31,17 @@ console.log(pickNonOverlapping([s("A")], files({ A: ["test/SsrfGuardTest.java"] 
 check("sensitive paths are flagged, ordinary ones are not",
   sensitivePaths([".githooks/pre-push", "app/utils/Filenames.java", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", "test/FooTest.java", ".sandcastle/main.ts", "docs/AGENTS.md"]),
   [".githooks/pre-push", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", ".sandcastle/main.ts"]);
+
+const plan = parsePlan('{"A": {"files": ["./app/X.java", "test/XTest.java"], "bmad": true, "why": " open choice "}, "B": {"files": [], "bmad": false, "why": "precise"}}');
+check("a plan parses, with ./ stripped and the reason trimmed",
+  plan && [...plan].map(([k, p]) => [k, [...p.files], p.bmad, p.why]),
+  [["A", ["app/X.java", "test/XTest.java"], true, "open choice"], ["B", [], false, "precise"]]);
+check("a plan that is not JSON is refused", parsePlan("{not json"), undefined);
+check("the old files-only answer is refused", parsePlan('{"A": ["app/X.java"]}'), undefined);
+check("a plan missing its verdict is refused", parsePlan('{"A": {"files": [], "why": "x"}}'), undefined);
+const verdict = { files: new Set<string>(), bmad: true, why: "a spike decides the scope" };
+check("the planner decides an unlabelled story", buildMode(["afk"], verdict), { bmad: true, why: "a spike decides the scope" });
+check("a bmad label forces BMAD", buildMode(["afk", "bmad"], { ...verdict, bmad: false }), { bmad: true, why: "labelled bmad" });
+check("a no-bmad label forbids it", buildMode(["afk", "no-bmad"], verdict), { bmad: false, why: "labelled no-bmad" });
+check("no-bmad wins over a bmad the harness wrote", buildMode(["afk", "bmad", "no-bmad"], verdict), { bmad: false, why: "labelled no-bmad" });
+check("no verdict runs plain", buildMode(["afk"], undefined), { bmad: false, why: "the planner gave no verdict" });

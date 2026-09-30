@@ -9,7 +9,7 @@ import * as sandcastle from "@ai-hero/sandcastle";
 import { z } from "zod";
 import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, factoryHooks, factorySandbox, gatewayUp, installBmad, planHooks } from "./factory.ts";
 import { FACTORY_HEADER, addLabel, claim, comment, inReview, intake, orphaned, promptContext, rejectionFeedback, removeLabel, snapshotToState, transitionTo, type Snapshot } from "./jira.ts";
-import { pickNonOverlapping, sensitivePaths } from "./plan.ts";
+import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type StoryPlan } from "./plan.ts";
 import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 
 // Sandcastle's lines too: one log spans every launchd restart. Local time, to read beside `pmset -g log`.
@@ -41,15 +41,17 @@ type Brief = z.infer<typeof Brief>;
 // The agent authenticates through the gateway, which reads the credential from .env itself.
 const agent = sandcastle.claudeCode(MODEL);
 
-const processStory = async (picked: Snapshot): Promise<void> => {
+const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> => {
   const key = picked.key;
   const branch = `agent/${key}`;
   const feedback = rejectionFeedback(picked);
   const lessons = fs.existsSync(LESSONS) ? fs.readFileSync(LESSONS, "utf8").trim() : "";
   const promptArgs = { KEY: key, SUMMARY: picked.summary, DESCRIPTION: promptContext(picked), LESSONS: lessons || "None yet." };
   const withFeedback = { ...promptArgs, FEEDBACK: feedback || "None: this is the first submission." };
-  const bmad = picked.labels.includes("bmad");
   let bmadVersion: string | undefined;
+  let freshBuild = false;
+  // A resumed or reworked story keeps the way its first build went, which the `bmad` label records.
+  const builtWithBmad = () => bmadVersion !== undefined || picked.labels.includes("bmad");
   let lesson: string | undefined;
   const logTo = (phase: string) => ({ type: "file" as const, path: `${LOGS}/${key}-${phase}.log` });
   const timings: Record<string, number> = {};
@@ -141,10 +143,12 @@ const processStory = async (picked: Snapshot): Promise<void> => {
       }
     } else if (alreadyAhead > 0) {
       console.log(`[${key} implement] skipped: ${branch} is already ${alreadyAhead} commit(s) ahead of main`);
-    } else if (bmad) {
+    } else if (mode.bmad) {
       // BMAD's bmad-build-auto writes the spec, then builds from it. Halting in between means a ticket it can read more
       // than one way goes back with its questions before any code is written.
+      freshBuild = true;
       bmadVersion = await installBmad(sandbox);
+      if (!picked.labels.includes("bmad")) await addLabel(key, "bmad");
       // Each halt records its status in the spec's frontmatter, or in a result file when it stopped before writing one.
       const outcome = async (file: string) => {
         const text = (await sandbox.exec(`cat '${file}'`)).stdout;
@@ -165,6 +169,7 @@ const processStory = async (picked: Snapshot): Promise<void> => {
       if (built.status !== "done") throw new Error(`BMAD stopped building (${built.status}):\n${built.result}`);
       if (current.commits.length === 0) throw new Error("the BMAD build made no commits");
     } else {
+      freshBuild = true;
       current = await timed("implement", () =>
         sandbox.run({ name: `implement ${key}`, agent, promptFile: `${HERE}/prompts/implement.md`, promptArgs, idleTimeoutSeconds: 1200, logging: logTo("implement") }),
       );
@@ -216,9 +221,10 @@ const processStory = async (picked: Snapshot): Promise<void> => {
   // The Jira comment carries the harness's own facts beside the agent's brief: the agent cannot see the gates.
   const reviewComment = (brief: Brief | undefined, sensitive: string[]) => {
     const lines = [`${FACTORY_HEADER}: ready for review`, `Local branch {{${branch}}} in the checkout of this comment's author, not pushed. Its commits are unsigned, which GitHub's main refuses, so re-sign them as you merge: {{git rebase --force-rebase --gpg-sign main ${branch}}}, then {{git merge --no-ff ${branch}}}; /deploy ships it. Model: ${MODEL}.`];
-    if (bmad) {
+    if (builtWithBmad()) {
       lines.push(`Specced and built by BMAD${bmadVersion ? ` ${bmadVersion}` : ""} (bmad-build-auto). Its spec, with its own review's triage and deferred findings: {{~/.jclaw-factory/logs/${key}-spec.md}}.`);
     }
+    if (freshBuild) lines.push(`Built ${mode.bmad ? "with BMAD" : "plain"} because: ${mode.why}`);
     if (feedback !== undefined) lines.push("Reworked after your review.");
     if (sensitive.length > 0) {
       lines.push("", "h4. (!) Runs on your Mac once merged", ...sensitive.map((f) => `* {{${f}}}`),
@@ -258,7 +264,7 @@ const processStory = async (picked: Snapshot): Promise<void> => {
     await transitionTo(key, "Review");
     await removeLabel(key, "afk-running");
     await comment(key, reviewComment(brief, sensitive));
-    fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, model: MODEL, timings, gates, brief, environmentFailures: [...environmentFailures], flakes }, null, 2));
+    fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, model: MODEL, buildMode: mode, timings, gates, brief, environmentFailures: [...environmentFailures], flakes }, null, 2));
     console.log(`[${key} done] → Review\n` + execFileSync("/usr/bin/git", ["-C", REPO, "log", "--stat", "--format=%h %an %s", `main..${branch}`], { encoding: "utf8" }));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -302,9 +308,9 @@ const changedOn = (key: string): string[] => {
   }
 };
 
-// An agent reads each ticket and the code it points at, and predicts the files the story will change.
-const PlanFiles = z.record(z.string(), z.array(z.string()));
-const predictFiles = async (stories: Snapshot[]): Promise<Map<string, Set<string>>> => {
+// An agent reads each ticket and the code it points at, predicts the files the story will change, and decides whether
+// it needs BMAD.
+const predictPlans = async (stories: Snapshot[]): Promise<Map<string, StoryPlan>> => {
   const planBranch = "factory/plan";
   gitIn(REPO, "branch", "-f", planBranch, "main");
   try {
@@ -316,18 +322,13 @@ const predictFiles = async (stories: Snapshot[]): Promise<Map<string, Set<string
       })
       .join("\n\n");
     const run = await sandbox.run({ name: "plan", agent, promptFile: `${HERE}/prompts/plan.md`, promptArgs: { STORIES }, logging: { type: "file", path: `${LOGS}/plan.log` } });
-    const raw = [...run.stdout.matchAll(/<plan>([\s\S]*?)<\/plan>/g)].at(-1)?.[1];
-    let parsed: ReturnType<typeof PlanFiles.safeParse> | undefined;
-    try {
-      parsed = raw === undefined ? undefined : PlanFiles.safeParse(JSON.parse(raw));
-    } catch {
-      parsed = undefined;
-    }
-    if (!parsed?.success) {
-      console.log("[plan] the planner's answer did not parse, so every story's files are unknown");
+    const plans = parsePlan([...run.stdout.matchAll(/<plan>([\s\S]*?)<\/plan>/g)].at(-1)?.[1]);
+    if (!plans) {
+      console.log("[plan] the planner's answer did not parse, so every story's files are unknown and it runs plain");
       return new Map();
     }
-    return new Map(Object.entries(parsed.data).map(([k, files]) => [k, new Set([...files.map((f) => f.replace(/^\.\//, "")), ...changedOn(k)])]));
+    for (const [k, plan] of plans) for (const f of changedOn(k)) plan.files.add(f);
+    return plans;
   } finally {
     try {
       gitIn(REPO, "branch", "-D", planBranch);
@@ -339,7 +340,7 @@ const predictFiles = async (stories: Snapshot[]): Promise<Map<string, Set<string
 
 // Stories this process is running, with the files each was predicted to change (undefined: unknown).
 const running = new Map<string, Set<string> | undefined>();
-const predicted = new Map<string, { updated: string; files: Set<string> }>();
+const predicted = new Map<string, { updated: string; plan: StoryPlan }>();
 
 // Starts as many stories as there are free slots, returning their runs.
 const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
@@ -373,23 +374,24 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
 
   const stale = unblocked.filter((s) => predicted.get(s.key)?.updated !== s.updated);
   if (stale.length > 0) {
-    const fresh = await predictFiles(stale);
+    const fresh = await predictPlans(stale);
     for (const s of stale) {
-      const files = fresh.get(s.key);
-      if (files) predicted.set(s.key, { updated: s.updated, files });
+      const plan = fresh.get(s.key);
+      if (plan) predicted.set(s.key, { updated: s.updated, plan });
     }
   }
-  const files = new Map(unblocked.flatMap((s) => (predicted.has(s.key) ? [[s.key, predicted.get(s.key)!.files] as const] : [])));
+  const files = new Map(unblocked.flatMap((s) => (predicted.has(s.key) ? [[s.key, predicted.get(s.key)!.plan.files] as const] : [])));
   const { picked, deferred } = pickNonOverlapping(unblocked, files, inFlight);
   for (const d of deferred) note(d.key, `[plan] ${d.key} waits: ${d.reason}`);
-  const starting = picked.slice(0, free);
+  const starting = picked.slice(0, free).map((s) => ({ story: s, mode: buildMode(s.labels, predicted.get(s.key)?.plan) }));
   if (starting.length === 0) return [];
-  console.log(`[plan] starting ${starting.map((s) => s.key).join(", ")}; main is at ${gitIn(REPO, "rev-parse", "--short", "main")}`);
+  const described = starting.map(({ story, mode }) => `${story.key} (${mode.bmad ? "BMAD" : "plain"}: ${mode.why})`);
+  console.log(`[plan] starting ${described.join(", ")}; main is at ${gitIn(REPO, "rev-parse", "--short", "main")}`);
   if (process.env.FACTORY_PLAN_ONLY) return [];
-  return starting.map((s) => {
+  return starting.map(({ story: s, mode }) => {
     running.set(s.key, files.get(s.key));
     lastSaid.delete(s.key);
-    return processStory(s)
+    return processStory(s, mode)
       .catch(() => {
         // processStory has already labelled and commented on the ticket.
       })

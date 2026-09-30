@@ -45,10 +45,10 @@ LaunchAgent `com.jclaw.factory` keeps it running through `run.sh`, which reinsta
 lockfile changes. Every two minutes it:
 
 1. Polls Jira for `afk` stories in To Do, and keeps those whose blockers are Done.
-2. Rebuilds the sandbox image if `main` has moved, and has a planner agent predict each story's files. A story waits
-   while its files overlap a branch awaiting review or a story already running.
+2. Rebuilds the sandbox image if `main` has moved, and has a planner agent predict each story's files and decide
+   whether it needs BMAD. A story waits while its files overlap a branch awaiting review or a story already running.
 3. Claims a story by assigning it to its own Jira user, moves it to In Progress, and runs it in a fresh sandbox:
-   - **Implement**, or **rework** if you sent it back. A story also labelled `bmad` is **specced**, then **built**, by
+   - **Implement**, or **rework** if you sent it back. A story that needs BMAD is **specced**, then **built**, by
      BMAD instead (see [BMAD stories](#bmad-stories)).
    - **Gate:** the full suite. A failing class is re-run alone. If it passes alone, or also fails on `main`, it is not
      counted, but the brief names it. There are up to two repair rounds and a 30-minute deadline.
@@ -137,8 +137,15 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
 
 ### BMAD stories
 
-Label a story `bmad` as well as `afk`, and BMAD's unattended `bmad-build-auto` does the implementing, in two runs in the
-same sandbox:
+The planner decides which stories BMAD builds, as it predicts their files. BMAD takes about twice the agent time, so the
+planner chooses it for a ticket that leaves work to judgement: vague or open acceptance criteria, a spike or research,
+a design decision the rest depends on, or a new component or a change across layers. A precise, mechanical ticket or a
+small bug with a clear fix is built plain. Labels override it: `bmad` forces BMAD and `no-bmad` forbids it, and
+`no-bmad` wins when a ticket has both, because the harness adds `bmad` itself when BMAD starts. That way a ticket's
+labels always show how it was built. The plan log line and the review comment give the planner's reason, and each
+story's `report.json` records it. A story resumed from commits on its branch keeps the way it was first built.
+
+BMAD's unattended `bmad-build-auto` then does the implementing, in two runs in the same sandbox:
 
 1. **Spec:** it reads the ticket and the code and writes a ready-for-development story spec: tasks with file paths,
    Given/When/Then acceptance criteria and a code map. It halts there. If it can read the ticket more than one way, the
