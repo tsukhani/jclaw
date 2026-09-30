@@ -112,7 +112,7 @@ public record ScrapeProxy(Kind kind, String host, int port,
         return (kind == Kind.SOCKS5 ? "socks5" : "http") + "://" + host + ":" + port;
     }
 
-    /** This proxy as the DataImpulse {@code plan} whose credentials it carries (JCLAW-1334). */
+    /** This proxy as the DataImpulse {@code plan} whose credentials it carries (JCLAW-1335). */
     public ScrapeProxy withPlan(String plan) {
         return new ScrapeProxy(kind, host, port, username, password, plan);
     }
