@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.decision.OllamaDecision;
 
 import java.util.List;
 import java.util.Map;
@@ -114,6 +115,27 @@ class RouterPolicyTest extends UnitTest {
             assertTrue(wrongModel.contains("jev-latest"), wrongModel);
         } finally {
             ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+        }
+    }
+
+    @Test
+    void anOllamaClassifierModelMustBeASelectedDecisionModel() {
+        // JCLAW-1336. No other class writes decision.ollama.models, and only one classifier half is stored.
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, OllamaDecision.PROVIDER),
+                "ollama-decision is not a registered provider, and needs none");
+        ConfigService.set(OllamaDecision.MODELS_KEY, "[\"tev1\",\"nimble\"]");
+        ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, OllamaDecision.PROVIDER);
+        try {
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "tev1"));
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, " nimble "));
+            for (var bad : new String[] {"tev1:0.8b", "llama3.2", "jev-latest"}) {
+                var rejected = RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, bad);
+                assertNotNull(rejected, () -> "accepted " + bad);
+                assertTrue(rejected.contains(OllamaDecision.MODELS_KEY), rejected);
+            }
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+            ConfigService.delete(OllamaDecision.MODELS_KEY);
         }
     }
 

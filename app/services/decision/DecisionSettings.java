@@ -2,6 +2,7 @@ package services.decision;
 
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
+import utils.SsrfGuard;
 
 /**
  * The {@code decision.*} keys, edited in Settings &gt; Decision Providers, and the rules
@@ -26,8 +27,23 @@ public final class DecisionSettings {
 
     /** A message naming what {@code value} must be, or null when {@code key} accepts it. */
     public static @Nullable String rejectionFor(String key, @Nullable String value) {
+        if (key.equals(OllamaDecision.BASE_URL_KEY)) {
+            if (value == null || value.isBlank()) return null;
+            try {
+                // Loopback and the LAN are where an Ollama server lives, so the provider screen, not the web one.
+                SsrfGuard.assertProviderUrlSafe(value.strip());
+                return null;
+            } catch (SecurityException e) {
+                return e.getMessage();
+            }
+        }
+        if (key.equals(OllamaDecision.MODELS_KEY)) {
+            return OllamaDecision.parseModels(value) != null ? null
+                    : "%s must be a JSON array of model names, such as [\"tev1\"].".formatted(key);
+        }
         if (!key.equals(API_KEY)) {
-            return "%s is not a decision-provider setting; the only one is %s.".formatted(key, API_KEY);
+            return "%s is not a decision-provider setting; use %s, %s or %s."
+                    .formatted(key, API_KEY, OllamaDecision.BASE_URL_KEY, OllamaDecision.MODELS_KEY);
         }
         // The key rides an Authorization header, where OkHttp throws on anything but printable ASCII.
         return value == null || value.isBlank() || value.chars().allMatch(c -> c > ' ' && c < 0x7f) ? null

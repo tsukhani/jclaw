@@ -131,6 +131,10 @@ const classifierValue = computed(() => {
 const JEV_CLASSIFIER = 'jev::jev-latest'
 const jevKeySet = computed(() => configValue('decision.jev.apiKey').trim().length > 0)
 
+// JCLAW-1336: the decision models selected on the Ollama card in Settings → Decision Providers.
+const ollamaDecisionOptions = computed(() => parseDecisionModels(configValue('decision.ollama.models'))
+  .map(m => ({ value: `ollama-decision::${m}`, label: `Ollama decision / ${m}` })))
+
 async function saveClassifier(value: string) {
   saving.value = true
   await attempt(async () => {
@@ -402,6 +406,14 @@ function usageTone(fraction: number): string {
               :disabled="!jevKeySet"
             >
               JEV (TypeSafe AI){{ jevKeySet ? '' : ' — needs a TypeSafe API key' }}
+            </option>
+            <option
+              v-for="o in ollamaDecisionOptions"
+              :key="o.value"
+              :value="o.value"
+              data-testid="router-ollama-decision-option"
+            >
+              {{ o.label }}
             </option>
             <option
               v-for="o in modelOptions"

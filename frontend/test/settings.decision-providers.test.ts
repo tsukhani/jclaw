@@ -9,12 +9,15 @@ import { sectionGroups } from '~/components/settings/sections'
 /**
  * Settings > Decision Providers (JCLAW-1302): JEV's card holds the TypeSafe key both consumers
  * send, the retention note, which consumers have chosen JEV, and the circuit breaker they share.
- * The key editor keeps the JCLAW-1274 behaviours it had in the Browser panel.
+ * The key editor keeps the JCLAW-1274 behaviours it had in the Browser panel. Ollama's card (JCLAW-1336)
+ * holds the server, its decision models and the router's use of them.
  */
 
 let stored: Map<string, string>
 let posted: Array<{ key: string, value: string }>
 let breakers: Array<Record<string, unknown>>
+let ollama: Record<string, unknown>
+let deleted: string[]
 
 function jevBreaker(over: Record<string, unknown> = {}) {
   return {
@@ -29,6 +32,17 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void> } 
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
   registerEndpoint('/api/providers', () => [])
   registerEndpoint('/api/breakers', () => breakers)
+  registerEndpoint('/api/decision/ollama', () => ollama)
+  for (const key of ['decision.ollama.baseUrl', 'decision.ollama.models']) {
+    registerEndpoint(`/api/config/${key}`, {
+      method: 'DELETE',
+      handler: () => {
+        deleted.push(key)
+        stored.delete(key)
+        return { status: 'ok' }
+      },
+    })
+  }
   registerEndpoint('/api/config', () => ({
     entries: [...stored].map(([key, value]) => ({ key, value, updatedAt: '2026-09-26T00:00:00Z' })),
   }))
@@ -63,6 +77,8 @@ describe('Settings page — Decision Providers', () => {
     stored = new Map()
     posted = []
     breakers = []
+    deleted = []
+    ollama = { baseUrl: 'http://localhost:11434', customized: false, reachable: true, error: null, models: ['tev1:latest', 'nimble:latest'] }
   })
 
   it('sits between LLM Providers and Search Providers in the Providers group', () => {
@@ -235,5 +251,116 @@ describe('Settings page — Decision Providers', () => {
     const row = component.find('[data-testid="decision-jev-breaker"]')
     expect(row.text()).toContain('isolated by you')
     expect(row.find('button[aria-label="Restore jev"]').exists()).toBe(true)
+  })
+
+  describe('Ollama card (JCLAW-1336)', () => {
+    it('sits directly below the JEV card', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const jev = component.find('[data-testid="decision-provider-jev"]').element
+      expect(jev.nextElementSibling?.getAttribute('data-testid')).toBe('decision-provider-ollama')
+    })
+
+    it('says the prompt goes only to the operator\'s server, without JEV\'s retention notice', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const card = component.find('[data-testid="decision-provider-ollama"]')
+      const note = card.find('[data-testid="decision-ollama-privacy"]').text()
+      expect(note).toContain('first 4000 characters of each prompt')
+      expect(note).toContain('only to this server')
+      expect(card.text()).not.toContain('record or retain')
+    })
+
+    it('lists only the decision models the server reports, not Ollama Local\'s chat models', async () => {
+      stored.set('provider.ollama-local.baseUrl', 'http://localhost:11434/v1')
+      stored.set('provider.ollama-local.models', JSON.stringify([{ id: 'llama3.2' }]))
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-status"]').text()).toBe('reachable'))
+      const models = component.find('[data-testid="decision-ollama-models"]')
+      expect(models.findAll('label').map(l => l.text())).toEqual(['tev1:latest', 'nimble:latest'])
+      expect(models.text()).not.toContain('llama3.2')
+      expect(component.find('[data-testid="decision-ollama-address"]').text()).toContain('http://localhost:11434')
+      expect(component.find('[data-testid="decision-ollama-address"]').text()).toContain('from Ollama Local')
+    })
+
+    it('selecting a model stores the selection as a JSON array, and clearing the last one deletes the key', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-model-tev1:latest"]').exists()).toBe(true))
+
+      await component.find('[data-testid="decision-ollama-model-tev1:latest"] input').setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.models', value: '["tev1:latest"]' }]))
+      const box = () => component.find('[data-testid="decision-ollama-model-tev1:latest"] input')
+      await vi.waitFor(() => expect(box().attributes('disabled')).toBeUndefined())
+      expect((box().element as HTMLInputElement).checked).toBe(true)
+
+      await component.find('[data-testid="decision-ollama-model-tev1:latest"] input').setValue(false)
+      await vi.waitFor(() => expect(deleted).toEqual(['decision.ollama.models']))
+    })
+
+    it('keeps a selected model the server no longer lists, so it can be cleared', async () => {
+      stored.set('decision.ollama.models', JSON.stringify(['tev1:0.8b']))
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-model-tev1:0.8b"]').exists()).toBe(true))
+      expect(component.find('[data-testid="decision-ollama-model-tev1:0.8b"]').text()).toContain('not installed')
+    })
+
+    it('an unreachable server says why, and lists nothing', async () => {
+      ollama = { baseUrl: 'http://192.168.1.20:11434', customized: true, reachable: false, error: 'not reachable (ConnectException)', models: [] }
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-status"]').text()).toBe('not reachable'))
+      expect(component.find('[data-testid="decision-ollama-error"]').text()).toBe('not reachable (ConnectException)')
+      expect(component.find('[data-testid="decision-ollama-models"]').findAll('label')).toHaveLength(0)
+      expect(component.find('[data-testid="decision-ollama-address"]').text()).not.toContain('from Ollama Local')
+    })
+
+    it('stores a different address, and clears the key when the inherited one is saved back', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-address-edit"]').exists()).toBe(true))
+
+      await component.find('[data-testid="decision-ollama-address-edit"]').trigger('click')
+      await component.find('[data-testid="decision-ollama-address-input"]').setValue('http://192.168.1.20:11434/')
+      await component.find('[data-testid="decision-ollama-address-save"]').trigger('click')
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.baseUrl', value: 'http://192.168.1.20:11434' }]))
+
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-address-edit"]').exists()).toBe(true))
+      await component.find('[data-testid="decision-ollama-address-edit"]').trigger('click')
+      await component.find('[data-testid="decision-ollama-address-input"]').setValue('http://localhost:11434')
+      await component.find('[data-testid="decision-ollama-address-save"]').trigger('click')
+      await vi.waitFor(() => expect(deleted).toEqual(['decision.ollama.baseUrl']))
+      expect(posted).toHaveLength(1)
+    })
+
+    it('shows the Model Router as not in use until it classifies with an Ollama model, then names the model', async () => {
+      stored.set('router.classifier.provider', 'jev')
+      stored.set('router.classifier.model', 'jev-latest')
+      baseEndpoints()
+      const idle = await mountDecisionProviders()
+      const row = idle.find('[data-testid="decision-ollama-consumer-model-router"]')
+      expect(row.find('a').attributes('href')).toBe('/settings?section=model-router')
+      expect(row.text()).toContain('not in use')
+      expect(idle.find('[data-testid="decision-ollama-used-by"]').findAll('li')).toHaveLength(1)
+
+      clearNuxtData()
+      stored.set('router.classifier.provider', 'ollama-decision')
+      stored.set('router.classifier.model', 'tev1:latest')
+      const using = await mountDecisionProviders()
+      const inUse = using.find('[data-testid="decision-ollama-consumer-model-router"]').text()
+      expect(inUse).toContain('tev1:latest')
+      expect(inUse).toContain('in use')
+      expect(inUse).not.toContain('not in use')
+    })
+
+    it('shows its own breaker once the router has called it', async () => {
+      breakers = [jevBreaker({ name: 'decision:ollama', target: 'ollama' })]
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-breaker"]').exists()).toBe(true))
+      expect(component.find('[data-testid="decision-jev-breaker"]').exists()).toBe(false)
+    })
   })
 })
