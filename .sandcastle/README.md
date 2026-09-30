@@ -245,6 +245,7 @@ Jira user.
 | Variable | Default | |
 |---|---|---|
 | `FACTORY_MAX_PARALLEL` | 2 | Stories at once; each sandbox peaks near 5 GB |
+| `FACTORY_CPUS` | 6 | CPU quota per sandbox, at most the Docker VM's CPU count |
 | `FACTORY_POLL_SECONDS` | 120 | How often Jira is polled |
 | `FACTORY_MODEL` | `claude-opus-5-5` | |
 | `FACTORY_HOME` | `~/.jclaw-factory` | |

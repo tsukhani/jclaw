@@ -191,6 +191,10 @@ export const installBmad = async (sandbox: { exec: (cmd: string) => Promise<{ ex
   return r.stdout.trim();
 };
 
+// Docker refuses a quota above its VM's CPU count (Docker Desktop → Settings → Resources).
+const CPUS = Number(process.env.FACTORY_CPUS || 6);
+if (!(CPUS > 0)) throw new Error(`FACTORY_CPUS must be a positive number, got "${process.env.FACTORY_CPUS}"`);
+
 const dockerSandbox = () => {
   // Sandcastle refuses a mount whose host path is missing, and the BMAD seed is empty until one is installed.
   fs.mkdirSync(BMAD_SEED, { recursive: true });
@@ -199,7 +203,7 @@ const dockerSandbox = () => {
     // The image's own user; macOS file sharing lets it write the host-owned worktree.
     containerUid: 1000,
     containerGid: 1000,
-    cpus: 4,
+    cpus: CPUS,
     network: NETWORK,
     mounts: [
       { hostPath: GRADLE_SEED, sandboxPath: "/opt/gradle-seed", readonly: true },
