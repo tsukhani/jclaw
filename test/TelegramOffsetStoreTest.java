@@ -13,7 +13,7 @@ import java.util.stream.Stream;
  * Round-trip + bot-id-scoping coverage for {@link TelegramOffsetStore}
  * (JCLAW-361). A pure file-store unit test: it redirects the store at a
  * per-test temp directory via the {@code jclaw.telegram.offsetPath} override
- * (mirrors {@code LuceneIndexer.setIndexPathForTest}), so it touches neither
+ * (mirrors {@code LuceneIndexer.INDEX_PATH_PROPERTY}), so it touches neither
  * production state nor the DB.
  *
  * <p>Pins:
