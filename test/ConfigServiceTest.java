@@ -151,7 +151,8 @@ class ConfigServiceTest extends UnitTest {
             assertTrue(rejected.contains(key), rejected);
         }
         assertNotNull(ConfigService.setWithSideEffects(key, "forever"), "refused through the write path");
-        assertNull(ConfigService.get(key), "a refused value is not saved");
+        // Not assertNull: OllamaDecisionTest writes this key from a concurrently running class.
+        assertNotEquals("forever", ConfigService.get(key), "a refused value is not saved");
     }
 
     @Test
