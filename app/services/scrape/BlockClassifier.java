@@ -67,7 +67,7 @@ public final class BlockClassifier {
             "bots are not allowed", "scraping is prohibited"
     };
 
-    /** Titles of the page a site serves, in place of itself, to a User-Agent it does not recognise. */
+    /** Titles of the page a site serves, in place of itself, to a User-Agent it does not recognize. */
     private static final String[] UNSUPPORTED_CLIENT_TITLES = {
             "unsupported browser", "unsupported client", "browser not supported", "browser is not supported",
             "update your browser", "upgrade your browser", "outdated browser"
@@ -115,7 +115,7 @@ public final class BlockClassifier {
         if (thin && containsAny(raw, TURNSTILE_MARKERS)) return ScrapeReason.TURNSTILE;
         if (thin && containsAny(raw, CHALLENGE_MARKERS)) return ScrapeReason.JS_CHALLENGE;
         if (thin && containsAny(raw, POLICY_MARKERS)) return ScrapeReason.POLICY_BLOCK;
-        // canva.com answers an unrecognised User-Agent with a 200 "update your browser" page, which scored
+        // canva.com answers an unrecognized User-Agent with a 200 "update your browser" page, which scored
         // OK on rung 1, so the ladder never reached the browser that reads the site.
         if (unsupportedClient(raw, obs.textLength())) return ScrapeReason.TRUST_BLOCK;
 

@@ -592,7 +592,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * decide what reaches it. Both were measured on 2026-09-23 and neither announces a mistake.
      *
      * <p>{@code <-loopback>} subtracts Chromium's implicit bypass, which covers more than its name says:
-     * 169.254.169.254 reaches the proxy with the flag and is dialled directly without it, so dropping it
+     * 169.254.169.254 reaches the proxy with the flag and is dialed directly without it, so dropping it
      * would unscreen the cloud-metadata address. WebRTC is UDP, which a SOCKS5 CONNECT proxy cannot carry:
      * without the third flag, STUN, TURN and a data channel's connectivity checks all reached loopback
      * listeners the proxy never saw (JCLAW-1286). Both spellings of that flag: the headless shell this
@@ -736,7 +736,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
         try { session.page().close(); } catch (Exception _) { /* best-effort */ }
         try { session.browser().close(); } catch (Exception _) { /* best-effort */ }
         try { session.playwright().close(); } catch (Exception _) { /* best-effort */ }
-        // After the browser, so nothing is still dialling through the screen when it drops the
+        // After the browser, so nothing is still dialing through the screen when it drops the
         // tunnels it is holding open.
         try { session.proxy().close(); } catch (Exception _) { /* best-effort */ }
         EventLogger.info("tool", agentName, null, "Browser session closed");

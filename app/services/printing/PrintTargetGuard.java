@@ -8,7 +8,7 @@ import java.net.UnknownHostException;
 import java.util.List;
 
 /**
- * Whether a print destination the <em>model</em> named may be dialled (JCLAW-1229).
+ * Whether a print destination the <em>model</em> named may be dialed (JCLAW-1229).
  *
  * <p>The printer tool accepts an explicit {@code host} and {@code port}, and the
  * backends behind it write raw bytes to whatever answers. That makes a destination
@@ -50,7 +50,7 @@ public final class PrintTargetGuard {
      *
      * @param port       the port the tool would actually dial, not the raw argument —
      *                   see {@link PrinterDiscovery#directPort}, which is how the two
-     *                   are kept identical. Vetting one port and dialling another
+     *                   are kept identical. Vetting one port and dialing another
      *                   would make this guard decorative
      * @param discovered printers from an mDNS browse, or empty to answer from the
      *                   saved default alone. Browsed by the caller rather than here so
