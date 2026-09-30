@@ -35,19 +35,12 @@ import java.util.Map;
  * no operator-role / RBAC / multi-user concept, so this parent-agent equality is the
  * whole gate (a tool call is always made by a concrete agent context).
  *
- * <p><b>Size + pagination.</b> Per AC, the transcript is bounded so a
- * runaway child can't blow up the tool's return string. Per-message content
- * is left untruncated (the AC says "truncate per-message content" but in
- * practice the child's own messages already obey JClaw's other size caps:
- * the announce truncation in {@link SubagentSpawnTool#ANNOUNCE_REPLY_MAX_CHARS}
- * bounds the visible reply, and tool results are bounded by their own
- * tools' return sizes). What matters for THIS tool is bounding the message
- * <em>count</em> so a 10,000-turn child doesn't return a single 200 MB
- * JSON blob to the LLM. The default {@link #DEFAULT_LIMIT} is 50 (the
- * JCLAW-326 AC value) with a
- * hard cap of {@link #MAX_LIMIT}; pagination via {@code beforeMessageId}
- * lets the caller walk back through history a page at a time if it really
- * needs all of it.
+ * <p><b>Size + pagination.</b> The message <em>count</em> is bounded, not
+ * per-message content: the child's messages already obey JClaw's other caps
+ * ({@link SubagentSpawnTool#ANNOUNCE_REPLY_MAX_CHARS}, each tool's own return
+ * size), so only the count can grow unboundedly. {@link #DEFAULT_LIMIT} is 50
+ * (JCLAW-326) with a hard cap of {@link #MAX_LIMIT}; {@code beforeMessageId}
+ * pages back through the rest.
  */
 public class ConversationHistoryTool implements ToolRegistry.Tool {
 

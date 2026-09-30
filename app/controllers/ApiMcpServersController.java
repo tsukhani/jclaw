@@ -42,8 +42,7 @@ import static utils.GsonHolder.GSON;
  *       success+tool count or error message</li>
  * </ul>
  *
- * <p>Auth: class-level {@code @With(AuthCheck.class)} mirrors every other
- * Api* controller. The {@code mcp_server} table is operator-wide — JClaw is
+ * <p>The {@code mcp_server} table is operator-wide — JClaw is
  * single-operator, so there is no per-user scoping.
  */
 @With(AuthCheck.class)

@@ -25,15 +25,8 @@ import java.util.Locale;
  *
  * <h2>Why static facade vs DI</h2>
  * JClaw's services layer is uniformly static (matches Play 1.x's
- * controller convention). Threading a {@link MessageSearchRepository}
- * instance through call sites would require either:
- * <ul>
- *   <li>A static "current" reference set at boot — same pattern
- *       this facade collapses to,</li>
- *   <li>Or a service-locator pattern that fetches the impl on
- *       every call — slower and no more testable, since both
- *       implementations are deterministic in their own right.</li>
- * </ul>
+ * controller convention); an injected instance would reduce to the
+ * same boot-time static reference this facade already is.
  *
  * <p>Tests target the {@code Repository} implementations
  * directly; this facade is the production routing layer.
