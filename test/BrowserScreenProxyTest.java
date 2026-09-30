@@ -470,7 +470,7 @@ class BrowserScreenProxyTest extends UnitTest {
     }
 
     @Test
-    void anUpstreamAtALinkLocalAddressIsNeverDialled() throws Exception {
+    void anUpstreamAtALinkLocalAddressIsNeverDialed() throws Exception {
         // The provider rule, as for every ScrapeProxy use: loopback and the LAN pass, the metadata address does not.
         var lines = new CopyOnWriteArrayList<String>();
         try (var proxy = new BrowserScreenProxy(sinkLog(lines),

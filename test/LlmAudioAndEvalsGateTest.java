@@ -47,7 +47,7 @@ class LlmAudioAndEvalsGateTest extends UnitTest {
     }
 
     @Test
-    void anUnrecognisedTypeStillCarriesTheAudioButYieldsNoFormatToken() throws Exception {
+    void anUnrecognizedTypeStillCarriesTheAudioButYieldsNoFormatToken() throws Exception {
         // Pins observed behaviour, not a desired contract: an unknown MIME with an unknown
         // extension comes back with the bytes intact but an EMPTY format. Callers therefore
         // have to cope with a blank token — worth confirming against the provider adapters,

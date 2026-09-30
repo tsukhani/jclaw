@@ -97,7 +97,7 @@ class CurrentTimeInjectorTest extends UnitTest {
     }
 
     @Test
-    void theClockBlockIsRecognisable() {
+    void theClockBlockIsRecognizable() {
         // The provider uses this to avoid anchoring its cache breakpoint to the one
         // message that changes every turn. If it stops matching, the breakpoint
         // silently lands on the clock and the cache goes dead again.

@@ -40,7 +40,7 @@ class ErrorTemplateTest extends UnitTest {
     }
 
     @Test
-    void everyCentralisedApiResponsesCodeHasItsOwnTemplate() throws Exception {
+    void everyCentralizedApiResponsesCodeHasItsOwnTemplate() throws Exception {
         var missing = new ArrayList<String>();
         for (var f : ApiResponses.class.getDeclaredFields()) {
             boolean isPublicConstant = Modifier.isPublic(f.getModifiers())

@@ -335,7 +335,7 @@ class PrintRenderingTest extends UnitTest {
     }
 
     @Test
-    void greyscaleRenderingIsAQuarterOfTheHeapAndAThirdOfTheWire() throws Exception {
+    void grayscaleRenderingIsAQuarterOfTheHeapAndAThirdOfTheWire() throws Exception {
         var canon = Set.of("image/pwg-raster");
         var caps = new services.printing.IppClient.RasterCapabilities(600, true, Set.of("sgray_8"), null);
         var text = "hello printer".getBytes(StandardCharsets.UTF_8);

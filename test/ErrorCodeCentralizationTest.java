@@ -33,7 +33,7 @@ import java.util.stream.Stream;
  * assertion over the real tree is only meaningful alongside
  * {@link #theScannerActuallyCatchesAViolation()}, which proves the detector fires.
  */
-class ErrorCodeCentralisationTest extends UnitTest {
+class ErrorCodeCentralizationTest extends UnitTest {
 
     /** {@code ApiResponses.error(...)} / {@code .errorAndLog(...)}, the only code-bearing calls. */
     private static final Pattern CALL =

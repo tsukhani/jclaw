@@ -17,7 +17,7 @@ import java.util.List;
 class HttpKeysTest extends UnitTest {
 
     /** Quoted forms that must come from {@link HttpKeys} instead of being retyped. */
-    private static final List<String> CENTRALISED = List.of(
+    private static final List<String> CENTRALIZED = List.of(
             "\"application/json\"",
             "\"application/octet-stream\"",
             "\"/chat/completions\"");
@@ -30,7 +30,7 @@ class HttpKeysTest extends UnitTest {
     }
 
     @Test
-    void noProductionSourceHandWritesACentralisedLiteral() throws IOException {
+    void noProductionSourceHandWritesACentralizedLiteral() throws IOException {
         var appRoot = Path.of(Play.applicationPath.getAbsolutePath(), "app");
         var owner = appRoot.resolve("utils").resolve("HttpKeys.java");
         var offenders = new ArrayList<String>();
@@ -46,7 +46,7 @@ class HttpKeysTest extends UnitTest {
                     var stripped = line.stripLeading();
                     // A mention in prose is not a call site; only executable lines count.
                     if (stripped.startsWith("*") || stripped.startsWith("//") || stripped.startsWith("/*")) continue;
-                    for (var literal : CENTRALISED) {
+                    for (var literal : CENTRALIZED) {
                         if (line.contains(literal)) {
                             offenders.add(appRoot.relativize(source) + ":" + (i + 1) + " " + literal);
                         }
