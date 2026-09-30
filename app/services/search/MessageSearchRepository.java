@@ -32,15 +32,6 @@ import java.util.List;
  * {@link jobs.FullTextSearchInitJob} calls {@link #init} once at
  * startup; everything else routes through the static facade.
  *
- * <p>Why this abstraction exists at JCLAW-21 time rather than
- * waiting for the consumer (JCLAW-22 monitoring UI's PeekPanel):
- * the schema-side wiring — trigger creation, Lucene index files
- * on disk — has to be in place before any task fires write rows
- * that need indexing. Splitting that across two stories would
- * leave us either re-indexing the entire table on JCLAW-22 land
- * (slow, surprising downtime), or shipping a Tasks foundation
- * that silently can't answer search queries.
- *
  * <p>Part of JCLAW-21's Tasks foundation.
  */
 public interface MessageSearchRepository {

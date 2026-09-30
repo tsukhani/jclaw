@@ -166,7 +166,7 @@ public final class PrintRenderer {
     }
 
     /**
-     * Scale an image to fit the page, preserving aspect ratio and centring it on
+     * Scale an image to fit the page, preserving aspect ratio and centering it on
      * white. Never upscales beyond the printable area, and never crops: a photo
      * that arrives at the wrong aspect gets bars, not a silently trimmed subject.
      */

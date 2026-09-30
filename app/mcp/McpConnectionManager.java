@@ -437,7 +437,7 @@ public final class McpConnectionManager {
 
     /** Servers whose handshake has actually completed. Distinct from
      *  {@link #connectionCount()}, which counts entries the moment a connect is
-     *  scheduled and so reads "all of them" while every one is still dialling. */
+     *  scheduled and so reads "all of them" while every one is still dialing. */
     public static int connectedCount() {
         return (int) connections.values().stream()
                 .filter(e -> e.status == McpServer.Status.CONNECTED)

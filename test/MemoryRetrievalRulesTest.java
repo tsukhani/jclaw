@@ -46,7 +46,7 @@ class MemoryRetrievalRulesTest extends UnitTest {
     // --- entity names: what the key backfill uses to find a memory's neighbours ---
 
     @Test
-    void liftsCapitalisedEntityNames() {
+    void liftsCapitalizedEntityNames() {
         assertEquals(List.of("Zephyrin"),
                 JpaMemoryStore.entityNames("The user has a son named Zephyrin."));
         assertEquals(List.of("Zephyrin", "Zeph"),

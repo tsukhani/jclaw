@@ -44,7 +44,7 @@ public final class MemoryForgetLog {
     private record Forgotten(String agentId, String text) {}
 
     /** Swappable clock so a test can drive the window's expiry instead of sleeping ten
-     *  minutes; mirrors the {@code setEmbedderForTest} / {@code setIndexPathForTest} seams. */
+     *  minutes; mirrors the {@code setEmbedderForTest} seam. */
     private static volatile Ticker ticker = Ticker.systemTicker();
 
     private static final Cache<Forgotten, Boolean> FORGOTTEN = Caffeine.newBuilder()

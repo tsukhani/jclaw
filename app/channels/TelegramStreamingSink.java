@@ -664,8 +664,6 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     @Nullable Integer messageThreadIdForTest() { return messageThreadId; }
     boolean streamCapReachedForTest() { return streamCapReached; }
     boolean sealedForTest() { return sealed.get(); }
-    String lastSentTextForTest() { return lastSentText; }
-    long lastSentAtForTest() { return lastSentAt; }
     long currentThrottleMsForTest() { return currentThrottleMs; }
 
     /** JCLAW-771: replaces getDeclaredMethod("flush") reflection in the integration test —

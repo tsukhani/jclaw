@@ -33,12 +33,10 @@ import java.util.concurrent.TimeUnit;
  * finds their prices already set and is a no-op for them. It still runs over
  * them, filling only any field discovery left unknown.
  *
- * <p>LiteLLM hand-maintains a JSON catalog the entire community ecosystem
- * relies on (Vercel AI SDK, Helicone, Langfuse, etc.). It's the de-facto
- * standard answer to "where do I get OpenAI pricing programmatically." The
- * file lives at the canonical raw URL below; updates ship via PR.
+ * <p>LiteLLM's hand-maintained catalog is the de-facto community source
+ * (Vercel AI SDK, Helicone, Langfuse); it lives at the raw URL below.
  *
- * <p>Two design constraints worth being explicit about:
+ * <p>Two design constraints:
  *
  * <ol>
  *   <li><b>Operator-set values are sacrosanct.</b> A field that already has

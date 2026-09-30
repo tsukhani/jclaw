@@ -175,7 +175,7 @@ public final class PrintDispatcher {
      * the fallback. Everything else follows in capability order.
      *
      * <p>{@code protocolPinned} switches the ladder off. Falling through turned one
-     * destination into three dialled ports — 631, 9100 and 515 — which is the whole
+     * destination into three dialed ports — 631, 9100 and 515 — which is the whole
      * fallback's value for a printer the operator chose and pure reach for one the
      * model named (JCLAW-1229).
      */

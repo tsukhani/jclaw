@@ -619,40 +619,13 @@ public final class LuceneIndexer {
         return writer.getDocStats().numDocs;
     }
 
-    /** System-property override for {@link #indexPath(Scope)}. Tests set
-     *  this in {@code @BeforeAll} to a freshly-created temp directory so
-     *  the autotest JVM doesn't fight a running production JVM for the
-     *  production index's {@code write.lock}. Unset (or blank) preserves
-     *  the production default at {@code data/jclaw-lucene/<scope>/}. Each
-     *  scope's subdirectory is created under whichever root resolves.
-     *
-     *  <p>Tests must {@link #close} before clearing the property, so the
-     *  next test's {@link #open} re-resolves against either a fresh
-     *  override or the production default. The companion
-     *  {@link #setIndexPathForTest} helper handles both halves and is
-     *  the documented test entrypoint. */
+    /** The System-property override and the Play config key for {@link #indexPath(Scope)}'s
+     *  root. {@code %test.} points the autotest JVM at {@code data/jclaw-lucene-test}, so it
+     *  never fights a running production JVM for the production index's {@code write.lock}
+     *  (JCLAW-428). Unset (or blank) preserves the production default at
+     *  {@code data/jclaw-lucene/<scope>/}. Each scope's subdirectory is created under whichever
+     *  root resolves. */
     public static final String INDEX_PATH_PROPERTY = "jclaw.search.lucenePath";
-
-    /**
-     * Test-only seam: redirect {@link #indexPath(Scope)} to use {@code path}
-     * as the parent directory (each scope gets its own subdirectory under
-     * it) for the lifetime of the JVM, or until called again with
-     * {@code null} to clear. Tests that drive the real Lucene path must
-     * call this in {@code @BeforeAll} pointing at a per-class temp
-     * directory; without the redirect the index opens at
-     * {@code data/jclaw-lucene/...} and collides with any running
-     * production JVM holding the same lock.
-     *
-     * <p>Idempotent. Safe to call before any {@link #open}; the resolved
-     * path is read fresh on every {@code open}.
-     */
-    public static void setIndexPathForTest(Path path) {
-        if (path == null) {
-            System.clearProperty(INDEX_PATH_PROPERTY);
-        } else {
-            System.setProperty(INDEX_PATH_PROPERTY, path.toString());
-        }
-    }
 
     /**
      * When true, {@link #open()} is a no-op in test mode: the running
@@ -703,8 +676,7 @@ public final class LuceneIndexer {
 
     private static Path indexPath(Scope scope) {
         // Resolution order:
-        //   1. explicit System-property override (setIndexPathForTest) — kept
-        //      for tests that drive the path directly (e.g. LuceneIndexerTest);
+        //   1. explicit System-property override (-Djclaw.search.lucenePath);
         //   2. Play config jclaw.search.lucenePath, which honors the %test.
         //      prefix so the autotest JVM lands in data/jclaw-lucene-test and
         //      never the production index (JCLAW-428);

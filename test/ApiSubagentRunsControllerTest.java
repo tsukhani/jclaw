@@ -295,7 +295,7 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void listReturnsSpawnLabelAndNullWhenUnlabelled() {
+    void listReturnsSpawnLabelAndNullWhenUnlabeled() {
         login();
         var ids = commitInFreshTx(() -> {
             var p = AgentService.create("api-label-p", "openrouter", "gpt-4.1");

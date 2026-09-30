@@ -40,10 +40,6 @@ public final class TelegramStreamingSinkTestHooks {
 
     public static boolean sealed(TelegramStreamingSink sink) { return sink.sealedForTest(); }
 
-    public static String lastSentText(TelegramStreamingSink sink) { return sink.lastSentTextForTest(); }
-
-    public static long lastSentAt(TelegramStreamingSink sink) { return sink.lastSentAtForTest(); }
-
     public static long currentThrottleMs(TelegramStreamingSink sink) { return sink.currentThrottleMsForTest(); }
 
     public static boolean typingHeartbeatActive(TelegramStreamingSink sink) { return sink.typingHeartbeatActiveForTest(); }

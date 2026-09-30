@@ -134,7 +134,7 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
             return minConfidenceRejection(value);
         }
         if (key.equals(PREFER_PREPAID)) {
-            // Boolean.parseBoolean maps anything unrecognised to false, which would silently turn the
+            // Boolean.parseBoolean maps anything unrecognized to false, which would silently turn the
             // credit protection off on a typo.
             return "true".equalsIgnoreCase(String.valueOf(value).trim())
                     || "false".equalsIgnoreCase(String.valueOf(value).trim())

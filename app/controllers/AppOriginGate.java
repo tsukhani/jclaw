@@ -38,7 +38,7 @@ public final class AppOriginGate {
     /**
      * The owning-app slug when {@code (secFetchSite, referer)} identify an
      * app-originated request, else {@code null}. Pure and side-effect-free — the
-     * predicate {@link #isBlocked()} and {@link #currentSlug()} build on it, and it
+     * predicate {@link #isBlocked()} builds on it, and it
      * is directly unit-tested. A malformed {@code Referer} is treated as
      * not-app-originated (a well-formed one is what accidental over-reach carries).
      */
@@ -60,15 +60,6 @@ public final class AppOriginGate {
         }
         var m = APP_REFERER_PATH.matcher(path);
         return m.find() ? m.group(1) : null;
-    }
-
-    /** The current request's owning-app slug, or {@code null} when it is not app-originated. */
-    public static @Nullable String currentSlug() {
-        var req = Http.Request.current();
-        if (req == null) {
-            return null;
-        }
-        return appOriginSlug(header(req, "sec-fetch-site"), header(req, "referer"));
     }
 
     /**

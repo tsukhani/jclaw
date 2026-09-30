@@ -15,7 +15,7 @@ import java.util.stream.Stream;
  * <p>Partitioning adds a failure mode a single table did not have: a surface file that exists
  * but is never merged into {@code ErrorTemplates} registers nothing and nothing complains. The
  * codes those files will carry are not {@code ApiResponses} constants, so
- * {@code ErrorTemplateTest.everyCentralisedApiResponsesCodeHasItsOwnTemplate} — the reflection
+ * {@code ErrorTemplateTest.everyCentralizedApiResponsesCodeHasItsOwnTemplate} — the reflection
  * guard that covers the API surface — cannot see them, and the templates would silently fall
  * back instead.
  */

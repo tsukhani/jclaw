@@ -52,8 +52,7 @@ import java.util.function.Consumer;
  * <p><b>Out of scope.</b> The optional GET-SSE channel for receiving
  * server-initiated events between requests is not implemented; for the
  * tools-only slice JCLAW-31 covers, notifications can only ride on the
- * SSE response of an in-flight request. Adding GET-SSE is additive when a
- * future story needs it.
+ * SSE response of an in-flight request.
  */
 public final class McpStreamableHttpTransport implements McpTransport {
 

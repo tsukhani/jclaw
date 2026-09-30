@@ -47,7 +47,7 @@ class TranscriptionRouterTest extends UnitTest {
     }
 
     @Test
-    void emptyWhenProviderUnrecognised() {
+    void emptyWhenProviderUnrecognized() {
         // Unknown radio value (typo, deprecated provider) — router falls
         // through the switch default to Optional.empty rather than blowing
         // up the calling pipeline.

@@ -13,8 +13,8 @@ import java.util.List;
  * @param chatId       Telegram chat id (used as the conversation peer key)
  * @param chatType     Telegram Bot API chat.type string ({@code "private"}
  *                     / {@code "group"} / {@code "supergroup"} /
- *                     {@code "channel"}), recorded for structured logging
- *                     and possible future routing. Nullable when an
+ *                     {@code "channel"}), read by the access policy and
+ *                     recorded for structured logging. Nullable when an
  *                     update arrives without chat context.
  * @param text         message body text; empty (never null) for media-only
  *                     updates — {@code TelegramInboundParser} falls back to
@@ -32,9 +32,9 @@ import java.util.List;
  *                        {@code @botusername} mention, a {@code text_mention}
  *                        resolving to the bot's own user id, a
  *                        {@code /cmd@botusername} bot_command suffix, or a
- *                        reply to one of the bot's own messages. A later
- *                        group-gating story consumes this; parsing here does
- *                        NOT itself gate or drop anything. Best-effort when
+ *                        reply to one of the bot's own messages.
+ *                        {@link TelegramAccessPolicy} gates on this; parsing
+ *                        here does NOT itself gate or drop anything. Best-effort when
  *                        the bot identity is unknown (see
  *                        {@link TelegramInboundParser#parseUpdate(Update)}).
  * @param attachments     inbound file attachments (resolved lazily by the

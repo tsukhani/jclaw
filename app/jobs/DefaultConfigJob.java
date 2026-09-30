@@ -499,7 +499,7 @@ public class DefaultConfigJob extends Job<Void> {
 
     /**
      * JCLAW-1334: DataImpulse credentials moved from the generic proxy keys into per-plan keys. The card
-     * was always labelled residential, so a stored login becomes the Residential plan's. A no-op once a
+     * was always labeled residential, so a stored login becomes the Residential plan's. A no-op once a
      * plan is set.
      */
     private void moveDataImpulseCredentialsToAPlan() {

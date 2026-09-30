@@ -174,7 +174,7 @@ class GenerateImageToolTest extends UnitTest {
     // ==================== JCLAW-1223: a per-call Replicate model ====================
 
     /** Curated Kontext slugs: always in the catalog once a Replicate key is set, whatever the cache holds. */
-    private static final String CATALOGUED = "black-forest-labs/flux-kontext-pro";
+    private static final String CATALOGED = "black-forest-labs/flux-kontext-pro";
     private static final String CONFIGURED = "black-forest-labs/flux-kontext-max";
 
     /** Paths the mock Replicate API was asked for, so a test can see which model ran, or that none did. */
@@ -215,16 +215,16 @@ class GenerateImageToolTest extends UnitTest {
     }
 
     @Test
-    void aCataloguedModelRunsForThatCallAndLeavesTheSettingAlone() {
+    void aCatalogedModelRunsForThatCallAndLeavesTheSettingAlone() {
         replicateBackend(true);
 
         var result = new GenerateImageTool().executeRich(
-                "{\"prompt\":\"a lighthouse\",\"model\":\"" + CATALOGUED + "\"}", new Agent());
+                "{\"prompt\":\"a lighthouse\",\"model\":\"" + CATALOGED + "\"}", new Agent());
 
         assertEquals(1, result.attachments().size(), result.text());
-        assertEquals(List.of("/models/" + CATALOGUED + "/predictions"), predictionPaths());
+        assertEquals(List.of("/models/" + CATALOGED + "/predictions"), predictionPaths());
         var meta = result.attachments().get(0).metadata();
-        assertTrue(meta.contains("replicate:" + CATALOGUED), meta);
+        assertTrue(meta.contains("replicate:" + CATALOGED), meta);
         assertEquals(CONFIGURED, ConfigService.get("imagegen.replicate.model"),
                 "a per-call model must never rewrite the instance-wide setting");
     }
@@ -247,7 +247,7 @@ class GenerateImageToolTest extends UnitTest {
         ConfigService.set("imagegen.provider", "openai");
 
         var result = new GenerateImageTool().executeRich(
-                "{\"prompt\":\"a lighthouse\",\"model\":\"" + CATALOGUED + "\"}", new Agent());
+                "{\"prompt\":\"a lighthouse\",\"model\":\"" + CATALOGED + "\"}", new Agent());
 
         assertTrue(result.attachments().isEmpty());
         assertTrue(result.text().contains("only be chosen on the Replicate image backend"), result.text());
@@ -264,7 +264,7 @@ class GenerateImageToolTest extends UnitTest {
 
         assertTrue(result.attachments().isEmpty());
         assertTrue(result.text().contains("'someone/not-offered' is not an available Replicate image model"), result.text());
-        assertTrue(result.text().contains(CATALOGUED), "the refusal must list what can be chosen: " + result.text());
+        assertTrue(result.text().contains(CATALOGED), "the refusal must list what can be chosen: " + result.text());
         assertTrue(predictionPaths().isEmpty(), "no prediction may run for a refused model: " + replicatePaths);
     }
 
@@ -274,7 +274,7 @@ class GenerateImageToolTest extends UnitTest {
         replicateBackend(false);
 
         var result = new GenerateImageTool().executeRich(
-                "{\"prompt\":\"a lighthouse\",\"model\":\"" + CATALOGUED + "\"}", new Agent());
+                "{\"prompt\":\"a lighthouse\",\"model\":\"" + CATALOGED + "\"}", new Agent());
 
         assertTrue(result.attachments().isEmpty());
         assertTrue(result.text().contains("model list is unavailable"), result.text());
