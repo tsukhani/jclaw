@@ -309,7 +309,7 @@ function playJevClip() {
           <template v-else>
             <span class="flex-1 min-w-0 text-sm font-mono text-fg-strong truncate">{{ ollama?.baseUrl ?? inheritedAddress }}</span>
             <span
-              v-if="ollama && !ollama.customized"
+              v-if="ollama && !ollama.customized && configValue('provider.ollama-local.baseUrl').trim()"
               class="text-xs text-fg-muted"
             >from Ollama Local</span>
             <button

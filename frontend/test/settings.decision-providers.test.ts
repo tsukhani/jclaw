@@ -284,6 +284,15 @@ describe('Settings page — Decision Providers', () => {
       expect(component.find('[data-testid="decision-ollama-address"]').text()).toContain('from Ollama Local')
     })
 
+    it('does not credit Ollama Local for the built-in default address', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-status"]').text()).toBe('reachable'))
+      const address = component.find('[data-testid="decision-ollama-address"]').text()
+      expect(address).toContain('http://localhost:11434')
+      expect(address).not.toContain('from Ollama Local')
+    })
+
     it('selecting a model stores the selection as a JSON array, and clearing the last one deletes the key', async () => {
       baseEndpoints()
       const component = await mountDecisionProviders()
