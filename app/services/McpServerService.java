@@ -214,8 +214,7 @@ public final class McpServerService {
         var restored = new LinkedHashMap<String, String>();
         for (var name : submitted.keySet()) {
             var element = submitted.get(name);
-            if (!element.isJsonPrimitive()) continue;
-            var value = element.getAsString();
+            var value = element.isJsonPrimitive() ? element.getAsString() : "";
             if (!value.endsWith("****") || !(everyValueSecret || ConfigService.isSensitive(name))) continue;
             var prior = stored.get(name);
             if (prior == null || !value.equals(everyValueSecret ? maskSecret(prior) : ConfigService.maskValue(name, prior))) {

@@ -131,7 +131,7 @@ function dataImpulseEndpoint(url: string): { gateway: DataImpulseGateway, port: 
     return null
   }
   const host = parsed.hostname.toLowerCase()
-  const gateway = host === DATAIMPULSE.host ? 'hostname' : host === DATAIMPULSE.ipHost ? 'ip' : null
+  const gateway = (['hostname', 'ip'] as const).find(g => gatewayHost(g) === host) ?? null
   if (parsed.protocol !== 'http:' || gateway === null) return null
   if (parsed.username || parsed.password || parsed.search || !['', '/'].includes(parsed.pathname)) return null
   const port = Number(parsed.port)
@@ -173,7 +173,8 @@ export function parseProxy(url: string, username: string, plans: StoredPlans = e
     rotation: sticky ? 'sticky' : 'rotating',
     stickyPort: sticky ? endpoint.port : DATAIMPULSE.stickyPortMin,
   }
-  return { provider: !storedUrl ? 'none' : endpoint === null ? 'manual' : 'dataimpulse', dataimpulse, manual }
+  if (!storedUrl) return { provider: 'none', dataimpulse, manual }
+  return { provider: endpoint === null ? 'manual' : 'dataimpulse', dataimpulse, manual }
 }
 
 function normalizeCountries(countries: string): string {
@@ -183,7 +184,8 @@ function normalizeCountries(countries: string): string {
 /** The gateway URL, the shared targeting, and the username the active plan connects with. */
 export function composeDataImpulse(fields: DataImpulseFields): { url: string, targeting: string, username: string } {
   const sticky = fields.rotation === 'sticky'
-  const port = !sticky ? DATAIMPULSE.rotatingPort : isStickyPort(fields.stickyPort) ? fields.stickyPort : DATAIMPULSE.stickyPortMin
+  const stickyPort = isStickyPort(fields.stickyPort) ? fields.stickyPort : DATAIMPULSE.stickyPortMin
+  const port = sticky ? stickyPort : DATAIMPULSE.rotatingPort
   const params: string[] = []
   const countries = normalizeCountries(fields.countries)
   if (countries) params.push(COUNTRY_PARAM + countries)
@@ -311,6 +313,13 @@ export function keepsStoredPassword(targetUrl: string, stored: StoredProxy): boo
   return stored.hasPassword && host !== '' && host === proxyHost(stored.url)
 }
 
+interface ProxyWrite {
+  field: ProxyField
+  value: string
+}
+
+type ComposedPlans = NonNullable<ComposedProxy['dataimpulse']>
+
 /**
  * The config writes that take the stored keys to `target`, in an order the backend's cross-key checks
  * accept and that never hands one host another's credentials: the stored credentials are cleared
@@ -325,35 +334,49 @@ export function planProxyWrites(
   password: string,
   stored: StoredProxy,
   planPasswords: Partial<PlanRecord<string>> = {},
-): Array<{ field: ProxyField, value: string }> {
+): ProxyWrite[] {
   const url = target.url.trim()
   const socks = /^socks5:/i.test(url)
   const hostChanges = url !== '' && proxyHost(url) !== proxyHost(stored.url)
-  const writes: Array<{ field: ProxyField, value: string }> = []
+  const storedUsername = hostChanges ? '' : stored.username.trim()
   const plans = target.dataimpulse
   const storedPlans = stored.dataimpulse ?? emptyStoredPlans()
-  if (plans) {
-    for (const { id } of DATAIMPULSE_PLANS) {
-      if (plans.logins[id] !== storedPlans.logins[id].trim()) writes.push({ field: `${id}.login`, value: plans.logins[id] })
-      const planPassword = planPasswords[id] ?? ''
-      if (planPassword.trim()) writes.push({ field: `${id}.password`, value: planPassword })
-    }
-  }
-  if (socks || hostChanges) {
-    if (stored.username.trim()) writes.push({ field: 'username', value: '' })
-    if (stored.hasPassword) writes.push({ field: 'password', value: '' })
-  }
+  const writes = plans ? planCredentialWrites(plans, storedPlans, planPasswords) : []
+  if (socks || hostChanges) writes.push(...clearedCredentialWrites(stored))
   if (url !== stored.url.trim()) writes.push({ field: 'url', value: url })
-  if (!socks) {
-    const username = target.username?.trim() ?? null
-    const storedUsername = hostChanges ? '' : stored.username.trim()
-    if (username !== null && username !== storedUsername) writes.push({ field: 'username', value: username })
-    if (password.trim()) writes.push({ field: 'password', value: password })
-  }
-  if (plans) {
-    if (plans.targeting !== storedPlans.targeting.trim()) writes.push({ field: 'targeting', value: plans.targeting })
-    if (plans.plan !== storedPlans.plan) writes.push({ field: 'plan', value: plans.plan })
-  }
+  if (!socks) writes.push(...credentialWrites(target.username?.trim() ?? null, password, storedUsername))
+  if (plans) writes.push(...planChoiceWrites(plans, storedPlans))
   if (url && !stored.enabled) writes.push({ field: 'enabled', value: 'true' })
+  return writes
+}
+
+function planCredentialWrites(plans: ComposedPlans, stored: StoredPlans, passwords: Partial<PlanRecord<string>>): ProxyWrite[] {
+  const writes: ProxyWrite[] = []
+  for (const { id } of DATAIMPULSE_PLANS) {
+    if (plans.logins[id] !== stored.logins[id].trim()) writes.push({ field: `${id}.login`, value: plans.logins[id] })
+    const planPassword = passwords[id] ?? ''
+    if (planPassword.trim()) writes.push({ field: `${id}.password`, value: planPassword })
+  }
+  return writes
+}
+
+function clearedCredentialWrites(stored: StoredProxy): ProxyWrite[] {
+  const writes: ProxyWrite[] = []
+  if (stored.username.trim()) writes.push({ field: 'username', value: '' })
+  if (stored.hasPassword) writes.push({ field: 'password', value: '' })
+  return writes
+}
+
+function credentialWrites(username: string | null, password: string, storedUsername: string): ProxyWrite[] {
+  const writes: ProxyWrite[] = []
+  if (username !== null && username !== storedUsername) writes.push({ field: 'username', value: username })
+  if (password.trim()) writes.push({ field: 'password', value: password })
+  return writes
+}
+
+function planChoiceWrites(plans: ComposedPlans, stored: StoredPlans): ProxyWrite[] {
+  const writes: ProxyWrite[] = []
+  if (plans.targeting !== stored.targeting.trim()) writes.push({ field: 'targeting', value: plans.targeting })
+  if (plans.plan !== stored.plan) writes.push({ field: 'plan', value: plans.plan })
   return writes
 }

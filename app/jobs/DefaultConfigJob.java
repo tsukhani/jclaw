@@ -51,6 +51,7 @@ import java.util.List;
 public class DefaultConfigJob extends Job<Void> {
 
     private static final String EVENT_CATEGORY_AGENT = "agent";
+    private static final String EVENT_CATEGORY_SYSTEM = "system";
     private static final String CONFIG_VALUE_FALSE = "false";
 
     @Override
@@ -72,7 +73,7 @@ public class DefaultConfigJob extends Job<Void> {
         // a "uv missing" banner for local image generation without paying the probe
         // cost on first page load (cheap; same rationale as FfmpegProbe above).
         UvProbe.probe();
-        EventLogger.info("system", "Default configuration seeded");
+        EventLogger.info(EVENT_CATEGORY_SYSTEM, "Default configuration seeded");
     }
 
     /**
@@ -518,7 +519,7 @@ public class DefaultConfigJob extends Job<Void> {
         ConfigService.delete(WebScrapeSettings.PROXY_USERNAME);
         ConfigService.delete(WebScrapeSettings.PROXY_PASSWORD);
         ConfigService.clearCache();
-        EventLogger.info("system", "DataImpulse proxy credentials moved to the Residential plan");
+        EventLogger.info(EVENT_CATEGORY_SYSTEM, "DataImpulse proxy credentials moved to the Residential plan");
     }
 
     private void seedIfAbsent(String key, String value) {
@@ -542,7 +543,7 @@ public class DefaultConfigJob extends Job<Void> {
             var newRow = Config.findByKey(newKey);
             if (newRow == null) {
                 Config.upsert(newKey, oldRow.value);
-                EventLogger.info("system", "Config key migrated: %s → %s".formatted(oldKey, newKey));
+                EventLogger.info(EVENT_CATEGORY_SYSTEM, "Config key migrated: %s → %s".formatted(oldKey, newKey));
             }
             oldRow.delete();
         });

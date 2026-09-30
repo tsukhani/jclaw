@@ -236,7 +236,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
     // ==================== JCLAW-1331: masked secrets written back ====================
 
     @Test
-    void savingAStdioServerAsItWasReadKeepsItsSecretEnvValues() throws Exception {
+    void savingAStdioServerAsItWasReadKeepsItsSecretEnvValues() {
         login();
         var view = created("""
                 {"name":"keeps","enabled":false,"transport":"STDIO","command":"node","args":["s.js"],
@@ -258,7 +258,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    void savingAnHttpServerAsItWasReadKeepsItsHeaderValues() throws Exception {
+    void savingAnHttpServerAsItWasReadKeepsItsHeaderValues() {
         login();
         var view = created("""
                 {"name":"remote-keeps","enabled":false,"transport":"HTTP","url":"http://127.0.0.1:1/mcp",
@@ -279,7 +279,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
     }
 
     @Test
-    void aMaskThatMatchesNothingStoredUnderItsNameIsRefused() throws Exception {
+    void aMaskThatMatchesNothingStoredUnderItsNameIsRefused() {
         login();
         var view = created("""
                 {"name":"renamed","enabled":false,"transport":"STDIO","command":"node",

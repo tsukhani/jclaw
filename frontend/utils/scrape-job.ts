@@ -88,7 +88,8 @@ export function proxyLabel(route: string): string {
   const [url = route, planId] = route.split('#', 2)
   if (parseProxy(url, '').provider !== 'dataimpulse') return route
   const plan = DATAIMPULSE_PLANS.find(p => p.id === planId)
-  return `DataImpulse${plan ? ` ${plan.label} plan` : ''}, ${url.replace(/^\w+:\/\//, '')}`
+  const planLabel = plan ? ` ${plan.label} plan` : ''
+  return `DataImpulse${planLabel}, ${url.replace(/^\w+:\/\//, '')}`
 }
 
 /** Where the job went out, in the order its runs did: a resumed run can go out another way. */
