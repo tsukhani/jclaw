@@ -286,7 +286,7 @@ class JevRouterClassifierTest extends UnitTest {
 
         assertEquals(1, requests.size());
         assertNull(verdict.classification(), "an answer that arrives after the timeout is not used");
-        assertTrue(verdict.reason().contains("unreachable"), verdict.reason());
+        assertEquals("the JEV classifier failed (Jev did not answer within 1 s)", verdict.reason());
         assertTrue(elapsedMs < 5_000, "one attempt, no backoff: took " + elapsedMs + " ms");
         assertEquals(1, JevApi.breaker().stats().failures(), "a timeout counts against the breaker");
     }
