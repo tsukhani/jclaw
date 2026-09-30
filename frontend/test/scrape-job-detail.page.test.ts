@@ -138,6 +138,9 @@ describe('Scrape job detail', () => {
     const cases: Array<[string[] | null, string]> = [
       [['http://74.81.81.81:823'], 'DataImpulse, 74.81.81.81:823'],
       [['socks5://10.0.0.5:1080'], 'socks5://10.0.0.5:1080'],
+      [['http://gw.dataimpulse.com:823#mobile'], 'DataImpulse Mobile plan, gw.dataimpulse.com:823'],
+      [['http://74.81.81.81:823#premium-residential', 'direct'], 'DataImpulse Premium Residential plan, 74.81.81.81:823, then none, connected directly'],
+      [['http://gw.dataimpulse.com:823#unknown'], 'DataImpulse, gw.dataimpulse.com:823'],
       [['http://74.81.81.81:823', 'direct'], 'DataImpulse, 74.81.81.81:823, then none, connected directly'],
       [['direct'], 'none, connected directly'],
       [null, 'not recorded'],

@@ -1,5 +1,5 @@
 import type { ScrapeJob, ScrapeJobState } from '~/types/api'
-import { parseProxy } from '~/utils/proxy-providers'
+import { DATAIMPULSE_PLANS, parseProxy } from '~/utils/proxy-providers'
 
 /**
  * Background scrape job helpers (JCLAW-1273), shared by the Scrapes page, its detail view, the
@@ -80,9 +80,15 @@ export function scrapeProxies(job: Pick<ScrapeJob, 'egress'>): string[] {
   return (job.egress ?? []).filter(route => route !== 'direct')
 }
 
-/** "DataImpulse, 74.81.81.81:823" when a preset recognizes the proxy, otherwise its address. */
-export function proxyLabel(url: string): string {
-  return parseProxy(url, '').provider === 'dataimpulse' ? `DataImpulse, ${url.replace(/^\w+:\/\//, '')}` : url
+/**
+ * "DataImpulse, 74.81.81.81:823" when a preset recognizes the proxy, otherwise its address; a route that
+ * names its plan (JCLAW-1335), such as "http://gw.dataimpulse.com:823#mobile", reads "DataImpulse Mobile plan, …".
+ */
+export function proxyLabel(route: string): string {
+  const [url = route, planId] = route.split('#', 2)
+  if (parseProxy(url, '').provider !== 'dataimpulse') return route
+  const plan = DATAIMPULSE_PLANS.find(p => p.id === planId)
+  return `DataImpulse${plan ? ` ${plan.label} plan` : ''}, ${url.replace(/^\w+:\/\//, '')}`
 }
 
 /** Where the job went out, in the order its runs did: a resumed run can go out another way. */

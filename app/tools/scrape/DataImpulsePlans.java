@@ -6,6 +6,7 @@ import services.ConfigService;
 import java.net.URI;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.SequencedMap;
@@ -25,13 +26,16 @@ public final class DataImpulsePlans {
 
     private static final Set<String> GATEWAY_HOSTS = Set.of("gw.dataimpulse.com", "74.81.81.81");
 
+    /** Where a job's plan goes out when the saved proxy URL is not a DataImpulse gateway (JCLAW-1335). */
+    public static final String DEFAULT_GATEWAY = "http://gw.dataimpulse.com:823";
+
     // DataImpulse puts targeting after the login: login__cr.de;sessttl.30
     private static final String PARAMS_SEPARATOR = "__";
 
     private static volatile @Nullable String gatewayHostForTest;
 
     /** A plan's username and password as the proxy receives them. */
-    public record Credentials(String username, String password) {}
+    public record Credentials(String plan, String username, String password) {}
 
     private DataImpulsePlans() {}
 
@@ -79,9 +83,44 @@ public final class DataImpulsePlans {
 
     /** {@code plan}'s stored credentials, with the shared targeting appended to its login. */
     public static Credentials credentials(String plan) {
-        return new Credentials(
+        return new Credentials(plan,
                 username(ConfigService.get(loginKey(plan), ""), ConfigService.get(WebScrapeSettings.PROXY_DATAIMPULSE_TARGETING, "")),
                 ConfigService.get(passwordKey(plan), ""));
+    }
+
+    /** {@code plan}'s dashboard label, such as "Mobile", or the id itself for an unknown plan. */
+    public static String label(String plan) {
+        return PLANS.getOrDefault(plan, plan);
+    }
+
+    /** Whether {@code plan} has both a login and a password saved. */
+    public static boolean hasCredentials(String plan) {
+        return !ConfigService.get(loginKey(plan), "").isBlank() && !ConfigService.get(passwordKey(plan), "").isBlank();
+    }
+
+    /** The plans that can be named, in the dashboard's order. */
+    public static List<String> withCredentials() {
+        return PLANS.keySet().stream().filter(DataImpulsePlans::hasCredentials).toList();
+    }
+
+    /**
+     * The proxy a job pins for {@code plan} (JCLAW-1335), whatever {@link WebScrapeSettings#PROXY_ENABLED} says:
+     * the saved proxy URL when it is a gateway, so the operator's gateway and rotation hold, else
+     * {@link #DEFAULT_GATEWAY}.
+     *
+     * @throws IllegalStateException naming the plan when it is unknown or its credentials are gone
+     */
+    public static ScrapeProxy proxyFor(String plan) {
+        if (!PLANS.containsKey(plan) || !hasCredentials(plan)) {
+            throw new IllegalStateException("The DataImpulse " + label(plan)
+                    + " plan has no saved login and password, so this job cannot use it.");
+        }
+        var saved = ConfigService.get(WebScrapeSettings.PROXY_URL, "");
+        var credentials = credentials(plan);
+        return ScrapeProxy.parse(isGateway(saved) ? saved : DEFAULT_GATEWAY, "true",
+                        credentials.username(), credentials.password())
+                .orElseThrow()
+                .withPlan(plan);
     }
 
     /** {@code login__targeting}, or the login alone when there is no targeting. */
@@ -122,7 +161,7 @@ public final class DataImpulsePlans {
         if (label == null) {
             return WebScrapeSettings.PROXY_DATAIMPULSE_PLAN + " must be one of " + String.join(", ", PLANS.keySet()) + ".";
         }
-        if (ConfigService.get(loginKey(plan), "").isBlank() || ConfigService.get(passwordKey(plan), "").isBlank()) {
+        if (!hasCredentials(plan)) {
             return "The DataImpulse " + label + " plan has no saved login and password; save both before using it.";
         }
         return null;

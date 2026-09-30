@@ -35,9 +35,14 @@ import java.util.Optional;
  * proxy for the browser, greets a SOCKS5 proxy with no authentication only.
  */
 public record ScrapeProxy(Kind kind, String host, int port,
-                          @Nullable String username, @Nullable String password) {
+                          @Nullable String username, @Nullable String password, @Nullable String plan) {
 
     public enum Kind { HTTP, SOCKS5 }
+
+    /** A proxy that is not a DataImpulse plan. */
+    public ScrapeProxy(Kind kind, String host, int port, @Nullable String username, @Nullable String password) {
+        this(kind, host, port, username, password, null);
+    }
 
     /**
      * The configured proxy, or empty when none is set or it is switched off.
@@ -51,7 +56,7 @@ public record ScrapeProxy(Kind kind, String host, int port,
         // On a DataImpulse gateway the active plan's credentials replace the generic keys (JCLAW-1334).
         var plan = DataImpulsePlans.active(url);
         return plan.isPresent()
-                ? parse(url, enabled, plan.get().username(), plan.get().password())
+                ? parse(url, enabled, plan.get().username(), plan.get().password()).map(p -> p.withPlan(plan.get().plan()))
                 : parse(url, enabled, ConfigService.get(WebScrapeSettings.PROXY_USERNAME, ""),
                         ConfigService.get(WebScrapeSettings.PROXY_PASSWORD, ""));
     }
@@ -105,6 +110,16 @@ public record ScrapeProxy(Kind kind, String host, int port,
     /** The proxy's address without its credentials, which the URL setting never carries: what a scrape job records. */
     public String url() {
         return (kind == Kind.SOCKS5 ? "socks5" : "http") + "://" + host + ":" + port;
+    }
+
+    /** This proxy as the DataImpulse {@code plan} whose credentials it carries (JCLAW-1335). */
+    public ScrapeProxy withPlan(String plan) {
+        return new ScrapeProxy(kind, host, port, username, password, plan);
+    }
+
+    /** What a scrape job records as its way out: {@link #url}, and {@code #<plan>} for a DataImpulse plan. */
+    public String route() {
+        return plan == null ? url() : url() + "#" + plan;
     }
 
     /** The shape the fetch sidecar reads from a request's {@code proxy} field; a render's names the JVM's screen instead. */

@@ -1,3 +1,5 @@
+import agents.DangerousActionGate;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -8,11 +10,14 @@ import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
+import services.ConfigService;
+import services.ConversationService;
 import services.FetchSidecarManager;
 import services.StealthSidecarManager;
 import services.Tx;
@@ -20,6 +25,8 @@ import services.scrape.BlockClassifier;
 import services.scrape.ScrapeJobService;
 import services.scrape.ScrapeReason;
 import tools.WebScrapeTool;
+import tools.scrape.DataImpulsePlans;
+import tools.scrape.ScrapeJobRequest;
 import tools.scrape.WebScrapeSettings;
 
 import java.io.IOException;
@@ -609,6 +616,140 @@ class WebScrapeToolTest extends UnitTest {
         assertEquals(13, requested.stream().distinct().count(), "no page is recorded twice: " + requested);
         for (var url : requested) {
             assertEquals(1, routes.pageHits().stream().filter(url::equals).count(), url + " was fetched once");
+        }
+    }
+
+    // A job's DataImpulse plan (JCLAW-1335)
+
+    private static final String MOBILE = "\"proxy\": {\"provider\": \"dataimpulse\", \"plan\": \"mobile\"}";
+
+    private void savePlans(String... plans) {
+        for (var plan : DataImpulsePlans.PLANS.keySet()) {
+            config.delete(DataImpulsePlans.loginKey(plan));
+            config.delete(DataImpulsePlans.passwordKey(plan));
+        }
+        for (var plan : plans) {
+            config.set(DataImpulsePlans.loginKey(plan), plan + "-login");
+            config.set(DataImpulsePlans.passwordKey(plan), plan + "-pass");
+        }
+    }
+
+    /** A tool call on its own thread, as a turn makes it, with the turn's sender and conversation bound. */
+    private static ToolRegistry.ToolResult call(boolean ownerInitiated, @Nullable Long conversationId, String json,
+                                                @Nullable Agent agent) {
+        return onFreshThread(() -> DangerousActionGate.withOwnerInitiated(ownerInitiated,
+                () -> ToolContext.withConversation(conversationId, () -> new WebScrapeTool().executeRich(json, agent))));
+    }
+
+    @Test
+    void aPlanOutsideABackgroundJobIsRefusedAndNothingIsFetched() {
+        routes.put("https://site.test/", page("Home"));
+        savePlans("mobile");
+        for (var json : List.of("{\"url\": \"https://site.test/\", " + MOBILE + "}",
+                "{\"url\": \"https://site.test/\", \"background\": false, " + MOBILE + "}")) {
+            var result = call(true, null, json, null);
+            assertEquals("web_bad_argument", errorCode(result));
+            assertTrue(result.text().contains("the proxy choice applies to background jobs"), result.text());
+        }
+        assertTrue(routes.pageHits().isEmpty(), routes.pageHits().toString());
+        // The nearby input that must still pass: an in-turn scrape with no proxy.
+        assertTrue(call(true, null, "{\"url\": \"https://site.test/\", \"maxDepth\": 0}", null)
+                .text().contains("# Home"));
+    }
+
+    @Test
+    void whoMayNameAPlanIsTheGatesAnswerNotTheArguments() {
+        savePlans();
+        var name = "scrapeplantrust" + (System.nanoTime() % 1_000_000);
+        var agent = onFreshThread(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
+        try {
+            var telegram = onFreshThread(() -> ConversationService.create(agent, "telegram", "group-1").id);
+            var web = onFreshThread(() -> ConversationService.create(agent, "web", "u-" + name).id);
+            var json = "{\"url\": \"https://site.test/\", \"background\": true, " + MOBILE + "}";
+
+            for (var guest : List.of(call(false, telegram, json, agent), call(false, null, json, agent))) {
+                assertEquals("web_bad_argument", errorCode(guest));
+                assertTrue(guest.text().contains("only the operator or the binding's owner can choose a proxy plan"),
+                        guest.text());
+            }
+            // Past the trust test, each stops at the credentials check instead, so no job is made either way.
+            for (var trusted : List.of(call(true, telegram, json, agent), call(false, web, json, agent))) {
+                assertTrue(trusted.text().contains("no DataImpulse plan has credentials saved"), trusted.text());
+            }
+            assertEquals(0L, (long) onFreshThread(() -> ScrapeJob.count("agent.id = ?1", agent.id)));
+        } finally {
+            onFreshThread(() -> {
+                AgentService.delete(Agent.findById(agent.id));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void aPlanWithoutCredentialsIsRefusedNamingThePlansThatHaveThem() {
+        savePlans("mobile", "residential");
+        config.delete(DataImpulsePlans.passwordKey("mobile"));
+        var name = "scrapeplancreds" + (System.nanoTime() % 1_000_000);
+        var agent = onFreshThread(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
+        try {
+            var datacenter = call(true, null, "{\"url\": \"https://site.test/\", \"background\": true, "
+                    + "\"proxy\": {\"provider\": \"dataimpulse\", \"plan\": \"datacenter\"}}", agent);
+            var mobile = call(true, null, "{\"url\": \"https://site.test/\", \"background\": true, " + MOBILE + "}",
+                    agent);
+            var manual = call(true, null, "{\"url\": \"https://site.test/\", \"background\": true, "
+                    + "\"proxy\": {\"provider\": \"manual\", \"plan\": \"mobile\"}}", agent);
+
+            assertEquals("web_bad_argument", errorCode(datacenter));
+            assertTrue(datacenter.text().contains("DataImpulse Datacenter plan has no saved login and password"),
+                    datacenter.text());
+            assertTrue(datacenter.text().contains("plans with credentials: residential"), datacenter.text());
+            assertTrue(mobile.text().contains("DataImpulse Mobile plan has no saved login and password"),
+                    "a login alone is not enough: " + mobile.text());
+            assertEquals("web_bad_argument", errorCode(manual));
+            assertEquals(0L, (long) onFreshThread(() -> ScrapeJob.count("agent.id = ?1", agent.id)));
+        } finally {
+            onFreshThread(() -> {
+                AgentService.delete(Agent.findById(agent.id));
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void anOwnersJobGoesThroughItsPlanAndLeavesTheSwitchOff() throws Exception {
+        routes.put("https://site.test/", page("Home"));
+        savePlans("mobile");
+        config.delete(WebScrapeSettings.PROXY_URL);
+        config.set(WebScrapeSettings.PROXY_ENABLED, "false");
+        var name = "scrapeplanowner" + (System.nanoTime() % 1_000_000);
+        var agent = onFreshThread(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
+        try {
+            var result = call(true, null,
+                    "{\"url\": \"https://site.test/\", \"maxDepth\": 0, \"background\": true, " + MOBILE + "}", agent);
+
+            assertTrue(result.text().startsWith("Started background scrape job"), result.text());
+            assertTrue(result.text().contains("through the DataImpulse Mobile plan."), result.text());
+            var id = JsonParser.parseString(Objects.requireNonNull(result.structuredJson())).getAsJsonObject()
+                    .getAsJsonObject("scrapeJob").get("id").getAsLong();
+            assertEquals("mobile", ScrapeJobRequest.fromJson(
+                    onFreshThread(() -> ((ScrapeJob) ScrapeJob.findById(id)).options)).proxyPlan());
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(20);
+            ScrapeJob.State state;
+            do {
+                Thread.sleep(25);
+                state = onFreshThread(() -> ((ScrapeJob) ScrapeJob.findById(id)).state);
+            } while (!state.terminal() && System.nanoTime() < deadline);
+
+            assertEquals(ScrapeJob.State.SUCCEEDED, state);
+            assertEquals(List.of(DataImpulsePlans.DEFAULT_GATEWAY + "#mobile"),
+                    onFreshThread(() -> ((ScrapeJob) ScrapeJob.findById(id)).egressRoutes()));
+            assertEquals("false", ConfigService.get(WebScrapeSettings.PROXY_ENABLED, ""));
+        } finally {
+            onFreshThread(() -> {
+                AgentService.delete(Agent.findById(agent.id));
+                return null;
+            });
+            deleteTree(AgentService.workspacePath(name));
         }
     }
 
