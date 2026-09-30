@@ -6,8 +6,8 @@ package services.telemetry;
  * <p>The metric-side sibling of {@link GenAiAttributes}, owned by jclaw for the same reason:
  * opentelemetry-semconv-incubating deprecated these when the GenAI conventions moved to a
  * repository with no Java artifact. Names and units are the contract — a collector aggregates
- * by both — and track {@code model/gen-ai/metrics.yaml} at the same upstream commit as
- * {@link GenAiAttributes}, checked the same way.
+ * by both — and track {@code model/gen-ai/metrics.yaml} and {@code model/gen-ai/token-metrics.yaml}
+ * at the same upstream commit as {@link GenAiAttributes}, checked the same way.
  */
 public final class GenAiMetrics {
 
@@ -24,7 +24,15 @@ public final class GenAiMetrics {
                     + " request to when the first chunk is received in the response stream.";
     public static final String GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_UNIT = "s";
 
-    public static final String GEN_AI_CLIENT_TOKEN_USAGE_NAME = "gen_ai.client.token.usage";
-    public static final String GEN_AI_CLIENT_TOKEN_USAGE_DESCRIPTION = "Number of input and output tokens used.";
-    public static final String GEN_AI_CLIENT_TOKEN_USAGE_UNIT = "{token}";
+    public static final String GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME =
+            "gen_ai.client.inference.operation.input_tokens";
+    public static final String GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_DESCRIPTION =
+            "The number of input (prompt) tokens used per inference operation.";
+    public static final String GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_UNIT = "{token}";
+
+    public static final String GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME =
+            "gen_ai.client.inference.operation.output_tokens";
+    public static final String GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_DESCRIPTION =
+            "The number of output (completion) tokens used per inference operation.";
+    public static final String GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_UNIT = "{token}";
 }

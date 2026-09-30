@@ -9,7 +9,7 @@ final class MetricBuckets {
     static final List<Double> GEN_AI_SECONDS = List.of(
             0.01, 0.02, 0.04, 0.08, 0.16, 0.32, 0.64, 1.28, 2.56, 5.12, 10.24, 20.48, 40.96, 81.92);
 
-    /** The GenAI semconv recommendation for {@code gen_ai.client.token.usage}. */
+    /** The GenAI semconv recommendation for both {@code gen_ai.client.inference.operation.*_tokens} histograms. */
     static final List<Double> TOKENS = List.of(
             1d, 4d, 16d, 64d, 256d, 1024d, 4096d, 16384d, 65536d, 262144d, 1048576d, 4194304d, 16777216d, 67108864d);
 
