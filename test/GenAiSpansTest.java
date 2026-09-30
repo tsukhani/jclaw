@@ -238,6 +238,24 @@ class GenAiSpansTest extends UnitTest {
         var chat = one(spans, "chat gpt-x");
         assertEquals(StatusCode.ERROR, chat.getStatus().getStatusCode());
         assertNotNull(chat.getAttributes().get(ErrorAttributes.ERROR_TYPE));
+
+        var metrics = OtelRuntime.captureMetricsForTest(() -> { });
+        assertTrue(points(metrics, GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME).stream()
+                        .anyMatch(pt -> pt.getAttributes().get(ErrorAttributes.ERROR_TYPE) != null),
+                "the failed call still records its duration, tagged with error.type");
+        for (var name : List.of(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME,
+                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME)) {
+            assertTrue(points(metrics, name).stream()
+                            .noneMatch(pt -> pt.getAttributes().get(ErrorAttributes.ERROR_TYPE) != null),
+                    () -> name + " recorded for a failed call");
+        }
+    }
+
+    private static List<HistogramPointData> points(Collection<MetricData> metrics, String name) {
+        return metrics.stream()
+                .filter(m -> m.getName().equals(name))
+                .flatMap(m -> m.getHistogramData().getPoints().stream())
+                .toList();
     }
 
     @Test
