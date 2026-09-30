@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.mvc.Http;
 import play.test.FunctionalTest;
+import tools.scrape.DataImpulsePlans;
 import tools.scrape.ScrapeProxyCheck;
 import tools.scrape.WebScrapeSettings;
 
@@ -123,6 +124,34 @@ class ApiScrapeProxyControllerTest extends FunctionalTest {
         proxy.takeRequest();
         var expected = "Basic " + Base64.getEncoder()
                 .encodeToString("abc__cr.de:s3cret".getBytes(StandardCharsets.ISO_8859_1));
+        assertEquals(expected, proxy.takeRequest().getHeaders().get("Proxy-Authorization"));
+    }
+
+    @Test
+    void aDataImpulseGatewayAuthenticatesWithTheActivePlan() throws Exception {
+        proxy.enqueue(new MockResponse.Builder().code(407)
+                .addHeader("Proxy-Authenticate", "Basic realm=\"proxy\"").build());
+        proxy.enqueue(new MockResponse.Builder().code(200).body("203.0.113.7").build());
+        login();
+        // The stub stands in for gw.dataimpulse.com, which the plans are keyed on.
+        DataImpulsePlans.setGatewayHostForTest("127.0.0.1");
+        JsonObject result;
+        try {
+            config.set(DataImpulsePlans.loginKey("residential"), "res");
+            config.set(DataImpulsePlans.passwordKey("residential"), "res-pass");
+            config.set(DataImpulsePlans.loginKey("mobile"), "abc");
+            config.set(DataImpulsePlans.passwordKey("mobile"), "mob-pass");
+            config.set(WebScrapeSettings.PROXY_DATAIMPULSE_TARGETING, "cr.de");
+            config.set(WebScrapeSettings.PROXY_DATAIMPULSE_PLAN, "mobile");
+            result = withSavedProxy(proxyUrl(), "true", "generic", "generic-pass", this::testConnection);
+        } finally {
+            DataImpulsePlans.setGatewayHostForTest(null);
+        }
+
+        assertTrue(result.get("ok").getAsBoolean(), result.toString());
+        proxy.takeRequest();
+        var expected = "Basic " + Base64.getEncoder()
+                .encodeToString("abc__cr.de:mob-pass".getBytes(StandardCharsets.ISO_8859_1));
         assertEquals(expected, proxy.takeRequest().getHeaders().get("Proxy-Authorization"));
     }
 

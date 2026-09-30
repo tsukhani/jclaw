@@ -30,6 +30,9 @@ public final class WebScrapeSettings {
     public static final String PROXY_USERNAME = "web_scrape.proxy.username";
     public static final String PROXY_PASSWORD = "web_scrape.proxy.password";
     public static final String PROXY_ENABLED = "web_scrape.proxy.enabled";
+    /** JCLAW-1334: the DataImpulse plan whose credentials the proxy uses, and the parameters that follow its login. */
+    public static final String PROXY_DATAIMPULSE_PLAN = "web_scrape.proxy.dataimpulse.plan";
+    public static final String PROXY_DATAIMPULSE_TARGETING = "web_scrape.proxy.dataimpulse.targeting";
     /** Background jobs (JCLAW-1272): the most an agent's job may ask for, and how many run at once. */
     public static final String JOB_MAX_PAGES = "web_scrape.job.max-pages";
     public static final String JOB_MAX_MINUTES = "web_scrape.job.max-minutes";
@@ -108,6 +111,8 @@ public final class WebScrapeSettings {
 
     /** A message naming what {@code value} must be, or null when {@code key} accepts it. */
     public static @Nullable String rejectionFor(String key, @Nullable String value) {
+        // Untrimmed: a trailing control character would otherwise reach the proxy's credentials.
+        if (key.startsWith(DataImpulsePlans.PREFIX)) return DataImpulsePlans.rejectionFor(key, value == null ? "" : value);
         var v = value == null ? "" : value.trim();
         return switch (key) {
             // max-pages and max-depth are a Math.clamp's upper bound: below the floor the
