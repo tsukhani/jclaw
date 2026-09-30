@@ -149,11 +149,13 @@ class GenAiSpansTest extends UnitTest {
         var duration = histogramPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME);
         assertTrue(duration.getBoundaries().contains(0.01), () -> "semconv buckets on the duration: " + duration.getBoundaries());
         // Aggregation is cumulative and the streamed test records the same model, so key on this call's host.
-        var input = ownSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME);
-        var output = ownSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME);
-        assertEquals(10.0, input.getSum());
-        assertEquals(5.0, output.getSum());
-        for (var point : List.of(input, output)) {
+        var input = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME, "api.example.test");
+        var output = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME, "api.example.test");
+        assertEquals(1, input.size(), () -> "input series: " + input);
+        assertEquals(1, output.size(), () -> "output series: " + output);
+        assertEquals(10.0, input.getFirst().getSum());
+        assertEquals(5.0, output.getFirst().getSum());
+        for (var point : List.of(input.getFirst(), output.getFirst())) {
             assertEquals(1L, point.getCount());
             assertEquals("openai", point.getAttributes().get(GenAiAttributes.GEN_AI_PROVIDER_NAME));
             assertEquals("gpt-x", point.getAttributes().get(GenAiAttributes.GEN_AI_REQUEST_MODEL));
@@ -162,16 +164,6 @@ class GenAiSpansTest extends UnitTest {
         }
         assertTrue(metrics.stream().noneMatch(m -> m.getName().equals("gen_ai.client.token.usage")),
                 () -> "the pre-PR-374 histogram is gone: " + metrics.stream().map(MetricData::getName).toList());
-    }
-
-    private static HistogramPointData ownSeries(Collection<MetricData> metrics, String name) {
-        return metrics.stream()
-                .filter(m -> m.getName().equals(name))
-                .flatMap(m -> m.getHistogramData().getPoints().stream())
-                .filter(p -> "api.example.test".equals(p.getAttributes().get(ServerAttributes.SERVER_ADDRESS)))
-                .findFirst()
-                .orElseThrow(() -> new AssertionError(name + " for api.example.test in "
-                        + metrics.stream().map(MetricData::getName).toList()));
     }
 
     private static HistogramPointData histogramPoint(Collection<MetricData> metrics, String name) {
