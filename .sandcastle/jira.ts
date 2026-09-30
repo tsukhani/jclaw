@@ -1,17 +1,10 @@
 // Host-side Jira access for the factory: intake of `afk` stories and the write-backs. The agent never
 // touches Jira; it only sees the snapshot written here.
 import * as fs from "node:fs";
-import { JIRA_ENV_FILE, STATE } from "./paths.ts";
+import { JIRA_ENV_FILE, STATE, readEnvFile } from "./paths.ts";
 
 // Only from FACTORY_HOME/jira.env, never .env, which the gateway mounts: no container ever holds the Jira token.
-const jiraEnv = (): Record<string, string> =>
-  fs.existsSync(JIRA_ENV_FILE)
-    ? Object.fromEntries(
-        fs.readFileSync(JIRA_ENV_FILE, "utf8").split("\n").map((l) => l.trim()).filter((l) => l.includes("=") && !l.startsWith("#"))
-          .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)]),
-      )
-    : {};
-const env = jiraEnv();
+const env = readEnvFile(JIRA_ENV_FILE);
 if (!env.JIRA_URL || !env.JIRA_PERSONAL_TOKEN) throw new Error(`no Jira credentials: put JIRA_URL and JIRA_PERSONAL_TOKEN in ${JIRA_ENV_FILE}`);
 const BASE: string = env.JIRA_URL.replace(/\/$/, "");
 const EPIC_LINK = "customfield_10002";

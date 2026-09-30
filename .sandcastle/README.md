@@ -114,6 +114,7 @@ every decision (`docker logs jclaw-factory-gateway`).
 | `~/.jclaw-factory/` (`FACTORY_HOME`) | Everything the harness writes: the clone it works in (`jclaw/`), `logs/`, `state/`, the Gradle and BMAD seeds, `lessons.md` |
 | `~/.jclaw-factory/.env` | The model credential. It is mounted into the gateway only. |
 | `~/.jclaw-factory/jira.env` | Jira access. Only the harness on your Mac reads it. |
+| `~/.jclaw-factory/settings.env` | Your [settings](#settings), optional. Only the harness on your Mac reads it. |
 
 Nothing the harness writes lives in the checkout, because `/deploy` stages the whole working tree.
 
@@ -242,15 +243,21 @@ Jira user.
 
 ## Settings
 
+The first four go in `~/.jclaw-factory/settings.env`, one `KEY=VALUE` per line, because launchd starts the harness
+without your shell's environment. An idle harness restarts itself when that file changes, so an edit applies once no
+story is running, and the log's `watching the active sprint` line shows the values in effect. The same variable set in
+the environment wins over the file. The file refuses any other key, and a number that is not valid stops the harness
+with the reason in the log. A model name is checked only when the first story runs.
+
 | Variable | Default | |
 |---|---|---|
 | `FACTORY_MAX_PARALLEL` | 2 | Stories at once; each sandbox peaks near 5 GB |
 | `FACTORY_CPUS` | 6 | CPU quota per sandbox, at most the Docker VM's CPU count |
 | `FACTORY_POLL_SECONDS` | 120 | How often Jira is polled |
 | `FACTORY_MODEL` | `claude-opus-5-5` | |
-| `FACTORY_HOME` | `~/.jclaw-factory` | |
-| `FACTORY_TICKET` | | Run these keys (comma-separated) for one round, then exit |
-| `FACTORY_PLAN_ONLY` | | Print the plan for one round and exit, changing nothing |
+| `FACTORY_HOME` | `~/.jclaw-factory` | Environment only; the LaunchAgent records it at install |
+| `FACTORY_TICKET` | | Environment only: run these keys (comma-separated) for one round, then exit |
+| `FACTORY_PLAN_ONLY` | | Environment only: print the plan for one round and exit, changing nothing |
 
 ## Checks
 

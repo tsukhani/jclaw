@@ -7,10 +7,10 @@ import { execFileSync } from "node:child_process";
 import { format } from "node:util";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { z } from "zod";
-import { assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, factoryHooks, factorySandbox, gatewayUp, installBmad, planHooks } from "./factory.ts";
+import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, factoryHooks, factorySandbox, gatewayUp, installBmad, planHooks } from "./factory.ts";
 import { FACTORY_HEADER, addLabel, claim, comment, inReview, intake, orphaned, promptContext, rejectionFeedback, removeLabel, snapshotToState, transitionTo, type Snapshot } from "./jira.ts";
 import { pickNonOverlapping, sensitivePaths } from "./plan.ts";
-import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, STATE } from "./paths.ts";
+import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 
 // Sandcastle's lines too: one log spans every launchd restart. Local time, to read beside `pmset -g log`.
 for (const level of ["log", "error", "warn"] as const) {
@@ -271,6 +271,7 @@ const processStory = async (picked: Snapshot): Promise<void> => {
 };
 
 const POLL_SECONDS = Number(process.env.FACTORY_POLL_SECONDS || 120);
+if (!(POLL_SECONDS > 0)) throw new Error(`FACTORY_POLL_SECONDS must be a positive number, got "${process.env.FACTORY_POLL_SECONDS}"`);
 // FACTORY_TICKET pins stories by key (comma-separated) for one round, as does FACTORY_PLAN_ONLY; otherwise the factory
 // watches the active sprint's `afk` stories until it is signalled.
 const PINNED = process.env.FACTORY_TICKET?.split(",").map((k) => k.trim()).filter(Boolean);
@@ -450,18 +451,27 @@ const factoryCode = () => {
   }
 };
 const CODE_AT_START = factoryCode();
+// Settings load once, at startup, so a change to the file is loaded the same way.
+const settingsText = () => (fs.existsSync(SETTINGS_FILE) ? fs.readFileSync(SETTINGS_FILE, "utf8") : "");
+const SETTINGS_AT_START = settingsText();
+const pendingChange = (): string | undefined => {
+  if (factoryCode() !== CODE_AT_START) return "the factory's code changed on main";
+  if (settingsText() !== SETTINGS_AT_START) return `${SETTINGS_FILE} changed`;
+  return undefined;
+};
 
 ensureGradleSeed();
 const runs = new Set<Promise<void>>();
 let firstRound = true;
-console.log(`[factory] ${ONE_ROUND ? "one round" : `watching the active sprint every ${POLL_SECONDS}s`}; ${LIMIT} at a time`);
+console.log(`[factory] ${ONE_ROUND ? "one round" : `watching the active sprint every ${POLL_SECONDS}s`}; ${LIMIT} at a time, ${CPUS} CPUs each, ${MODEL}`);
 while (true) {
-  if (!ONE_ROUND && running.size === 0 && factoryCode() !== CODE_AT_START) {
+  const change = !ONE_ROUND && running.size === 0 ? pendingChange() : undefined;
+  if (change) {
     if (process.env.FACTORY_SUPERVISED) {
-      console.log("[factory] the factory's code changed on main; exiting so launchd restarts it on the new code");
+      console.log(`[factory] ${change}; exiting so launchd restarts it with the change`);
       process.exit(0);
     }
-    note("code", "[factory] the factory's code changed on main; restart it to load the change");
+    note("code", `[factory] ${change}; restart it to load the change`);
   }
   if (!ONE_ROUND || firstRound) {
     firstRound = false;

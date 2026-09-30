@@ -192,7 +192,7 @@ export const installBmad = async (sandbox: { exec: (cmd: string) => Promise<{ ex
 };
 
 // Docker refuses a quota above its VM's CPU count (Docker Desktop → Settings → Resources).
-const CPUS = Number(process.env.FACTORY_CPUS || 6);
+export const CPUS = Number(process.env.FACTORY_CPUS || 6);
 if (!(CPUS > 0)) throw new Error(`FACTORY_CPUS must be a positive number, got "${process.env.FACTORY_CPUS}"`);
 
 const dockerSandbox = () => {
