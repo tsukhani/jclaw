@@ -19,6 +19,7 @@ import services.scrape.ScrapeObservation;
 import services.scrape.ScrapeReason;
 import services.scrape.ScrapeRung;
 import tools.scrape.CrawlListener;
+import tools.scrape.DataImpulsePlans;
 import tools.scrape.PageHarvest;
 import tools.scrape.ScrapeJobRequest;
 import tools.scrape.ScrapeLadder;
@@ -27,6 +28,7 @@ import tools.scrape.ScrapeProxy;
 import tools.scrape.SitemapSeeder;
 import tools.scrape.WebScrapeSettings;
 import utils.AppClock;
+import utils.ChannelOriginTrust;
 import utils.GsonHolder;
 import utils.RobotsCache;
 import utils.SsrfGuard;
@@ -222,6 +224,18 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                 + "operator's limit (%d unless changed in Settings); a larger value "
                                 + "is capped to that limit"
                                         .formatted(WebScrapeSettings.DEFAULT_JOB_MAX_MINUTES)),
+                        ScrapeJobRequest.ARG_PROXY, Map.of(SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                                SchemaKeys.DESCRIPTION,
+                                "With background only, and only when the user asks for it: the "
+                                + "DataImpulse plan the job goes out through, as {\"provider\": "
+                                + "\"dataimpulse\", \"plan\": \"mobile\"}. Omit it to use the "
+                                + "operator's proxy setting",
+                                SchemaKeys.PROPERTIES, Map.of(
+                                        ScrapeJobRequest.PROXY_PROVIDER, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                                "enum", List.of(ScrapeJobRequest.PROVIDER_DATAIMPULSE)),
+                                        ScrapeJobRequest.PROXY_PLAN, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                                                "enum", List.copyOf(DataImpulsePlans.PLANS.keySet()))),
+                                SchemaKeys.REQUIRED, List.of(ScrapeJobRequest.PROXY_PROVIDER, ScrapeJobRequest.PROXY_PLAN)),
                         ARG_LANGUAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION,
                                 "Preferred language for sites that publish translations, as an "
@@ -303,6 +317,10 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                 && args.get(ARG_BACKGROUND).getAsBoolean()) {
             return startJob(args, agent);
         }
+        if (ScrapeJobRequest.namesProxy(args)) {
+            return ToolRegistry.ToolResult.error(ToolErrorTemplates.webBadArgument(
+                    "the proxy choice applies to background jobs; set background to true, or leave proxy out"));
+        }
         boolean save = args.has(ARG_SAVE) && !args.get(ARG_SAVE).isJsonNull() && args.get(ARG_SAVE).getAsBoolean();
         var state = new CrawlState(output, save);
         crawl(seed, maxPages, maxDepth, sameHostOnly, respectRobots, language, state);
@@ -322,10 +340,18 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                     "background needs an agent workspace to write the pages to"));
         }
         var conversationId = ToolContext.conversationId();
+        var plan = request.proxyPlan();
+        if (plan != null) {
+            var refusal = planRefusal(plan, conversationId);
+            if (refusal != null) {
+                return ToolRegistry.ToolResult.error(ToolErrorTemplates.webBadArgument(refusal));
+            }
+        }
         var job = ScrapeJobService.submit(agent, conversationId, request, DangerousActionGate.ownerInitiated());
         var folder = ScrapeJobService.folder(job.id);
-        var text = new StringBuilder("Started background scrape job %d for %s (up to %d pages, depth %d, %d minutes). "
-                .formatted(job.id, request.url(), request.maxPages(), request.maxDepth(), request.maxMinutes()));
+        var text = new StringBuilder("Started background scrape job %d for %s (up to %d pages, depth %d, %d minutes)%s. "
+                .formatted(job.id, request.url(), request.maxPages(), request.maxDepth(), request.maxMinutes(),
+                        plan == null ? "" : " through the DataImpulse " + DataImpulsePlans.label(plan) + " plan"));
         text.append("It keeps running after this turn. Each page is written to the workspace folder '%s' as it is read, "
                 .formatted(folder));
         text.append("and every page is combined in '%s' when the job ends. "
@@ -340,6 +366,23 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         ref.addProperty("folder", folder);
         structured.add("scrapeJob", ref);
         return new ToolRegistry.ToolResult(text.toString(), GsonHolder.GSON.toJson(structured));
+    }
+
+    /**
+     * Why this turn may not send a job through {@code plan}, or null when it may (JCLAW-1335). The
+     * trust test is the one standing grants use, read from the gate and never from the arguments.
+     */
+    private static @Nullable String planRefusal(String plan, @Nullable Long conversationId) {
+        if (!DangerousActionGate.ownerInitiated()
+                && ChannelOriginTrust.classify(DangerousActionGate.effectiveOrigin(conversationId))
+                        != ChannelOriginTrust.Trust.OPERATOR) {
+            return "only the operator or the binding's owner can choose a proxy plan; leave proxy out";
+        }
+        if (DataImpulsePlans.hasCredentials(plan)) return null;
+        var usable = DataImpulsePlans.withCredentials();
+        return "the DataImpulse " + DataImpulsePlans.label(plan) + " plan has no saved login and password; "
+                + (usable.isEmpty() ? "no DataImpulse plan has credentials saved"
+                        : "plans with credentials: " + String.join(", ", usable));
     }
 
     /**
@@ -365,6 +408,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         var state = new CrawlState(request.output(), true, Integer.MAX_VALUE,
                 Duration.ofMinutes(request.maxMinutes()), resume.timeLeft(), request.seedFromSitemap(),
                 listener, resume.recorded());
+        state.proxyPlan = request.proxyPlan();
         crawl(request.url(), request.maxPages(), request.maxDepth(), request.sameHostOnly(),
                 request.respectRobots(), request.language(), state);
         return new JobCrawl(summary(request.url(), state, request.maxDepth(), request.sameHostOnly()),
@@ -423,6 +467,8 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         final @Nullable CrawlListener listener;
         /** Read once when the crawl starts (JCLAW-1333), so a change in Settings applies from the next crawl. */
         Optional<ScrapeProxy> proxy = Optional.empty();
+        /** A job's own DataImpulse plan (JCLAW-1335), pinned in place of the Settings proxy. */
+        @Nullable String proxyPlan;
         /** The rung-1 client, through {@link #proxy}. */
         OkHttpClient client = CLIENT;
         /** Pages an earlier run read, by requested URL, each taken out as it is replayed. */
@@ -472,7 +518,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         void pinProxy(Optional<ScrapeProxy> pinned) {
             proxy = pinned;
             client = pinned.map(p -> p.apply(CLIENT)).orElse(CLIENT);
-            if (listener != null) listener.egress(pinned.map(ScrapeProxy::url).orElse(null));
+            if (listener != null) listener.egress(pinned.map(ScrapeProxy::route).orElse(null));
         }
 
         CrawlState(ScrapeOutput.Request output, boolean save) {
@@ -515,7 +561,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
 
     private void crawl(URI seed, int maxPages, int maxDepth, boolean sameHostOnly,
                        boolean respectRobots, String language, CrawlState state) {
-        state.pinProxy(ScrapeProxy.current());
+        // A plan whose credentials are gone throws, failing the job rather than going out direct.
+        state.pinProxy(state.proxyPlan == null ? ScrapeProxy.current()
+                : Optional.of(DataImpulsePlans.proxyFor(state.proxyPlan)));
         state.deadline = System.nanoTime() + state.timeLeft.toNanos();
         state.inScope = link -> !sameHostOnly || sameHost(link, seed);
         state.seen.add(canonical(seed));

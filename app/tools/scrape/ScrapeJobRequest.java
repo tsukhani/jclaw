@@ -3,6 +3,7 @@ package tools.scrape;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import org.jspecify.annotations.Nullable;
 import utils.SsrfGuard;
 
 import java.math.BigDecimal;
@@ -18,10 +19,12 @@ import java.util.Locale;
  * change before it starts.
  *
  * @param maxMinutes the job's time limit; a crawl inside a turn is bounded in seconds instead
+ * @param proxyPlan the DataImpulse plan the job goes out through whatever Settings says (JCLAW-1335), or
+ *                  null for the scrape proxy in Settings
  */
 public record ScrapeJobRequest(URI url, int maxPages, int maxDepth, int maxMinutes, boolean sameHostOnly,
                                boolean respectRobots, boolean seedFromSitemap, String language,
-                               ScrapeOutput.Request output) {
+                               ScrapeOutput.Request output, @Nullable String proxyPlan) {
 
     public static final String ARG_URL = "url";
     public static final String ARG_MAX_PAGES = "maxPages";
@@ -31,6 +34,10 @@ public record ScrapeJobRequest(URI url, int maxPages, int maxDepth, int maxMinut
     public static final String ARG_RESPECT_ROBOTS = "respectRobots";
     public static final String ARG_SEED_FROM_SITEMAP = "seedFromSitemap";
     public static final String ARG_LANGUAGE = "language";
+    public static final String ARG_PROXY = "proxy";
+    public static final String PROXY_PROVIDER = "provider";
+    public static final String PROXY_PLAN = "plan";
+    public static final String PROVIDER_DATAIMPULSE = "dataimpulse";
 
     /**
      * An agent's request: each limit is clamped into the operator's ceilings, as the inline crawl
@@ -76,7 +83,30 @@ public record ScrapeJobRequest(URI url, int maxPages, int maxDepth, int maxMinut
                 flag(args, ARG_RESPECT_ROBOTS, WebScrapeSettings.respectRobots()),
                 flag(args, ARG_SEED_FROM_SITEMAP, WebScrapeSettings.seedFromSitemap()),
                 language,
-                ScrapeOutput.parse(args, false, ScrapeOutput.Format.MARKDOWN));
+                ScrapeOutput.parse(args, false, ScrapeOutput.Format.MARKDOWN),
+                proxyPlan(args));
+    }
+
+    /** Whether {@code args} name a proxy at all, so a caller can refuse one where it does not apply. */
+    public static boolean namesProxy(JsonObject args) {
+        var value = args.get(ARG_PROXY);
+        return value != null && !value.isJsonNull();
+    }
+
+    /** Only a DataImpulse plan can be named; whether it has credentials is the caller's check. */
+    private static @Nullable String proxyPlan(JsonObject args) {
+        if (!namesProxy(args)) return null;
+        var usage = ARG_PROXY + " must be {\"provider\": \"dataimpulse\", \"plan\": one of "
+                + String.join(", ", DataImpulsePlans.PLANS.keySet()) + "}";
+        if (!args.get(ARG_PROXY).isJsonObject()) throw new IllegalArgumentException(usage);
+        var proxy = args.getAsJsonObject(ARG_PROXY);
+        if (!present(proxy, PROXY_PROVIDER)
+                || !PROVIDER_DATAIMPULSE.equalsIgnoreCase(proxy.get(PROXY_PROVIDER).getAsString().strip())) {
+            throw new IllegalArgumentException(usage + "; DataImpulse is the only provider a job can name");
+        }
+        var plan = present(proxy, PROXY_PLAN) ? proxy.get(PROXY_PLAN).getAsString().strip().toLowerCase(Locale.ROOT) : "";
+        if (!DataImpulsePlans.PLANS.containsKey(plan)) throw new IllegalArgumentException(usage);
+        return plan;
     }
 
     private static URI url(JsonObject args) {
@@ -141,6 +171,12 @@ public record ScrapeJobRequest(URI url, int maxPages, int maxDepth, int maxMinut
             json.add(ScrapeOutput.ARG_EXTRACT, extract);
         }
         json.addProperty(ScrapeOutput.ARG_METADATA, output.metadata());
+        if (proxyPlan != null) {
+            var proxy = new JsonObject();
+            proxy.addProperty(PROXY_PROVIDER, PROVIDER_DATAIMPULSE);
+            proxy.addProperty(PROXY_PLAN, proxyPlan);
+            json.add(ARG_PROXY, proxy);
+        }
         return json;
     }
 }

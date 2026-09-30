@@ -133,11 +133,12 @@ class ApiScrapeProxyControllerTest extends FunctionalTest {
                 .addHeader("Proxy-Authenticate", "Basic realm=\"proxy\"").build());
         proxy.enqueue(new MockResponse.Builder().code(200).body("203.0.113.7").build());
         login();
-        // The stub stands in for gw.dataimpulse.com, which the plans are keyed on.
-        DataImpulsePlans.setGatewayHostForTest("127.0.0.1");
         JsonObject result;
         try {
             config.set(DataImpulsePlans.loginKey("residential"), "res");
+            // After the first write, which takes the scrape config lock that other users of the override hold too.
+            // The stub stands in for gw.dataimpulse.com, which the plans are keyed on.
+            DataImpulsePlans.setGatewayHostForTest("127.0.0.1");
             config.set(DataImpulsePlans.passwordKey("residential"), "res-pass");
             config.set(DataImpulsePlans.loginKey("mobile"), "abc");
             config.set(DataImpulsePlans.passwordKey("mobile"), "mob-pass");

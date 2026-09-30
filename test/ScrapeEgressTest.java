@@ -13,6 +13,7 @@ import services.ConfigService;
 import services.scrape.ScrapeReason;
 import tools.WebScrapeTool;
 import tools.scrape.CrawlListener;
+import tools.scrape.DataImpulsePlans;
 import tools.scrape.ScrapeJobRequest;
 import tools.scrape.WebScrapeSettings;
 
@@ -33,6 +34,9 @@ class ScrapeEgressTest extends UnitTest {
     private final ScrapeConfigGuard config = new ScrapeConfigGuard();
     private MockWebServer proxy;
     private final List<String> proxied = Collections.synchronizedList(new ArrayList<>());
+    /** The Proxy-Authorization each request carried; with it set, a request without one is challenged. */
+    private final List<String> authorizations = Collections.synchronizedList(new ArrayList<>());
+    private volatile boolean challenge;
 
     @BeforeEach
     void setup() throws Exception {
@@ -40,6 +44,12 @@ class ScrapeEgressTest extends UnitTest {
         proxy.setDispatcher(new Dispatcher() {
             @Override
             public MockResponse dispatch(RecordedRequest request) {
+                var authorization = request.getHeaders().get("Proxy-Authorization");
+                if (challenge && authorization == null) {
+                    return new MockResponse.Builder().code(407)
+                            .addHeader("Proxy-Authenticate", "Basic realm=\"proxy\"").build();
+                }
+                if (authorization != null) authorizations.add(authorization);
                 proxied.add(request.getTarget());
                 return switch (request.getTarget()) {
                     case "http://8.8.8.8/" -> html(page("Home", "/a"));
@@ -55,6 +65,7 @@ class ScrapeEgressTest extends UnitTest {
     @AfterEach
     void teardown() throws Exception {
         try {
+            DataImpulsePlans.setGatewayHostForTest(null);
             config.restore();
         } finally {
             try {
@@ -106,9 +117,117 @@ class ScrapeEgressTest extends UnitTest {
     }
 
     private static void crawl(String url, CrawlListener listener) {
+        crawl(url, "", listener);
+    }
+
+    /** {@code extra} is spliced into the stored request, as a resumed job reads it back. */
+    private static void crawl(String url, String extra, CrawlListener listener) {
         var request = ScrapeJobRequest.fromJson("""
-                {"url":"%s","maxPages":2,"maxDepth":1,"respectRobots":false}""".formatted(url));
+                {"url":"%s","maxPages":2,"maxDepth":1,"respectRobots":false%s}""".formatted(url, extra));
         new WebScrapeTool().crawlForJob(request, listener, CrawlListener.Resume.fresh(Duration.ofMinutes(1)));
+    }
+
+    private static final String MOBILE = ",\"proxy\":{\"provider\":\"dataimpulse\",\"plan\":\"mobile\"}";
+
+    /** The fixture stands in for a DataImpulse gateway, with every plan cleared but the ones a test saves. */
+    private String asGateway() {
+        var proxyUrl = "http://127.0.0.1:" + proxy.getPort();
+        config.set(WebScrapeSettings.PROXY_URL, proxyUrl);
+        // After the first write, which takes the lock every user of this process-wide override holds.
+        DataImpulsePlans.setGatewayHostForTest("127.0.0.1");
+        for (var plan : DataImpulsePlans.PLANS.keySet()) {
+            config.delete(DataImpulsePlans.loginKey(plan));
+            config.delete(DataImpulsePlans.passwordKey(plan));
+        }
+        config.delete(WebScrapeSettings.PROXY_DATAIMPULSE_PLAN);
+        config.set(WebScrapeSettings.PROXY_DATAIMPULSE_TARGETING, "cr.de");
+        challenge = true;
+        return proxyUrl;
+    }
+
+    private static String basic(String username, String password) {
+        return okhttp3.Credentials.basic(username, password);
+    }
+
+    @Test
+    void aJobsPlanCarriesItThroughWithTheProxySwitchedOffAndLeavesTheSwitchAlone() {
+        var proxyUrl = asGateway();
+        config.set(DataImpulsePlans.loginKey("mobile"), "abc");
+        config.set(DataImpulsePlans.passwordKey("mobile"), "mob-pass");
+        config.set(DataImpulsePlans.loginKey("residential"), "res");
+        config.set(DataImpulsePlans.passwordKey("residential"), "res-pass");
+        config.set(WebScrapeSettings.PROXY_DATAIMPULSE_PLAN, "residential");
+        config.set(WebScrapeSettings.PROXY_ENABLED, "false");
+        var listener = new Recording(false, false);
+
+        crawl("http://8.8.8.8/", MOBILE, listener);
+
+        assertEquals(List.of(proxyUrl + "#mobile"), listener.egress);
+        assertEquals(2, listener.pages.size(), listener.pages.toString());
+        assertTrue(proxied.contains("http://8.8.8.8/a"), proxied.toString());
+        assertFalse(authorizations.isEmpty());
+        for (var sent : authorizations) assertEquals(basic("abc__cr.de", "mob-pass"), sent, "the job's plan, not the active one");
+        assertEquals("false", ConfigService.get(WebScrapeSettings.PROXY_ENABLED, ""));
+        assertEquals("residential", ConfigService.get(WebScrapeSettings.PROXY_DATAIMPULSE_PLAN, ""));
+    }
+
+    @Test
+    void theActivePlanInSettingsIsRecordedByName() {
+        var proxyUrl = asGateway();
+        config.set(DataImpulsePlans.loginKey("residential"), "res");
+        config.set(DataImpulsePlans.passwordKey("residential"), "res-pass");
+        config.set(WebScrapeSettings.PROXY_DATAIMPULSE_PLAN, "residential");
+        config.set(WebScrapeSettings.PROXY_ENABLED, "true");
+        var listener = new Recording(false, false);
+
+        crawl("http://8.8.8.8/", listener);
+
+        assertEquals(List.of(proxyUrl + "#residential"), listener.egress);
+        assertEquals(2, listener.pages.size(), listener.pages.toString());
+        for (var sent : authorizations) assertEquals(basic("res__cr.de", "res-pass"), sent);
+    }
+
+    @Test
+    void aManualProxyIsRecordedWithoutAPlan() {
+        var proxyUrl = "http://127.0.0.1:" + proxy.getPort();
+        config.set(WebScrapeSettings.PROXY_URL, proxyUrl);
+        config.delete(WebScrapeSettings.PROXY_DATAIMPULSE_PLAN);
+        config.set(WebScrapeSettings.PROXY_ENABLED, "true");
+        var listener = new Recording(false, true);
+
+        crawl("http://8.8.8.8/", listener);
+
+        assertEquals(List.of(proxyUrl), listener.egress);
+    }
+
+    @Test
+    void aPlanWhoseCredentialsAreGoneFailsTheJobRatherThanGoingDirect() {
+        asGateway();
+        config.set(DataImpulsePlans.loginKey("mobile"), "abc");
+        config.set(WebScrapeSettings.PROXY_ENABLED, "false");
+        var listener = new Recording(false, false);
+
+        var error = assertThrows(IllegalStateException.class, () -> crawl("http://8.8.8.8/", MOBILE, listener));
+
+        assertTrue(error.getMessage().contains("DataImpulse Mobile plan"), error.getMessage());
+        assertTrue(listener.egress.isEmpty(), listener.egress.toString());
+        assertTrue(listener.pages.isEmpty(), listener.pages.toString());
+    }
+
+    @Test
+    void withoutAGatewaySavedAPlanGoesToDataImpulsesOwn() {
+        config.set(WebScrapeSettings.PROXY_URL, "http://proxy.example:3128");
+        config.set(DataImpulsePlans.loginKey("mobile"), "abc");
+        config.set(DataImpulsePlans.passwordKey("mobile"), "mob-pass");
+        config.set(WebScrapeSettings.PROXY_DATAIMPULSE_TARGETING, "");
+
+        var plan = DataImpulsePlans.proxyFor("mobile");
+
+        assertEquals("http://gw.dataimpulse.com:823#mobile", plan.route());
+        assertEquals("http://gw.dataimpulse.com:823", plan.url(), "the url stays the address alone");
+        assertEquals("abc", plan.username());
+        assertEquals("mob-pass", plan.password());
+        assertFalse(plan.toString().contains("mob-pass"), plan.toString());
     }
 
     @Test

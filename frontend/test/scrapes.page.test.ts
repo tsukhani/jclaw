@@ -58,6 +58,16 @@ describe('Scrapes page', () => {
     expect(page.find('[data-testid="scrape-proxy-3"]').exists()).toBe(false)
   })
 
+  it('names the DataImpulse plan a job went through (JCLAW-1335)', async () => {
+    registerEndpoint('/api/scrape-jobs', listing(job(1, 'SUCCEEDED', { egress: ['http://gw.dataimpulse.com:823#mobile'] })))
+
+    const page = await mountSuspended(Scrapes)
+    await settle()
+
+    expect(page.find('[data-testid="scrape-proxy-1"]').attributes('title'))
+      .toBe('Went through DataImpulse Mobile plan, gw.dataimpulse.com:823')
+  })
+
   it('lists each job with its site, agent, state in words and its progress', async () => {
     registerEndpoint('/api/scrape-jobs', listing(job(1, 'RUNNING'), job(2, 'INTERRUPTED')))
 

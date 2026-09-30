@@ -2,6 +2,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import tools.scrape.DataImpulsePlans;
 import tools.scrape.ScrapeJobRequest;
 import tools.scrape.ScrapeOutput;
 import tools.scrape.WebScrapeSettings;
@@ -91,6 +92,42 @@ class ScrapeJobRequestTest extends UnitTest {
     void aWholeNumberWrittenAsTextIsStillANumber() {
         assertEquals(12, ScrapeJobRequest.forOperator(
                 args("{\"url\": \"https://site.test/\", \"maxPages\": \"12\"}")).maxPages());
+    }
+
+    // A job's DataImpulse plan (JCLAW-1335)
+
+    @Test
+    void aNamedPlanIsStoredAndReadBackForAResumedRun() {
+        for (var plan : DataImpulsePlans.PLANS.keySet()) {
+            var original = ScrapeJobRequest.forAgent(args("""
+                    {"url": "https://site.test/", "proxy": {"provider": "dataimpulse", "plan": "%s"}}""".formatted(plan)));
+            assertEquals(plan, original.proxyPlan());
+            var read = ScrapeJobRequest.fromJson(original.toJson().toString());
+            assertEquals(original, read);
+            assertEquals(plan, read.proxyPlan());
+        }
+        assertEquals("mobile", ScrapeJobRequest.forAgent(args("""
+                {"url": "https://site.test/", "proxy": {"provider": "DataImpulse", "plan": " Mobile "}}""")).proxyPlan());
+    }
+
+    @Test
+    void noPlanStoresNoProxy() {
+        var request = ScrapeJobRequest.forAgent(args("{\"url\": \"https://site.test/\", \"proxy\": null}"));
+        assertNull(request.proxyPlan());
+        assertFalse(request.toJson().has("proxy"));
+        assertNull(ScrapeJobRequest.fromJson(request.toJson().toString()).proxyPlan());
+    }
+
+    @Test
+    void onlyADataImpulsePlanCanBeNamed() {
+        assertMessageStarts("proxy must be", "{\"url\": \"https://site.test/\", \"proxy\": \"mobile\"}");
+        assertMessageStarts("proxy must be", "{\"url\": \"https://site.test/\", \"proxy\": {\"plan\": \"mobile\"}}");
+        assertMessageStarts("proxy must be",
+                "{\"url\": \"https://site.test/\", \"proxy\": {\"provider\": \"manual\", \"plan\": \"mobile\"}}");
+        assertMessageStarts("proxy must be",
+                "{\"url\": \"https://site.test/\", \"proxy\": {\"provider\": \"dataimpulse\"}}");
+        assertMessageStarts("proxy must be",
+                "{\"url\": \"https://site.test/\", \"proxy\": {\"provider\": \"dataimpulse\", \"plan\": \"isp\"}}");
     }
 
     private static void assertMessage(String expected, String json) {
