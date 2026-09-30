@@ -266,7 +266,7 @@ onUnmounted(() => stopTtsPolling())
               <span class="text-fg-muted">— Qwen3-TTS / Kokoro</span>
             </span>
             <span
-              class="text-[10px] px-1 border"
+              class="text-xs px-1 border"
               :class="sidecarEntry && !sidecarEntry.available
                 ? 'text-amber-700 dark:text-amber-400 border-amber-400/30'
                 : 'text-fg-muted border-input'"
@@ -289,7 +289,7 @@ onUnmounted(() => stopTtsPolling())
               JVM-native
               <span class="text-fg-muted">— sherpa-onnx</span>
             </span>
-            <span class="text-[10px] px-1 border text-fg-muted border-input">no sidecar</span>
+            <span class="text-xs px-1 border text-fg-muted border-input">no sidecar</span>
           </label>
         </div>
       </fieldset>
@@ -334,7 +334,7 @@ onUnmounted(() => stopTtsPolling())
           <template v-if="selectedEngine === 'jvm'">
             <span
               v-if="activeModelStatus?.present"
-              class="text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1 shrink-0"
+              class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1 shrink-0"
             >Ready</span>
             <span
               v-else-if="activeModelStatus?.downloading"
@@ -351,7 +351,7 @@ onUnmounted(() => stopTtsPolling())
             </button>
           </template>
           <template v-else>
-            <span class="text-[10px] px-1 border text-fg-muted border-input shrink-0">auto</span>
+            <span class="text-xs px-1 border text-fg-muted border-input shrink-0">auto</span>
           </template>
         </div>
 

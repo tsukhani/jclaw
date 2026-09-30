@@ -185,7 +185,7 @@ async function setCaptionModel(value: string) {
             >OpenRouter</span>
             <span
               v-if="!openrouterApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no API key — configure in LLM Providers</span>
           </label>
           <label
@@ -214,7 +214,7 @@ async function setCaptionModel(value: string) {
             >OpenAI</span>
             <span
               v-if="!openaiApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no API key — configure in LLM Providers</span>
           </label>
           <label
@@ -232,7 +232,7 @@ async function setCaptionModel(value: string) {
             >
             <span class="flex-1 text-sm text-fg-primary">Local VLM (Ollama)</span>
             <span
-              class="text-[10px] px-1 border"
+              class="text-xs px-1 border"
               :class="captionProvider === 'ollama-local'
                 ? 'text-green-700 dark:text-green-400 border-green-400/30'
                 : 'text-fg-muted border-input'"

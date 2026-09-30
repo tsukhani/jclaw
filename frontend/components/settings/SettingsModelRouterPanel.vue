@@ -300,13 +300,13 @@ function usageTone(fraction: number): string {
           <li
             v-for="(c, i) in listFor(taskClass)"
             :key="`${c.provider}::${c.model}`"
-            class="flex items-center gap-2 text-sm font-mono text-fg-primary"
+            class="flex items-center gap-2 text-sm font-mono text-fg-primary max-sm:flex-wrap"
           >
             <span class="w-5 text-right text-xs text-fg-muted">{{ i + 1 }}.</span>
-            <span class="min-w-0 truncate">{{ c.provider }} / {{ c.model }}</span>
+            <span class="min-w-0 truncate max-sm:basis-[calc(100%-2rem)]">{{ c.provider }} / {{ c.model }}</span>
             <span
               v-if="demoted(taskClass, c)"
-              class="shrink-0 px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded text-fg-muted border border-border"
+              class="shrink-0 px-1.5 py-0.5 text-xs uppercase tracking-wide rounded text-fg-muted border border-border"
               title="Per-token: with the preference above on, the prepaid models in this list are tried first, whatever the order here."
             >fallback only</span>
             <span class="flex-1" />

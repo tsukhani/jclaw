@@ -299,7 +299,7 @@ onUnmounted(() => stopVideoCapPolling())
             >Replicate (WAN 2, LTX, …)</span>
             <span
               v-if="!replicateApiKeyConfigured"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
             >no API key — set in Image Generation</span>
           </label>
           <!-- Model — picked from Replicate's curated text-to-video collection (GET /api/videogen/models). -->
@@ -371,7 +371,7 @@ onUnmounted(() => stopVideoCapPolling())
             </label>
             <span
               v-if="!videoCapability?.uvAvailable"
-              class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 px-1"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 px-1"
               :title="videoCapability?.uvReason ?? ''"
             >requires uv on PATH</span>
             <button
@@ -431,15 +431,15 @@ onUnmounted(() => stopVideoCapPolling())
               >{{ e.label }}</span>
               <span
                 v-if="e.tier === 'ready'"
-                class="text-[10px] text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-600/60 px-1"
+                class="text-xs text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-600/60 px-1"
               >ready</span>
               <span
                 v-else-if="e.tier === 'fits'"
-                class="text-[10px] text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 px-1"
+                class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 px-1"
               >runs slow</span>
               <span
                 v-else
-                class="text-[10px] text-fg-muted border border-border px-1"
+                class="text-xs text-fg-muted border border-border px-1"
               >{{ e.reason ?? 'unavailable' }}</span>
             </label>
             <!-- No engine fits this machine — Self-Hosted is disabled above; say why. -->

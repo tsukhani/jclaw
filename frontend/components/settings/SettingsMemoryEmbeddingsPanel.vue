@@ -219,11 +219,11 @@ async function saveSelection() {
           <span class="text-sm font-medium text-fg-strong">Vector memory</span>
           <span
             v-if="enabled"
-            class="ml-2 text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+            class="ml-2 text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
           >on</span>
           <span
             v-else
-            class="ml-2 text-[10px] text-fg-muted border border-input px-1"
+            class="ml-2 text-xs text-fg-muted border border-input px-1"
           >off</span>
         </div>
         <button
@@ -411,15 +411,15 @@ async function saveSelection() {
             <span class="text-sm font-medium text-fg-strong">Stored memories</span>
             <span
               v-if="reembed?.running"
-              class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+              class="ml-2 text-xs text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
             >re-embedding</span>
             <span
               v-else-if="reembed && !reembed.upToDate"
-              class="ml-2 text-[10px] text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
+              class="ml-2 text-xs text-amber-700 dark:text-amber-400 border border-amber-400/40 px-1"
             >needs re-embedding</span>
             <span
               v-else-if="reembed"
-              class="ml-2 text-[10px] text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+              class="ml-2 text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
             >up to date</span>
           </div>
           <button

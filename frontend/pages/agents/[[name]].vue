@@ -2283,7 +2283,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :aria-checked="execBypassAllowlist"
               aria-label="Bypass allowlist"
               :disabled="savingExec"
-              :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600 ring-1 ring-inset ring-input dark:ring-0'"
+              :class="execBypassAllowlist ? 'bg-amber-600 hover:bg-amber-700 dark:hover:bg-amber-600' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600 ring-1 ring-inset ring-input dark:ring-0'"
               class="relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50"
               @click="toggleExecConfig('bypassAllowlist')"
             >
@@ -2306,7 +2306,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               :aria-checked="execAllowGlobalPaths"
               aria-label="Allow global paths"
               :disabled="savingExec"
-              :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-500' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600 ring-1 ring-inset ring-input dark:ring-0'"
+              :class="execAllowGlobalPaths ? 'bg-amber-600 hover:bg-amber-700 dark:hover:bg-amber-600' : 'bg-muted hover:bg-neutral-300 dark:hover:bg-neutral-600 ring-1 ring-inset ring-input dark:ring-0'"
               class="relative w-9 h-5 rounded-full transition-colors shrink-0 disabled:opacity-50"
               @click="toggleExecConfig('allowGlobalPaths')"
             >
