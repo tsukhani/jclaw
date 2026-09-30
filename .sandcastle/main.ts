@@ -53,7 +53,8 @@ const processStory = async (picked: Snapshot): Promise<void> => {
   const timings: Record<string, number> = {};
   const gates: string[] = [];
   const environmentFailures = new Set<string>();
-  const timed = async <T>(phase: string, body: () => Promise<T>): Promise<T> => {
+  const flakes: { gate: string; failure: string }[] = [];
+  const timed =async <T>(phase: string, body: () => Promise<T>): Promise<T> => {
     const started = Date.now();
     try {
       return await body();
@@ -78,11 +79,13 @@ const processStory = async (picked: Snapshot): Promise<void> => {
 
     type Diagnostic = { kind: string; file: string | null; line: number | null; message: string };
     const suiteOf = (r: Diagnostic) => r.message.split(".")[0];
+    // Only a passed report clears a suite: a re-run that wrote no reports would otherwise forgive every failure.
     const failingSuites = async (suites: string[]): Promise<Set<string>> => {
       const r = await sandbox.exec(
-        `rm -rf test-result; ./gradlew playAutotest -Ptests=${suites.join(",")} > /tmp/rerun.log 2>&1; ls test-result | grep failed.html || true`,
+        `rm -rf test-result; ./gradlew playAutotest -Ptests=${suites.join(",")} > /tmp/rerun.log 2>&1; ls test-result | grep passed.html || true`,
       );
-      return new Set(r.stdout.split("\n").filter(Boolean).map((f) => f.replace(".class.failed.html", "")).filter((s) => suites.includes(s)));
+      const passed = new Set(r.stdout.split("\n").filter(Boolean).map((f) => f.replace(".class.passed.html", "")));
+      return new Set(suites.filter((s) => !passed.has(s)));
     };
     // Baseline on main in the same worktree, so a suite this image cannot run is never handed to the agent.
     const onMain = async <T>(body: () => Promise<T>): Promise<T> => {
@@ -116,6 +119,7 @@ const processStory = async (picked: Snapshot): Promise<void> => {
           const failingAlone = await failingSuites(suites);
           const failingOnMain = failingAlone.size > 0 ? await onMain(() => failingSuites([...failingAlone])) : new Set<string>();
           for (const s of failingOnMain) environmentFailures.add(s);
+          for (const r of records) if (!failingAlone.has(suiteOf(r))) flakes.push({ gate: label, failure: r.message.split("\n")[0] });
           fresh = records.filter((r) => failingAlone.has(suiteOf(r)) && !failingOnMain.has(suiteOf(r)));
         }
         gates.push(`${label}: ${passed} classes passed, ${fresh.length === 0 ? "no new failures" : `${fresh.length} new failures`}`);
@@ -205,6 +209,7 @@ const processStory = async (picked: Snapshot): Promise<void> => {
     }
     lines.push("", "h4. Harness gates", ...gates.map((g) => `* ${g}`));
     if (environmentFailures.size) lines.push(`* Also failing on main in the sandbox, so not counted: ${[...environmentFailures].join(", ")}`);
+    lines.push(...flakes.map((f) => `* ${f.gate}: failed in the full suite but passed alone, so not counted: {{${f.failure}}}`));
     lines.push(`* Timings: ${Object.entries(timings).map(([k, v]) => `${k} ${v}s`).join(", ")}`);
     return lines.join("\n");
   };
@@ -225,7 +230,7 @@ const processStory = async (picked: Snapshot): Promise<void> => {
     await transitionTo(key, "Review");
     await removeLabel(key, "afk-running");
     await comment(key, reviewComment(brief, sensitive));
-    fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, model: MODEL, timings, gates, brief, environmentFailures: [...environmentFailures] }, null, 2));
+    fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, model: MODEL, timings, gates, brief, environmentFailures: [...environmentFailures], flakes }, null, 2));
     console.log(`[${key} done] → Review\n` + execFileSync("/usr/bin/git", ["-C", REPO, "log", "--stat", "--format=%h %an %s", `main..${branch}`], { encoding: "utf8" }));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);

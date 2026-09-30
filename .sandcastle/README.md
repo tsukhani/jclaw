@@ -49,8 +49,8 @@ lockfile changes. Every two minutes it:
    while its files overlap a branch awaiting review or a story already running.
 3. Claims a story by assigning it to its own Jira user, moves it to In Progress, and runs it in a fresh sandbox:
    - **Implement**, or **rework** if you sent it back.
-   - **Gate:** the full suite. Failures that also occur on `main` are excluded, and there are up to two repair rounds
-     and a 30-minute deadline.
+   - **Gate:** the full suite. A failing class is re-run alone. If it passes alone, or also fails on `main`, it is not
+     counted, but the brief names it. There are up to two repair rounds and a 30-minute deadline.
    - **Review** by a second agent, then a **brief**.
 4. Copies `agent/<KEY>` into your checkout, moves the ticket to Review and posts the brief.
 
