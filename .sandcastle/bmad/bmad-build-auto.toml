@@ -1,0 +1,25 @@
+# The AFK factory's overrides for bmad-build-auto. The harness copies this into a bmad story's sandbox as
+# _bmad/custom/bmad-build-auto.toml, which is gitignored there. Lists append to the skill's defaults; strings replace them.
+
+[workflow]
+
+persistent_facts = [
+  "This run is one phase of the JClaw AFK factory, in a disposable sandbox. The harness created the current branch `agent/<ticket key>` from main and owns branching: stay on it and commit to it, although AGENTS.md says to work on main.",
+  "The harness runs the full backend suite after the build, so neither the spec's Verification section nor any command you or a subagent run may be the full suite: `play autotest` or `./gradlew playAutotest` without `-Ptests`, `./jclaw.sh test`, `./jclaw.sh diagnostics --tests`. Verify with `./jclaw.sh diagnostics` (compile errors as JSON; `[]` is clean), `./gradlew playAutotest -Ptests=ClassA,ClassB` (never piped; afterwards `ls test-result | grep failed.html`), and `cd frontend && pnpm test` for frontend changes.",
+  "Commit messages follow AGENTS.md and carry the Jira key in the subject. When the ticket asks for a decision to be made or recorded, write it in the commit body as a line starting `Decision:`.",
+  "Git prints `error: Unable to create '…/packed-refs.lock': Read-only file system` after commits and branch switches. That is expected: the repository's shared metadata is read-only in this sandbox, and the commit or switch still succeeded.",
+  "Do not push, do not call Jira or any other tracker, and do not contact anything on `host.docker.internal`.",
+]
+
+on_complete = "Output <promise>COMPLETE</promise>."
+
+# The default handoff, plus the rules the implementation subagent would otherwise never see.
+implementation_handoff = """
+Launch a subagent with no prior conversation context, with this prompt:
+
+> Read {spec_file} fully and implement it — the spec is the sole source of truth. Load every file listed in its frontmatter `context:` before you start.
+>
+> You are in a sandbox of the JClaw AFK factory, on a branch its harness created: commit to it. Never run the full backend suite (`play autotest` or `./gradlew playAutotest` without `-Ptests`, `./jclaw.sh test`, `./jclaw.sh diagnostics --tests`); the harness runs it afterwards. Git's `packed-refs.lock: Read-only file system` error after a commit is expected, and the commit still succeeded.
+>
+> When done, report what you changed, how you verified it, and anything left incomplete or risky.
+"""

@@ -36,6 +36,7 @@ export type Snapshot = {
   key: string;
   summary: string;
   description: string;
+  labels: string[];
   comments: { author: string; body: string }[];
   parent?: { key: string; summary: string; description: string };
   blockedBy: { key: string; status: string; done: boolean }[];
@@ -44,13 +45,14 @@ export type Snapshot = {
 };
 
 export const snapshot = async (key: string): Promise<Snapshot> => {
-  const f = (await api(`/rest/api/2/issue/${key}?fields=summary,description,comment,issuelinks,updated,${EPIC_LINK}`)).fields;
+  const f = (await api(`/rest/api/2/issue/${key}?fields=summary,description,labels,comment,issuelinks,updated,${EPIC_LINK}`)).fields;
   const epicKey: string | null = f[EPIC_LINK];
   const epic = epicKey ? (await api(`/rest/api/2/issue/${epicKey}?fields=summary,description`)).fields : null;
   return {
     key,
     summary: f.summary,
     description: f.description ?? "",
+    labels: f.labels ?? [],
     comments: (f.comment?.comments ?? []).map((c: any) => ({ author: c.author?.displayName ?? "unknown", body: c.body })),
     parent: epic ? { key: epicKey!, summary: epic.summary, description: epic.description ?? "" } : undefined,
     // On issue A, a Blocks link carrying an inwardIssue B reads "A is blocked by B".

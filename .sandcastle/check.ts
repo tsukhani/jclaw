@@ -3,7 +3,7 @@ import { rejectionFeedback, type Snapshot } from "./jira.ts";
 import { pickNonOverlapping, sensitivePaths } from "./plan.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
-  key: "T-1", summary: "", description: "", blockedBy: [], updated: "", fetchedAt: "",
+  key: "T-1", summary: "", description: "", labels: [], blockedBy: [], updated: "", fetchedAt: "",
   comments: bodies.map((body) => ({ author: body.startsWith("h3.") ? "factory" : "Reviewer", body })),
 });
 const OFFER = "h3. AFK factory: ready for review\nbrief", GAVE_UP = "h3. AFK factory gave up\nboom";

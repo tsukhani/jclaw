@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { createBindMountSandboxProvider, type BindMountCreateOptions, type BindMountSandboxProvider, type BindMountSandboxProviderConfig } from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { CLONE, ENV_FILE, FACTORY_HOME, HERE } from "./paths.ts";
+import { CLONE, ENV_FILE, FACTORY_HOME, HERE, REPO_ROOT } from "./paths.ts";
 
 // Sandcastle and every docker call here inherit this: the local images are native, and a shell that exports another
 // platform makes Docker emulate them or fail to find them.
@@ -146,15 +146,65 @@ export const ensureGradleSeed = () => {
   );
 };
 
-const dockerSandbox = () =>
-  docker({
+// BMAD is gitignored, so neither the clone nor a worktree carries it: a `bmad` story gets the operator's own install,
+// copied here from the checkout with the factory's overrides and mounted read-only. Replaced only while idle, since a
+// starting sandbox copies from it.
+const BMAD_SEED = `${FACTORY_HOME}/bmad-seed`;
+const BMAD_SEED_MOUNT = "/opt/bmad-seed";
+const BMAD_MANIFEST = "_bmad/_config/manifest.yaml";
+const BMAD_OVERRIDES = `${HERE}/bmad/bmad-build-auto.toml`;
+export const ensureBmadSeed = (idle: boolean) => {
+  const read = (file: string) => (fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "");
+  const installed = read(path.join(REPO_ROOT, BMAD_MANIFEST));
+  const stamp = installed && `${installed}\0${read(BMAD_OVERRIDES)}`;
+  if (!idle || stamp === read(path.join(BMAD_SEED, "stamp"))) return;
+  fs.rmSync(BMAD_SEED, { recursive: true, force: true });
+  fs.mkdirSync(BMAD_SEED);
+  const skills = path.join(REPO_ROOT, ".claude/skills");
+  if (!installed || !fs.existsSync(skills)) return;
+  // render/ holds snapshots keyed to the checkout's path; custom/ holds the tracked team config, which the worktree
+  // already has, and the operator's personal overrides.
+  const bmad = path.join(REPO_ROOT, "_bmad");
+  fs.cpSync(bmad, path.join(BMAD_SEED, "_bmad"), {
+    recursive: true,
+    filter: (src) => !["render", "custom"].includes(path.relative(bmad, src).split(path.sep)[0]),
+  });
+  fs.cpSync(BMAD_OVERRIDES, path.join(BMAD_SEED, "_bmad/custom/bmad-build-auto.toml"));
+  for (const name of fs.readdirSync(skills).filter((n) => n.startsWith("bmad-"))) {
+    fs.cpSync(path.join(skills, name), path.join(BMAD_SEED, "skills", name), { recursive: true });
+  }
+  fs.writeFileSync(path.join(BMAD_SEED, "stamp"), stamp);
+  console.log("[factory] BMAD seeded from the checkout's install");
+};
+
+// Everything this writes is gitignored, so the tree stays clean for bmad-build-auto's own check. Returns the version.
+export const installBmad = async (sandbox: { exec: (cmd: string) => Promise<{ exitCode: number; stdout: string }> }): Promise<string> => {
+  const r = await sandbox.exec(
+    [
+      `test -f ${BMAD_SEED_MOUNT}/${BMAD_MANIFEST}`,
+      `cp -R ${BMAD_SEED_MOUNT}/_bmad/. _bmad/`,
+      `mkdir -p .claude/skills && cp -R ${BMAD_SEED_MOUNT}/skills/. .claude/skills/`,
+      `sed -n 's/^  version: //p' ${BMAD_MANIFEST}`,
+    ].join(" && "),
+  );
+  if (r.exitCode !== 0) throw new Error(`BMAD is not installed in ${REPO_ROOT}, so a bmad story cannot run: run ./jclaw.sh setup there`);
+  return r.stdout.trim();
+};
+
+const dockerSandbox = () => {
+  // Sandcastle refuses a mount whose host path is missing, and the BMAD seed is empty until one is installed.
+  fs.mkdirSync(BMAD_SEED, { recursive: true });
+  return docker({
     imageName: IMAGE,
     // The image's own user; macOS file sharing lets it write the host-owned worktree.
     containerUid: 1000,
     containerGid: 1000,
     cpus: 4,
     network: NETWORK,
-    mounts: [{ hostPath: GRADLE_SEED, sandboxPath: "/opt/gradle-seed", readonly: true }],
+    mounts: [
+      { hostPath: GRADLE_SEED, sandboxPath: "/opt/gradle-seed", readonly: true },
+      { hostPath: BMAD_SEED, sandboxPath: BMAD_SEED_MOUNT, readonly: true },
+    ],
     env: {
       HTTPS_PROXY: PROXY,
       HTTP_PROXY: PROXY,
@@ -174,6 +224,7 @@ const dockerSandbox = () =>
       GIT_CONFIG_VALUE_0: "0",
     },
   });
+};
 
 // Sandcastle's Docker provider takes no memory or process limit; each sandbox peaks near 5 GB during the full suite.
 const SANDBOX_MEMORY = "6g";

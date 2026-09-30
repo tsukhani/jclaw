@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { format } from "node:util";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { z } from "zod";
-import { assertReady, ensureGradleSeed, ensureImage, factoryHooks, factorySandbox, gatewayUp, planHooks } from "./factory.ts";
+import { assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, factoryHooks, factorySandbox, gatewayUp, installBmad, planHooks } from "./factory.ts";
 import { FACTORY_HEADER, addLabel, claim, comment, inReview, intake, orphaned, promptContext, rejectionFeedback, removeLabel, snapshotToState, transitionTo, type Snapshot } from "./jira.ts";
 import { pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, STATE } from "./paths.ts";
@@ -48,6 +48,8 @@ const processStory = async (picked: Snapshot): Promise<void> => {
   const lessons = fs.existsSync(LESSONS) ? fs.readFileSync(LESSONS, "utf8").trim() : "";
   const promptArgs = { KEY: key, SUMMARY: picked.summary, DESCRIPTION: promptContext(picked), LESSONS: lessons || "None yet." };
   const withFeedback = { ...promptArgs, FEEDBACK: feedback || "None: this is the first submission." };
+  const bmad = picked.labels.includes("bmad");
+  let bmadVersion: string | undefined;
   let lesson: string | undefined;
   const logTo = (phase: string) => ({ type: "file" as const, path: `${LOGS}/${key}-${phase}.log` });
   const timings: Record<string, number> = {};
@@ -139,6 +141,29 @@ const processStory = async (picked: Snapshot): Promise<void> => {
       }
     } else if (alreadyAhead > 0) {
       console.log(`[${key} implement] skipped: ${branch} is already ${alreadyAhead} commit(s) ahead of main`);
+    } else if (bmad) {
+      // BMAD's bmad-build-auto writes the spec, then builds from it. Halting in between means a ticket it can read more
+      // than one way goes back with its questions before any code is written.
+      bmadVersion = await installBmad(sandbox);
+      // Each halt records its status in the spec's frontmatter, or in a result file when it stopped before writing one.
+      const outcome = async (file: string) => {
+        const text = (await sandbox.exec(`cat '${file}'`)).stdout;
+        fs.writeFileSync(`${LOGS}/${key}-spec.md`, text);
+        return { status: text.match(/^status:\s*['"]?([\w-]+)/m)?.[1] ?? "missing", result: text.split("## Auto Run Result")[1]?.trim() ?? "" };
+      };
+      await timed("spec", () =>
+        sandbox.run({ name: `spec ${key}`, agent, promptFile: `${HERE}/prompts/bmad-spec.md`, promptArgs, idleTimeoutSeconds: 1200, logging: logTo("spec") }),
+      );
+      const spec = (await sandbox.exec("ls -t _bmad-output/implementation-artifacts/*.md 2>/dev/null | head -1")).stdout.trim();
+      if (!spec) throw new Error("BMAD wrote no spec");
+      const planned = await outcome(spec);
+      if (planned.status !== "ready-for-dev") throw new Error(`BMAD stopped at the spec (${planned.status}):\n${planned.result}`);
+      current = await timed("build", () =>
+        sandbox.run({ name: `build ${key}`, agent, promptFile: `${HERE}/prompts/bmad-build.md`, promptArgs: { KEY: key, SPEC: spec }, idleTimeoutSeconds: 1200, logging: logTo("build") }),
+      );
+      const built = await outcome(spec);
+      if (built.status !== "done") throw new Error(`BMAD stopped building (${built.status}):\n${built.result}`);
+      if (current.commits.length === 0) throw new Error("the BMAD build made no commits");
     } else {
       current = await timed("implement", () =>
         sandbox.run({ name: `implement ${key}`, agent, promptFile: `${HERE}/prompts/implement.md`, promptArgs, idleTimeoutSeconds: 1200, logging: logTo("implement") }),
@@ -191,6 +216,9 @@ const processStory = async (picked: Snapshot): Promise<void> => {
   // The Jira comment carries the harness's own facts beside the agent's brief: the agent cannot see the gates.
   const reviewComment = (brief: Brief | undefined, sensitive: string[]) => {
     const lines = [`${FACTORY_HEADER}: ready for review`, `Local branch {{${branch}}} in the checkout of this comment's author, not pushed. Its commits are unsigned, which GitHub's main refuses, so re-sign them as you merge: {{git rebase --force-rebase --gpg-sign main ${branch}}}, then {{git merge --no-ff ${branch}}}; /deploy ships it. Model: ${MODEL}.`];
+    if (bmad) {
+      lines.push(`Specced and built by BMAD${bmadVersion ? ` ${bmadVersion}` : ""} (bmad-build-auto). Its spec, with its own review's triage and deferred findings: {{~/.jclaw-factory/logs/${key}-spec.md}}.`);
+    }
     if (feedback !== undefined) lines.push("Reworked after your review.");
     if (sensitive.length > 0) {
       lines.push("", "h4. (!) Runs on your Mac once merged", ...sensitive.map((f) => `* {{${f}}}`),
@@ -328,6 +356,7 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   // ff-only: nothing in the factory commits to main, so a divergence is for a human to look at, not to merge.
   gitIn(REPO, "fetch", "--quiet", "origin", "main");
   gitIn(REPO, "merge", "--ff-only", "--quiet", "origin/main");
+  ensureBmadSeed(running.size === 0);
   if (!ensureImage(REPO, gitIn(REPO, "rev-parse", "main"), `${LOGS}/image-build.log`)) return [];
 
   // A story pinned by FACTORY_TICKET may itself be in review; its own branch is not someone else's work.

@@ -48,7 +48,8 @@ lockfile changes. Every two minutes it:
 2. Rebuilds the sandbox image if `main` has moved, and has a planner agent predict each story's files. A story waits
    while its files overlap a branch awaiting review or a story already running.
 3. Claims a story by assigning it to its own Jira user, moves it to In Progress, and runs it in a fresh sandbox:
-   - **Implement**, or **rework** if you sent it back.
+   - **Implement**, or **rework** if you sent it back. A story also labelled `bmad` is **specced**, then **built**, by
+     BMAD instead (see [BMAD stories](#bmad-stories)).
    - **Gate:** the full suite. A failing class is re-run alone. If it passes alone, or also fails on `main`, it is not
      counted, but the brief names it. There are up to two repair rounds and a 30-minute deadline.
    - **Review** by a second agent, then a **brief**.
@@ -109,8 +110,8 @@ every decision (`docker logs jclaw-factory-gateway`).
 
 | Where | What |
 |---|---|
-| `.sandcastle/` (this directory) | Harness code, prompts, gateway code and allowlist, checks, installer |
-| `~/.jclaw-factory/` (`FACTORY_HOME`) | Everything the harness writes: the clone it works in (`jclaw/`), `logs/`, `state/`, the Gradle seed, `lessons.md` |
+| `.sandcastle/` (this directory) | Harness code, prompts, BMAD overrides, gateway code and allowlist, checks, installer |
+| `~/.jclaw-factory/` (`FACTORY_HOME`) | Everything the harness writes: the clone it works in (`jclaw/`), `logs/`, `state/`, the Gradle and BMAD seeds, `lessons.md` |
 | `~/.jclaw-factory/.env` | The model credential. It is mounted into the gateway only. |
 | `~/.jclaw-factory/jira.env` | Jira access. Only the harness on your Mac reads it. |
 
@@ -132,6 +133,28 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
   label to retry.
 - **When the harness stops:** an interrupted story still has `afk-running`. The next start sends it back to To Do,
   and its branch keeps what it had committed.
+
+### BMAD stories
+
+Label a story `bmad` as well as `afk`, and BMAD's unattended `bmad-build-auto` does the implementing, in two runs in the
+same sandbox:
+
+1. **Spec:** it reads the ticket and the code and writes a ready-for-development story spec: tasks with file paths,
+   Given/When/Then acceptance criteria and a code map. It halts there. If it can read the ticket more than one way, the
+   story is blocked with its questions in the comment, before any code is written. Answer them on the ticket, then
+   remove `afk-blocked`.
+2. **Build:** it implements the spec in a subagent, runs the spec's verification, reviews the diff with four reviewer
+   subagents, fixes what they find and commits.
+
+The harness then gates, reviews and briefs the branch as it does any other. BMAD's spec, with its review's triage and
+deferred findings, is saved as `~/.jclaw-factory/logs/<KEY>-spec.md`, and the review comment names it. A rejected
+`bmad` story is reworked with the ordinary rework prompt.
+
+BMAD is gitignored, so the sandboxes get the install `./jclaw.sh setup` made in your checkout. The harness copies it,
+with `.sandcastle/bmad/bmad-build-auto.toml`, into `~/.jclaw-factory/bmad-seed`, which every sandbox mounts read-only.
+That file adds the factory's rules for BMAD's runs and its implementation subagent: stay on the branch, never run the
+full suite, no push, no Jira. Without an install in the checkout, a `bmad` story is blocked, and other stories are
+unaffected.
 
 ## Security model
 
@@ -172,6 +195,9 @@ The factory takes its versions from main:
 - **The harness itself** exits, while idle, when `.sandcastle/` changes on main, and launchd starts it again on the new
   code. Sandcastle bumps are reviewed rather than automerged: it ships breaking changes as patches before 1.0, and the
   `.git` lockdown wraps its Docker provider.
+
+BMAD is the exception: it follows your checkout, not main. The BMAD seed is replaced, while idle, when
+`./jclaw.sh setup` changes the install or `.sandcastle/bmad/bmad-build-auto.toml` changes.
 
 ## Setup on a Mac
 
@@ -230,3 +256,5 @@ Jira user.
 - `npm run check`: typecheck plus the offline logic checks.
 - `npx tsx sandbox-check.ts`: live check of a sandbox's `.git` lockdown and limits, and of hook-free git on the Mac.
 - `npx tsx gateway-check.ts`: live check of the gateway, egress and route allowlist. It spends one small model call.
+- `npx tsx bmad-check.ts`: live check that a `bmad` story's sandbox gets BMAD, that BMAD renders there with the factory's
+  overrides, and that the tree stays clean. No model call.
