@@ -157,7 +157,6 @@ class GenAiSpansTest extends UnitTest {
             assertEquals(1L, point.getCount());
             assertEquals("openai", point.getAttributes().get(GenAiAttributes.GEN_AI_PROVIDER_NAME));
             assertEquals("gpt-x", point.getAttributes().get(GenAiAttributes.GEN_AI_REQUEST_MODEL));
-            // Upstream semconv-genai PR 374 removed the attribute along with the combined histogram.
             assertNull(point.getAttributes().get(io.opentelemetry.api.common.AttributeKey.stringKey("gen_ai.token.type")));
             assertTrue(point.getBoundaries().contains(4.0), () -> "semconv buckets on tokens: " + point.getBoundaries());
         }
@@ -238,23 +237,31 @@ class GenAiSpansTest extends UnitTest {
         var chat = one(spans, "chat gpt-x");
         assertEquals(StatusCode.ERROR, chat.getStatus().getStatusCode());
         assertNotNull(chat.getAttributes().get(ErrorAttributes.ERROR_TYPE));
+    }
 
-        var metrics = OtelRuntime.captureMetricsForTest(() -> { });
-        assertTrue(points(metrics, GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME).stream()
-                        .anyMatch(pt -> pt.getAttributes().get(ErrorAttributes.ERROR_TYPE) != null),
-                "the failed call still records its duration, tagged with error.type");
+    @Test
+    void aCallThatFailsAfterReportingUsageRecordsNoTokens() {
+        var usage = new llm.LlmTypes.Usage(10, 5, 15, 0, 0, 0, 0);
+        var metrics = OtelRuntime.captureMetricsForTest(() -> {
+            var call = GenAiSpans.start(new ProviderConfig("OpenAI", "https://fails.example.test/v1", "sk-test", List.of()),
+                    GenAiSpans.OPERATION_CHAT, "gpt-x", true, null);
+            call.response("chatcmpl-f", "gpt-x-2024", usage, List.of());
+            call.failed(new IllegalStateException("stream died after its usage chunk"));
+        });
+        var duration = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME, "fails.example.test");
+        assertEquals(1, duration.size(), () -> "duration points: " + duration);
+        assertEquals(IllegalStateException.class.getName(), duration.getFirst().getAttributes().get(ErrorAttributes.ERROR_TYPE));
         for (var name : List.of(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME,
                 GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME)) {
-            assertTrue(points(metrics, name).stream()
-                            .noneMatch(pt -> pt.getAttributes().get(ErrorAttributes.ERROR_TYPE) != null),
-                    () -> name + " recorded for a failed call");
+            assertTrue(hostSeries(metrics, name, "fails.example.test").isEmpty(), () -> name + " recorded for a failed call");
         }
     }
 
-    private static List<HistogramPointData> points(Collection<MetricData> metrics, String name) {
+    private static List<HistogramPointData> hostSeries(Collection<MetricData> metrics, String name, String host) {
         return metrics.stream()
                 .filter(m -> m.getName().equals(name))
                 .flatMap(m -> m.getHistogramData().getPoints().stream())
+                .filter(pt -> host.equals(pt.getAttributes().get(ServerAttributes.SERVER_ADDRESS)))
                 .toList();
     }
 
