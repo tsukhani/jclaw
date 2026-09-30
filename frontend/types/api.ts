@@ -439,6 +439,17 @@ export interface OcrStatusResponse {
   providers: OcrBackend[]
 }
 
+/** GET /api/decision/ollama: the Ollama decision server and its installed decision models (JCLAW-1336). */
+export interface OllamaDecisionStatus {
+  baseUrl: string
+  /** True when `decision.ollama.baseUrl` is stored, rather than inherited from Ollama Local. */
+  customized: boolean
+  reachable: boolean
+  error: string | null
+  /** Only models whose capabilities include `decision`. */
+  models: string[]
+}
+
 /** A single histogram for a latency segment, as returned by /api/metrics/latency. */
 export interface LatencyHistogram {
   count: number

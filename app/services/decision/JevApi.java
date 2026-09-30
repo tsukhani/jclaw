@@ -22,12 +22,14 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
- * TypeSafe AI's JEV, one {@code POST /v1/systemone} at a time, for every consumer: the Jev browser
- * engine and the router's classifier. A port of jev-ultrafast's {@code model.post_json} and
+ * One {@code POST /v1/systemone} at a time, for every decision provider that speaks it: TypeSafe AI's
+ * JEV, for the Jev browser engine and the router's classifier, and an Ollama server's System One models
+ * (JCLAW-1336), for the router's classifier. A port of jev-ultrafast's {@code model.post_json} and
  * {@code model.validate_choice} (MIT, Browser Use; notice in {@code conf/browser/jev-ultrafast-LICENSE}).
  *
- * <p>Every call runs under one breaker, {@link #BREAKER_NAME}, shared by both consumers, so an outage
- * that one of them discovers stops the other sending too.
+ * <p>Each {@link Target} runs under its own breaker, so an outage of one provider never stops the other.
+ * JEV's, {@link #BREAKER_NAME}, is shared by both its consumers, so an outage that one of them
+ * discovers stops the other sending too.
  */
 public final class JevApi {
 
@@ -38,9 +40,6 @@ public final class JevApi {
     public static final CircuitBreaker.Config BREAKER_CONFIG =
             CircuitBreaker.Config.of(10, 0.5, 3, 60_000L).withConsecutiveFailures(3);
     public static final String INVALID = "Invalid Jev response";
-    private static final String BREAKER_OPEN = "JEV's circuit breaker is open: not calling TypeSafe until it recovers";
-    private static final String ISOLATED =
-            "JEV was isolated by the operator: not calling TypeSafe until the cooldown ends or it is restored";
 
     private static final String CATEGORY = "decision";
     private static final MediaType JSON = MediaType.get(HttpKeys.APPLICATION_JSON);
@@ -50,20 +49,42 @@ public final class JevApi {
     private JevApi() {}
 
     /**
+     * Where a call goes and what it runs under.
+     *
+     * @param name        how log lines and failures name the provider
+     * @param breakerLabel how the breaker's messages and alarms name it
+     * @param service     who is not called while the breaker is open
+     * @param apiKey      sent as a bearer token; null sends none
+     * @param guarded     dial through the SSRF-guarded client, for an address the operator chose
+     */
+    public record Target(String name, String breakerLabel, String service, String url, @Nullable String apiKey,
+                         String breakerName, boolean guarded) {}
+
+    /** TypeSafe's JEV, with {@code apiKey}. */
+    public static Target jev(String apiKey) {
+        return new Target("Jev", "JEV", "TypeSafe", ENDPOINT, apiKey, BREAKER_NAME, false);
+    }
+
+    /** {@link #post(Target, JsonObject, int, long)} to TypeSafe's JEV. */
+    public static JsonObject post(String apiKey, JsonObject body, int attempts, long attemptTimeoutMs) {
+        return post(jev(apiKey), body, attempts, attemptTimeoutMs);
+    }
+
+    /**
      * POST {@code body}, up to {@code attempts} times within {@code attemptTimeoutMs} each; one attempt
      * never retries. A request has no side effects, so a timeout or a dropped connection is retried as
      * well as 429, 503 and 529. The whole loop is one outcome for the breaker.
      *
      * @throws JevException.BreakerOpen without sending anything, while the breaker is open or isolated
-     * @throws JevException             when TypeSafe gave no usable answer
+     * @throws JevException             when the provider gave no usable answer
      */
-    public static JsonObject post(String apiKey, JsonObject body, int attempts, long attemptTimeoutMs) {
-        var breaker = breaker();
+    public static JsonObject post(Target target, JsonObject body, int attempts, long attemptTimeoutMs) {
+        var breaker = breaker(target);
         var admission = breaker.admit();
-        if (!admission.allowed()) throw openBreakerFailure(breaker);
+        if (!admission.allowed()) throw openBreakerFailure(target, breaker);
         var reported = false;
         try {
-            var result = send(apiKey, body, attempts, attemptTimeoutMs);
+            var result = send(target, body, attempts, attemptTimeoutMs);
             breaker.recordSuccess(0L, admission.probeWindow());
             reported = true;
             return result;
@@ -73,48 +94,50 @@ public final class JevApi {
             throw e;
         } finally {
             // A probe holds a HALF_OPEN permit until it reports, and a refused key or a malformed answer
-            // is TypeSafe answering: stranding the permit would keep the breaker shut for good.
+            // is the provider answering: stranding the permit would keep the breaker shut for good.
             if (!reported && admission.probe()) breaker.recordSuccess(0L, admission.probeWindow());
         }
     }
 
-    private static JsonObject send(String apiKey, JsonObject body, int attempts, long attemptTimeoutMs) {
-        var request = new Request.Builder().url(ENDPOINT)
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + apiKey)
-                .post(RequestBody.create(body.toString(), JSON))
-                .build();
+    private static JsonObject send(Target target, JsonObject body, int attempts, long attemptTimeoutMs) {
+        var builder = new Request.Builder().url(target.url()).post(RequestBody.create(body.toString(), JSON));
+        if (target.apiKey() != null) builder.header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + target.apiKey());
+        var request = builder.build();
+        var client = target.guarded() ? HttpFactories.generalGuarded() : HttpFactories.general();
         for (int attempt = 1; ; attempt++) {
-            var call = HttpFactories.general().newCall(request);
+            var call = client.newCall(request);
             call.timeout().timeout(attemptTimeoutMs, TimeUnit.MILLISECONDS);
             try (var response = call.execute()) {
                 int code = response.code();
                 if (!response.isSuccessful()) {
-                    EventLogger.warn(CATEGORY, "Jev request %d of %d failed: HTTP %d".formatted(attempt, attempts, code));
+                    EventLogger.warn(CATEGORY, "%s request %d of %d failed: HTTP %d"
+                            .formatted(target.name(), attempt, attempts, code));
                 }
                 if (RETRIED_STATUS.contains(code) && attempt < attempts) {
                     pause(BACKOFF_MS << (attempt - 1));
                     continue;
                 }
-                failOnStatus(response);
+                failOnStatus(target, response);
                 return parseAnswer(response);
             } catch (IOException e) {
-                EventLogger.warn(CATEGORY, "Jev request %d of %d failed: %s"
-                        .formatted(attempt, attempts, e.getClass().getSimpleName()));
-                if (attempt >= attempts) throw new Outage("Jev unreachable");
+                EventLogger.warn(CATEGORY, "%s request %d of %d failed: %s"
+                        .formatted(target.name(), attempt, attempts, e.getClass().getSimpleName()));
+                if (attempt >= attempts) throw new Outage(target.name() + " unreachable");
                 pause(BACKOFF_MS << (attempt - 1));
             }
         }
     }
 
     /** Ends the call on a status that is not retried, or has run out of retries. */
-    private static void failOnStatus(Response response) {
+    private static void failOnStatus(Target target, Response response) {
         int code = response.code();
-        if (code == 401 || code == 403) {
-            throw new JevException("TypeSafe refused the Jev API key (HTTP %d); the operator must update it "
-                    .formatted(code) + "in Settings → Decision Providers");
+        if ((code == 401 || code == 403) && target.apiKey() != null) {
+            throw new JevException("%s refused the %s API key (HTTP %d); the operator must update it "
+                    .formatted(target.service(), target.name(), code) + "in Settings → Decision Providers");
         }
-        if (code == 429 || code >= 500) throw new Outage("Jev returned HTTP " + code);
-        if (!response.isSuccessful()) throw new JevException("Jev returned HTTP " + code);
+        // Status only: the body comes from a server whose address the operator chose (JCLAW-778).
+        if (code == 429 || code >= 500) throw new Outage(target.name() + " returned HTTP " + code);
+        if (!response.isSuccessful()) throw new JevException(target.name() + " returned HTTP " + code);
     }
 
     private static JsonObject parseAnswer(Response response) throws IOException {
@@ -171,19 +194,26 @@ public final class JevApi {
 
     /** The breaker every JEV call runs under, created on first use. */
     public static CircuitBreaker breaker() {
-        return CircuitBreakers.find(BREAKER_NAME).orElseGet(JevApi::registerBreaker);
+        return breaker(jev(""));
     }
 
-    private static CircuitBreaker registerBreaker() {
-        var breaker = CircuitBreakers.get(BREAKER_NAME, BREAKER_CONFIG);
-        breaker.setTransitionListener(BreakerAlarms.listener(BREAKER_NAME, "Decision provider JEV"));
-        return breaker;
+    /** The breaker every call to {@code target} runs under, created on first use with {@link #BREAKER_CONFIG}. */
+    public static CircuitBreaker breaker(Target target) {
+        return CircuitBreakers.find(target.breakerName()).orElseGet(() -> {
+            var breaker = CircuitBreakers.get(target.breakerName(), BREAKER_CONFIG);
+            breaker.setTransitionListener(BreakerAlarms.listener(target.breakerName(),
+                    "Decision provider " + target.breakerLabel()));
+            return breaker;
+        });
     }
 
-    /** An operator's isolation is a different fact from TypeSafe failing, and says so. */
-    private static JevException.BreakerOpen openBreakerFailure(CircuitBreaker breaker) {
-        return new JevException.BreakerOpen(
-                breaker.stats().reason() == CircuitBreaker.Reason.MANUAL_TRIP ? ISOLATED : BREAKER_OPEN);
+    /** An operator's isolation is a different fact from the provider failing, and says so. */
+    private static JevException.BreakerOpen openBreakerFailure(Target target, CircuitBreaker breaker) {
+        return new JevException.BreakerOpen(breaker.stats().reason() == CircuitBreaker.Reason.MANUAL_TRIP
+                ? "%s was isolated by the operator: not calling %s until the cooldown ends or it is restored"
+                        .formatted(target.breakerLabel(), target.service())
+                : "%s's circuit breaker is open: not calling %s until it recovers"
+                        .formatted(target.breakerLabel(), target.service()));
     }
 
     private static double unitNumber(@Nullable JsonElement element) {

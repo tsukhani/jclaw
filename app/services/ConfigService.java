@@ -27,6 +27,7 @@ import play.cache.Caches;
 import play.db.jpa.JPA;
 import services.database.DatabaseService;
 import services.decision.DecisionSettings;
+import services.decision.OllamaDecision;
 import services.telemetry.OtelConfig;
 import services.telemetry.OtelRuntime;
 import services.tts.TtsEngine;
@@ -379,6 +380,9 @@ public class ConfigService {
         if (key.startsWith(PROVIDER_KEY_PREFIX + RouterPolicy.JEV + ".")) {
             return "The provider name '" + RouterPolicy.JEV + "' is reserved for the model router's JEV classifier.";
         }
+        if (key.startsWith(PROVIDER_KEY_PREFIX + OllamaDecision.PROVIDER + ".")) {
+            return "The provider name '" + OllamaDecision.PROVIDER + "' is reserved for the model router's Ollama classifier.";
+        }
 
         // JCLAW-1229: the chat path now dials through the provider-guarded client, so a base URL
         // in the metadata range fails at connect as an opaque DNS error on the operator's next
@@ -475,7 +479,7 @@ public class ConfigService {
             }
         }
 
-        // JCLAW-1302: the TypeSafe key rides an Authorization header, and no other decision.* key exists.
+        // JCLAW-1302, JCLAW-1336: the TypeSafe key rides an Authorization header, and the Ollama address is dialled.
         if (key.startsWith(DecisionSettings.KEY_PREFIX)) {
             var rejected = DecisionSettings.rejectionFor(key, value);
             if (rejected != null) {

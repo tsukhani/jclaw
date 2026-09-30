@@ -9,6 +9,7 @@ import llm.ProviderRegistry;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.decision.JevApi;
+import services.decision.OllamaDecision;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -23,12 +24,13 @@ import java.util.Map;
  * @param downshiftAt usage fraction of a prepaid provider at which non-chat classes stop using it
  *                    and drop to the chat list
  * @param exhaustedAt usage fraction at which a prepaid provider is skipped for every class
- * @param classifier  the model that labels each prompt, {@link #JEV} for TypeSafe's judge, or null to
- *                    use the local keyword rules
+ * @param classifier  the model that labels each prompt, {@link #JEV} for TypeSafe's judge,
+ *                    {@link OllamaDecision#PROVIDER} for an Ollama System One model, or null to use the
+ *                    local keyword rules
  * @param classifierTimeoutSeconds how long a classifier call may take before the rules answer instead
  * @param preferPrepaid whether subscriptions and self-hosted models are tried before per-token ones
  *                      whatever the listed order; false follows the operator's order exactly
- * @param jevMinConfidence the probability JEV's class must reach before it is used over the rules
+ * @param jevMinConfidence the probability a decision provider's class must reach before it is used over the rules
  */
 public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downshiftAt, double exhaustedAt,
                            @Nullable Candidate classifier, int classifierTimeoutSeconds, boolean preferPrepaid,
@@ -152,8 +154,9 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
     /**
      * The classifier is a pair, so each half is checked against the other's stored value: a provider
      * that is not configured, a model it does not register, or the router itself — which would ask the
-     * router to classify the prompt it is routing — is refused. {@link #JEV} is not a registered
-     * provider and has one model, so its provider write is not checked against the stored model.
+     * router to classify the prompt it is routing — is refused. {@link #JEV} and
+     * {@link OllamaDecision#PROVIDER} are not registered providers, so their provider write is not
+     * checked against the stored model; an Ollama model must be one selected in Decision Providers.
      */
     private static @Nullable String classifierRejection(String key, @Nullable String value) {
         if (value == null || value.isBlank()) return null;
@@ -170,6 +173,11 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
         if (JEV.equals(provider.strip())) {
             return key.equals(CLASSIFIER_PROVIDER) || JevApi.MODEL.equals(v) ? null
                     : "%s must be %s when %s is %s.".formatted(CLASSIFIER_MODEL, JevApi.MODEL, CLASSIFIER_PROVIDER, JEV);
+        }
+        if (OllamaDecision.PROVIDER.equals(provider.strip())) {
+            return key.equals(CLASSIFIER_PROVIDER) || OllamaDecision.selectedModels().contains(v) ? null
+                    : "%s must be an Ollama decision model selected in Settings > Decision Providers (%s)."
+                            .formatted(CLASSIFIER_MODEL, OllamaDecision.MODELS_KEY);
         }
         return registeredModelRejection(provider, model);
     }

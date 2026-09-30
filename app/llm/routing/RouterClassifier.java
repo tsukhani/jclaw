@@ -8,6 +8,7 @@ import llm.routing.RouterPolicy.Candidate;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.decision.DecisionSettings;
+import services.decision.OllamaDecision;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -22,7 +23,8 @@ import java.util.regex.Pattern;
 /**
  * Labels a prompt with its {@link TaskClass} and the {@link ReasoningEffort} it deserves, through a model when the operator has named one
  * ({@code router.classifier.provider} / {@code .model}), TypeSafe's JEV judge when that pair is
- * {@code jev} / {@code jev-latest} (JCLAW-1300), and through {@link PromptClassifier}'s local
+ * {@code jev} / {@code jev-latest} (JCLAW-1300), an Ollama System One model when it is
+ * {@code ollama-decision} / the model (JCLAW-1336), and through {@link PromptClassifier}'s local
  * rules otherwise (JCLAW-1222).
  *
  * <p>The rules cost nothing and explain themselves, but they read words rather than intent, so a
@@ -100,7 +102,12 @@ public final class RouterClassifier {
         var classifier = policy.classifier();
         if (classifier == null) return PromptClassifier.classify(message, priorClass, priorToolCalls);
         if (RouterPolicy.JEV.equals(classifier.provider())) {
-            return askJev(message, priorClass, priorToolCalls, policy, jevKey.get());
+            return orRules(JevRouterClassifier.classify(message, jevKey.get(), policy.jevMinConfidence(),
+                    policy.classifierTimeoutSeconds()), message, priorClass, priorToolCalls);
+        }
+        if (OllamaDecision.PROVIDER.equals(classifier.provider())) {
+            return orRules(JevRouterClassifier.classifyWithOllama(message, OllamaDecision.baseUrl(), classifier.model(),
+                    policy.jevMinConfidence(), policy.classifierTimeoutSeconds()), message, priorClass, priorToolCalls);
         }
 
         var answer = askModel(message, classifier, policy.classifierTimeoutSeconds());
@@ -117,11 +124,9 @@ public final class RouterClassifier {
         return PromptClassifier.classify(message, priorClass, priorToolCalls);
     }
 
-    /** JEV's class and effort, or the keyword rules' when JEV cannot answer, is not sure enough, or its breaker is open. */
-    private static Classification askJev(String message, @Nullable TaskClass priorClass, int priorToolCalls,
-                                         RouterPolicy policy, @Nullable String apiKey) {
-        var verdict = JevRouterClassifier.classify(message, apiKey, policy.jevMinConfidence(),
-                policy.classifierTimeoutSeconds());
+    /** The decision's class and effort, or the keyword rules' when it cannot answer, is not sure enough, or its breaker is open. */
+    private static Classification orRules(JevRouterClassifier.Verdict verdict, String message,
+                                          @Nullable TaskClass priorClass, int priorToolCalls) {
         if (verdict.classification() != null) return verdict.classification();
         var rules = PromptClassifier.classify(message, priorClass, priorToolCalls);
         if (!verdict.signal() || verdict.reason() == null) return rules;

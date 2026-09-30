@@ -1,4 +1,5 @@
 import services.decision.JevApi;
+import services.decision.OllamaDecision;
 import utils.CircuitBreakers;
 
 import java.util.concurrent.locks.ReentrantLock;
@@ -9,7 +10,9 @@ import java.util.concurrent.locks.ReentrantLock;
  * runs under the one process-global {@code decision:jev} breaker, so one class's deliberate 503s would
  * open it for another class's run, which then sends nothing.
  *
- * <p>{@link #acquire()} also drops the breaker, so each test starts from a fresh, closed one.
+ * <p>The Ollama decision provider's {@code decision:ollama} breaker rides the same lock (JCLAW-1336).
+ *
+ * <p>{@link #acquire()} also drops both breakers, so each test starts from a fresh, closed one.
  */
 public final class JevBreakerTestSync {
 
@@ -21,6 +24,7 @@ public final class JevBreakerTestSync {
     public static void acquire() {
         LOCK.lock();
         CircuitBreakers.remove(JevApi.BREAKER_NAME);
+        CircuitBreakers.remove(OllamaDecision.BREAKER_NAME);
     }
 
     /**
@@ -30,6 +34,7 @@ public final class JevBreakerTestSync {
     public static void release() {
         try {
             CircuitBreakers.remove(JevApi.BREAKER_NAME);
+            CircuitBreakers.remove(OllamaDecision.BREAKER_NAME);
         } finally {
             if (LOCK.isHeldByCurrentThread()) {
                 LOCK.unlock();

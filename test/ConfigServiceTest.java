@@ -12,6 +12,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.Tx;
 import services.decision.DecisionSettings;
+import services.decision.OllamaDecision;
 import services.telemetry.OtelConfig;
 import tools.jev.JevSettings;
 import tools.scrape.WebScrapeSettings;
@@ -70,7 +71,7 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
-    void theJevKeyIsTheOnlyDecisionProviderSetting() {
+    void anyOtherDecisionProviderSettingIsRefused() {
         // JCLAW-1302: consumer settings stay with their consumers, so any other decision.* key is refused.
         assertTrue(ConfigService.isSensitive(DecisionSettings.API_KEY), "the JEV key is masked on every read");
         var rejected = ConfigService.setWithSideEffects("decision.jev.timeoutSeconds", "3");
@@ -107,6 +108,45 @@ class ConfigServiceTest extends UnitTest {
         rename.invoke(job, legacy, current);
         assertEquals("ts-stored", ConfigService.get(current));
         Tx.run(() -> assertNull(Config.findByKey(legacy)));
+    }
+
+    @Test
+    void theOllamaDecisionAddressIsScreenedLikeAProviderUrl() {
+        // JCLAW-1336. Only rejectionFor is asked, so nothing here stores an address another class could read.
+        var key = OllamaDecision.BASE_URL_KEY;
+        for (var ok : new String[] {"", "http://localhost:11434", "http://127.0.0.1:11434", "http://192.168.1.20:11434",
+                "http://10.0.0.5:11434/", "http://ollama.local:11434"}) {
+            assertNull(DecisionSettings.rejectionFor(key, ok), () -> "refused " + ok);
+        }
+        for (var bad : new String[] {"http://169.254.169.254", "http://169.254.169.254:11434", "http://0.0.0.0:11434",
+                "http://224.0.0.1:11434", "file:///etc/passwd"}) {
+            assertNotNull(DecisionSettings.rejectionFor(key, bad), () -> "accepted " + bad);
+        }
+        assertNotNull(ConfigService.setWithSideEffects(key, "http://169.254.169.254"), "refused through the write path");
+        assertNull(ConfigService.get(key), "a refused value is not saved");
+    }
+
+    @Test
+    void theOllamaDecisionModelsAreAJsonArrayOfNames() {
+        var key = OllamaDecision.MODELS_KEY;
+        for (var ok : new String[] {"", "[]", "[\"tev1\"]", "[\"tev1\",\"nimble:latest\"]"}) {
+            assertNull(DecisionSettings.rejectionFor(key, ok), () -> "refused " + ok);
+        }
+        for (var bad : new String[] {"tev1", "{\"tev1\":true}", "[1]", "[\"\"]", "[null]", "[\"tev1\""}) {
+            var rejected = DecisionSettings.rejectionFor(key, bad);
+            assertNotNull(rejected, () -> "accepted " + bad);
+            assertTrue(rejected.contains(key), rejected);
+        }
+    }
+
+    @Test
+    void theOllamaDecisionProviderNameIsReservedForTheRoutersClassifier() {
+        for (var key : new String[] {"provider.ollama-decision.baseUrl", "provider.ollama-decision.apiKey"}) {
+            var rejected = ConfigService.setWithSideEffects(key, "x");
+            assertNotNull(rejected, key);
+            assertTrue(rejected.contains("reserved"), rejected);
+            assertNull(ConfigService.get(key), "a refused value is not saved");
+        }
     }
 
     @Test

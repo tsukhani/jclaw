@@ -259,6 +259,31 @@ describe('SettingsModelRouterPanel', () => {
     ])
   })
 
+  it('offers each Ollama decision model selected in Decision Providers, and writes the pair', async () => {
+    entries = [...entries, { key: 'decision.ollama.models', value: JSON.stringify(['tev1', 'nimble']) }]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const options = c.findAll('[data-testid="router-ollama-decision-option"]')
+    expect(options.map(o => [o.attributes('value'), o.text()])).toEqual([
+      ['ollama-decision::tev1', 'Ollama decision / tev1'],
+      ['ollama-decision::nimble', 'Ollama decision / nimble'],
+    ])
+
+    await c.find('select[aria-label="Prompt classifier model"]').setValue('ollama-decision::tev1')
+    await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
+    expect(ops).toEqual([
+      'DELETE router.classifier.model',
+      'POST router.classifier.provider=ollama-decision',
+      'POST router.classifier.model=tev1',
+    ])
+  })
+
+  it('offers no Ollama decision model until one is selected', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(c.findAll('[data-testid="router-ollama-decision-option"]')).toHaveLength(0)
+  })
+
   it('shows the classifier timeout only once a classifier is picked, at the default until one is stored', async () => {
     const rules = await mountSuspended(Harness)
     await flushPromises()
