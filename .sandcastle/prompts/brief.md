@@ -1,5 +1,7 @@
 Write the brief a human reviewer will read before merging this branch. Do not change files and do not run commands.
 
+The harness posts this brief on the Jira ticket as its review comment, `decisions` included. So a criterion that asks for a decision to be made or recorded on the ticket is met once that decision, with its reason, is in `decisions`: say so in its evidence, and do not list copying it to the ticket as a risk.
+
 Emit exactly one <brief> block as the last thing in your response, containing JSON of this shape:
 
 <brief>
