@@ -17,7 +17,7 @@ import static io.opentelemetry.api.common.AttributeKey.stringKey;
  * their own repository, which publishes no Java artifact, so jclaw owns them. The wire names are
  * the contract — collectors, dashboards and queries key on them — and track
  * open-telemetry/semantic-conventions-genai {@code model/gen-ai/registry.yaml} as of commit
- * c88d504ab3d9. That repository cuts no releases and marks these {@code stability: development},
+ * 8ffdf568e1b4391a99adb081db16e8102e36918e. That repository cuts no releases and marks these {@code stability: development},
  * so they can change: {@code /renovate} checks them against upstream, and GenAiWireNamesTest pins
  * them here. Constant names follow the upstream keys.
  */
@@ -37,7 +37,6 @@ public final class GenAiAttributes {
     public static final AttributeKey<String> GEN_AI_RESPONSE_MODEL = stringKey("gen_ai.response.model");
     public static final AttributeKey<Double> GEN_AI_RESPONSE_TIME_TO_FIRST_CHUNK =
             doubleKey("gen_ai.response.time_to_first_chunk");
-    public static final AttributeKey<String> GEN_AI_TOKEN_TYPE = stringKey("gen_ai.token.type");
     public static final AttributeKey<Long> GEN_AI_USAGE_CACHE_WRITE_INPUT_TOKENS =
             longKey("gen_ai.usage.cache_write.input_tokens");
     public static final AttributeKey<Long> GEN_AI_USAGE_CACHE_READ_INPUT_TOKENS =
@@ -46,12 +45,4 @@ public final class GenAiAttributes {
     public static final AttributeKey<Long> GEN_AI_USAGE_OUTPUT_TOKENS = longKey("gen_ai.usage.output_tokens");
     public static final AttributeKey<Long> GEN_AI_USAGE_REASONING_OUTPUT_TOKENS =
             longKey("gen_ai.usage.reasoning.output_tokens");
-
-    /** Values for {@link #GEN_AI_TOKEN_TYPE}. */
-    public static final class TokenTypeValues {
-        public static final String INPUT = "input";
-        public static final String OUTPUT = "output";
-
-        private TokenTypeValues() {}
-    }
 }

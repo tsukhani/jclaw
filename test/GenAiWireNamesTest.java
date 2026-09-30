@@ -29,7 +29,6 @@ class GenAiWireNamesTest extends UnitTest {
             Map.entry("gen_ai.response.id", AttributeType.STRING),
             Map.entry("gen_ai.response.model", AttributeType.STRING),
             Map.entry("gen_ai.response.time_to_first_chunk", AttributeType.DOUBLE),
-            Map.entry("gen_ai.token.type", AttributeType.STRING),
             Map.entry("gen_ai.usage.cache_read.input_tokens", AttributeType.LONG),
             Map.entry("gen_ai.usage.cache_write.input_tokens", AttributeType.LONG),
             Map.entry("gen_ai.usage.input_tokens", AttributeType.LONG),
@@ -49,12 +48,6 @@ class GenAiWireNamesTest extends UnitTest {
     }
 
     @Test
-    void tokenTypeValuesMatchTheUpstreamEnum() {
-        assertEquals("input", GenAiAttributes.TokenTypeValues.INPUT);
-        assertEquals("output", GenAiAttributes.TokenTypeValues.OUTPUT);
-    }
-
-    @Test
     void metricNamesAndUnitsArePinned() {
         // Units matter as much as names: a collector aggregates by both.
         assertEquals("gen_ai.client.operation.duration", GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME);
@@ -62,7 +55,11 @@ class GenAiWireNamesTest extends UnitTest {
         assertEquals("gen_ai.client.operation.time_to_first_chunk",
                 GenAiMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_NAME);
         assertEquals("s", GenAiMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_UNIT);
-        assertEquals("gen_ai.client.token.usage", GenAiMetrics.GEN_AI_CLIENT_TOKEN_USAGE_NAME);
-        assertEquals("{token}", GenAiMetrics.GEN_AI_CLIENT_TOKEN_USAGE_UNIT);
+        assertEquals("gen_ai.client.inference.operation.input_tokens",
+                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME);
+        assertEquals("{token}", GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_UNIT);
+        assertEquals("gen_ai.client.inference.operation.output_tokens",
+                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME);
+        assertEquals("{token}", GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_UNIT);
     }
 }

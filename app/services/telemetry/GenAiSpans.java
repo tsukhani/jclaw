@@ -24,9 +24,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
-import static services.telemetry.GenAiAttributes.TokenTypeValues.INPUT;
-import static services.telemetry.GenAiAttributes.TokenTypeValues.OUTPUT;
-
 /**
  * One CLIENT span and the {@code gen_ai.client.*} metrics per model call, following the
  * GenAI semantic conventions (JCLAW-34). Opened at the two {@code LlmProvider} dispatch
@@ -49,7 +46,7 @@ public final class GenAiSpans {
 
     private static final String SCOPE = "jclaw";
 
-    private record Instruments(OpenTelemetry api, DoubleHistogram tokenUsage,
+    private record Instruments(OpenTelemetry api, DoubleHistogram inputTokens, DoubleHistogram outputTokens,
                                DoubleHistogram duration, DoubleHistogram firstChunk) {}
 
     private static volatile @Nullable Instruments instruments;
@@ -124,9 +121,13 @@ public final class GenAiSpans {
         }
         var meter = api.getMeter(SCOPE);
         var built = new Instruments(api,
-                meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_TOKEN_USAGE_NAME)
-                        .setDescription(GenAiMetrics.GEN_AI_CLIENT_TOKEN_USAGE_DESCRIPTION)
-                        .setUnit(GenAiMetrics.GEN_AI_CLIENT_TOKEN_USAGE_UNIT)
+                meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME)
+                        .setDescription(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_DESCRIPTION)
+                        .setUnit(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_UNIT)
+                        .setExplicitBucketBoundariesAdvice(MetricBuckets.TOKENS).build(),
+                meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME)
+                        .setDescription(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_DESCRIPTION)
+                        .setUnit(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_UNIT)
                         .setExplicitBucketBoundariesAdvice(MetricBuckets.TOKENS).build(),
                 meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME)
                         .setDescription(GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_DESCRIPTION)
@@ -272,10 +273,8 @@ public final class GenAiSpans {
             i.duration().record(seconds(System.nanoTime()), attrs);
             var u = usage;
             if (u != null && errorType == null) {
-                i.tokenUsage().record(u.promptTokens(), attrs.toBuilder()
-                        .put(GenAiAttributes.GEN_AI_TOKEN_TYPE, INPUT).build());
-                i.tokenUsage().record(u.completionTokens(), attrs.toBuilder()
-                        .put(GenAiAttributes.GEN_AI_TOKEN_TYPE, OUTPUT).build());
+                i.inputTokens().record(u.promptTokens(), attrs);
+                i.outputTokens().record(u.completionTokens(), attrs);
             }
             if (firstChunkNanos >= 0 && errorType == null) {
                 i.firstChunk().record(seconds(firstChunkNanos), attrs);
