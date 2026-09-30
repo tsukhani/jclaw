@@ -89,7 +89,7 @@ async function save(next: string) {
             class="block w-4 h-4 bg-white rounded-full transition-transform"
           />
         </button>
-        <span class="ml-auto text-[11px] text-fg-muted">
+        <span class="ml-auto text-xs text-fg-muted">
           {{ isOn ? 'on' : 'off' }}
         </span>
       </template>

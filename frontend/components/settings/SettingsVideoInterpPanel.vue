@@ -258,7 +258,7 @@ async function setVideoModel(value: string) {
           />
         </button>
         <span class="text-sm font-medium text-fg-strong">Dedicated video model</span>
-        <span class="ml-auto text-[11px] text-fg-muted">{{ videoEnabled ? 'on' : 'off' }}</span>
+        <span class="ml-auto text-xs text-fg-muted">{{ videoEnabled ? 'on' : 'off' }}</span>
       </div>
     </div>
 

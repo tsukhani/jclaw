@@ -680,7 +680,7 @@ const groupedProviders = computed(() => {
           />
         </button>
         <span class="text-sm font-medium text-fg-strong">Auto-update model prices nightly</span>
-        <span class="ml-auto text-[11px] text-fg-muted">
+        <span class="ml-auto text-xs text-fg-muted">
           {{ priceRefreshEnabled ? 'on' : 'off' }}
         </span>
       </div>

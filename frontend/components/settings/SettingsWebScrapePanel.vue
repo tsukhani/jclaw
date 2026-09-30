@@ -259,7 +259,7 @@ async function save(key: string, value: string) {
                   class="block w-4 h-4 bg-white rounded-full transition-transform"
                 />
               </button>
-              <span class="ml-auto text-[11px] text-fg-muted">
+              <span class="ml-auto text-xs text-fg-muted">
                 {{ isOn(field) ? 'on' : 'off' }}
               </span>
             </template>

@@ -382,7 +382,7 @@ onUnmounted(() => stopTranscriptionPolling())
             class="block w-4 h-4 bg-white rounded-full transition-transform"
           />
         </button>
-        <span class="text-[11px] text-fg-muted">
+        <span class="text-xs text-fg-muted">
           {{ transcriptionEnabled ? 'on' : 'off' }}
         </span>
       </div>
@@ -627,7 +627,7 @@ onUnmounted(() => stopTranscriptionPolling())
             class="block w-4 h-4 bg-white rounded-full transition-transform"
           />
         </button>
-        <span class="text-[11px] text-fg-muted">{{ diarizationEnabled ? 'on' : 'off' }}</span>
+        <span class="text-xs text-fg-muted">{{ diarizationEnabled ? 'on' : 'off' }}</span>
       </div>
       <div class="px-4 pt-2.5 text-xs text-fg-muted">
         Who-said-what transcripts (the diarize-audio tool) come from an

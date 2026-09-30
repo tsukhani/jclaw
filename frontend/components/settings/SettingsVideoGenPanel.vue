@@ -264,7 +264,7 @@ onUnmounted(() => stopVideoCapPolling())
           />
         </button>
         <span class="text-sm font-medium text-fg-strong">Enable video generation</span>
-        <span class="ml-auto text-[11px] text-fg-muted">{{ videogenEnabled ? 'on' : 'off' }}</span>
+        <span class="ml-auto text-xs text-fg-muted">{{ videogenEnabled ? 'on' : 'off' }}</span>
       </div>
     </div>
     <ApiErrorAlert :error="videogenBackendError" />

@@ -266,7 +266,7 @@ onUnmounted(() => stopImagegenLocalPolling())
           />
         </button>
         <span class="text-sm font-medium text-fg-strong">Enable image generation</span>
-        <span class="ml-auto text-[11px] text-fg-muted">
+        <span class="ml-auto text-xs text-fg-muted">
           {{ imagegenEnabled ? 'on' : 'off' }}
         </span>
       </div>

@@ -144,7 +144,7 @@ async function setCaptionModel(value: string) {
           />
         </button>
         <span class="text-sm font-medium text-fg-strong">Enable image captioning</span>
-        <span class="ml-auto text-[11px] text-fg-muted">
+        <span class="ml-auto text-xs text-fg-muted">
           {{ captionEnabled ? 'on' : 'off' }}
         </span>
       </div>
