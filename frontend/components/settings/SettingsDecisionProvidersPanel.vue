@@ -266,13 +266,17 @@ function playJevClip() {
           data-testid="decision-ollama-status"
         >not reachable</span>
       </div>
-      <p
-        class="px-4 py-2.5 text-xs text-fg-muted leading-relaxed border-b border-border"
-        data-testid="decision-ollama-privacy"
-      >
-        Decision models such as tev1 and nimble, running on your own Ollama server. The Model Router's
-        classifier sends the first 4000 characters of each prompt, only to this server.
-      </p>
+      <div class="px-4 py-2.5 flex items-start gap-3 text-xs text-fg-muted leading-relaxed border-b border-border">
+        <!-- 2lh, as JEV's 3lh: the text beside it wraps to two lines in a 1330–1660 px window. -->
+        <IconOllama
+          class="h-[2lh] w-auto shrink-0 text-fg-strong"
+          data-testid="decision-ollama-logo"
+        />
+        <p data-testid="decision-ollama-privacy">
+          Decision models such as tev1 and nimble, running on your own Ollama server. The Model Router's
+          classifier sends the first 4000 characters of each prompt, only to this server.
+        </p>
+      </div>
       <div class="divide-y divide-border">
         <div
           class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"

@@ -271,6 +271,15 @@ describe('Settings page — Decision Providers', () => {
       expect(card.text()).not.toContain('record or retain')
     })
 
+    it('shows Ollama\'s logo beside the note, decorative and filled with the theme\'s text color', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const logo = component.find('[data-testid="decision-ollama-logo"]')
+      expect(logo.attributes('aria-hidden')).toBe('true')
+      expect(logo.attributes('fill')).toBe('currentColor')
+      expect(logo.element.nextElementSibling?.getAttribute('data-testid')).toBe('decision-ollama-privacy')
+    })
+
     it('lists only the decision models the server reports, not Ollama Local\'s chat models', async () => {
       stored.set('provider.ollama-local.baseUrl', 'http://localhost:11434/v1')
       stored.set('provider.ollama-local.models', JSON.stringify([{ id: 'llama3.2' }]))
