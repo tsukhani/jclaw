@@ -170,16 +170,22 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
             return key.equals(CLASSIFIER_MODEL)
                     ? CLASSIFIER_MODEL + " needs " + CLASSIFIER_PROVIDER + " as well." : null;
         }
-        if (JEV.equals(provider.strip())) {
-            return key.equals(CLASSIFIER_PROVIDER) || JevApi.MODEL.equals(v) ? null
-                    : "%s must be %s when %s is %s.".formatted(CLASSIFIER_MODEL, JevApi.MODEL, CLASSIFIER_PROVIDER, JEV);
-        }
-        if (OllamaDecision.PROVIDER.equals(provider.strip())) {
-            return key.equals(CLASSIFIER_PROVIDER) || OllamaDecision.selectedModels().contains(v) ? null
-                    : "%s must be an Ollama decision model selected in Settings > Decision Providers (%s)."
-                            .formatted(CLASSIFIER_MODEL, OllamaDecision.MODELS_KEY);
+        var named = provider.strip();
+        if (JEV.equals(named) || OllamaDecision.PROVIDER.equals(named)) {
+            return key.equals(CLASSIFIER_PROVIDER) ? null : decisionModelRejection(named, v);
         }
         return registeredModelRejection(provider, model);
+    }
+
+    /** A model the decision provider does not serve: anything but JEV's one, or an Ollama model not selected. */
+    private static @Nullable String decisionModelRejection(String provider, String model) {
+        if (JEV.equals(provider)) {
+            return JevApi.MODEL.equals(model) ? null
+                    : "%s must be %s when %s is %s.".formatted(CLASSIFIER_MODEL, JevApi.MODEL, CLASSIFIER_PROVIDER, JEV);
+        }
+        return OllamaDecision.selectedModels().contains(model) ? null
+                : "%s must be an Ollama decision model selected in Settings > Decision Providers (%s)."
+                        .formatted(CLASSIFIER_MODEL, OllamaDecision.MODELS_KEY);
     }
 
     /** A provider the registry does not configure, or a model it does not register. */

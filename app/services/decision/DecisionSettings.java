@@ -28,14 +28,7 @@ public final class DecisionSettings {
     /** A message naming what {@code value} must be, or null when {@code key} accepts it. */
     public static @Nullable String rejectionFor(String key, @Nullable String value) {
         if (key.equals(OllamaDecision.BASE_URL_KEY)) {
-            if (value == null || value.isBlank()) return null;
-            try {
-                // Loopback and the LAN are where an Ollama server lives, so the provider screen, not the web one.
-                SsrfGuard.assertProviderUrlSafe(value.strip());
-                return null;
-            } catch (SecurityException e) {
-                return e.getMessage();
-            }
+            return baseUrlRejection(value);
         }
         if (key.equals(OllamaDecision.MODELS_KEY)) {
             return OllamaDecision.parseModels(value) != null ? null
@@ -53,5 +46,16 @@ public final class DecisionSettings {
         // The key rides an Authorization header, where OkHttp throws on anything but printable ASCII.
         return value == null || value.isBlank() || value.chars().allMatch(c -> c > ' ' && c < 0x7f) ? null
                 : "%s must be printable ASCII with no spaces.".formatted(API_KEY);
+    }
+
+    private static @Nullable String baseUrlRejection(@Nullable String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            // Loopback and the LAN are where an Ollama server lives, so the provider screen, not the web one.
+            SsrfGuard.assertProviderUrlSafe(value.strip());
+            return null;
+        } catch (SecurityException e) {
+            return e.getMessage();
+        }
     }
 }

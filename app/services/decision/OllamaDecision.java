@@ -59,6 +59,7 @@ public final class OllamaDecision {
     private static final long PS_TIMEOUT_SECONDS = 1;
     /** Until Ollama restarts: the classifier is consulted on every routed turn, and a cold tev1 took 19 s. */
     private static final String DEFAULT_KEEP_ALIVE = "-1";
+    private static final String KEEP_ALIVE_FIELD = "keep_alive";
     private static final Pattern DURATION = Pattern.compile("-1|0|\\d+(\\.\\d+)?[smh]");
     private static final Pattern NO_RESIDENCY = Pattern.compile("0+(\\.0+)?[smh]?");
     /** A cold load from disk took 19 s; the pin must outlast it, unlike the classifier's own call. */
@@ -103,9 +104,9 @@ public final class OllamaDecision {
         var value = stored != null && isKeepAlive(stored.strip()) ? stored.strip() : DEFAULT_KEEP_ALIVE;
         // Ollama parses a bare "-1" string as a duration missing its unit; a number is seconds.
         if (value.equals("-1") || value.equals("0")) {
-            body.addProperty("keep_alive", Integer.parseInt(value));
+            body.addProperty(KEEP_ALIVE_FIELD, Integer.parseInt(value));
         } else {
-            body.addProperty("keep_alive", value);
+            body.addProperty(KEEP_ALIVE_FIELD, value);
         }
     }
 
@@ -123,7 +124,7 @@ public final class OllamaDecision {
         body.addProperty("model", model);
         addKeepAlive(body);
         // A keep_alive of zero unloads the model as soon as it has loaded.
-        if (NO_RESIDENCY.matcher(body.get("keep_alive").getAsString()).matches()) return CompletableFuture.completedFuture(false);
+        if (NO_RESIDENCY.matcher(body.get(KEEP_ALIVE_FIELD).getAsString()).matches()) return CompletableFuture.completedFuture(false);
         var base = trimSlash(baseUrl);
         try {
             SsrfGuard.assertProviderUrlSafe(base);
@@ -256,7 +257,7 @@ public final class OllamaDecision {
     private static boolean unload(String base, String model) {
         var body = new JsonObject();
         body.addProperty("model", model);
-        body.addProperty("keep_alive", 0);
+        body.addProperty(KEEP_ALIVE_FIELD, 0);
         var request = new Request.Builder().url(base + "/api/generate").post(RequestBody.create(body.toString(), JSON)).build();
         var call = HttpFactories.generalGuarded().newCall(request);
         call.timeout().timeout(UNLOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);

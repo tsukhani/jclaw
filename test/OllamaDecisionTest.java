@@ -576,7 +576,7 @@ class OllamaDecisionTest extends UnitTest {
     }
 
     @Test
-    void aFreshPinWaitsForTheOneInFlightAndSendsItsOwn() throws Exception {
+    void aFreshPinWaitsForTheOneInFlightAndSendsItsOwn() {
         ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
         var release = new CountDownLatch(1);
         try {

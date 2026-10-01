@@ -376,14 +376,14 @@ public class ConfigService {
         }
         // Every model picker lists the router under this name, so no real provider may take it.
         if (key.startsWith(PROVIDER_KEY_PREFIX + ModelRouter.PROVIDER + ".")) {
-            return "The provider name '" + ModelRouter.PROVIDER + "' is reserved for the model router.";
+            return reservedProviderName(ModelRouter.PROVIDER, "the model router");
         }
         // The router's classifier names TypeSafe's judge by this provider name (JCLAW-1300).
         if (key.startsWith(PROVIDER_KEY_PREFIX + RouterPolicy.JEV + ".")) {
-            return "The provider name '" + RouterPolicy.JEV + "' is reserved for the model router's JEV classifier.";
+            return reservedProviderName(RouterPolicy.JEV, "the model router's JEV classifier");
         }
         if (key.startsWith(PROVIDER_KEY_PREFIX + OllamaDecision.PROVIDER + ".")) {
-            return "The provider name '" + OllamaDecision.PROVIDER + "' is reserved for the model router's Ollama classifier.";
+            return reservedProviderName(OllamaDecision.PROVIDER, "the model router's Ollama classifier");
         }
 
         // JCLAW-1229: the chat path now dials through the provider-guarded client, so a base URL
@@ -584,6 +584,10 @@ public class ConfigService {
     private static String unconfiguredProvider(String key, String name) {
         return "Provider '" + name + "' is not configured. " + key
                 + " must name a provider from Settings > LLM Providers.";
+    }
+
+    private static String reservedProviderName(String name, String owner) {
+        return "The provider name '" + name + "' is reserved for " + owner + ".";
     }
 
     private static boolean isIntAtLeast(String value, int min) {

@@ -127,16 +127,19 @@ public final class JevApi {
             } catch (IOException e) {
                 EventLogger.warn(CATEGORY, "%s request %d of %d failed: %s"
                         .formatted(target.name(), attempt, attempts, e.getClass().getSimpleName()));
-                if (attempt >= attempts) {
-                    // The address is the operator's, never the model's, so naming a timeout scans nothing (JCLAW-1337).
-                    var timedOut = e instanceof InterruptedIOException;
-                    throw new JevException.Outage(timedOut
-                            ? "%s did not answer within %s".formatted(target.name(), seconds(attemptTimeoutMs))
-                            : target.name() + " unreachable", timedOut);
-                }
+                if (attempt >= attempts) throw exhausted(target, e, attemptTimeoutMs);
                 pause(BACKOFF_MS << (attempt - 1));
             }
         }
+    }
+
+    /** The outage that ends the call when its last attempt failed on I/O. */
+    private static JevException.Outage exhausted(Target target, IOException e, long attemptTimeoutMs) {
+        // The address is the operator's, never the model's, so naming a timeout scans nothing (JCLAW-1337).
+        var timedOut = e instanceof InterruptedIOException;
+        return new JevException.Outage(timedOut
+                ? "%s did not answer within %s".formatted(target.name(), seconds(attemptTimeoutMs))
+                : target.name() + " unreachable", timedOut);
     }
 
     /** Ends the call on a status that is not retried, or has run out of retries. */
