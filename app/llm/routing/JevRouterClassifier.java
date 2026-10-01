@@ -71,7 +71,7 @@ public final class JevRouterClassifier {
                                              int timeoutSeconds) {
         JevApi.Target target;
         try {
-            target = OllamaDecision.target(baseUrl);
+            target = OllamaDecision.target(baseUrl, model);
         } catch (SecurityException e) {
             return failed("the Ollama classifier's server address is refused (%s)".formatted(e.getMessage()));
         }

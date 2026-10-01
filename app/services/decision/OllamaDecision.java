@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 /**
@@ -51,6 +52,8 @@ public final class OllamaDecision {
     private static final String LOCAL_BASE_URL_KEY = "provider.ollama-local.baseUrl";
     private static final String DEFAULT_BASE_URL = "http://localhost:11434";
     private static final long TAGS_TIMEOUT_SECONDS = 5;
+    /** Asked only after a timeout, on the turn's own thread; a healthy server answers in microseconds. */
+    private static final long PS_TIMEOUT_SECONDS = 1;
     /** Until Ollama restarts: the classifier is consulted on every routed turn, and a cold tev1 took 19 s. */
     private static final String DEFAULT_KEEP_ALIVE = "-1";
     private static final Pattern DURATION = Pattern.compile("-1|0|\\d+(\\.\\d+)?[smh]");
@@ -160,20 +163,47 @@ public final class OllamaDecision {
      *
      * @throws SecurityException for an address {@link SsrfGuard#assertProviderUrlSafe} refuses
      */
-    public static JevApi.Target target(String baseUrl) {
+    public static JevApi.Target target(String baseUrl, String model) {
         // The guarded client's DNS screen never sees an IP literal, and a stored row can predate the write check.
         SsrfGuard.assertProviderUrlSafe(baseUrl);
-        return unscreened(baseUrl);
+        var base = trimSlash(baseUrl);
+        // A cold load outlasts the classifier's timeout without the server being any less healthy (JCLAW-1338).
+        return unscreened(base, outage -> outage.timedOut() && stillLoading(base, model));
     }
 
     /** The provider's one breaker, whatever the address. */
     public static CircuitBreaker breaker() {
-        return JevApi.breaker(unscreened(DEFAULT_BASE_URL));
+        return JevApi.breaker(unscreened(DEFAULT_BASE_URL, _ -> false));
     }
 
-    private static JevApi.Target unscreened(String baseUrl) {
+    private static JevApi.Target unscreened(String baseUrl, Predicate<JevException.Outage> uncounted) {
         return new JevApi.Target("Ollama", "Ollama", "the Ollama server", trimSlash(baseUrl) + "/v1/systemone",
-                null, BREAKER_NAME, true);
+                null, BREAKER_NAME, true, uncounted);
+    }
+
+    /**
+     * Whether the server at {@code base} answers {@code GET /api/ps} without {@code model} among its loaded models, so
+     * a call that timed out was waiting on a load. False when it cannot tell, which leaves the timeout counted.
+     */
+    static boolean stillLoading(String base, String model) {
+        var request = new Request.Builder().url(base + "/api/ps").header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
+                .get().build();
+        var call = HttpFactories.generalGuarded().newCall(request);
+        call.timeout().timeout(PS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        try (var response = call.execute()) {
+            if (!response.isSuccessful()) return false;
+            var loaded = JsonParser.parseString(response.body().string()).getAsJsonObject().getAsJsonArray("models");
+            if (loaded == null) return false;
+            // Ollama names a model by its tag, and a bare name means :latest.
+            var wanted = model.contains(":") ? model : model + ":latest";
+            for (var entry : loaded) {
+                var name = entry.isJsonObject() ? entry.getAsJsonObject().get("name") : null;
+                if (name != null && name.isJsonPrimitive() && wanted.equals(name.getAsString())) return false;
+            }
+            return true;
+        } catch (IOException | JsonParseException | IllegalStateException | ClassCastException _) {
+            return false;
+        }
     }
 
     /** {@code GET /api/tags} at {@code baseUrl}, keeping only models whose capabilities include {@code decision}. */

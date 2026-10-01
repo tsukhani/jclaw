@@ -1,3 +1,4 @@
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.routing.JevRouterClassifier;
@@ -89,6 +90,24 @@ class OllamaDecisionTest extends UnitTest {
     /** Calls the last {@link #withOllama} client still holds: an enqueued load stays counted until it answers. */
     private int callsInFlight() {
         return client.dispatcher().queuedCallsCount() + client.dispatcher().runningCallsCount();
+    }
+
+    /** A server whose {@code /api/ps} lists {@code loaded}, which loads at once, and which sends the rest to {@code otherwise}. */
+    private static Answer serverWith(List<String> loaded, Answer otherwise) {
+        return chain -> {
+            var path = chain.request().url().encodedPath();
+            if (path.equals("/api/generate")) return reply(chain, 200, "{\"done\":true}");
+            if (!path.equals("/api/ps")) return otherwise.reply(chain);
+            var models = new JsonArray();
+            for (var name : loaded) {
+                var model = new JsonObject();
+                model.addProperty("name", name);
+                models.add(model);
+            }
+            var ps = new JsonObject();
+            ps.add("models", models);
+            return reply(chain, 200, ps.toString());
+        };
     }
 
     /** Answers a load only once {@code release} opens, so a test can see it in flight. */
@@ -266,14 +285,48 @@ class OllamaDecisionTest extends UnitTest {
 
     @Test
     void aTimeoutSaysSoRatherThanUnreachable() throws Exception {
-        var verdict = withOllama(hang(),
+        var loaded = serverWith(List.of("tev1:latest"), hang());
+        var verdict = withOllama(loaded,
                 () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "tev1:latest", 0.9, 1));
         assertEquals(1, requestsTo("/v1/systemone"));
         assertNull(verdict.classification());
         assertEquals("the Ollama tev1:latest classifier failed (Ollama did not answer within 1 s)", verdict.reason());
-        assertEquals(1, OllamaDecision.breaker().stats().failures(), "a timeout still counts against the breaker");
+        assertEquals(1, OllamaDecision.breaker().stats().failures(), "a loaded model that times out counts against the breaker");
         // The timeout started a load; let it finish so it cannot answer for a later test's pin.
-        withOllama(hang(), () -> OllamaDecision.pin(BASE, "tev1:latest")).get(10, TimeUnit.SECONDS);
+        withOllama(loaded, () -> OllamaDecision.pin(BASE, "tev1:latest")).get(10, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void timeoutsWhileTheModelIsStillLoadingAreNotCountedAgainstTheBreaker() throws Exception {
+        var notYet = serverWith(List.of("snowflake-arctic-embed:latest"), hang());
+        for (var i = 0; i < 3; i++) {
+            var verdict = withOllama(notYet, () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "tev1", 0.9, 1));
+            assertTrue(verdict.reason().contains("did not answer within 1 s"), verdict.reason());
+        }
+        assertEquals(3, requestsTo("/api/ps"), "asked after each timeout");
+        assertEquals(0, OllamaDecision.breaker().stats().failures(), "loading is not failing");
+        assertEquals(CircuitBreaker.State.CLOSED, OllamaDecision.breaker().state(), "three cold timeouts keep the classifier on");
+        withOllama(notYet, () -> OllamaDecision.pin(BASE, "tev1")).get(10, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void aBareModelNameMatchesItsLatestTagSoALoadedModelsTimeoutCounts() throws Exception {
+        var loaded = serverWith(List.of("tev1:latest"), hang());
+        withOllama(loaded, () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "tev1", 0.9, 1));
+        assertEquals(1, OllamaDecision.breaker().stats().failures());
+        withOllama(loaded, () -> OllamaDecision.pin(BASE, "tev1")).get(10, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void aTimeoutCountsWhenTheServerCannotSayWhatIsLoaded() throws Exception {
+        Answer silent = chain -> switch (chain.request().url().encodedPath()) {
+            case "/api/ps" -> reply(chain, 500, "{}");
+            case "/api/generate" -> reply(chain, 200, "{\"done\":true}");
+            default -> hang().reply(chain);
+        };
+        withOllama(silent, () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "tev1", 0.9, 1));
+        assertEquals(1, OllamaDecision.breaker().stats().failures(), "unable to tell, so the timeout counts");
+        withOllama(silent, () -> OllamaDecision.pin(BASE, "tev1")).get(10, TimeUnit.SECONDS);
     }
 
     // --- loading the model -------------------------------------------------------------------

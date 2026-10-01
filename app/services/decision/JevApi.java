@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.io.InterruptedIOException;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 
 /**
  * One {@code POST /v1/systemone} at a time, for every decision provider that speaks it: TypeSafe AI's
@@ -57,13 +58,14 @@ public final class JevApi {
      * @param service     who is not called while the breaker is open
      * @param apiKey      sent as a bearer token; null sends none
      * @param guarded     dial through the SSRF-guarded client, for an address the operator chose
+     * @param uncounted   an outage the breaker leaves out, because it says nothing of the provider's health
      */
     public record Target(String name, String breakerLabel, String service, String url, @Nullable String apiKey,
-                         String breakerName, boolean guarded) {}
+                         String breakerName, boolean guarded, Predicate<JevException.Outage> uncounted) {}
 
     /** TypeSafe's JEV, with {@code apiKey}. */
     public static Target jev(String apiKey) {
-        return new Target("Jev", "JEV", "TypeSafe", ENDPOINT, apiKey, BREAKER_NAME, false);
+        return new Target("Jev", "JEV", "TypeSafe", ENDPOINT, apiKey, BREAKER_NAME, false, _ -> false);
     }
 
     /** {@link #post(Target, JsonObject, int, long)} to TypeSafe's JEV. */
@@ -90,12 +92,14 @@ public final class JevApi {
             reported = true;
             return result;
         } catch (JevException.Outage e) {
-            breaker.recordFailure(admission.probeWindow());
-            reported = true;
+            if (!target.uncounted().test(e)) {
+                breaker.recordFailure(admission.probeWindow());
+                reported = true;
+            }
             throw e;
         } finally {
-            // A probe holds a HALF_OPEN permit until it reports, and a refused key or a malformed answer
-            // is the provider answering: stranding the permit would keep the breaker shut for good.
+            // A probe holds a HALF_OPEN permit until it reports, and a refused key, a malformed answer or an
+            // uncounted outage is the provider answering: stranding the permit would keep the breaker shut for good.
             if (!reported && admission.probe()) breaker.recordSuccess(0L, admission.probeWindow());
         }
     }
