@@ -17,6 +17,9 @@
 
 FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
 
+# GHCR links the pushed package to this repo by this label, so it lists on the repo page.
+LABEL org.opencontainers.image.source=https://github.com/tsukhani/jclaw
+
 ENV DEBIAN_FRONTEND=noninteractive
 # Without a UTF-8 locale the JVM encodes process arguments and file names as ASCII (sun.jnu.encoding).
 ENV LANG=C.UTF-8
