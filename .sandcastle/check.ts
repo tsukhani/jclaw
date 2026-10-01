@@ -1,7 +1,7 @@
 // Offline checks on synthetic tickets: review feedback, planning, build mode and the GitHub trust rule. `npm run check`.
 import { vetIssue, type Issue } from "./github.ts";
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
-import { rejectionFeedback, type Snapshot } from "./tracker.ts";
+import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
   key: "T-1", summary: "", description: "", labels: [], blockedBy: [], updated: "", fetchedAt: "",
@@ -77,3 +77,13 @@ check("a title a stranger renamed after the label is refused",
 check("labelling it again approves the issue as it now reads",
   vet(issue({ lastEditedAt: LATER, editor: { login: "stranger" }, timelineItems: { nodes: [labelled(LABELLED), labelled("2026-10-01T12:00:00Z")] } }))?.refused,
   undefined);
+
+const declined = parsePlan('{"A": {"files": [], "bmad": false, "why": "x", "wontDo": " not this repository "}, "B": {"files": ["b"], "bmad": false, "why": "y", "wontDo": null}, "C": {"files": ["c"], "bmad": true, "why": "z"}}');
+check("a declined story carries its reason, trimmed; null or absent means build",
+  declined && [...declined].map(([k, p]) => [k, p.wontDo ?? "build"]), [["A", "not this repository"], ["B", "build"], ["C", "build"]]);
+const JIRA = "h3. AFK factory";
+check("a story the factory never declined is not overruled", overruled(ticket("a human note", OFFER), JIRA), false);
+check("a story back in intake after the factory's won't-do was overruled",
+  overruled(ticket(`${JIRA}: won't do\nIt is about another product.`, "it is not, build it"), JIRA), true);
+check("GitHub's header counts the same way",
+  overruled({ ...ticket(), comments: [{ author: OWNER, body: "### AFK factory: won't do\nGibberish." }] }, "### AFK factory"), true);

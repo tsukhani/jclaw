@@ -12,7 +12,7 @@ const EPIC_LINK = "customfield_10002";
 
 export const INTAKE_JQL =
   'project = JCLAW AND sprint in openSprints() AND issuetype not in (Epic, Sub-task) ' +
-  'AND labels = afk AND labels != afk-blocked AND status = "To Do" AND (assignee is EMPTY OR assignee = currentUser()) ' +
+  'AND labels = afk AND labels != afk-blocked AND labels != wont-do AND status = "To Do" AND (assignee is EMPTY OR assignee = currentUser()) ' +
   'ORDER BY rank';
 
 // Jira's REST shapes are read field by field below, so the payload stays untyped.

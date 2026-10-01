@@ -48,8 +48,8 @@ lockfile changes. Every two minutes it:
 
 1. Polls Jira for `afk` stories in To Do, keeping those whose blockers are Done, and GitHub for open issues you labelled
    `afk` (see [GitHub issues](#github-issues)).
-2. Rebuilds the sandbox image if `main` has moved, and has a planner agent predict each story's files and decide
-   whether it needs BMAD. A story waits while its files overlap a branch awaiting review or a story already running.
+2. Rebuilds the sandbox image if `main` has moved, and has a planner agent predict each story's files, decide whether
+   it needs BMAD, and decline one that should not be built at all. A story waits while its files overlap a branch awaiting review or a story already running.
 3. Claims a story by assigning it to its own Jira user, moves it to In Progress, and runs it in a fresh sandbox:
    - **Implement**, or **rework** if you sent it back. A story that needs BMAD is **specced**, then **built**, by
      BMAD instead (see [BMAD stories](#bmad-stories)).
@@ -138,6 +138,15 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
   label to retry.
 - **When the harness stops:** an interrupted story still has `afk-running`. The next start sends it back to To Do,
   and its branch keeps what it had committed.
+
+### Declined stories
+
+The planner also judges each new story before anything is built. It declines one that asks for no coherent change,
+is about something other than this repository, or asks for something harmful, such as removing a security control or
+exposing a credential. It never declines a story for being vague, large or hard; when unsure, it builds. A declined
+story gets a comment with the reason and the `wont-do` label, which takes it out of intake. The factory never closes
+it. Close it if you agree. If not, remove `wont-do`, and the factory builds it as written without judging it again. A
+story that was already built or offered for review, or one pinned with `FACTORY_TICKET`, is never declined.
 
 ### BMAD stories
 

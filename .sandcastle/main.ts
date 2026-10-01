@@ -10,7 +10,7 @@ import { z } from "zod";
 import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, factoryHooks, factorySandbox, gatewayUp, installBmad, planHooks } from "./factory.ts";
 import { githubTracker } from "./github.ts";
 import { jira } from "./jira.ts";
-import { promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
+import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type StoryPlan } from "./plan.ts";
 import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 
@@ -347,7 +347,7 @@ const predictPlans = async (stories: Snapshot[]): Promise<Map<string, StoryPlan>
     const STORIES = stories
       .map((s) => {
         const own = changedOn(s.key);
-        return [`## ${s.key}: ${s.summary}`, s.description, own.length ? `Its branch already changes: ${own.join(", ")}` : ""].join("\n\n");
+        return [`## ${s.key}: ${s.summary}`, promptContext(s), own.length ? `Its branch already changes: ${own.join(", ")}` : ""].join("\n\n");
       })
       .join("\n\n");
     const run = await sandbox.run({ name: "plan", agent, promptFile: `${HERE}/prompts/plan.md`, promptArgs: { STORIES }, logging: { type: "file", path: `${LOGS}/plan.log` } });
@@ -380,6 +380,17 @@ const refuse = async (story: Snapshot) => {
   const m = tracker.markup;
   await tracker.blocked(story.key);
   await tracker.comment(story.key, `${tracker.header} will not start this\n${story.refused}, so the agent would read text you have not approved. To approve the issue as it now reads, remove the ${m.code("afk")} label and add it again, then remove ${m.code("afk-blocked")}.`);
+};
+
+// The planner judged the story not worth building. It is labelled and explained, never closed: the reviewer confirms by
+// closing it, or overrules by removing `wont-do`.
+const decline = async (story: Snapshot, reason: string) => {
+  console.log(`[plan] ${story.key} declined: ${reason}`);
+  if (process.env.FACTORY_PLAN_ONLY) return;
+  const tracker = trackerFor(story.key);
+  const m = tracker.markup;
+  await tracker.addLabel(story.key, "wont-do");
+  await tracker.comment(story.key, `${tracker.header}: won't do\n${reason}\n\nNothing was built. Close it if you agree. If not, remove the ${m.code("wont-do")} label, and the factory will build it as written without judging it again.`);
 };
 
 // Starts as many stories as there are free slots, returning their runs.
@@ -425,7 +436,14 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
     }
   }
   const files = new Map(unblocked.flatMap((s) => (predicted.has(s.key) ? [[s.key, predicted.get(s.key)!.plan.files] as const] : [])));
-  const { picked, deferred } = pickNonOverlapping(unblocked, files, inFlight);
+  // Only a fresh story is judged: one the reviewer overruled, already built or offered, or pinned by the operator is built.
+  const declined = unblocked.filter((s) => {
+    const tracker = trackerFor(s.key);
+    return Boolean(predicted.get(s.key)?.plan.wontDo) && !PINNED && !overruled(s, tracker.header)
+      && rejectionFeedback(s, tracker.header) === undefined && changedOn(s.key).length === 0;
+  });
+  for (const s of declined) await decline(s, predicted.get(s.key)!.plan.wontDo!);
+  const { picked, deferred } = pickNonOverlapping(unblocked.filter((s) => !declined.includes(s)), files, inFlight);
   for (const d of deferred) note(d.key, `[plan] ${d.key} waits: ${d.reason}`);
   const starting = picked.slice(0, free).map((s) => ({ story: s, mode: buildMode(s.labels, predicted.get(s.key)?.plan) }));
   if (starting.length === 0) return [];

@@ -8,7 +8,8 @@ import type { Snapshot, Tracker } from "./tracker.ts";
 
 const API = "https://api.github.com";
 const HEADER = "### AFK factory";
-const STATE_LABELS = ["afk-running", "afk-review", "afk-blocked"];
+// Labels that take an issue out of intake: the factory's states, and a won't-do verdict awaiting the owner.
+const STATE_LABELS = ["afk-running", "afk-review", "afk-blocked", "wont-do"];
 
 type Login = { login: string } | null;
 type Comment = { author: Login; body: string; createdAt: string; lastEditedAt: string | null; editor: Login };

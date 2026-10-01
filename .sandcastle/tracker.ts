@@ -59,6 +59,9 @@ export const rejectionFeedback = (s: Snapshot, header: string): string | undefin
     .join("\n\n");
 };
 
+// The factory declined this story earlier and it is back in intake, so the reviewer removed `wont-do`: build it as written.
+export const overruled = (s: Snapshot, header: string): boolean => s.comments.some((c) => c.body.startsWith(`${header}: won't do`));
+
 // Everything the agent should read, as one block for the prompt's {{DESCRIPTION}}.
 export const promptContext = (s: Snapshot): string =>
   [

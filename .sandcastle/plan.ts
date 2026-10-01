@@ -1,8 +1,12 @@
 import { z } from "zod";
 
-// What the planner predicts for one story: the files it will change, and whether to build it with BMAD and why.
-export type StoryPlan = { files: Set<string>; bmad: boolean; why: string };
-const PlanAnswer = z.record(z.string(), z.object({ files: z.array(z.string()), bmad: z.boolean(), why: z.string() }));
+// What the planner predicts for one story: the files it will change, whether to build it with BMAD and why, and, when
+// building it would be wrong, why it should not be built at all.
+export type StoryPlan = { files: Set<string>; bmad: boolean; why: string; wontDo?: string };
+const PlanAnswer = z.record(
+  z.string(),
+  z.object({ files: z.array(z.string()), bmad: z.boolean(), why: z.string(), wontDo: z.string().nullish() }),
+);
 
 // The planner's <plan> JSON by story key, or undefined when it does not parse.
 export const parsePlan = (raw: string | undefined): Map<string, StoryPlan> | undefined => {
@@ -16,7 +20,10 @@ export const parsePlan = (raw: string | undefined): Map<string, StoryPlan> | und
   const parsed = PlanAnswer.safeParse(json);
   if (!parsed.success) return undefined;
   return new Map(
-    Object.entries(parsed.data).map(([key, p]) => [key, { files: new Set(p.files.map((f) => f.replace(/^\.\//, ""))), bmad: p.bmad, why: p.why.trim() }]),
+    Object.entries(parsed.data).map(([key, p]) => [
+      key,
+      { files: new Set(p.files.map((f) => f.replace(/^\.\//, ""))), bmad: p.bmad, why: p.why.trim(), wontDo: p.wontDo?.trim() || undefined },
+    ]),
   );
 };
 
