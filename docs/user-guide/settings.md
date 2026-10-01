@@ -330,7 +330,7 @@ Every value is a whole number; a write outside these bounds is refused.
 
 A decision provider answers a question by choosing among the options it is given, with a probability for each, rather than by writing text. JClaw features call it directly, and it never answers a chat. Each provider has one card, which holds what its features share: the API key and the circuit breaker. A feature's own settings stay on that feature's page.
 
-**JEV (TypeSafe AI)** is the one decision provider today. Its card shows **configured** once a key is set and **needs API key** until then.
+There are two: **JEV (TypeSafe AI)** and **Ollama**. The JEV card shows **configured** once a key is set and **needs API key** until then.
 
 | Key                   | Default   | Meaning                                                                                          |
 |-----------------------|-----------|--------------------------------------------------------------------------------------------------|
@@ -346,6 +346,22 @@ Saving the key editor without typing anything leaves the stored key as it was. A
 TypeSafe AI may record or retain what it is sent.
 
 Both features share one **circuit breaker**, shown on the card once JEV has been called, with **Isolate** or **Restore** to move it by hand. Three failures in a row, or half of the last ten, open it for 60 seconds. A failure is a request that could not reach TypeSafe, timed out, or got HTTP 429 or a 5xx; a browser step's retries count as one. A refused key (401 or 403), any other 4xx, or an answer JClaw cannot read never counts. A Model Router classifier timeout counts too, so with JEV keep that timeout at 3 seconds or more. While the breaker is open or isolated nothing is sent: the Model Router uses its keyword rules, and a Jev browser run ends with an error naming the breaker. Isolating it lasts until the 60-second cooldown ends or you restore it. The thresholds are fixed. An open breaker is also listed on the [Dashboard](/) under **Circuit Breakers**.
+
+### Ollama
+
+The **Ollama** card is for System One decision models, such as `tev1` and `nimble`, running on your own Ollama server. Its card shows **reachable** or **not reachable** for that server.
+
+- **Server address** defaults to the Ollama Local LLM provider's server without `/v1` (marked **from Ollama Local**), or `http://localhost:11434` when Ollama Local has none. **Change** sets a different one; the address is stored only when it differs from that default.
+- **Decision models** lists the installed models whose Ollama capabilities include `decision`. Tick the ones you want; only a ticked model can be chosen as the Model Router's classifier. A ticked model the server no longer lists stays, marked **not installed**, so you can clear it.
+- **Used by** lists the [Model Router](#settings-model-router)'s prompt classifier, marked **in use** with the model's name when the classifier is one of these models. It sends the first 4000 characters of each prompt, only to this server.
+
+| Key                         | Default   | Meaning                                                                                          |
+|-----------------------------|-----------|--------------------------------------------------------------------------------------------------|
+| `decision.ollama.baseUrl`   | *(unset)* | The Ollama server's address. Absent means Ollama Local's address without `/v1`, else `http://localhost:11434`. Loopback and the LAN are allowed; link-local, multicast and `0.0.0.0` are refused. |
+| `decision.ollama.models`    | *(unset)* | A JSON array of the selected model names, such as `["tev1"]`.                                     |
+| `decision.ollama.keepAlive` | `-1`      | How long Ollama keeps the selected model loaded. `-1` keeps it until Ollama restarts, `0` unloads it at once, or a number followed by `s`, `m` or `h`, such as `30m`; anything else is refused. |
+
+JClaw loads the classifier's model itself, on a request of its own: at startup, every 30 minutes, when it is chosen, and after a classification times out, because a cold model can take longer to load than the classifier timeout allows. The Ollama card has its own **circuit breaker**, with JEV's thresholds and counting, except that a timeout does not count while the model is still loading.
 
 ## Search Providers
 
