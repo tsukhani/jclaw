@@ -98,11 +98,12 @@ const routerOllamaModel = computed(() =>
     : '')
 const ollamaBreaker = computed(() => breakersByName.value.get('decision:ollama'))
 
-// The clip's transcript, so its words reach a reader who cannot hear it (WCAG 1.2.1).
+// Each clip's transcript, so what it says reaches a reader who cannot hear it (WCAG 1.2.1).
 const JEV_CLIP_LABEL = 'Play JEV saying “My name is Jev”'
+const OLLAMA_CLIP_LABEL = 'Play a llama’s call'
 const jevClip = ref<HTMLAudioElement>()
-function playJevClip() {
-  const audio = jevClip.value
+const ollamaClip = ref<HTMLAudioElement>()
+function playClip(audio: HTMLAudioElement | undefined) {
   if (!audio) return
   audio.currentTime = 0
   void audio.play()
@@ -145,7 +146,7 @@ function playJevClip() {
           :aria-label="JEV_CLIP_LABEL"
           :title="JEV_CLIP_LABEL"
           data-testid="decision-jev-play"
-          @click="playJevClip()"
+          @click="playClip(jevClip)"
         >
           <!-- 3lh: the text beside it wraps to three lines in a 1330–1660 px window. -->
           <img
@@ -267,10 +268,34 @@ function playJevClip() {
         >not reachable</span>
       </div>
       <div class="px-4 py-2.5 flex items-start gap-3 text-xs text-fg-muted leading-relaxed border-b border-border">
-        <!-- 2lh, as JEV's 3lh: the text beside it wraps to two lines in a 1330–1660 px window. -->
-        <IconOllama
-          class="h-[2lh] w-auto shrink-0 text-fg-strong"
-          data-testid="decision-ollama-logo"
+        <button
+          type="button"
+          class="group relative shrink-0 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          :aria-label="OLLAMA_CLIP_LABEL"
+          :title="OLLAMA_CLIP_LABEL"
+          data-testid="decision-ollama-play"
+          @click="playClip(ollamaClip)"
+        >
+          <!-- 2lh, as JEV's 3lh: the text beside it wraps to two lines in a 1330–1660 px window. -->
+          <IconOllama
+            class="block h-[2lh] w-auto text-fg-strong"
+            data-testid="decision-ollama-logo"
+          />
+          <span
+            class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-safe:transition-opacity"
+            aria-hidden="true"
+          >
+            <!-- The card's colors, the inverse of the mark's in either theme. -->
+            <span class="rounded-full bg-surface-elevated/75 p-0.5 text-fg-strong shadow-sm backdrop-blur-xs">
+              <SpeakerWaveIcon class="w-3 h-3" />
+            </span>
+          </span>
+        </button>
+        <!-- eslint-disable-next-line vuejs-accessibility/media-has-caption -- its sound is the button's name and tooltip -->
+        <audio
+          ref="ollamaClip"
+          src="/ollama.mp3"
+          preload="none"
         />
         <p data-testid="decision-ollama-privacy">
           Decision models such as tev1 and nimble, running on your own Ollama server. The Model Router's

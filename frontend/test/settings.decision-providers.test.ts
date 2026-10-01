@@ -277,7 +277,33 @@ describe('Settings page — Decision Providers', () => {
       const logo = component.find('[data-testid="decision-ollama-logo"]')
       expect(logo.attributes('aria-hidden')).toBe('true')
       expect(logo.attributes('fill')).toBe('currentColor')
-      expect(logo.element.nextElementSibling?.getAttribute('data-testid')).toBe('decision-ollama-privacy')
+      const play = component.find('[data-testid="decision-ollama-play"]')
+      expect(play.find('[data-testid="decision-ollama-logo"]').exists()).toBe(true)
+      expect(play.element.nextElementSibling?.nextElementSibling?.getAttribute('data-testid')).toBe('decision-ollama-privacy')
+    })
+
+    it('plays the llama clip from the start when the logo is clicked, fetching nothing before', async () => {
+      const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+      try {
+        baseEndpoints()
+        const component = await mountDecisionProviders()
+
+        const button = component.find('[data-testid="decision-ollama-play"]')
+        expect(button.attributes('type')).toBe('button')
+        expect(button.attributes('aria-label')).toBe('Play a llama’s call')
+        expect(button.attributes('title')).toBe(button.attributes('aria-label'))
+        const audio = component.find('audio[src="/ollama.mp3"]')
+        expect(audio.attributes('preload')).toBe('none')
+
+        ;(audio.element as HTMLAudioElement).currentTime = 1.2
+        await button.trigger('click')
+        expect(playSpy).toHaveBeenCalledTimes(1)
+        expect(playSpy.mock.contexts[0]).toBe(audio.element)
+        expect((audio.element as HTMLAudioElement).currentTime).toBe(0)
+      }
+      finally {
+        playSpy.mockRestore()
+      }
     })
 
     it('lists only the decision models the server reports, not Ollama Local\'s chat models', async () => {

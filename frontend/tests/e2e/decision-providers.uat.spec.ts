@@ -16,6 +16,7 @@ import { test, expect, gotoPage, blockApiWrites } from './helpers'
  */
 
 const PLAY = { name: 'Play JEV saying “My name is Jev”' }
+const OLLAMA_PLAY = { name: 'Play a llama’s call' }
 
 async function openPanel(page: Page) {
   await gotoPage(page, '/settings?section=decision-providers')
@@ -23,8 +24,8 @@ async function openPanel(page: Page) {
 }
 
 /** The speaker badge's computed opacity: the CSS, not a class name, decides what is visible. */
-function badgeOpacity(page: Page) {
-  const badge = page.getByRole('button', PLAY).locator('span[aria-hidden="true"]').first()
+function badgeOpacity(page: Page, play = PLAY) {
+  const badge = page.getByRole('button', play).locator('span[aria-hidden="true"]').first()
   return () => badge.evaluate(el => getComputedStyle(el).opacity)
 }
 
@@ -65,7 +66,7 @@ function recordConfigPosts(page: Page) {
 test.describe('UAT-23 decision providers', () => {
   test('the clip and the portrait are served as media, not as the SPA fallback', async ({ request }) => {
     // An unknown path answers 200 text/html from the SPA catch-all, so the status alone proves nothing.
-    for (const [path, type] of [['/jev.mp3', 'audio/'], ['/jev.webp', 'image/']] as const) {
+    for (const [path, type] of [['/jev.mp3', 'audio/'], ['/jev.webp', 'image/'], ['/ollama.mp3', 'audio/']] as const) {
       const res = await request.get(path)
       expect(res.status(), path).toBe(200)
       expect(res.headers()['content-type'], path).toContain(type)
@@ -138,6 +139,7 @@ test.describe('UAT-23 decision providers', () => {
       // Guards the emulation itself: without it this test would pass on a hover device by never asking.
       expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true)
       await expect.poll(badgeOpacity(page)).toBe('1')
+      await expect.poll(badgeOpacity(page, OLLAMA_PLAY)).toBe('1')
     })
   })
 
@@ -219,6 +221,48 @@ test.describe('UAT-23 decision providers', () => {
       const router = page.getByTestId('decision-ollama-consumer-model-router')
       await expect(router).toContainText('not in use')
       await expect(router).not.toContainText('(tev1:latest)')
+    })
+
+    test('the llama clip is fetched only once the logo is clicked, and the click plays it', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      const writes = await blockApiWrites(page)
+      const fetched: string[] = []
+      page.on('request', (req) => {
+        if (new URL(req.url()).pathname === '/ollama.mp3') fetched.push(req.url())
+      })
+      await openPanel(page)
+      await expect(page.getByTestId('decision-ollama-logo')).toBeVisible()
+      expect(fetched, 'preload="none" should fetch nothing before the click').toEqual([])
+
+      await page.getByRole('button', OLLAMA_PLAY).click()
+      const clip = page.locator('audio[src="/ollama.mp3"]')
+      await expect.poll(() => fetched.length).toBeGreaterThan(0)
+      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.error?.code ?? 0), 'media error code').toBe(0)
+      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.duration || 0)).toBeGreaterThan(0)
+      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.played.length), 'the clip never played').toBeGreaterThan(0)
+      expect(writes()).toEqual([])
+    })
+
+    test('the speaker badge is hidden at rest and shown on hover and on keyboard focus', async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await stubOllama(page, REACHABLE)
+      await blockApiWrites(page)
+      await openPanel(page)
+      const play = page.getByRole('button', OLLAMA_PLAY)
+      const opacity = badgeOpacity(page, OLLAMA_PLAY)
+
+      await page.mouse.move(0, 0)
+      await expect.poll(opacity).toBe('0')
+      await play.hover()
+      await expect.poll(opacity).toBe('1')
+      await page.mouse.move(0, 0)
+      await expect.poll(opacity).toBe('0')
+
+      await play.focus()
+      await page.keyboard.press('Shift+Tab')
+      await page.keyboard.press('Tab')
+      await expect(play).toBeFocused()
+      await expect.poll(opacity).toBe('1')
     })
   })
 })
