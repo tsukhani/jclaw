@@ -1,14 +1,16 @@
-// The AFK factory: Jira intake, then per story → implement → full-suite gate (baselined on main, with repair)
-// → review → gate → brief → Jira write-back, up to FACTORY_MAX_PARALLEL stories at once, each in its own sandbox,
-// polling Jira until signalled.
-// Local only: branches are never pushed, and the agent never touches Jira.
+// The AFK factory: intake from Jira and, when configured, GitHub issues, then per story → implement → full-suite gate
+// (baselined on main, with repair) → review → gate → brief → write-back to the story's tracker, up to
+// FACTORY_MAX_PARALLEL stories at once, each in its own sandbox, polling until signalled.
+// Local only: branches are never pushed, and the agent never touches a tracker.
 import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { format } from "node:util";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { z } from "zod";
 import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, factoryHooks, factorySandbox, gatewayUp, installBmad, planHooks } from "./factory.ts";
-import { FACTORY_HEADER, addLabel, claim, comment, inReview, intake, orphaned, promptContext, rejectionFeedback, removeLabel, snapshotToState, transitionTo, type Snapshot } from "./jira.ts";
+import { githubTracker } from "./github.ts";
+import { jira } from "./jira.ts";
+import { promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type StoryPlan } from "./plan.ts";
 import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 
@@ -41,10 +43,38 @@ type Brief = z.infer<typeof Brief>;
 // The agent authenticates through the gateway, which reads the credential from .env itself.
 const agent = sandcastle.claudeCode(MODEL);
 
+const github = githubTracker();
+const TRACKERS: Tracker[] = github ? [jira, github] : [jira];
+const trackerFor = (key: string): Tracker => {
+  const tracker = TRACKERS.find((t) => t.owns(key));
+  if (!tracker) throw new Error(`no story source owns ${key}`);
+  return tracker;
+};
+// A source that cannot be read this poll contributes nothing, so a GitHub outage or a bad token never stops Jira work;
+// while it fails, its stories in review hold no files.
+const fromAll = async <T>(what: string, read: (t: Tracker) => Promise<T[]>): Promise<T[]> =>
+  (
+    await Promise.all(
+      TRACKERS.map(async (t) => {
+        const topic = `source ${t.name} ${what}`;
+        try {
+          const found = await read(t);
+          lastSaid.delete(topic);
+          return found;
+        } catch (error) {
+          note(topic, `[factory] could not read ${what} from ${t.name}, so it is skipped this poll: ${errorText(error)}`);
+          return [];
+        }
+      }),
+    )
+  ).flat();
+
 const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> => {
   const key = picked.key;
   const branch = `agent/${key}`;
-  const feedback = rejectionFeedback(picked);
+  const tracker = trackerFor(key);
+  const m = tracker.markup;
+  const feedback = rejectionFeedback(picked, tracker.header);
   const lessons = fs.existsSync(LESSONS) ? fs.readFileSync(LESSONS, "utf8").trim() : "";
   const promptArgs = { KEY: key, SUMMARY: picked.summary, DESCRIPTION: promptContext(picked), LESSONS: lessons || "None yet." };
   const withFeedback = { ...promptArgs, FEEDBACK: feedback || "None: this is the first submission." };
@@ -148,7 +178,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
       // than one way goes back with its questions before any code is written.
       freshBuild = true;
       bmadVersion = await installBmad(sandbox);
-      if (!picked.labels.includes("bmad")) await addLabel(key, "bmad");
+      if (!picked.labels.includes("bmad")) await tracker.addLabel(key, "bmad");
       // Each halt records its status in the spec's frontmatter, or in a result file when it stopped before writing one.
       const outcome = async (file: string) => {
         const text = (await sandbox.exec(`cat '${file}'`)).stdout;
@@ -179,7 +209,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     let failures = await gate("gate-1");
     for (let round = 1; failures.length > 0 && round <= MAX_REPAIRS; round++) {
       const message =
-        `The harness ran the full suite on branch ${branch} (Jira ${key}) and these failures are new relative to main. ` +
+        `The harness ran the full suite on branch ${branch} (ticket ${key}) and these failures are new relative to main. ` +
         `Fix them, re-run the affected classes, commit, then output <promise>COMPLETE</promise>.\n\n${JSON.stringify(failures, null, 2)}`;
       const options = { idleTimeoutSeconds: 1200, logging: logTo(`repair-${round}`) };
       const previous = current;
@@ -218,60 +248,59 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     return brief?.success ? brief.data : undefined;
   };
 
-  // The Jira comment carries the harness's own facts beside the agent's brief: the agent cannot see the gates.
+  // The comment carries the harness's own facts beside the agent's brief: the agent cannot see the gates.
   const reviewComment = (brief: Brief | undefined, sensitive: string[]) => {
-    const lines = [`${FACTORY_HEADER}: ready for review`, `Local branch {{${branch}}} in the checkout of this comment's author, not pushed. Its commits are unsigned, which GitHub's main refuses, so re-sign them as you merge: {{git rebase --force-rebase --gpg-sign main ${branch}}}, then {{git merge --no-ff ${branch}}}; /deploy ships it. Model: ${MODEL}.`];
+    const closes = tracker.mergeMessage(key);
+    const merge = closes ? `git merge --no-ff -m "Merge branch '${branch}'" -m "${closes}" ${branch}` : `git merge --no-ff ${branch}`;
+    const lines = [`${tracker.header}: ready for review`, `Local branch ${m.code(branch)} in the checkout of this comment's author, not pushed. Its commits are unsigned, which GitHub's main refuses, so re-sign them as you merge: ${m.code(`git rebase --force-rebase --gpg-sign main ${branch}`)}, then ${m.code(merge)}; /deploy ships it. Model: ${MODEL}.`];
     if (builtWithBmad()) {
-      lines.push(`Specced and built by BMAD${bmadVersion ? ` ${bmadVersion}` : ""} (bmad-build-auto). Its spec, with its own review's triage and deferred findings: {{~/.jclaw-factory/logs/${key}-spec.md}}.`);
+      lines.push(`Specced and built by BMAD${bmadVersion ? ` ${bmadVersion}` : ""} (bmad-build-auto). Its spec, with its own review's triage and deferred findings: ${m.code(`~/.jclaw-factory/logs/${key}-spec.md`)}.`);
     }
     if (freshBuild) lines.push(`Built ${mode.bmad ? "with BMAD" : "plain"} because: ${mode.why}`);
     if (feedback !== undefined) lines.push("Reworked after your review.");
     if (sensitive.length > 0) {
-      lines.push("", "h4. (!) Runs on your Mac once merged", ...sensitive.map((f) => `* {{${f}}}`),
+      lines.push("", m.heading("(!) Runs on your Mac once merged"), ...sensitive.map((f) => m.bullet(m.code(f))),
         "These files run during build, test, commit or push, or instruct later agents: read them line by line before merging.");
     }
     lines.push("");
     if (brief) {
-      lines.push(brief.summary, "", "h4. Acceptance criteria", ...brief.acceptanceCriteria.map((c) => `* ${c.met ? "(/)" : "(x)"} ${c.criterion}: ${c.evidence}`));
-      if (brief.decisions.length) lines.push("", "h4. Decisions", ...brief.decisions.map((d) => `* ${d}`));
-      if (brief.risks.length) lines.push("", "h4. For the reviewer", ...brief.risks.map((d) => `* ${d}`));
+      lines.push(brief.summary, "", m.heading("Acceptance criteria"), ...brief.acceptanceCriteria.map((c) => m.bullet(`${c.met ? m.met : m.unmet} ${c.criterion}: ${c.evidence}`)));
+      if (brief.decisions.length) lines.push("", m.heading("Decisions"), ...brief.decisions.map(m.bullet));
+      if (brief.risks.length) lines.push("", m.heading("For the reviewer"), ...brief.risks.map(m.bullet));
     } else {
       lines.push("The agent's brief did not validate; see the run log.");
     }
     if (lesson) {
-      lines.push("", "h4. Lesson recorded", lesson, "Every future story's prompts now include it ({{~/.jclaw-factory/lessons.md}}); promote it into AGENTS.md or delete it there.");
+      lines.push("", m.heading("Lesson recorded"), lesson, `Every future story's prompts now include it (${m.code("~/.jclaw-factory/lessons.md")}); promote it into AGENTS.md or delete it there.`);
     }
-    lines.push("", "h4. Harness gates", ...gates.map((g) => `* ${g}`));
-    if (environmentFailures.size) lines.push(`* Also failing on main in the sandbox, so not counted: ${[...environmentFailures].join(", ")}`);
-    lines.push(...flakes.map((f) => `* ${f.gate}: failed in the full suite but passed alone, so not counted: {{${f.failure}}}`));
-    lines.push(`* Timings: ${Object.entries(timings).map(([k, v]) => `${k} ${v}s`).join(", ")}`);
+    lines.push("", m.heading("Harness gates"), ...gates.map(m.bullet));
+    if (environmentFailures.size) lines.push(m.bullet(`Also failing on main in the sandbox, so not counted: ${[...environmentFailures].join(", ")}`));
+    lines.push(...flakes.map((f) => m.bullet(`${f.gate}: failed in the full suite but passed alone, so not counted: ${m.code(f.failure)}`)));
+    lines.push(m.bullet(`Timings: ${Object.entries(timings).map(([k, v]) => `${k} ${v}s`).join(", ")}`));
     return lines.join("\n");
   };
 
-  if (!(await claim(key))) {
+  if (!(await tracker.claim(key))) {
     console.log(`[${key}] claimed by another harness; leaving it`);
     return;
   }
-  await transitionTo(key, "In Progress");
-  await addLabel(key, "afk-running");
+  await tracker.started(key);
   try {
-    if (feedback === "") throw new Error("it came back from review without a comment: say what to change, then move it back to To Do");
+    if (feedback === "") throw new Error("it came back from review without a comment: say in a comment what to change, then send it back");
     const brief = await build();
     // A local branch in the operator's checkout, where merging it into main puts it in the next /deploy.
     gitIn(CHECKOUT, "fetch", "--quiet", REPO, `${branch}:${branch}`);
     const sensitive = sensitivePaths(gitIn(REPO, "diff", "--name-only", `main...${branch}`).split("\n").filter(Boolean));
     if (sensitive.length > 0) console.log(`[${key}] changes files that run on the Mac once merged: ${sensitive.join(", ")}`);
-    await transitionTo(key, "Review");
-    await removeLabel(key, "afk-running");
-    await comment(key, reviewComment(brief, sensitive));
+    await tracker.reviewing(key);
+    await tracker.comment(key, reviewComment(brief, sensitive));
     fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, model: MODEL, buildMode: mode, timings, gates, brief, environmentFailures: [...environmentFailures], flakes }, null, 2));
     console.log(`[${key} done] → Review\n` + execFileSync("/usr/bin/git", ["-C", REPO, "log", "--stat", "--format=%h %an %s", `main..${branch}`], { encoding: "utf8" }));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.log(`[${key} blocked] ${reason}`);
-    await addLabel(key, "afk-blocked");
-    await removeLabel(key, "afk-running");
-    await comment(key, `${FACTORY_HEADER} gave up\nBranch {{${branch}}} (local). ${reason}\n\nRemove the {{afk-blocked}} label to let the factory retry.`);
+    await tracker.blocked(key);
+    await tracker.comment(key, `${tracker.header} gave up\nBranch ${m.code(branch)} (local). ${reason}\n\nRemove the ${m.code("afk-blocked")} label to let the factory retry.`);
     throw error;
   }
 };
@@ -342,6 +371,17 @@ const predictPlans = async (stories: Snapshot[]): Promise<Map<string, StoryPlan>
 const running = new Map<string, Set<string> | undefined>();
 const predicted = new Map<string, { updated: string; plan: StoryPlan }>();
 
+// A source refused the story as it stands (GitHub: its text changed after the owner's label). Blocking it takes it out of
+// the next intake, so the comment is posted once.
+const refuse = async (story: Snapshot) => {
+  note(story.key, `[plan] ${story.key} refused: ${story.refused}`);
+  if (process.env.FACTORY_PLAN_ONLY) return;
+  const tracker = trackerFor(story.key);
+  const m = tracker.markup;
+  await tracker.blocked(story.key);
+  await tracker.comment(story.key, `${tracker.header} will not start this\n${story.refused}, so the agent would read text you have not approved. To approve the issue as it now reads, remove the ${m.code("afk")} label and add it again, then remove ${m.code("afk-blocked")}.`);
+};
+
 // Starts as many stories as there are free slots, returning their runs.
 const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   const free = LIMIT - running.size;
@@ -349,6 +389,10 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   // holds the blocker's code in whatever form it landed, so no branch reaches the reviewer carrying another story's commits.
   const unblocked: Snapshot[] = [];
   for (const story of candidates.filter((c) => !running.has(c.key))) {
+    if (story.refused) {
+      await refuse(story);
+      continue;
+    }
     const open = story.blockedBy.filter((b) => !b.done);
     if (open.length === 0) unblocked.push(story);
     else note(story.key, `[plan] ${story.key} waits: blocked by ${open.map((b) => `${b.key} (${b.status})`).join(", ")}`);
@@ -363,7 +407,7 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
 
   // A story pinned by FACTORY_TICKET may itself be in review; its own branch is not someone else's work.
   const inFlight = new Map<string, string>();
-  for (const k of await inReview()) {
+  for (const k of await fromAll("stories in review", (t) => t.inReview())) {
     if (!unblocked.some((s) => s.key === k)) for (const f of changedOn(k)) inFlight.set(f, `${k} (in review)`);
   }
   for (const [k, files] of running) for (const f of files ?? []) inFlight.set(f, `${k} (in progress)`);
@@ -436,12 +480,12 @@ fs.writeFileSync(PIDFILE, String(process.pid));
 process.on("exit", () => fs.rmSync(PIDFILE, { force: true }));
 
 // Stopping the harness (Ctrl-C, kill, a crash, a reboot) interrupts its stories: Sandcastle removes their containers,
-// the branches keep their commits, and they are sent back to To Do here so the next round resumes them.
-for (const key of process.env.FACTORY_PLAN_ONLY ? [] : await orphaned()) {
-  await transitionTo(key, "To Do");
-  await removeLabel(key, "afk-running");
-  await comment(key, `${FACTORY_HEADER} was interrupted\nThe factory stopped while working on this story. Its branch keeps what was committed, and the next round resumes it.`);
-  console.log(`[factory] ${key}: interrupted by the last stop, back to To Do`);
+// the branches keep their commits, and they are queued again here so the next round resumes them.
+for (const key of process.env.FACTORY_PLAN_ONLY ? [] : await fromAll("interrupted stories", (t) => t.orphaned())) {
+  const tracker = trackerFor(key);
+  await tracker.requeued(key);
+  await tracker.comment(key, `${tracker.header} was interrupted\nThe factory stopped while working on this story. Its branch keeps what was committed, and the next round resumes it.`);
+  console.log(`[factory] ${key}: interrupted by the last stop, queued again`);
 }
 
 // The factory's own code, as main has it: an idle harness under launchd restarts to load a change.
@@ -465,7 +509,7 @@ const pendingChange = (): string | undefined => {
 ensureGradleSeed();
 const runs = new Set<Promise<void>>();
 let firstRound = true;
-console.log(`[factory] ${ONE_ROUND ? "one round" : `watching the active sprint every ${POLL_SECONDS}s`}; ${LIMIT} at a time, ${CPUS} CPUs each, ${MODEL}`);
+console.log(`[factory] ${ONE_ROUND ? "one round" : `watching the active sprint${github ? " and GitHub issues" : ""} every ${POLL_SECONDS}s`}; ${LIMIT} at a time, ${CPUS} CPUs each, ${MODEL}`);
 while (true) {
   const change = !ONE_ROUND && running.size === 0 ? pendingChange() : undefined;
   if (change) {
@@ -489,7 +533,9 @@ while (true) {
     } else {
       note("gateway", "[factory] gateway up");
       try {
-        const candidates = PINNED ? await Promise.all(PINNED.map((k) => snapshotToState(k))) : await intake();
+        const candidates = PINNED
+          ? await Promise.all(PINNED.map((k) => trackerFor(k).snapshotToState(k)))
+          : await fromAll("afk stories", (t) => t.intake());
         for (const run of await round(candidates)) {
           runs.add(run);
           void run.finally(() => {

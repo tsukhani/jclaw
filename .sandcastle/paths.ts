@@ -12,6 +12,7 @@ export const LOGS = path.join(FACTORY_HOME, "logs");
 export const STATE = path.join(FACTORY_HOME, "state");
 export const ENV_FILE = path.join(FACTORY_HOME, ".env");
 export const JIRA_ENV_FILE = path.join(FACTORY_HOME, "jira.env");
+export const GITHUB_ENV_FILE = path.join(FACTORY_HOME, "github.env");
 export const SETTINGS_FILE = path.join(FACTORY_HOME, "settings.env");
 
 // KEY=VALUE lines; blank lines and `#` comments are skipped.

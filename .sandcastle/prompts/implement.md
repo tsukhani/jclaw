@@ -1,6 +1,6 @@
 # TASK
 
-Implement Jira ticket {{KEY}}: {{SUMMARY}}
+Implement ticket {{KEY}}: {{SUMMARY}}
 
 You are on branch `{{SOURCE_BRANCH}}`, created from `main` by the harness that launched you; any story this one depends on is already merged there. AGENTS.md tells agents to work on `main` and not to create branches; in this run the harness owns branching, so stay on this branch and commit to it.
 
@@ -34,6 +34,6 @@ Recent history on this branch:
 
 Commit on this branch following AGENTS.md's commit conventions, with the ticket key in the subject. When the ticket asks for a decision to be made or recorded, make it and write it in the commit body as a line starting `Decision:`; the harness records it on the ticket.
 
-Do not push. Do not call Jira or any other tracker. Do not contact anything on `host.docker.internal`.
+Do not push. Do not call Jira, GitHub or any other tracker. Do not contact anything on `host.docker.internal`.
 
 When the work is committed, output <promise>COMPLETE</promise>.

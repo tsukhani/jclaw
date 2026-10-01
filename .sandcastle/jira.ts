@@ -2,6 +2,7 @@
 // touches Jira; it only sees the snapshot written here.
 import * as fs from "node:fs";
 import { JIRA_ENV_FILE, STATE, readEnvFile } from "./paths.ts";
+import type { Snapshot, Tracker } from "./tracker.ts";
 
 // Only from FACTORY_HOME/jira.env, never .env, which the gateway mounts: no container ever holds the Jira token.
 const env = readEnvFile(JIRA_ENV_FILE);
@@ -23,18 +24,6 @@ const api = async (path: string, init: { method?: string; body?: unknown } = {})
   });
   if (!res.ok) throw new Error(`Jira ${init.method ?? "GET"} ${path}: ${res.status} ${(await res.text()).slice(0, 300)}`);
   return res.status === 204 ? undefined : res.json();
-};
-
-export type Snapshot = {
-  key: string;
-  summary: string;
-  description: string;
-  labels: string[];
-  comments: { author: string; body: string }[];
-  parent?: { key: string; summary: string; description: string };
-  blockedBy: { key: string; status: string; done: boolean }[];
-  updated: string;
-  fetchedAt: string;
 };
 
 export const snapshot = async (key: string): Promise<Snapshot> => {
@@ -85,29 +74,6 @@ export const snapshotToState = async (key: string): Promise<Snapshot> => {
 // Every comment the factory posts starts with this; the reviewer's own comments never do.
 export const FACTORY_HEADER = "h3. AFK factory";
 
-// A story back in To Do after the factory offered it for review was sent back: the reviewer's comments since the last
-// offer are the feedback ("" when there are none), skipping the factory's own. undefined means it was never offered.
-export const rejectionFeedback = (s: Snapshot): string | undefined => {
-  let offer = -1;
-  s.comments.forEach((c, i) => {
-    if (c.body.startsWith(`${FACTORY_HEADER}: ready for review`)) offer = i;
-  });
-  if (offer < 0) return undefined;
-  return s.comments
-    .slice(offer + 1)
-    .filter((c) => !c.body.startsWith(FACTORY_HEADER))
-    .map((c) => `${c.author}: ${c.body}`)
-    .join("\n\n");
-};
-
-// Everything the agent should read, as one block for the prompt's {{DESCRIPTION}}.
-export const promptContext = (s: Snapshot): string =>
-  [
-    s.description,
-    s.comments.length ? `\n### Comments on the ticket\n${s.comments.map((c) => `- ${c.author}: ${c.body}`).join("\n")}` : "",
-    s.parent ? `\n### Parent epic ${s.parent.key}: ${s.parent.summary}\n${s.parent.description}` : "",
-  ].join("\n");
-
 export const transitionTo = async (key: string, status: string) => {
   const { transitions } = await api(`/rest/api/2/issue/${key}/transitions`);
   const t = transitions.find((x: any) => x.to.name === status);
@@ -146,4 +112,39 @@ export const claim = async (key: string): Promise<boolean> => {
   await new Promise((resolve) => setTimeout(resolve, 2000));
   const after = await holder();
   return after.status.name === "To Do" && after.assignee?.name === myName;
+};
+
+export const jira: Tracker = {
+  name: "Jira",
+  header: FACTORY_HEADER,
+  markup: { code: (t) => `{{${t}}}`, heading: (t) => `h4. ${t}`, bullet: (t) => `* ${t}`, met: "(/)", unmet: "(x)" },
+  owns: (key) => /^JCLAW-\d+$/.test(key),
+  intake,
+  inReview,
+  orphaned,
+  snapshotToState,
+  claim,
+  started: async (key) => {
+    await transitionTo(key, "In Progress");
+    await addLabel(key, "afk-running");
+  },
+  reviewing: async (key) => {
+    await transitionTo(key, "Review");
+    await removeLabel(key, "afk-running");
+  },
+  blocked: async (key) => {
+    await addLabel(key, "afk-blocked");
+    await removeLabel(key, "afk-running");
+  },
+  requeued: async (key) => {
+    await transitionTo(key, "To Do");
+    await removeLabel(key, "afk-running");
+  },
+  comment: async (key, body) => {
+    await comment(key, body);
+  },
+  addLabel: async (key, label) => {
+    await addLabel(key, label);
+  },
+  mergeMessage: () => undefined,
 };

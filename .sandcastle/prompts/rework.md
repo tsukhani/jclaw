@@ -1,6 +1,6 @@
 # TASK
 
-The human reviewer sent Jira ticket {{KEY}} ({{SUMMARY}}) back from review. You are on its branch `{{SOURCE_BRANCH}}`, which holds the rejected submission. Address every point of the feedback on this branch. AGENTS.md tells agents to work on `main` and not to create branches; in this run the harness owns branching, so stay on this branch and commit to it.
+The human reviewer sent ticket {{KEY}} ({{SUMMARY}}) back from review. You are on its branch `{{SOURCE_BRANCH}}`, which holds the rejected submission. Address every point of the feedback on this branch. AGENTS.md tells agents to work on `main` and not to create branches; in this run the harness owns branching, so stay on this branch and commit to it.
 
 # REVIEWER FEEDBACK
 
@@ -30,7 +30,7 @@ Rules the reviewer asked for on earlier stories. Follow them.
 
 # COMMIT
 
-Commit the rework on this branch with the ticket key in the subject, following AGENTS.md's commit conventions. Add commits; do not rewrite or squash the earlier ones. Do not push. Do not call Jira or any other tracker. Do not contact anything on `host.docker.internal`.
+Commit the rework on this branch with the ticket key in the subject, following AGENTS.md's commit conventions. Add commits; do not rewrite or squash the earlier ones. Do not push. Do not call Jira, GitHub or any other tracker. Do not contact anything on `host.docker.internal`.
 
 # LESSON
 

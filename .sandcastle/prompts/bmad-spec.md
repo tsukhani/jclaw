@@ -2,7 +2,7 @@ Invoke the `bmad-build-auto` skill on the intent below. Halt after planning.
 
 # INTENT
 
-Jira ticket {{KEY}}: {{SUMMARY}}
+Ticket {{KEY}}: {{SUMMARY}}
 
 {{DESCRIPTION}}
 

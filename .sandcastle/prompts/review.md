@@ -1,6 +1,6 @@
 # TASK
 
-Review branch `{{SOURCE_BRANCH}}`, which implements Jira ticket {{KEY}}: {{SUMMARY}}. Improve it where a concrete improvement is warranted; do not restyle what is already correct.
+Review branch `{{SOURCE_BRANCH}}`, which implements ticket {{KEY}}: {{SUMMARY}}. Improve it where a concrete improvement is warranted; do not restyle what is already correct.
 
 # TICKET
 
@@ -33,6 +33,6 @@ Review branch `{{SOURCE_BRANCH}}`, which implements Jira ticket {{KEY}}: {{SUMMA
 
 Git prints `error: Unable to create '…/packed-refs.lock': Read-only file system` after commits: expected, since the repository's shared metadata is read-only here, and the commit still succeeded.
 
-If you change code, run `./jclaw.sh diagnostics` and the affected test classes with `./gradlew playAutotest -Ptests=...`, then commit on this branch. Do not run the full suite, do not push, and do not call Jira.
+If you change code, run `./jclaw.sh diagnostics` and the affected test classes with `./gradlew playAutotest -Ptests=...`, then commit on this branch. Do not run the full suite, do not push, and do not call Jira, GitHub or any other tracker.
 
 When done, output <promise>COMPLETE</promise>.

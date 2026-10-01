@@ -1,6 +1,6 @@
 # TASK
 
-For each Jira story below, predict which files it will change in this repository, so the harness never runs two stories that change the same file before one of them is merged, and decide how it should be built. Read the code each ticket points at before answering. Do not change files, do not commit, and do not call Jira.
+For each story below, predict which files it will change in this repository, so the harness never runs two stories that change the same file before one of them is merged, and decide how it should be built. Read the code each ticket points at before answering. Do not change files, do not commit, and do not call Jira, GitHub or any other tracker.
 
 # STORIES
 

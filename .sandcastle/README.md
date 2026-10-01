@@ -1,7 +1,8 @@
 # AFK factory
 
 An unattended software factory for JClaw, built on [Sandcastle](https://github.com/mattpocock/sandcastle). It picks up
-Jira stories labelled `afk` in the active sprint, has a coding agent implement each one in its own isolated container,
+Jira stories labelled `afk` in the active sprint, and GitHub issues you label `afk` when you set it up, has a coding
+agent implement each one in its own isolated container,
 runs the full test suite itself, has a second agent review the work, and hands you a local branch `agent/<KEY>` with a
 brief on the ticket. It never pushes and never merges. You review the branch, merge it into `main` and ship it with
 `/deploy`.
@@ -40,11 +41,13 @@ credential and is the sandboxes' only way out.
 
 ### Harness
 
-TypeScript that runs on your Mac: `main.ts` for the loop, `factory.ts` for the Docker side, `jira.ts` and `plan.ts`. The
+TypeScript that runs on your Mac: `main.ts` for the loop, `factory.ts` for the Docker side, `jira.ts` and `github.ts`
+behind `tracker.ts`, and `plan.ts`. The
 LaunchAgent `com.jclaw.factory` keeps it running through `run.sh`, which reinstalls its dependencies whenever the
 lockfile changes. Every two minutes it:
 
-1. Polls Jira for `afk` stories in To Do, and keeps those whose blockers are Done.
+1. Polls Jira for `afk` stories in To Do, keeping those whose blockers are Done, and GitHub for open issues you labelled
+   `afk` (see [GitHub issues](#github-issues)).
 2. Rebuilds the sandbox image if `main` has moved, and has a planner agent predict each story's files and decide
    whether it needs BMAD. A story waits while its files overlap a branch awaiting review or a story already running.
 3. Claims a story by assigning it to its own Jira user, moves it to In Progress, and runs it in a fresh sandbox:
@@ -114,6 +117,7 @@ every decision (`docker logs jclaw-factory-gateway`).
 | `~/.jclaw-factory/` (`FACTORY_HOME`) | Everything the harness writes: the clone it works in (`jclaw/`), `logs/`, `state/`, the Gradle and BMAD seeds, `lessons.md` |
 | `~/.jclaw-factory/.env` | The model credential. It is mounted into the gateway only. |
 | `~/.jclaw-factory/jira.env` | Jira access. Only the harness on your Mac reads it. |
+| `~/.jclaw-factory/github.env` | GitHub access, optional. Only the harness on your Mac reads it. |
 | `~/.jclaw-factory/settings.env` | Your [settings](#settings), optional. Only the harness on your Mac reads it. |
 
 Nothing the harness writes lives in the checkout, because `/deploy` stages the whole working tree.
@@ -164,6 +168,26 @@ That file adds the factory's rules for BMAD's runs and its implementation subage
 full suite, no push, no Jira. Without an install in the checkout, a `bmad` story is blocked, and other stories are
 unaffected.
 
+### GitHub issues
+
+Add `~/.jclaw-factory/github.env` holding `GITHUB_TOKEN=…`, and the factory also takes open issues of the checkout's
+GitHub repository (its `github` remote, or `GITHUB_REPO=owner/name` in the same file) that you labelled `afk`. Make the
+token fine-grained, limited to that one repository, with Issues read and write and nothing else. Without the file,
+GitHub is off and the factory reads Jira alone. The startup line says `watching the active sprint and GitHub issues`
+when it is on.
+
+Issue #12 becomes story `GH-12` on branch `agent/GH-12`, with the same planning, BMAD decision, gates, review and brief
+as a Jira story. GitHub has no statuses, so the factory's states are labels it manages itself: `afk-running` while it
+works, `afk-review` once it has posted the brief, `afk-blocked` when it gives up. To send an issue back, comment on it
+and remove `afk-review`. The review comment's merge command adds `Closes #12` to the merge commit, so `/deploy` closes
+the issue when it pushes to GitHub. GitHub issues have no dependencies here: each runs as soon as its files are free.
+
+The repository is public, so anyone can open an issue or comment on one, but only you can label it. The agent therefore
+reads an issue as it stood when you applied `afk`, plus your own later comments. A comment someone else wrote or
+edited after your label is left out. If someone else edits the issue's title or body after your label, the factory
+blocks the story and says why: remove `afk` and add it again to approve the issue as it now reads, then remove
+`afk-blocked`. An `afk` label applied by anyone but you is ignored.
+
 ## Security model
 
 **What an agent can reach:**
@@ -177,7 +201,7 @@ unaffected.
 - the internet beyond that allowlist
 - your Mac, or the clone's hooks and config
 - `main`
-- Jira, and your checkout
+- Jira, GitHub, and your checkout
 
 **Risks that remain, and how they are handled:**
 - **Merging runs its code.** Once you merge a branch, its code runs on your Mac through hooks, build scripts and the
@@ -260,7 +284,7 @@ with the reason in the log. A model name is checked only when the first story ru
 |---|---|---|
 | `FACTORY_MAX_PARALLEL` | 2 | Stories at once; each sandbox peaks near 5 GB |
 | `FACTORY_CPUS` | 6 | CPU quota per sandbox, at most the Docker VM's CPU count |
-| `FACTORY_POLL_SECONDS` | 120 | How often Jira is polled |
+| `FACTORY_POLL_SECONDS` | 120 | How often Jira and GitHub are polled |
 | `FACTORY_MODEL` | `claude-opus-5-5` | |
 | `FACTORY_HOME` | `~/.jclaw-factory` | Environment only; the LaunchAgent records it at install |
 | `FACTORY_TICKET` | | Environment only: run these keys (comma-separated) for one round, then exit |

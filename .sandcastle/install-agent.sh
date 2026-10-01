@@ -25,7 +25,7 @@ mkdir -p "$FACTORY_HOME/logs" "$(dirname "$PLIST")"
 chmod 700 "$FACTORY_HOME"
 [[ -f "$FACTORY_HOME/.env" ]] || fail "missing $FACTORY_HOME/.env: the model credential, CLAUDE_CODE_OAUTH_TOKEN=… (from \`claude setup-token\`) or ANTHROPIC_API_KEY=…"
 [[ -f "$FACTORY_HOME/jira.env" ]] || fail "missing $FACTORY_HOME/jira.env: JIRA_URL=… and JIRA_PERSONAL_TOKEN=… (a Jira personal access token)"
-chmod 600 "$FACTORY_HOME/.env" "$FACTORY_HOME"/jira.env 2>/dev/null || true
+chmod 600 "$FACTORY_HOME/.env" "$FACTORY_HOME"/jira.env "$FACTORY_HOME"/github.env 2>/dev/null || true
 if ! docker image inspect jclaw-devcontainer:local >/dev/null 2>&1; then
     echo "building the sandbox image jclaw-devcontainer:local (several minutes, once)"
     docker build -f "$HERE/../.devcontainer/Dockerfile" -t jclaw-devcontainer:local "$HERE/.."
