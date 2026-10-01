@@ -29,6 +29,34 @@ function badgeOpacity(page: Page, play = PLAY) {
   return () => badge.evaluate(el => getComputedStyle(el).opacity)
 }
 
+async function expectStandsThreeLinesTall(page: Page, image: string, note: string) {
+  const img = page.getByTestId(image)
+  await expect.poll(() => img.evaluate((el: HTMLImageElement) => el.complete ? el.naturalWidth : 0)).toBeGreaterThan(0)
+
+  const height = await img.evaluate(el => el.getBoundingClientRect().height)
+  const line = await page.getByTestId(note).evaluate(el => Number.parseFloat(getComputedStyle(el).lineHeight))
+  expect(Math.abs(height - 3 * line), `${image} ${height}px against a ${line}px line`).toBeLessThanOrEqual(1)
+}
+
+async function expectBadgeFollowsHoverAndFocus(page: Page, play: { name: string }) {
+  const button = page.getByRole('button', play)
+  const opacity = badgeOpacity(page, play)
+
+  await page.mouse.move(0, 0)
+  await expect.poll(opacity).toBe('0')
+  await button.hover()
+  await expect.poll(opacity).toBe('1')
+  await page.mouse.move(0, 0)
+  await expect.poll(opacity).toBe('0')
+
+  // Arrive by Tab, so :focus-visible matches for the reason a keyboard user would see it.
+  await button.focus()
+  await page.keyboard.press('Shift+Tab')
+  await page.keyboard.press('Tab')
+  await expect(button).toBeFocused()
+  await expect.poll(opacity).toBe('1')
+}
+
 const DECISION_MODELS = ['tev1:latest', 'nimble:latest']
 
 const REACHABLE: OllamaDecisionStatus = {
@@ -76,14 +104,7 @@ test.describe('UAT-23 decision providers', () => {
   test('the portrait decodes and stands three text lines tall beside the note', async ({ page }) => {
     const writes = await blockApiWrites(page)
     await openPanel(page)
-    const portrait = page.getByTestId('decision-jev-portrait')
-    await expect.poll(() => portrait.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0)).toBeGreaterThan(0)
-
-    const { height, line } = await page.evaluate(() => ({
-      height: document.querySelector('[data-testid="decision-jev-portrait"]')!.getBoundingClientRect().height,
-      line: Number.parseFloat(getComputedStyle(document.querySelector('[data-testid="decision-jev-retention"]')!).lineHeight),
-    }))
-    expect(Math.abs(height - 3 * line), `portrait ${height}px against a ${line}px line`).toBeLessThanOrEqual(1)
+    await expectStandsThreeLinesTall(page, 'decision-jev-portrait', 'decision-jev-retention')
     expect(writes()).toEqual([])
   })
 
@@ -112,22 +133,7 @@ test.describe('UAT-23 decision providers', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
     await blockApiWrites(page)
     await openPanel(page)
-    const play = page.getByRole('button', PLAY)
-    const opacity = badgeOpacity(page)
-
-    await page.mouse.move(0, 0)
-    await expect.poll(opacity).toBe('0')
-    await play.hover()
-    await expect.poll(opacity).toBe('1')
-    await page.mouse.move(0, 0)
-    await expect.poll(opacity).toBe('0')
-
-    // Arrive by Tab, so :focus-visible matches for the reason a keyboard user would see it.
-    await play.focus()
-    await page.keyboard.press('Shift+Tab')
-    await page.keyboard.press('Tab')
-    await expect(play).toBeFocused()
-    await expect.poll(opacity).toBe('1')
+    await expectBadgeFollowsHoverAndFocus(page, PLAY)
   })
 
   test.describe('on a screen with no hover', () => {
@@ -227,14 +233,7 @@ test.describe('UAT-23 decision providers', () => {
       await stubOllama(page, REACHABLE)
       const writes = await blockApiWrites(page)
       await openPanel(page)
-      const logo = page.getByTestId('decision-ollama-logo')
-      await expect.poll(() => logo.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0)).toBeGreaterThan(0)
-
-      const { height, line } = await page.evaluate(() => ({
-        height: document.querySelector('[data-testid="decision-ollama-logo"]')!.getBoundingClientRect().height,
-        line: Number.parseFloat(getComputedStyle(document.querySelector('[data-testid="decision-ollama-privacy"]')!).lineHeight),
-      }))
-      expect(Math.abs(height - 3 * line), `llama ${height}px against a ${line}px line`).toBeLessThanOrEqual(1)
+      await expectStandsThreeLinesTall(page, 'decision-ollama-logo', 'decision-ollama-privacy')
       expect(writes()).toEqual([])
     })
 
@@ -263,21 +262,7 @@ test.describe('UAT-23 decision providers', () => {
       await stubOllama(page, REACHABLE)
       await blockApiWrites(page)
       await openPanel(page)
-      const play = page.getByRole('button', OLLAMA_PLAY)
-      const opacity = badgeOpacity(page, OLLAMA_PLAY)
-
-      await page.mouse.move(0, 0)
-      await expect.poll(opacity).toBe('0')
-      await play.hover()
-      await expect.poll(opacity).toBe('1')
-      await page.mouse.move(0, 0)
-      await expect.poll(opacity).toBe('0')
-
-      await play.focus()
-      await page.keyboard.press('Shift+Tab')
-      await page.keyboard.press('Tab')
-      await expect(play).toBeFocused()
-      await expect.poll(opacity).toBe('1')
+      await expectBadgeFollowsHoverAndFocus(page, OLLAMA_PLAY)
     })
   })
 })
