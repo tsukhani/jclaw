@@ -1,4 +1,5 @@
 import type { Page } from '@playwright/test'
+import type { ConfigResponse, OllamaDecisionStatus } from '~/types/api'
 import { test, expect, gotoPage, blockApiWrites } from './helpers'
 
 /**
@@ -10,7 +11,8 @@ import { test, expect, gotoPage, blockApiWrites } from './helpers'
  * the click plays the clip, and the speaker badge the CSS hides at rest appears on hover, on
  * keyboard focus and on a screen with no hover.
  *
- * Read-only: blockApiWrites answers every write, and the key editor is never opened.
+ * Read-only: blockApiWrites answers every write, and the key editor is never opened. The Ollama
+ * card's reads are stubbed, so no test depends on a real Ollama server or on the instance's settings.
  */
 
 const PLAY = { name: 'Play JEV saying “My name is Jev”' }
@@ -24,6 +26,40 @@ async function openPanel(page: Page) {
 function badgeOpacity(page: Page) {
   const badge = page.getByRole('button', PLAY).locator('span[aria-hidden="true"]').first()
   return () => badge.evaluate(el => getComputedStyle(el).opacity)
+}
+
+const DECISION_MODELS = ['tev1:latest', 'nimble:latest']
+
+const REACHABLE: OllamaDecisionStatus = {
+  baseUrl: 'http://localhost:11434', customized: false, reachable: true, error: null, models: DECISION_MODELS,
+}
+
+async function stubOllama(page: Page, status: OllamaDecisionStatus) {
+  await page.route(url => url.pathname === '/api/decision/ollama', route => route.fulfill({ json: status }))
+}
+
+/** Answer GET /api/config with the real entries, the keys the Ollama card reads replaced by `overrides`. */
+async function stubConfig(page: Page, overrides: Record<string, string> = {}) {
+  const replaced = new Set(['decision.ollama.models', 'router.classifier.provider', 'router.classifier.model', ...Object.keys(overrides)])
+  await page.route(url => url.pathname === '/api/config', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const response = await route.fetch()
+    const config = await response.json() as ConfigResponse
+    config.entries = [
+      ...config.entries.filter(e => !replaced.has(e.key)),
+      ...Object.entries(overrides).map(([key, value]) => ({ key, value })),
+    ]
+    return route.fulfill({ response, json: config })
+  })
+}
+
+/** The bodies of the POST /api/config writes blockApiWrites answers. */
+function recordConfigPosts(page: Page) {
+  const posts: unknown[] = []
+  page.on('request', (req) => {
+    if (req.method() === 'POST' && new URL(req.url()).pathname === '/api/config') posts.push(req.postDataJSON())
+  })
+  return () => posts
 }
 
 test.describe('UAT-23 decision providers', () => {
@@ -102,6 +138,84 @@ test.describe('UAT-23 decision providers', () => {
       // Guards the emulation itself: without it this test would pass on a hover device by never asking.
       expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true)
       await expect.poll(badgeOpacity(page)).toBe('1')
+    })
+  })
+
+  test.describe('the Ollama card', () => {
+    test('renders below the JEV card', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      await stubConfig(page)
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      const ollama = page.getByTestId('decision-provider-ollama')
+      await expect(ollama).toBeVisible()
+      const [jevBox, ollamaBox] = await Promise.all([page.getByTestId('decision-provider-jev').boundingBox(), ollama.boundingBox()])
+      expect(ollamaBox!.y).toBeGreaterThanOrEqual(jevBox!.y + jevBox!.height)
+      expect(writes()).toEqual([])
+    })
+
+    test('a reachable server lists exactly its decision models', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      await stubConfig(page)
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      await expect(page.getByTestId('decision-ollama-status')).toHaveText('reachable')
+      const models = page.getByTestId('decision-ollama-models')
+      await expect(models.locator('label')).toHaveText(DECISION_MODELS)
+      await expect(page.getByTestId('decision-ollama-error')).toHaveCount(0)
+      expect(writes()).toEqual([])
+    })
+
+    test('an unreachable server says so and shows the error', async ({ page }) => {
+      await stubOllama(page, {
+        baseUrl: 'http://192.168.1.20:11434', customized: true, reachable: false,
+        error: 'not reachable (ConnectException)', models: [],
+      })
+      await stubConfig(page)
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      await expect(page.getByTestId('decision-ollama-status')).toHaveText('not reachable')
+      await expect(page.getByTestId('decision-ollama-error')).toHaveText('not reachable (ConnectException)')
+      await expect(page.getByTestId('decision-ollama-models').locator('label')).toHaveCount(0)
+      expect(writes()).toEqual([])
+    })
+
+    test('selecting a model sends one write that stores it in decision.ollama.models', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      await stubConfig(page)
+      const writes = await blockApiWrites(page)
+      const posts = recordConfigPosts(page)
+      await openPanel(page)
+      // click(), not check(): the stubbed re-read after the write unticks the box, which check() reports as a failure.
+      await page.getByTestId('decision-ollama-model-tev1:latest').getByRole('checkbox').click()
+
+      await expect.poll(writes).toEqual(['POST /api/config'])
+      expect(posts()).toHaveLength(1)
+      const { key, value } = posts()[0] as { key: string, value: string }
+      expect(key).toBe('decision.ollama.models')
+      expect(JSON.parse(value)).toEqual(['tev1:latest'])
+    })
+
+    test('the router classifier on an Ollama model reads in use and names the model', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      await stubConfig(page, { 'router.classifier.provider': 'ollama-decision', 'router.classifier.model': 'tev1:latest' })
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      const router = page.getByTestId('decision-ollama-consumer-model-router')
+      await expect(router).toContainText('(tev1:latest)')
+      await expect(router).toContainText('in use')
+      await expect(router).not.toContainText('not in use')
+      expect(writes()).toEqual([])
+    })
+
+    test('the router classifier on JEV leaves the Ollama card not in use', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      await stubConfig(page, { 'router.classifier.provider': 'jev', 'router.classifier.model': 'tev1:latest' })
+      await blockApiWrites(page)
+      await openPanel(page)
+      const router = page.getByTestId('decision-ollama-consumer-model-router')
+      await expect(router).toContainText('not in use')
+      await expect(router).not.toContainText('(tev1:latest)')
     })
   })
 })
