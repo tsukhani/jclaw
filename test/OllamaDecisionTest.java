@@ -449,6 +449,155 @@ class OllamaDecisionTest extends UnitTest {
         assertTrue(verdict.reason().contains("refused"), verdict.reason());
     }
 
+    // --- unloading the models the router no longer uses (JCLAW-1339) --------------------------
+
+    private static final String INSTALLED = """
+            {"models":[
+              {"name":"tev1:latest","capabilities":["decision"]},
+              {"name":"tev1:0.8b","capabilities":["decision"]},
+              {"name":"nimble:latest","capabilities":["completion","decision"]},
+              {"name":"snowflake-arctic-embed:latest","capabilities":["embedding"]},
+              {"name":"llama3.2:latest","capabilities":["completion","tools"]}
+            ]}""";
+
+    /** A server with every model in {@link #INSTALLED} and {@code loaded} in memory. */
+    private static Answer installedWith(List<String> loaded) {
+        return serverWith(loaded, chain -> chain.request().url().encodedPath().equals("/api/tags")
+                ? reply(chain, 200, INSTALLED) : reply(chain, 404, "{}"));
+    }
+
+    /** The models sent {@code keep_alive: 0}, in order. */
+    private List<String> unloadsSent() {
+        return bodies.stream().map(b -> JsonParser.parseString(b).getAsJsonObject())
+                .filter(b -> b.has("keep_alive") && b.get("keep_alive").getAsString().equals("0"))
+                .map(b -> b.get("model").getAsString()).toList();
+    }
+
+    private static RouterPolicy classifiedBy(Candidate classifier) {
+        return new RouterPolicy(Map.of(TaskClass.CHAT, List.of(new Candidate("p", "m"))), 0.75, 0.95,
+                classifier, 8, true, 0.90);
+    }
+
+    @Test
+    void onlyTheDecisionModelTheRouterIsNotUsingIsUnloaded() {
+        ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
+        var loaded = List.of("nimble:latest", "tev1:latest", "snowflake-arctic-embed:latest", "llama3.2:latest");
+        withOllama(installedWith(loaded), () -> {
+            RouterClassifier.settleOllamaModels(ollamaPolicy(), BASE);
+            return null;
+        });
+        assertEquals(List.of("nimble:latest"), unloadsSent());
+        var unload = requests.stream().filter(r -> r.url().encodedPath().equals("/api/generate")).findFirst().orElseThrow();
+        assertEquals(BASE + "/api/generate", unload.url().toString());
+        var body = JsonParser.parseString(bodies.getFirst()).getAsJsonObject();
+        assertEquals(List.of("keep_alive", "model"), body.keySet().stream().sorted().toList(), "what ollama stop sends");
+        assertEquals(0, body.get("keep_alive").getAsInt());
+        assertEquals("tev1", JsonParser.parseString(bodies.getLast()).getAsJsonObject().get("model").getAsString(),
+                "the classifier is loaded, not unloaded");
+        assertEquals(0, OllamaDecision.breaker().stats().samples(), "an unload is no decision");
+    }
+
+    @Test
+    void withJevOrNoClassifierEveryLoadedDecisionModelIsUnloaded() {
+        var loaded = List.of("nimble:latest", "tev1:latest", "snowflake-arctic-embed:latest");
+        for (var policy : List.of(classifiedBy(new Candidate(RouterPolicy.JEV, "jev-latest")), classifiedBy(null))) {
+            bodies.clear();
+            requests.clear();
+            withOllama(installedWith(loaded), () -> {
+                RouterClassifier.settleOllamaModels(policy, BASE);
+                return null;
+            });
+            assertEquals(List.of("nimble:latest", "tev1:latest"), unloadsSent());
+            assertEquals(2, requestsTo("/api/generate"), "nothing for the embedding model, and nothing to load");
+        }
+    }
+
+    @Test
+    void theClassifiersOwnTagIsKeptAndItsOtherTagsAreNot() {
+        var loaded = List.of("tev1:latest", "tev1:0.8b");
+        withOllama(installedWith(loaded), () -> OllamaDecision.unloadUnused(BASE, "tev1"));
+        assertEquals(List.of("tev1:0.8b"), unloadsSent(), "a bare name is :latest and nothing else");
+
+        bodies.clear();
+        withOllama(installedWith(loaded), () -> OllamaDecision.unloadUnused(BASE, "tev1:0.8b"));
+        assertEquals(List.of("tev1:latest"), unloadsSent());
+
+        bodies.clear();
+        withOllama(installedWith(loaded), () -> OllamaDecision.unloadUnused(BASE, "tev1:latest"));
+        assertEquals(List.of("tev1:0.8b"), unloadsSent());
+    }
+
+    @Test
+    void aModelWithoutTheDecisionCapabilityIsNeverSentAnything() {
+        var unloaded = withOllama(installedWith(List.of("snowflake-arctic-embed:latest", "llama3.2:latest")),
+                () -> OllamaDecision.unloadUnused(BASE, null));
+        assertEquals(List.of(), unloaded);
+        assertEquals(0, requestsTo("/api/generate"));
+    }
+
+    @Test
+    void anUnreadablePsOrTagsUnloadsNothing() {
+        Answer psFails = chain -> switch (chain.request().url().encodedPath()) {
+            case "/api/ps" -> reply(chain, 500, "{}");
+            case "/api/tags" -> reply(chain, 200, INSTALLED);
+            default -> reply(chain, 200, "{}");
+        };
+        Answer psGarbled = chain -> switch (chain.request().url().encodedPath()) {
+            case "/api/ps" -> reply(chain, 200, "<html>router login</html>");
+            case "/api/tags" -> reply(chain, 200, INSTALLED);
+            default -> reply(chain, 200, "{}");
+        };
+        var loaded = List.of("nimble:latest");
+        Answer tagsFails = serverWith(loaded, chain -> reply(chain, 500, "{}"));
+        for (var server : List.of(psFails, psGarbled, tagsFails, unreachable())) {
+            assertEquals(List.of(), withOllama(server, () -> OllamaDecision.unloadUnused(BASE, null)));
+        }
+        assertEquals(0, requestsTo("/api/generate"));
+    }
+
+    @Test
+    void aRefusedAddressIsNeverDialled() {
+        withOllama(installedWith(List.of("nimble:latest")), () -> OllamaDecision.unloadUnused("http://169.254.169.254", null));
+        assertTrue(requests.isEmpty());
+    }
+
+    @Test
+    void reselectingTheSameModelLeavesItLoaded() {
+        ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
+        // Settings deletes the model, then writes the pair: a settle with no classifier, then one with tev1.
+        withOllama(installedWith(List.of("tev1:latest")), () -> {
+            RouterClassifier.settleOllamaModels(classifiedBy(null), BASE);
+            RouterClassifier.settleOllamaModels(ollamaPolicy(), BASE);
+            return null;
+        });
+        var last = JsonParser.parseString(bodies.getLast()).getAsJsonObject();
+        assertEquals("tev1", last.get("model").getAsString());
+        assertEquals(-1, last.get("keep_alive").getAsInt(), "the last word on tev1 is a load");
+    }
+
+    @Test
+    void aFreshPinWaitsForTheOneInFlightAndSendsItsOwn() throws Exception {
+        ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
+        var release = new CountDownLatch(1);
+        try {
+            var server = loadingUntil(release, chain -> reply(chain, 404, "{}"));
+            var first = withOllama(server, () -> OllamaDecision.pin(BASE, "nimble"));
+            Thread.ofVirtual().start(() -> {
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                }
+                release.countDown();
+            });
+            assertTrue(withOllama(server, () -> OllamaDecision.pinAfresh(BASE, "nimble")));
+            assertTrue(first.isDone(), "the fresh pin waited for the earlier one");
+            assertEquals(2, requestsTo("/api/generate"), "and did not join it");
+        } finally {
+            release.countDown();
+        }
+    }
+
     // --- the server's decision models --------------------------------------------------------
 
     private static final String TAGS = """

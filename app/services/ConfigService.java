@@ -509,11 +509,12 @@ public class ConfigService {
         if (key.startsWith(PROVIDER_KEY_PREFIX) || key.startsWith(RouterPolicy.PREFIX)) {
             AgentService.syncEnabledStates();
         }
-        // Choosing an Ollama classifier starts its load now, not at the first routed turn's timeout (JCLAW-1338).
+        // Choosing an Ollama classifier starts its load now, not at the first routed turn's timeout (JCLAW-1338),
+        // and unloads the decision models it replaced (JCLAW-1339).
         // Tests point at canned transports, so a write there must never dial a real server.
-        if ((key.equals(RouterPolicy.CLASSIFIER_PROVIDER) || key.equals(RouterPolicy.CLASSIFIER_MODEL)
-                || key.equals(OllamaDecision.BASE_URL_KEY) || key.equals(OllamaDecision.KEEP_ALIVE_KEY))
-                && !Play.runningInTestMode()) {
+        if (isOllamaClassifierKey(key) && !Play.runningInTestMode()) {
+            RouterClassifier.settleOllamaModelsInBackground();
+        } else if (key.equals(OllamaDecision.KEEP_ALIVE_KEY) && !Play.runningInTestMode()) {
             RouterClassifier.keepOllamaModelLoaded(RouterPolicy.load());
         }
         // The registry otherwise re-reads the pin only once a minute.
@@ -675,6 +676,16 @@ public class ConfigService {
         if (isDispatcherCapKey(key)) {
             HttpFactories.applyDispatcherConfig();
         }
+        // Settings deletes the classifier model before writing the pair; see setWithSideEffects.
+        if (isOllamaClassifierKey(key) && !Play.runningInTestMode()) {
+            RouterClassifier.settleOllamaModelsInBackground();
+        }
+    }
+
+    /** The keys that decide which Ollama decision model, on which server, the router keeps loaded. */
+    private static boolean isOllamaClassifierKey(String key) {
+        return key.equals(RouterPolicy.CLASSIFIER_PROVIDER) || key.equals(RouterPolicy.CLASSIFIER_MODEL)
+                || key.equals(OllamaDecision.BASE_URL_KEY);
     }
 
     /** The two keys {@link HttpFactories#applyDispatcherConfig} reads. */
