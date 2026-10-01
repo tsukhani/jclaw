@@ -18,6 +18,7 @@ import utils.HttpKeys;
 import utils.RetryScheduler;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
@@ -122,7 +123,12 @@ public final class JevApi {
             } catch (IOException e) {
                 EventLogger.warn(CATEGORY, "%s request %d of %d failed: %s"
                         .formatted(target.name(), attempt, attempts, e.getClass().getSimpleName()));
-                if (attempt >= attempts) throw new Outage(target.name() + " unreachable");
+                if (attempt >= attempts) {
+                    // The address is the operator's, never the model's, so naming a timeout scans nothing (JCLAW-1337).
+                    throw new Outage(e instanceof InterruptedIOException
+                            ? "%s did not answer within %s".formatted(target.name(), seconds(attemptTimeoutMs))
+                            : target.name() + " unreachable");
+                }
                 pause(BACKOFF_MS << (attempt - 1));
             }
         }
@@ -223,6 +229,10 @@ public final class JevApi {
         double value = element.getAsDouble();
         if (!Double.isFinite(value) || value < 0 || value > 1) throw new JevException(INVALID);
         return value;
+    }
+
+    private static String seconds(long millis) {
+        return millis % 1000 == 0 ? millis / 1000 + " s" : millis + " ms";
     }
 
     /** A wait that unmounts a virtual-thread caller (JDK-8373224). */

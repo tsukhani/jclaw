@@ -189,6 +189,7 @@ class JevClientTest extends UnitTest {
         assertEquals("https://api.typesafe.ai/v1/systemone", request.url().toString());
         assertEquals("Bearer ts-test-key", request.header("Authorization"));
         assertEquals("jev-latest", bodies.getFirst().get("model").getAsString());
+        assertFalse(bodies.getFirst().has("keep_alive"), "keep_alive is Ollama's, not TypeSafe's");
     }
 
     @Test

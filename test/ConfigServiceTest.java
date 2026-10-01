@@ -140,6 +140,22 @@ class ConfigServiceTest extends UnitTest {
     }
 
     @Test
+    void theOllamaDecisionKeepAliveIsAnOllamaDuration() {
+        var key = OllamaDecision.KEEP_ALIVE_KEY;
+        for (var ok : new String[] {"", "-1", "0", "30s", "5m", "1h", "90m", "1.5h", "0s", " 30m "}) {
+            assertNull(DecisionSettings.rejectionFor(key, ok), () -> "refused " + ok);
+        }
+        for (var bad : new String[] {"-2", "1", "300", "5", "-1m", "5d", "5 m", "m", "1.m", "forever", "5M", "1h30m"}) {
+            var rejected = DecisionSettings.rejectionFor(key, bad);
+            assertNotNull(rejected, () -> "accepted " + bad);
+            assertTrue(rejected.contains(key), rejected);
+        }
+        assertNotNull(ConfigService.setWithSideEffects(key, "forever"), "refused through the write path");
+        // Not assertNull: OllamaDecisionTest writes this key from a concurrently running class.
+        assertNotEquals("forever", ConfigService.get(key), "a refused value is not saved");
+    }
+
+    @Test
     void theOllamaDecisionProviderNameIsReservedForTheRoutersClassifier() {
         for (var key : new String[] {"provider.ollama-decision.baseUrl", "provider.ollama-decision.apiKey"}) {
             var rejected = ConfigService.setWithSideEffects(key, "x");

@@ -2,6 +2,7 @@ package services.decision;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import okhttp3.Request;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * The operator's Ollama server as a decision provider (JCLAW-1336): its System One models answer
@@ -32,6 +34,8 @@ public final class OllamaDecision {
     public static final String BASE_URL_KEY = "decision.ollama.baseUrl";
     /** A JSON array of the model names the operator selected, such as {@code ["tev1"]}. */
     public static final String MODELS_KEY = "decision.ollama.models";
+    /** How long Ollama keeps the model loaded after a decision request; not {@code provider.ollama-local.keepAlive}. */
+    public static final String KEEP_ALIVE_KEY = "decision.ollama.keepAlive";
     public static final String BREAKER_NAME = "decision:ollama";
     /** The capability Ollama's {@code /api/tags} lists for a System One model. */
     static final String DECISION_CAPABILITY = "decision";
@@ -39,6 +43,9 @@ public final class OllamaDecision {
     private static final String LOCAL_BASE_URL_KEY = "provider.ollama-local.baseUrl";
     private static final String DEFAULT_BASE_URL = "http://localhost:11434";
     private static final long TAGS_TIMEOUT_SECONDS = 5;
+    /** Until Ollama restarts: the classifier is consulted on every routed turn, and a cold tev1 took 19 s. */
+    private static final String DEFAULT_KEEP_ALIVE = "-1";
+    private static final Pattern DURATION = Pattern.compile("-1|0|\\d+(\\.\\d+)?[smh]");
 
     private OllamaDecision() {}
 
@@ -62,6 +69,23 @@ public final class OllamaDecision {
     public static List<String> selectedModels() {
         var parsed = parseModels(ConfigService.get(MODELS_KEY));
         return parsed == null ? List.of() : parsed;
+    }
+
+    /** Whether {@code value} is an Ollama duration this key accepts: -1, 0, or a number followed by s, m or h. */
+    static boolean isKeepAlive(String value) {
+        return DURATION.matcher(value).matches();
+    }
+
+    /** Adds {@link #KEEP_ALIVE_KEY}, or -1 when it is unset or unreadable, as {@code keep_alive} on {@code body}. */
+    public static void addKeepAlive(JsonObject body) {
+        var stored = ConfigService.get(KEEP_ALIVE_KEY);
+        var value = stored != null && isKeepAlive(stored.strip()) ? stored.strip() : DEFAULT_KEEP_ALIVE;
+        // Ollama parses a bare "-1" string as a duration missing its unit; a number is seconds.
+        if (value.equals("-1") || value.equals("0")) {
+            body.addProperty("keep_alive", Integer.parseInt(value));
+        } else {
+            body.addProperty("keep_alive", value);
+        }
     }
 
     /**

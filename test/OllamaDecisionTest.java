@@ -18,6 +18,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.ConfigService;
 import services.decision.JevApi;
 import services.decision.OllamaDecision;
 import utils.CircuitBreaker;
@@ -110,6 +111,18 @@ class OllamaDecisionTest extends UnitTest {
         };
     }
 
+    /** Holds the call past a 1 s classifier timeout; OkHttp's call timeout ends it. */
+    private static Answer hang() {
+        return chain -> {
+            try {
+                Thread.sleep(1_300);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            return answering("chat", 0.95, "low").reply(chain);
+        };
+    }
+
     private static JevRouterClassifier.Verdict classify(String model) {
         return JevRouterClassifier.classifyWithOllama(PROMPT, BASE, model, 0.9, 8);
     }
@@ -133,6 +146,38 @@ class OllamaDecisionTest extends UnitTest {
         assertEquals("tev1:0.8b", body.get("model").getAsString());
         assertEquals(List.of("task_class", "effort"), List.copyOf(body.getAsJsonObject("questions").keySet()),
                 "the questions JEV answers");
+    }
+
+    @Test
+    void theRequestKeepsTheModelLoadedUntilOllamaRestartsByDefault() {
+        ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
+        withOllama(answering("chat", 0.95, "low"), () -> classify("tev1"));
+        var keepAlive = JsonParser.parseString(bodies.getFirst()).getAsJsonObject().getAsJsonPrimitive("keep_alive");
+        assertNotNull(keepAlive, bodies.getFirst());
+        assertTrue(keepAlive.isNumber(), "a bare \"-1\" string is a duration with no unit to Ollama");
+        assertEquals(-1, keepAlive.getAsInt());
+    }
+
+    @Test
+    void theRequestCarriesTheConfiguredKeepAlive() {
+        try {
+            for (var configured : List.of("30m", "0", "-1", "1.5h", "garbage")) {
+                bodies.clear();
+                ConfigService.set(OllamaDecision.KEEP_ALIVE_KEY, configured);
+                withOllama(answering("chat", 0.95, "low"), () -> classify("tev1"));
+                var keepAlive = JsonParser.parseString(bodies.getFirst()).getAsJsonObject().getAsJsonPrimitive("keep_alive");
+                switch (configured) {
+                    case "0", "-1" -> assertEquals(Integer.parseInt(configured), keepAlive.getAsInt());
+                    case "garbage" -> assertEquals(-1, keepAlive.getAsInt(), "a value written around the check");
+                    default -> {
+                        assertTrue(keepAlive.isString(), configured);
+                        assertEquals(configured, keepAlive.getAsString());
+                    }
+                }
+            }
+        } finally {
+            ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
+        }
     }
 
     @Test
@@ -191,6 +236,16 @@ class OllamaDecisionTest extends UnitTest {
         var c = withOllama(unreachable(), () -> RouterClassifier.classify(PROMPT, null, 0, ollamaPolicy(), () -> null));
         assertEquals(TaskClass.AGENTIC, c.taskClass());
         assertEquals(List.of("asks to run"), c.signals(), "a fault adds nothing to the route; it was logged");
+    }
+
+    @Test
+    void aTimeoutSaysSoRatherThanUnreachable() {
+        var verdict = withOllama(hang(),
+                () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "tev1:latest", 0.9, 1));
+        assertEquals(1, requests.size());
+        assertNull(verdict.classification());
+        assertEquals("the Ollama tev1:latest classifier failed (Ollama did not answer within 1 s)", verdict.reason());
+        assertEquals(1, OllamaDecision.breaker().stats().failures(), "a timeout still counts against the breaker");
     }
 
     @Test

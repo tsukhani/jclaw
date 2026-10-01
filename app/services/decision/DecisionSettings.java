@@ -41,9 +41,14 @@ public final class DecisionSettings {
             return OllamaDecision.parseModels(value) != null ? null
                     : "%s must be a JSON array of model names, such as [\"tev1\"].".formatted(key);
         }
+        if (key.equals(OllamaDecision.KEEP_ALIVE_KEY)) {
+            return value == null || value.isBlank() || OllamaDecision.isKeepAlive(value.strip()) ? null
+                    : "%s must be -1 (keep loaded), 0 (unload at once) or a number followed by s, m or h, such as 30m."
+                            .formatted(key);
+        }
         if (!key.equals(API_KEY)) {
-            return "%s is not a decision-provider setting; use %s, %s or %s."
-                    .formatted(key, API_KEY, OllamaDecision.BASE_URL_KEY, OllamaDecision.MODELS_KEY);
+            return "%s is not a decision-provider setting; use %s, %s, %s or %s.".formatted(key, API_KEY,
+                    OllamaDecision.BASE_URL_KEY, OllamaDecision.MODELS_KEY, OllamaDecision.KEEP_ALIVE_KEY);
         }
         // The key rides an Authorization header, where OkHttp throws on anything but printable ASCII.
         return value == null || value.isBlank() || value.chars().allMatch(c -> c > ' ' && c < 0x7f) ? null

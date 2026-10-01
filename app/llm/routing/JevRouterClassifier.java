@@ -60,7 +60,7 @@ public final class JevRouterClassifier {
         if (apiKey == null || apiKey.isBlank()) {
             return failed("the JEV classifier has no TypeSafe API key; set one in Settings → Decision Providers");
         }
-        return decide(JEV, JevApi.jev(apiKey.strip()), JevApi.MODEL, message, minConfidence, timeoutSeconds);
+        return decide(JEV, JevApi.jev(apiKey.strip()), request(message, JevApi.MODEL), minConfidence, timeoutSeconds);
     }
 
     /**
@@ -75,15 +75,17 @@ public final class JevRouterClassifier {
         } catch (SecurityException e) {
             return failed("the Ollama classifier's server address is refused (%s)".formatted(e.getMessage()));
         }
-        return decide("Ollama " + model, target, model, message, minConfidence, timeoutSeconds);
+        var body = request(message, model);
+        OllamaDecision.addKeepAlive(body);
+        return decide("Ollama " + model, target, body, minConfidence, timeoutSeconds);
     }
 
     /** {@code label} names the provider in the verdict's reasons and signals. */
-    private static Verdict decide(String label, JevApi.Target target, String model, String message,
-                                  double minConfidence, int timeoutSeconds) {
+    private static Verdict decide(String label, JevApi.Target target, JsonObject body, double minConfidence,
+                                  int timeoutSeconds) {
         JsonObject result;
         try {
-            result = JevApi.post(target, request(message, model), 1, timeoutSeconds * 1000L);
+            result = JevApi.post(target, body, 1, timeoutSeconds * 1000L);
         } catch (JevException.BreakerOpen _) {
             // The breaker logged its own transition; a warning per routed turn would only repeat it.
             return new Verdict(null, label + " breaker open", true);
