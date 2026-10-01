@@ -271,12 +271,13 @@ describe('Settings page — Decision Providers', () => {
       expect(card.text()).not.toContain('record or retain')
     })
 
-    it('shows Ollama\'s logo beside the note, decorative and filled with the theme\'s text color', async () => {
+    it('shows the llama beside the note, decorative and sized before it loads', async () => {
       baseEndpoints()
       const component = await mountDecisionProviders()
       const logo = component.find('[data-testid="decision-ollama-logo"]')
-      expect(logo.attributes('aria-hidden')).toBe('true')
-      expect(logo.attributes('fill')).toBe('currentColor')
+      expect(logo.attributes('src')).toBe('/ollama.webp')
+      expect(logo.attributes('alt')).toBe('')
+      expect([logo.attributes('width'), logo.attributes('height')]).toEqual(['200', '294'])
       const play = component.find('[data-testid="decision-ollama-play"]')
       expect(play.find('[data-testid="decision-ollama-logo"]').exists()).toBe(true)
       expect(play.element.nextElementSibling?.nextElementSibling?.getAttribute('data-testid')).toBe('decision-ollama-privacy')

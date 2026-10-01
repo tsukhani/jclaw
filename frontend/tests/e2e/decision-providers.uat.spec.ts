@@ -66,7 +66,7 @@ function recordConfigPosts(page: Page) {
 test.describe('UAT-23 decision providers', () => {
   test('the clip and the portrait are served as media, not as the SPA fallback', async ({ request }) => {
     // An unknown path answers 200 text/html from the SPA catch-all, so the status alone proves nothing.
-    for (const [path, type] of [['/jev.mp3', 'audio/'], ['/jev.webp', 'image/'], ['/ollama.mp3', 'audio/']] as const) {
+    for (const [path, type] of [['/jev.mp3', 'audio/'], ['/jev.webp', 'image/'], ['/ollama.mp3', 'audio/'], ['/ollama.webp', 'image/']] as const) {
       const res = await request.get(path)
       expect(res.status(), path).toBe(200)
       expect(res.headers()['content-type'], path).toContain(type)
@@ -221,6 +221,21 @@ test.describe('UAT-23 decision providers', () => {
       const router = page.getByTestId('decision-ollama-consumer-model-router')
       await expect(router).toContainText('not in use')
       await expect(router).not.toContainText('(tev1:latest)')
+    })
+
+    test('the llama decodes and stands three text lines tall beside the note, as JEV does', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      const logo = page.getByTestId('decision-ollama-logo')
+      await expect.poll(() => logo.evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0)).toBeGreaterThan(0)
+
+      const { height, line } = await page.evaluate(() => ({
+        height: document.querySelector('[data-testid="decision-ollama-logo"]')!.getBoundingClientRect().height,
+        line: Number.parseFloat(getComputedStyle(document.querySelector('[data-testid="decision-ollama-privacy"]')!).lineHeight),
+      }))
+      expect(Math.abs(height - 3 * line), `llama ${height}px against a ${line}px line`).toBeLessThanOrEqual(1)
+      expect(writes()).toEqual([])
     })
 
     test('the llama clip is fetched only once the logo is clicked, and the click plays it', async ({ page }) => {

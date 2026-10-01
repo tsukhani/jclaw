@@ -276,11 +276,15 @@ function playClip(audio: HTMLAudioElement | undefined) {
           data-testid="decision-ollama-play"
           @click="playClip(ollamaClip)"
         >
-          <!-- 2lh, as JEV's 3lh: the text beside it wraps to two lines in a 1330–1660 px window. -->
-          <IconOllama
-            class="block h-[2lh] w-auto text-fg-strong"
+          <!-- 3lh, as JEV's: the text beside it wraps to three lines in a 1330–1660 px window. -->
+          <img
+            src="/ollama.webp"
+            alt=""
+            width="200"
+            height="294"
+            class="block h-[3lh] w-auto select-none"
             data-testid="decision-ollama-logo"
-          />
+          >
           <span
             class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-safe:transition-opacity"
             aria-hidden="true"
@@ -298,8 +302,10 @@ function playClip(audio: HTMLAudioElement | undefined) {
           preload="none"
         />
         <p data-testid="decision-ollama-privacy">
-          Decision models such as tev1 and nimble, running on your own Ollama server. The Model Router's
-          classifier sends the first 4000 characters of each prompt, only to this server.
+          Decision models such as tev1 and nimble, running on your own Ollama server. They answer the same
+          questions JEV does, but Ollama runs them only on that server and will not hand a decision to a cloud
+          model, so no third party ever sees or keeps what they are sent. The Model Router's classifier sends
+          the first 4000 characters of each prompt, only to this server.
         </p>
       </div>
       <div class="divide-y divide-border">
