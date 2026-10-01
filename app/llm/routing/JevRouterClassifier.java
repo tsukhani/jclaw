@@ -60,7 +60,7 @@ public final class JevRouterClassifier {
         if (apiKey == null || apiKey.isBlank()) {
             return failed("the JEV classifier has no TypeSafe API key; set one in Settings → Decision Providers");
         }
-        return decide(JEV, JevApi.jev(apiKey.strip()), request(message, JevApi.MODEL), minConfidence, timeoutSeconds);
+        return decide(JEV, JevApi.jev(apiKey.strip()), request(message, JevApi.MODEL), minConfidence, timeoutSeconds, () -> {});
     }
 
     /**
@@ -77,12 +77,14 @@ public final class JevRouterClassifier {
         }
         var body = request(message, model);
         OllamaDecision.addKeepAlive(body);
-        return decide("Ollama " + model, target, body, minConfidence, timeoutSeconds);
+        // Ollama drops a load when its request is cancelled, so a timed-out cold model needs a load of its own.
+        return decide("Ollama " + model, target, body, minConfidence, timeoutSeconds,
+                () -> OllamaDecision.pin(baseUrl, model));
     }
 
-    /** {@code label} names the provider in the verdict's reasons and signals. */
+    /** {@code label} names the provider in reasons and signals; {@code onTimeout} runs when the call timed out. */
     private static Verdict decide(String label, JevApi.Target target, JsonObject body, double minConfidence,
-                                  int timeoutSeconds) {
+                                  int timeoutSeconds, Runnable onTimeout) {
         JsonObject result;
         try {
             result = JevApi.post(target, body, 1, timeoutSeconds * 1000L);
@@ -90,6 +92,7 @@ public final class JevRouterClassifier {
             // The breaker logged its own transition; a warning per routed turn would only repeat it.
             return new Verdict(null, label + " breaker open", true);
         } catch (RuntimeException e) {
+            if (e instanceof JevException.Outage outage && outage.timedOut()) onTimeout.run();
             // A JevException never carries the key; anything else is named by its type alone.
             return failed("the %s classifier failed (%s)".formatted(label,
                     e instanceof JevException ? e.getMessage() : e.getClass().getSimpleName()));

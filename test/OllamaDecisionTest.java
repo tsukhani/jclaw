@@ -29,6 +29,8 @@ import java.net.ConnectException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -46,6 +48,7 @@ class OllamaDecisionTest extends UnitTest {
 
     private final List<Request> requests = new CopyOnWriteArrayList<>();
     private final List<String> bodies = new CopyOnWriteArrayList<>();
+    private OkHttpClient client;
 
     @BeforeEach
     void reset() {
@@ -75,7 +78,30 @@ class OllamaDecisionTest extends UnitTest {
             }
             return answer.reply(chain);
         };
-        return HttpFactories.callWith(new OkHttpClient.Builder().addInterceptor(ollama).build(), body);
+        client = new OkHttpClient.Builder().addInterceptor(ollama).build();
+        return HttpFactories.callWith(client, body);
+    }
+
+    private long requestsTo(String path) {
+        return requests.stream().filter(r -> r.url().encodedPath().equals(path)).count();
+    }
+
+    /** Calls the last {@link #withOllama} client still holds: an enqueued load stays counted until it answers. */
+    private int callsInFlight() {
+        return client.dispatcher().queuedCallsCount() + client.dispatcher().runningCallsCount();
+    }
+
+    /** Answers a load only once {@code release} opens, so a test can see it in flight. */
+    private static Answer loadingUntil(CountDownLatch release, Answer otherwise) {
+        return chain -> {
+            if (!chain.request().url().encodedPath().equals("/api/generate")) return otherwise.reply(chain);
+            try {
+                release.await(10, TimeUnit.SECONDS);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            return reply(chain, 200, "{\"model\":\"tev1:latest\",\"done\":true,\"done_reason\":\"load\"}");
+        };
     }
 
     private static Response reply(Interceptor.Chain chain, int code, String json) {
@@ -239,13 +265,114 @@ class OllamaDecisionTest extends UnitTest {
     }
 
     @Test
-    void aTimeoutSaysSoRatherThanUnreachable() {
+    void aTimeoutSaysSoRatherThanUnreachable() throws Exception {
         var verdict = withOllama(hang(),
                 () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "tev1:latest", 0.9, 1));
-        assertEquals(1, requests.size());
+        assertEquals(1, requestsTo("/v1/systemone"));
         assertNull(verdict.classification());
         assertEquals("the Ollama tev1:latest classifier failed (Ollama did not answer within 1 s)", verdict.reason());
         assertEquals(1, OllamaDecision.breaker().stats().failures(), "a timeout still counts against the breaker");
+        // The timeout started a load; let it finish so it cannot answer for a later test's pin.
+        withOllama(hang(), () -> OllamaDecision.pin(BASE, "tev1:latest")).get(10, TimeUnit.SECONDS);
+    }
+
+    // --- loading the model -------------------------------------------------------------------
+
+    @Test
+    void aTimedOutClassificationLoadsItsModelOnARequestOfItsOwn() throws Exception {
+        ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
+        var release = new CountDownLatch(1);
+        try {
+            var verdict = withOllama(loadingUntil(release, hang()),
+                    () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "tev1:latest", 0.9, 1));
+            assertTrue(verdict.reason().contains("did not answer within 1 s"), verdict.reason());
+            assertEquals(1, callsInFlight(), "the load outlives the classifier's timeout");
+
+            var again = OllamaDecision.pin(BASE, "tev1:latest");
+            assertFalse(again.isDone(), "a second pin joins the one in flight");
+            assertEquals(1, callsInFlight(), "and sends nothing of its own");
+
+            release.countDown();
+            assertTrue(again.get(10, TimeUnit.SECONDS));
+            assertEquals(1, requestsTo("/api/generate"));
+            var load = bodies.stream().filter(b -> !b.contains("questions")).findFirst().orElseThrow();
+            var body = JsonParser.parseString(load).getAsJsonObject();
+            assertEquals("tev1:latest", body.get("model").getAsString());
+            assertEquals(-1, body.get("keep_alive").getAsInt());
+            assertEquals(List.of("keep_alive", "model"), body.keySet().stream().sorted().toList(), "no prompt: load only");
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void aLoadGoesToTheServersNativeGenerateRouteWithNoKey() throws Exception {
+        ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
+        var loaded = withOllama(chain -> reply(chain, 200, "{\"done\":true}"), () -> OllamaDecision.pin(BASE + "/", "tev1"));
+        assertTrue(loaded.get(10, TimeUnit.SECONDS));
+        assertEquals(1, requests.size());
+        var request = requests.getFirst();
+        assertEquals("POST", request.method());
+        assertEquals(BASE + "/api/generate", request.url().toString());
+        assertNull(request.header("Authorization"), "Ollama takes no key");
+        assertEquals(0, OllamaDecision.breaker().stats().samples(), "a load is no decision, so the breaker never sees it");
+    }
+
+    @Test
+    void aFailedLoadReportsFalse() throws Exception {
+        assertFalse(withOllama(unreachable(), () -> OllamaDecision.pin(BASE, "tev1")).get(10, TimeUnit.SECONDS));
+        assertFalse(withOllama(chain -> reply(chain, 500, "{}"), () -> OllamaDecision.pin(BASE, "tev1"))
+                .get(10, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void nothingIsLoadedForAZeroKeepAliveOrARefusedAddress() throws Exception {
+        try {
+            for (var zero : List.of("0", "0m")) {
+                ConfigService.set(OllamaDecision.KEEP_ALIVE_KEY, zero);
+                var loaded = withOllama(chain -> reply(chain, 200, "{}"), () -> OllamaDecision.pin(BASE, "tev1"));
+                assertFalse(loaded.get(1, TimeUnit.SECONDS), zero + " would unload it at once");
+            }
+        } finally {
+            ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
+        }
+        var refused = withOllama(chain -> reply(chain, 200, "{}"), () -> OllamaDecision.pin("http://169.254.169.254", "tev1"));
+        assertFalse(refused.get(1, TimeUnit.SECONDS));
+        assertTrue(requests.isEmpty());
+    }
+
+    @Test
+    void aRefusalOrAnUnreachableServerLoadsNothing() {
+        var release = new CountDownLatch(1);
+        try {
+            var refusal = "{\"error\":\"model \\\"llama3.2\\\" is not supported by System One\"}";
+            withOllama(loadingUntil(release, chain -> reply(chain, 400, refusal)), () -> classify("llama3.2"));
+            assertEquals(0, callsInFlight(), "a 4xx is no load in progress, and must not load a chat model");
+
+            withOllama(loadingUntil(release, unreachable()), () -> classify("tev1"));
+            assertEquals(0, callsInFlight(), "a server that cannot be reached cannot load either");
+            assertEquals(0, requestsTo("/api/generate"));
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
+    void onlyAnOllamaClassifierIsKeptLoaded() throws Exception {
+        var loaded = withOllama(chain -> reply(chain, 200, "{\"done\":true}"),
+                () -> RouterClassifier.keepOllamaModelLoaded(ollamaPolicy()));
+        assertTrue(loaded.get(10, TimeUnit.SECONDS));
+        assertEquals(OllamaDecision.baseUrl() + "/api/generate", requests.getFirst().url().toString());
+        assertEquals("tev1", JsonParser.parseString(bodies.getFirst()).getAsJsonObject().get("model").getAsString());
+
+        requests.clear();
+        var classes = Map.of(TaskClass.CHAT, List.of(new Candidate("p", "m")));
+        for (var policy : List.of(new RouterPolicy(classes, 0.75, 0.95, new Candidate(RouterPolicy.JEV, "jev-latest"), 8, true, 0.90),
+                new RouterPolicy(classes, 0.75, 0.95, null, 8, true, 0.90))) {
+            var other = withOllama(chain -> reply(chain, 200, "{}"), () -> RouterClassifier.keepOllamaModelLoaded(policy));
+            assertFalse(other.get(1, TimeUnit.SECONDS));
+        }
+        assertTrue(requests.isEmpty(), "JEV, or no classifier, has no model to load");
     }
 
     @Test

@@ -5,8 +5,14 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import okhttp3.Call;
+import okhttp3.Callback;
+import okhttp3.MediaType;
 import okhttp3.Request;
+import okhttp3.RequestBody;
+import okhttp3.Response;
 import org.jspecify.annotations.Nullable;
+import play.Logger;
 import services.ConfigService;
 import services.discovery.ModelCatalogParser;
 import utils.CircuitBreaker;
@@ -18,6 +24,8 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
@@ -46,6 +54,11 @@ public final class OllamaDecision {
     /** Until Ollama restarts: the classifier is consulted on every routed turn, and a cold tev1 took 19 s. */
     private static final String DEFAULT_KEEP_ALIVE = "-1";
     private static final Pattern DURATION = Pattern.compile("-1|0|\\d+(\\.\\d+)?[smh]");
+    private static final Pattern NO_RESIDENCY = Pattern.compile("0+(\\.0+)?[smh]?");
+    /** A cold load from disk took 19 s; the pin must outlast it, unlike the classifier's own call. */
+    private static final long PIN_TIMEOUT_SECONDS = 120;
+    private static final MediaType JSON = MediaType.get(HttpKeys.APPLICATION_JSON);
+    private static final ConcurrentHashMap<String, CompletableFuture<Boolean>> PINNING = new ConcurrentHashMap<>();
 
     private OllamaDecision() {}
 
@@ -86,6 +99,60 @@ public final class OllamaDecision {
         } else {
             body.addProperty("keep_alive", value);
         }
+    }
+
+    /**
+     * Asks the server at {@code baseUrl} to load {@code model} and keep it as {@link #KEEP_ALIVE_KEY} says, without
+     * waiting. Ollama cancels a load when the request that started it is cancelled (v0.35.0), so a classifier call cut
+     * off at its timeout can leave a cold model unloaded on every turn; this request has its own, longer timeout. It
+     * is no decision, so it stays outside the provider's breaker.
+     *
+     * @return whether the model loaded: already false when nothing was sent, and the running pin's outcome while one
+     *         for the same server and model is in flight
+     */
+    public static CompletableFuture<Boolean> pin(String baseUrl, String model) {
+        var body = new JsonObject();
+        body.addProperty("model", model);
+        addKeepAlive(body);
+        // A keep_alive of zero unloads the model as soon as it has loaded.
+        if (NO_RESIDENCY.matcher(body.get("keep_alive").getAsString()).matches()) return CompletableFuture.completedFuture(false);
+        var base = trimSlash(baseUrl);
+        try {
+            SsrfGuard.assertProviderUrlSafe(base);
+        } catch (SecurityException _) {
+            return CompletableFuture.completedFuture(false);
+        }
+        var key = base + " " + model;
+        var pinning = new CompletableFuture<Boolean>();
+        var running = PINNING.putIfAbsent(key, pinning);
+        if (running != null) return running;
+
+        var request = new Request.Builder().url(base + "/api/generate").post(RequestBody.create(body.toString(), JSON)).build();
+        var call = HttpFactories.generalGuarded().newCall(request);
+        call.timeout().timeout(PIN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        call.enqueue(new Callback() {
+            @Override
+            public void onResponse(Call done, Response response) {
+                try (response) {
+                    // Debug, as for the embedding pin: a stopped server would otherwise warn on every renewal.
+                    if (!response.isSuccessful()) Logger.debug("[decision] loading Ollama %s returned HTTP %d", model, response.code());
+                    finish(response.isSuccessful());
+                }
+            }
+
+            @Override
+            public void onFailure(Call failed, IOException e) {
+                Logger.debug("[decision] loading Ollama %s failed: %s", model, e.getClass().getSimpleName());
+                finish(false);
+            }
+
+            // Out of the map first, so a pin that has finished is never handed to a later caller.
+            private void finish(boolean loaded) {
+                PINNING.remove(key, pinning);
+                pinning.complete(loaded);
+            }
+        });
+        return pinning;
     }
 
     /**

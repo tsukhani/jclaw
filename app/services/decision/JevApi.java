@@ -89,7 +89,7 @@ public final class JevApi {
             breaker.recordSuccess(0L, admission.probeWindow());
             reported = true;
             return result;
-        } catch (Outage e) {
+        } catch (JevException.Outage e) {
             breaker.recordFailure(admission.probeWindow());
             reported = true;
             throw e;
@@ -125,9 +125,10 @@ public final class JevApi {
                         .formatted(target.name(), attempt, attempts, e.getClass().getSimpleName()));
                 if (attempt >= attempts) {
                     // The address is the operator's, never the model's, so naming a timeout scans nothing (JCLAW-1337).
-                    throw new Outage(e instanceof InterruptedIOException
+                    var timedOut = e instanceof InterruptedIOException;
+                    throw new JevException.Outage(timedOut
                             ? "%s did not answer within %s".formatted(target.name(), seconds(attemptTimeoutMs))
-                            : target.name() + " unreachable");
+                            : target.name() + " unreachable", timedOut);
                 }
                 pause(BACKOFF_MS << (attempt - 1));
             }
@@ -142,7 +143,7 @@ public final class JevApi {
                     .formatted(target.service(), target.name(), code) + "in Settings → Decision Providers");
         }
         // Status only: the body comes from a server whose address the operator chose (JCLAW-778).
-        if (code == 429 || code >= 500) throw new Outage(target.name() + " returned HTTP " + code);
+        if (code == 429 || code >= 500) throw new JevException.Outage(target.name() + " returned HTTP " + code, false);
         if (!response.isSuccessful()) throw new JevException(target.name() + " returned HTTP " + code);
     }
 
@@ -238,12 +239,5 @@ public final class JevApi {
     /** A wait that unmounts a virtual-thread caller (JDK-8373224). */
     private static void pause(long millis) {
         RetryScheduler.schedule(() -> null, millis).join();
-    }
-
-    /** A failure the breaker counts: a transport error, a timeout, HTTP 5xx or 429. */
-    private static final class Outage extends JevException {
-        Outage(String message) {
-            super(message);
-        }
     }
 }

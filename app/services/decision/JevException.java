@@ -13,4 +13,19 @@ public class JevException extends RuntimeException {
             super(message);
         }
     }
+
+    /** A failure the breaker counts: a transport error, a timeout, HTTP 5xx or 429. */
+    public static final class Outage extends JevException {
+        private final boolean timedOut;
+
+        Outage(String message, boolean timedOut) {
+            super(message);
+            this.timedOut = timedOut;
+        }
+
+        /** Whether the last attempt ran out of time, which on Ollama can mean a model still loading. */
+        public boolean timedOut() {
+            return timedOut;
+        }
+    }
 }

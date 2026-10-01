@@ -16,6 +16,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -122,6 +123,20 @@ public final class RouterClassifier {
                     .formatted(classifier.describe(), answer.isBlank() ? "empty" : abbreviate(answer)));
         }
         return PromptClassifier.classify(message, priorClass, priorToolCalls);
+    }
+
+    /**
+     * Loads the router's classifier model on its Ollama server when the classifier is an Ollama decision model, so a
+     * routed turn does not wait on the load (JCLAW-1338).
+     *
+     * @return the pin's outcome; already false for any other classifier
+     */
+    public static CompletableFuture<Boolean> keepOllamaModelLoaded(RouterPolicy policy) {
+        var classifier = policy.classifier();
+        if (classifier == null || !OllamaDecision.PROVIDER.equals(classifier.provider())) {
+            return CompletableFuture.completedFuture(false);
+        }
+        return OllamaDecision.pin(OllamaDecision.baseUrl(), classifier.model());
     }
 
     /** The decision's class and effort, or the keyword rules' when it cannot answer, is not sure enough, or its breaker is open. */

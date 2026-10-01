@@ -12,6 +12,7 @@ import llm.OllamaProvider;
 import llm.ProviderLocality;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
+import llm.routing.RouterClassifier;
 import llm.routing.RouterPolicy;
 import memory.JpaMemoryStore;
 import memory.MemoryReranker;
@@ -21,6 +22,7 @@ import models.Agent;
 import models.Config;
 import org.hibernate.Session;
 import org.jspecify.annotations.Nullable;
+import play.Play;
 import play.cache.Cache;
 import play.cache.CacheConfig;
 import play.cache.Caches;
@@ -506,6 +508,13 @@ public class ConfigService {
         // An agent on router/auto is enabled exactly while the router has models to route to.
         if (key.startsWith(PROVIDER_KEY_PREFIX) || key.startsWith(RouterPolicy.PREFIX)) {
             AgentService.syncEnabledStates();
+        }
+        // Choosing an Ollama classifier starts its load now, not at the first routed turn's timeout (JCLAW-1338).
+        // Tests point at canned transports, so a write there must never dial a real server.
+        if ((key.equals(RouterPolicy.CLASSIFIER_PROVIDER) || key.equals(RouterPolicy.CLASSIFIER_MODEL)
+                || key.equals(OllamaDecision.BASE_URL_KEY) || key.equals(OllamaDecision.KEEP_ALIVE_KEY))
+                && !Play.runningInTestMode()) {
+            RouterClassifier.keepOllamaModelLoaded(RouterPolicy.load());
         }
         // The registry otherwise re-reads the pin only once a minute.
         if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY)) {
