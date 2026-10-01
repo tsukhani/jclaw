@@ -285,9 +285,9 @@ function playClip(audio: HTMLAudioElement | undefined) {
             class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-safe:transition-opacity"
             aria-hidden="true"
           >
-            <!-- The card's colors, the inverse of the mark's in either theme. -->
-            <span class="rounded-full bg-surface-elevated/75 p-0.5 text-fg-strong shadow-sm backdrop-blur-xs">
-              <SpeakerWaveIcon class="w-3 h-3" />
+            <!-- JEV's light badge, so the two cards' cues match. -->
+            <span class="rounded-full bg-white/75 p-1 text-neutral-900 shadow-sm backdrop-blur-xs">
+              <SpeakerWaveIcon class="w-3.5 h-3.5" />
             </span>
           </span>
         </button>
