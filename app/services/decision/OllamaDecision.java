@@ -22,11 +22,14 @@ import utils.SsrfGuard;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
@@ -60,6 +63,8 @@ public final class OllamaDecision {
     private static final Pattern NO_RESIDENCY = Pattern.compile("0+(\\.0+)?[smh]?");
     /** A cold load from disk took 19 s; the pin must outlast it, unlike the classifier's own call. */
     private static final long PIN_TIMEOUT_SECONDS = 120;
+    /** Ollama answered {@code ollama stop}'s unload in 8 ms; the slack covers one queued behind a load. */
+    private static final long UNLOAD_TIMEOUT_SECONDS = 30;
     private static final MediaType JSON = MediaType.get(HttpKeys.APPLICATION_JSON);
     private static final ConcurrentHashMap<String, CompletableFuture<Boolean>> PINNING = new ConcurrentHashMap<>();
 
@@ -186,24 +191,113 @@ public final class OllamaDecision {
      * a call that timed out was waiting on a load. False when it cannot tell, which leaves the timeout counted.
      */
     static boolean stillLoading(String base, String model) {
-        var request = new Request.Builder().url(base + "/api/ps").header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
-                .get().build();
-        var call = HttpFactories.generalGuarded().newCall(request);
-        call.timeout().timeout(PS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        try (var response = call.execute()) {
-            if (!response.isSuccessful()) return false;
-            var loaded = JsonParser.parseString(response.body().string()).getAsJsonObject().getAsJsonArray("models");
-            if (loaded == null) return false;
-            // Ollama names a model by its tag, and a bare name means :latest.
-            var wanted = model.contains(":") ? model : model + ":latest";
-            for (var entry : loaded) {
-                var name = entry.isJsonObject() ? entry.getAsJsonObject().get("name") : null;
-                if (name != null && name.isJsonPrimitive() && wanted.equals(name.getAsString())) return false;
-            }
-            return true;
+        try {
+            return !loadedModels(base, PS_TIMEOUT_SECONDS).contains(tagged(model));
         } catch (IOException | JsonParseException | IllegalStateException | ClassCastException _) {
             return false;
         }
+    }
+
+    /**
+     * Waits for a pin of {@code model} already in flight, then pins it afresh and waits for that: an unload sent while
+     * the earlier pin ran may have undone it.
+     *
+     * @return whether the fresh pin loaded the model
+     */
+    public static boolean pinAfresh(String baseUrl, String model) {
+        try {
+            var running = PINNING.get(trimSlash(baseUrl) + " " + model);
+            if (running != null) running.get(PIN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+            return pin(baseUrl, model).get(PIN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException | TimeoutException _) {
+            return false;
+        }
+    }
+
+    /**
+     * Unloads every decision model loaded on the server at {@code baseUrl} other than {@code keep}: loaded per
+     * {@code /api/ps} and listing {@code decision} among its capabilities per {@code /api/tags} (JCLAW-1339). Sends
+     * nothing when either cannot be read. Like {@link #pin}, it is no decision, so it stays outside the breaker.
+     *
+     * @param keep the router's classifier model, or null when the router uses none on this server
+     * @return the models Ollama accepted an unload for
+     */
+    public static List<String> unloadUnused(String baseUrl, @Nullable String keep) {
+        var base = trimSlash(baseUrl);
+        try {
+            SsrfGuard.assertProviderUrlSafe(base);
+        } catch (SecurityException _) {
+            return List.of();
+        }
+        List<String> loaded;
+        var decision = new HashSet<String>();
+        try {
+            loaded = loadedModels(base, TAGS_TIMEOUT_SECONDS);
+            if (loaded.isEmpty()) return List.of();
+            for (var name : decisionModels(JsonParser.parseString(get(base, "/api/tags", TAGS_TIMEOUT_SECONDS)))) {
+                decision.add(tagged(name));
+            }
+        } catch (IOException | JsonParseException | IllegalStateException | ClassCastException e) {
+            Logger.debug("[decision] reading Ollama's loaded models failed: %s", e.getClass().getSimpleName());
+            return List.of();
+        }
+        var kept = keep == null ? null : tagged(keep);
+        var unloaded = new ArrayList<String>();
+        for (var name : loaded) {
+            if (decision.contains(name) && !name.equals(kept) && unload(base, name)) unloaded.add(name);
+        }
+        return unloaded;
+    }
+
+    /** What {@code ollama stop} sends: the model and a zero keep_alive, no prompt. */
+    private static boolean unload(String base, String model) {
+        var body = new JsonObject();
+        body.addProperty("model", model);
+        body.addProperty("keep_alive", 0);
+        var request = new Request.Builder().url(base + "/api/generate").post(RequestBody.create(body.toString(), JSON)).build();
+        var call = HttpFactories.generalGuarded().newCall(request);
+        call.timeout().timeout(UNLOAD_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        try (var response = call.execute()) {
+            if (!response.isSuccessful()) {
+                Logger.debug("[decision] unloading Ollama %s returned HTTP %d", model, response.code());
+                return false;
+            }
+            Logger.info("[decision] unloaded Ollama %s, which the router no longer uses", model);
+            return true;
+        } catch (IOException e) {
+            Logger.debug("[decision] unloading Ollama %s failed: %s", model, e.getClass().getSimpleName());
+            return false;
+        }
+    }
+
+    /** The {@link #tagged} names {@code GET /api/ps} lists as loaded. */
+    private static List<String> loadedModels(String base, long timeoutSeconds) throws IOException {
+        var loaded = JsonParser.parseString(get(base, "/api/ps", timeoutSeconds)).getAsJsonObject().getAsJsonArray("models");
+        if (loaded == null) throw new IOException("no models in /api/ps");
+        var out = new ArrayList<String>();
+        for (var entry : loaded) {
+            var name = entry.isJsonObject() ? entry.getAsJsonObject().get("name") : null;
+            if (name != null && name.isJsonPrimitive()) out.add(tagged(name.getAsString()));
+        }
+        return out;
+    }
+
+    private static String get(String base, String path, long timeoutSeconds) throws IOException {
+        var request = new Request.Builder().url(base + path).header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON).get().build();
+        var call = HttpFactories.generalGuarded().newCall(request);
+        call.timeout().timeout(timeoutSeconds, TimeUnit.SECONDS);
+        try (var response = call.execute()) {
+            if (!response.isSuccessful()) throw new IOException("HTTP " + response.code() + " from " + path);
+            return response.body().string();
+        }
+    }
+
+    /** Ollama names a model by its tag, and a bare name means {@code :latest}. */
+    private static String tagged(String model) {
+        return model.contains(":") ? model : model + ":latest";
     }
 
     /** {@code GET /api/tags} at {@code baseUrl}, keeping only models whose capabilities include {@code decision}. */

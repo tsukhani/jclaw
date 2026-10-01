@@ -6,6 +6,7 @@ import llm.ProviderRegistry;
 import llm.routing.PromptClassifier.Classification;
 import llm.routing.RouterPolicy.Candidate;
 import org.jspecify.annotations.Nullable;
+import play.Logger;
 import services.EventLogger;
 import services.decision.DecisionSettings;
 import services.decision.OllamaDecision;
@@ -17,6 +18,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -51,6 +54,10 @@ public final class RouterClassifier {
 
     /** Event-log category and the caller tag the provider records for these calls. */
     private static final String ROUTER = "router";
+
+    /** One thread, so settles run in the order their writes did and the last write's runs last (JCLAW-1339). */
+    private static final ExecutorService OLLAMA_SETTLE = Executors.newSingleThreadExecutor(
+            Thread.ofPlatform().daemon().name("decision-model-settle").factory());
 
     /** What each class means, in the order both classifiers read it: the LLM in its prompt, JEV as its choices. */
     static final Map<TaskClass, String> CLASS_DEFINITIONS = ordered(Map.of(
@@ -137,6 +144,30 @@ public final class RouterClassifier {
             return CompletableFuture.completedFuture(false);
         }
         return OllamaDecision.pin(OllamaDecision.baseUrl(), classifier.model());
+    }
+
+    /** {@link #settleOllamaModels} on the current policy and server, without waiting for it. */
+    public static void settleOllamaModelsInBackground() {
+        var policy = RouterPolicy.load();
+        var baseUrl = OllamaDecision.baseUrl();
+        OLLAMA_SETTLE.execute(() -> {
+            try {
+                settleOllamaModels(policy, baseUrl);
+            } catch (RuntimeException e) {
+                Logger.debug("[decision] settling the Ollama decision models failed: %s", e.getClass().getSimpleName());
+            }
+        });
+    }
+
+    /**
+     * Unloads the decision models on {@code baseUrl} that {@code policy}'s classifier is not, then loads the
+     * classifier's afresh, so a model an earlier settle unloaded is loaded again at the end (JCLAW-1339).
+     */
+    public static void settleOllamaModels(RouterPolicy policy, String baseUrl) {
+        var classifier = policy.classifier();
+        var model = classifier != null && OllamaDecision.PROVIDER.equals(classifier.provider()) ? classifier.model() : null;
+        OllamaDecision.unloadUnused(baseUrl, model);
+        if (model != null) OllamaDecision.pinAfresh(baseUrl, model);
     }
 
     /** The decision's class and effort, or the keyword rules' when it cannot answer, is not sure enough, or its breaker is open. */
