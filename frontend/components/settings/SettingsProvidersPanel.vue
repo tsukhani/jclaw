@@ -626,8 +626,9 @@ const groupedProviders = computed(() => {
     if (!providers.has(name)) providers.set(name, [])
     providers.get(name)!.push(e)
   }
-  const remote: Array<[string, ConfigEntry[]]> = []
-  const local: Array<[string, ConfigEntry[]]> = []
+  // Not Array<[…]>: CodeQL blanks `]]>` in Vue scripts as an XHTML CDATA end, breaking its parse.
+  const remote: [string, ConfigEntry[]][] = []
+  const local: [string, ConfigEntry[]][] = []
   for (const [name, entries] of providers) {
     if (providerGroup(name) === 'local') local.push([name, entries])
     else remote.push([name, entries])
