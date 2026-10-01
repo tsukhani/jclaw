@@ -142,6 +142,9 @@ test.describe('UAT-23 decision providers', () => {
   })
 
   test.describe('the Ollama card', () => {
+    // The panel re-reads the config after a write, so a stubConfig route.fetch() can still be in flight at teardown.
+    test.afterEach(({ page }) => page.unrouteAll({ behavior: 'ignoreErrors' }))
+
     test('renders below the JEV card', async ({ page }) => {
       await stubOllama(page, REACHABLE)
       await stubConfig(page)
