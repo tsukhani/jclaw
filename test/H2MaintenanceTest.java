@@ -298,6 +298,50 @@ class H2MaintenanceTest extends UnitTest {
         assertFalse(Files.exists(dir.resolve("x")));
     }
 
+    /** The database from {@code good} plus one graph entry named {@code name}. */
+    private Path withGraphEntry(Path good, String name) throws Exception {
+        var zip = tmp.resolve("extra-" + System.nanoTime() + ".zip");
+        try (var in = new java.util.zip.ZipFile(good.toFile());
+             var out = new ZipOutputStream(Files.newOutputStream(zip))) {
+            out.putNextEntry(new ZipEntry(H2Maintenance.DATA_FILE));
+            try (var s = in.getInputStream(in.getEntry(H2Maintenance.DATA_FILE))) {
+                s.transferTo(out);
+            }
+            out.closeEntry();
+            out.putNextEntry(new ZipEntry(name));
+            out.write("x\n".getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+        return zip;
+    }
+
+    @Test
+    void aGraphEntryNameThatIsNoPathIsRefusedRatherThanThrown() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 5);
+        var good = tmp.resolve("good.zip");
+        H2Maintenance.backupOffline(dir, good);
+
+        var check = H2Maintenance.validateBackup(withGraphEntry(good, "memory-graph/4/a\0b.jsonl"));
+
+        assertFalse(check.ok());
+        assertTrue(check.reason().startsWith("unsafe graph entry"), check.reason());
+    }
+
+    @Test
+    void aDotDotInsideAGraphFileNameIsNoEscapeAndRestores() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 5);
+        var good = tmp.resolve("good.zip");
+        H2Maintenance.backupOffline(dir, good);
+        var zip = withGraphEntry(good, "memory-graph/4/notes..jsonl");
+
+        assertTrue(H2Maintenance.validateBackup(zip).ok());
+        H2Maintenance.restore(zip, dir);
+
+        assertEquals("x\n", Files.readString(dir.resolve(H2Maintenance.GRAPH_DIR).resolve("4/notes..jsonl")));
+    }
+
     // ---- repair ----
 
     @Test

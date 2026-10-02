@@ -13,10 +13,12 @@ import services.AtomicDirSwap;
 import services.database.H2Maintenance;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
@@ -375,6 +377,14 @@ public final class GraphStore {
             }
             for (var file : unknown) {
                 Files.copy(file, dir.resolve(file.getFileName()), StandardCopyOption.COPY_ATTRIBUTES);
+            }
+            // The swap deletes the previous generation, so the new one must be on disk before it moves in.
+            try (var staged = Files.list(dir)) {
+                for (var file : staged.toList()) {
+                    try (var channel = FileChannel.open(file, StandardOpenOption.WRITE)) {
+                        channel.force(true);
+                    }
+                }
             }
         });
         indexes.put(agentId, Index.of(records));

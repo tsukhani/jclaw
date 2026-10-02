@@ -14,6 +14,7 @@ import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -372,10 +373,14 @@ public final class H2Maintenance {
         for (var segment : relative.split("/", -1)) {
             if (segment.equals("..") || segment.contains("\\")) return true;
         }
-        if (relative.startsWith("/") || Path.of(relative).isAbsolute()) return true;
-        var base = Path.of(GRAPH_DIR);
-        var dest = base.resolve(relative).normalize();
-        return !dest.startsWith(base) || dest.equals(base);
+        try {
+            if (relative.startsWith("/") || Path.of(relative).isAbsolute()) return true;
+            var base = Path.of(GRAPH_DIR);
+            var dest = base.resolve(relative).normalize();
+            return !dest.startsWith(base) || dest.equals(base);
+        } catch (InvalidPathException _) {
+            return true;
+        }
     }
 
     /** Delete {@code dir} and everything under it; a no-op when it does not exist. */
