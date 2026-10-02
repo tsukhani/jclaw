@@ -485,7 +485,8 @@ class ApiMemoryControllerTest extends FunctionalTest {
         login();
 
         for (var body : java.util.List.of("{}", "{\"importance\":0.4}", "{\"category\":\"fact\"}",
-                "{\"importance\":0.4,\"category\":\"fact\"}", "{\"importance\":null}")) {
+                "{\"importance\":0.4,\"category\":\"fact\"}", "{\"importance\":null}",
+                "{\"category\":\" Fact \"}", "{\"category\":\"\"}")) {
             var resp = PUT("/api/memories/" + memId, "application/json", body);
             assertIsOk(resp);
             var dto = com.google.gson.JsonParser.parseString(getContent(resp)).getAsJsonObject();
