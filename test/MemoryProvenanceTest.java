@@ -186,6 +186,32 @@ class MemoryProvenanceTest extends UnitTest {
         assertTrue(p.mayCorroborate());
     }
 
+    private MemoryProvenance chatTurnOn(String channel, Boolean ownerInitiated) {
+        var conv = ConversationService.create(agent, channel, "u-provenance-" + channel + "-" + ownerInitiated);
+        ConversationService.appendUserMessage(conv, "Something worth remembering");
+        java.util.function.Supplier<MemoryProvenance> body =
+                () -> MemoryAutoCapture.chatTurnSource(conv.id).apply("m1");
+        return ownerInitiated == null ? body.get() : agents.DangerousActionGate.withOwnerInitiated(ownerInitiated, body);
+    }
+
+    @Test
+    void theChatPathStampsEveryChannelAndSenderAsTheMatrixSays() {
+        record Row(String channel, Boolean ownerInitiated, MemoryAuthorType expected) {}
+        for (var row : List.of(
+                new Row("web", null, MemoryAuthorType.HUMAN_TURN),
+                new Row("telegram", true, MemoryAuthorType.HUMAN_TURN),
+                new Row("slack", true, MemoryAuthorType.HUMAN_TURN),
+                new Row("telegram", false, MemoryAuthorType.GUEST_TURN),
+                new Row("slack", false, MemoryAuthorType.GUEST_TURN),
+                new Row("whatsapp", null, MemoryAuthorType.GUEST_TURN),
+                new Row("telegram", null, MemoryAuthorType.GUEST_TURN))) {
+            var p = chatTurnOn(row.channel(), row.ownerInitiated());
+            assertEquals(row.expected(), p.authorType(), row::toString);
+            assertEquals("extractor/m1", p.actor(), row::toString);
+            assertEquals(row.expected() == MemoryAuthorType.HUMAN_TURN, p.mayCorroborate(), row::toString);
+        }
+    }
+
     @Test
     void aRepeatedInputIsLinkedOnce() {
         var a = storeWith("Input A", MemoryProvenance.extractor("m1"));
