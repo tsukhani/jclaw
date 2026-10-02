@@ -201,4 +201,50 @@ class OntologySchemaTest extends UnitTest {
                 "- relation owns",
                 "~ relation same_as match: close -> exact"), lines);
     }
+
+    @Test
+    void aNonIntegerVersionIsRefused() throws IOException {
+        var text = seedText().replace("version: 1\n", "version: one\n");
+        var e = assertThrows(IllegalArgumentException.class, () -> OntologySchema.parse(text));
+        assertTrue(e.getMessage().contains("version"), e.getMessage());
+    }
+
+    @Test
+    void aRelationWithNoEndpointsIsRefused() throws IOException {
+        var text = seedText().replace("endpoints: [\"Person -> Topic\"]", "endpoints: []");
+        var e = assertThrows(IllegalArgumentException.class, () -> OntologySchema.parse(text));
+        assertTrue(e.getMessage().contains("relation holds_view_on"), e.getMessage());
+    }
+
+    @Test
+    void aFamilyMissingMustLinkOrMeaningIsRefused() throws IOException {
+        var noMustLink = seedText().replace(" must_link: \"One or more Evidence\",", "");
+        var e1 = assertThrows(IllegalArgumentException.class, () -> OntologySchema.parse(noMustLink));
+        assertTrue(e1.getMessage().contains("family Term") && e1.getMessage().contains("must_link"), e1.getMessage());
+
+        var noMeaning = seedText().replace("meaning: \"An entity or concept\", ", "");
+        var e2 = assertThrows(IllegalArgumentException.class, () -> OntologySchema.parse(noMeaning));
+        assertTrue(e2.getMessage().contains("family Term") && e2.getMessage().contains("meaning"), e2.getMessage());
+    }
+
+    @Test
+    void diffReportsVersionFamilyReferenceCoversAndKindChanges() throws IOException {
+        var seed = seedText();
+        var edited = seed.replace("version: 1\n", "version: 2\n")
+                .replace("must_link: \"One or more Evidence\"", "must_link: \"At least one Evidence\"")
+                .replace("  - \"Evidence -> Any\"\n", "  - \"Evidence -> Any\"\n  - \"Evidence -> Term\"\n")
+                .replace("covers: \"City, address, property\"", "covers: \"City, address, property, region\"")
+                .replace("{kind: Equivalence,", "{kind: Alias,");
+
+        var lines = OntologySchema.diff(OntologySchema.parse(seed), OntologySchema.parse(edited));
+
+        assertEquals(
+                List.of(
+                        "+ reference Evidence -> Term",
+                        "~ family Term must_link: One or more Evidence -> At least one Evidence",
+                        "~ relation same_as kind: Equivalence -> Alias",
+                        "~ term type Place covers: City, address, property -> City, address, property, region",
+                        "~ version: 1 -> 2"),
+                lines);
+    }
 }

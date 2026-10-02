@@ -225,4 +225,13 @@ class OntologyValidatorTest extends UnitTest {
         Collections.shuffle(shuffled, new Random(1343));
         assertEquals(first, validate(shuffled));
     }
+
+    @Test
+    void aDuplicatedTermIdResolvesThroughWhicheverTypeTheEndpointAllows() {
+        var records = with(term("x", "Person"), term("x", "Topic"), relation("r2", "holds_view_on", "p1", "x"));
+        var expected = List.of(new Violation("x", Kind.DUPLICATE_ID, "id 'x' is shared by 2 records"));
+        assertEquals(expected, validate(records));
+        Collections.reverse(records);
+        assertEquals(expected, validate(records));
+    }
 }
