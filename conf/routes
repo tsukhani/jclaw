@@ -405,6 +405,10 @@ POST    /api/evals/memory-ingest                ApiEvalsController.memoryIngest
 # fetch stack. Same loopback + X-Loadtest-Auth gate.
 POST    /api/scrape/harness                     ApiScrapeTestController.harness
 
+# Graph-extraction reliability spike (JCLAW-1344): labelled synthetic memories through
+# every proposer x decision-model pairing. Same loopback + X-Loadtest-Auth gate.
+POST    /api/graph/spike                        ApiGraphSpikeController.spike
+
 # Apps registry (SPEC-apps): operator-hosted mini-apps under public/apps/<slug>/
 GET     /api/apps                               ApiAppsController.list
 DELETE  /api/apps/{slug}                        ApiAppsController.delete
