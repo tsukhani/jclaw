@@ -2,6 +2,8 @@ package models;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
@@ -129,6 +131,36 @@ public class Memory extends Model {
      */
     @Column(name = "superseded_by_id")
     public Long supersededById;
+
+    /** Conversation of the turn this memory was captured from (JCLAW-1318); null outside a chat. */
+    @Column(name = "source_conversation_id")
+    public Long sourceConversationId;
+
+    /** The user message of that turn. A plain id, like {@link #supersededById}. */
+    @Column(name = "source_message_id")
+    public Long sourceMessageId;
+
+    /** Who wrote the row: {@code extractor/<modelId>}, {@code human:operator} or {@code process:<id>}. */
+    @Column(length = 200)
+    public String actor;
+
+    /** Whose words the row rests on; null on a row written before JCLAW-1318. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "author_type", length = 30)
+    public MemoryAuthorType authorType;
+
+    /** True exactly when the row has {@link MemoryDerivation} inputs. */
+    @Column(nullable = false)
+    @ColumnDefault("false")
+    public boolean derived;
+
+    /**
+     * How many later writes restated this memory and were dropped as duplicates. Written by
+     * {@link #corroborate} only.
+     */
+    @Column(name = "corroboration_count", nullable = false)
+    @ColumnDefault("0")
+    public int corroborationCount;
 
     /**
      * Mark this memory superseded by {@code newerId} (JCLAW-525). Saving fires
@@ -268,6 +300,18 @@ public class Memory extends Model {
     }
 
     /**
+     * Count one restatement of this memory (JCLAW-1318). Bulk JPQL for the reason
+     * {@link #touchAccessed} gives: a corroboration is not a content change, so it must not
+     * bump {@code updatedAt} or reindex the row.
+     */
+    public static void corroborate(Long id) {
+        JPA.em()
+                .createQuery("UPDATE Memory m SET m.corroborationCount = m.corroborationCount + 1 WHERE m.id = :id")
+                .setParameter("id", id)
+                .executeUpdate();
+    }
+
+    /**
      * Delete this memory, first clearing any supersession pointer aimed at it (JCLAW-529).
      *
      * <p>{@code supersededById} is a bare column with no foreign key — only {@code agent_id}
@@ -293,6 +337,12 @@ public class Memory extends Model {
             for (var m : referencing) {
                 m.supersededById = null;
                 m.save();
+            }
+            // A derivation link outlives its input and keeps the copied turn refs (JCLAW-1318).
+            List<MemoryDerivation> links = MemoryDerivation.find("inputMemoryId = ?1", id).fetch();
+            for (var link : links) {
+                link.inputMemoryId = null;
+                link.save();
             }
         }
         delete();

@@ -22,6 +22,20 @@ interface MemoryDto {
   createdAt: string | null
   supersededAt: string | null
   supersededById: string | null
+  provenance: MemoryProvenance
+}
+
+interface MemoryProvenance {
+  sourceConversationId: number | null
+  sourceMessageId: number | null
+  actor: string | null
+  authorType: 'HUMAN_TURN' | 'AGENT_SYNTHESIZED' | 'CONSOLIDATION_DERIVED' | 'UNATTRIBUTED'
+  derived: boolean
+  derivations: { inputMemoryId: number | null, inputConversationId: number | null, inputMessageId: number | null }[]
+  corroborationCount: number
+  verifications: { actor: string, kind: string, verifiedAt: string }[]
+  trustTier: 'HUMAN_REVIEWED' | 'MACHINE_CONFIRMED' | 'UNVERIFIED'
+  graphTier: 'FIRM' | 'TENTATIVE'
 }
 
 interface Filter { key: string, value: string }
@@ -39,6 +53,32 @@ const CATEGORY_CLASS: Record<string, string> = {
 
 function categoryClass(cat: string | null): string {
   return CATEGORY_CLASS[cat ?? ''] ?? 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
+}
+
+const TRUST_LABEL: Record<MemoryProvenance['trustTier'], string> = {
+  HUMAN_REVIEWED: 'Human-reviewed',
+  MACHINE_CONFIRMED: 'Machine-confirmed',
+  UNVERIFIED: 'Unverified',
+}
+
+const TRUST_CLASS: Record<MemoryProvenance['trustTier'], string> = {
+  HUMAN_REVIEWED: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300',
+  MACHINE_CONFIRMED: 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300',
+  UNVERIFIED: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
+}
+
+function provenanceTitle(p: MemoryProvenance): string {
+  const lines = [
+    `Actor: ${p.actor ?? '—'}`,
+    `Author type: ${p.authorType}`,
+    `Source conversation: ${p.sourceConversationId ?? '—'}`,
+    `Source message: ${p.sourceMessageId ?? '—'}`,
+  ]
+  for (const d of p.derivations) {
+    const input = d.inputMemoryId == null ? 'deleted memory' : `memory #${d.inputMemoryId}`
+    lines.push(`Derived from ${input} (conversation ${d.inputConversationId ?? '—'}, message ${d.inputMessageId ?? '—'})`)
+  }
+  return lines.join('\n')
 }
 
 // FilterBar-driven query state. Each chip maps to a backend query param;
@@ -194,6 +234,11 @@ async function updateImportance(mem: MemoryDto, input: HTMLInputElement) {
   }
   // :value is only re-applied on a re-render, which a refused, blank or no-op clamped entry never causes.
   input.value = String(mem.importance)
+}
+
+async function confirmMemory(mem: MemoryDto) {
+  const res = await mutate(`/api/memories/${mem.id}/verify`, { method: 'POST' })
+  if (res !== null) await refresh()
 }
 
 // ── Bulk deletion (mirrors the Conversations page: selection-driven Delete
@@ -430,6 +475,12 @@ async function exportMemories() {
                 />
               </button>
             </th>
+            <th
+              scope="col"
+              class="px-4 py-2.5 font-medium"
+            >
+              Provenance
+            </th>
           </tr>
         </thead>
         <tbody class="divide-y divide-border">
@@ -483,6 +534,40 @@ async function exportMemories() {
             </td>
             <td class="whitespace-nowrap px-4 py-2.5 text-fg-muted">
               {{ mem.createdAt ? formatDateTime(mem.createdAt) : '—' }}
+            </td>
+            <td
+              class="whitespace-nowrap px-4 py-2.5"
+              data-testid="provenance-cell"
+              :title="provenanceTitle(mem.provenance)"
+            >
+              <span
+                data-testid="trust-badge"
+                class="inline-block px-2 py-0.5 text-xs font-medium"
+                :class="TRUST_CLASS[mem.provenance.trustTier]"
+              >{{ TRUST_LABEL[mem.provenance.trustTier] }}</span>
+              <span
+                data-testid="graph-badge"
+                class="ml-1 inline-block px-2 py-0.5 text-xs font-medium"
+                :class="mem.provenance.graphTier === 'FIRM'
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                  : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'"
+              >{{ mem.provenance.graphTier === 'FIRM' ? 'Firm' : 'Tentative' }}</span>
+              <span
+                data-testid="corroboration-badge"
+                :title="`Corroborated ${mem.provenance.corroborationCount} times`"
+                :aria-label="`Corroborated ${mem.provenance.corroborationCount} times`"
+                class="ml-1 inline-block bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300"
+              >×{{ mem.provenance.corroborationCount }}</span>
+              <button
+                v-if="mem.provenance.trustTier !== 'HUMAN_REVIEWED'"
+                type="button"
+                data-testid="confirm-memory"
+                :aria-label="`Confirm memory: ${mem.text}`"
+                class="ml-2 px-2 py-0.5 text-xs border border-border hover:text-fg-strong hover:border-ring transition-colors"
+                @click="confirmMemory(mem)"
+              >
+                Confirm
+              </button>
             </td>
           </tr>
         </tbody>

@@ -13,10 +13,14 @@ import memory.CoreMemoryCapMigration;
 import memory.JpaMemoryStore;
 import memory.MemoryCategory;
 import memory.MemoryKeyBackfillService;
+import memory.MemoryProvenance;
 import memory.MemoryReembedService;
+import memory.MemoryTrust;
 import memory.MemoryVectorSettings;
 import models.Agent;
 import models.Memory;
+import models.MemoryDerivation;
+import models.MemoryVerification;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -37,6 +41,8 @@ import utils.JsonArgs;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -70,7 +76,21 @@ public class ApiMemoryController extends Controller {
 
     public record MemoryDto(String id, String agentName, String text, String category,
                             double importance, @Nullable String createdAt,
-                            @Nullable String supersededAt, @Nullable String supersededById) {}
+                            @Nullable String supersededAt, @Nullable String supersededById,
+                            ProvenanceView provenance) {}
+
+    /** One input of a derived memory; the turn refs survive the input's deletion. */
+    public record DerivationView(@Nullable Long inputMemoryId, @Nullable Long inputConversationId,
+                                 @Nullable Long inputMessageId) {}
+
+    public record VerificationView(String actor, String kind, String verifiedAt) {}
+
+    /** Where a memory came from and how far it is trusted (JCLAW-1318); the tiers are computed. */
+    public record ProvenanceView(@Nullable Long sourceConversationId, @Nullable Long sourceMessageId,
+                                 @Nullable String actor, String authorType, boolean derived,
+                                 List<DerivationView> derivations, int corroborationCount,
+                                 List<VerificationView> verifications, String trustTier,
+                                 String graphTier) {}
 
     public record MemoryUpdateRequest(Double importance, String category) {}
 
@@ -111,7 +131,8 @@ public class ApiMemoryController extends Controller {
 
         response.setHeader("X-Total-Count", String.valueOf(total));
         response.setHeader("Access-Control-Expose-Headers", "X-Total-Count");
-        renderJSON(gson.toJson(rows.stream().map(m -> toDto(m, agentNames)).toList()));
+        var batch = ProvenanceBatch.load(rows);
+        renderJSON(gson.toJson(rows.stream().map(m -> toDto(m, agentNames, batch)).toList()));
     }
 
     /**
@@ -289,6 +310,26 @@ public class ApiMemoryController extends Controller {
             if (normalized != null) memory.category = normalized;
         }
         memory.save();
+        MemoryVerification.record(memory, MemoryProvenance.OPERATOR_ACTOR, MemoryVerification.Kind.EDITED);
+        renderJSON(gson.toJson(toDto(memory, agentNamesById())));
+    }
+
+    /**
+     * POST /api/memories/{memoryId}/verify — the operator confirms a memory, which makes it
+     * human-reviewed (JCLAW-1318).
+     */
+    @SuppressWarnings("java:S2259")
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = MemoryDto.class)))
+    @Operation(summary = "Confirm a memory as reviewed by the operator")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "a human verification is the operator's word; an agent cannot vouch for itself")
+    public static void verify(Long memoryId) {
+        Memory memory = MemoryService.findById(memoryId);
+        if (memory == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        MemoryVerification.record(memory, MemoryProvenance.OPERATOR_ACTOR, MemoryVerification.Kind.CONFIRMED);
         renderJSON(gson.toJson(toDto(memory, agentNamesById())));
     }
 
@@ -474,7 +515,8 @@ public class ApiMemoryController extends Controller {
 
     /** One scored candidate as recall saw it (JCLAW-937). */
     public record RecallCandidateView(long id, String text, String category, double importance,
-                                      double relevance, double decay, double score, boolean selected) {}
+                                      double relevance, double decay, double score, boolean selected,
+                                      @Nullable ProvenanceView provenance) {}
 
     /** A recall, the settings that shaped it, and every candidate it considered. */
     public record RecallView(String agentId, String query, int limit,
@@ -523,10 +565,20 @@ public class ApiMemoryController extends Controller {
         }
 
         var result = SystemPromptAssembler.recall(agentId, query, Set.of());
+        var ids = result.candidates().stream().map(c -> Long.parseLong(c.entry().id())).toList();
+        List<Memory> rows = ids.isEmpty() ? List.of() : Memory.find("id IN (?1)", ids).fetch();
+        var batch = ProvenanceBatch.load(rows);
+        var byId = new HashMap<Long, Memory>();
+        for (Memory m : rows) byId.put(m.id, m);
         var candidates = result.candidates().stream()
-                .map(c -> new RecallCandidateView(Long.parseLong(c.entry().id()), c.entry().text(),
-                        c.entry().category(), c.entry().importance(), c.entry().relevance(),
-                        c.decay(), c.score(), c.selected()))
+                .map(c -> {
+                    long id = Long.parseLong(c.entry().id());
+                    var row = byId.get(id);
+                    return new RecallCandidateView(id, c.entry().text(),
+                            c.entry().category(), c.entry().importance(), c.entry().relevance(),
+                            c.decay(), c.score(), c.selected(),
+                            row == null ? null : batch.provenance(row));
+                })
                 .toList();
         renderJSON(gson.toJson(new RecallView(agentId, query, result.limit(),
                 result.relevanceWeight(), result.importanceWeight(), vectorBackendLabel(),
@@ -707,6 +759,10 @@ public class ApiMemoryController extends Controller {
     // ─── helpers ──────────────────────────────────────────────────────────────
 
     private static MemoryDto toDto(Memory m, Map<String, String> agentNames) {
+        return toDto(m, agentNames, ProvenanceBatch.load(List.of(m)));
+    }
+
+    private static MemoryDto toDto(Memory m, Map<String, String> agentNames, ProvenanceBatch batch) {
         // The agent FK is the immutable id (JCLAW-531/537); surface the current
         // human name, falling back to the raw id if the agent row is somehow gone.
         String key = String.valueOf(m.agent.id);
@@ -714,7 +770,46 @@ public class ApiMemoryController extends Controller {
         return new MemoryDto(String.valueOf(m.id), name, m.text, m.category,
                 m.importance, m.createdAt == null ? null : m.createdAt.toString(),
                 m.supersededAt == null ? null : m.supersededAt.toString(),
-                m.supersededById == null ? null : String.valueOf(m.supersededById));
+                m.supersededById == null ? null : String.valueOf(m.supersededById),
+                batch.provenance(m));
+    }
+
+    /** A page's verifications and derivations, fetched with one IN query each rather than per row. */
+    private record ProvenanceBatch(Map<Long, List<MemoryVerification>> verifications,
+                                   Map<Long, List<MemoryDerivation>> derivations, int firmThreshold) {
+
+        static ProvenanceBatch load(Collection<Memory> rows) {
+            var verifications = new HashMap<Long, List<MemoryVerification>>();
+            var derivations = new HashMap<Long, List<MemoryDerivation>>();
+            var ids = rows.stream().map(m -> m.id).toList();
+            if (!ids.isEmpty()) {
+                List<MemoryVerification> vs =
+                        MemoryVerification.find("memory.id IN (?1) ORDER BY id", ids).fetch();
+                for (MemoryVerification v : vs) {
+                    verifications.computeIfAbsent(v.memory.id, _ -> new ArrayList<>()).add(v);
+                }
+                List<MemoryDerivation> ds =
+                        MemoryDerivation.find("derivedMemory.id IN (?1) ORDER BY id", ids).fetch();
+                for (MemoryDerivation d : ds) {
+                    derivations.computeIfAbsent(d.derivedMemory.id, _ -> new ArrayList<>()).add(d);
+                }
+            }
+            return new ProvenanceBatch(verifications, derivations, MemoryTrust.firmThreshold());
+        }
+
+        ProvenanceView provenance(Memory m) {
+            var vs = verifications.getOrDefault(m.id, List.of());
+            var ds = derivations.getOrDefault(m.id, List.of());
+            return new ProvenanceView(m.sourceConversationId, m.sourceMessageId, m.actor,
+                    m.authorType == null ? "UNATTRIBUTED" : m.authorType.name(), m.derived,
+                    ds.stream().map(d -> new DerivationView(
+                            d.inputMemoryId, d.inputConversationId, d.inputMessageId)).toList(),
+                    m.corroborationCount,
+                    vs.stream().map(v -> new VerificationView(
+                            v.actor, v.kind.name(), v.verifiedAt.toString())).toList(),
+                    MemoryTrust.trustTier(vs).name(),
+                    MemoryTrust.graphTier(m.actor, vs, m.corroborationCount, firmThreshold).name());
+        }
     }
 
     /**

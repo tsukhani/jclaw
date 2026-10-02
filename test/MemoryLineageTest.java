@@ -90,4 +90,24 @@ class MemoryLineageTest extends UnitTest {
                 "the successor still exists, so this lineage is intact and must be left alone");
         assertEquals(newer.id, ((Memory) Memory.findById(older.id)).supersededById);
     }
+
+    @Test
+    void deletingAnInputKeepsItsDerivationLinksTurnRefs() {
+        var store = memory.MemoryStoreFactory.get();
+        var aid = String.valueOf(agent.id);
+        var input = store.storeDeferred(aid, "The user lives in Berlin", "fact", 0.5, null,
+                memory.MemoryProvenance.extractor("m1").withSource(31L, 310L));
+        var derived = store.storeDeferred(aid, "The user is based in Germany", "fact", 0.5, null,
+                new memory.MemoryProvenance(null, null, memory.MemoryProvenance.process("consolidation"),
+                        models.MemoryAuthorType.CONSOLIDATION_DERIVED, java.util.List.of(Long.parseLong(input))));
+
+        ((Memory) Memory.findById(Long.parseLong(input))).deleteWithLineage();
+
+        java.util.List<models.MemoryDerivation> links =
+                models.MemoryDerivation.find("derivedMemory.id = ?1", Long.parseLong(derived)).fetch();
+        assertEquals(1, links.size(), "the link outlives its input");
+        assertNull(links.getFirst().inputMemoryId, "the input is gone, so the pointer must say so");
+        assertEquals(31L, links.getFirst().inputConversationId);
+        assertEquals(310L, links.getFirst().inputMessageId);
+    }
 }

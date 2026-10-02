@@ -148,6 +148,7 @@ POST    /api/memories/backfill-keys             ApiMemoryController.backfillKeys
 GET     /api/memories/reembed                   ApiMemoryController.reembedStatus
 POST    /api/memories/reembed                   ApiMemoryController.reembedStart
 PUT     /api/memories/{memoryId}                ApiMemoryController.update
+POST    /api/memories/{memoryId}/verify         ApiMemoryController.verify
 DELETE  /api/memories                           ApiMemoryController.bulkDelete
 DELETE  /api/memories/{memoryId}                ApiMemoryController.delete
 

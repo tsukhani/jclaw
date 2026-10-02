@@ -83,6 +83,18 @@ public interface MemoryStore {
     }
 
     /**
+     * As {@link #storeDeferred(String, String, String, double, String)}, recording where the
+     * memory came from (JCLAW-1318). Every production writer goes through this overload.
+     *
+     * @throws IllegalArgumentException when a {@code derivedFrom} input is missing or belongs
+     *                                  to another agent; no row is written
+     */
+    default String storeDeferred(String agentId, String text, String category, double importance,
+            @Nullable String retrievalKey, MemoryProvenance provenance) {
+        return storeDeferred(agentId, text, category, importance, retrievalKey);
+    }
+
+    /**
      * JCLAW-807-follow-up: generate and persist the embedding for a row previously
      * written by {@link #storeDeferred}, with the embedding HTTP call held outside
      * any DB transaction. No-op for backends without a vector leg, when vector

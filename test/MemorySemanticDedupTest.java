@@ -83,6 +83,10 @@ class MemorySemanticDedupTest extends UnitTest {
         assertEquals(0, captureOne(agent, PARAPHRASE),
                 "cosine 0.9999 — the semantic tier must NOOP what the lexical rule cannot reach");
         assertEquals(1, Memory.findByAgent(agent).size(), "no second row may be written");
+        int count = play.db.jpa.JPA.em()
+                .createQuery("SELECT m.corroborationCount FROM Memory m WHERE m.id = :id", Integer.class)
+                .setParameter("id", Memory.findByAgent(agent).getFirst().id).getSingleResult();
+        assertEquals(1, count, "the cosine match corroborates its top neighbour (JCLAW-1318)");
     }
 
     @Test

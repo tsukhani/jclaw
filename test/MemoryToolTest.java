@@ -137,6 +137,58 @@ class MemoryToolTest extends UnitTest {
         assertTrue(again.startsWith("Already remembered"), again);
         assertEquals(1, MemoryStoreFactory.get().list(String.valueOf(agent.id)).size(),
                 "a duplicate store must not create a second row");
+        assertEquals(1, corroborations(onlyMemory().id), "a restatement corroborates the stored row");
+    }
+
+    /** Read past the persistence context: corroboration is a bulk update. */
+    private static int corroborations(Long id) {
+        return play.db.jpa.JPA.em()
+                .createQuery("SELECT m.corroborationCount FROM Memory m WHERE m.id = :id", Integer.class)
+                .setParameter("id", id).getSingleResult();
+    }
+
+    // --- JCLAW-1318: provenance ---
+
+    @Test
+    void aStoreInsideAConversationIsTheOperatorsTurn() {
+        var conv = services.ConversationService.create(agent, "web", "u-memtool-prov");
+        services.ConversationService.appendUserMessage(conv, "Remember that I keep the NAS in the basement");
+        var latest = services.ConversationService.appendUserMessage(conv, "and the router upstairs");
+        services.ConversationService.appendAssistantMessage(conv, "Noted.", null);
+
+        agents.ToolContext.withConversation(conv.id,
+                () -> call("{\"action\":\"store\",\"text\":\"The user keeps the router upstairs\"}"));
+
+        var m = onlyMemory();
+        assertEquals(conv.id, m.sourceConversationId);
+        assertEquals(latest.id, m.sourceMessageId, "the latest USER message, not the assistant reply");
+        assertEquals("human:operator", m.actor);
+        assertEquals(models.MemoryAuthorType.HUMAN_TURN, m.authorType);
+        assertFalse(m.derived);
+    }
+
+    @Test
+    void aStoreInATaskRunIsAProcessWriteAndNotFirm() {
+        agents.ToolContext.withScope(null, 77L,
+                () -> call("{\"action\":\"store\",\"text\":\"The nightly build finished green\"}"));
+
+        var m = onlyMemory();
+        assertNull(m.sourceConversationId);
+        assertNull(m.sourceMessageId);
+        assertEquals("process:task-run/77", m.actor);
+        assertEquals(models.MemoryAuthorType.AGENT_SYNTHESIZED, m.authorType);
+        assertEquals(memory.MemoryTrust.GraphTier.TENTATIVE,
+                memory.MemoryTrust.graphTier(m.actor, java.util.List.of(), 0, memory.MemoryTrust.DEFAULT_FIRM_THRESHOLD),
+                "no human stands behind a task run's write");
+    }
+
+    @Test
+    void aStoreWithNoScopeIsAProcessWrite() {
+        call("{\"action\":\"store\",\"text\":\"The nightly build finished green\"}");
+
+        var m = onlyMemory();
+        assertEquals("process:memory-tool", m.actor);
+        assertEquals(models.MemoryAuthorType.AGENT_SYNTHESIZED, m.authorType);
     }
 
     @Test
