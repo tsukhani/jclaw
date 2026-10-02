@@ -29,11 +29,7 @@ public final class GraphWithdrawal {
         var removed = new TreeSet<String>();
         var current = new ArrayList<OntologyRecord>();
         for (var record : records) {
-            var source = switch (record) {
-                case Evidence e -> e.source();
-                case Mapping m -> m.source();
-                default -> null;
-            };
+            var source = GraphStore.sourceOf(record);
             if (source != null && sources.contains(source)) {
                 removed.add(record.id());
             } else {

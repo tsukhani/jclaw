@@ -71,22 +71,28 @@ public final class GraphLifecycle {
         int removed = 0;
         for (var agentId : store.agentIds()) {
             agents++;
-            if (store.recover(agentId)) recovered++;
-            if (Tx.run(() -> Agent.findById(agentId) == null)) {
-                store.deleteAgent(agentId);
-                orphans++;
-                continue;
+            try {
+                if (store.recover(agentId)) recovered++;
+                if (Tx.run(() -> Agent.findById(agentId) == null)) {
+                    store.deleteAgent(agentId);
+                    orphans++;
+                    continue;
+                }
+                var referenced = new TreeSet<Long>();
+                for (var record : store.read(agentId)) {
+                    var memoryId = memoryId(GraphStore.sourceOf(record));
+                    if (memoryId != null) referenced.add(memoryId);
+                }
+                if (referenced.isEmpty()) continue;
+                var live = liveMemoryIds(agentId, referenced);
+                var stale = new TreeSet<>(referenced);
+                stale.removeAll(live);
+                if (!stale.isEmpty()) removed += store.withdraw(agentId, stale).size();
+            } catch (IOException | RuntimeException e) {
+                // One unreadable graph must not keep every later agent from being repaired.
+                EventLogger.warn(CATEGORY, String.valueOf(agentId), null,
+                        "Memory graph reconcile failed: %s".formatted(e.getMessage()));
             }
-            var referenced = new TreeSet<Long>();
-            for (var record : store.read(agentId)) {
-                var memoryId = memoryId(GraphStore.sourceOf(record));
-                if (memoryId != null) referenced.add(memoryId);
-            }
-            if (referenced.isEmpty()) continue;
-            var live = liveMemoryIds(agentId, referenced);
-            var stale = new TreeSet<>(referenced);
-            stale.removeAll(live);
-            if (!stale.isEmpty()) removed += store.withdraw(agentId, stale).size();
         }
         return new ReconcileResult(agents, recovered, orphans, removed);
     }

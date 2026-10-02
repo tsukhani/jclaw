@@ -90,6 +90,7 @@ public final class GraphCodec {
         var sb = new StringBuilder();
         records.stream()
                 .filter(r -> Family.of(r) == family)
+                .distinct()
                 .sorted(Comparator.comparing(OntologyRecord::id))
                 .forEach(r -> sb.append(encode(r)).append('\n'));
         return sb.toString();

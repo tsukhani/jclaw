@@ -290,6 +290,7 @@ class H2MaintenanceTest extends UnitTest {
         var beforeSha = H2Maintenance.sha256(dataFile(dir));
         var beforeNames = names(dir);
 
+        assertFalse(H2Maintenance.validateBackup(evil).ok(), "refused before the instance would stop");
         assertThrows(IllegalArgumentException.class, () -> H2Maintenance.restore(evil, dir));
 
         assertEquals(beforeNames, names(dir));

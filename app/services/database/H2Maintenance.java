@@ -223,6 +223,14 @@ public final class H2Maintenance {
             if (entry == null) {
                 return new BackupCheck(false, "no " + DATA_FILE + " inside the archive", 0);
             }
+            var entries = archive.entries();
+            while (entries.hasMoreElements()) {
+                var name = entries.nextElement().getName();
+                var relative = name.startsWith(GRAPH_DIR + "/") ? name.substring(GRAPH_DIR.length() + 1) : "";
+                if (!relative.isEmpty() && unsafeGraphEntry(relative)) {
+                    return new BackupCheck(false, "unsafe graph entry in the archive: " + name, 0);
+                }
+            }
             try (var in = archive.getInputStream(entry)) {
                 var head = in.readNBytes(MVSTORE_MAGIC.length());
                 if (!MVSTORE_MAGIC.equals(new String(head, StandardCharsets.US_ASCII))) {
@@ -340,19 +348,10 @@ public final class H2Maintenance {
                 if (!name.startsWith(GRAPH_DIR + "/")) continue;
                 var relative = name.substring(GRAPH_DIR.length() + 1);
                 if (relative.isEmpty()) continue;
-                var segments = relative.split("/", -1);
-                for (var segment : segments) {
-                    if (segment.equals("..") || segment.contains("\\")) {
-                        throw new IllegalArgumentException("unsafe graph entry in the archive: " + name);
-                    }
-                }
-                if (relative.startsWith("/") || Path.of(relative).isAbsolute()) {
+                if (unsafeGraphEntry(relative)) {
                     throw new IllegalArgumentException("unsafe graph entry in the archive: " + name);
                 }
                 var dest = base.resolve(relative).normalize();
-                if (!dest.startsWith(base) || dest.equals(base)) {
-                    throw new IllegalArgumentException("unsafe graph entry in the archive: " + name);
-                }
                 if (entry.isDirectory()) {
                     Files.createDirectories(dest);
                     continue;
@@ -366,6 +365,17 @@ public final class H2Maintenance {
             throw e;
         }
         return staging;
+    }
+
+    /** True when a {@code memory-graph/}-relative entry name could land outside the graph directory. */
+    private static boolean unsafeGraphEntry(String relative) {
+        for (var segment : relative.split("/", -1)) {
+            if (segment.equals("..") || segment.contains("\\")) return true;
+        }
+        if (relative.startsWith("/") || Path.of(relative).isAbsolute()) return true;
+        var base = Path.of(GRAPH_DIR);
+        var dest = base.resolve(relative).normalize();
+        return !dest.startsWith(base) || dest.equals(base);
     }
 
     /** Delete {@code dir} and everything under it; a no-op when it does not exist. */

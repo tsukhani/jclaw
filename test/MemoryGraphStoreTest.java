@@ -104,6 +104,48 @@ class MemoryGraphStoreTest extends UnitTest {
     }
 
     @Test
+    void aRecordGivenTwiceWritesTheSameBytesAsOnce() throws Exception {
+        store.write(AGENT, fullSet());
+        var once = snapshot();
+        var twice = new ArrayList<>(fullSet());
+        twice.add(fullSet().getFirst());
+        store.write(AGENT, twice);
+        assertEquals(once, snapshot());
+    }
+
+    /** The matrix's withdraw rows on the store: T rests on memory:5 and memory:6, R on T on memory:5 alone. */
+    @Test
+    void withdrawingTheMatrixSourcesUpdatesFilesAndIndex() throws Exception {
+        store.write(AGENT, List.of(
+                new Evidence(meta("e5"), "memory:5", null),
+                new Evidence(meta("e6"), "memory:6", null),
+                new Evidence(meta("e50"), "memory:50", null),
+                new Term(meta("T"), "Person", "Ada", List.of("mT"), List.of("e5", "e6")),
+                new Term(meta("O"), "Organization", "Acme", List.of(), List.of("e50")),
+                new Mapping(meta("mT"), "T", "message:1", List.of("e6")),
+                new Constraint(meta("cT"), "T", "only at work", List.of("e6")),
+                new Evidence(meta("eS"), "message:2", "T"),
+                new Relation(meta("R"), "works_at", "T", "O", List.of("e5"))));
+
+        assertEquals(Set.of("e5", "R"), store.withdraw(AGENT, Set.of(5L)));
+        var term = (Term) store.read(AGENT).stream().filter(r -> r.id().equals("T")).findFirst().orElseThrow();
+        assertEquals(List.of("e6"), term.evidenceIds());
+        var index = store.index(AGENT);
+        assertNotNull(index);
+        assertFalse(index.byId().containsKey("e5"));
+        assertFalse(index.byId().containsKey("R"));
+        assertNull(index.evidenceIdsBySource().get("memory:5"));
+        assertEquals(Set.of("e50"), index.evidenceIdsBySource().get("memory:50"));
+
+        assertEquals(Set.of("e6", "T", "mT", "cT", "eS"), store.withdraw(AGENT, Set.of(6L)));
+        assertEquals(Set.of("e50", "O"), Set.copyOf(store.read(AGENT).stream().map(OntologyRecord::id).toList()));
+        index = store.index(AGENT);
+        assertNotNull(index);
+        assertEquals(Set.of("e50", "O"), index.byId().keySet());
+        assertEquals(Map.of("memory:50", Set.of("e50")), index.evidenceIdsBySource());
+    }
+
+    @Test
     void theLineFormatPinsKeyOrderAndValueShapes() throws Exception {
         store.write(AGENT, fullSet());
         var dir = store.agentDir(AGENT);

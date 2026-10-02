@@ -10,6 +10,7 @@ import memory.ontology.OntologyValidator.Violation;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.AtomicDirSwap;
+import services.database.H2Maintenance;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -45,7 +46,7 @@ public final class GraphStore {
 
     /** The source string an Evidence or Mapping uses to name a memory row. */
     public static final String MEMORY_SOURCE_PREFIX = "memory:";
-    public static final String DIR_NAME = "memory-graph";
+    public static final String DIR_NAME = H2Maintenance.GRAPH_DIR;
     static final String TEST_DIR_NAME = "memory-graph-test";
     static final String STAGING_SUFFIX = ".staging";
     static final String PREVIOUS_SUFFIX = ".previous";
@@ -206,8 +207,8 @@ public final class GraphStore {
     }
 
     private Set<String> withdrawSources(long agentId, SourceSelector selector) throws IOException {
-        if (!hasGraph(agentId)) return Set.of();
         return locked(agentId, () -> {
+            if (!hasGraph(agentId)) return Set.<String>of();
             var records = readLocked(agentId);
             var sources = selector.select(records);
             if (sources.isEmpty()) return Set.<String>of();

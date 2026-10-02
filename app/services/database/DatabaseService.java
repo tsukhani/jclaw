@@ -175,20 +175,23 @@ public final class DatabaseService {
     public static BackupInfo backupNow() throws SQLException, IOException {
         var dir = Files.createDirectories(backupsDir());
         var zip = dir.resolve(BACKUP_PREFIX + STAMP.format(AppClock.now()) + ".zip");
-        // doWork lends the session's connection; a JDBC refusal comes back wrapped, not as SQLException.
-        try {
-            JPA.em().unwrap(Session.class).doWork(connection -> H2Maintenance.backupOnline(connection, zip));
-        } catch (JDBCException e) {
-            throw e.getSQLException();
-        }
+        // Graph writers wait across both steps, so no withdrawal lands between the database and the graph.
         try {
             GraphStore.get().pauseWriters(() -> {
+                // doWork lends the session's connection; a JDBC refusal comes back wrapped, not as SQLException.
+                try {
+                    JPA.em().unwrap(Session.class).doWork(connection -> H2Maintenance.backupOnline(connection, zip));
+                } catch (JDBCException e) {
+                    throw e.getSQLException();
+                }
                 H2Maintenance.appendGraph(zip, dataDir());
                 return null;
             });
-        } catch (IOException | RuntimeException e) {
+        } catch (SQLException | IOException | RuntimeException e) {
+            Files.deleteIfExists(zip);
             throw e;
         } catch (Exception e) {
+            Files.deleteIfExists(zip);
             throw new IOException(e.getMessage(), e);
         }
         Files.deleteIfExists(dataDir().resolve(H2Maintenance.PRE_RESTORE_FILE));

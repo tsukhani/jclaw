@@ -17,6 +17,7 @@ import services.AgentService;
 import services.Tx;
 
 import java.nio.file.Files;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -187,6 +188,48 @@ class MemoryGraphLifecycleTest extends UnitTest {
         GraphLifecycle.reconcile();
 
         assertEquals(expected, new HashSet<>(GraphStore.get().read(f.agentId())));
+        assertFirstWithdrawn(f);
+    }
+
+    @Test
+    void reconcileWithdrawsAMemorySupersededWithNoHookFiring() throws Exception {
+        var f = seed();
+        try (var _ = LuceneTestSync.closedLease()) {
+            commitInFreshTx(() -> JPA.em().createQuery("UPDATE Memory m SET m.supersededAt = :at WHERE m.id = :id")
+                    .setParameter("at", Instant.parse("2026-10-01T00:00:00Z"))
+                    .setParameter("id", f.first()).executeUpdate());
+        }
+
+        GraphLifecycle.reconcile();
+
+        assertFirstWithdrawn(f);
+    }
+
+    @Test
+    void reconcileWithdrawsASourceNamingAnotherAgentsMemory() throws Exception {
+        var f = seed();
+        var other = seed();
+        var foreign = new Fixture(f.agentId(), other.first(), f.second());
+        GraphStore.get().write(f.agentId(), graph(foreign));
+
+        GraphLifecycle.reconcile();
+
+        assertFirstWithdrawn(foreign);
+        assertEquals(Set.of("eA", "eB", "T", "O", "R"), ids(other.agentId()), "the owner's graph is untouched");
+    }
+
+    @Test
+    void anUnreadableGraphDoesNotStopTheNextAgentsRepair() throws Exception {
+        var broken = seed();
+        var f = seed();
+        Files.writeString(GraphStore.get().agentDir(broken.agentId()).resolve("evidence.jsonl"), "not json\n");
+        try (var _ = LuceneTestSync.closedLease()) {
+            commitInFreshTx(() -> JPA.em().createQuery("DELETE FROM Memory m WHERE m.id = :id")
+                    .setParameter("id", f.first()).executeUpdate());
+        }
+
+        GraphLifecycle.reconcile();
+
         assertFirstWithdrawn(f);
     }
 
