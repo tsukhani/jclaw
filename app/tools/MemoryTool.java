@@ -387,7 +387,7 @@ public class MemoryTool implements ToolRegistry.Tool {
     private static String requester(MemoryProvenance provenance) {
         return switch (provenance.authorType()) {
             case HUMAN_TURN -> "operator";
-            case GUEST_TURN -> "guest";
+            case GUEST_TURN -> provenance.actor();
             default -> "agent";
         };
     }

@@ -22,7 +22,7 @@ class MemoryAuthorTypeColumnJobTest extends UnitTest {
     @Test
     void anEnumColumnWidensKeepingItsRowsAndAdmitsGuestTurn() throws Exception {
         try (Connection conn = DriverManager.getConnection(
-                "jdbc:h2:mem:memory-author-type-" + System.nanoTime() + ";MODE=MYSQL;DB_CLOSE_DELAY=-1")) {
+                "jdbc:h2:mem:memory-author-type-" + System.nanoTime() + ";MODE=MYSQL")) {
             try (Statement s = conn.createStatement()) {
                 s.execute("CREATE TABLE memory (id BIGINT PRIMARY KEY, "
                         + "author_type ENUM('HUMAN_TURN','AGENT_SYNTHESIZED','CONSOLIDATION_DERIVED'))");
