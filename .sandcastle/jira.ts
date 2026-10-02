@@ -1,6 +1,7 @@
 // Host-side Jira access for the factory: intake of `afk` stories and the write-backs. The agent never
 // touches Jira; it only sees the snapshot written here.
 import * as fs from "node:fs";
+import { intakeJql } from "./jira-intake.ts";
 import { JIRA_ENV_FILE, STATE, readEnvFile } from "./paths.ts";
 import type { Snapshot, Tracker } from "./tracker.ts";
 
@@ -9,11 +10,6 @@ const env = readEnvFile(JIRA_ENV_FILE);
 if (!env.JIRA_URL || !env.JIRA_PERSONAL_TOKEN) throw new Error(`no Jira credentials: put JIRA_URL and JIRA_PERSONAL_TOKEN in ${JIRA_ENV_FILE}`);
 const BASE: string = env.JIRA_URL.replace(/\/$/, "");
 const EPIC_LINK = "customfield_10002";
-
-export const INTAKE_JQL =
-  'project = JCLAW AND sprint in openSprints() AND issuetype not in (Epic, Sub-task) ' +
-  'AND labels = afk AND labels != afk-blocked AND labels != wont-do AND status = "To Do" AND (assignee is EMPTY OR assignee = currentUser()) ' +
-  'ORDER BY rank';
 
 // Jira's REST shapes are read field by field below, so the payload stays untyped.
 const api = async (path: string, init: { method?: string; body?: unknown } = {}): Promise<any> => {
@@ -53,8 +49,15 @@ export const snapshot = async (key: string): Promise<Snapshot> => {
 // Every `afk` candidate in board order, each snapshot written to state/ (gitignored: it holds ticket text).
 // Which of them may run, and in what order, is the caller's plan.
 export const intake = async (): Promise<Snapshot[]> => {
-  const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(INTAKE_JQL)}&fields=summary&maxResults=50`);
+  const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(intakeJql(await afkEpics()))}&fields=summary&maxResults=50`);
   return Promise.all(found.issues.map((issue: { key: string }) => snapshotToState(issue.key)));
+};
+
+// Open epics labelled `afk`: each of their stories is a candidate without a label of its own.
+const afkEpics = async (): Promise<string[]> => {
+  const jql = "project = JCLAW AND issuetype = Epic AND labels = afk AND statusCategory != Done";
+  const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=summary&maxResults=100`);
+  return found.issues.map((issue: { key: string }) => issue.key);
 };
 
 // afk stories awaiting human review: their branches are unmerged, so no new story may change the same files yet.

@@ -1,5 +1,7 @@
-// Offline checks on synthetic tickets: review feedback, planning, build mode and the GitHub trust rule. `npm run check`.
+// Offline checks on synthetic tickets: review feedback, planning, build mode, the GitHub trust rule and Jira's intake
+// query. `npm run check`.
 import { vetIssue, type Issue } from "./github.ts";
+import { intakeJql } from "./jira-intake.ts";
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
 
@@ -87,3 +89,9 @@ check("a story back in intake after the factory's won't-do was overruled",
   overruled(ticket(`${JIRA}: won't do\nIt is about another product.`, "it is not, build it"), JIRA), true);
 check("GitHub's header counts the same way",
   overruled({ ...ticket(), comments: [{ author: OWNER, body: "### AFK factory: won't do\nGibberish." }] }, "### AFK factory"), true);
+
+const SPRINT = "project = JCLAW AND sprint in openSprints() AND issuetype not in (Epic, Sub-task)";
+const HOLD = '(labels is EMPTY OR labels not in (afk-blocked, wont-do, no-afk)) AND status = "To Do" AND (assignee is EMPTY OR assignee = currentUser()) ORDER BY rank';
+check("with no afk epic, a story is taken by its own label alone", intakeJql([]), `${SPRINT} AND labels = afk AND ${HOLD}`);
+check("an afk epic's stories are taken with the labelled ones", intakeJql(["JCLAW-538", "JCLAW-902"]),
+  `${SPRINT} AND (labels = afk OR "Epic Link" in (JCLAW-538, JCLAW-902)) AND ${HOLD}`);

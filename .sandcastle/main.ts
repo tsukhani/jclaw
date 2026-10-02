@@ -285,6 +285,8 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     return;
   }
   await tracker.started(key);
+  // A story taken through its epic's label gets its own, which the queries for stories in review read.
+  if (!PINNED && !picked.labels.includes("afk")) await tracker.addLabel(key, "afk");
   try {
     if (feedback === "") throw new Error("it came back from review without a comment: say in a comment what to change, then send it back");
     const brief = await build();

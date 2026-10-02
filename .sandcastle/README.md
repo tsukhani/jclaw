@@ -1,7 +1,8 @@
 # AFK factory
 
 An unattended software factory for JClaw, built on [Sandcastle](https://github.com/mattpocock/sandcastle). It picks up
-Jira stories labelled `afk` in the active sprint, and GitHub issues you label `afk` when you set it up, has a coding
+Jira stories in the active sprint that are labelled `afk` or belong to an epic labelled `afk`, and GitHub issues you
+label `afk` when you set it up, has a coding
 agent implement each one in its own isolated container,
 runs the full test suite itself, has a second agent review the work, and hands you a local branch `agent/<KEY>` with a
 brief on the ticket. It never pushes and never merges. You review the branch, merge it into `main` and ship it with
@@ -46,8 +47,9 @@ behind `tracker.ts`, and `plan.ts`. The
 LaunchAgent `com.jclaw.factory` keeps it running through `run.sh`, which reinstalls its dependencies whenever the
 lockfile changes. Every two minutes it:
 
-1. Polls Jira for `afk` stories in To Do, keeping those whose blockers are Done, and GitHub for open issues you labelled
-   `afk` (see [GitHub issues](#github-issues)).
+1. Polls Jira for To Do stories that carry `afk` or sit in an epic that does (see [A whole epic](#a-whole-epic)),
+   keeping those whose blockers are Done, and GitHub for open issues you labelled `afk` (see
+   [GitHub issues](#github-issues)).
 2. Rebuilds the sandbox image if `main` has moved, and has a planner agent predict each story's files, decide whether
    it needs BMAD, and decline one that should not be built at all. A story waits while its files overlap a branch awaiting review or a story already running.
 3. Claims a story by assigning it to its own Jira user, moves it to In Progress, and runs it in a fresh sandbox:
@@ -138,6 +140,21 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
   label to retry.
 - **When the harness stops:** an interrupted story still has `afk-running`. The next start sends it back to To Do,
   and its branch keeps what it had committed.
+
+### A whole epic
+
+Label an epic `afk` and every To Do story in it that is in the active sprint becomes a candidate, with no label of its
+own. The epic itself need not be in the sprint.
+
+The order comes from the stories, not the epic. A story starts only once every story that blocks it is Done, which
+means merged, so link the stories with Blocks to set the order. Stories with no link between them may run at the same
+time, in board rank order, as far as `FACTORY_MAX_PARALLEL` and the file-overlap plan allow. A chain therefore costs one
+review and merge per link. Blocks links between epics are not read.
+
+- **To leave one story out,** label it `no-afk`.
+- **To stop,** remove `afk` from the epic. Stories not yet started are no longer taken. The harness adds `afk` to a
+  story when it starts it, so one already running, in review or sent back stays with the factory.
+- A story added to the epic later is picked up at the next poll.
 
 ### Declined stories
 
