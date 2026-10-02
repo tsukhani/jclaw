@@ -4,6 +4,7 @@ import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import llm.LlmProvider;
 import llm.ProviderRegistry;
+import memory.graph.GraphStore;
 import models.Agent;
 import models.Memory;
 import models.MemoryDerivation;
@@ -508,6 +509,12 @@ public class JpaMemoryStore implements MemoryStore {
             @Override
             public void afterCompletion(int status) {
                 if (status == Status.STATUS_COMMITTED) {
+                    try {
+                        GraphStore.get().withdrawAllMemoryEvidence(pk);
+                    } catch (Exception e) {
+                        EventLogger.warn("memory", String.valueOf(pk), null,
+                                "Memory graph withdraw all memory evidence failed: %s".formatted(e.getMessage()));
+                    }
                     LuceneIndexer.removeByAgent(LuceneIndexer.Scope.MEMORY, String.valueOf(pk));
                 }
             }

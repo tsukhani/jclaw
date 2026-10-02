@@ -3,6 +3,7 @@ package services;
 import agents.DangerousActionGate;
 import jakarta.persistence.EntityManager;
 import memory.MemoryStoreFactory;
+import memory.graph.GraphLifecycle;
 import models.Agent;
 import play.db.jpa.JPA;
 import services.search.LuceneIndexer;
@@ -79,6 +80,7 @@ public final class AgentDeletionCascade {
             // JCLAW-1226: the tool_approval_grant rows cascade at the DB, but the gate's
             // in-process grant cache is not FK-linked and would outlive them.
             DangerousActionGate.revokeGrantsForAgent(node.id);
+            GraphLifecycle.deleteAgentAfterCommit(node.id);
         }
         ConfigService.clearCache();
         // JCLAW-673: evict the subtree's SUBAGENT_RUN + TASK full-text docs while
