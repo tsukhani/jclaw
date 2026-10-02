@@ -19,6 +19,23 @@ function mem(overrides: Record<string, unknown> = {}) {
     createdAt: '2026-06-29T00:00:00Z',
     supersededAt: null,
     supersededById: null,
+    provenance: provenance(),
+    ...overrides,
+  }
+}
+
+function provenance(overrides: Record<string, unknown> = {}) {
+  return {
+    sourceConversationId: 5,
+    sourceMessageId: 42,
+    actor: 'extractor/m1',
+    authorType: 'HUMAN_TURN',
+    derived: false,
+    derivations: [],
+    corroborationCount: 0,
+    verifications: [],
+    trustTier: 'UNVERIFIED',
+    graphTier: 'TENTATIVE',
     ...overrides,
   }
 }
@@ -437,5 +454,60 @@ describe('memories admin page — a failed delete (JCLAW-1221)', () => {
     finally {
       off()
     }
+  })
+})
+
+describe('memories admin page — provenance (JCLAW-1318)', () => {
+  let unregister: Array<() => void> = []
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  it('shows the trust tier, graph tier and corroboration count, with the source in the title', async () => {
+    memoriesResponse = [mem({
+      provenance: provenance({
+        corroborationCount: 3,
+        graphTier: 'FIRM',
+        derived: true,
+        authorType: 'CONSOLIDATION_DERIVED',
+        derivations: [{ inputMemoryId: null, inputConversationId: 7, inputMessageId: 70 }],
+      }),
+    })]
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+
+    expect(c.find('[data-testid="trust-badge"]').text()).toBe('Unverified')
+    expect(c.find('[data-testid="graph-badge"]').text()).toBe('Firm')
+    expect(c.find('[data-testid="corroboration-badge"]').text()).toBe('×3')
+    const title = c.find('[data-testid="provenance-cell"]').attributes('title')
+    expect(title).toContain('Actor: extractor/m1')
+    expect(title).toContain('Author type: CONSOLIDATION_DERIVED')
+    expect(title).toContain('Source conversation: 5')
+    expect(title).toContain('Source message: 42')
+    expect(title).toContain('Derived from deleted memory (conversation 7, message 70)')
+  })
+
+  it('Confirm POSTs the verify route and the refreshed row reads Human-reviewed', async () => {
+    memoriesResponse = [mem()]
+    let posted = false
+    unregister.push(registerEndpoint('/api/memories/10/verify', {
+      method: 'POST',
+      handler: () => {
+        posted = true
+        const confirmed = mem({ provenance: provenance({ trustTier: 'HUMAN_REVIEWED', graphTier: 'FIRM' }) })
+        memoriesResponse = [confirmed]
+        return confirmed
+      },
+    }))
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+
+    await c.find('[data-testid="confirm-memory"]').trigger('click')
+    await vi.waitFor(() => expect(c.find('[data-testid="trust-badge"]').text()).toBe('Human-reviewed'))
+    expect(posted).toBe(true)
+    expect(c.find('[data-testid="graph-badge"]').text()).toBe('Firm')
+    expect(c.find('[data-testid="confirm-memory"]').exists()).toBe(false)
   })
 })

@@ -6,6 +6,7 @@ import llm.LlmProvider;
 import llm.ProviderRegistry;
 import models.Agent;
 import models.Memory;
+import models.MemoryDerivation;
 import org.hibernate.Session;
 import org.jspecify.annotations.Nullable;
 import play.Play;
@@ -178,23 +179,63 @@ public class JpaMemoryStore implements MemoryStore {
     @Override
     public String storeDeferred(String agentId, String text, String category, double importance,
             @Nullable String retrievalKey) {
-        return persistRow(agentId, text, category, importance, retrievalKey).id.toString();
+        return persistRow(agentId, text, category, importance, retrievalKey, null).id.toString();
+    }
+
+    @Override
+    public String storeDeferred(String agentId, String text, String category, double importance,
+            @Nullable String retrievalKey, MemoryProvenance provenance) {
+        return persistRow(agentId, text, category, importance, retrievalKey, provenance).id.toString();
     }
 
     private Memory persistRow(String agentId, String text, String category, double importance) {
-        return persistRow(agentId, text, category, importance, null);
+        return persistRow(agentId, text, category, importance, null, null);
     }
 
     private Memory persistRow(String agentId, String text, String category, double importance,
-            @Nullable String retrievalKey) {
+            @Nullable String retrievalKey, @Nullable MemoryProvenance provenance) {
+        var agent = resolveAgent(agentId);   // JCLAW-537: real FK — the agent must exist
+        // Inputs are resolved before the row is saved, so a bad input writes nothing even
+        // when the caller's transaction does not roll back.
+        var inputs = provenance == null ? List.<Memory>of() : resolveInputs(agent, provenance.derivedFrom());
         var memory = new Memory();
-        memory.agent = resolveAgent(agentId);   // JCLAW-537: real FK — the agent must exist
+        memory.agent = agent;
         memory.text = text;
         memory.category = category;
         memory.importance = importance;
         memory.retrievalKey = retrievalKey;
+        if (provenance != null) {
+            memory.sourceConversationId = provenance.sourceConversationId();
+            memory.sourceMessageId = provenance.sourceMessageId();
+            memory.actor = provenance.actor();
+            memory.authorType = provenance.authorType();
+            memory.derived = provenance.derived();
+        }
         memory.save();
+        for (var input : inputs) {
+            var link = new MemoryDerivation();
+            link.derivedMemory = memory;
+            link.inputMemoryId = input.id;
+            link.inputConversationId = input.sourceConversationId;
+            link.inputMessageId = input.sourceMessageId;
+            link.save();
+        }
         return memory;
+    }
+
+    private static List<Memory> resolveInputs(Agent agent, List<Long> ids) {
+        var out = new ArrayList<Memory>(ids.size());
+        for (var id : ids) {
+            Memory input = Memory.findById(id);
+            if (input == null) {
+                throw new IllegalArgumentException("Cannot derive a memory from missing memory " + id);
+            }
+            if (!agent.id.equals(input.agent.id)) {
+                throw new IllegalArgumentException("Cannot derive a memory from another agent's memory " + id);
+            }
+            out.add(input);
+        }
+        return out;
     }
 
     /**

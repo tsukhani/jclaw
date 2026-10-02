@@ -418,6 +418,127 @@ class ApiMemoryControllerTest extends FunctionalTest {
         assertEquals(404, resp.status.intValue());
     }
 
+    // ─── Provenance (JCLAW-1318) ─────────────────────────────────────────────
+
+    private static com.google.gson.JsonObject provenanceOf(String listBody, String memId) {
+        for (var e : com.google.gson.JsonParser.parseString(listBody).getAsJsonArray()) {
+            var o = e.getAsJsonObject();
+            if (memId.equals(o.get("id").getAsString())) return o.getAsJsonObject("provenance");
+        }
+        throw new AssertionError("memory " + memId + " not listed: " + listBody);
+    }
+
+    private long verificationCount(String memId, models.MemoryVerification.Kind kind) {
+        return fetchInFreshTx(() -> models.MemoryVerification.count(
+                "memory.id = ?1 AND kind = ?2", Long.parseLong(memId), kind));
+    }
+
+    @Test
+    void verifyRecordsAnOperatorConfirmationAndReturnsTheReviewedDto() {
+        var memId = seedMemory("alice", "Confirm me", "fact", 0.5);
+        login();
+
+        var resp = POST("/api/memories/" + memId + "/verify", "application/json", "{}");
+        assertIsOk(resp);
+        var prov = com.google.gson.JsonParser.parseString(getContent(resp))
+                .getAsJsonObject().getAsJsonObject("provenance");
+        assertEquals("HUMAN_REVIEWED", prov.get("trustTier").getAsString(), prov.toString());
+        assertEquals("FIRM", prov.get("graphTier").getAsString(), prov.toString());
+        var v = prov.getAsJsonArray("verifications").get(0).getAsJsonObject();
+        assertEquals("human:operator", v.get("actor").getAsString());
+        assertEquals("CONFIRMED", v.get("kind").getAsString());
+        assertEquals(1, verificationCount(memId, models.MemoryVerification.Kind.CONFIRMED));
+    }
+
+    @Test
+    void verifyOfAnUnknownMemoryIs404() {
+        login();
+        assertEquals(404, POST("/api/memories/999999/verify", "application/json", "{}").status.intValue());
+    }
+
+    @Test
+    void aValidEditRecordsAnEditedEventAndAnInvalidOneRecordsNone() {
+        var memId = seedMemory("alice", "Tweak me", "fact", 0.4);
+        login();
+
+        assertEquals(400, PUT("/api/memories/" + memId, "application/json", "{\"importance\":1.5}")
+                .status.intValue());
+        assertEquals(0, verificationCount(memId, models.MemoryVerification.Kind.EDITED));
+
+        assertIsOk(PUT("/api/memories/" + memId, "application/json", "{\"importance\":0.9}"));
+        assertEquals(1, verificationCount(memId, models.MemoryVerification.Kind.EDITED));
+    }
+
+    @Test
+    void aLegacyRowListsAsUnattributedUnverifiedAndTentative() {
+        var memId = seedMemory("alice", "Written before provenance", "fact", 0.5);
+        login();
+
+        var prov = provenanceOf(getContent(GET("/api/memories")), memId);
+        assertEquals("UNATTRIBUTED", prov.get("authorType").getAsString(), prov.toString());
+        assertTrue(prov.get("actor") == null || prov.get("actor").isJsonNull(), prov.toString());
+        assertTrue(prov.get("sourceConversationId") == null || prov.get("sourceConversationId").isJsonNull(),
+                prov.toString());
+        assertEquals("UNVERIFIED", prov.get("trustTier").getAsString());
+        assertEquals("TENTATIVE", prov.get("graphTier").getAsString());
+        assertEquals(0, prov.get("corroborationCount").getAsInt());
+    }
+
+    @Test
+    void aDerivedMemoryListsItsInputsTurnRefs() {
+        var ids = fetchInFreshTx(() -> {
+            var agent = services.AgentService.create("deriver", "openrouter", "gpt-4.1");
+            var aid = String.valueOf(agent.id);
+            var store = MemoryStoreFactory.get();
+            var a = store.storeDeferred(aid, "Input A", "fact", 0.5, null,
+                    memory.MemoryProvenance.extractor("m1").withSource(11L, 111L));
+            var b = store.storeDeferred(aid, "Input B", "fact", 0.5, null,
+                    memory.MemoryProvenance.extractor("m1").withSource(22L, 222L));
+            var d = store.storeDeferred(aid, "Derived from A and B", "fact", 0.5, null,
+                    new memory.MemoryProvenance(null, null, memory.MemoryProvenance.process("consolidation"),
+                            models.MemoryAuthorType.CONSOLIDATION_DERIVED,
+                            java.util.List.of(Long.parseLong(a), Long.parseLong(b))));
+            return java.util.List.of(a, b, d);
+        });
+        login();
+
+        var prov = provenanceOf(getContent(GET("/api/memories")), ids.get(2));
+        assertTrue(prov.get("derived").getAsBoolean(), prov.toString());
+        assertEquals("CONSOLIDATION_DERIVED", prov.get("authorType").getAsString());
+        assertEquals("process:consolidation", prov.get("actor").getAsString());
+        var links = prov.getAsJsonArray("derivations");
+        assertEquals(2, links.size(), prov.toString());
+        var turns = new java.util.HashSet<String>();
+        for (var l : links) {
+            var o = l.getAsJsonObject();
+            turns.add(o.get("inputConversationId").getAsLong() + "/" + o.get("inputMessageId").getAsLong());
+        }
+        assertEquals(java.util.Set.of("11/111", "22/222"), turns);
+
+        var source = provenanceOf(getContent(GET("/api/memories")), ids.get(0));
+        assertEquals(11L, source.get("sourceConversationId").getAsLong());
+        assertEquals(111L, source.get("sourceMessageId").getAsLong());
+        assertEquals("extractor/m1", source.get("actor").getAsString());
+        assertEquals("HUMAN_TURN", source.get("authorType").getAsString());
+    }
+
+    @Test
+    void recallCandidatesCarryTheSameProvenanceAsTheList() {
+        var memId = seedMemory("recall-prov", "The user prefers dark mode in every editor", "preference", 0.7);
+        var agent = agentIdFor("recall-prov");
+        login();
+        assertIsOk(POST("/api/memories/" + memId + "/verify", "application/json", "{}"));
+
+        var listed = provenanceOf(getContent(GET("/api/memories")), memId);
+        var recalled = com.google.gson.JsonParser.parseString(recall(agent, "dark mode")).getAsJsonObject();
+        com.google.gson.JsonObject candidate = null;
+        for (var c : recalled.getAsJsonArray("candidates")) {
+            if (c.getAsJsonObject().get("id").getAsLong() == Long.parseLong(memId)) candidate = c.getAsJsonObject();
+        }
+        assertNotNull(candidate, recalled.toString());
+        assertEquals(listed, candidate.getAsJsonObject("provenance"));
+    }
+
     @Test
     void deletesMemory() {
         var memId = seedMemory("alice", "Delete me", "fact", 0.5);

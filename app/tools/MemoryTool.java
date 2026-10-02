@@ -3,16 +3,20 @@ package tools;
 import agents.PromptFenceScrubber;
 import agents.SystemPromptAssembler;
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import memory.MemoryAutoCapture;
 import memory.MemoryCategory;
 import memory.MemoryForgetLog;
+import memory.MemoryProvenance;
 import memory.MemorySafety;
 import memory.MemorySimilarity;
 import memory.MemoryStoreFactory;
 import models.Agent;
 import models.Memory;
+import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
@@ -311,6 +315,7 @@ public class MemoryTool implements ToolRegistry.Tool {
 
         var existing = sameFact(agentId, text, retrievalKey);
         if (!existing.isEmpty()) {
+            Tx.run(() -> Memory.corroborate(existing.getFirst().id));
             return "Already remembered: \"%s\"".formatted(snippet(existing.getFirst().text));
         }
 
@@ -339,11 +344,26 @@ public class MemoryTool implements ToolRegistry.Tool {
         // HTTP call and store() would run it inside this transaction, pinning a pooled
         // connection across the network (the JCLAW-807 shape). Same split as applyPlan.
         var store = MemoryStoreFactory.get();
-        var storedId = Tx.run(() -> store.storeDeferred(agentId, text, category, importance, retrievalKey));
+        var storedId = Tx.run(() -> store.storeDeferred(agentId, text, category, importance, retrievalKey,
+                toolProvenance()));
         store.embedStored(storedId);
         EventLogger.info(EVENT_CATEGORY, agent.name, null,
                 "Memory stored on operator request: \"%s\"".formatted(snippet(text)));
         return "Remembered [%s]: %s".formatted(category, text);
+    }
+
+    /**
+     * Inside a conversation the store answers the operator's "remember that…", so it rests on
+     * their latest turn; outside one (a task run) nothing human stands behind it (JCLAW-1318).
+     */
+    private static MemoryProvenance toolProvenance() {
+        var conversationId = ToolContext.conversationId();
+        if (conversationId == null) {
+            return new MemoryProvenance(null, null, MemoryProvenance.OPERATOR_ACTOR,
+                    MemoryAuthorType.AGENT_SYNTHESIZED, List.of());
+        }
+        return new MemoryProvenance(conversationId, MemoryAutoCapture.latestUserMessageId(conversationId),
+                MemoryProvenance.OPERATOR_ACTOR, MemoryAuthorType.HUMAN_TURN, List.of());
     }
 
     /**

@@ -12,6 +12,8 @@ import llm.routing.ModelRouter;
 import models.Agent;
 import models.ChannelType;
 import models.Memory;
+import models.Message;
+import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.ConfigService;
@@ -249,6 +251,9 @@ public final class MemoryAutoCapture {
         // name still rides along purely for the event-log agent column.
         final var agentKey = String.valueOf(agent.id);
         final var agentName = agent.name;
+        // Read before forking: the turn still holds the conversation queue here, so the
+        // latest USER message is this turn's and not one queued behind it.
+        final Long sourceMessageId = Tx.run(() -> latestUserMessageId(conversationId));
         Thread.ofVirtual().name("memory-capture").start(() -> {
             try {
                 // Snapshot provider/model/channel under a short Tx — no Tx is held
@@ -269,7 +274,9 @@ public final class MemoryAutoCapture {
                 int judgeOutput = ConfigService.getInt("memory.consolidation.maxTokens", 512);
                 Consolidator consolidator = msgs -> chatText(ctx, msgs, judgeOutput);
 
-                capture(agentKey, agentName, userMessage, assistantResponse, extractor, consolidator, SHARED_BREAKER);
+                var provenance = MemoryProvenance.extractor(ctx.modelId()).withSource(conversationId, sourceMessageId);
+                capture(agentKey, agentName, userMessage, assistantResponse, extractor, consolidator,
+                        SHARED_BREAKER, provenance);
             } catch (Exception e) {
                 EventLogger.warn(EVENT_CATEGORY, agentName, null,
                         "Auto-capture failed: %s".formatted(e.getMessage()));
@@ -315,7 +322,14 @@ public final class MemoryAutoCapture {
         Extractor extractor = msgs -> chatText(ctx, msgs, maxOutput);
         Consolidator consolidator = msgs -> chatText(ctx, msgs, judgeOutput);
         return capture(String.valueOf(agent.id), agent.name, userMessage, assistantResponse,
-                extractor, consolidator, SHARED_BREAKER);
+                extractor, consolidator, SHARED_BREAKER, MemoryProvenance.extractor(ctx.modelId()));
+    }
+
+    /** The newest USER message in {@code conversationId}, or null when it has none. Must run inside a transaction. */
+    public static @Nullable Long latestUserMessageId(Long conversationId) {
+        Message m = Message.find("conversation.id = ?1 AND role = ?2 ORDER BY id DESC",
+                conversationId, MessageRole.USER.value).first();
+        return m == null ? null : m.id;
     }
 
     /**
@@ -411,6 +425,18 @@ public final class MemoryAutoCapture {
     public static CaptureResult capture(String agentKey, String agentName, String userMessage,
                                         String assistantResponse, Extractor extractor,
                                         @Nullable Consolidator consolidator, CircuitBreaker breaker) {
+        return capture(agentKey, agentName, userMessage, assistantResponse, extractor, consolidator, breaker,
+                MemoryProvenance.extractor("unknown"));
+    }
+
+    /**
+     * As the seven-arg overload, stamping every stored row with {@code provenance}
+     * (JCLAW-1318) — the extractor actor and, on the chat path, the source turn.
+     */
+    public static CaptureResult capture(String agentKey, String agentName, String userMessage,
+                                        String assistantResponse, Extractor extractor,
+                                        @Nullable Consolidator consolidator, CircuitBreaker breaker,
+                                        MemoryProvenance provenance) {
         var gate = MemoryAttentionGate.evaluate(userMessage);
         if (!gate.proceed()) {
             return logged(agentName, CaptureResult.skipped(gate.resolvedReason()));
@@ -522,7 +548,7 @@ public final class MemoryAutoCapture {
             // round-trip must never run inside the write tx (same "slow call OUTSIDE the
             // Tx" ordering as extract/judge above; the vector leg otherwise pinned one
             // pooled connection across up to maxPerTurn sequential embedding calls).
-            var storedIds = Tx.run(() -> applyPlan(agentKey, agentName, plan, supersessions));
+            var storedIds = Tx.run(() -> applyPlan(agentKey, agentName, plan, supersessions, provenance));
             int embedded = embedStored(storedIds);
             if (embedded < storedIds.size()) {
                 // Distinct from "Auto-capture failed", which reads as "nothing was captured".
@@ -627,6 +653,7 @@ public final class MemoryAutoCapture {
                     candidates.get(i).retrievalKey(), limit, minCosine);
             if (matches.isEmpty()) continue;
             out.add(i);
+            Tx.run(() -> Memory.corroborate(matches.getFirst()));
             EventLogger.info(EVENT_CATEGORY, agentName, null,
                     "Memory candidate dropped as a semantic duplicate of %s: \"%s\""
                             .formatted(matches, snippet(candidates.get(i).text())));
@@ -699,8 +726,13 @@ public final class MemoryAutoCapture {
             if (semanticDupes.contains(idx)) continue;
             var c = candidates.get(idx);
             var toks = MemorySimilarity.Tokens.of(c.text());
-            if (hasDuplicate(toks, poolTokens, dupThreshold, containment, minLengthRatio)
-                    || hasDuplicate(toks, survivorTokens, dupThreshold, containment, minLengthRatio)) continue;
+            int poolMatch = duplicateIndex(toks, poolTokens, dupThreshold, containment, minLengthRatio);
+            if (poolMatch >= 0) {
+                Memory.corroborate(poolRows.get(poolMatch).id);
+                continue;
+            }
+            // A within-turn duplicate restates nothing stored, so it corroborates nothing.
+            if (duplicateIndex(toks, survivorTokens, dupThreshold, containment, minLengthRatio) >= 0) continue;
             survivors.add(c);
             survivorTokens.add(toks);
             // Same-subject shortlist: moderate overlap below the dup threshold
@@ -717,14 +749,15 @@ public final class MemoryAutoCapture {
         return new ConsolidationPlan(survivors, shortlist, overflow);
     }
 
-    private static boolean hasDuplicate(MemorySimilarity.Tokens toks,
+    /** Index of the first entry in {@code against} that {@code toks} duplicates, or -1. */
+    private static int duplicateIndex(MemorySimilarity.Tokens toks,
             List<MemorySimilarity.Tokens> against, double jaccardThreshold,
             double containmentThreshold, double minLengthRatio) {
-        for (var other : against) {
-            if (MemorySimilarity.isDuplicate(toks, other, jaccardThreshold,
-                    containmentThreshold, minLengthRatio)) return true;
+        for (int i = 0; i < against.size(); i++) {
+            if (MemorySimilarity.isDuplicate(toks, against.get(i), jaccardThreshold,
+                    containmentThreshold, minLengthRatio)) return i;
         }
-        return false;
+        return -1;
     }
 
     /**
@@ -771,13 +804,14 @@ public final class MemoryAutoCapture {
      * (JCLAW-525 AC). Each supersession is event-logged.
      */
     private static List<String> applyPlan(String agentKey, String agentName, ConsolidationPlan plan,
-                                          Map<Integer, List<Integer>> supersessions) {
+                                          Map<Integer, List<Integer>> supersessions,
+                                          MemoryProvenance provenance) {
         var store = MemoryStoreFactory.get();
         var storedIds = new ArrayList<String>(plan.survivors().size());
         for (int i = 0; i < plan.survivors().size(); i++) {
             var c = plan.survivors().get(i);
             var newIdStr = store.storeDeferred(agentKey, c.text(), c.category(), c.importance(),
-                    c.retrievalKey());
+                    c.retrievalKey(), provenance);
             storedIds.add(newIdStr);
             var olds = supersessions.get(i);
             if (olds == null || olds.isEmpty()) continue;

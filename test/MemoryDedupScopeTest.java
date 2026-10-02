@@ -59,6 +59,28 @@ class MemoryDedupScopeTest extends UnitTest {
         return result.captured();
     }
 
+    /** Read past the persistence context: corroboration is a bulk update. */
+    private static int corroborations(Long id) {
+        return play.db.jpa.JPA.em()
+                .createQuery("SELECT m.corroborationCount FROM Memory m WHERE m.id = :id", Integer.class)
+                .setParameter("id", id).getSingleResult();
+    }
+
+    @Test
+    void aWithinTurnDuplicateStoresOneRowAndCorroboratesNothing() {
+        var agent = agentId("dedup-within-turn");
+        var item = "{\"text\":\"The user drives a Tesla Model Y in Malaysia.\",\"category\":\"fact\",\"importance\":0.7}";
+        MemoryAutoCapture.Extractor extractor = msgs -> "{\"memories\":[" + item + "," + item + "]}";
+        var result = MemoryAutoCapture.capture(agent, "dedup-agent",
+                "Here is something durable worth remembering about my setup.",
+                "Understood, noted.", extractor, freshBreaker());
+
+        assertEquals(1, result.captured());
+        var rows = Memory.findByAgent(agent);
+        assertEquals(1, rows.size());
+        assertEquals(0, corroborations(rows.getFirst().id), "a survivor match is not a corroboration");
+    }
+
     // ─── control: the harness can still store something ──────────────────────
 
     @Test
@@ -83,6 +105,8 @@ class MemoryDedupScopeTest extends UnitTest {
         assertEquals(0, captureOne(agent, "The user's NAS/SMB server is at IP address 192.168.0.50."),
                 "a paraphrase of a stored memory must NOOP");
         assertEquals(1, Memory.findByAgent(agent).size(), "no second row may be written");
+        assertEquals(1, corroborations(Memory.findByAgent(agent).getFirst().id),
+                "the dropped restatement corroborates the stored row (JCLAW-1318)");
     }
 
     @Test

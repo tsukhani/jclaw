@@ -264,6 +264,8 @@ class JClawApiToolTest extends UnitTest {
                 "deleting a memory is OPERATOR_ONLY");
         assertFalse(JClawApiTool.isCallable("POST", "/api/memories/recall"),
                 "recall for an arbitrary agentId is OPERATOR_ONLY");
+        assertFalse(JClawApiTool.isCallable("POST", "/api/memories/7/verify"),
+                "a human verification is the operator's alone");
         assertFalse(JClawApiTool.isCallable("GET", "/api/logs"),
                 "logs is OPERATOR_ONLY");
         // JCLAW-1020: the semver gate stopped the download leaving the pinned repo, but a
