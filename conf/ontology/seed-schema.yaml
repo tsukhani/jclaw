@@ -1,0 +1,55 @@
+# JClaw seed ontology: the rulebook every knowledge-graph record is validated against
+# (memory.ontology.OntologyValidator). It changes only by a reviewed human edit — nothing
+# at runtime adds a type — and one seed is shared by every agent.
+#
+# Identifiers are curated slices of published vocabularies, kept with their prefixes:
+#   schema: https://schema.org/   prov: http://www.w3.org/ns/prov#
+#   skos:   http://www.w3.org/2004/02/skos/core#   dcterms: http://purl.org/dc/terms/
+# match is exact or close, after skos:exactMatch / skos:closeMatch; a type with no
+# counterpart writes standard: none and no match.
+#
+# Endpoints read "From[, From] -> To[, To]" (every From may point at every To);
+# "same" means any declared term type to itself. Keep one line per type so a diff of two
+# versions is one line per change.
+
+version: 1
+
+families:
+  Term:       {meaning: "An entity or concept", must_link: "One or more Evidence", standard: none}
+  Mapping:    {meaning: "Grounds a Term in a physical source: memory id, message id or file path", must_link: "Its Term; one or more Evidence", standard: none}
+  Relation:   {meaning: "A typed edge between two Terms", must_link: "Both Terms; one or more Evidence", standard: none}
+  Constraint: {meaning: "A valid-use rule attached to a Term", must_link: "Its Term; one or more Evidence", standard: none}
+  Evidence:   {meaning: "Provenance supporting a claim", must_link: "The source it names (dcterms:source)", standard: "prov:Entity", match: close}
+
+# Record-to-record links; "Any" is any other record.
+references:
+  - "Term -> Mapping"
+  - "Mapping -> Term"
+  - "Relation -> Term"
+  - "Constraint -> Term"
+  - "Term, Mapping, Relation, Constraint -> Evidence"
+  - "Evidence -> Any"
+
+term_types:
+  Person:       {standard: "schema:Person", match: exact, covers: "A named individual, including the operator"}
+  Organization: {standard: "schema:Organization", match: exact, covers: "Company, institution, team, business unit"}
+  Project:      {standard: "schema:Project", match: close, covers: "A body of work with a goal: product, codebase, course, paper"}
+  System:       {standard: "schema:SoftwareApplication", match: close, covers: "Tool, service, device or server the operator uses or runs"}
+  Artifact:     {standard: "schema:CreativeWork", match: close, covers: "A concrete addressable thing: file, URL, document, ticket, dataset"}
+  Place:        {standard: "schema:Place", match: exact, covers: "City, address, property"}
+  Event:        {standard: "schema:Event", match: exact, covers: "Something dated: trip, deadline, renewal, scheduled run"}
+  Topic:        {standard: "skos:Concept", match: exact, covers: "The subject a view or interest is about"}
+
+relations:
+  works_at:      {kind: Association, standard: "schema:worksFor", match: exact, endpoints: ["Person -> Organization"]}
+  works_on:      {kind: Association, standard: none, endpoints: ["Person, Organization -> Project"]}
+  uses:          {kind: Association, standard: none, endpoints: ["Person, Organization, Project -> System"]}
+  owns:          {kind: Association, standard: "schema:owns", match: close, endpoints: ["Person, Organization -> System, Artifact, Place"]}
+  family_of:     {kind: Association, standard: "schema:relatedTo", match: exact, endpoints: ["Person -> Person"]}
+  located_in:    {kind: Association, standard: "schema:location", match: close, endpoints: ["Person, Organization, Event -> Place"]}
+  involves:      {kind: Association, standard: none, endpoints: ["Event -> Person, Organization, Project"]}
+  holds_view_on: {kind: Association, standard: none, endpoints: ["Person -> Topic"]}
+  part_of:       {kind: Composition, standard: "schema:isPartOf", match: close, endpoints: ["Organization -> Organization", "Project -> Project", "System -> System", "Artifact -> Project"]}
+  kind_of:       {kind: Hierarchy, standard: "skos:broader", match: exact, endpoints: [same]}
+  same_as:       {kind: Equivalence, standard: "schema:sameAs", match: close, endpoints: [same]}
+  derived_from:  {kind: Derivation, standard: "prov:wasDerivedFrom", match: exact, endpoints: ["Artifact -> Artifact, Project"]}
