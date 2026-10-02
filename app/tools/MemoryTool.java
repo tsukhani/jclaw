@@ -354,13 +354,15 @@ public class MemoryTool implements ToolRegistry.Tool {
 
     /**
      * Inside a conversation the store answers the operator's "remember that…", so it rests on
-     * their latest turn; outside one (a task run) nothing human stands behind it (JCLAW-1318).
+     * their latest turn; outside one (a task run) nothing human stands behind it, and a human
+     * actor would make the row firm in the graph tier (JCLAW-1318).
      */
     private static MemoryProvenance toolProvenance() {
         var conversationId = ToolContext.conversationId();
         if (conversationId == null) {
-            return new MemoryProvenance(null, null, MemoryProvenance.OPERATOR_ACTOR,
-                    MemoryAuthorType.AGENT_SYNTHESIZED, List.of());
+            var taskRunId = ToolContext.taskRunId();
+            var actor = MemoryProvenance.process(taskRunId == null ? "memory-tool" : "task-run/" + taskRunId);
+            return new MemoryProvenance(null, null, actor, MemoryAuthorType.AGENT_SYNTHESIZED, List.of());
         }
         return new MemoryProvenance(conversationId, MemoryAutoCapture.latestUserMessageId(conversationId),
                 MemoryProvenance.OPERATOR_ACTOR, MemoryAuthorType.HUMAN_TURN, List.of());

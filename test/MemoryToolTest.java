@@ -168,13 +168,26 @@ class MemoryToolTest extends UnitTest {
     }
 
     @Test
-    void aStoreOutsideAConversationIsAgentSynthesized() {
-        call("{\"action\":\"store\",\"text\":\"The nightly build finished green\"}");
+    void aStoreInATaskRunIsAProcessWriteAndNotFirm() {
+        agents.ToolContext.withScope(null, 77L,
+                () -> call("{\"action\":\"store\",\"text\":\"The nightly build finished green\"}"));
 
         var m = onlyMemory();
         assertNull(m.sourceConversationId);
         assertNull(m.sourceMessageId);
-        assertEquals("human:operator", m.actor);
+        assertEquals("process:task-run/77", m.actor);
+        assertEquals(models.MemoryAuthorType.AGENT_SYNTHESIZED, m.authorType);
+        assertEquals(memory.MemoryTrust.GraphTier.TENTATIVE,
+                memory.MemoryTrust.graphTier(m.actor, java.util.List.of(), 0, memory.MemoryTrust.DEFAULT_FIRM_THRESHOLD),
+                "no human stands behind a task run's write");
+    }
+
+    @Test
+    void aStoreWithNoScopeIsAProcessWrite() {
+        call("{\"action\":\"store\",\"text\":\"The nightly build finished green\"}");
+
+        var m = onlyMemory();
+        assertEquals("process:memory-tool", m.actor);
         assertEquals(models.MemoryAuthorType.AGENT_SYNTHESIZED, m.authorType);
     }
 
