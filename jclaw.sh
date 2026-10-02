@@ -3984,7 +3984,15 @@ PYBODY
         exit 1
     fi
 
-    python3 - "$tmp" <<'PYSUM'
+    # Saved before the summary runs, so a printing error cannot lose a report the model calls paid for.
+    if [[ -n "$out" ]]; then
+        mkdir -p "$(dirname "$out")"
+        cp "$tmp" "$out"
+        echo "==> Full report written to $out"
+    fi
+
+    local summary=0
+    python3 - "$tmp" <<'PYSUM' || summary=$?
 import json, sys
 r = json.load(open(sys.argv[1]))
 def pct(v):
@@ -3992,15 +4000,15 @@ def pct(v):
 print()
 print("  threshold %.2f" % r["threshold"])
 print()
-print("  %-32s %-12s %7s %7s %8s %8s %5s %5s %9s" % ("proposer", "model", "written", "wrong",
-      "wrong%", "abstain%", "fail", "pfail", "discarded"))
+print("  %-32s %-12s %7s %7s %8s %8s %5s %5s %9s %6s" % ("proposer", "model", "written", "wrong",
+      "wrong%", "abstain%", "fail", "pfail", "discarded", "missed"))
 for p in r["pairings"]:
     if p.get("skipped"):
         print("  %-32s %-12s skipped: %s" % (p["proposer"], p["model"], p["skipped"]))
         continue
-    print("  %-32s %-12s %7d %7d %8s %8s %5d %5d %9d" % (p["proposer"], p["model"], p["written"], p["wrong"],
+    print("  %-32s %-12s %7d %7d %8s %8s %5d %5d %9d %6d" % (p["proposer"], p["model"], p["written"], p["wrong"],
           pct(p.get("wrongShare")), pct(p.get("abstentionRate")), p["decisionFailures"],
-          p["proposerFailures"], p["discardedMentions"]))
+          p["proposerFailures"], p["discardedMentions"], p["missedLabels"]))
 print()
 print("  threshold curve (wrong% / abstain%):")
 cols = sorted({(c["proposer"], c["model"]) for c in r["curve"]})
@@ -4028,14 +4036,8 @@ if mi["changed"]:
     print("    CHANGED: " + ", ".join(mi["changed"]))
 print()
 PYSUM
-
-    if [[ -n "$out" ]]; then
-        mkdir -p "$(dirname "$out")"
-        mv "$tmp" "$out"
-        echo "==> Full report written to $out"
-    else
-        rm -f "$tmp"
-    fi
+    rm -f "$tmp"
+    return "$summary"
 }
 
 do_evals_capture() {

@@ -56,7 +56,13 @@ public final class ExtractionPipeline {
             return body -> {
                 var target = OllamaDecision.target(baseUrl, model);
                 OllamaDecision.addKeepAlive(body);
-                return JevApi.post(target, body, 1, timeoutMs);
+                try {
+                    return JevApi.post(target, body, 1, timeoutMs);
+                } catch (JevException.Outage e) {
+                    // Ollama drops a load when its request is cancelled, so a timed-out cold model needs a load of its own.
+                    if (e.timedOut()) OllamaDecision.pin(baseUrl, model);
+                    throw e;
+                }
             };
         }
     }

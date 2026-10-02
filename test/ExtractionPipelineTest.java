@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.decision.JevApi;
 import services.decision.JevException;
+import services.decision.OllamaDecision;
 import services.graphspike.ExtractionPipeline;
 import services.graphspike.ExtractionPipeline.CaseRun;
 import services.graphspike.ExtractionPipeline.Decider;
@@ -25,6 +26,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /** JCLAW-1344: proposer parsing and the two-stage decision flow, against the spec's I/O matrix. */
@@ -234,6 +237,74 @@ class ExtractionPipelineTest extends UnitTest {
             var decision = run.decisions().getFirst();
             assertEquals(ExtractionPipeline.WRITTEN, decision.outcome());
             assertEquals("Person", decision.choice());
+        } finally {
+            JevBreakerTestSync.release();
+        }
+    }
+
+    @Test
+    void theOllamaDeciderSendsKeepAliveAndPinsAfterATimeout() throws Exception {
+        var base = "http://192.168.1.20:11434";
+        JevBreakerTestSync.acquire();
+        try {
+            var sent = new CopyOnWriteArrayList<Request>();
+            var bodies = new CopyOnWriteArrayList<JsonObject>();
+            var hang = new AtomicBoolean();
+            Interceptor ollama = chain -> {
+                sent.add(chain.request());
+                var path = chain.request().url().encodedPath();
+                var json = "{\"done\":true}";
+                if (path.equals("/api/ps")) {
+                    json = "{\"models\":[{\"name\":\"tev1:latest\"}]}";
+                } else if (!path.equals("/api/generate")) {
+                    var buffer = new Buffer();
+                    chain.request().body().writeTo(buffer);
+                    var body = JsonParser.parseString(buffer.readUtf8()).getAsJsonObject();
+                    bodies.add(body);
+                    if (hang.get()) {
+                        try {
+                            Thread.sleep(1_300);
+                        } catch (InterruptedException _) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    var answers = new JsonObject();
+                    for (var q : body.getAsJsonObject("questions").entrySet()) {
+                        answers.add(q.getKey(), answer(q.getValue().getAsJsonObject().getAsJsonObject("criteria").keySet(),
+                                "Person", 0.8));
+                    }
+                    var result = new JsonObject();
+                    result.add("answers", answers);
+                    json = result.toString();
+                }
+                return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200)
+                        .message("canned").body(ResponseBody.create(json, MediaType.get("application/json"))).build();
+            };
+            var client = new OkHttpClient.Builder().addInterceptor(ollama).build();
+
+            var answered = HttpFactories.callWith(client, () -> run(TEXT, proposal("Dana Reyes"),
+                    Decider.ollama(base, "tev1", 5_000)));
+            assertEquals(ExtractionPipeline.WRITTEN, answered.decisions().getFirst().outcome());
+            assertTrue(sent.getFirst().url().toString().startsWith(base + "/"), sent.getFirst().url().toString());
+            assertEquals("tev1", bodies.getFirst().get("model").getAsString());
+            assertTrue(bodies.getFirst().has("keep_alive"), bodies.getFirst().toString());
+            assertTrue(sent.stream().noneMatch(r -> r.url().encodedPath().equals("/api/generate")), "no pin while it answers");
+
+            hang.set(true);
+            var timedOut = HttpFactories.callWith(client, () -> run(TEXT, proposal("Dana Reyes"),
+                    Decider.ollama(base, "tev1", 1_000)));
+            var failed = timedOut.decisions().getFirst();
+            assertTrue(failed.failed());
+            assertTrue(failed.detail().contains("did not answer"), failed.detail());
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (sent.stream().noneMatch(r -> r.url().encodedPath().equals("/api/generate"))
+                    && System.nanoTime() < deadline) {
+                Thread.sleep(20);
+            }
+            assertTrue(sent.stream().anyMatch(r -> r.url().encodedPath().equals("/api/generate")), "the timeout pinned tev1");
+            // Let the pin finish so it cannot answer for another class's pin of the same model.
+            HttpFactories.callWith(client, () -> OllamaDecision.pin(base, "tev1"))
+                    .get(10, TimeUnit.SECONDS);
         } finally {
             JevBreakerTestSync.release();
         }

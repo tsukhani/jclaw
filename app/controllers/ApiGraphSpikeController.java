@@ -2,6 +2,7 @@ package controllers;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import llm.routing.RouterPolicy;
 import memory.ontology.OntologySchema;
 import models.Agent;
 import play.Play;
@@ -35,8 +36,6 @@ import static utils.GsonHolder.GSON;
 public class ApiGraphSpikeController extends Controller {
 
     private static final List<String> DEFAULT_MODELS = List.of(JevApi.MODEL, "tev1", "nimble");
-    /** The router's {@code jev.minConfidence} default. */
-    private static final double DEFAULT_THRESHOLD = 0.50;
     private static final int MAX_CONCURRENCY = 4;
     private static final int DEFAULT_CONCURRENCY = 2;
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
@@ -64,7 +63,7 @@ public class ApiGraphSpikeController extends Controller {
 
         int timeoutSeconds = Math.clamp(readInt(body, "timeoutSeconds", DEFAULT_TIMEOUT_SECONDS), 1, MAX_TIMEOUT_SECONDS);
         int concurrency = Math.clamp(readInt(body, "concurrency", DEFAULT_CONCURRENCY), 1, MAX_CONCURRENCY);
-        double threshold = DEFAULT_THRESHOLD;
+        double threshold = RouterPolicy.DEFAULT_JEV_MIN_CONFIDENCE;
         if (body.has("threshold")) {
             try {
                 threshold = body.get("threshold").getAsDouble();
@@ -75,7 +74,7 @@ public class ApiGraphSpikeController extends Controller {
         }
 
         var proposers = new ArrayList<NamedProposer>();
-        for (var name : strings(body, "proposers")) {
+        for (var name : strings(body, "proposers").stream().distinct().toList()) {
             int slash = name.indexOf('/');
             if (slash <= 0 || slash == name.length() - 1) throw invalid("proposer '%s' must read provider/model".formatted(name));
             proposers.add(new NamedProposer(name,
