@@ -1,5 +1,6 @@
 package memory;
 
+import agents.DangerousActionGate;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -12,6 +13,7 @@ import llm.routing.ModelRouter;
 import models.Agent;
 import models.ChannelType;
 import models.Memory;
+import models.MemoryAuthorType;
 import models.Message;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
@@ -253,7 +255,8 @@ public final class MemoryAutoCapture {
         final var agentKey = String.valueOf(agent.id);
         final var agentName = agent.name;
         // Read before forking: the turn still holds the conversation queue here, so the
-        // latest USER message is this turn's and not one queued behind it.
+        // latest USER message is this turn's and not one queued behind it, and the sender
+        // trust is a thread-local the memory-capture thread must not be trusted to inherit.
         final var turnSource = Tx.run(() -> chatTurnSource(conversationId));
         Thread.ofVirtual().name("memory-capture").start(() -> {
             try {
@@ -328,11 +331,14 @@ public final class MemoryAutoCapture {
 
     /**
      * The chat path's provenance for this turn, keyed by the capture model resolved later.
-     * Call on the turn's thread, in a Tx: it reads the latest USER message now.
+     * Call on the turn's thread, in a Tx: it reads the latest USER message and the sender trust now.
      */
     public static Function<String, MemoryProvenance> chatTurnSource(Long conversationId) {
         var messageId = latestUserMessageId(conversationId);
-        return modelId -> MemoryProvenance.extractor(modelId).withSource(conversationId, messageId);
+        var authorType = DangerousActionGate.operatorTurn(conversationId)
+                ? MemoryAuthorType.HUMAN_TURN
+                : MemoryAuthorType.GUEST_TURN;
+        return modelId -> MemoryProvenance.extractor(modelId, authorType).withSource(conversationId, messageId);
     }
 
     /** The newest USER message in {@code conversationId}, or null when it has none. Must run inside a transaction. */
@@ -547,9 +553,10 @@ public final class MemoryAutoCapture {
         try {
             // One turn corroborates a stored row at most once, across both dedup tiers.
             var corroborated = new HashSet<Long>();
-            var semanticDupes = semanticDuplicateIndices(agentKey, agentName, ranked, corroborated);
+            boolean mayCorroborate = provenance.mayCorroborate();
+            var semanticDupes = semanticDuplicateIndices(agentKey, agentName, ranked, corroborated, mayCorroborate);
             var plan = Tx.run(() -> plan(agentKey, ranked, maxPerTurn, dupThreshold, dedupScan, semanticDupes,
-                    corroborated));
+                    corroborated, mayCorroborate));
             if (plan.overflow() > 0) {
                 EventLogger.info(EVENT_CATEGORY, agentName, null,
                         ("Turn yielded more than the %d-memory per-turn cap — %d lower-importance "
@@ -655,7 +662,8 @@ public final class MemoryAutoCapture {
      * a lookup error all yield no semantic drops and the lexical rule stands alone.
      */
     private static Set<Integer> semanticDuplicateIndices(String agentKey, String agentName,
-                                                         List<Candidate> candidates, Set<Long> corroborated) {
+                                                         List<Candidate> candidates, Set<Long> corroborated,
+                                                         boolean mayCorroborate) {
         if (!ConfigService.getBoolean("memory.autocapture.dedup.semantic.enabled", true)) return Set.of();
         double minCosine = ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90);
         int limit = ConfigService.getInt("memory.autocapture.dedup.semanticLimit", 5);
@@ -666,7 +674,9 @@ public final class MemoryAutoCapture {
                     candidates.get(i).retrievalKey(), limit, minCosine);
             if (matches.isEmpty()) continue;
             out.add(i);
-            if (corroborated.add(matches.getFirst())) Tx.run(() -> Memory.corroborate(matches.getFirst()));
+            if (mayCorroborate && corroborated.add(matches.getFirst())) {
+                Tx.run(() -> Memory.corroborate(matches.getFirst()));
+            }
             EventLogger.info(EVENT_CATEGORY, agentName, null,
                     "Memory candidate dropped as a semantic duplicate of %s: \"%s\""
                             .formatted(matches, snippet(candidates.get(i).text())));
@@ -696,7 +706,8 @@ public final class MemoryAutoCapture {
      */
     private static ConsolidationPlan plan(String agentKey, List<Candidate> candidates,
                                           int maxPerTurn, double dupThreshold, int dedupScan,
-                                          Set<Integer> semanticDupes, Set<Long> corroborated) {
+                                          Set<Integer> semanticDupes, Set<Long> corroborated,
+                                          boolean mayCorroborate) {
         double shortlistMin = ConfigService.getDouble("memory.consolidation.shortlist.minJaccard", 0.2);
         int shortlistCap = ConfigService.getInt("memory.consolidation.shortlist.maxPerCandidate", 5);
         // 0.82, not 0.85: swept against a 1248-row store, 0.82 catches 10 restatement
@@ -742,7 +753,7 @@ public final class MemoryAutoCapture {
             int poolMatch = duplicateIndex(toks, poolTokens, dupThreshold, containment, minLengthRatio);
             if (poolMatch >= 0) {
                 var matchedId = poolRows.get(poolMatch).id;
-                if (corroborated.add(matchedId)) Memory.corroborate(matchedId);
+                if (mayCorroborate && corroborated.add(matchedId)) Memory.corroborate(matchedId);
                 continue;
             }
             // A within-turn duplicate restates nothing stored, so it corroborates nothing.

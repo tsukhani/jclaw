@@ -45,6 +45,16 @@ class MemoryTrustTest extends UnitTest {
     }
 
     @Test
+    void aGuestActorIsTentativeBelowTheThresholdLikeAnyNonHuman() {
+        int t = MemoryTrust.DEFAULT_FIRM_THRESHOLD;
+        assertEquals(GraphTier.TENTATIVE, MemoryTrust.graphTier("guest:telegram", List.of(), t - 1, t),
+                "guest: is not human:, so a guest's words alone are never firm (JCLAW-1353)");
+        assertEquals(GraphTier.FIRM, MemoryTrust.graphTier("guest:telegram", List.of(), t, t));
+        assertEquals(GraphTier.FIRM,
+                MemoryTrust.graphTier("guest:telegram", List.of(verification("human:operator")), 0, t));
+    }
+
+    @Test
     void aLegacyRowIsTentative() {
         assertEquals(GraphTier.TENTATIVE, MemoryTrust.graphTier(null, List.of(), 0, 2));
     }

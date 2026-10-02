@@ -90,6 +90,26 @@ class MemorySemanticDedupTest extends UnitTest {
     }
 
     @Test
+    void aGuestSemanticRestatementIsDroppedWithoutCorroborating() {
+        var agent = agentId();
+        MemoryStoreFactory.get().store(agent, STORED, "core", 0.9);
+        MemoryAutoCapture.Extractor extractor = msgs ->
+                "{\"memories\":[{\"text\":\"%s\",\"category\":\"fact\",\"importance\":0.7}]}".formatted(PARAPHRASE);
+
+        var captured = MemoryAutoCapture.capture(agent, "semantic-dedup-agent",
+                "Here is something durable worth remembering about my setup.",
+                "Understood, noted.", extractor, null, new CircuitBreaker(20, 0.5, 5, 30_000L),
+                memory.MemoryProvenance.extractor("m1", models.MemoryAuthorType.GUEST_TURN)).captured();
+
+        assertEquals(0, captured, "still a semantic duplicate, so no second row");
+        assertEquals(1, Memory.findByAgent(agent).size());
+        int count = play.db.jpa.JPA.em()
+                .createQuery("SELECT m.corroborationCount FROM Memory m WHERE m.id = :id", Integer.class)
+                .setParameter("id", Memory.findByAgent(agent).getFirst().id).getSingleResult();
+        assertEquals(0, count, "a guest restatement does not corroborate (JCLAW-1353)");
+    }
+
+    @Test
     void aSupersededMemoryDoesNotNoopANewOneAsASemanticDuplicate() {
         // JCLAW-525's invariant, on the semantic tier. The pgvector leg filters
         // superseded rows in SQL; the Lucene leg gets its ids from the index, which can

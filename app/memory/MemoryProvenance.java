@@ -16,7 +16,7 @@ import java.util.List;
  *   <tr><td>{@code prov:Entity}</td><td>the memory</td></tr>
  *   <tr><td>{@code prov:wasAttributedTo}</td><td>{@code actor}</td></tr>
  *   <tr><td>{@code prov:wasGeneratedBy}</td><td>the capture activity, whose kind is the actor
- *       prefix (extractor, human, process)</td></tr>
+ *       prefix (extractor, human, guest, process)</td></tr>
  *   <tr><td>{@code prov:hadPrimarySource}</td><td>{@code sourceConversationId} /
  *       {@code sourceMessageId}</td></tr>
  *   <tr><td>{@code prov:wasDerivedFrom}</td><td>{@code MemoryDerivation}</td></tr>
@@ -36,6 +36,11 @@ public record MemoryProvenance(@Nullable Long sourceConversationId, @Nullable Lo
 
     public static final String HUMAN_ACTOR_PREFIX = "human:";
 
+    /** A non-operator human on a channel; never {@code human:}, so it is never firm on its own. */
+    public static final String GUEST_ACTOR_PREFIX = "guest:";
+
+    static final String SUBAGENT_ACTOR_PREFIX = "process:subagent/";
+
     public MemoryProvenance {
         derivedFrom = derivedFrom == null ? List.of() : List.copyOf(new LinkedHashSet<>(derivedFrom));
         if (!derivedFrom.isEmpty() && authorType != MemoryAuthorType.CONSOLIDATION_DERIVED) {
@@ -53,7 +58,12 @@ public record MemoryProvenance(@Nullable Long sourceConversationId, @Nullable Lo
 
     /** Auto-capture by {@code modelId}, with no source turn yet — see {@link #withSource}. */
     public static MemoryProvenance extractor(String modelId) {
-        return new MemoryProvenance(null, null, extractorActor(modelId), MemoryAuthorType.HUMAN_TURN, List.of());
+        return extractor(modelId, MemoryAuthorType.HUMAN_TURN);
+    }
+
+    /** As {@link #extractor(String)}, for a turn whose speaker is {@code authorType}. */
+    public static MemoryProvenance extractor(String modelId, MemoryAuthorType authorType) {
+        return new MemoryProvenance(null, null, extractorActor(modelId), authorType, List.of());
     }
 
     public static String extractorActor(String modelId) {
@@ -63,6 +73,21 @@ public record MemoryProvenance(@Nullable Long sourceConversationId, @Nullable Lo
     /** The actor string for an automated writer. */
     public static String process(String id) {
         return "process:" + id;
+    }
+
+    /** The actor string for a guest speaking on {@code channelType}. */
+    public static String guest(String channelType) {
+        return GUEST_ACTOR_PREFIX + channelType;
+    }
+
+    /** The actor string for a subagent, by its immutable id (JCLAW-531). */
+    public static String subagent(Long agentId) {
+        return SUBAGENT_ACTOR_PREFIX + agentId;
+    }
+
+    /** Whether restating an existing row under this provenance may raise its corroboration count. */
+    public boolean mayCorroborate() {
+        return authorType != MemoryAuthorType.GUEST_TURN && !actor.startsWith(SUBAGENT_ACTOR_PREFIX);
     }
 
     public MemoryProvenance withSource(@Nullable Long conversationId, @Nullable Long messageId) {

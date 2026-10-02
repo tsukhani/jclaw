@@ -1,5 +1,6 @@
 package tools;
 
+import agents.DangerousActionGate;
 import agents.PromptFenceScrubber;
 import agents.SystemPromptAssembler;
 import agents.ToolAction;
@@ -15,6 +16,7 @@ import memory.MemorySafety;
 import memory.MemorySimilarity;
 import memory.MemoryStoreFactory;
 import models.Agent;
+import models.Conversation;
 import models.Memory;
 import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
@@ -313,9 +315,11 @@ public class MemoryTool implements ToolRegistry.Tool {
         // leg firing on exact duplicates. The key has to exist by the time sameFact runs.
         var retrievalKey = parseQuestions(args);
 
+        // Read on the turn's thread: the sender trust is thread-local.
+        var provenance = Tx.run(() -> toolProvenance(agent));
         var existing = sameFact(agentId, text, retrievalKey);
         if (!existing.isEmpty()) {
-            Tx.run(() -> Memory.corroborate(existing.getFirst().id));
+            if (provenance.mayCorroborate()) Tx.run(() -> Memory.corroborate(existing.getFirst().id));
             return "Already remembered: \"%s\"".formatted(snippet(existing.getFirst().text));
         }
 
@@ -345,27 +349,47 @@ public class MemoryTool implements ToolRegistry.Tool {
         // connection across the network (the JCLAW-807 shape). Same split as applyPlan.
         var store = MemoryStoreFactory.get();
         var storedId = Tx.run(() -> store.storeDeferred(agentId, text, category, importance, retrievalKey,
-                toolProvenance()));
+                provenance));
         store.embedStored(storedId);
         EventLogger.info(EVENT_CATEGORY, agent.name, null,
-                "Memory stored on operator request: \"%s\"".formatted(snippet(text)));
+                "Memory stored on %s request: \"%s\"".formatted(requester(provenance), snippet(text)));
         return "Remembered [%s]: %s".formatted(category, text);
     }
 
     /**
-     * Inside a conversation the store answers the operator's "remember that…", so it rests on
-     * their latest turn; outside one (a task run) nothing human stands behind it, and a human
-     * actor would make the row firm in the graph tier (JCLAW-1318).
+     * Inside a conversation the store answers the latest turn's "remember that…": the operator's
+     * when {@link DangerousActionGate#operatorTurn} says so, a guest's otherwise (JCLAW-1353).
+     * A subagent or a task run has no human behind it, and a human actor would make the row
+     * firm in the graph tier (JCLAW-1318). Must run inside a transaction.
      */
-    private static MemoryProvenance toolProvenance() {
+    private static MemoryProvenance toolProvenance(Agent agent) {
         var conversationId = ToolContext.conversationId();
+        var messageId = conversationId == null ? null : MemoryAutoCapture.latestUserMessageId(conversationId);
+        if (agent.isSubagent()) {
+            return new MemoryProvenance(conversationId, messageId, MemoryProvenance.subagent(agent.id),
+                    MemoryAuthorType.AGENT_SYNTHESIZED, List.of());
+        }
         if (conversationId == null) {
             var taskRunId = ToolContext.taskRunId();
             var actor = MemoryProvenance.process(taskRunId == null ? "memory-tool" : "task-run/" + taskRunId);
             return new MemoryProvenance(null, null, actor, MemoryAuthorType.AGENT_SYNTHESIZED, List.of());
         }
-        return new MemoryProvenance(conversationId, MemoryAutoCapture.latestUserMessageId(conversationId),
-                MemoryProvenance.OPERATOR_ACTOR, MemoryAuthorType.HUMAN_TURN, List.of());
+        if (DangerousActionGate.operatorTurn(conversationId)) {
+            return new MemoryProvenance(conversationId, messageId,
+                    MemoryProvenance.OPERATOR_ACTOR, MemoryAuthorType.HUMAN_TURN, List.of());
+        }
+        Conversation conversation = Conversation.findById(conversationId);
+        var channel = conversation == null ? "unknown" : conversation.channelType;
+        return new MemoryProvenance(conversationId, messageId, MemoryProvenance.guest(channel),
+                MemoryAuthorType.GUEST_TURN, List.of());
+    }
+
+    private static String requester(MemoryProvenance provenance) {
+        return switch (provenance.authorType()) {
+            case HUMAN_TURN -> "operator";
+            case GUEST_TURN -> provenance.actor();
+            default -> "agent";
+        };
     }
 
     /**

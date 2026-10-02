@@ -8,6 +8,8 @@ package models;
 public enum MemoryAuthorType {
     /** Grounded in something the operator said in a conversation turn. */
     HUMAN_TURN,
+    /** Grounded in what a non-operator human said in a conversation turn (JCLAW-1353). */
+    GUEST_TURN,
     /** Written by an agent with no human turn behind it — a task run, say. */
     AGENT_SYNTHESIZED,
     /** Derived from other memories; exactly the rows carrying {@link MemoryDerivation} links. */

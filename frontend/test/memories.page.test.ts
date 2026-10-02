@@ -490,6 +490,15 @@ describe('memories admin page — provenance (JCLAW-1318)', () => {
     expect(title).toContain('Derived from deleted memory (conversation 7, message 70)')
   })
 
+  it('shows a guest-authored row as GUEST_TURN in the title (JCLAW-1353)', async () => {
+    memoriesResponse = [mem({ provenance: provenance({ authorType: 'GUEST_TURN' }) })]
+    const c = await mountSuspended(Memory)
+    await flushPromises()
+
+    expect(c.find('[data-testid="provenance-cell"]').attributes('title')).toContain('Author type: GUEST_TURN')
+    expect(c.find('[data-testid="graph-badge"]').text()).toBe('Tentative')
+  })
+
   it('Confirm POSTs the verify route and the refreshed row reads Human-reviewed', async () => {
     memoriesResponse = [mem()]
     let posted = false

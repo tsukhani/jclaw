@@ -167,6 +167,135 @@ class MemoryToolTest extends UnitTest {
         assertFalse(m.derived);
     }
 
+    // --- JCLAW-1353: guest and subagent writes ---
+
+    private static final String ROUTER_STORE = "{\"action\":\"store\",\"text\":\"The user keeps the router upstairs\"}";
+
+    private models.Conversation conversationOn(String channel) {
+        var conv = services.ConversationService.create(agent, channel, "u-memtool-" + channel);
+        services.ConversationService.appendUserMessage(conv, "Remember that the router is upstairs");
+        return conv;
+    }
+
+    /** Store on {@code channel} with the sender trust bound as given, or unbound when null. */
+    private models.Memory storeOn(String channel, Boolean ownerInitiated) {
+        var conv = conversationOn(channel);
+        java.util.function.Supplier<String> body =
+                () -> agents.ToolContext.withConversation(conv.id, () -> call(ROUTER_STORE));
+        if (ownerInitiated == null) body.get();
+        else agents.DangerousActionGate.withOwnerInitiated(ownerInitiated, body);
+        var m = onlyMemory();
+        assertEquals(conv.id, m.sourceConversationId);
+        return m;
+    }
+
+    private static void assertGuest(models.Memory m, String channel) {
+        assertEquals("guest:" + channel, m.actor);
+        assertEquals(models.MemoryAuthorType.GUEST_TURN, m.authorType);
+        assertEquals(memory.MemoryTrust.GraphTier.TENTATIVE,
+                memory.MemoryTrust.graphTier(m.actor, java.util.List.of(), 0, memory.MemoryTrust.DEFAULT_FIRM_THRESHOLD));
+    }
+
+    private static void assertOperator(models.Memory m) {
+        assertEquals("human:operator", m.actor);
+        assertEquals(models.MemoryAuthorType.HUMAN_TURN, m.authorType);
+    }
+
+    @Test
+    void aTelegramGroupNonOwnerStoreIsAGuestTurn() {
+        assertGuest(storeOn("telegram", false), "telegram");
+    }
+
+    @Test
+    void aSlackNonOwnerStoreIsAGuestTurn() {
+        assertGuest(storeOn("slack", false), "slack");
+    }
+
+    @Test
+    void aWhatsAppStoreIsAGuestTurn() {
+        assertGuest(storeOn("whatsapp", null), "whatsapp");
+    }
+
+    @Test
+    void anUnboundNonWebStoreIsAGuestTurn() {
+        assertGuest(storeOn("telegram", null), "telegram");
+    }
+
+    @Test
+    void aWebStoreIsTheOperatorsTurn() {
+        assertOperator(storeOn("web", null));
+    }
+
+    @Test
+    void aTelegramOwnerStoreIsTheOperatorsTurn() {
+        // A DM and a group differ only in the peer; the bound owner flag is what decides.
+        assertOperator(storeOn("telegram", true));
+    }
+
+    @Test
+    void aSlackOwnerStoreIsTheOperatorsTurn() {
+        assertOperator(storeOn("slack", true));
+    }
+
+    private Agent subagentOf(Agent parent) {
+        var child = new Agent();
+        child.name = "memtool-child";
+        child.modelProvider = "openrouter";
+        child.modelId = "gpt-4.1";
+        child.parentAgent = parent;
+        child.save();
+        return child;
+    }
+
+    @Test
+    void aSubagentStoreIsAProcessWriteEvenUnderAnOwnersTurn() {
+        var child = subagentOf(agent);
+        var conv = services.ConversationService.create(child, "telegram", "u-memtool-child");
+        services.ConversationService.appendUserMessage(conv, "Remember the router");
+
+        agents.DangerousActionGate.withOwnerInitiated(true, () -> agents.ToolContext.withConversation(conv.id,
+                () -> tool.execute(ROUTER_STORE, child)));
+
+        var m = onlyMemory();
+        assertEquals("process:subagent/" + child.id, m.actor);
+        assertEquals(models.MemoryAuthorType.AGENT_SYNTHESIZED, m.authorType);
+        assertEquals(memory.MemoryTrust.GraphTier.TENTATIVE,
+                memory.MemoryTrust.graphTier(m.actor, java.util.List.of(), 0, memory.MemoryTrust.DEFAULT_FIRM_THRESHOLD));
+    }
+
+    @Test
+    void aGuestRestatementDoesNotCorroborate() {
+        seed("The user keeps the router upstairs");
+        var conv = conversationOn("telegram");
+        var out = agents.DangerousActionGate.withOwnerInitiated(false,
+                () -> agents.ToolContext.withConversation(conv.id, () -> call(ROUTER_STORE)));
+
+        assertTrue(out.startsWith("Already remembered"), out);
+        assertEquals(0, corroborations(onlyMemory().id));
+    }
+
+    @Test
+    void aSubagentRestatementDoesNotCorroborate() {
+        var child = subagentOf(agent);
+        MemoryStoreFactory.get().store(String.valueOf(child.id), "The user keeps the router upstairs",
+                MemoryCategory.FACT.label, 0.6);
+        var conv = services.ConversationService.create(child, "web", "u-memtool-child");
+        var out = agents.ToolContext.withConversation(conv.id, () -> tool.execute(ROUTER_STORE, child));
+
+        assertTrue(out.startsWith("Already remembered"), out);
+        assertEquals(0, corroborations(onlyMemory().id));
+    }
+
+    @Test
+    void anOperatorRestatementInAConversationCorroborates() {
+        seed("The user keeps the router upstairs");
+        var conv = conversationOn("web");
+        var out = agents.ToolContext.withConversation(conv.id, () -> call(ROUTER_STORE));
+
+        assertTrue(out.startsWith("Already remembered"), out);
+        assertEquals(1, corroborations(onlyMemory().id));
+    }
+
     @Test
     void aStoreInATaskRunIsAProcessWriteAndNotFirm() {
         agents.ToolContext.withScope(null, 77L,

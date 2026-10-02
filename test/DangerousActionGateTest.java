@@ -614,6 +614,23 @@ class DangerousActionGateTest extends UnitTest {
         throw new AssertionError("approval prompt with callback_data never arrived");
     }
 
+    // --- JCLAW-1353: one operator-turn definition, shared with the standing-grant check ---
+
+    @Test
+    void operatorTurnIsTheOwnerOrTheWebOrigin() {
+        var agent = unboundAgent("gate-operator-turn");
+        var web = webConvId(agent);
+        var telegram = telegramConvId(agent);
+        var whatsapp = whatsappConvId(agent);
+
+        assertTrue(DangerousActionGate.operatorTurn(web), "web, unbound");
+        assertTrue(DangerousActionGate.withOwnerInitiated(true, () -> DangerousActionGate.operatorTurn(telegram)),
+                "telegram, owner-initiated");
+        assertFalse(DangerousActionGate.withOwnerInitiated(false, () -> DangerousActionGate.operatorTurn(telegram)),
+                "telegram, a guest");
+        assertFalse(DangerousActionGate.operatorTurn(whatsapp), "whatsapp, unbound");
+    }
+
     /** An agent with NO Telegram binding (web/Slack/unbound), committed cross-thread. */
     private Agent unboundAgent(String name) {
         return commitInFreshTx(() -> AgentService.create(name, "openrouter", "gpt-4.1"));
