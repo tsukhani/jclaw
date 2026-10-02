@@ -391,6 +391,7 @@ usage_for() {
         backup|restore|repair|db-clean|db-status) usage_database ;;
         loadtest) usage_loadtest ;;
         scrapetest) usage_scrapetest ;;
+        graphspike) usage_graphspike ;;
         evals)    usage_evals    ;;
         diagnostics) usage_diagnostics ;;
         test)     usage_test     ;;
@@ -978,6 +979,27 @@ Build or refresh the corpus first:
 USAGE
 }
 
+usage_graphspike() {
+    cat <<'USAGE'
+Usage: ./jclaw.sh graphspike --agent NAME --proposer PROVIDER/MODEL [options]
+
+Runs the labelled cases in evals/graph/cases.json through every proposer x
+decision-model pairing and reports wrong-record share, abstention rate, the
+threshold curve and the per-model allow-list (JCLAW-1344). Needs the backend
+running and spends model calls. Each case is stored as a memory of the agent
+for the run and deleted afterwards.
+
+Options:
+  --agent NAME             Agent whose memories hold the cases (required).
+  --proposer P/MODEL       Mention proposer as provider/model; repeatable (required).
+  --decision-model ID      Decision model; repeatable
+                           (default jev-latest, tev1, nimble).
+  --threshold P            Confidence threshold for the gate (default 0.50).
+  --concurrency N          Parallel calls, 1-4 (default 2).
+  --out FILE               Write the full JSON report to FILE.
+USAGE
+}
+
 usage_evals() {
     if is_developer_clone; then
         cat <<EOF
@@ -1509,6 +1531,21 @@ while [[ $# -gt 0 ]]; do
                 exit 0
             fi
             SCRAPETEST_ARGS=("$@")
+            break
+            ;;
+        graphspike)
+            # Developer-only; flags are forwarded verbatim, as for scrapetest.
+            if ! is_developer_clone; then
+                echo "Error: 'graphspike' is a developer-only command, not available in this distribution."
+                exit 1
+            fi
+            COMMAND="$1"
+            shift
+            if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
+                usage_graphspike
+                exit 0
+            fi
+            GRAPHSPIKE_ARGS=("$@")
             break
             ;;
         evals)
@@ -3877,6 +3914,130 @@ PYSUM
     fi
 }
 
+# Same loopback + X-Loadtest-Auth boundary as scrapetest.
+do_graphspike() {
+    local agent="" threshold="" concurrency="" out=""
+    local -a proposers=() models=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --agent)          agent="${2:-}";        shift 2 ;;
+            --proposer)       proposers+=("${2:-}"); shift 2 ;;
+            --decision-model) models+=("${2:-}");    shift 2 ;;
+            --threshold)      threshold="${2:-}";    shift 2 ;;
+            --concurrency)    concurrency="${2:-}";  shift 2 ;;
+            --out)            out="${2:-}";          shift 2 ;;
+            --help|-h)        usage_graphspike; exit 0 ;;
+            *) echo "Error: unknown option for graphspike: $1"; usage_graphspike; exit 2 ;;
+        esac
+    done
+    if [[ -z "$agent" || ${#proposers[@]} -eq 0 ]]; then
+        echo "Error: graphspike needs --agent and at least one --proposer."
+        usage_graphspike
+        exit 2
+    fi
+
+    cd "$SCRIPT_DIR"
+    load_env_file
+    local var_name secret
+    var_name=$(secret_var_name)
+    secret=${!var_name:-}
+    if [[ -z "$secret" ]]; then
+        echo "Error: $var_name is not set - graphspike authenticates with it via the"
+        echo "       X-Loadtest-Auth header. Generate or rotate via: $0 secret"
+        exit 1
+    fi
+
+    if ! curl -s -o /dev/null -w '%{http_code}' "http://localhost:$BACKEND_PORT/" | grep -q '^[23]'; then
+        echo "Error: Backend is not responding on port $BACKEND_PORT."
+        echo "       Start it first: $0 ${DEV_MODE:+--dev }start"
+        exit 1
+    fi
+
+    local body
+    body=$(python3 - "$agent" "$threshold" "$concurrency" "${#proposers[@]}" \
+        "${proposers[@]}" ${models[@]+"${models[@]}"} <<'PYBODY'
+import json, sys
+agent, threshold, concurrency, n = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
+body = {"agent": agent, "proposers": sys.argv[5:5 + n]}
+if sys.argv[5 + n:]:
+    body["decisionModels"] = sys.argv[5 + n:]
+if threshold:
+    body["threshold"] = float(threshold)
+if concurrency:
+    body["concurrency"] = int(concurrency)
+print(json.dumps(body))
+PYBODY
+) || { echo "Error: --threshold must be a number and --concurrency an integer."; exit 2; }
+
+    echo "==> Running graph-extraction cases for agent $agent"
+    local tmp status
+    tmp=$(mktemp)
+    status=$(curl -s -o "$tmp" -w '%{http_code}' \
+        -H "X-Loadtest-Auth: $secret" \
+        -H "Content-Type: application/json" \
+        -X POST --data "$body" \
+        "http://localhost:$BACKEND_PORT/api/graph/spike")
+
+    if [[ "$status" != "200" ]]; then
+        echo "Error: graphspike failed (HTTP $status)"
+        cat "$tmp"; echo; rm -f "$tmp"
+        exit 1
+    fi
+
+    python3 - "$tmp" <<'PYSUM'
+import json, sys
+r = json.load(open(sys.argv[1]))
+def pct(v):
+    return "-" if v is None else "%.1f%%" % (100 * v)
+print()
+print("  threshold %.2f" % r["threshold"])
+print()
+print("  %-32s %-12s %7s %7s %8s %8s %5s %5s %9s" % ("proposer", "model", "written", "wrong",
+      "wrong%", "abstain%", "fail", "pfail", "discarded"))
+for p in r["pairings"]:
+    if p.get("skipped"):
+        print("  %-32s %-12s skipped: %s" % (p["proposer"], p["model"], p["skipped"]))
+        continue
+    print("  %-32s %-12s %7d %7d %8s %8s %5d %5d %9d" % (p["proposer"], p["model"], p["written"], p["wrong"],
+          pct(p.get("wrongShare")), pct(p.get("abstentionRate")), p["decisionFailures"],
+          p["proposerFailures"], p["discardedMentions"]))
+print()
+print("  threshold curve (wrong% / abstain%):")
+cols = sorted({(c["proposer"], c["model"]) for c in r["curve"]})
+by = {(c["threshold"], c["proposer"], c["model"]): c for c in r["curve"]}
+for t in sorted({c["threshold"] for c in r["curve"]}):
+    cells = []
+    for prop, model in cols:
+        c = by[(t, prop, model)]
+        cells.append("%s/%s" % (pct(c.get("wrongShare")), pct(c.get("abstentionRate"))))
+    print("    %.2f  %s" % (t, "  ".join(cells)))
+print("    columns: " + ", ".join("%s x %s" % pm for pm in cols))
+print()
+print("  allow-list:")
+for m in r["models"]:
+    lowest = m.get("lowestAllowedThreshold")
+    print("    %-12s %-11s worst wrong %-7s lowest allowed t %s" % (m["model"],
+          "ALLOWED" if m["allowed"] else "not allowed", pct(m.get("worstWrongShare")),
+          "-" if lowest is None else "%.2f" % lowest))
+print("    allowed at %.2f: %s" % (r["threshold"], ", ".join(r["allowed"]) or "(none)"))
+print()
+mi = r["memoryIntegrity"]
+print("  memoryIntegrity: %d/%d unchanged; with an abstention or failure %d/%d unchanged" % (
+      mi["unchanged"], mi["checked"], mi["degradedUnchanged"], mi["degradedChecked"]))
+if mi["changed"]:
+    print("    CHANGED: " + ", ".join(mi["changed"]))
+print()
+PYSUM
+
+    if [[ -n "$out" ]]; then
+        mkdir -p "$(dirname "$out")"
+        mv "$tmp" "$out"
+        echo "==> Full report written to $out"
+    else
+        rm -f "$tmp"
+    fi
+}
+
 do_evals_capture() {
     local out="" agent="" suite="" concurrency="" local_suites=""
     local -a rest=()
@@ -5712,6 +5873,9 @@ case "$COMMAND" in
         ;;
     scrapetest)
         do_scrapetest ${SCRAPETEST_ARGS[@]+"${SCRAPETEST_ARGS[@]}"}
+        ;;
+    graphspike)
+        do_graphspike ${GRAPHSPIKE_ARGS[@]+"${GRAPHSPIKE_ARGS[@]}"}
         ;;
     evals)
         do_evals
