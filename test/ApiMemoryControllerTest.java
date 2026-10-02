@@ -480,6 +480,42 @@ class ApiMemoryControllerTest extends FunctionalTest {
     }
 
     @Test
+    void aSaveThatChangesNothingRecordsNoEditAndLeavesTheTiers() {
+        var memId = seedMemory("alice", "Leave me be", "fact", 0.4);
+        login();
+
+        for (var body : java.util.List.of("{}", "{\"importance\":0.4}", "{\"category\":\"fact\"}",
+                "{\"importance\":0.4,\"category\":\"fact\"}", "{\"importance\":null}")) {
+            var resp = PUT("/api/memories/" + memId, "application/json", body);
+            assertIsOk(resp);
+            var dto = com.google.gson.JsonParser.parseString(getContent(resp)).getAsJsonObject();
+            assertEquals(memId, dto.get("id").getAsString(), body);
+            assertEquals(0.4, dto.get("importance").getAsDouble(), 1e-9, body);
+            var prov = dto.getAsJsonObject("provenance");
+            assertEquals("UNVERIFIED", prov.get("trustTier").getAsString(), body);
+            assertEquals("TENTATIVE", prov.get("graphTier").getAsString(), body);
+        }
+        assertEquals(0, verificationCount(memId, models.MemoryVerification.Kind.EDITED));
+    }
+
+    @Test
+    void eachRealChangeRecordsExactlyOneEdit() {
+        var memId = seedMemory("alice", "Change me", "fact", 0.4);
+        login();
+
+        assertIsOk(PUT("/api/memories/" + memId, "application/json", "{\"category\":\"preference\"}"));
+        assertEquals(1, verificationCount(memId, models.MemoryVerification.Kind.EDITED));
+
+        assertIsOk(PUT("/api/memories/" + memId, "application/json", "{\"importance\":0.41}"));
+        assertEquals(2, verificationCount(memId, models.MemoryVerification.Kind.EDITED));
+
+        // One field the same and one changed is still one edit.
+        assertIsOk(PUT("/api/memories/" + memId, "application/json",
+                "{\"importance\":0.41,\"category\":\"fact\"}"));
+        assertEquals(3, verificationCount(memId, models.MemoryVerification.Kind.EDITED));
+    }
+
+    @Test
     void aLegacyRowListsAsUnattributedUnverifiedAndTentative() {
         var memId = seedMemory("alice", "Written before provenance", "fact", 0.5);
         login();
