@@ -326,7 +326,6 @@ public final class MemoryAutoCapture {
                 extractor, consolidator, SHARED_BREAKER, MemoryProvenance.extractor(ctx.modelId()));
     }
 
-    /** The newest USER message in {@code conversationId}, or null when it has none. Must run inside a transaction. */
     /**
      * The chat path's provenance for this turn, keyed by the capture model resolved later.
      * Call on the turn's thread, in a Tx: it reads the latest USER message now.
@@ -336,6 +335,7 @@ public final class MemoryAutoCapture {
         return modelId -> MemoryProvenance.extractor(modelId).withSource(conversationId, messageId);
     }
 
+    /** The newest USER message in {@code conversationId}, or null when it has none. Must run inside a transaction. */
     public static @Nullable Long latestUserMessageId(Long conversationId) {
         Message m = Message.find("conversation.id = ?1 AND role = ?2 ORDER BY id DESC",
                 conversationId, MessageRole.USER.value).first();
