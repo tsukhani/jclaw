@@ -3,6 +3,7 @@ package memory;
 import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 
 /**
@@ -36,7 +37,7 @@ public record MemoryProvenance(@Nullable Long sourceConversationId, @Nullable Lo
     public static final String HUMAN_ACTOR_PREFIX = "human:";
 
     public MemoryProvenance {
-        derivedFrom = derivedFrom == null ? List.of() : List.copyOf(derivedFrom);
+        derivedFrom = derivedFrom == null ? List.of() : List.copyOf(new LinkedHashSet<>(derivedFrom));
         if (!derivedFrom.isEmpty() && authorType != MemoryAuthorType.CONSOLIDATION_DERIVED) {
             throw new IllegalArgumentException(
                     "A memory derived from other memories must be CONSOLIDATION_DERIVED, not " + authorType);

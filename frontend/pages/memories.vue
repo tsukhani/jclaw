@@ -29,7 +29,7 @@ interface MemoryProvenance {
   sourceConversationId: number | null
   sourceMessageId: number | null
   actor: string | null
-  authorType: string
+  authorType: 'HUMAN_TURN' | 'AGENT_SYNTHESIZED' | 'CONSOLIDATION_DERIVED' | 'UNATTRIBUTED'
   derived: boolean
   derivations: { inputMemoryId: number | null, inputConversationId: number | null, inputMessageId: number | null }[]
   corroborationCount: number
@@ -554,12 +554,15 @@ async function exportMemories() {
               >{{ mem.provenance.graphTier === 'FIRM' ? 'Firm' : 'Tentative' }}</span>
               <span
                 data-testid="corroboration-badge"
+                :title="`Corroborated ${mem.provenance.corroborationCount} times`"
+                :aria-label="`Corroborated ${mem.provenance.corroborationCount} times`"
                 class="ml-1 inline-block bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700 dark:bg-gray-800 dark:text-gray-300"
               >×{{ mem.provenance.corroborationCount }}</span>
               <button
                 v-if="mem.provenance.trustTier !== 'HUMAN_REVIEWED'"
                 type="button"
                 data-testid="confirm-memory"
+                :aria-label="`Confirm memory: ${mem.text}`"
                 class="ml-2 px-2 py-0.5 text-xs border border-border hover:text-fg-strong hover:border-ring transition-colors"
                 @click="confirmMemory(mem)"
               >

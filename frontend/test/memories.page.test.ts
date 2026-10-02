@@ -481,6 +481,7 @@ describe('memories admin page — provenance (JCLAW-1318)', () => {
     expect(c.find('[data-testid="trust-badge"]').text()).toBe('Unverified')
     expect(c.find('[data-testid="graph-badge"]').text()).toBe('Firm')
     expect(c.find('[data-testid="corroboration-badge"]').text()).toBe('×3')
+    expect(c.find('[data-testid="corroboration-badge"]').attributes('aria-label')).toBe('Corroborated 3 times')
     const title = c.find('[data-testid="provenance-cell"]').attributes('title')
     expect(title).toContain('Actor: extractor/m1')
     expect(title).toContain('Author type: CONSOLIDATION_DERIVED')
@@ -504,6 +505,8 @@ describe('memories admin page — provenance (JCLAW-1318)', () => {
     const c = await mountSuspended(Memory)
     await flushPromises()
 
+    expect(c.find('[data-testid="confirm-memory"]').attributes('aria-label'))
+      .toBe('Confirm memory: The user prefers dark mode')
     await c.find('[data-testid="confirm-memory"]').trigger('click')
     await vi.waitFor(() => expect(c.find('[data-testid="trust-badge"]').text()).toBe('Human-reviewed'))
     expect(posted).toBe(true)

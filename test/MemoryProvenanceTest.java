@@ -5,6 +5,7 @@ import models.Agent;
 import models.Memory;
 import models.MemoryAuthorType;
 import models.MemoryDerivation;
+import models.MemoryVerification;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -141,6 +142,49 @@ class MemoryProvenanceTest extends UnitTest {
         assertEquals(MemoryAuthorType.HUMAN_TURN, m.authorType);
         assertFalse(m.derived);
         assertEquals(0, m.corroborationCount);
+    }
+
+    @Test
+    void theChatPathNamesTheConversationItsLatestUserMessageAndTheModel() {
+        var conv = ConversationService.create(agent, "web", "u-provenance-chat");
+        ConversationService.appendUserMessage(conv, "First question");
+        ConversationService.appendAssistantMessage(conv, "First answer", null);
+        var latest = ConversationService.appendUserMessage(conv, "Second question");
+
+        var p = MemoryAutoCapture.chatTurnSource(conv.id).apply("m1");
+
+        assertEquals(conv.id, p.sourceConversationId());
+        assertEquals(latest.id, p.sourceMessageId());
+        assertEquals("extractor/m1", p.actor());
+        assertEquals(MemoryAuthorType.HUMAN_TURN, p.authorType());
+    }
+
+    @Test
+    void aRepeatedInputIsLinkedOnce() {
+        var a = storeWith("Input A", MemoryProvenance.extractor("m1"));
+        var d = storeWith("Derived", derivedFrom(Long.parseLong(a), Long.parseLong(a)));
+
+        assertEquals(1, MemoryDerivation.count("derivedMemory.id = ?1", Long.parseLong(d)));
+    }
+
+    private static long dependents(List<Long> ids) {
+        return MemoryVerification.count("memory.id IN (?1)", ids)
+                + MemoryDerivation.count("derivedMemory.id IN (?1)", ids);
+    }
+
+    @Test
+    void deletingMemoriesTakesTheirVerificationsAndDerivationLinksWithThem() {
+        var a = Long.parseLong(storeWith("Input A", MemoryProvenance.extractor("m1")));
+        var d1 = Long.parseLong(storeWith("Derived once", derivedFrom(a)));
+        var d2 = Long.parseLong(storeWith("Derived twice", derivedFrom(a)));
+        MemoryVerification.record(Memory.findById(a), MemoryProvenance.OPERATOR_ACTOR, MemoryVerification.Kind.CONFIRMED);
+        MemoryVerification.record(Memory.findById(d2), MemoryProvenance.OPERATOR_ACTOR, MemoryVerification.Kind.EDITED);
+
+        ((Memory) Memory.findById(d1)).deleteWithLineage();
+        assertEquals(0, MemoryDerivation.count("derivedMemory.id = ?1", d1));
+
+        MemoryStoreFactory.get().deleteAll(aid());
+        assertEquals(0, dependents(List.of(a, d1, d2)), "no verification or derivation row may outlive its memory");
     }
 
     @Test

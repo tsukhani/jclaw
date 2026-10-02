@@ -451,6 +451,16 @@ class ApiMemoryControllerTest extends FunctionalTest {
     }
 
     @Test
+    void deletingAVerifiedMemoryTakesItsVerificationsWithIt() {
+        var memId = seedMemory("alice", "Confirm then delete me", "fact", 0.5);
+        login();
+        assertIsOk(POST("/api/memories/" + memId + "/verify", "application/json", "{}"));
+
+        assertIsOk(DELETE("/api/memories/" + memId));
+        assertEquals(0, verificationCount(memId, models.MemoryVerification.Kind.CONFIRMED));
+    }
+
+    @Test
     void verifyOfAnUnknownMemoryIs404() {
         login();
         assertEquals(404, POST("/api/memories/999999/verify", "application/json", "{}").status.intValue());

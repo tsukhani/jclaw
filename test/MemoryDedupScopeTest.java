@@ -81,6 +81,25 @@ class MemoryDedupScopeTest extends UnitTest {
         assertEquals(0, corroborations(rows.getFirst().id), "a survivor match is not a corroboration");
     }
 
+    @Test
+    void twoRestatementsInOneTurnCorroborateTheStoredRowOnce() {
+        var agent = agentId("dedup-once-per-turn");
+        var stored = "The user has a NAS at home with IP address 192.168.0.50 with various SMB shares.";
+        MemoryStoreFactory.get().store(agent, stored, "fact", 0.7);
+        MemoryAutoCapture.Extractor extractor = msgs -> ("{\"memories\":["
+                + "{\"text\":\"%s\",\"category\":\"fact\",\"importance\":0.7},"
+                + "{\"text\":\"The user's NAS/SMB server is at IP address 192.168.0.50.\",\"category\":\"fact\",\"importance\":0.6}]}")
+                .formatted(stored);
+        var result = MemoryAutoCapture.capture(agent, "dedup-agent",
+                "Here is something durable worth remembering about my setup.",
+                "Understood, noted.", extractor, freshBreaker());
+
+        assertEquals(0, result.captured());
+        var rows = Memory.findByAgent(agent);
+        assertEquals(1, rows.size());
+        assertEquals(1, corroborations(rows.getFirst().id), "repetition inside one turn counts once");
+    }
+
     // ─── control: the harness can still store something ──────────────────────
 
     @Test
