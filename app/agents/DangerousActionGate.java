@@ -191,6 +191,15 @@ public final class DangerousActionGate {
         return Boolean.TRUE.equals(OWNER_INITIATED.get());
     }
 
+    /** Whether the current turn on {@code conversationId} speaks for the operator: owner-initiated or of operator origin. */
+    public static boolean operatorTurn(@Nullable Long conversationId) {
+        return operatorTurn(ownerInitiated(), effectiveOrigin(conversationId));
+    }
+
+    private static boolean operatorTurn(boolean ownerInitiated, @Nullable String origin) {
+        return ownerInitiated || ChannelOriginTrust.classify(origin) == ChannelOriginTrust.Trust.OPERATOR;
+    }
+
     /**
      * Run {@code body} inside the dynamic extent of a task fire whose Task recorded
      * {@code origin} — the task-fire path, whose Conversation is a stub that was never
@@ -282,8 +291,7 @@ public final class DangerousActionGate {
         // JCLAW-1226: a standing grant is the operator's own approval, so only the operator
         // may spend it. Honoring it before the origin was resolved meant an "Always" tap in
         // the owner's DM also covered a group guest's turn on that same (agent, tool).
-        if ((ownerInitiated || ChannelOriginTrust.classify(channelType) == ChannelOriginTrust.Trust.OPERATOR)
-                && hasStandingGrant(agent, toolName)) {
+        if (operatorTurn(ownerInitiated, channelType) && hasStandingGrant(agent, toolName)) {
             EventLogger.info(LOG_CATEGORY, agent.name, CHANNEL_NAME,
                     "Dangerous tool '%s' pre-approved for this agent; skipping prompt".formatted(toolName));
             return Decision.PROCEED;

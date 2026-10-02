@@ -29,7 +29,7 @@ interface MemoryProvenance {
   sourceConversationId: number | null
   sourceMessageId: number | null
   actor: string | null
-  authorType: 'HUMAN_TURN' | 'AGENT_SYNTHESIZED' | 'CONSOLIDATION_DERIVED' | 'UNATTRIBUTED'
+  authorType: 'HUMAN_TURN' | 'GUEST_TURN' | 'AGENT_SYNTHESIZED' | 'CONSOLIDATION_DERIVED' | 'UNATTRIBUTED'
   derived: boolean
   derivations: { inputMemoryId: number | null, inputConversationId: number | null, inputMessageId: number | null }[]
   corroborationCount: number

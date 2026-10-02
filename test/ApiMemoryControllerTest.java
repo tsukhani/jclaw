@@ -550,6 +550,35 @@ class ApiMemoryControllerTest extends FunctionalTest {
     }
 
     @Test
+    void aGuestRowListsAndRecallsAsGuestTurnUnverifiedAndTentative() {
+        var memId = fetchInFreshTx(() -> {
+            var agent = services.AgentService.create("guest-prov", "openrouter", "gpt-4.1");
+            return MemoryStoreFactory.get().storeDeferred(String.valueOf(agent.id),
+                    "The user's guest keeps a kayak by the lake", "fact", 0.6, null,
+                    new memory.MemoryProvenance(5L, 50L, memory.MemoryProvenance.guest("telegram"),
+                            models.MemoryAuthorType.GUEST_TURN, java.util.List.of()));
+        });
+        MemoryStoreFactory.get().embedStored(memId);
+        var agent = agentIdFor("guest-prov");
+        login();
+
+        var listed = provenanceOf(getContent(GET("/api/memories")), memId);
+        assertEquals("GUEST_TURN", listed.get("authorType").getAsString(), listed.toString());
+        assertEquals("guest:telegram", listed.get("actor").getAsString());
+        assertEquals("UNVERIFIED", listed.get("trustTier").getAsString());
+        assertEquals("TENTATIVE", listed.get("graphTier").getAsString());
+
+        var recalled = com.google.gson.JsonParser.parseString(recall(agent, "kayak")).getAsJsonObject();
+        com.google.gson.JsonObject candidate = null;
+        for (var c : recalled.getAsJsonArray("candidates")) {
+            if (c.getAsJsonObject().get("id").getAsLong() == Long.parseLong(memId)) candidate = c.getAsJsonObject();
+        }
+        assertNotNull(candidate, recalled.toString());
+        assertEquals("GUEST_TURN", candidate.getAsJsonObject("provenance").get("authorType").getAsString());
+        assertEquals("TENTATIVE", candidate.getAsJsonObject("provenance").get("graphTier").getAsString());
+    }
+
+    @Test
     void deletesMemory() {
         var memId = seedMemory("alice", "Delete me", "fact", 0.5);
         login();

@@ -140,7 +140,7 @@ public class Memory extends Model {
     @Column(name = "source_message_id")
     public Long sourceMessageId;
 
-    /** Who wrote the row: {@code extractor/<modelId>}, {@code human:operator} or {@code process:<id>}. */
+    /** Who wrote the row: {@code extractor/<modelId>}, {@code human:operator}, {@code guest:<channel>} or {@code process:<id>}. */
     @Column(length = 200)
     public String actor;
 

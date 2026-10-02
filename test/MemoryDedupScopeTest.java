@@ -100,6 +100,41 @@ class MemoryDedupScopeTest extends UnitTest {
         assertEquals(1, corroborations(rows.getFirst().id), "repetition inside one turn counts once");
     }
 
+    // ─── JCLAW-1353: a guest's restatement is a duplicate but not a corroboration ──
+
+    private int captureAs(String agentId, String candidateText, memory.MemoryProvenance provenance) {
+        MemoryAutoCapture.Extractor extractor = msgs ->
+                "{\"memories\":[{\"text\":\"%s\",\"category\":\"fact\",\"importance\":0.7}]}"
+                        .formatted(candidateText);
+        return MemoryAutoCapture.capture(agentId, "dedup-agent",
+                "Here is something durable worth remembering about my setup.",
+                "Understood, noted.", extractor, null, freshBreaker(), provenance).captured();
+    }
+
+    @Test
+    void aGuestLexicalRestatementIsDroppedWithoutCorroborating() {
+        var agent = agentId("dedup-guest-lexical");
+        var stored = "The user drives a Tesla Model Y in Malaysia.";
+        MemoryStoreFactory.get().store(agent, stored, "fact", 0.7);
+
+        assertEquals(0, captureAs(agent, stored,
+                memory.MemoryProvenance.extractor("m1", models.MemoryAuthorType.GUEST_TURN)));
+        var rows = Memory.findByAgent(agent);
+        assertEquals(1, rows.size(), "still a duplicate, so no second row");
+        assertEquals(0, corroborations(rows.getFirst().id));
+    }
+
+    @Test
+    void anOperatorLexicalRestatementCorroborates() {
+        var agent = agentId("dedup-operator-lexical");
+        var stored = "The user drives a Tesla Model Y in Malaysia.";
+        MemoryStoreFactory.get().store(agent, stored, "fact", 0.7);
+
+        assertEquals(0, captureAs(agent, stored,
+                memory.MemoryProvenance.extractor("m1", models.MemoryAuthorType.HUMAN_TURN)));
+        assertEquals(1, corroborations(Memory.findByAgent(agent).getFirst().id));
+    }
+
     // ─── control: the harness can still store something ──────────────────────
 
     @Test

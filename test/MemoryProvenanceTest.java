@@ -160,6 +160,33 @@ class MemoryProvenanceTest extends UnitTest {
     }
 
     @Test
+    void theChatPathStampsAGuestTurnAsGuestButKeepsTheExtractorActor() {
+        var conv = ConversationService.create(agent, "telegram", "u-provenance-guest");
+        var latest = ConversationService.appendUserMessage(conv, "I'm a group member");
+
+        var p = agents.DangerousActionGate.withOwnerInitiated(false,
+                () -> MemoryAutoCapture.chatTurnSource(conv.id)).apply("m1");
+
+        assertEquals(conv.id, p.sourceConversationId());
+        assertEquals(latest.id, p.sourceMessageId());
+        assertEquals("extractor/m1", p.actor());
+        assertEquals(MemoryAuthorType.GUEST_TURN, p.authorType());
+        assertFalse(p.mayCorroborate());
+    }
+
+    @Test
+    void theChatPathStampsAnOwnersTurnOnAChannelAsHuman() {
+        var conv = ConversationService.create(agent, "telegram", "u-provenance-owner");
+        ConversationService.appendUserMessage(conv, "I'm the owner");
+
+        var p = agents.DangerousActionGate.withOwnerInitiated(true,
+                () -> MemoryAutoCapture.chatTurnSource(conv.id)).apply("m1");
+
+        assertEquals(MemoryAuthorType.HUMAN_TURN, p.authorType());
+        assertTrue(p.mayCorroborate());
+    }
+
+    @Test
     void aRepeatedInputIsLinkedOnce() {
         var a = storeWith("Input A", MemoryProvenance.extractor("m1"));
         var d = storeWith("Derived", derivedFrom(Long.parseLong(a), Long.parseLong(a)));
