@@ -38,7 +38,8 @@ Every written record is checked against its case's labels:
 - **type** — a matched term typed differently from its label is wrong.
 - **relation** — a relation is wrong when its `(from, type, to)` triple is not labelled, or
   either endpoint term is wrong. `same_as` and `family_of` are symmetric and match a label in
-  either direction; every other relation matches only as labelled.
+  either direction; every other relation matches only as labelled. Both directions of a
+  symmetric relation are asked, but writing it both ways is one record, not two.
 
 At a threshold t a decision is written only when its choice's probability is at least t; a
 relation additionally needs both endpoint terms written at t. `not_an_entity` and `none` write

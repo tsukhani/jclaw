@@ -136,6 +136,45 @@ class GraphSpikeScorerTest extends UnitTest {
     }
 
     @Test
+    void aSymmetricRelationWrittenBothWaysIsOneRecord() {
+        var family = score(List.of(FAMILY), new PairingRun("p", "m", null, List.of(run(FAMILY,
+                term("Wren Castillo", "Person", 0.9),
+                term("Mateo Castillo", "Person", 0.9),
+                relation("Wren Castillo", "family_of", "Mateo Castillo", 0.9),
+                relation("Mateo Castillo", "family_of", "Wren Castillo", 0.9))))).pairings().getFirst();
+        assertEquals(3, family.written());
+        assertEquals(0, family.wrong());
+        assertEquals(4, family.decisions(), "both directions are still asked and tallied");
+
+        var wrongBothWays = score(List.of(FAMILY), new PairingRun("p", "m", null, List.of(run(FAMILY,
+                term("Wren Castillo", "Person", 0.9),
+                term("Mateo Castillo", "Person", 0.9),
+                relation("Wren Castillo", "same_as", "Mateo Castillo", 0.9),
+                relation("Mateo Castillo", "same_as", "Wren Castillo", 0.9))))).pairings().getFirst();
+        assertEquals(3, wrongBothWays.written());
+        assertEquals(1, wrongBothWays.wrongRelation());
+    }
+
+    @Test
+    void anAsymmetricRelationWrittenBothWaysIsTwoRecords() {
+        var kinds = score(List.of(FAMILY), new PairingRun("p", "m", null, List.of(run(FAMILY,
+                term("Wren Castillo", "Person", 0.9),
+                term("Mateo Castillo", "Person", 0.9),
+                relation("Wren Castillo", "kind_of", "Mateo Castillo", 0.9),
+                relation("Mateo Castillo", "kind_of", "Wren Castillo", 0.9))))).pairings().getFirst();
+        assertEquals(4, kinds.written());
+        assertEquals(2, kinds.wrongRelation());
+
+        var mixed = score(List.of(FAMILY), new PairingRun("p", "m", null, List.of(run(FAMILY,
+                term("Wren Castillo", "Person", 0.9),
+                term("Mateo Castillo", "Person", 0.9),
+                relation("Wren Castillo", "family_of", "Mateo Castillo", 0.9),
+                relation("Mateo Castillo", "same_as", "Wren Castillo", 0.9))))).pairings().getFirst();
+        assertEquals(4, mixed.written(), "a different symmetric type on the same pair is its own record");
+        assertEquals(1, mixed.wrongRelation());
+    }
+
+    @Test
     void aLabelledRelationOnAWronglyTypedEndpointIsWrong() {
         var pairing = score(List.of(WORKS), new PairingRun("p", "m", null, List.of(run(WORKS,
                 term("Dana Reyes", "Person", 0.9),

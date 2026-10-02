@@ -156,6 +156,7 @@ public final class GraphSpikeScorer {
             var termWritten = new HashSet<String>();
             var termCorrect = new HashMap<String, Boolean>();
             var relationsRight = new HashSet<GraphCases.Relation>();
+            var symmetricWritten = new HashSet<List<String>>();
             for (var d : run.decisions()) {
                 if (!d.stage().equals(ExtractionPipeline.TERM)) continue;
                 var choice = counted(d, t);
@@ -177,6 +178,11 @@ public final class GraphSpikeScorer {
                 var to = d.to();
                 if (choice == null || choice.equals(ExtractionPipeline.NONE) || from == null || to == null
                         || !termWritten.contains(from) || !termWritten.contains(to)) {
+                    continue;
+                }
+                // Both directions of a symmetric pair are asked, but they are one record, so the second is no write.
+                if (SYMMETRIC.contains(choice) && !symmetricWritten.add(from.compareTo(to) < 0
+                        ? List.of(choice, from, to) : List.of(choice, to, from))) {
                     continue;
                 }
                 written++;
