@@ -17,23 +17,32 @@ import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.SortedMap;
+import java.util.SortedSet;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 /**
  * The parsed seed ontology document ({@code conf/ontology/seed-schema.yaml}): record families,
- * structural references, term types and relation types, each with its standard identifier.
- * Types are data — adding one is an edit to the document, never to this class.
+ * structural references, the system-time, date and claim glosses, term types and relation types,
+ * each with its standard identifier. Types are data — adding one is an edit to the document, never
+ * to this class. The three gloss sections are null below version 3.
  */
 public record OntologySchema(
         int version,
         SortedMap<String, Family> families,
         List<String> references,
+        @Nullable SystemTime systemTime,
+        @Nullable Gloss dates,
+        @Nullable Claims claims,
         SortedMap<String, TermType> termTypes,
         SortedMap<String, RelationType> relations) {
 
@@ -44,6 +53,22 @@ public record OntologySchema(
     private static final String ARROW = "->";
     // ASCII unit separator: no name, covers text or endpoint holds it, so two schemas cannot render alike.
     private static final char FIELD_SEP = (char) 0x1F;
+    private static final String ENDED = "ended";
+    private static final int CLAIMS_VERSION = 3;
+    private static final Pattern X = Pattern.compile("\\bX\\b");
+    private static final Pattern Y = Pattern.compile("\\bY\\b");
+    private static final Set<String> TOP_KEYS = Set.of(
+            "version", "families", "references", "system_time", "dates", "claims", "term_types", "relations");
+    private static final Set<String> FAMILY_KEYS = Set.of("meaning", "must_link", "standard", "match");
+    private static final Set<String> TERM_TYPE_KEYS = Set.of("covers", "standard", "match", "dated");
+    private static final Set<String> RELATION_KEYS = Set.of("kind", "standard", "match", "endpoints", "reads", "status",
+            "symmetric", "irreflexive", "valid", "valence");
+    private static final Set<String> GLOSS_KEYS = Set.of("standard", "match", "covers");
+    private static final List<String> SYSTEM_TIME_KEYS = List.of("recordedAt", "retiredAt", "lineage");
+    private static final List<String> LINEAGE_KEYS = List.of("update", "restatement", "correction");
+    private static final List<String> CLAIMS_KEYS = List.of("status", "valid", "occurs", "valence");
+    private static final List<String> STATUS_KEYS = List.of("holds", ENDED, "denied");
+    private static final List<String> VALENCE_KEYS = List.of("favorable", "unfavorable");
 
     public enum Match {
         EXACT,
@@ -60,11 +85,38 @@ public record OntologySchema(
 
     public record Family(String meaning, String mustLink, Identifier identifier) {}
 
-    public record TermType(String covers, Identifier identifier) {}
+    /** A documented entry's covers text; the identifier is null only for {@code dates}, which has no standard. */
+    public record Gloss(String covers, @Nullable Identifier identifier) {}
 
-    public record RelationType(String kind, Identifier identifier, List<String> endpoints) {
+    public record SystemTime(Gloss recordedAt, Gloss retiredAt, Map<String, Gloss> lineage) {
+        public SystemTime {
+            lineage = Collections.unmodifiableMap(new LinkedHashMap<>(lineage));
+        }
+    }
+
+    public record Claims(Map<String, Gloss> status, Gloss valid, Gloss occurs, Map<String, Gloss> valence) {
+        public Claims {
+            status = Collections.unmodifiableMap(new LinkedHashMap<>(status));
+            valence = Collections.unmodifiableMap(new LinkedHashMap<>(valence));
+        }
+    }
+
+    public record TermType(String covers, Identifier identifier, boolean dated) {}
+
+    /** {@code reads} is null and {@code statuses} empty below version 3. */
+    public record RelationType(
+            String kind,
+            Identifier identifier,
+            List<String> endpoints,
+            @Nullable String reads,
+            boolean symmetric,
+            boolean irreflexive,
+            List<String> statuses,
+            boolean valid,
+            boolean valence) {
         public RelationType {
             endpoints = List.copyOf(endpoints);
+            statuses = List.copyOf(statuses);
         }
 
         public boolean allows(String fromType, String toType) {
@@ -98,18 +150,68 @@ public record OntologySchema(
                 && relation.allows(fromType, toType);
     }
 
+    /** The relation's statuses, without ended when {@code fromType} is dated: an occurrence does not stop. */
+    public List<String> effectiveStatuses(String relationType, String fromType) {
+        var statuses = relation(relationType).statuses();
+        if (!termType(fromType).dated()) return statuses;
+        return statuses.stream().filter(s -> !s.equals(ENDED)).toList();
+    }
+
+    /** True when the relation takes a valid time from {@code fromType}; a dated From is timed by its occurrence. */
+    public boolean validAllowed(String relationType, String fromType) {
+        return relation(relationType).valid() && !termType(fromType).dated();
+    }
+
+    public boolean timeable(String relationType, String fromType) {
+        return effectiveStatuses(relationType, fromType).contains(ENDED) || termType(fromType).dated();
+    }
+
+    public boolean symmetric(String relationType) {
+        return relation(relationType).symmetric();
+    }
+
+    public boolean irreflexive(String relationType) {
+        return relation(relationType).irreflexive();
+    }
+
+    public SortedSet<String> symmetricSet() {
+        var names = new TreeSet<String>();
+        relations.forEach((name, r) -> {
+            if (r.symmetric()) names.add(name);
+        });
+        return Collections.unmodifiableSortedSet(names);
+    }
+
+    private RelationType relation(String relationType) {
+        var relation = relations.get(relationType);
+        if (relation == null) throw new IllegalArgumentException("relation type '" + relationType + "' is not declared");
+        return relation;
+    }
+
+    private TermType termType(String name) {
+        var termType = termTypes.get(name);
+        if (termType == null) throw new IllegalArgumentException("term type '" + name + "' is not declared");
+        return termType;
+    }
+
     /**
-     * {@code v<version>@<12 hex>}: the version and a SHA-256 prefix over what extraction asks with, each term type's
-     * name and covers text and each relation's name and endpoints. A graph-eval certificate holds only under the
-     * fingerprint it was measured with.
+     * {@code v<version>@<12 hex>}: the version and a SHA-256 prefix over what extraction asks with — the version, each
+     * term type's name, covers text and dated flag, and each relation's name, endpoints, reads, symmetric flag, status
+     * list, valid and valence. A graph-eval certificate holds only under the fingerprint it was measured with.
      */
     public String fingerprint() {
-        var canonical = new StringBuilder();
-        termTypes.forEach((name, t) -> canonical.append(name).append(FIELD_SEP).append(t.covers()).append(FIELD_SEP));
+        var canonical = new StringBuilder().append(version).append(FIELD_SEP);
+        termTypes.forEach((name, t) -> canonical.append(name).append(FIELD_SEP).append(t.covers()).append(FIELD_SEP)
+                .append(t.dated()).append(FIELD_SEP));
         relations.forEach((name, r) -> {
             canonical.append(name);
             r.endpoints().forEach(e -> canonical.append(FIELD_SEP).append(e));
-            canonical.append(FIELD_SEP);
+            canonical.append(FIELD_SEP).append(Objects.requireNonNullElse(r.reads(), NONE))
+                    .append(FIELD_SEP).append(r.symmetric())
+                    .append(FIELD_SEP).append(r.statuses())
+                    .append(FIELD_SEP).append(r.valid())
+                    .append(FIELD_SEP).append(r.valence())
+                    .append(FIELD_SEP);
         });
         try {
             var digest = MessageDigest.getInstance("SHA-256").digest(canonical.toString().getBytes(StandardCharsets.UTF_8));
@@ -142,14 +244,17 @@ public record OntologySchema(
             throw new IllegalArgumentException("ontology schema is not valid YAML: " + e.getMessage(), e);
         }
         var doc = map(root, "document");
+        knownKeys(doc, TOP_KEYS, "ontology schema");
         if (!(doc.get("version") instanceof Integer version)) {
             throw new IllegalArgumentException("ontology schema: version must be an integer");
         }
+        var v3 = version >= CLAIMS_VERSION;
 
         var families = new TreeMap<String, Family>();
         map(doc.get("families"), "families").forEach((name, value) -> {
             var where = "family " + name;
             var entry = map(value, where);
+            knownKeys(entry, FAMILY_KEYS, where);
             families.put(
                     String.valueOf(name),
                     new Family(text(entry, "meaning", where), text(entry, "must_link", where), identifier(entry, where)));
@@ -166,17 +271,24 @@ public record OntologySchema(
             references.add(reference);
         }
 
+        var systemTime = section(doc, "system_time", v3) ? parseSystemTime(doc.get("system_time")) : null;
+        var dates = section(doc, "dates", v3) ? parseDates(doc.get("dates")) : null;
+        var claims = section(doc, "claims", v3) ? parseClaims(doc.get("claims")) : null;
+
         var termTypes = new TreeMap<String, TermType>();
         map(doc.get("term_types"), "term_types").forEach((name, value) -> {
             var where = "term type " + name;
             var entry = map(value, where);
-            termTypes.put(String.valueOf(name), new TermType(text(entry, "covers", where), identifier(entry, where)));
+            knownKeys(entry, TERM_TYPE_KEYS, where);
+            termTypes.put(String.valueOf(name),
+                    new TermType(text(entry, "covers", where), identifier(entry, where), flag(entry, "dated", where)));
         });
 
         var relations = new TreeMap<String, RelationType>();
         map(doc.get("relations"), "relations").forEach((name, value) -> {
             var where = "relation " + name;
             var entry = map(value, where);
+            knownKeys(entry, RELATION_KEYS, where);
             var endpoints = new ArrayList<String>();
             for (var endpointValue : list(entry.get("endpoints"), where + " endpoints")) {
                 var endpoint = String.valueOf(endpointValue).trim();
@@ -194,11 +306,165 @@ public record OntologySchema(
                 endpoints.add(endpoint);
             }
             if (endpoints.isEmpty()) throw new IllegalArgumentException(where + ": endpoints is empty");
-            relations.put(
-                    String.valueOf(name), new RelationType(text(entry, "kind", where), identifier(entry, where), endpoints));
+            relations.put(String.valueOf(name), new RelationType(
+                    text(entry, "kind", where),
+                    identifier(entry, where),
+                    endpoints,
+                    reads(entry, where, v3),
+                    symmetricFlag(entry, endpoints, termTypes.keySet(), where),
+                    flag(entry, "irreflexive", where),
+                    statuses(entry, where, v3, claims),
+                    flag(entry, "valid", where),
+                    valenceFlag(entry, endpoints, where)));
         });
 
-        return new OntologySchema(version, families, references, termTypes, relations);
+        return new OntologySchema(version, families, references, systemTime, dates, claims, termTypes, relations);
+    }
+
+    private static boolean section(Map<?, ?> doc, String key, boolean required) {
+        if (doc.get(key) != null) return true;
+        if (required) throw new IllegalArgumentException("ontology schema: missing " + key);
+        return false;
+    }
+
+    private static SystemTime parseSystemTime(@Nullable Object value) {
+        var where = "system_time";
+        var entry = required(map(value, where), SYSTEM_TIME_KEYS, where);
+        return new SystemTime(
+                gloss(entry.get("recordedAt"), where + " recordedAt"),
+                gloss(entry.get("retiredAt"), where + " retiredAt"),
+                glosses(entry.get("lineage"), LINEAGE_KEYS, where + " lineage"));
+    }
+
+    private static Gloss parseDates(@Nullable Object value) {
+        var where = "dates";
+        var entry = map(value, where);
+        knownKeys(entry, Set.of("covers"), where);
+        return new Gloss(text(entry, "covers", where), null);
+    }
+
+    private static Claims parseClaims(@Nullable Object value) {
+        var where = "claims";
+        var entry = required(map(value, where), CLAIMS_KEYS, where);
+        return new Claims(
+                glosses(entry.get("status"), STATUS_KEYS, where + " status"),
+                gloss(entry.get("valid"), where + " valid"),
+                gloss(entry.get("occurs"), where + " occurs"),
+                glosses(entry.get("valence"), VALENCE_KEYS, where + " valence"));
+    }
+
+    /** The named glosses in document order, each of {@code keys} required and no other admitted. */
+    private static Map<String, Gloss> glosses(@Nullable Object value, List<String> keys, String where) {
+        var entry = required(map(value, where), keys, where);
+        var glosses = new LinkedHashMap<String, Gloss>();
+        entry.forEach((name, gloss) -> glosses.put(String.valueOf(name), gloss(gloss, where + " " + name)));
+        return glosses;
+    }
+
+    private static Gloss gloss(@Nullable Object value, String where) {
+        var entry = map(value, where);
+        knownKeys(entry, GLOSS_KEYS, where);
+        return new Gloss(text(entry, "covers", where), identifier(entry, where));
+    }
+
+    private static Map<?, ?> required(Map<?, ?> entry, List<String> keys, String where) {
+        knownKeys(entry, Set.copyOf(keys), where);
+        for (var key : keys) {
+            if (entry.get(key) == null) throw new IllegalArgumentException(where + ": missing " + key);
+        }
+        return entry;
+    }
+
+    private static @Nullable String reads(Map<?, ?> entry, String where, boolean required) {
+        if (entry.get("reads") == null && !required) return null;
+        var reads = text(entry, "reads", where);
+        if (count(X, reads) != 1 || count(Y, reads) != 1) {
+            throw new IllegalArgumentException(
+                    where + ": reads must hold exactly one whole-word X and one whole-word Y, was '" + reads + "'");
+        }
+        return reads;
+    }
+
+    private static long count(Pattern pattern, String text) {
+        return pattern.matcher(text).results().count();
+    }
+
+    private static List<String> statuses(Map<?, ?> entry, String where, boolean required, @Nullable Claims claims) {
+        var value = entry.get("status");
+        if (value == null) {
+            if (required) throw new IllegalArgumentException(where + ": missing status");
+            return List.of();
+        }
+        var list = list(value, where + " status");
+        if (list.isEmpty()) throw new IllegalArgumentException(where + ": status is empty");
+        var known = claims == null ? Set.<String>of() : claims.status().keySet();
+        var statuses = new ArrayList<String>();
+        for (var status : list) {
+            if (!(status instanceof String name)) {
+                throw new IllegalArgumentException(where + ": status must list strings, was '" + status + "'");
+            }
+            if (!known.contains(name)) {
+                throw new IllegalArgumentException(where + ": status " + name + " is not a key of claims.status");
+            }
+            statuses.add(name);
+        }
+        if (statuses.contains(ENDED) && !flag(entry, "valid", where)) {
+            throw new IllegalArgumentException(where + ": status " + ENDED + " needs valid: true");
+        }
+        return statuses;
+    }
+
+    private static boolean symmetricFlag(Map<?, ?> entry, List<String> endpoints, Set<String> termTypes, String where) {
+        var symmetric = flag(entry, "symmetric", where);
+        if (!symmetric) return false;
+        var from = new TreeSet<String>();
+        var to = new TreeSet<String>();
+        for (var endpoint : endpoints) {
+            if (endpoint.equals(SAME)) {
+                from.addAll(termTypes);
+                to.addAll(termTypes);
+            } else {
+                var sides = endpoint.split(ARROW, -1);
+                from.addAll(splitNames(sides[0]));
+                to.addAll(splitNames(sides[1]));
+            }
+        }
+        from.removeAll(to);
+        if (!from.isEmpty()) {
+            throw new IllegalArgumentException(
+                    where + ": symmetric needs every From type to be a To type, but " + from.first() + " is not");
+        }
+        return true;
+    }
+
+    private static boolean valenceFlag(Map<?, ?> entry, List<String> endpoints, String where) {
+        var valence = flag(entry, "valence", where);
+        if (valence && !(endpoints.size() == 1 && isPersonToTopic(endpoints.get(0)))) {
+            throw new IllegalArgumentException(where + ": valence needs the only endpoint to be Person -> Topic");
+        }
+        return valence;
+    }
+
+    private static boolean isPersonToTopic(String endpoint) {
+        if (endpoint.equals(SAME)) return false;
+        var sides = endpoint.split(ARROW, -1);
+        return splitNames(sides[0]).equals(List.of("Person")) && splitNames(sides[1]).equals(List.of("Topic"));
+    }
+
+    private static boolean flag(Map<?, ?> entry, String key, String where) {
+        var value = entry.get(key);
+        if (value == null) return false;
+        if (value instanceof Boolean flag) return flag;
+        throw new IllegalArgumentException(where + ": " + key + " must be a boolean, was '" + value + "'");
+    }
+
+    /** Reports the first unknown key in sorted order, so the message does not depend on document order. */
+    private static void knownKeys(Map<?, ?> entry, Set<String> known, String where) {
+        var unknown = new TreeSet<String>();
+        for (var key : entry.keySet()) {
+            if (!known.contains(String.valueOf(key))) unknown.add(String.valueOf(key));
+        }
+        if (!unknown.isEmpty()) throw new IllegalArgumentException(where + ": unknown key '" + unknown.first() + "'");
     }
 
     /** The readable view of two versions: one sorted line per added, removed or changed entry. */
@@ -218,10 +484,16 @@ public record OntologySchema(
         for (var reference : b.references) {
             if (!a.references.contains(reference)) lines.add("+ reference " + reference);
         }
+        diffMap(lines, "system_time", systemTimeEntries(a.systemTime), systemTimeEntries(b.systemTime),
+                OntologySchema::glossChanges, OntologySchema::glossSummary);
+        diffDates(lines, a.dates, b.dates);
+        diffMap(lines, "claims", claimsEntries(a.claims), claimsEntries(b.claims),
+                OntologySchema::glossChanges, OntologySchema::glossSummary);
         diffMap(lines, "term type", a.termTypes, b.termTypes, (x, y) -> {
             var changes = new ArrayList<String>();
             change(changes, "covers", x.covers(), y.covers());
             changeIdentifier(changes, x.identifier(), y.identifier());
+            change(changes, "dated", x.dated(), y.dated());
             return changes;
         }, t -> t.identifier().toString());
         diffMap(lines, "relation", a.relations, b.relations, (x, y) -> {
@@ -229,6 +501,13 @@ public record OntologySchema(
             change(changes, "kind", x.kind(), y.kind());
             changeIdentifier(changes, x.identifier(), y.identifier());
             change(changes, "endpoints", x.endpoints().toString(), y.endpoints().toString());
+            change(changes, "reads", Objects.requireNonNullElse(x.reads(), NONE),
+                    Objects.requireNonNullElse(y.reads(), NONE));
+            change(changes, "symmetric", x.symmetric(), y.symmetric());
+            change(changes, "irreflexive", x.irreflexive(), y.irreflexive());
+            change(changes, "status", x.statuses().toString(), y.statuses().toString());
+            change(changes, "valid", x.valid(), y.valid());
+            change(changes, "valence", x.valence(), y.valence());
             return changes;
         }, r -> r.identifier().toString());
         Collections.sort(lines);
@@ -257,6 +536,51 @@ public record OntologySchema(
 
     private static void change(List<String> changes, String field, String x, String y) {
         if (!x.equals(y)) changes.add(field + ": " + x + " -> " + y);
+    }
+
+    private static void change(List<String> changes, String field, boolean x, boolean y) {
+        change(changes, field, String.valueOf(x), String.valueOf(y));
+    }
+
+    private static SortedMap<String, Gloss> systemTimeEntries(@Nullable SystemTime systemTime) {
+        var entries = new TreeMap<String, Gloss>();
+        if (systemTime == null) return entries;
+        entries.put("recordedAt", systemTime.recordedAt());
+        entries.put("retiredAt", systemTime.retiredAt());
+        systemTime.lineage().forEach((name, gloss) -> entries.put("lineage " + name, gloss));
+        return entries;
+    }
+
+    private static SortedMap<String, Gloss> claimsEntries(@Nullable Claims claims) {
+        var entries = new TreeMap<String, Gloss>();
+        if (claims == null) return entries;
+        claims.status().forEach((name, gloss) -> entries.put("status " + name, gloss));
+        entries.put("valid", claims.valid());
+        entries.put("occurs", claims.occurs());
+        claims.valence().forEach((name, gloss) -> entries.put("valence " + name, gloss));
+        return entries;
+    }
+
+    private static void diffDates(List<String> lines, @Nullable Gloss a, @Nullable Gloss b) {
+        if (a == null && b != null) lines.add("+ dates (" + glossSummary(b) + ")");
+        if (a != null && b == null) lines.add("- dates");
+        if (a != null && b != null) {
+            for (var change : glossChanges(a, b)) lines.add("~ dates " + change);
+        }
+    }
+
+    private static List<String> glossChanges(Gloss x, Gloss y) {
+        var changes = new ArrayList<String>();
+        change(changes, "covers", x.covers(), y.covers());
+        var xId = x.identifier();
+        var yId = y.identifier();
+        if (xId != null && yId != null) changeIdentifier(changes, xId, yId);
+        return changes;
+    }
+
+    private static String glossSummary(Gloss gloss) {
+        var identifier = gloss.identifier();
+        return identifier == null ? "no standard" : identifier.toString();
     }
 
     private static void changeIdentifier(List<String> changes, Identifier x, Identifier y) {

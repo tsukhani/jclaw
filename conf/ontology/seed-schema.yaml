@@ -5,21 +5,22 @@
 # Identifiers are curated slices of published vocabularies, kept with their prefixes:
 #   schema: https://schema.org/   prov: http://www.w3.org/ns/prov#
 #   skos:   http://www.w3.org/2004/02/skos/core#   dcterms: http://purl.org/dc/terms/
+#   pq: http://www.wikidata.org/prop/qualifier/
 # match is exact or close, after skos:exactMatch / skos:closeMatch; a type with no
 # counterpart writes standard: none and no match.
 #
 # Endpoints read "From[, From] -> To[, To]" (every From may point at every To);
-# "same" means any declared term type to itself. Keep one line per type so a diff of two
-# versions is one line per change.
+# "same" means any declared term type to itself. Every key below is known to the parser; any
+# other key fails the load.
 
-version: 2
+version: 3
 
 families:
   Term:       {meaning: "An entity or concept", must_link: "One or more Evidence", standard: none}
   Mapping:    {meaning: "Grounds a Term in a physical source: memory id, message id or file path", must_link: "Its Term; one or more Evidence", standard: none}
   Relation:   {meaning: "A typed edge between two Terms", must_link: "Both Terms; one or more Evidence", standard: none}
   Constraint: {meaning: "A valid-use rule attached to a Term", must_link: "Its Term; one or more Evidence", standard: none}
-  Evidence:   {meaning: "Provenance supporting a claim", must_link: "The source it names (dcterms:source)", standard: "prov:Entity", match: close}
+  Evidence:   {meaning: "Provenance supporting a claim, and what its source states about that claim", must_link: "The source it names (dcterms:source)", standard: "prov:Entity", match: close}
 
 # Record-to-record links; "Any" is any other record.
 references:
@@ -30,6 +31,33 @@ references:
   - "Term, Mapping, Relation, Constraint -> Evidence"
   - "Evidence -> Any"
 
+# When JClaw recorded and retired a claim's source, and why it was retired. Code copies the times from
+# the memory rows; the lineage is a certified decision. Documentation only: not in the fingerprint.
+system_time:
+  recordedAt: {standard: "prov:generatedAtTime", match: close, covers: "When JClaw recorded the source"}
+  retiredAt:  {standard: "prov:invalidatedAtTime", match: close, covers: "When JClaw superseded the source; absent while it stands"}
+  lineage:
+    update:      {standard: none, covers: "The successor says the situation has since changed; the claim stays as history until changedBy"}
+    restatement: {standard: none, covers: "The successor says the same; the claim stays as history"}
+    correction:  {standard: none, covers: "The successor says the source was wrong; the claim is retracted"}
+
+# Every date is an EDTF string (loc.gov/standards/datetime) in this subset, found and normalized by code.
+# Documentation only: not in the fingerprint.
+dates: {covers: "YYYY, YYYY-MM or YYYY-MM-DD; a season YYYY-21..24 (Level 1; winter YYYY-24 runs December YYYY to February YYYY+1) or a calendar quarter YYYY-33..36 (Level 2); optional trailing ~ (approximate). An interval joins two with /; its start may be unknown (empty) or, only in a denial's never scope, open (..); its end may be unknown (empty) or open (..)"}
+
+# What an Evidence record states about its subject, as its source says it. Absent means the source does not
+# say, or no certified decision model decided it; absent never means "holds now". Documentation only.
+claims:
+  status:
+    holds:  {standard: none, covers: "The source states it is so, or that it is scheduled to be so, and does not say it has stopped"}
+    ended:  {standard: "pq:P582", match: close, covers: "The source states it was so and has stopped"}
+    denied: {standard: none, covers: "The source states it is not so, and does not say it ever was"}
+  valid:    {standard: "dcterms:valid", match: close, covers: "When a relation held: an EDTF interval whose start is P580 and whose end is P582"}
+  occurs:   {standard: "pq:P585", match: close, covers: "When a dated Term takes place: an EDTF date, or a closed interval for a stated range"}
+  valence:
+    favorable:   {standard: none, covers: "The holder's view is for its Topic, as the preference verb states"}
+    unfavorable: {standard: none, covers: "The holder's view is against its Topic, as the preference verb states"}
+
 term_types:
   Person:       {standard: "schema:Person", match: exact, covers: "A named individual, including the operator"}
   Organization: {standard: "schema:Organization", match: exact, covers: "Company, institution, team, business unit"}
@@ -37,19 +65,19 @@ term_types:
   System:       {standard: "schema:SoftwareApplication", match: close, covers: "Tool, service, device or server the operator uses or runs"}
   Artifact:     {standard: "schema:CreativeWork", match: close, covers: "A concrete addressable thing: file, URL, document, ticket, dataset"}
   Place:        {standard: "schema:Place", match: exact, covers: "City, address, property"}
-  Event:        {standard: "schema:Event", match: exact, covers: "A specific dated occurrence: a trip, a renewal, a scheduled run, a particular deadline; never a weekday, a recurring time or a category such as 'deadlines'"}
+  Event:        {standard: "schema:Event", match: exact, dated: true, covers: "A specific dated occurrence: a trip, a renewal, a scheduled run, a particular deadline; never a weekday, a recurring time or a category such as 'deadlines'"}
   Topic:        {standard: "skos:Concept", match: exact, covers: "The subject a view or interest is about"}
 
 relations:
-  works_at:      {kind: Association, standard: "schema:worksFor", match: exact, endpoints: ["Person -> Organization"]}
-  works_on:      {kind: Association, standard: none, endpoints: ["Person, Organization -> Project"]}
-  uses:          {kind: Association, standard: none, endpoints: ["Person, Organization, Project -> System"]}
-  owns:          {kind: Association, standard: "schema:owns", match: close, endpoints: ["Person, Organization -> System, Artifact, Place"]}
-  family_of:     {kind: Association, standard: "schema:relatedTo", match: exact, endpoints: ["Person -> Person"]}
-  located_in:    {kind: Association, standard: "schema:location", match: close, endpoints: ["Person, Organization, Event -> Place"]}
-  involves:      {kind: Association, standard: none, endpoints: ["Event -> Person, Organization, Project"]}
-  holds_view_on: {kind: Association, standard: none, endpoints: ["Person -> Topic"]}
-  part_of:       {kind: Composition, standard: "schema:isPartOf", match: close, endpoints: ["Organization -> Organization", "Project -> Project", "System -> System", "Artifact -> Project", "Place -> Place"]}
-  kind_of:       {kind: Hierarchy, standard: "skos:broader", match: exact, endpoints: [same]}
-  same_as:       {kind: Equivalence, standard: "schema:sameAs", match: close, endpoints: [same]}
-  derived_from:  {kind: Derivation, standard: "prov:wasDerivedFrom", match: exact, endpoints: ["Artifact -> Artifact, Project"]}
+  works_at:      {kind: Association, standard: "schema:worksFor", match: exact, endpoints: ["Person -> Organization"], reads: "X works at Y", status: [holds, ended, denied], valid: true}
+  works_on:      {kind: Association, standard: none, endpoints: ["Person, Organization -> Project"], reads: "X works on Y", status: [holds, ended, denied], valid: true}
+  uses:          {kind: Association, standard: none, endpoints: ["Person, Organization, Project -> System"], reads: "X uses Y", status: [holds, ended, denied], valid: true}
+  owns:          {kind: Association, standard: "schema:owns", match: close, endpoints: ["Person, Organization -> System, Artifact, Place"], reads: "X owns Y", status: [holds, ended, denied], valid: true}
+  family_of:     {kind: Association, standard: "schema:relatedTo", match: exact, endpoints: ["Person -> Person"], reads: "X is a family member of Y", symmetric: true, irreflexive: true, status: [holds, ended], valid: true}
+  located_in:    {kind: Association, standard: "schema:location", match: close, endpoints: ["Person, Organization, Event -> Place"], reads: "X is located in Y", status: [holds, ended, denied], valid: true}
+  involves:      {kind: Association, standard: none, endpoints: ["Event -> Person, Organization, Project"], reads: "X involves Y", status: [holds, denied]}
+  holds_view_on: {kind: Association, standard: none, endpoints: ["Person -> Topic"], reads: "X holds a view on Y", status: [holds, ended], valid: true, valence: true}
+  part_of:       {kind: Composition, standard: "schema:isPartOf", match: close, endpoints: ["Organization -> Organization", "Project -> Project", "System -> System", "Artifact -> Project", "Place -> Place"], reads: "X is part of Y", irreflexive: true, status: [holds, ended, denied], valid: true}
+  kind_of:       {kind: Hierarchy, standard: "skos:broader", match: exact, endpoints: [same], reads: "X is a kind of Y", irreflexive: true, status: [holds]}
+  same_as:       {kind: Equivalence, standard: "schema:sameAs", match: close, endpoints: [same], reads: "X is the same thing as Y", symmetric: true, irreflexive: true, status: [holds, denied]}
+  derived_from:  {kind: Derivation, standard: "prov:wasDerivedFrom", match: exact, endpoints: ["Artifact -> Artifact, Project"], reads: "X is derived from Y", irreflexive: true, status: [holds]}

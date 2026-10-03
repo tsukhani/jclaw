@@ -229,6 +229,19 @@ class MemoryGraphStoreTest extends UnitTest {
     }
 
     @Test
+    void anAxiomViolationIsRefused() throws Exception {
+        var loop = new ArrayList<>(fullSet());
+        loop.add(new Relation(meta("r9"), "part_of", "o1", "o1", List.of("e1")));
+        assertRefused(loop, Kind.AXIOM, "r9");
+
+        var bothWays = new ArrayList<>(fullSet());
+        bothWays.add(new Term(meta("p2"), "Person", "Grace", List.of(), List.of("e1")));
+        bothWays.add(new Relation(meta("r8"), "family_of", "p1", "p2", List.of("e1")));
+        bothWays.add(new Relation(meta("r9"), "family_of", "p2", "p1", List.of("e1")));
+        assertRefused(bothWays, Kind.AXIOM, "r9");
+    }
+
+    @Test
     void aRecordOfAnotherAgentIsRefused() throws Exception {
         store.write(AGENT, fullSet());
         var before = snapshot();
