@@ -1,6 +1,7 @@
 // Host-side GitHub access for the factory: open issues of the checkout's GitHub repository that its owner labelled
 // `afk`, and the write-backs. GitHub has no statuses, so the factory's states are labels: `afk-running` while it works,
-// `afk-review` once it offers a branch, `afk-blocked` when it gives up. Closing the issue is Done.
+// `afk-review` once it offers a branch, `afk-blocked` when it gives up, `afk-merged` once it merged an `afk-merge`
+// issue's branch. Closing the issue is Done, which the merge commit's "Closes #N" does when /deploy pushes it.
 import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
 import { GITHUB_ENV_FILE, REPO_ROOT, STATE, readEnvFile } from "./paths.ts";
@@ -9,7 +10,7 @@ import type { Snapshot, Tracker } from "./tracker.ts";
 const API = "https://api.github.com";
 const HEADER = "### AFK factory";
 // Labels that take an issue out of intake: the factory's states, and a won't-do verdict awaiting the owner.
-const STATE_LABELS = ["afk-running", "afk-review", "afk-blocked", "wont-do"];
+const STATE_LABELS = ["afk-running", "afk-review", "afk-blocked", "afk-merged", "wont-do"];
 
 type Login = { login: string } | null;
 type Comment = { author: Login; body: string; createdAt: string; lastEditedAt: string | null; editor: Login };
@@ -81,6 +82,13 @@ export const vetIssue = (issue: Issue, owner: string, fetchedAt: string): Snapsh
   };
 };
 
+// Whether `label` stands as the owner's: its most recent application was by the owner.
+export const ownerApplied = (issue: Issue, owner: string, label: string): boolean =>
+  issue.timelineItems.nodes
+    .filter((e) => e.__typename === "LabeledEvent" && e.label?.name === label)
+    .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""))
+    .at(-1)?.actor?.login === owner;
+
 // The repository the checkout's `github` remote names, unless github.env sets GITHUB_REPO.
 const repositoryOf = (configured: string | undefined): string | undefined => {
   if (configured) return configured;
@@ -132,13 +140,17 @@ export const githubTracker = (): Tracker | undefined => {
       (i) => !i.pull_request,
     );
 
-  const fetchSnapshot = async (key: string): Promise<Snapshot | undefined> => {
+  const fetchIssue = async (key: string): Promise<Issue> => {
     const result = await api("/graphql", {
       method: "POST",
       body: { query: ISSUE_QUERY, variables: { owner: repoOwner, name: repoName, number: number(key) } },
     });
     if (result.errors) throw new Error(`GitHub GraphQL for ${key}: ${JSON.stringify(result.errors).slice(0, 300)}`);
-    const snap = vetIssue(result.data.repository.issue as Issue, await owner(), new Date().toISOString());
+    return result.data.repository.issue as Issue;
+  };
+
+  const fetchSnapshot = async (key: string): Promise<Snapshot | undefined> => {
+    const snap = vetIssue(await fetchIssue(key), await owner(), new Date().toISOString());
     if (snap) {
       fs.mkdirSync(STATE, { recursive: true });
       fs.writeFileSync(`${STATE}/${snap.key}.json`, JSON.stringify(snap, null, 2));
@@ -175,6 +187,13 @@ export const githubTracker = (): Tracker | undefined => {
       return snaps.filter((s): s is Snapshot => s !== undefined);
     },
     inReview: async () => (await open("afk-review")).map((i) => `GH-${i.number}`),
+    mergeQueue: async () => {
+      const mine = await owner();
+      const labelled = (await open("afk-review")).filter((i) => i.labels.some((l: { name: string }) => l.name === "afk-merge"));
+      const keys = labelled.map((i) => `GH-${i.number}`);
+      const approved = await Promise.all(keys.map(async (k) => ownerApplied(await fetchIssue(k), mine, "afk-merge")));
+      return keys.filter((_, i) => approved[i]);
+    },
     orphaned: async () => {
       const mine = await owner();
       return (await open("afk-running"))
@@ -205,10 +224,15 @@ export const githubTracker = (): Tracker | undefined => {
       await removeLabel(key, "afk-running");
     },
     requeued: async (key) => removeLabel(key, "afk-running"),
+    merged: async (key) => {
+      await addLabel(key, "afk-merged");
+      await removeLabel(key, "afk-review");
+    },
     comment: async (key, body) => {
       await api(`${issuesPath}/${number(key)}/comments`, { method: "POST", body: { body } });
     },
     addLabel,
+    removeLabel,
     // Pushed to main by /deploy, the merge commit closes the issue.
     mergeMessage: (key) => `Closes #${number(key)}`,
   };

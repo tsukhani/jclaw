@@ -1,7 +1,12 @@
-// Offline checks on synthetic tickets: review feedback, planning, build mode, the GitHub trust rule and Jira's intake
-// query. `npm run check`.
-import { vetIssue, type Issue } from "./github.ts";
-import { intakeJql } from "./jira-intake.ts";
+// Offline checks on synthetic tickets: review feedback, planning, build mode, the GitHub trust rule, Jira's intake and
+// merge queries, and auto-merge, which lands branches between throwaway repos with real signing. `npm run check`.
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { execFileSync } from "node:child_process";
+import { ownerApplied, vetIssue, type Issue } from "./github.ts";
+import { intakeJql, mergeJql } from "./jira-intake.ts";
+import { MergeRefused, landBranch, landedAs, mergeVerdict } from "./merge.ts";
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
 
@@ -95,3 +100,110 @@ const HOLD = '(labels is EMPTY OR labels not in (afk-blocked, wont-do, no-afk)) 
 check("with no afk epic, a story is taken by its own label alone", intakeJql([]), `${SPRINT} AND labels = afk AND ${HOLD}`);
 check("an afk epic's stories are taken with the labelled ones", intakeJql(["JCLAW-538", "JCLAW-902"]),
   `${SPRINT} AND (labels = afk OR "Epic Link" in (JCLAW-538, JCLAW-902)) AND ${HOLD}`);
+
+const MERGE = "project = JCLAW AND labels = afk AND status = Review";
+check("with no afk-merge epic, a story merges by its own label", mergeJql([]), `${MERGE} AND labels = afk-merge AND labels not in (no-afk-merge) ORDER BY rank`);
+check("an afk-merge epic's stories merge with the labelled ones", mergeJql(["JCLAW-538"]),
+  `${MERGE} AND (labels = afk-merge OR "Epic Link" in (JCLAW-538)) AND labels not in (no-afk-merge) ORDER BY rank`);
+const merged = (who: string, at: string) => ({ __typename: "LabeledEvent", createdAt: at, actor: { login: who }, label: { name: "afk-merge" } });
+check("afk-merge counts when the owner applied it last", ownerApplied(issue({ timelineItems: { nodes: [merged("stranger", BEFORE), merged(OWNER, LATER)] } }), OWNER, "afk-merge"), true);
+check("afk-merge from anyone else does not", ownerApplied(issue({ timelineItems: { nodes: [merged(OWNER, BEFORE), merged("stranger", LATER)] } }), OWNER, "afk-merge"), false);
+
+const brief = (met: boolean[]) => ({ brief: { acceptanceCriteria: met.map((m, i) => ({ criterion: `AC ${i + 1}`, met: m })) } });
+check("a clean report with ordinary files may merge", mergeVerdict(brief([true, true]), []), undefined);
+check("no report: another harness built it", mergeVerdict(undefined, []), "this harness has no report for it, so another developer's factory built it");
+check("an unvalidated brief is refused", mergeVerdict({}, []), "the agent's brief did not validate, so its acceptance criteria are unconfirmed");
+check("an unmet criterion is refused", mergeVerdict(brief([true, false]), []), "acceptance criteria not met: AC 2");
+check("files that run on the Mac need a human", mergeVerdict(brief([true]), [".githooks/pre-push"]),
+  "it changes files that run on your Mac once merged, which a human must read first: .githooks/pre-push");
+
+// landBranch between a throwaway checkout and its clone, signing with the operator's own git configuration.
+const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "jclaw-land-check-"));
+const g = (repo: string, ...args: string[]) => execFileSync("/usr/bin/git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+const write = (repo: string, file: string, text: string) => fs.writeFileSync(path.join(repo, file), text);
+const commit = (repo: string, file: string, text: string) => {
+  write(repo, file, text);
+  g(repo, "add", file);
+  g(repo, "commit", "--quiet", "-m", `change ${file}`);
+};
+const checkout = path.join(sandbox, "checkout"), clone = path.join(sandbox, "clone");
+fs.mkdirSync(checkout);
+g(checkout, "init", "--quiet", "--initial-branch=main");
+commit(checkout, "base.txt", "base\n");
+g(sandbox, "clone", "--quiet", checkout, clone);
+// A finished story, as processStory leaves it: built in the clone, copied into the checkout, its tip recorded.
+const story = (key: string, file: string, text: string) => {
+  g(clone, "fetch", "--quiet", "origin", "main");
+  g(clone, "branch", "--quiet", "-f", `agent/${key}`, "origin/main");
+  g(clone, "checkout", "--quiet", `agent/${key}`);
+  commit(clone, file, text);
+  g(clone, "checkout", "--quiet", "--detach");
+  g(checkout, "fetch", "--quiet", clone, `agent/${key}:agent/${key}`);
+  return g(clone, "rev-parse", `agent/${key}`);
+};
+const regates: string[] = [];
+type Regate = (branch: string) => Promise<string | undefined>;
+const green: Regate = async (branch) => {
+  regates.push(branch);
+  return undefined;
+};
+const attempt = async (key: string, head: string, regate: Regate = green) => {
+  try {
+    return await landBranch({ checkout, clone, key, head, messages: [], regate });
+  } catch (e) {
+    return e instanceof MergeRefused ? `${e.permanent ? "refused" : "waiting"}: ${e.message}` : `error: ${e}`;
+  }
+};
+const has = (repo: string, ref: string) => g(repo, "for-each-ref", "--format=%(refname)", ref) !== "";
+
+const a = await attempt("T-1", story("T-1", "one.txt", "one\n"));
+const main1 = g(checkout, "rev-parse", "main");
+check("an unmoved main lands without a re-gate", typeof a === "object" && !a.regated && regates.length === 0 && main1 === a.merge, true);
+check("the merge commit and the rebased commit are signed", g(checkout, "log", "--format=%G?", "-2", "main").split("\n"), ["G", "G"]);
+check("the merge has two parents and names the branch", [g(checkout, "rev-list", "--parents", "-n1", "main").split(" ").length, g(checkout, "log", "-1", "--format=%s", "main")], [3, "Merge branch 'agent/T-1'"]);
+check("the checkout fast-forwarded its working tree", fs.readFileSync(path.join(checkout, "one.txt"), "utf8"), "one\n");
+check("a landed story is recognised by its merge commit; an unlanded one is not", [typeof a === "object" && landedAs(checkout, "T-1") === a.merge, landedAs(checkout, "T-9")], [true, undefined]);
+check("both copies of the branch and the landing refs are gone",
+  [has(checkout, "refs/heads/agent/T-1"), has(clone, "refs/heads/agent/T-1"), has(clone, "refs/heads/factory"), has(clone, "refs/factory")], [false, false, false, false]);
+
+const head2 = story("T-2", "two.txt", "two\n");
+commit(checkout, "elsewhere.txt", "moved\n");
+const b = await attempt("T-2", head2);
+check("a moved main re-gates the rebased branch, then lands", typeof b === "object" && b.regated && regates.at(-1) === "factory/land-T-2", true);
+check("…and the result holds both the branch and the newer main", ["two.txt", "elsewhere.txt"].every((f) => fs.existsSync(path.join(checkout, f))), true);
+
+const head3 = story("T-3", "base.txt", "theirs\n");
+commit(checkout, "base.txt", "ours\n");
+const before3 = g(checkout, "rev-parse", "main");
+check("a conflict is refused and leaves main alone", [await attempt("T-3", head3), g(checkout, "rev-parse", "main") === before3, has(clone, "refs/heads/factory")],
+  ["refused: agent/T-3 conflicts with main in base.txt", true, false]);
+
+const head4 = story("T-4", "four.txt", "four\n");
+write(checkout, "four.txt", "local work\n");
+const c = await attempt("T-4", head4, async () => undefined);
+check("an untracked local file the merge would overwrite waits, untouched", [typeof c === "string" && c.startsWith("waiting:"), fs.readFileSync(path.join(checkout, "four.txt"), "utf8")], [true, "local work\n"]);
+fs.rmSync(path.join(checkout, "four.txt"));
+
+g(checkout, "checkout", "--quiet", "-b", "elsewhere");
+const d = await attempt("T-4", head4, async () => undefined);
+check("with main not checked out, the ref moves and HEAD stays put",
+  [typeof d === "object" && g(checkout, "rev-parse", "main") === d.merge, g(checkout, "symbolic-ref", "--short", "HEAD")], [true, "elsewhere"]);
+g(checkout, "checkout", "--quiet", "main");
+
+const head5 = story("T-5", "five.txt", "five\n");
+commit(checkout, "other.txt", "moved again\n");
+check("a red re-gate is refused", await attempt("T-5", head5, async () => "FooTest failed"),
+  "refused: main had moved since the branch was built, and the suite is red on the rebased branch: FooTest failed");
+check("a branch that moved since the offer is refused", await attempt("T-5", "0".repeat(40)),
+  "refused: agent/T-5 has moved since the factory offered it for review; merge it by hand");
+
+const head6 = story("T-6", "six.txt", "six\n");
+commit(checkout, "seven.txt", "moved once more\n");
+const resetTo = g(checkout, "rev-parse", "main~1");
+const resetDuringGate: Regate = async () => {
+  g(checkout, "reset", "--quiet", "--hard", resetTo);
+  return undefined;
+};
+check("main reset back during the re-gate waits, and keeps the reset", [await attempt("T-6", head6, resetDuringGate), g(checkout, "rev-parse", "main") === resetTo],
+  ["waiting: your checkout's main moved while the branch was landing", true]);
+fs.rmSync(sandbox, { recursive: true, force: true });

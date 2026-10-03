@@ -31,6 +31,8 @@ export interface Tracker {
   owns(key: string): boolean;
   intake(): Promise<Snapshot[]>;
   inReview(): Promise<string[]>;
+  // Stories in review the operator labelled `afk-merge`.
+  mergeQueue(): Promise<string[]>;
   orphaned(): Promise<string[]>;
   snapshotToState(key: string): Promise<Snapshot>;
   claim(key: string): Promise<boolean>;
@@ -38,8 +40,11 @@ export interface Tracker {
   reviewing(key: string): Promise<void>;
   blocked(key: string): Promise<void>;
   requeued(key: string): Promise<void>;
+  // The factory merged the story's branch into the checkout's main.
+  merged(key: string): Promise<void>;
   comment(key: string, body: string): Promise<void>;
   addLabel(key: string, label: string): Promise<void>;
+  removeLabel(key: string, label: string): Promise<void>;
   // Extra lines for the merge commit, such as GitHub's "Closes #12".
   mergeMessage(key: string): string | undefined;
 }

@@ -1,7 +1,7 @@
 // Host-side Jira access for the factory: intake of `afk` stories and the write-backs. The agent never
 // touches Jira; it only sees the snapshot written here.
 import * as fs from "node:fs";
-import { intakeJql } from "./jira-intake.ts";
+import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { JIRA_ENV_FILE, STATE, readEnvFile } from "./paths.ts";
 import type { Snapshot, Tracker } from "./tracker.ts";
 
@@ -53,9 +53,17 @@ export const intake = async (): Promise<Snapshot[]> => {
   return Promise.all(found.issues.map((issue: { key: string }) => snapshotToState(issue.key)));
 };
 
-// Open epics labelled `afk`: each of their stories is a candidate without a label of its own.
-const afkEpics = async (): Promise<string[]> => {
-  const jql = "project = JCLAW AND issuetype = Epic AND labels = afk AND statusCategory != Done";
+// Open epics carrying `label`: each of their stories carries it without a label of its own.
+const epicsLabelled = async (label: string): Promise<string[]> => {
+  const jql = `project = JCLAW AND issuetype = Epic AND labels = ${label} AND statusCategory != Done`;
+  const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=summary&maxResults=100`);
+  return found.issues.map((issue: { key: string }) => issue.key);
+};
+const afkEpics = () => epicsLabelled("afk");
+
+// Stories in review the operator has told the factory to merge.
+export const mergeQueue = async (): Promise<string[]> => {
+  const jql = mergeJql(await epicsLabelled("afk-merge"));
   const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(jql)}&fields=summary&maxResults=100`);
   return found.issues.map((issue: { key: string }) => issue.key);
 };
@@ -124,6 +132,7 @@ export const jira: Tracker = {
   owns: (key) => /^JCLAW-\d+$/.test(key),
   intake,
   inReview,
+  mergeQueue,
   orphaned,
   snapshotToState,
   claim,
@@ -143,11 +152,17 @@ export const jira: Tracker = {
     await transitionTo(key, "To Do");
     await removeLabel(key, "afk-running");
   },
+  merged: async (key) => {
+    await transitionTo(key, "Done");
+  },
   comment: async (key, body) => {
     await comment(key, body);
   },
   addLabel: async (key, label) => {
     await addLabel(key, label);
+  },
+  removeLabel: async (key, label) => {
+    await removeLabel(key, label);
   },
   mergeMessage: () => undefined,
 };

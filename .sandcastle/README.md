@@ -5,8 +5,8 @@ Jira stories in the active sprint that are labelled `afk` or belong to an epic l
 label `afk` when you set it up, has a coding
 agent implement each one in its own isolated container,
 runs the full test suite itself, has a second agent review the work, and hands you a local branch `agent/<KEY>` with a
-brief on the ticket. It never pushes and never merges. You review the branch, merge it into `main` and ship it with
-`/deploy`.
+brief on the ticket. It never pushes, and merges only a story you labelled `afk-merge`. You review the branch, merge
+it into `main` and ship it with `/deploy`.
 
 ## Architecture
 
@@ -59,6 +59,7 @@ lockfile changes. Every two minutes it:
      counted, but the brief names it. There are up to two repair rounds and a 30-minute deadline.
    - **Review** by a second agent, then a **brief**.
 4. Copies `agent/<KEY>` into your checkout, moves the ticket to Review and posts the brief.
+5. Merges a story in review that you labelled `afk-merge` (see [Auto-merge](#auto-merge)).
 
 **Why it is necessary.** Everything that needs trust or judgement stays out of the model's hands. The agent never sees
 a Jira token and cannot push or touch your checkout: it produces commits, and the harness decides what becomes of
@@ -122,7 +123,8 @@ every decision (`docker logs jclaw-factory-gateway`).
 | `~/.jclaw-factory/github.env` | GitHub access, optional. Only the harness on your Mac reads it. |
 | `~/.jclaw-factory/settings.env` | Your [settings](#settings), optional. Only the harness on your Mac reads it. |
 
-Nothing the harness writes lives in the checkout, because `/deploy` stages the whole working tree.
+Nothing the harness writes lives in the checkout, because `/deploy` stages the whole working tree. It only adds
+`agent/<KEY>` branches there and, for an `afk-merge` story, fast-forwards `main`.
 
 ## A story's path
 
@@ -133,7 +135,7 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
      │                                                                                   ▼
      └──────────────────────────────── Review ◄───────────────────── brief posted on the ticket
                                           │
-                              you merge it, then mark it Done
+                you merge it and mark it Done, or label it afk-merge and the factory does
 ```
 
 - **When it fails:** a story the factory gives up on gets the `afk-blocked` label and a comment saying why. Remove the
@@ -155,6 +157,27 @@ review and merge per link. Blocks links between epics are not read.
 - **To stop,** remove `afk` from the epic. Stories not yet started are no longer taken. The harness adds `afk` to a
   story when it starts it, so one already running, in review or sent back stays with the factory.
 - A story added to the epic later is picked up at the next poll.
+
+### Auto-merge
+
+Label a story `afk-merge`, or its epic, and once it is in Review the factory merges it the way you would. It rebases
+`agent/<KEY>` onto your checkout's `main` with every commit re-signed. It merges it with a signed merge commit, moves
+the story to Done, and deletes the branch in your checkout and in its clone. It never pushes, so `/deploy` still ships
+it. The label works before the story is built or after, and `no-afk-merge` exempts one story of a labelled epic.
+
+- **When `main` moved** since the branch was built, the full suite runs again on the rebased branch in a sandbox first.
+  When it has not moved, the review's gate already covers that exact tree.
+- **Your checkout is never disturbed.** The rebase and the merge happen in a throwaway worktree of the clone, and your
+  `main` only fast-forwards. If you have a local change on a file the merge touches, a merge or rebase in progress,
+  or `main` moved meanwhile, the factory waits and tries again at the next poll.
+- **What it refuses:** a branch it did not build, a brief that did not validate or has an unmet criterion, a branch
+  that changed since it was offered, a conflict with `main`, a red re-gate, and any change to a file under
+  "(!) Runs on your Mac once merged", which a human must read. A refusal comments on the ticket, leaves the story in
+  Review, and takes `afk-merge` off the story (or adds `no-afk-merge` when the label came from the epic), so nothing
+  retries until you put it back.
+
+Signing uses your own git configuration, so the key must sign without a prompt. An SSH key with no passphrase, or one
+held by an agent the LaunchAgent can reach, works.
 
 ### Declined stories
 
@@ -206,7 +229,8 @@ Issue #12 becomes story `GH-12` on branch `agent/GH-12`, with the same planning,
 as a Jira story. GitHub has no statuses, so the factory's states are labels it manages itself: `afk-running` while it
 works, `afk-review` once it has posted the brief, `afk-blocked` when it gives up. To send an issue back, comment on it
 and remove `afk-review`. The review comment's merge command adds `Closes #12` to the merge commit, so `/deploy` closes
-the issue when it pushes to GitHub. GitHub issues have no dependencies here: each runs as soon as its files are free.
+the issue when it pushes to GitHub. An issue the factory merged through `afk-merge` moves from `afk-review` to
+`afk-merged` until then, and only an `afk-merge` label you applied counts. GitHub issues have no dependencies here: each runs as soon as its files are free.
 
 The repository is public, so anyone can open an issue or comment on one, but only you can label it. The agent therefore
 reads an issue as it stood when you applied `afk`, plus your own later comments. A comment someone else wrote or
@@ -232,7 +256,7 @@ blocks the story and says why: remove `afk` and add it again to approve the issu
 **Risks that remain, and how they are handled:**
 - **Merging runs its code.** Once you merge a branch, its code runs on your Mac through hooks, build scripts and the
   suite `/deploy` runs. The review comment lists every changed file of that kind under
-  "(!) Runs on your Mac once merged", and you should read those line by line.
+  "(!) Runs on your Mac once merged", and you should read those line by line. Auto-merge never merges such a branch.
 - **A sandbox can move another story's `agent/` branch** in the clone, because commits need that ref directory
   writable. `main` stays out of reach, and a tampered branch shows up in its review.
 - **Sandboxes can reach each other** on the factory network. Cutting that would cut them off from the gateway too.
@@ -293,7 +317,7 @@ Jira user.
   The agent's commits are unsigned, because the sandbox holds no key, and GitHub's `main` refuses unsigned commits. So
   re-sign them as you merge: `git rebase --force-rebase --gpg-sign main agent/<KEY>`, then
   `git merge --no-ff agent/<KEY>`. Mark the story Done only once it is merged, because Done is what lets the stories it
-  blocks start.
+  blocks start. Or label it `afk-merge` and the factory does all of this (see [Auto-merge](#auto-merge)).
 - **Reject:** move the story back to To Do with a comment saying what to change. The next round reworks it on the same
   branch. The general rule behind your comment goes into `~/.jclaw-factory/lessons.md`, which every prompt includes.
   Promote a lesson into `AGENTS.md`, or delete it there.

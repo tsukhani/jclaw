@@ -10,3 +10,9 @@ export const intakeJql = (afkEpics: string[]): string =>
   `AND ${afkEpics.length > 0 ? `(labels = afk OR "Epic Link" in (${afkEpics.join(", ")}))` : "labels = afk"} ` +
   `AND (labels is EMPTY OR labels not in (${HELD})) AND status = "To Do" AND (assignee is EMPTY OR assignee = currentUser()) ` +
   'ORDER BY rank';
+
+// Stories in review the factory may merge: labelled `afk-merge` themselves or through their epic, unless `no-afk-merge`.
+export const mergeJql = (mergeEpics: string[]): string =>
+  'project = JCLAW AND labels = afk AND status = Review ' +
+  `AND ${mergeEpics.length > 0 ? `(labels = afk-merge OR "Epic Link" in (${mergeEpics.join(", ")}))` : "labels = afk-merge"} ` +
+  'AND labels not in (no-afk-merge) ORDER BY rank';

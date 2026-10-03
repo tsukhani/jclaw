@@ -11,6 +11,7 @@ import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, facto
 import { githubTracker } from "./github.ts";
 import { jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
+import { MergeRefused, landBranch, landedAs, mergeVerdict, type Report } from "./merge.ts";
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type StoryPlan } from "./plan.ts";
 import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 
@@ -69,6 +70,68 @@ const fromAll = async <T>(what: string, read: (t: Tracker) => Promise<T[]>): Pro
     )
   ).flat();
 
+type Diagnostic = { kind: string; file: string | null; line: number | null; message: string };
+// Where a gate records what it saw, for the story's comment and report.
+type GateLog = {
+  key: string;
+  branch: string;
+  timed: <T>(phase: string, body: () => Promise<T>) => Promise<T>;
+  gates: string[];
+  environmentFailures: Set<string>;
+  flakes: { gate: string; failure: string }[];
+};
+
+// The full-suite gate on the sandbox's branch, returning only the failures that are new relative to main.
+const gateIn = (sandbox: sandcastle.Sandbox, log: GateLog) => {
+  const suiteOf = (r: Diagnostic) => r.message.split(".")[0];
+  // Only a passed report clears a suite: a re-run that wrote no reports would otherwise forgive every failure.
+  const failingSuites = async (suites: string[]): Promise<Set<string>> => {
+    const r = await sandbox.exec(
+      `rm -rf test-result; ./gradlew playAutotest -Ptests=${suites.join(",")} > /tmp/rerun.log 2>&1; ls test-result | grep passed.html || true`,
+    );
+    const passed = new Set(r.stdout.split("\n").filter(Boolean).map((f) => f.replace(".class.passed.html", "")));
+    return new Set(suites.filter((s) => !passed.has(s)));
+  };
+  // Baseline on main in the same worktree, so a suite this image cannot run is never handed to the agent.
+  const onMain = async <T>(body: () => Promise<T>): Promise<T> => {
+    if ((await sandbox.exec("git status --porcelain --untracked-files=no")).stdout.trim()) {
+      throw new Error(`worktree has uncommitted changes; cannot switch to main for the baseline`);
+    }
+    if ((await sandbox.exec("git switch --detach main")).exitCode !== 0) throw new Error("git switch to main failed");
+    try {
+      return await body();
+    } finally {
+      await sandbox.exec(`git switch ${log.branch}`);
+    }
+  };
+  // The full suite runs here, not in the agent: a blocking 10-minute Bash call would trip the idle timeout.
+  return async (label: string): Promise<Diagnostic[]> =>
+    log.timed(label, async () => {
+      const run = await sandbox.exec(`timeout ${GATE_DEADLINE_SECONDS} ./jclaw.sh diagnostics --tests --out /tmp/diag.json > /tmp/gate.log 2>&1`);
+      // A hung suite would otherwise hold the sandbox, and the story, forever.
+      if (run.exitCode === 124) throw new Error(`the full-suite gate did not finish within ${GATE_DEADLINE_SECONDS / 60} minutes`);
+      if (run.exitCode === 2) {
+        throw new Error(`diagnostics harness failure (exit 2):\n${(await sandbox.exec("tail -40 /tmp/gate.log")).stdout}`);
+      }
+      const raw = (await sandbox.exec("cat /tmp/diag.json")).stdout;
+      const passed = (await sandbox.exec("ls test-result | grep -c passed.html")).stdout.trim();
+      fs.writeFileSync(`${LOGS}/${log.key}-${label}-diag.json`, raw);
+      const records = JSON.parse(raw) as Diagnostic[];
+      let fresh = records;
+      if (records.length > 0 && records.every((r) => r.kind === "test")) {
+        // A suite that passes alone was the concurrency flake; one that also fails on main is the environment.
+        const suites = [...new Set(records.map(suiteOf))];
+        const failingAlone = await failingSuites(suites);
+        const failingOnMain = failingAlone.size > 0 ? await onMain(() => failingSuites([...failingAlone])) : new Set<string>();
+        for (const s of failingOnMain) log.environmentFailures.add(s);
+        for (const r of records) if (!failingAlone.has(suiteOf(r))) log.flakes.push({ gate: label, failure: r.message.split("\n")[0] });
+        fresh = records.filter((r) => failingAlone.has(suiteOf(r)) && !failingOnMain.has(suiteOf(r)));
+      }
+      log.gates.push(`${label}: ${passed} classes passed, ${fresh.length === 0 ? "no new failures" : `${fresh.length} new failures`}`);
+      return fresh;
+    });
+};
+
 const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> => {
   const key = picked.key;
   const branch = `agent/${key}`;
@@ -110,55 +173,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
 
     await using sandbox = await sandcastle.createSandbox({ cwd: REPO, branch, sandbox: factorySandbox(), hooks: factoryHooks });
     await assertReady(sandbox);
-
-    type Diagnostic = { kind: string; file: string | null; line: number | null; message: string };
-    const suiteOf = (r: Diagnostic) => r.message.split(".")[0];
-    // Only a passed report clears a suite: a re-run that wrote no reports would otherwise forgive every failure.
-    const failingSuites = async (suites: string[]): Promise<Set<string>> => {
-      const r = await sandbox.exec(
-        `rm -rf test-result; ./gradlew playAutotest -Ptests=${suites.join(",")} > /tmp/rerun.log 2>&1; ls test-result | grep passed.html || true`,
-      );
-      const passed = new Set(r.stdout.split("\n").filter(Boolean).map((f) => f.replace(".class.passed.html", "")));
-      return new Set(suites.filter((s) => !passed.has(s)));
-    };
-    // Baseline on main in the same worktree, so a suite this image cannot run is never handed to the agent.
-    const onMain = async <T>(body: () => Promise<T>): Promise<T> => {
-      if ((await sandbox.exec("git status --porcelain --untracked-files=no")).stdout.trim()) {
-        throw new Error(`worktree has uncommitted changes; cannot switch to main for the baseline`);
-      }
-      if ((await sandbox.exec("git switch --detach main")).exitCode !== 0) throw new Error("git switch to main failed");
-      try {
-        return await body();
-      } finally {
-        await sandbox.exec(`git switch ${branch}`);
-      }
-    };
-    // The full suite runs here, not in the agent: a blocking 10-minute Bash call would trip the idle timeout.
-    const gate = async (label: string): Promise<Diagnostic[]> =>
-      timed(label, async () => {
-        const run = await sandbox.exec(`timeout ${GATE_DEADLINE_SECONDS} ./jclaw.sh diagnostics --tests --out /tmp/diag.json > /tmp/gate.log 2>&1`);
-        // A hung suite would otherwise hold the sandbox, and the story, forever.
-        if (run.exitCode === 124) throw new Error(`the full-suite gate did not finish within ${GATE_DEADLINE_SECONDS / 60} minutes`);
-        if (run.exitCode === 2) {
-          throw new Error(`diagnostics harness failure (exit 2):\n${(await sandbox.exec("tail -40 /tmp/gate.log")).stdout}`);
-        }
-        const raw = (await sandbox.exec("cat /tmp/diag.json")).stdout;
-        const passed = (await sandbox.exec("ls test-result | grep -c passed.html")).stdout.trim();
-        fs.writeFileSync(`${LOGS}/${key}-${label}-diag.json`, raw);
-        const records = JSON.parse(raw) as Diagnostic[];
-        let fresh = records;
-        if (records.length > 0 && records.every((r) => r.kind === "test")) {
-          // A suite that passes alone was the concurrency flake; one that also fails on main is the environment.
-          const suites = [...new Set(records.map(suiteOf))];
-          const failingAlone = await failingSuites(suites);
-          const failingOnMain = failingAlone.size > 0 ? await onMain(() => failingSuites([...failingAlone])) : new Set<string>();
-          for (const s of failingOnMain) environmentFailures.add(s);
-          for (const r of records) if (!failingAlone.has(suiteOf(r))) flakes.push({ gate: label, failure: r.message.split("\n")[0] });
-          fresh = records.filter((r) => failingAlone.has(suiteOf(r)) && !failingOnMain.has(suiteOf(r)));
-        }
-        gates.push(`${label}: ${passed} classes passed, ${fresh.length === 0 ? "no new failures" : `${fresh.length} new failures`}`);
-        return fresh;
-      });
+    const gate = gateIn(sandbox, { key, branch, timed, gates, environmentFailures, flakes });
 
     let current: sandcastle.SandboxRunResult | undefined;
     if (feedback !== undefined) {
@@ -252,7 +267,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
   const reviewComment = (brief: Brief | undefined, sensitive: string[]) => {
     const closes = tracker.mergeMessage(key);
     const merge = closes ? `git merge --no-ff -m "Merge branch '${branch}'" -m "${closes}" ${branch}` : `git merge --no-ff ${branch}`;
-    const lines = [`${tracker.header}: ready for review`, `Local branch ${m.code(branch)} in the checkout of this comment's author, not pushed. Its commits are unsigned, which GitHub's main refuses, so re-sign them as you merge: ${m.code(`git rebase --force-rebase --gpg-sign main ${branch}`)}, then ${m.code(merge)}; /deploy ships it. Model: ${MODEL}.`];
+    const lines = [`${tracker.header}: ready for review`, `Local branch ${m.code(branch)} in the checkout of this comment's author, not pushed. Its commits are unsigned, which GitHub's main refuses, so re-sign them as you merge: ${m.code(`git rebase --force-rebase --gpg-sign main ${branch}`)}, then ${m.code(merge)}; /deploy ships it. Or label it ${m.code("afk-merge")} and the factory merges it the same way. Model: ${MODEL}.`];
     if (builtWithBmad()) {
       lines.push(`Specced and built by BMAD${bmadVersion ? ` ${bmadVersion}` : ""} (bmad-build-auto). Its spec, with its own review's triage and deferred findings: ${m.code(`~/.jclaw-factory/logs/${key}-spec.md`)}.`);
     }
@@ -296,7 +311,8 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     if (sensitive.length > 0) console.log(`[${key}] changes files that run on the Mac once merged: ${sensitive.join(", ")}`);
     await tracker.reviewing(key);
     await tracker.comment(key, reviewComment(brief, sensitive));
-    fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, model: MODEL, buildMode: mode, timings, gates, brief, environmentFailures: [...environmentFailures], flakes }, null, 2));
+    const head = gitIn(REPO, "rev-parse", branch);
+    fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, head, model: MODEL, buildMode: mode, timings, gates, brief, environmentFailures: [...environmentFailures], flakes }, null, 2));
     console.log(`[${key} done] → Review\n` + execFileSync("/usr/bin/git", ["-C", REPO, "log", "--stat", "--format=%h %an %s", `main..${branch}`], { encoding: "utf8" }));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -393,6 +409,80 @@ const decline = async (story: Snapshot, reason: string) => {
   const m = tracker.markup;
   await tracker.addLabel(story.key, "wont-do");
   await tracker.comment(story.key, `${tracker.header}: won't do\n${reason}\n\nNothing was built. Close it if you agree. If not, remove the ${m.code("wont-do")} label, and the factory will build it as written without judging it again.`);
+};
+
+// Merges one `afk-merge` story's branch into the checkout's main, or says on the ticket why not and hands it back.
+const land = async (key: string): Promise<void> => {
+  const tracker = trackerFor(key);
+  const m = tracker.markup;
+  const reportFile = `${LOGS}/${key}-report.json`;
+  const report = fs.existsSync(reportFile) ? (JSON.parse(fs.readFileSync(reportFile, "utf8")) as Report) : undefined;
+  // A refusal takes the label off the story, or opts it out of its epic's, so nothing retries until the operator says so.
+  const refuse = async (reason: string) => {
+    console.log(`[${key} merge] not merged: ${reason}`);
+    const own = (await tracker.snapshotToState(key)).labels.includes("afk-merge");
+    if (own) await tracker.removeLabel(key, "afk-merge");
+    else await tracker.addLabel(key, "no-afk-merge");
+    const retry = own ? `Label it ${m.code("afk-merge")} again` : `Remove ${m.code("no-afk-merge")}`;
+    await tracker.comment(key, `${tracker.header}: not merged\n${reason}.\n\nThe branch still waits for your review in your checkout. ${retry} to let the factory try again.`);
+  };
+  // A landing that merged but stopped before the tracker heard of it: finish the bookkeeping, not the merge.
+  const earlier = landedAs(CHECKOUT, key);
+  if (earlier && !gitIn(REPO, "branch", "--list", `agent/${key}`)) {
+    await tracker.merged(key);
+    await tracker.comment(key, `${tracker.header}: merged\nMerged earlier as ${m.code(earlier.slice(0, 8))}, in your checkout and not pushed; the factory stopped before it could mark the story.`);
+    return console.log(`[${key} merge] already merged as ${earlier.slice(0, 8)}; marked`);
+  }
+  const verdict = mergeVerdict(report, sensitivePaths(changedOn(key)));
+  if (!report) return note(`merge ${key}`, `[${key} merge] skipped: ${verdict}`);
+  if (verdict) return refuse(verdict);
+
+  // The rebase targets the checkout's main, and a re-gate needs the image built from it.
+  gitIn(REPO, "fetch", "--quiet", "origin", "main");
+  gitIn(REPO, "merge", "--ff-only", "--quiet", "origin/main");
+  const gates: string[] = [];
+  const timed = <T>(phase: string, body: () => Promise<T>) => {
+    console.log(`[${key} ${phase}] started`);
+    return body();
+  };
+  try {
+    const landed = await landBranch({
+      checkout: CHECKOUT,
+      clone: REPO,
+      key,
+      head: report.head,
+      messages: [tracker.mergeMessage(key)].filter((x): x is string => Boolean(x)),
+      regate: async (branch) => {
+        if (!ensureImage(REPO, gitIn(REPO, "rev-parse", "main"), `${LOGS}/image-build.log`)) {
+          throw new MergeRefused("the sandbox image did not build", false);
+        }
+        await using sandbox = await sandcastle.createSandbox({ cwd: REPO, branch, sandbox: factorySandbox(), hooks: factoryHooks });
+        await assertReady(sandbox);
+        const fresh = await gateIn(sandbox, { key, branch, timed, gates, environmentFailures: new Set(), flakes: [] })("gate-merge");
+        return fresh.length === 0 ? undefined : fresh.map((f) => f.message.split("\n")[0]).join("; ");
+      },
+    });
+    await tracker.merged(key);
+    const tested = landed.regated
+      ? `Main had moved since the branch was built, so the full suite ran again on the rebased branch (${gates.join("; ")}).`
+      : "Main had not moved since the branch was built, so the gate in the review comment covers this exact tree.";
+    await tracker.comment(key, `${tracker.header}: merged\nRebased onto main with every commit re-signed, then merged as ${m.code(landed.merge.slice(0, 8))} with a signed merge commit, in your checkout and not pushed. ${tested} Its branches are deleted; /deploy ships it.`);
+    console.log(`[${key} merge] merged as ${landed.merge.slice(0, 8)}${landed.regated ? " after a re-gate" : ""}`);
+  } catch (error) {
+    if (error instanceof MergeRefused && !error.permanent) return note(`merge ${key}`, `[${key} merge] waiting: ${error.message}`);
+    await refuse(error instanceof MergeRefused ? error.message : `landing failed: ${errorText(error)}`);
+  }
+};
+
+// Lands every `afk-merge` story in review that a free slot allows; a landing holds a slot because a re-gate is a sandbox.
+const landAll = async (): Promise<Promise<void>[]> => {
+  const started: Promise<void>[] = [];
+  for (const key of await fromAll("stories to merge", (t) => t.mergeQueue())) {
+    if (running.has(key) || running.size >= LIMIT) continue;
+    running.set(key, new Set(changedOn(key)));
+    started.push(land(key).catch((error) => console.log(`[${key} merge] failed: ${errorText(error)}`)).finally(() => running.delete(key)));
+  }
+  return started;
 };
 
 // Starts as many stories as there are free slots, returning their runs.
@@ -553,10 +643,12 @@ while (true) {
     } else {
       note("gateway", "[factory] gateway up");
       try {
+        // Landing first: a story it merges is Done, which can unblock a candidate in the same round.
+        const landings = ONE_ROUND ? [] : await landAll();
         const candidates = PINNED
           ? await Promise.all(PINNED.map((k) => trackerFor(k).snapshotToState(k)))
           : await fromAll("afk stories", (t) => t.intake());
-        for (const run of await round(candidates)) {
+        for (const run of [...landings, ...(await round(candidates))]) {
           runs.add(run);
           void run.finally(() => {
             runs.delete(run);
