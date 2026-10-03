@@ -88,8 +88,10 @@ most 5%: with no wrong record that takes 59 written, with one 93, two 124, three
 at the first threshold that fails; the model certifies at the lowest threshold reached. So a
 model whose recall at 0.95 is under the floor certifies at nothing, by design.
 
-Each model runs twice by default; the certified threshold is the higher of the runs, and a run
-that certifies nowhere fails the model with `second run did not certify`. Then, in order:
+Certification needs two runs, the default; with `--runs 1` the report is information only and
+reads `certification needs two runs`. The certified threshold is the higher of the runs, and a
+run that certifies nowhere fails the model with `run N did not certify` (for run 2, `second run
+did not certify`). Then, in order:
 
 1. any case memory changed by the run → `not-certified`;
 2. any record adjudicated `label-error` → `not-certified`, `labels need fixing`;

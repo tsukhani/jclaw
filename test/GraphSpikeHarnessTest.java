@@ -9,17 +9,22 @@ import play.Play;
 import play.test.UnitTest;
 import services.AgentService;
 import services.Tx;
+import services.graphspike.Agreement;
 import services.graphspike.Certifier;
+import services.graphspike.Certifier.Adjudication;
 import services.graphspike.ExtractionPipeline;
 import services.graphspike.ExtractionPipeline.Decider;
 import services.graphspike.GraphCases;
 import services.graphspike.GraphCases.Case;
 import services.graphspike.GraphSpikeHarness;
 import services.graphspike.GraphSpikeHarness.DecisionModel;
+import services.graphspike.GraphSpikeScorer;
+import services.graphspike.GraphSpikeScorer.WrongRecord;
 import services.graphspike.HeldOut;
 
 import java.nio.file.Files;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,7 +35,8 @@ import java.util.regex.Pattern;
 import static utils.GsonHolder.GSON;
 
 /**
- * JCLAW-1356: the harness over the committed set with a decider that answers gold, one that edits a memory, and the
+ * JCLAW-1356: the harness over the committed set with a decider that answers gold, one that mis-types a term, one
+ * that edits a memory, and the
  * held-out set. Concurrency 1 keeps every step on the test thread, inside the test's transaction.
  */
 class GraphSpikeHarnessTest extends UnitTest {
@@ -101,6 +107,53 @@ class GraphSpikeHarnessTest extends UnitTest {
     private GraphSpikeHarness.Report run(List<Case> cases, Decider decider) {
         return GraphSpikeHarness.run(agentId, cases, SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
                 Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), List.of());
+    }
+
+    /** Gold, except c015's "Larchmere House" (a Place on no relation) is typed Organization at 0.92. */
+    private static Decider oneMistyped(List<Case> cases) {
+        var golden = gold(cases);
+        var target = cases.stream().filter(c -> c.id().equals("c015")).findFirst().orElseThrow().text();
+        return request -> {
+            var response = golden.decide(request);
+            if (!request.getAsJsonObject("state").get("memory").getAsString().equals(target)) return response;
+            for (var q : request.getAsJsonObject("questions").entrySet()) {
+                var rules = q.getValue().getAsJsonObject().getAsJsonObject("instructions").get("rules").getAsString();
+                var span = QUOTED.matcher(rules).results().map(m -> m.group(1)).findFirst().orElse("");
+                if (q.getKey().startsWith("m") && span.equals("Larchmere House")) {
+                    response.getAsJsonObject("answers").add(q.getKey(),
+                            answer(q.getValue().getAsJsonObject().getAsJsonObject("criteria").keySet(), "Organization", 0.92));
+                }
+            }
+            return response;
+        };
+    }
+
+    private GraphSpikeHarness.Report runWithLabels(List<Case> cases, Decider decider, List<Adjudication> verdicts) {
+        var blind = new HashSet<>(Agreement.blindSelection(cases));
+        var second = cases.stream().filter(c -> blind.contains(c.id())).toList();
+        return GraphSpikeHarness.run(agentId, cases, SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
+                Certifier.DEFAULT_RECALL_FLOOR, 1, second, verdicts);
+    }
+
+    @Test
+    void aWrongRecordAtTheCertifiedThresholdAwaitsAdjudicationThenCertifies() throws Exception {
+        var cases = committed();
+        var expected = new WrongRecord("c015", "term:Larchmere House:Organization", GraphSpikeScorer.TYPE);
+
+        var pending = runWithLabels(cases, oneMistyped(cases), List.of());
+        assertTrue(pending.agreement().complete(), pending.agreement().toString());
+        var model = pending.models().getFirst();
+        assertEquals(0.50, model.wrongRecordsAt());
+        assertEquals(List.of(expected), model.wrongRecords());
+        assertEquals(Certifier.PENDING_ADJUDICATION, model.certification().status(),
+                model.certification().reasons().toString());
+        assertEquals(List.of(expected), model.certification().unadjudicated());
+
+        var verdict = new Adjudication("c015", expected.record(), Certifier.WRONG, "typed a house as a company");
+        var certified = runWithLabels(cases, oneMistyped(cases), List.of(verdict)).models().getFirst();
+        assertEquals(Certifier.CERTIFIED, certified.certification().status(),
+                certified.certification().reasons().toString());
+        assertEquals(0.50, certified.certification().threshold());
     }
 
     @Test

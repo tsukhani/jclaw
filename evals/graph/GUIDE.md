@@ -27,8 +27,9 @@ name and the description has written one entity twice, and the second is a `dupl
 
 A record that is true but adds nothing a graph needs carries `"noise": true`: a generic place
 that is only a backdrop ("at home"), an obviously implied relation, a topic so broad it says
-nothing. Noise is counted on its own and sits in neither the wrong count nor the denominator, so
-marking it never makes a model look better or worse. Use it sparingly: when in doubt, a thing is
+nothing. Noise is counted on its own and sits in neither the wrong count nor the denominator, nor
+in recall's gold. That is not free: it shrinks the denominator, which widens the certification
+bound, so every noise label makes certifying harder. Use it sparingly: when in doubt, a thing is
 either worth a node (label it) or not (leave it out, or list it as a negative).
 
 ## 4. The operator

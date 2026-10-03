@@ -108,7 +108,7 @@ class CertifierTest extends UnitTest {
 
     @Test
     void anUnadjudicatedWrongRecordIsPendingAdjudicationAndListed() {
-        var c = Certifier.certify(List.of(walkDownTo(0.5)), false, true, List.of(RECORD), List.of());
+        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of());
         assertEquals(Certifier.PENDING_ADJUDICATION, c.status());
         assertEquals(List.of(RECORD), c.unadjudicated());
     }
@@ -116,7 +116,7 @@ class CertifierTest extends UnitTest {
     @Test
     void everyWrongRecordAdjudicatedWrongCertifies() {
         var verdict = new Adjudication("c007", RECORD.record(), Certifier.WRONG, "a real miss");
-        var c = Certifier.certify(List.of(walkDownTo(0.5)), false, true, List.of(RECORD), List.of(verdict));
+        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of(verdict));
         assertEquals(Certifier.CERTIFIED, c.status());
         assertEquals(0.5, c.threshold());
         assertEquals(List.of(), c.unadjudicated());
@@ -125,14 +125,23 @@ class CertifierTest extends UnitTest {
     @Test
     void aLabelErrorVerdictMeansTheLabelsNeedFixing() {
         var verdict = new Adjudication("c007", RECORD.record(), Certifier.LABEL_ERROR, "gold missed an alias");
-        var c = Certifier.certify(List.of(walkDownTo(0.5)), false, true, List.of(RECORD), List.of(verdict));
+        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of(verdict));
         assertEquals(Certifier.NOT_CERTIFIED, c.status());
         assertTrue(c.reasons().contains(Certifier.LABELS_NEED_FIXING), c.reasons().toString());
+        assertNull(c.threshold());
+    }
+
+    @Test
+    void oneRunCertifiesNothing() {
+        var c = Certifier.certify(List.of(walkDownTo(0.5)), false, true, List.of(), List.of());
+        assertEquals(Certifier.NOT_CERTIFIED, c.status());
+        assertNull(c.threshold());
+        assertTrue(c.reasons().contains(Certifier.NEEDS_TWO_RUNS), c.reasons().toString());
     }
 
     @Test
     void aChangedMemoryCertifiesNothing() {
-        var c = Certifier.certify(List.of(walkDownTo(0.95)), true, true, List.of(), List.of());
+        var c = Certifier.certify(List.of(walkDownTo(0.95), walkDownTo(0.95)), true, true, List.of(), List.of());
         assertEquals(Certifier.NOT_CERTIFIED, c.status());
         assertNull(c.threshold());
     }

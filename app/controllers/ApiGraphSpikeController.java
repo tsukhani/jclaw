@@ -83,8 +83,6 @@ public class ApiGraphSpikeController extends Controller {
         if (modelNames.contains(JevApi.MODEL)) {
             throw invalid(JevApi.MODEL + " is a hosted model; the graph certifier measures local Ollama models only");
         }
-        var agentId = agentId(body);
-
         long timeoutMs = timeoutSeconds * 1000L;
         var baseUrl = OllamaDecision.baseUrl();
         var models = modelNames.stream().distinct()
@@ -105,6 +103,7 @@ public class ApiGraphSpikeController extends Controller {
             return;
         }
 
+        var agentId = agentId(body);
         var cases = cases(schema);
         List<GraphCases.Case> secondLabels;
         List<Certifier.Adjudication> adjudications;

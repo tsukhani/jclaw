@@ -1,15 +1,23 @@
+import com.google.gson.JsonParser;
+import memory.ontology.OntologySchema;
 import models.Agent;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.mvc.Http;
 import play.test.FunctionalTest;
+import services.graphspike.Agreement;
+import services.graphspike.GraphCases;
+import services.graphspike.HeldOut;
 
+import java.nio.file.Files;
 import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * JCLAW-1344, JCLAW-1356: the graph spike endpoints' gate and validation. Every request here is refused before a model call,
- * so the test never spends one. Mirrors {@code ApiEvalsControllerTest}.
+ * JCLAW-1344, JCLAW-1356: the graph spike endpoints' gate, validation and blind sheet. No request here reaches a model
+ * call, so the test never spends one. Mirrors {@code ApiEvalsControllerTest}.
  */
 class ApiGraphSpikeControllerTest extends FunctionalTest {
 
@@ -118,5 +126,31 @@ class ApiGraphSpikeControllerTest extends FunctionalTest {
                 "{\"agent\":\"" + AGENT + "\",\"count\":0}");
         assertEquals(400, response.status.intValue(), getContent(response));
         assertTrue(getContent(response).contains("count must be between"), getContent(response));
+    }
+
+    @Test
+    void theBlindSheetHoldsOnlyTheSelectedIdsAndText() throws Exception {
+        var file = Play.applicationPath.toPath().resolve(HeldOut.DIR).resolve("blind-sheet.json");
+        var saved = Files.exists(file) ? Files.readString(file) : null;
+        try {
+            var response = POST(authed(), "/api/graph/spike/blind-sheet", "application/json", "{}");
+            assertEquals(200, response.status.intValue(), getContent(response));
+            var cases = GraphCases.load(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH),
+                    OntologySchema.seed());
+            var selected = Agreement.blindSelection(cases);
+            var body = JsonParser.parseString(getContent(response)).getAsJsonObject();
+            assertEquals(selected.size(), body.get("cases").getAsInt());
+
+            var ids = new HashSet<String>();
+            for (var e : JsonParser.parseString(Files.readString(file)).getAsJsonObject().getAsJsonArray("cases")) {
+                var o = e.getAsJsonObject();
+                assertEquals(Set.of("id", "text"), o.keySet());
+                ids.add(o.get("id").getAsString());
+            }
+            assertEquals(new HashSet<>(selected), ids);
+        } finally {
+            if (saved == null) Files.deleteIfExists(file);
+            else Files.writeString(file, saved);
+        }
     }
 }

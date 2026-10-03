@@ -64,6 +64,26 @@ class CandidateGeneratorTest extends UnitTest {
     }
 
     @Test
+    void aDotInsideATokenDoesNotEndAPreference() {
+        var spans = spans("The user prefers Node.js, always.");
+        assertTrue(spans.contains("Node.js"), spans.toString());
+    }
+
+    @Test
+    void aTicketKeyInsideAUrlIsNotASecondCandidate() {
+        var spans = spans("The user tracks https://jira.example.com/browse/OPS-7 daily.");
+        assertTrue(spans.contains("https://jira.example.com/browse/OPS-7"), spans.toString());
+        assertFalse(spans.contains("OPS-7"), spans.toString());
+    }
+
+    @Test
+    void aPreferenceOverlappingAUrlIsNotACandidate() {
+        var spans = spans("The user prefers https://docs.example.com/guide for reference.");
+        assertTrue(spans.contains("https://docs.example.com/guide"), spans.toString());
+        assertFalse(spans.contains("https"), spans.toString());
+    }
+
+    @Test
     void theOutputIsDeterministic() {
         var text = "The user owns Larchmere House in Ashgrove and drives a Volvo XC40 to Harborlight Analytics.";
         assertEquals(CandidateGenerator.generate(text), CandidateGenerator.generate(text));

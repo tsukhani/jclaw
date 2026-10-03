@@ -34,7 +34,7 @@ public final class CandidateGenerator {
     private static final Pattern TICKET = Pattern.compile("\\b[A-Z]+-\\d+\\b");
     private static final Pattern PREFERENCE = Pattern.compile(
             "(?i)\\b(?:prefers|likes|loves|dislikes|hates|thinks that|is interested in)\\s+");
-    private static final Pattern PREFERENCE_END = Pattern.compile("[,.;:!?]|\\s(?:over|because|when|than)\\b");
+    private static final Pattern PREFERENCE_END = Pattern.compile("[,;:!?]|\\.(?=\\s|$)|\\s(?:over|because|when|than)\\b");
     private static final Pattern SENTENCE_END = Pattern.compile("[.!?][\"'\u201d\u2019)]*$");
 
     private CandidateGenerator() {}
@@ -93,14 +93,16 @@ public final class CandidateGenerator {
             if (free(taken, file.start(), file.end())) found.add(new int[] {file.start(), file.end()});
         }
         var ticket = TICKET.matcher(text);
-        while (ticket.find()) found.add(new int[] {ticket.start(), ticket.end()});
+        while (ticket.find()) {
+            if (free(taken, ticket.start(), ticket.end())) found.add(new int[] {ticket.start(), ticket.end()});
+        }
         var preference = PREFERENCE.matcher(text);
         while (preference.find()) {
             int s = preference.end();
             var stop = PREFERENCE_END.matcher(text).region(s, text.length());
             int e = stop.find() ? stop.start() : text.length();
             while (e > s && Character.isWhitespace(text.charAt(e - 1))) e--;
-            if (e > s) found.add(new int[] {s, e});
+            if (e > s && free(taken, s, e)) found.add(new int[] {s, e});
         }
         capitalizedRuns(text, implicit, found);
 

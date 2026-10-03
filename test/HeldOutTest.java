@@ -109,5 +109,16 @@ class HeldOutTest extends UnitTest {
         var e = assertThrows(IllegalArgumentException.class, () -> HeldOut.load(file, OntologySchema.seed()));
         assertTrue(e.getMessage().startsWith("case h0: "), e.getMessage());
         assertFalse(e.getMessage().contains("notebook"), "a refusal never quotes the memory");
+
+        operator.addProperty("type", "Person");
+        var unquoted = new JsonObject();
+        unquoted.addProperty("id", "ledger");
+        unquoted.addProperty("mention", "Quillfeather Ledger");
+        unquoted.addProperty("type", "Project");
+        first.getAsJsonArray("entities").add(unquoted);
+        Files.writeString(file, root.toString());
+        e = assertThrows(IllegalArgumentException.class, () -> HeldOut.load(file, OntologySchema.seed()));
+        assertEquals("case h0: labels break the v2 rules in GUIDE.md", e.getMessage());
+        assertFalse(e.getMessage().contains("Quillfeather"), "a refusal never quotes a span");
     }
 }

@@ -31,6 +31,8 @@ public final class Certifier {
     public static final String LABEL_ERROR = "label-error";
     public static final String SECOND_RUN_FAILED = "second run did not certify";
     public static final String LABELS_NEED_FIXING = "labels need fixing";
+    public static final String NEEDS_TWO_RUNS = "certification needs two runs";
+    public static final int MIN_RUNS = 2;
 
     private Certifier() {}
 
@@ -167,8 +169,9 @@ public final class Certifier {
         var combined = combine(runs);
         var threshold = combined.threshold();
         var reasons = new ArrayList<>(combined.reasons());
+        if (runs.size() < MIN_RUNS) reasons.add(NEEDS_TWO_RUNS);
         if (memoryChanged) reasons.addFirst("a case memory changed during the run");
-        if (memoryChanged || threshold == null) {
+        if (memoryChanged || threshold == null || runs.size() < MIN_RUNS) {
             return new Certification(NOT_CERTIFIED, null, reasons, List.of(), null);
         }
         var noiseRate = noiseRate(runs, threshold);
@@ -188,7 +191,7 @@ public final class Certifier {
 
         if (labelError) {
             reasons.add(LABELS_NEED_FIXING);
-            return new Certification(NOT_CERTIFIED, threshold, reasons, unadjudicated, noiseRate);
+            return new Certification(NOT_CERTIFIED, null, reasons, unadjudicated, noiseRate);
         }
         if (!agreementCovered) {
             reasons.add("blind second labels do not cover the selected cases");

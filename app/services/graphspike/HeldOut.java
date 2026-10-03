@@ -108,7 +108,14 @@ public final class HeldOut {
             } catch (RuntimeException _) {
                 throw new IllegalArgumentException("case " + id + ": 'memoryId' must be a number");
             }
-            cases.add(new HeldCase(memoryId, GraphCases.parseCase(o, id, false, schema, types)));
+            GraphCases.Case labels;
+            try {
+                labels = GraphCases.parseCase(o, id, false, schema, types);
+            } catch (IllegalArgumentException _) {
+                // parseCase quotes spans, and a held-out span is real memory text.
+                throw new IllegalArgumentException("case " + id + ": labels break the v2 rules in GUIDE.md");
+            }
+            cases.add(new HeldCase(memoryId, labels));
         }
         return new Loaded(cases, unlabelled);
     }
