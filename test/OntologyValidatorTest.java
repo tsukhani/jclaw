@@ -1,23 +1,32 @@
+import memory.ontology.EdtfInterval;
 import memory.ontology.OntologyRecord;
 import memory.ontology.OntologyRecord.Constraint;
 import memory.ontology.OntologyRecord.Evidence;
+import memory.ontology.OntologyRecord.Lineage;
 import memory.ontology.OntologyRecord.Mapping;
 import memory.ontology.OntologyRecord.Meta;
 import memory.ontology.OntologyRecord.Relation;
+import memory.ontology.OntologyRecord.Status;
 import memory.ontology.OntologyRecord.Term;
 import memory.ontology.OntologyRecord.Tier;
+import memory.ontology.OntologyRecord.Valence;
 import memory.ontology.OntologySchema;
 import memory.ontology.OntologyValidator;
 import memory.ontology.OntologyValidator.Kind;
 import memory.ontology.OntologyValidator.Violation;
+import models.MemoryAuthorType;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Random;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 class OntologyValidatorTest extends UnitTest {
@@ -227,7 +236,16 @@ class OntologyValidatorTest extends UnitTest {
                 new Mapping(meta("m2"), "e1", "", List.of()),
                 new Evidence(meta("e4"), " ", "e4"),
                 evidence("t2"),
-                relation("r4", "part_of", "o1", "o1"));
+                relation("r4", "part_of", "o1", "o1"),
+                claim("k1", SOURCE, null, Status.HOLDS, null, null, null, null),
+                term("ev1", "Event"),
+                listed("r5", "involves", "ev1", "p1", "k2"),
+                claim("k2", "r5", Status.ENDED, null),
+                listed("r6", "works_at", "p1", "o1", "k3", "k4"),
+                claim("k3", "r6", Status.HOLDS, "2019/"),
+                claim("k4", "r6", Status.HOLDS, null),
+                new Evidence(meta("k5"), "memory:5", null, null, null, null, null, null, "memory:6", null, null, null,
+                        null, null, null, null));
         var first = validate(faulty);
         assertEquals(EnumSet.allOf(Kind.class),
                 first.stream().map(Violation::kind).collect(Collectors.toCollection(() -> EnumSet.noneOf(Kind.class))),
@@ -293,5 +311,275 @@ class OntologyValidatorTest extends UnitTest {
         assertEquals(List.of(new Violation("r9", Kind.AXIOM,
                         "relation r9: family_of is irreflexive, but from and to are both 'p1'")),
                 validate(with(relation("r9", "family_of", "p1", "p1"))));
+    }
+
+    private static final String SOURCE = "memory:501";
+    private static final LocalDate ANCHOR = LocalDate.parse("2026-02-15");
+    private static final Instant RECORDED = Instant.parse("2026-02-15T09:00:00Z");
+
+    /** A fully provenanced claim from {@link #SOURCE}, anchored on {@link #ANCHOR}. */
+    private static Evidence claim(String id, @Nullable String subject, @Nullable Status status, @Nullable String valid) {
+        return claim(id, SOURCE, subject, status, valid, null, null, ANCHOR);
+    }
+
+    private static Evidence claim(String id, String source, @Nullable String subject, @Nullable Status status,
+            @Nullable String valid, @Nullable String occurs, @Nullable Valence valence, @Nullable LocalDate anchor) {
+        return new Evidence(meta(id), source, subject, MemoryAuthorType.HUMAN_TURN, null, null, RECORDED, null, null,
+                null, null, anchor, status, valid == null ? null : EdtfInterval.parse(valid),
+                occurs == null ? null : EdtfInterval.parse(occurs), valence);
+    }
+
+    /** A relation resting on e1 and listing the given claims. */
+    private static Relation listed(String id, String type, String from, String to, String... claimIds) {
+        var evidenceIds = new ArrayList<>(List.of("e1"));
+        evidenceIds.addAll(List.of(claimIds));
+        return new Relation(meta(id), type, from, to, evidenceIds);
+    }
+
+    private static Term listedTerm(String id, String type, String... claimIds) {
+        var evidenceIds = new ArrayList<>(List.of("e1"));
+        evidenceIds.addAll(List.of(claimIds));
+        return new Term(meta(id), type, id, List.of(), evidenceIds);
+    }
+
+    private static Evidence systemTime(String id, @Nullable Instant recordedAt, @Nullable Instant retiredAt,
+            @Nullable String retiredBy, @Nullable Lineage lineage, @Nullable LocalDate changedBy,
+            @Nullable LocalDate anchor) {
+        return new Evidence(meta(id), "memory:1", null, null, null, null, recordedAt, retiredAt, retiredBy,
+                lineage, changedBy, anchor, null, null, null, null);
+    }
+
+    /** One claim on a works_at relation r7 that lists it and nothing else does. */
+    private static List<Violation> validateClaim(@Nullable Status status, @Nullable String valid, @Nullable LocalDate anchor) {
+        return validate(with(listed("r7", "works_at", "p1", "o1", "k"),
+                claim("k", SOURCE, "r7", status, valid, null, null, anchor)));
+    }
+
+    private static List<String> kindsOn(List<Violation> violations) {
+        return violations.stream().map(v -> v.recordId() + " " + v.kind()).toList();
+    }
+
+    @Test
+    void wellLinkedClaimsOfEveryKindPass() {
+        assertEquals(List.of(), validate(with(
+                listed("r7", "works_at", "p1", "o1", "k1"),
+                claim("k1", "r7", Status.HOLDS, "2019/.."),
+                listedTerm("ev1", "Event", "k2"),
+                claim("k2", SOURCE, "ev1", null, null, "2026-02-14", null, ANCHOR),
+                listed("r8", "holds_view_on", "p1", "t1", "k3"),
+                claim("k3", SOURCE, "r8", Status.HOLDS, null, null, Valence.FAVORABLE, ANCHOR))));
+    }
+
+    @Test
+    void aClaimWithANullUnresolvedOrSelfSubjectIsAClaimLink() {
+        assertEquals(List.of(
+                new Violation("k1", Kind.CLAIM_LINK, "evidence k1: a claim needs a subjectId"),
+                new Violation("k2", Kind.CLAIM_LINK, "evidence k2: subjectId 'ghost' is unresolved"),
+                new Violation("k3", Kind.CLAIM_LINK, "evidence k3: subjectId 'k3' names the evidence itself")),
+                validate(with(claim("k1", null, Status.HOLDS, null), claim("k2", "ghost", Status.HOLDS, null),
+                        claim("k3", "k3", Status.HOLDS, null))));
+    }
+
+    @Test
+    void aClaimItsSubjectDoesNotListOrAnotherRecordListsIsAClaimLink() {
+        assertEquals(List.of(new Violation("k", Kind.CLAIM_LINK, "evidence k: subject 'r1' does not list it in evidenceIds")),
+                validate(with(claim("k", "r1", Status.HOLDS, null))));
+        assertEquals(List.of(new Violation("k", Kind.CLAIM_LINK,
+                        "evidence k: a claim about 'r7' is also listed by t9")),
+                validate(with(listed("r7", "works_at", "p1", "o1", "k"), listedTerm("t9", "Topic", "k"),
+                        claim("k", "r7", Status.HOLDS, null))));
+        assertEquals(List.of(
+                new Violation("k", Kind.CLAIM_LINK, "evidence k: subject 'e1' does not list it in evidenceIds"),
+                new Violation("k", Kind.CLAIM_LINK, "evidence k: valence needs a relation of a type that takes one")),
+                validate(with(new Evidence(meta("k"), "file:/a", "e1", null, null, null, null, null, null, null, null,
+                        null, null, null, null, Valence.FAVORABLE))), "an evidence subject lists nothing");
+    }
+
+    @Test
+    void aClaimOnTheWrongKindOfSubjectIsAClaimLink() {
+        var violations = validate(with(
+                listedTerm("t8", "Topic", "k1", "k2"),
+                claim("k1", "t8", Status.HOLDS, null),
+                claim("k2", "file:/b", "t8", null, null, "2026-02-14", null, ANCHOR),
+                listed("r7", "works_at", "p1", "o1", "k3"),
+                claim("k3", SOURCE, "r7", Status.HOLDS, null, null, Valence.UNFAVORABLE, ANCHOR),
+                listedTerm("v1", "Vehicle", "k4"),
+                claim("k4", "file:/c", "v1", null, null, "2026-02-14", null, ANCHOR)));
+        assertEquals(List.of(
+                new Violation("k1", Kind.CLAIM_LINK, "evidence k1: status and valid need a relation subject"),
+                new Violation("k2", Kind.CLAIM_LINK, "evidence k2: occurs needs a term of a dated type"),
+                new Violation("k3", Kind.CLAIM_LINK, "evidence k3: valence needs a relation of a type that takes one"),
+                new Violation("v1", Kind.UNDECLARED_TYPE, "term v1: type 'Vehicle' is not declared")), violations);
+    }
+
+    @Test
+    void aStatusOrValidTheRelationDoesNotTakeIsNotAllowed() {
+        var violations = validate(with(
+                term("ev1", "Event"),
+                listed("r5", "involves", "ev1", "p1", "k1", "k2"),
+                claim("k1", "r5", Status.ENDED, null),
+                claim("k2", "file:/v", "r5", Status.HOLDS, "2020/..", null, null, ANCHOR),
+                listed("r6", "located_in", "ev1", "pl1", "k3"),
+                claim("k3", "r6", Status.ENDED, null)));
+        assertEquals(List.of(
+                new Violation("k1", Kind.CLAIM_NOT_ALLOWED, "evidence k1: status ended is not allowed on involves from Event"),
+                new Violation("k2", Kind.CLAIM_NOT_ALLOWED, "evidence k2: valid is not allowed on involves from Event"),
+                new Violation("k3", Kind.CLAIM_NOT_ALLOWED,
+                        "evidence k3: status ended is not allowed on located_in from Event")), violations);
+        assertEquals(List.of(), validate(with(term("ev1", "Event"), listed("r5", "involves", "ev1", "p1", "k1"),
+                claim("k1", "r5", Status.DENIED, null))));
+    }
+
+    @Test
+    void aDenialsValidIsTheNeverFormEndingOnItsAnchor() {
+        assertEquals(List.of(), validateClaim(Status.DENIED, "../2026-02-15", ANCHOR));
+        assertEquals(List.of(), validateClaim(Status.DENIED, null, ANCHOR), "a denial needs no valid");
+        assertEquals(List.of("k CLAIM_NOT_ALLOWED"), kindsOn(validateClaim(Status.DENIED, "../2026-02-14", ANCHOR)));
+        assertEquals(List.of("k CLAIM_NOT_ALLOWED"), kindsOn(validateClaim(Status.DENIED, "2026-02-15", ANCHOR)));
+
+        Function<String, List<Violation>> unanchored = valid -> validate(with(
+                listed("r7", "works_at", "p1", "o1", "k"),
+                claim("k", "file:/notes", "r7", Status.DENIED, valid, null, null, null)));
+        assertEquals(List.of(), unanchored.apply("../2026-01-01"));
+        assertEquals(List.of(new Violation("k", Kind.CLAIM_NOT_ALLOWED,
+                "evidence k: a denial's valid 2020/.. is not an open start ../YYYY-MM-DD")), unanchored.apply("2020/.."));
+    }
+
+    @Test
+    void aHoldsIntervalMustStillHoldOnItsAnchor() {
+        assertEquals(List.of(), validateClaim(Status.HOLDS, "2019/2026-02-15", ANCHOR));
+        assertEquals(List.of("k INVALID_INTERVAL"), kindsOn(validateClaim(Status.HOLDS, "2019/2026-02-14", ANCHOR)));
+        assertEquals(List.of(), validateClaim(Status.HOLDS, "2019/..", ANCHOR));
+        assertEquals(List.of(), validateClaim(Status.HOLDS, "2019", ANCHOR), "the single-date form has no end");
+        assertEquals(List.of("k INVALID_INTERVAL"), kindsOn(validateClaim(Status.HOLDS, "2019/", ANCHOR)));
+        assertEquals(List.of("k INVALID_INTERVAL", "k PROVENANCE_MISSING"),
+                kindsOn(validateClaim(Status.HOLDS, "2019/", null)), "an unknown end is refused without an anchor too");
+        assertEquals(List.of("k PROVENANCE_MISSING"), kindsOn(validateClaim(Status.HOLDS, "2019/2020", null)));
+    }
+
+    @Test
+    void anEndedIntervalMustHaveEndedByItsAnchor() {
+        assertEquals(List.of(), validateClaim(Status.ENDED, "2019/2026-02-15", ANCHOR));
+        assertEquals(List.of("k INVALID_INTERVAL"), kindsOn(validateClaim(Status.ENDED, "2019/2026-02-16", ANCHOR)));
+        assertEquals(List.of(), validateClaim(Status.ENDED, "2026-02-15/", ANCHOR));
+        assertEquals(List.of("k INVALID_INTERVAL"), kindsOn(validateClaim(Status.ENDED, "2026-02-16/", ANCHOR)));
+        assertEquals(List.of("k INVALID_INTERVAL"), kindsOn(validateClaim(Status.ENDED, "2019/..", ANCHOR)));
+        assertEquals(List.of(), validateClaim(Status.ENDED, "2019/", ANCHOR), "an unknown end is accepted");
+    }
+
+    @Test
+    void anOpenStartIsRefusedOutsideADenial() {
+        assertEquals(List.of(new Violation("k", Kind.INVALID_INTERVAL, "evidence k: valid ../2026-02-15 has an open start")),
+                validateClaim(null, "../2026-02-15", ANCHOR));
+    }
+
+    @Test
+    void anOccurrenceIsADateOrAClosedInterval() {
+        Function<String, List<Violation>> check = occurs -> validate(with(
+                listedTerm("ev1", "Event", "k"), claim("k", SOURCE, "ev1", null, null, occurs, null, ANCHOR)));
+        assertEquals(List.of(), check.apply("2026-02-14"));
+        assertEquals(List.of(), check.apply("2026-02-14/2026-02-16"));
+        assertEquals(List.of(new Violation("k", Kind.INVALID_INTERVAL,
+                "evidence k: occurs 2026/.. is neither a date nor a closed interval")), check.apply("2026/.."));
+        assertEquals(List.of("k INVALID_INTERVAL"), kindsOn(check.apply("2026-02/")));
+    }
+
+    @Test
+    void systemTimeIsCheckedOnEveryEvidence() {
+        var at = Instant.parse("2026-03-01T12:00:00Z");
+        assertEquals(List.of(), validate(with(
+                systemTime("s1", at, at, "memory:12", Lineage.UPDATE, ANCHOR, ANCHOR),
+                systemTime("s2", null, at, "memory:13", Lineage.CORRECTION, null, ANCHOR))));
+        var violations = validate(with(
+                systemTime("s1", at, at.minusSeconds(1), null, null, null, null),
+                systemTime("s2", null, null, "memory:12", null, null, null),
+                systemTime("s3", null, at, "message:12", null, null, null),
+                systemTime("s4", null, at, "memory:", null, null, null),
+                systemTime("s5", null, null, null, Lineage.UPDATE, null, null),
+                systemTime("s6", null, at, "memory:12", Lineage.RESTATEMENT, ANCHOR, null),
+                systemTime("s7", null, at, "memory:12", Lineage.UPDATE, ANCHOR.minusDays(1), ANCHOR)));
+        assertEquals(List.of(
+                new Violation("s1", Kind.SYSTEM_TIME,
+                        "evidence s1: retiredAt 2026-03-01T11:59:59Z is before recordedAt 2026-03-01T12:00:00Z"),
+                new Violation("s2", Kind.SYSTEM_TIME, "evidence s2: retiredBy is set without retiredAt"),
+                new Violation("s3", Kind.SYSTEM_TIME, "evidence s3: retiredBy 'message:12' is not memory:<id>"),
+                new Violation("s4", Kind.SYSTEM_TIME, "evidence s4: retiredBy 'memory:' is not memory:<id>"),
+                new Violation("s5", Kind.SYSTEM_TIME, "evidence s5: lineage is set without retiredBy"),
+                new Violation("s6", Kind.SYSTEM_TIME, "evidence s6: changedBy is set but lineage is not update"),
+                new Violation("s7", Kind.SYSTEM_TIME, "evidence s7: changedBy 2026-02-14 is before anchor 2026-02-15")),
+                violations);
+    }
+
+    @Test
+    void aClaimFromAMemoryOrMessageNeedsItsProvenance() {
+        Function<String, Evidence> bare = source -> new Evidence(meta("k"), source, "r7", null,
+                null, null, null, null, null, null, null, null, Status.HOLDS, null, null, null);
+        assertEquals(List.of(
+                new Violation("k", Kind.PROVENANCE_MISSING, "evidence k: claim from message:9 has no anchor"),
+                new Violation("k", Kind.PROVENANCE_MISSING, "evidence k: claim from message:9 has no authorType"),
+                new Violation("k", Kind.PROVENANCE_MISSING, "evidence k: claim from message:9 has no recordedAt")),
+                validate(with(listed("r7", "works_at", "p1", "o1", "k"), bare.apply("message:9"))));
+        assertEquals(List.of(), validate(with(listed("r7", "works_at", "p1", "o1", "k"), bare.apply("file:/notes"))));
+        assertEquals(List.of(), validateClaim(Status.HOLDS, null, ANCHOR));
+    }
+
+    @Test
+    void twoClaimsFromOneSourceAboutOneRecordAreDuplicates() {
+        assertEquals(List.of(
+                new Violation("k1", Kind.DUPLICATE_CLAIM, "evidence k1: memory:501 already claims about 'r7' through k2"),
+                new Violation("k2", Kind.DUPLICATE_CLAIM, "evidence k2: memory:501 already claims about 'r7' through k1")),
+                validate(with(listed("r7", "works_at", "p1", "o1", "k1", "k2"),
+                        claim("k1", "r7", Status.HOLDS, null), claim("k2", "r7", Status.ENDED, null))));
+        assertEquals(List.of(), validate(with(listed("r7", "works_at", "p1", "o1", "k1", "k2"),
+                claim("k1", "r7", Status.HOLDS, null),
+                claim("k2", "memory:502", "r7", Status.ENDED, null, null, null, ANCHOR))));
+    }
+
+    @Test
+    void aNullAnchorSkipsEveryAnchorComparison() {
+        var at = Instant.parse("2026-03-01T12:00:00Z");
+        assertEquals(List.of(), validate(with(
+                systemTime("s1", null, at, "memory:12", Lineage.UPDATE, ANCHOR, null))));
+        assertEquals(List.of(new Violation("k", Kind.PROVENANCE_MISSING, "evidence k: claim from memory:501 has no anchor")),
+                validateClaim(null, "2019/2020", null));
+    }
+
+    @Test
+    void theConcurrentUpdateShapeIsClean() {
+        var records = cleanSet();
+        for (int i = 1; i <= 3; i++) {
+            records.add(new Evidence(meta("xa" + i), "memory:" + i, null));
+            records.add(new Evidence(meta("xb" + i), "memory:" + i, null));
+        }
+        assertEquals(List.of(), validate(records));
+    }
+
+    @Test
+    void aClaimBearingSetGivesTheSameOutputInAnyOrder() {
+        var records = with(
+                term("ev1", "Event"),
+                listed("r5", "involves", "ev1", "p1", "k1"),
+                claim("k1", "r5", Status.ENDED, "2019/"),
+                listed("r6", "works_at", "p1", "o1", "k2", "k3"),
+                claim("k2", "r6", Status.HOLDS, "2019/2020"),
+                claim("k3", "r6", Status.DENIED, "../2026-02-14"),
+                claim("k4", null, null, "../2026-02-15"));
+        var first = validate(records);
+        assertFalse(first.isEmpty());
+        var a = new ArrayList<>(records);
+        Collections.shuffle(a, new Random(1362));
+        var b = new ArrayList<>(records);
+        Collections.shuffle(b, new Random(2026));
+        assertEquals(first, validate(a));
+        assertEquals(first, validate(b));
+    }
+
+    @Test
+    void claimIdsCarryTheRecordLengthAndTheFullSource() {
+        assertEquals("ev:2:r1:memory:501", Evidence.claimId("r1", "memory:501"));
+        assertEquals("ev:2:r1:message:501", Evidence.claimId("r1", "message:501"));
+        assertNotEquals(Evidence.claimId("r1", "memory:501"), Evidence.claimId("r1", "message:501"));
+        assertNotEquals(Evidence.claimId("a:b", "c"), Evidence.claimId("a", "b:c"));
+        assertEquals(Evidence.claimId("r1", "memory:501"), Evidence.claimId("r1", "memory:501"));
     }
 }

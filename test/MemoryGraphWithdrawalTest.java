@@ -75,6 +75,22 @@ class MemoryGraphWithdrawalTest extends UnitTest {
     }
 
     @Test
+    void aPruneKeepsATermsAliasesAndMergeAndAMappingsSurfaces() {
+        var graph = List.<OntologyRecord>of(
+                evidence("e5", "memory:5"),
+                evidence("e6", "memory:6"),
+                new Term(meta("T"), "Person", "Ada", List.of("mT"), List.of("e5", "e6"), List.of("Ada L."), "T0"),
+                new Mapping(meta("mT"), "T", "message:1", List.of("e5", "e6"), List.of("Ada", "my aunt")));
+
+        var survivors = GraphWithdrawal.withdraw(graph, Set.of("memory:5")).survivors();
+
+        assertEquals(new Term(meta("T"), "Person", "Ada", List.of("mT"), List.of("e6"), List.of("Ada L."), "T0"),
+                byId(survivors, "T"));
+        assertEquals(new Mapping(meta("mT"), "T", "message:1", List.of("e6"), List.of("Ada", "my aunt")),
+                byId(survivors, "mT"));
+    }
+
+    @Test
     void withdrawingTheLastSourceCascadesThroughEveryArm() {
         var afterFive = GraphWithdrawal.withdraw(graph(), Set.of("memory:5")).survivors();
 

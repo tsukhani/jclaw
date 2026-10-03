@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -620,6 +621,18 @@ class OntologySchemaTest extends UnitTest {
         var seed = OntologySchema.seed();
         assertEquals(OntologyValidator.STATUSES, List.copyOf(seed.claims().status().keySet()));
         assertEquals(OntologyValidator.LINEAGES, List.copyOf(seed.systemTime().lineage().keySet()));
+    }
+
+    @Test
+    void theClaimEnumsMirrorTheSeedInDeclarationOrder() {
+        var seed = OntologySchema.seed();
+        assertEquals(OntologyValidator.STATUSES, lowerNames(OntologyRecord.Status.values()));
+        assertEquals(OntologyValidator.LINEAGES, lowerNames(OntologyRecord.Lineage.values()));
+        assertEquals(List.copyOf(seed.claims().valence().keySet()), lowerNames(OntologyRecord.Valence.values()));
+    }
+
+    private static List<String> lowerNames(Enum<?>[] constants) {
+        return Arrays.stream(constants).map(c -> c.name().toLowerCase(Locale.ROOT)).toList();
     }
 
     @Test
