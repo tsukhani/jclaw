@@ -1,46 +1,48 @@
 import com.google.gson.JsonObject;
+import memory.MemoryStoreFactory;
 import memory.ontology.OntologySchema;
 import models.Memory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.Play;
 import play.test.UnitTest;
 import services.AgentService;
 import services.Tx;
+import services.graphspike.Agreement;
+import services.graphspike.Certifier;
+import services.graphspike.Certifier.Adjudication;
 import services.graphspike.ExtractionPipeline;
 import services.graphspike.ExtractionPipeline.Decider;
+import services.graphspike.GraphCases;
 import services.graphspike.GraphCases.Case;
-import services.graphspike.GraphCases.Entity;
-import services.graphspike.GraphCases.Relation;
 import services.graphspike.GraphSpikeHarness;
 import services.graphspike.GraphSpikeHarness.DecisionModel;
-import services.graphspike.GraphSpikeHarness.NamedProposer;
-import services.graphspike.MentionProposer;
-import services.graphspike.MentionProposer.Proposal;
+import services.graphspike.GraphSpikeScorer;
+import services.graphspike.GraphSpikeScorer.WrongRecord;
+import services.graphspike.HeldOut;
 
+import java.nio.file.Files;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.BiFunction;
 import java.util.regex.Pattern;
 
 import static utils.GsonHolder.GSON;
 
 /**
- * JCLAW-1344: the harness stores each case as a real memory, proves the run left it unchanged, and deletes it.
- * Concurrency 1 keeps every step on the test thread, inside the test's transaction.
+ * JCLAW-1356: the harness over the committed set with a decider that answers gold, one that mis-types a term, one
+ * that edits a memory, and the
+ * held-out set. Concurrency 1 keeps every step on the test thread, inside the test's transaction.
  */
 class GraphSpikeHarnessTest extends UnitTest {
 
-    private static final List<Case> CASES = List.of(
-            new Case("family", "Wren Castillo is the sister of Mateo Castillo.",
-                    List.of(new Entity("Wren Castillo", "Person"), new Entity("Mateo Castillo", "Person")),
-                    List.of(new Relation("Wren Castillo", "family_of", "Mateo Castillo"))),
-            new Case("tea", "Dana Reyes prefers tea in the morning.",
-                    List.of(new Entity("Dana Reyes", "Person")), List.of()),
-            new Case("none", "Prefers short answers without bullet points.", List.of(), List.of()));
-
     private static final Pattern QUOTED = Pattern.compile("\"([^\"]*)\"");
+    private static final OntologySchema SCHEMA = OntologySchema.seed();
 
     private String agentId;
 
@@ -56,173 +58,204 @@ class GraphSpikeHarnessTest extends UnitTest {
         LuceneTestSync.release();
     }
 
-    /** Proposes every labelled mention, and fails on the case with none. */
-    private static final MentionProposer PROPOSER = text -> {
-        var c = CASES.stream().filter(x -> x.text().equals(text)).findFirst().orElseThrow();
-        return c.entities().isEmpty() ? Proposal.failed("stub: nothing to say")
-                : new Proposal(c.entities().stream().map(Entity::mention).toList(), 0, null);
-    };
-
-    /** Types every mention a Person and states no relation, all at 0.9. */
-    private static JsonObject answer(JsonObject request) {
-        return answer(request, (qid, _) -> qid.startsWith("m") ? "Person" : ExtractionPipeline.NONE, 0.9);
+    private static List<Case> committed() throws Exception {
+        return GraphCases.load(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH), SCHEMA);
     }
 
-    /** Answers each question with {@code choose(questionId, rules)} at probability {@code p}. */
-    private static JsonObject answer(JsonObject request, BiFunction<String, String, String> choose, double p) {
-        var answers = new JsonObject();
-        for (var q : request.getAsJsonObject("questions").entrySet()) {
-            var question = q.getValue().getAsJsonObject();
-            var ids = question.getAsJsonObject("criteria").keySet();
-            var choice = choose.apply(q.getKey(), question.getAsJsonObject("instructions").get("rules").getAsString());
-            var probabilities = new JsonObject();
-            ids.forEach(id -> probabilities.addProperty(id, id.equals(choice) ? p : (1 - p) / (ids.size() - 1)));
-            var a = new JsonObject();
-            a.addProperty("choice", choice);
-            a.addProperty("confidence", p);
-            a.add("probabilities", probabilities);
-            answers.add(q.getKey(), a);
-        }
-        var response = new JsonObject();
-        response.add("answers", answers);
-        return response;
+    /**
+     * Answers gold at 0.99: a term is its entity's type when the quoted span is that entity's mention, and a pair is
+     * its labelled relation, read back from the case whose text is {@code state.memory}.
+     */
+    private static Decider gold(List<Case> cases) {
+        var byText = new HashMap<String, Case>();
+        cases.forEach(c -> byText.put(c.text(), c));
+        return request -> {
+            var c = byText.get(request.getAsJsonObject("state").get("memory").getAsString());
+            var answers = new JsonObject();
+            for (var q : request.getAsJsonObject("questions").entrySet()) {
+                var question = q.getValue().getAsJsonObject();
+                var spans = QUOTED.matcher(question.getAsJsonObject("instructions").get("rules").getAsString())
+                        .results().map(m -> m.group(1)).toList();
+                String choice;
+                if (q.getKey().startsWith("m")) {
+                    var e = c.entityAt(spans.getFirst());
+                    choice = e != null && spans.getFirst().equals(e.mention()) ? e.type() : ExtractionPipeline.NOT_AN_ENTITY;
+                } else {
+                    var from = c.entityAt(spans.get(0));
+                    var to = c.entityAt(spans.get(1));
+                    var r = from == null || to == null ? null : c.relation(from.id(), to.id());
+                    choice = r == null ? ExtractionPipeline.NONE : r.type();
+                }
+                answers.add(q.getKey(), answer(question.getAsJsonObject("criteria").keySet(), choice, 0.99));
+            }
+            var response = new JsonObject();
+            response.add("answers", answers);
+            return response;
+        };
     }
 
-    private static Case caseOf(JsonObject request) {
-        var text = request.getAsJsonObject("state").get("memory").getAsString();
-        return CASES.stream().filter(c -> c.text().equals(text)).findFirst().orElseThrow();
+    private static JsonObject answer(Set<String> ids, String choice, double p) {
+        var probabilities = new JsonObject();
+        ids.forEach(id -> probabilities.addProperty(id, id.equals(choice) ? p : (1 - p) / (ids.size() - 1)));
+        var a = new JsonObject();
+        a.addProperty("choice", choice);
+        a.addProperty("confidence", p);
+        a.add("probabilities", probabilities);
+        return a;
     }
 
-    /** The quoted names in a question's rules: the mention, or a relation's two endpoints. */
-    private static List<String> quoted(String rules) {
-        return QUOTED.matcher(rules).results().map(m -> m.group(1)).toList();
+    private GraphSpikeHarness.Report run(List<Case> cases, Decider decider) {
+        return GraphSpikeHarness.run(agentId, cases, SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
+                Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), List.of());
     }
 
-    private GraphSpikeHarness.Report run(Decider decider) {
-        return run(List.of(new NamedProposer("stub/proposer", PROPOSER)),
-                List.of(DecisionModel.of("tev1", decider), DecisionModel.skipped("jev-latest", "no API key")), 1);
+    /** Gold, except c015's "Larchmere House" (a Place on no relation) is typed Organization at 0.92. */
+    private static Decider oneMistyped(List<Case> cases) {
+        var golden = gold(cases);
+        var target = cases.stream().filter(c -> c.id().equals("c015")).findFirst().orElseThrow().text();
+        return request -> {
+            var response = golden.decide(request);
+            if (!request.getAsJsonObject("state").get("memory").getAsString().equals(target)) return response;
+            for (var q : request.getAsJsonObject("questions").entrySet()) {
+                var rules = q.getValue().getAsJsonObject().getAsJsonObject("instructions").get("rules").getAsString();
+                var span = QUOTED.matcher(rules).results().map(m -> m.group(1)).findFirst().orElse("");
+                if (q.getKey().startsWith("m") && span.equals("Larchmere House")) {
+                    response.getAsJsonObject("answers").add(q.getKey(),
+                            answer(q.getValue().getAsJsonObject().getAsJsonObject("criteria").keySet(), "Organization", 0.92));
+                }
+            }
+            return response;
+        };
     }
 
-    private GraphSpikeHarness.Report run(List<NamedProposer> proposers, List<DecisionModel> models, int concurrency) {
-        return GraphSpikeHarness.run(agentId, CASES, OntologySchema.seed(), proposers, models, 0.5, concurrency);
+    private GraphSpikeHarness.Report runWithLabels(List<Case> cases, Decider decider, List<Adjudication> verdicts) {
+        var blind = new HashSet<>(Agreement.blindSelection(cases));
+        var second = cases.stream().filter(c -> blind.contains(c.id())).toList();
+        return GraphSpikeHarness.run(agentId, cases, SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
+                Certifier.DEFAULT_RECALL_FLOOR, 1, second, verdicts);
     }
 
     @Test
-    void casesAreStoredVerifiedUnchangedAndDeleted() {
-        var seen = new AtomicBoolean();
-        var report = run(request -> {
-            seen.set(Memory.findByAgent(agentId).size() == CASES.size());
-            return answer(request);
+    void aWrongRecordAtTheCertifiedThresholdAwaitsAdjudicationThenCertifies() throws Exception {
+        var cases = committed();
+        var expected = new WrongRecord("c015", "term:Larchmere House:Organization", GraphSpikeScorer.TYPE);
+
+        var pending = runWithLabels(cases, oneMistyped(cases), List.of());
+        assertTrue(pending.agreement().complete(), pending.agreement().toString());
+        var model = pending.models().getFirst();
+        assertEquals(0.50, model.wrongRecordsAt());
+        assertEquals(List.of(expected), model.wrongRecords());
+        assertEquals(Certifier.PENDING_ADJUDICATION, model.certification().status(),
+                model.certification().reasons().toString());
+        assertEquals(List.of(expected), model.certification().unadjudicated());
+
+        var verdict = new Adjudication("c015", expected.record(), Certifier.WRONG, "typed a house as a company");
+        var certified = runWithLabels(cases, oneMistyped(cases), List.of(verdict)).models().getFirst();
+        assertEquals(Certifier.CERTIFIED, certified.certification().status(),
+                certified.certification().reasons().toString());
+        assertEquals(0.50, certified.certification().threshold());
+    }
+
+    @Test
+    void aGoldDeciderScoresEveryStageFullAndWalksToTheBottom() throws Exception {
+        var cases = committed();
+        var stored = new AtomicBoolean();
+        var golden = gold(cases);
+        var report = run(cases, request -> {
+            if (!stored.get()) stored.set(Tx.run(() -> Memory.findByAgent(agentId)).size() == cases.size());
+            return golden.decide(request);
         });
 
-        assertTrue(seen.get(), "every case is a stored memory while the decisions run");
+        assertTrue(stored.get(), "every case is a stored memory while the decisions run");
         assertEquals(List.of(), Tx.run(() -> Memory.findByAgent(agentId)), "every case memory deleted afterwards");
-
         var integrity = report.memoryIntegrity();
-        assertEquals(3, integrity.checked());
-        assertEquals(3, integrity.unchanged());
+        assertEquals(cases.size(), integrity.checked());
+        assertEquals(cases.size(), integrity.unchanged());
+        assertEquals(cases.size(), integrity.deleted());
         assertEquals(List.of(), integrity.changed());
-        assertEquals(1, integrity.degradedChecked(), "the proposer failure");
-        assertEquals(1, integrity.degradedUnchanged());
 
-        assertEquals(List.of("tev1"), report.allowed());
-        var pairings = report.pairings();
-        assertEquals(List.of("jev-latest", "tev1"), pairings.stream().map(p -> p.model()).toList());
-        assertEquals("no API key", pairings.getFirst().skipped());
-        var tev1 = pairings.getLast();
-        assertEquals(3, tev1.written());
-        assertEquals(0, tev1.wrong());
-        assertEquals(1, tev1.proposerFailures());
-        assertEquals(1, tev1.missedLabels(), "family_of, answered none");
+        var model = report.models().getFirst();
+        assertEquals(2, model.runs().size());
+        for (var run : model.runs()) {
+            var s = run.stages();
+            assertEquals(1.0, s.typing().rate(), "typing");
+            assertEquals(1.0, s.rejection().rate(), "rejection");
+            assertEquals(1.0, s.relation().rate(), "relation");
+            assertEquals(1.0, s.resolution().bcubedPrecision(), "resolution precision");
+            assertEquals(1.0, s.resolution().bcubedRecall(), "resolution recall");
+            assertEquals(0, s.failures());
+            assertEquals(0.50, run.walk().threshold(), "run " + run.run() + ": " + run.walk().failure());
+        }
+        assertEquals(Certifier.PENDING_AGREEMENT, model.certification().status(), model.certification().reasons().toString());
+        assertEquals(0.50, model.certification().threshold());
+        assertFalse(report.agreement().complete());
     }
 
     @Test
-    void aDeciderThatEditsAMemoryIsReportedAndAllowsNothing() {
-        var report = run(request -> {
-            var state = request.getAsJsonObject("state").get("memory").getAsString();
-            if (state.startsWith("Dana Reyes")) {
+    void aDeciderThatEditsAMemoryIsReportedAndCertifiesNothing() throws Exception {
+        var cases = committed().subList(0, 6);
+        var target = cases.get(2);
+        var golden = gold(cases);
+        var report = run(cases, request -> {
+            var text = request.getAsJsonObject("state").get("memory").getAsString();
+            if (text.equals(target.text())) {
                 Tx.run(() -> {
                     for (var m : Memory.findByAgent(agentId)) {
-                        if (m.text.equals(state)) {
-                            m.text = state + " Edited.";
+                        if (m.text.equals(text)) {
+                            m.text = text + " Edited.";
                             m.save();
                         }
                     }
                 });
             }
-            return answer(request);
+            return golden.decide(request);
         });
 
-        assertEquals(List.of("tea"), report.memoryIntegrity().changed());
-        assertEquals(2, report.memoryIntegrity().unchanged());
-        assertEquals(List.of(), report.allowed());
-        assertTrue(report.models().stream().noneMatch(m -> m.allowed()), "no model is allowed");
+        assertEquals(List.of(target.id()), report.memoryIntegrity().changed());
+        assertEquals(cases.size() - 1, report.memoryIntegrity().unchanged());
+        var certification = report.models().getFirst().certification();
+        assertEquals(Certifier.NOT_CERTIFIED, certification.status());
+        assertNull(certification.threshold());
         assertEquals(List.of(), Tx.run(() -> Memory.findByAgent(agentId)));
     }
 
     @Test
-    void twoIdenticalRunsReportIdenticalJson() {
-        assertEquals(GSON.toJson(run(GraphSpikeHarnessTest::answer)), GSON.toJson(run(GraphSpikeHarnessTest::answer)));
-    }
+    void aHeldOutRunReportsNoIdTextOrSpanAndLeavesEveryRowAsItWas() throws Exception {
+        var text = "The user works at Harborlight Analytics, which runs Kestrel CI for every release.";
+        var store = MemoryStoreFactory.get();
+        var memoryId = Tx.run(() -> store.storeDeferred(agentId, text, "fact", 0.5));
+        var dir = Files.createTempDirectory("graph-heldout");
+        var file = dir.resolve(HeldOut.FILE);
+        try {
+            var labelled = Map.of("cases", List.of(
+                    Map.of("memoryId", Long.parseLong(memoryId), "labelled", true, "text", text,
+                            "entities", List.of(
+                                    Map.of("id", "operator", "mention", "The user", "type", "Person"),
+                                    Map.of("id", "harborlight", "mention", "Harborlight Analytics", "type", "Organization"),
+                                    Map.of("id", "kestrel", "mention", "Kestrel CI", "type", "System")),
+                            "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight"),
+                                    Map.of("from", "harborlight", "type", "uses", "to", "kestrel"))),
+                    Map.of("memoryId", 1, "labelled", false, "text", "unlabelled", "entities", List.of(),
+                            "relations", List.of())));
+            Files.writeString(file, GSON.toJson(labelled));
+            var loaded = HeldOut.load(file, SCHEMA);
+            var report = GraphSpikeHarness.runHeldOut(loaded, SCHEMA,
+                    List.of(new DecisionModel("tev1", gold(loaded.cases().stream().map(HeldOut.HeldCase::labels).toList()))),
+                    2, Certifier.DEFAULT_RECALL_FLOOR, 1);
 
-    @Test
-    void theThreadPoolReportsWhatTheInlineRunDoes() {
-        // A second proposer that also offers "tea", and models that answer differently, so a misplaced result shows.
-        MentionProposer greedy = text -> {
-            var p = PROPOSER.propose(text);
-            return text.contains("tea") ? new Proposal(List.of("Dana Reyes", "tea"), 0, null) : p;
-        };
-        var proposers = List.of(new NamedProposer("a/exact", PROPOSER), new NamedProposer("b/greedy", greedy));
-        var models = List.of(
-                DecisionModel.of("tev1", GraphSpikeHarnessTest::answer),
-                DecisionModel.skipped("jev-latest", "no API key"),
-                DecisionModel.of("nimble", request -> answer(request,
-                        (qid, _) -> qid.startsWith("m") ? "Person" : ExtractionPipeline.NONE, 0.4)));
-
-        var inline = GSON.toJson(run(proposers, models, 1));
-        var pooled = run(proposers, models, 2);
-        assertEquals(inline, GSON.toJson(pooled));
-        assertEquals(6, pooled.pairings().size());
-        var greedyTev1 = pooled.pairings().stream()
-                .filter(p -> p.proposer().equals("b/greedy") && p.model().equals("tev1")).findFirst().orElseThrow();
-        assertEquals(1, greedyTev1.wrongMatch(), "tea is no entity");
-    }
-
-    @Test
-    void anAbstentionAndADecisionFailureBothCountAsDegraded() {
-        var report = run(request -> {
-            var c = caseOf(request);
-            if (c.id().equals("family")) throw new IllegalStateException("stub outage");
-            return answer(request, (qid, _) -> qid.startsWith("m") ? "Person" : ExtractionPipeline.NONE, 0.3);
-        });
-        var integrity = report.memoryIntegrity();
-        assertEquals(3, integrity.degradedChecked(), "tea abstained, family failed, none had no proposal");
-        assertEquals(3, integrity.degradedUnchanged());
-        assertEquals(List.of(), integrity.degradedChanged());
-    }
-
-    @Test
-    void anOracleWritesEveryLabelAndIsAllowed() {
-        MentionProposer exact = text -> new Proposal(CASES.stream().filter(c -> c.text().equals(text)).findFirst()
-                .orElseThrow().entities().stream().map(Entity::mention).toList(), 0, null);
-        Decider oracle = request -> {
-            var c = caseOf(request);
-            return answer(request, (qid, rules) -> {
-                var names = quoted(rules);
-                if (qid.startsWith("m")) return c.typeOf(names.getFirst()).orElse(ExtractionPipeline.NOT_AN_ENTITY);
-                return c.relations().stream()
-                        .filter(r -> r.from().equals(names.get(0)) && r.to().equals(names.get(1)))
-                        .map(Relation::type).findFirst().orElse(ExtractionPipeline.NONE);
-            }, 0.99);
-        };
-        var report = run(List.of(new NamedProposer("stub/exact", exact)), List.of(DecisionModel.of("tev1", oracle)), 1);
-
-        var pairing = report.pairings().getFirst();
-        assertEquals(4, pairing.written(), "three entities and one relation");
-        assertEquals(0.0, pairing.wrongShare());
-        assertEquals(0.0, pairing.abstentionRate());
-        assertEquals(0, pairing.missedLabels());
-        assertEquals(0, pairing.decisionFailures());
-        assertEquals(List.of("tev1"), report.allowed());
+            var json = GSON.toJson(report);
+            for (var secret : List.of("memoryId", text, "Harborlight", "Kestrel", "The user", "term:", "rel:")) {
+                assertFalse(json.contains(secret), "the report names " + secret + ": " + json);
+            }
+            assertEquals(1, report.cases());
+            assertEquals(1, report.unlabelled());
+            assertEquals(new GraphSpikeHarness.HeldOutIntegrity(1, 1, 1), report.memoryIntegrity());
+            assertNull(report.models().getFirst().walk().threshold(), "five records cannot bound the wrong share");
+            assertEquals(text, Tx.run(() -> Memory.<Memory>findById(Long.parseLong(memoryId))).text);
+        } finally {
+            Files.deleteIfExists(file);
+            Files.deleteIfExists(dir);
+            Tx.run(() -> store.delete(memoryId));
+        }
     }
 }

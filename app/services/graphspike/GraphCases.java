@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import memory.ontology.OntologySchema;
+import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -13,29 +14,94 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Optional;
+import java.util.Map;
+import java.util.Set;
 
-/** The labelled synthetic memories in {@code evals/graph/cases.json}, validated against an ontology. */
+/**
+ * The v2 labelled memories in {@code evals/graph/cases.json} (JCLAW-1356), validated against an ontology. The rules
+ * are {@code evals/graph/GUIDE.md}'s; the format is {@code evals/graph/README.md}'s.
+ */
 public final class GraphCases {
 
     public static final String DEFAULT_PATH = "evals/graph/cases.json";
+    public static final String SECOND_LABELS_PATH = "evals/graph/second-labels.json";
+    public static final String ADJUDICATIONS_PATH = "evals/graph/adjudications.json";
+    public static final String OPERATOR = "operator";
+    /** The surface an implicit operator is asked and reported under. */
+    public static final String IMPLICIT_OPERATOR_SPAN = "the user";
+    public static final List<String> HARD_NEGATIVE_TAGS = List.of("weekday-time", "role", "everyday-object",
+            "descriptive-phrase", "reversed-direction", "employer-tool");
+    public static final String PLAIN = "plain";
+    public static final Set<String> TAGS = Set.of("weekday-time", "role", "everyday-object", "descriptive-phrase",
+            "reversed-direction", "employer-tool", PLAIN);
 
     private GraphCases() {}
 
-    public record Entity(String mention, String type) {}
-
-    public record Relation(String from, String type, String to) {}
-
-    public record Case(String id, String text, List<Entity> entities, List<Relation> relations) {
-        public Case {
-            entities = List.copyOf(entities);
-            relations = List.copyOf(relations);
+    /** A labelled entity; {@code mention} is null only on an implicit operator. */
+    public record Entity(String id, @Nullable String mention, String type, List<String> aliases, boolean implicit,
+                         boolean noise) {
+        public Entity {
+            aliases = List.copyOf(aliases);
         }
 
-        /** The labelled type of {@code mention}, empty when it is no labelled entity. */
-        public Optional<String> typeOf(String mention) {
-            return entities.stream().filter(e -> e.mention().equals(mention)).map(Entity::type).findFirst();
+        public static Entity of(String id, String mention, String type, String... aliases) {
+            return new Entity(id, mention, type, List.of(aliases), false, false);
+        }
+
+        public static Entity implicitOperator() {
+            return new Entity(OPERATOR, null, "Person", List.of(), true, false);
+        }
+
+        public boolean operator() {
+            return id.equals(OPERATOR);
+        }
+
+        /** The span a question names it by: the mention, or {@link #IMPLICIT_OPERATOR_SPAN}. */
+        public String span() {
+            return mention == null ? IMPLICIT_OPERATOR_SPAN : mention;
+        }
+
+        public boolean answersTo(String span) {
+            return span.equals(mention) || aliases.contains(span);
+        }
+    }
+
+    public record Relation(String from, String type, String to, boolean noise) {
+        public static Relation of(String from, String type, String to) {
+            return new Relation(from, type, to, false);
+        }
+    }
+
+    public record Case(String id, List<String> tags, String text, List<Entity> entities, List<Relation> relations,
+                       List<String> negatives) {
+        public Case {
+            tags = List.copyOf(tags);
+            entities = List.copyOf(entities);
+            relations = List.copyOf(relations);
+            negatives = List.copyOf(negatives);
+        }
+
+        public @Nullable Entity entity(String id) {
+            return entities.stream().filter(e -> e.id().equals(id)).findFirst().orElse(null);
+        }
+
+        /** The entity a span names: by mention or alias, or the operator for "the user" in any case. */
+        public @Nullable Entity entityAt(String span) {
+            for (var e : entities) {
+                if (e.answersTo(span)) return e;
+            }
+            return span.equalsIgnoreCase(IMPLICIT_OPERATOR_SPAN) ? entity(OPERATOR) : null;
+        }
+
+        /** The labelled relation from one id to another, either way round for a symmetric type. */
+        public @Nullable Relation relation(String from, String to) {
+            for (var r : relations) {
+                if (r.from().equals(from) && r.to().equals(to)) return r;
+                if (GraphSpikeScorer.SYMMETRIC.contains(r.type()) && r.from().equals(to) && r.to().equals(from)) return r;
+            }
+            return null;
         }
     }
 
@@ -46,11 +112,27 @@ public final class GraphCases {
     /**
      * The cases in {@code json}, in file order.
      *
-     * @throws IllegalArgumentException naming the case, on a malformed entry, a duplicate id, a mention that is not
-     *                                  verbatim, an undeclared type, an endpoint that is no labelled entity, or a
-     *                                  relation the schema disallows for its endpoints' types
+     * @throws IllegalArgumentException naming the case, on any break of the v2 rules
      */
     public static List<Case> parse(String json, OntologySchema schema) {
+        var root = root(json);
+        var cases = new ArrayList<Case>();
+        var types = new HashMap<String, String>();
+        var ids = new HashSet<String>();
+        int index = 0;
+        for (var element : root.getAsJsonArray("cases")) {
+            var where = "case #" + index++;
+            if (!element.isJsonObject()) throw new IllegalArgumentException(where + ": must be an object");
+            var object = element.getAsJsonObject();
+            var id = text(object, "id", where);
+            var c = parseCase(object, id, true, schema, types);
+            if (!ids.add(c.id())) throw new IllegalArgumentException("case " + c.id() + ": duplicate id");
+            cases.add(c);
+        }
+        return List.copyOf(cases);
+    }
+
+    static JsonObject root(String json) {
         JsonElement root;
         try {
             root = JsonParser.parseString(json);
@@ -60,64 +142,128 @@ public final class GraphCases {
         if (!root.isJsonObject() || !root.getAsJsonObject().has("cases") || !root.getAsJsonObject().get("cases").isJsonArray()) {
             throw new IllegalArgumentException("graph cases: the document must be an object with a 'cases' array");
         }
-        var cases = new ArrayList<Case>();
-        var ids = new HashSet<String>();
-        int index = 0;
-        for (var element : root.getAsJsonObject().getAsJsonArray("cases")) {
-            var where = "case #" + index++;
-            if (!element.isJsonObject()) throw new IllegalArgumentException(where + ": must be an object");
-            var c = parseCase(element.getAsJsonObject(), where, schema);
-            if (!ids.add(c.id())) throw new IllegalArgumentException("case " + c.id() + ": duplicate id");
-            cases.add(c);
-        }
-        return List.copyOf(cases);
+        return root.getAsJsonObject();
     }
 
-    private static Case parseCase(JsonObject object, String where, OntologySchema schema) {
-        var id = text(object, "id", where);
-        where = "case " + id;
+    /**
+     * One case under the v2 rules. {@code types} carries each entity id's type across the cases parsed so far;
+     * {@code tagged} cases must carry known tags, held-out ones may omit them.
+     */
+    static Case parseCase(JsonObject object, String id, boolean tagged, OntologySchema schema, Map<String, String> types) {
+        var where = "case " + id;
         var text = text(object, "text", where);
 
-        var types = new HashMap<String, String>();
-        var entities = new ArrayList<Entity>();
+        var tags = new ArrayList<String>();
+        if (tagged || object.has("tags")) {
+            for (var tag : strings(object, "tags", where)) {
+                if (!TAGS.contains(tag)) throw new IllegalArgumentException(where + ": unknown tag '" + tag + "'");
+                tags.add(tag);
+            }
+        }
+
+        var entities = new LinkedHashMap<String, Entity>();
+        var spans = new HashSet<String>();
         for (var e : array(object, "entities", where)) {
             if (!e.isJsonObject()) throw new IllegalArgumentException(where + ": an entity must be an object");
-            var mention = text(e.getAsJsonObject(), "mention", where);
-            var type = text(e.getAsJsonObject(), "type", where);
-            if (!text.contains(mention)) {
-                throw new IllegalArgumentException(where + ": mention '" + mention + "' is not verbatim in the text");
+            var entity = parseEntity(e.getAsJsonObject(), text, where, schema);
+            if (entities.put(entity.id(), entity) != null) {
+                throw new IllegalArgumentException(where + ": entity id '" + entity.id() + "' is labelled twice");
             }
-            if (!schema.termTypes().containsKey(type)) {
-                throw new IllegalArgumentException(where + ": mention '" + mention + "' has undeclared type '" + type + "'");
+            for (var span : spansOf(entity)) {
+                if (!spans.add(span)) throw new IllegalArgumentException(where + ": span '" + span + "' names two entities");
             }
-            if (types.put(mention, type) != null) {
-                throw new IllegalArgumentException(where + ": mention '" + mention + "' is labelled twice");
+            var known = types.putIfAbsent(entity.id(), entity.type());
+            if (known != null && !known.equals(entity.type())) {
+                throw new IllegalArgumentException(where + ": id '" + entity.id() + "' is typed " + entity.type()
+                        + " here and " + known + " elsewhere");
             }
-            entities.add(new Entity(mention, type));
         }
 
         var relations = new ArrayList<Relation>();
+        var pairs = new HashSet<List<String>>();
         for (var r : array(object, "relations", where)) {
             if (!r.isJsonObject()) throw new IllegalArgumentException(where + ": a relation must be an object");
-            var from = text(r.getAsJsonObject(), "from", where);
-            var type = text(r.getAsJsonObject(), "type", where);
-            var to = text(r.getAsJsonObject(), "to", where);
-            var fromType = types.get(from);
-            var toType = types.get(to);
-            if (fromType == null || toType == null) {
-                throw new IllegalArgumentException(where + ": relation endpoint '" + (fromType == null ? from : to)
-                        + "' is not a labelled entity");
+            var o = r.getAsJsonObject();
+            var from = text(o, "from", where);
+            var type = text(o, "type", where);
+            var to = text(o, "to", where);
+            var fromEntity = entities.get(from);
+            var toEntity = entities.get(to);
+            if (fromEntity == null || toEntity == null) {
+                throw new IllegalArgumentException(where + ": relation endpoint '" + (fromEntity == null ? from : to)
+                        + "' is not a case entity id");
             }
-            if (!schema.allows(type, fromType, toType)) {
-                throw new IllegalArgumentException(where + ": the schema does not allow " + fromType + " " + type
-                        + " " + toType + " ('" + from + "' -> '" + to + "')");
+            if (!schema.allows(type, fromEntity.type(), toEntity.type())) {
+                throw new IllegalArgumentException(where + ": the schema does not allow " + fromEntity.type() + " "
+                        + type + " " + toEntity.type() + " ('" + from + "' -> '" + to + "')");
             }
-            relations.add(new Relation(from, type, to));
+            boolean reversedSymmetric = GraphSpikeScorer.SYMMETRIC.contains(type) && pairs.contains(List.of(to, from));
+            if (!pairs.add(List.of(from, to)) || reversedSymmetric) {
+                throw new IllegalArgumentException(where + ": two relations on '" + from + "' -> '" + to + "'");
+            }
+            relations.add(new Relation(from, type, to, flag(o, "noise", where)));
         }
-        return new Case(id, text, entities, relations);
+
+        var negatives = new ArrayList<String>();
+        if (object.has("negatives")) {
+            for (var negative : strings(object, "negatives", where)) {
+                if (spans.contains(negative)) {
+                    throw new IllegalArgumentException(where + ": negative '" + negative + "' is a labelled mention or alias");
+                }
+                if (!text.contains(negative)) {
+                    throw new IllegalArgumentException(where + ": negative '" + negative + "' is not verbatim in the text");
+                }
+                negatives.add(negative);
+            }
+        }
+        return new Case(id, tags, text, List.copyOf(entities.values()), relations, negatives);
     }
 
-    private static String text(JsonObject object, String key, String where) {
+    private static Entity parseEntity(JsonObject o, String text, String where, OntologySchema schema) {
+        var id = text(o, "id", where);
+        var type = text(o, "type", where);
+        if (!schema.termTypes().containsKey(type)) {
+            throw new IllegalArgumentException(where + ": entity '" + id + "' has undeclared type '" + type + "'");
+        }
+        boolean implicit = flag(o, "implicit", where);
+        boolean noise = flag(o, "noise", where);
+        if (implicit) {
+            if (!id.equals(OPERATOR) || o.has("mention") || o.has("aliases")) {
+                throw new IllegalArgumentException(where + ": only the operator is implicit, and it has no span");
+            }
+            return new Entity(id, null, type, List.of(), true, noise);
+        }
+        var mention = text(o, "mention", where);
+        var aliases = o.has("aliases") ? strings(o, "aliases", where) : List.<String>of();
+        for (var span : concat(mention, aliases)) {
+            if (!text.contains(span)) {
+                throw new IllegalArgumentException(where + ": mention '" + span + "' is not verbatim in the text");
+            }
+        }
+        return new Entity(id, mention, type, aliases, false, noise);
+    }
+
+    private static List<String> spansOf(Entity e) {
+        return e.mention() == null ? List.of() : concat(e.mention(), e.aliases());
+    }
+
+    private static List<String> concat(String first, List<String> rest) {
+        var out = new ArrayList<String>();
+        out.add(first);
+        out.addAll(rest);
+        return out;
+    }
+
+    static boolean flag(JsonObject object, String key, String where) {
+        var value = object.get(key);
+        if (value == null) return false;
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isBoolean()) {
+            throw new IllegalArgumentException(where + ": '" + key + "' must be a boolean");
+        }
+        return value.getAsBoolean();
+    }
+
+    static String text(JsonObject object, String key, String where) {
         var value = object.get(key);
         if (value == null || !value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()
                 || value.getAsString().isBlank()) {
@@ -126,11 +272,27 @@ public final class GraphCases {
         return value.getAsString();
     }
 
-    private static JsonArray array(JsonObject object, String key, String where) {
+    static List<String> strings(JsonObject object, String key, String where) {
+        var out = new ArrayList<String>();
+        for (var e : array(object, key, where)) {
+            if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString() || e.getAsString().isBlank()) {
+                throw new IllegalArgumentException(where + ": '" + key + "' must hold non-blank strings");
+            }
+            out.add(e.getAsString());
+        }
+        return out;
+    }
+
+    static JsonArray array(JsonObject object, String key, String where) {
         var value = object.get(key);
         if (value == null || !value.isJsonArray()) {
             throw new IllegalArgumentException(where + ": '" + key + "' must be an array");
         }
         return value.getAsJsonArray();
+    }
+
+    /** Whether {@code text} opens with the operator in either of the two shapes the guide allows. */
+    public static boolean operatorVoice(String text) {
+        return text.startsWith("The user") || CandidateGenerator.subjectless(text);
     }
 }

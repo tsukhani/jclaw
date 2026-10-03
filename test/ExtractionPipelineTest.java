@@ -14,14 +14,14 @@ import play.test.UnitTest;
 import services.decision.JevApi;
 import services.decision.JevException;
 import services.decision.OllamaDecision;
+import services.graphspike.CandidateGenerator;
+import services.graphspike.CandidateGenerator.Candidate;
 import services.graphspike.ExtractionPipeline;
 import services.graphspike.ExtractionPipeline.CaseRun;
 import services.graphspike.ExtractionPipeline.Decider;
-import services.graphspike.ExtractionPipeline.Decision;
-import services.graphspike.MentionProposer;
-import services.graphspike.MentionProposer.Proposal;
 import utils.HttpFactories;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -30,7 +30,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
-/** JCLAW-1344: proposer parsing and the two-stage decision flow, against the spec's I/O matrix. */
+/** JCLAW-1344, JCLAW-1356: the two-stage decision flow over generated candidates. */
 class ExtractionPipelineTest extends UnitTest {
 
     private static final String TEXT = "Dana Reyes works at Harborlight Analytics.";
@@ -78,52 +78,52 @@ class ExtractionPipelineTest extends UnitTest {
         };
     }
 
-    private static Proposal proposal(String... mentions) {
-        return new Proposal(List.of(mentions), 0, null);
+    private static CaseRun run(String text, List<Candidate> candidates, Decider decider) {
+        return ExtractionPipeline.run(SCHEMA, "c", text, candidates, "tev1", decider);
     }
 
-    private static CaseRun run(String text, Proposal proposal, Decider decider) {
-        return ExtractionPipeline.run(SCHEMA, "c", text, proposal, "tev1", decider, 0.5);
-    }
-
-    @Test
-    void aNonVerbatimMentionIsDiscardedAndCountedAndNeverAsked() {
-        var proposal = MentionProposer.parseReply(TEXT, "{\"mentions\":[\"Dan Reyes\",\"Dana Reyes\",\"Dana Reyes\"]}");
-        assertNull(proposal.failure());
-        assertEquals(List.of("Dana Reyes"), proposal.mentions());
-        assertEquals(1, proposal.discarded());
-
-        var run = run(TEXT, proposal, scripted(Map.of("Dana Reyes", "Person"), Map.of()));
-        assertEquals(1, run.discardedMentions());
-        assertEquals(1, requests.size(), "one term request, and no pair to relate");
-        var questions = requests.getFirst().getAsJsonObject("questions");
-        assertEquals(Set.of("m0"), questions.keySet());
-        assertTrue(questions.toString().contains("Dana Reyes"));
-        assertFalse(questions.toString().contains("Dan Reyes\\\""));
+    private static List<Candidate> spans(String... spans) {
+        return Arrays.stream(spans).map(Candidate::of).toList();
     }
 
     @Test
-    void aFencedReplyParses() {
-        var proposal = MentionProposer.parseReply(TEXT, "```json\n{\"mentions\":[\"Dana Reyes\"]}\n```");
-        assertEquals(List.of("Dana Reyes"), proposal.mentions());
+    void theOperatorIsWrittenAsAPersonWithoutATypingQuestion() {
+        var text = "The user works at Harborlight Analytics.";
+        var run = run(text, CandidateGenerator.generate(text), scripted(Map.of(
+                "Harborlight Analytics", "Organization",
+                "The user -> Harborlight Analytics", "works_at"), Map.of()));
+
+        assertEquals(2, requests.size());
+        var typing = requests.getFirst().getAsJsonObject("questions");
+        assertEquals(Set.of("m0"), typing.keySet(), "only the non-operator candidate is typed");
+        assertFalse(typing.toString().contains("The user"), typing.toString());
+
+        var operator = run.decisions().getFirst();
+        assertTrue(operator.operator());
+        assertEquals("Person", operator.choice());
+        assertEquals(1.0, operator.confidence(), 1e-9);
+        var works = run.decisions().getLast();
+        assertEquals(ExtractionPipeline.RELATION, works.stage());
+        assertEquals("The user", works.from());
+        assertEquals("works_at", works.choice());
+        assertTrue(works.writes(0.9));
     }
 
     @Test
-    void aMalformedProposerReplyIsAFailureAndAsksNothing() {
-        for (var reply : new String[] {"not json", "", "[\"Dana Reyes\"]", "{\"names\":[]}", "{\"mentions\":[1]}"}) {
-            var proposal = MentionProposer.parseReply(TEXT, reply);
-            assertNotNull(proposal.failure(), "a failure, never an empty list: " + reply);
-            var run = run(TEXT, proposal, scripted(Map.of(), Map.of()));
-            assertEquals(proposal.failure(), run.proposerFailure());
-            assertEquals(List.of(), run.decisions());
-        }
-        assertEquals(List.of(), requests, "no decision asked");
-        assertNull(MentionProposer.parseReply(TEXT, "{\"mentions\":[]}").failure(), "an empty list is an answer");
+    void anImplicitOperatorIsAskedAboutAsTheUser() {
+        var text = "Works at Harborlight Analytics.";
+        var candidates = CandidateGenerator.generate(text);
+        assertTrue(candidates.getFirst().implicit(), candidates.toString());
+        var run = run(text, candidates, scripted(Map.of(
+                "Harborlight Analytics", "Organization",
+                "the user -> Harborlight Analytics", "works_at"), Map.of()));
+        assertEquals("works_at", run.decisions().getLast().choice());
+        assertEquals("the user", run.decisions().getLast().from());
     }
 
     @Test
-    void bothStagesAskOneRequestEachAndOfferOnlyAllowedRelations() {
-        var run = run(TEXT, proposal("Dana Reyes", "Harborlight Analytics"), scripted(Map.of(
+    void everyAllowedOrderedPairIsAskedAndOnlyAllowedRelationsOffered() {
+        var run = run(TEXT, spans("Dana Reyes", "Harborlight Analytics"), scripted(Map.of(
                 "Dana Reyes", "Person",
                 "Harborlight Analytics", "Organization",
                 "Dana Reyes -> Harborlight Analytics", "works_at"), Map.of()));
@@ -134,60 +134,54 @@ class ExtractionPipelineTest extends UnitTest {
         var options = relation.getAsJsonObject("questions").getAsJsonObject("p0").getAsJsonObject("criteria").keySet();
         assertTrue(options.contains("works_at") && options.contains(ExtractionPipeline.NONE), options.toString());
         assertFalse(options.contains("family_of"), options.toString());
-
-        var written = run.decisions().stream().filter(d -> d.outcome().equals(ExtractionPipeline.WRITTEN)).toList();
-        assertEquals(3, written.size());
-        var works = written.getLast();
-        assertEquals(ExtractionPipeline.RELATION, works.stage());
-        assertEquals("works_at", works.choice());
-        assertEquals(0.9, works.confidence(), 1e-9);
+        assertEquals(1, run.prunedPairs(), "Organization -> Person has no allowed relation");
+        assertEquals(3, run.decisions().stream().filter(d -> d.writes(0.5)).count());
     }
 
     @Test
     void aPairWithNoAllowedRelationIsPrunedUnasked() {
         var text = "Felix Amari loves jazz in Lake Verrin.";
-        var run = run(text, proposal("Lake Verrin", "jazz"),
+        var run = run(text, spans("Lake Verrin", "jazz"),
                 scripted(Map.of("Lake Verrin", "Place", "jazz", "Topic"), Map.of()));
         assertEquals(2, run.prunedPairs(), "both directions");
         assertEquals(1, requests.size(), "the term request only");
     }
 
     @Test
-    void aRelationOnAnUnsureEndpointIsAskedButNotWritten() {
-        var run = run(TEXT, proposal("Dana Reyes", "Harborlight Analytics"), scripted(Map.of(
+    void aRejectedCandidateIsNeverRelatedAndALowConfidenceIsNotWritten() {
+        var run = run(TEXT, spans("Dana Reyes", "Harborlight Analytics"), scripted(Map.of(
                 "Dana Reyes", "Person",
-                "Harborlight Analytics", "Organization",
-                "Dana Reyes -> Harborlight Analytics", "works_at"), Map.of("Harborlight Analytics", 0.4)));
-        var outcomes = run.decisions().stream().map(Decision::outcome).toList();
-        // Organization -> Person has no allowed relation, so only one pair is asked.
-        assertEquals(List.of(ExtractionPipeline.WRITTEN, ExtractionPipeline.ABSTAINED,
-                ExtractionPipeline.ENDPOINT_ABSTAINED), outcomes);
-        assertEquals(1, run.prunedPairs());
+                "Harborlight Analytics", ExtractionPipeline.NOT_AN_ENTITY), Map.of("Dana Reyes", 0.4)));
+        assertEquals(1, requests.size(), "one typed term leaves no pair");
+        var dana = run.decisions().getFirst();
+        assertFalse(dana.writes(0.5));
+        assertTrue(dana.writes(0.4));
+        assertFalse(run.decisions().getLast().writes(0.0), "not_an_entity is never written");
     }
 
     @Test
     void aDecisionErrorFailsEveryQuestionInItsRequest() {
         Decider refusing = _ -> {
-            throw new JevException("Jev returned HTTP 400");
+            throw new JevException("Ollama returned HTTP 400");
         };
-        var run = run(TEXT, proposal("Dana Reyes", "Harborlight Analytics"), refusing);
+        var run = run(TEXT, spans("Dana Reyes", "Harborlight Analytics"), refusing);
         assertEquals(2, run.decisions().size());
         run.decisions().forEach(d -> {
             assertTrue(d.failed());
-            assertEquals("Jev returned HTTP 400", d.detail());
+            assertEquals("Ollama returned HTTP 400", d.failure());
         });
 
         Decider broken = _ -> {
             throw new IllegalStateException("secret detail");
         };
-        var other = run(TEXT, proposal("Dana Reyes"), broken).decisions().getFirst();
-        assertEquals("IllegalStateException", other.detail(), "only the type, never the message");
+        var other = run(TEXT, spans("Dana Reyes"), broken).decisions().getFirst();
+        assertEquals("IllegalStateException", other.failure(), "only the type, never the message");
     }
 
     @Test
     void anInvalidAnswerIsAFailure() {
         Decider missing = _ -> new JsonObject();
-        assertEquals(JevApi.INVALID, run(TEXT, proposal("Dana Reyes"), missing).decisions().getFirst().detail());
+        assertEquals(JevApi.INVALID, run(TEXT, spans("Dana Reyes"), missing).decisions().getFirst().failure());
 
         Decider unknownChoice = request -> {
             var answers = new JsonObject();
@@ -196,50 +190,10 @@ class ExtractionPipelineTest extends UnitTest {
             response.add("answers", answers);
             return response;
         };
-        var d = run(TEXT, proposal("Dana Reyes"), unknownChoice).decisions().getFirst();
+        var d = run(TEXT, spans("Dana Reyes"), unknownChoice).decisions().getFirst();
         assertTrue(d.failed());
-        assertEquals(JevApi.INVALID, d.detail());
+        assertEquals(JevApi.INVALID, d.failure());
         assertNull(d.choice());
-    }
-
-    @Test
-    void theJevDeciderSpeaksTheRealWireThroughJevApi() {
-        JevBreakerTestSync.acquire();
-        try {
-            var sent = new CopyOnWriteArrayList<Request>();
-            var bodies = new CopyOnWriteArrayList<JsonObject>();
-            Interceptor jev = chain -> {
-                var buffer = new Buffer();
-                chain.request().body().writeTo(buffer);
-                sent.add(chain.request());
-                var body = JsonParser.parseString(buffer.readUtf8()).getAsJsonObject();
-                bodies.add(body);
-                var answers = new JsonObject();
-                for (var q : body.getAsJsonObject("questions").entrySet()) {
-                    var ids = q.getValue().getAsJsonObject().getAsJsonObject("criteria").keySet();
-                    answers.add(q.getKey(), answer(ids, q.getKey().startsWith("m") ? "Person" : "none", 0.8));
-                }
-                var result = new JsonObject();
-                result.add("answers", answers);
-                return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200)
-                        .message("canned").body(ResponseBody.create(result.toString(),
-                                MediaType.get("application/json"))).build();
-            };
-            var client = new OkHttpClient.Builder().addInterceptor(jev).build();
-            var run = HttpFactories.callWith(client, () -> run(TEXT, proposal("Dana Reyes"),
-                    Decider.jev("graphspike-test-key", 5_000)));
-
-            assertEquals(1, sent.size());
-            assertEquals("Bearer graphspike-test-key", sent.getFirst().header("Authorization"));
-            var question = bodies.getFirst().getAsJsonObject("questions").getAsJsonObject("m0");
-            assertEquals("choice", question.get("type").getAsString());
-            assertEquals(SCHEMA.termTypes().size() + 1, question.getAsJsonObject("criteria").size());
-            var decision = run.decisions().getFirst();
-            assertEquals(ExtractionPipeline.WRITTEN, decision.outcome());
-            assertEquals("Person", decision.choice());
-        } finally {
-            JevBreakerTestSync.release();
-        }
     }
 
     @Test
@@ -282,20 +236,20 @@ class ExtractionPipelineTest extends UnitTest {
             };
             var client = new OkHttpClient.Builder().addInterceptor(ollama).build();
 
-            var answered = HttpFactories.callWith(client, () -> run(TEXT, proposal("Dana Reyes"),
+            var answered = HttpFactories.callWith(client, () -> run(TEXT, spans("Dana Reyes"),
                     Decider.ollama(base, "tev1", 5_000)));
-            assertEquals(ExtractionPipeline.WRITTEN, answered.decisions().getFirst().outcome());
+            assertEquals("Person", answered.decisions().getFirst().choice());
             assertTrue(sent.getFirst().url().toString().startsWith(base + "/"), sent.getFirst().url().toString());
             assertEquals("tev1", bodies.getFirst().get("model").getAsString());
             assertTrue(bodies.getFirst().has("keep_alive"), bodies.getFirst().toString());
             assertTrue(sent.stream().noneMatch(r -> r.url().encodedPath().equals("/api/generate")), "no pin while it answers");
 
             hang.set(true);
-            var timedOut = HttpFactories.callWith(client, () -> run(TEXT, proposal("Dana Reyes"),
+            var timedOut = HttpFactories.callWith(client, () -> run(TEXT, spans("Dana Reyes"),
                     Decider.ollama(base, "tev1", 1_000)));
             var failed = timedOut.decisions().getFirst();
             assertTrue(failed.failed());
-            assertTrue(failed.detail().contains("did not answer"), failed.detail());
+            assertTrue(failed.failure().contains("did not answer"), failed.failure());
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while (sent.stream().noneMatch(r -> r.url().encodedPath().equals("/api/generate"))
                     && System.nanoTime() < deadline) {

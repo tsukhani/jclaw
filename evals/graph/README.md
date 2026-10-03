@@ -1,62 +1,146 @@
-# Graph-extraction cases (JCLAW-1344)
+# Graph-extraction cases (JCLAW-1356)
 
-`cases.json` is the labelled set the graph-extraction spike runs through every proposer x
-decision-model pairing (`POST /api/graph/spike`, `./jclaw.sh graphspike`). It is not an
-`evals/suites/` dataset: those are offline and agent-turn shaped, while this one needs live
-chat and decision providers.
+`cases.json` is the labelled set that certifies a local Ollama decision model for graph
+extraction (`POST /api/graph/spike`, `./jclaw.sh graphspike run`). It is not an
+`evals/suites/` dataset: those are offline and agent-turn shaped, while this one needs a
+live decision provider. `GUIDE.md` is how to label; this file is the format and the scoring.
+
+Only local Ollama models are measured, through `Decider.ollama`; the default list is the
+models selected in Settings. A hosted model such as `jev-latest` is refused with a 400.
 
 ## Format
 
 ```json
 {"cases": [
-  {"id": "rel-works-at",
-   "text": "Dana Reyes works at Harborlight Analytics as a data engineer.",
-   "entities": [{"mention": "Dana Reyes", "type": "Person"},
-                {"mention": "Harborlight Analytics", "type": "Organization"}],
-   "relations": [{"from": "Dana Reyes", "type": "works_at", "to": "Harborlight Analytics"}]}
+  {"id": "c042", "tags": ["role", "employer-tool"],
+   "text": "The user is a data engineer at Harborlight Analytics, which runs Kestrel CI, the team's deployment platform, every Tuesday.",
+   "entities": [{"id": "operator", "mention": "The user", "type": "Person"},
+                {"id": "harborlight", "mention": "Harborlight Analytics", "type": "Organization"},
+                {"id": "kestrel-ci", "mention": "Kestrel CI", "type": "System",
+                 "aliases": ["the team's deployment platform"]}],
+   "relations": [{"from": "operator", "type": "works_at", "to": "harborlight"},
+                 {"from": "harborlight", "type": "uses", "to": "kestrel-ci"}],
+   "negatives": ["data engineer", "Tuesday"]}
 ]}
 ```
 
-- `id` is unique; `text` is stored verbatim as one memory of the requested agent for the run
-  and deleted afterwards.
-- Every `mention` appears verbatim in `text`, at most once per case, and its `type` is one of
-  the seed ontology's term types (`memory.ontology.OntologySchema`).
-- A relation's `from` and `to` are labelled mentions, and the schema allows its `type` between
-  their labelled types.
-- `entities` lists everything worth a graph node and nothing else: a case with only generic
-  nouns ("coffee", "the meeting") has its named terms labelled and the distractors left out,
-  and a case with no entity has an empty list.
+- `id` is unique. `text` is stored verbatim as one memory of the requested agent for the run,
+  snapshotted, checked and deleted afterwards.
+- Every case has exactly one `operator` entity. A text that never says "the user" opens with
+  a subjectless verb ("Prefers ...") and its operator is `{"id": "operator", "type": "Person",
+  "implicit": true}`, with no mention.
+- Every `mention` and alias appears verbatim in `text`. Its `type` is one of the seed
+  ontology's term types (`conf/ontology/seed-schema.yaml`), and an entity id keeps one type
+  across every case it appears in.
+- A relation's `from` and `to` are entity ids of the same case, and the schema allows its
+  `type` between their types. At most one relation per ordered pair.
+- `negatives` are spans that must not become terms; none may be a labelled mention or alias.
+- An entity or relation that is true but not worth a graph record carries `"noise": true`.
+- `tags` are from `weekday-time`, `role`, `everyday-object`, `descriptive-phrase`,
+  `reversed-direction`, `employer-tool` (the hard negatives) and `plain`.
 
-`services.graphspike.GraphCases` refuses a set that breaks any of these, naming the case, and
-`GraphCasesConformanceTest` fails the build on it.
+`services.graphspike.GraphCases` refuses a set that breaks any of these, naming the case.
+`GraphCasesConformanceTest` fails the build on a refusal or on a missed composition target:
+at least 120 cases, at least 85% beginning "The user" and the rest subjectless, a mean
+length of 17-23 words, at least 12 cases per hard-negative tag and at least half carrying
+one, at least 420 non-noise gold records, every term type and relation used, and entity ids
+recurring across cases.
+
+## Pipeline
+
+Candidates come from fixed rules, not a model (`CandidateGenerator`): the operator,
+capitalized runs, URLs, file paths, ticket keys and the object of a stated preference. The
+decision model types each candidate (or answers `not_an_entity`) and is asked about
+relations between the typed terms, over every relation the schema allows. Mentions are
+clustered by `ExactMatchResolver` (case-folded, a leading "the" and a possessive stripped).
 
 ## Scoring
 
-Every written record is checked against its case's labels:
+**Stages**, each with gold swapped in for the stages before it, so a stage's score is its own:
 
-- **match** — a term whose mention is no labelled entity is wrong.
-- **type** — a matched term typed differently from its label is wrong.
-- **relation** — a relation is wrong when its `(from, type, to)` triple is not labelled, or
-  either endpoint term is wrong. `same_as` and `family_of` are symmetric and match a label in
-  either direction; every other relation matches only as labelled. Both directions of a
-  symmetric relation are asked, but writing it both ways is one record, not two.
+- candidate recall: gold mentions (or an alias) among the generated candidates;
+- typing: gold spans typed as labelled; rejection: negatives answered `not_an_entity`;
+- relation: gold relations found between gold terms; no-relation: unlabelled pairs left empty;
+- resolution: B-cubed and pairwise precision and recall, and false merges, over gold mentions.
 
-At a threshold t a decision is written only when its choice's probability is at least t; a
-relation additionally needs both endpoint terms written at t. `not_an_entity` and `none` write
-nothing. Below t the decision is an abstention; an error or invalid answer is a failure,
-reported separately.
+**End to end**, strictly. At a threshold t a decision is written only when its probability
+is at least t; a relation also needs both endpoint terms written at t. Each written record
+is right, noise or wrong:
 
-- wrong share = wrong written records / written records
-- abstention rate = abstentions / decisions asked
-- missed labels = labelled entities and relations not written correctly
+- **match** — the span is no labelled mention or alias (a partial span is wrong);
+- **type** — a matched span typed differently from its label;
+- **duplicate** — a second record for an entity already written, such as its alias;
+- **relation** — a relation whose triple is not labelled. `same_as` and `family_of` match
+  either direction, and written both ways are one record.
 
-A decision model is allowed at t only when every proposer's pairing with it wrote at least one
-record and is at most 5% wrong (exactly 5% passes). The report gives the gate at the requested
-threshold (default 0.50), the curve at 0.30 to 0.95 by 0.05, and each model's lowest allowed
-threshold. Any case memory changed by the run empties the allow-list.
+A record labelled noise counts in neither the wrong count nor the denominator:
+
+- wrong share = wrong / (written - noise)
+- recall = right / non-noise gold records
+
+The grid scores every threshold from 0.95 to 0.50 by 0.05.
+
+## Certification
+
+At each threshold the one-sided 95% Clopper-Pearson upper bound on the wrong share must be at
+most 5%: with no wrong record that takes 59 written, with one 93, two 124, three 153, five
+208. Recall must also meet the floor (default 0.50). The walk runs from 0.95 down and stops
+at the first threshold that fails; the model certifies at the lowest threshold reached. So a
+model whose recall at 0.95 is under the floor certifies at nothing, by design.
+
+Certification needs two runs, the default; with `--runs 1` the report is information only and
+reads `certification needs two runs`. The certified threshold is the higher of the runs, and a
+run that certifies nowhere fails the model with `run N did not certify` (for run 2, `second run
+did not certify`). Then, in order:
+
+1. any case memory changed by the run → `not-certified`;
+2. any record adjudicated `label-error` → `not-certified`, `labels need fixing`;
+3. second labels missing or short of the blind subset → `pending-agreement`;
+4. a wrong record at the certified threshold with no `wrong` verdict → `pending-adjudication`;
+5. otherwise `certified`, with the noise rate at that threshold.
+
+The report lists the wrong records at the certified threshold (at 0.50 when nothing
+certified). A written set only grows as t falls, so adjudicating those covers every
+threshold above it.
+
+## Second labels and adjudications
+
+`./jclaw.sh graphspike blind-sheet` writes `data/graph-eval/blind-sheet.json`: the ids and
+text of the blind subset, ceil(15%) of the cases chosen by SHA-256 of `"jclaw-1356:" + id`.
+A second labeller works from that sheet and `GUIDE.md` alone and commits
+`evals/graph/second-labels.json` in the same format as `cases.json`. The report gives entity
+F1, Cohen's kappa on matched entity types and relation F1.
+
+`evals/graph/adjudications.json` records verdicts on the report's wrong records:
+
+```json
+[{"caseId": "c042", "record": "term:Kestrel:System", "verdict": "wrong", "note": "partial span"},
+ {"caseId": "c017", "record": "rel:The user:uses:Fenwick", "verdict": "label-error", "note": "missing alias"}]
+```
+
+`record` is the report's stable key, `term:<span>:<type>` or `rel:<from>:<type>:<to>`.
+`wrong` confirms the model erred; `label-error` says the label did, and blocks
+certification until `cases.json` is fixed.
+
+## Held-out set
+
+The held-out set measures a model on real memories and runs only on the operator's Mac. Its
+files live under `data/graph-eval/`, which is gitignored, and never leave that machine.
+
+1. `./jclaw.sh graphspike heldout-sample --agent NAME --count 100 [--seed S]` reads that
+   many of the agent's active memories, read-only, into `data/graph-eval/heldout.json`,
+   each with `labelled: false` and its generated candidates. It refuses to overwrite an
+   existing file.
+2. Label each case in place under `GUIDE.md` (tags optional) and set `labelled: true`.
+3. `./jclaw.sh graphspike run --agent NAME --set heldout` reads the memories where they live:
+   nothing is stored, edited or deleted, and the report checks every row is unchanged and
+   still present. Unlabelled cases are skipped and counted.
+
+The held-out report carries aggregate counts only: no memory id, text, span or per-case
+result. Its walk is information; only the committed set certifies.
 
 ## Synthetic only
 
-The GitHub mirror is public. Every name, organization, place and file here is invented; URLs
-use `example.com`. Never add a real person, company or customer detail, and never copy text
-from a real memory.
+The GitHub mirror is public. Every name, organization, place and file in `evals/graph/` is
+invented; URLs use `example.com`. Never add a real person, company or customer detail, and
+never copy text from a real memory.
