@@ -16,6 +16,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
+import memory.graph.GraphLifecycle;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
@@ -173,6 +174,7 @@ public class Memory extends Model {
         supersededAt = AppClock.now();
         supersededById = newerId;
         save();
+        if (id != null && agent != null) GraphLifecycle.withdrawAfterCommit(agent.id, id);
     }
 
     // Deliberately NOT on TimestampedModel: these callbacks also clamp the importance
@@ -346,6 +348,7 @@ public class Memory extends Model {
             }
         }
         delete();
+        if (id != null && agent != null) GraphLifecycle.withdrawAfterCommit(agent.id, id);
     }
 
     /**

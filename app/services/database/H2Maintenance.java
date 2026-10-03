@@ -14,6 +14,8 @@ import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
@@ -23,12 +25,14 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -36,6 +40,7 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipException;
 import java.util.zip.ZipFile;
 import java.util.zip.ZipInputStream;
+import java.util.zip.ZipOutputStream;
 
 /**
  * The H2 file-database maintenance engine (JCLAW-1165): backup, restore, repair and the
@@ -57,6 +62,12 @@ public final class H2Maintenance {
     public static final String LOCK_FILE = DB_NAME + ".lock.db";
     /** The file a restore displaces, kept until the next successful backup. */
     public static final String PRE_RESTORE_FILE = DATA_FILE + ".pre-restore";
+    /** The memory graph's directory under {@code data/}, and its prefix inside a backup zip. */
+    public static final String GRAPH_DIR = "memory-graph";
+    /** The graph a restore displaces, kept until the next successful backup. */
+    public static final String GRAPH_PRE_RESTORE_DIR = GRAPH_DIR + ".pre-restore";
+    static final String GRAPH_RESTORING_DIR = GRAPH_DIR + ".restoring";
+    private static final Pattern AGENT_DIR = Pattern.compile("\\d+");
     static final String MANIFEST_PREFIX = "repair-";
     static final String MANIFEST_SUFFIX = ".json";
     /** Every MVStore file starts with this; the check that a zip entry is a database. */
@@ -141,8 +152,66 @@ public final class H2Maintenance {
     }
 
     /** Backup of a closed database: the same zip {@code BACKUP TO} writes, from the file. */
-    public static void backupOffline(Path dataDir, Path zip) throws SQLException {
+    public static void backupOffline(Path dataDir, Path zip) throws SQLException, IOException {
         Backup.execute(zip.toAbsolutePath().toString(), dataDir.toAbsolutePath().toString(), DB_NAME, true);
+        appendGraph(zip, dataDir);
+    }
+
+    /**
+     * Add {@code dataDir}'s memory graph to {@code zip} as {@code memory-graph/<agentId>/<file>}
+     * entries in sorted order, rewriting the zip through a sibling and an atomic move. Only
+     * all-digit agent directories are taken, so a swap's {@code .staging} or {@code .previous}
+     * never reaches a backup. A missing graph leaves the zip as it was.
+     */
+    public static void appendGraph(Path zip, Path dataDir) throws IOException {
+        var graphRoot = dataDir.resolve(GRAPH_DIR);
+        var files = new TreeMap<String, Path>();
+        if (Files.isDirectory(graphRoot)) {
+            try (var agents = Files.list(graphRoot)) {
+                for (var agentDir : agents.toList()) {
+                    var agent = agentDir.getFileName().toString();
+                    if (!AGENT_DIR.matcher(agent).matches() || !Files.isDirectory(agentDir)) continue;
+                    try (var inside = Files.list(agentDir)) {
+                        for (var file : inside.toList()) {
+                            if (Files.isRegularFile(file)) {
+                                files.put(GRAPH_DIR + "/" + agent + "/" + file.getFileName(), file);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if (files.isEmpty()) {
+            return;
+        }
+        var tmp = zip.resolveSibling(zip.getFileName() + ".tmp");
+        try {
+            try (var archive = new ZipFile(zip.toFile());
+                 var out = new ZipOutputStream(Files.newOutputStream(tmp))) {
+                var entries = archive.entries();
+                while (entries.hasMoreElements()) {
+                    var entry = entries.nextElement();
+                    if (entry.getName().startsWith(GRAPH_DIR + "/")) continue;
+                    var copy = new ZipEntry(entry.getName());
+                    copy.setTime(entry.getTime());
+                    out.putNextEntry(copy);
+                    try (var in = archive.getInputStream(entry)) {
+                        in.transferTo(out);
+                    }
+                    out.closeEntry();
+                }
+                for (var e : files.entrySet()) {
+                    var entry = new ZipEntry(e.getKey());
+                    entry.setLastModifiedTime(Files.getLastModifiedTime(e.getValue()));
+                    out.putNextEntry(entry);
+                    Files.copy(e.getValue(), out);
+                    out.closeEntry();
+                }
+            }
+            Files.move(tmp, zip, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
     }
 
     /** A zip holding one {@value #DATA_FILE} entry that starts like an MVStore file. */
@@ -154,6 +223,14 @@ public final class H2Maintenance {
             var entry = databaseEntry(archive);
             if (entry == null) {
                 return new BackupCheck(false, "no " + DATA_FILE + " inside the archive", 0);
+            }
+            var entries = archive.entries();
+            while (entries.hasMoreElements()) {
+                var name = entries.nextElement().getName();
+                var relative = name.startsWith(GRAPH_DIR + "/") ? name.substring(GRAPH_DIR.length() + 1) : "";
+                if (!relative.isEmpty() && unsafeGraphEntry(relative)) {
+                    return new BackupCheck(false, "unsafe graph entry in the archive: " + name, 0);
+                }
             }
             try (var in = archive.getInputStream(entry)) {
                 var head = in.readNBytes(MVSTORE_MAGIC.length());
@@ -218,6 +295,7 @@ public final class H2Maintenance {
         }
         var target = dataDir.resolve(DATA_FILE);
         var staging = dataDir.resolve(DATA_FILE + ".restoring");
+        var graphStaging = extractGraph(zip, dataDir);
         try (var in = new ZipInputStream(Files.newInputStream(zip))) {
             ZipEntry entry;
             var found = false;
@@ -231,6 +309,9 @@ public final class H2Maintenance {
             if (!found) {
                 throw new IllegalArgumentException("no " + DATA_FILE + " inside the archive");
             }
+        } catch (IOException | RuntimeException e) {
+            deleteTree(graphStaging);
+            throw e;
         }
         String displaced = null;
         if (Files.exists(target)) {
@@ -239,7 +320,79 @@ public final class H2Maintenance {
         }
         Files.move(staging, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         Files.deleteIfExists(dataDir.resolve(LOCK_FILE));
+        var graph = dataDir.resolve(GRAPH_DIR);
+        if (Files.exists(graph)) {
+            var displacedGraph = dataDir.resolve(GRAPH_PRE_RESTORE_DIR);
+            deleteTree(displacedGraph);
+            Files.move(graph, displacedGraph);
+        }
+        Files.move(graphStaging, graph, StandardCopyOption.ATOMIC_MOVE);
         return new RestoreResult(Files.size(target), displaced);
+    }
+
+    /**
+     * Extract the archive's {@code memory-graph/**} entries to {@value #GRAPH_RESTORING_DIR},
+     * refusing an entry that names a path outside it. An archive with none yields an empty
+     * directory, which is the graph that backup had.
+     *
+     * @throws IllegalArgumentException on a {@code ..} segment or an absolute name, with nothing left on disk
+     */
+    static Path extractGraph(Path zip, Path dataDir) throws IOException {
+        var staging = dataDir.resolve(GRAPH_RESTORING_DIR);
+        deleteTree(staging);
+        Files.createDirectories(staging);
+        var base = staging.toAbsolutePath().normalize();
+        try (var in = new ZipInputStream(Files.newInputStream(zip))) {
+            ZipEntry entry;
+            while ((entry = in.getNextEntry()) != null) {
+                var name = entry.getName();
+                if (!name.startsWith(GRAPH_DIR + "/")) continue;
+                var relative = name.substring(GRAPH_DIR.length() + 1);
+                if (relative.isEmpty()) continue;
+                if (unsafeGraphEntry(relative)) {
+                    throw new IllegalArgumentException("unsafe graph entry in the archive: " + name);
+                }
+                var dest = base.resolve(relative).normalize();
+                if (entry.isDirectory()) {
+                    Files.createDirectories(dest);
+                    continue;
+                }
+                var parent = dest.getParent();
+                if (parent != null) Files.createDirectories(parent);
+                Files.copy(in, dest, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException | RuntimeException e) {
+            deleteTree(staging);
+            throw e;
+        }
+        return staging;
+    }
+
+    /** True when a {@code memory-graph/}-relative entry name could land outside the graph directory. */
+    private static boolean unsafeGraphEntry(String relative) {
+        for (var segment : relative.split("/", -1)) {
+            if (segment.equals("..") || segment.contains("\\")) return true;
+        }
+        try {
+            if (relative.startsWith("/") || Path.of(relative).isAbsolute()) return true;
+            var base = Path.of(GRAPH_DIR);
+            var dest = base.resolve(relative).normalize();
+            return !dest.startsWith(base) || dest.equals(base);
+        } catch (InvalidPathException _) {
+            return true;
+        }
+    }
+
+    /** Delete {@code dir} and everything under it; a no-op when it does not exist. */
+    public static void deleteTree(Path dir) throws IOException {
+        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) {
+            return;
+        }
+        try (var walk = Files.walk(dir)) {
+            for (var p : walk.sorted(Comparator.reverseOrder()).toList()) {
+                Files.delete(p);
+            }
+        }
     }
 
     // ---- repair ----

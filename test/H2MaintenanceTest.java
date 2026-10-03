@@ -191,6 +191,157 @@ class H2MaintenanceTest extends UnitTest {
         assertEquals(beforeSha, H2Maintenance.sha256(dataFile(dir)));
     }
 
+    // ---- the memory graph beside the database ----
+
+    private static List<String> zipNames(Path zip) throws Exception {
+        try (var z = new java.util.zip.ZipFile(zip.toFile())) {
+            return z.stream().map(ZipEntry::getName).toList();
+        }
+    }
+
+    private static void graphFile(Path dataDir, String rel, String content) throws Exception {
+        var file = dataDir.resolve(H2Maintenance.GRAPH_DIR).resolve(rel);
+        Files.createDirectories(file.getParent());
+        Files.writeString(file, content);
+    }
+
+    @Test
+    void aBackupCarriesEachAgentsGraphFilesAndNothingElseFromTheGraphRoot() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 5);
+        graphFile(dir, "12/term.jsonl", "{\"id\":\"t\"}\n");
+        graphFile(dir, "12/evidence.jsonl", "{\"id\":\"e\"}\n");
+        graphFile(dir, "3/term.jsonl", "{\"id\":\"t3\"}\n");
+        graphFile(dir, "3.staging/term.jsonl", "half-written");
+        graphFile(dir, "notes/term.jsonl", "not an agent");
+
+        var zip = tmp.resolve("b.zip");
+        H2Maintenance.backupOffline(dir, zip);
+
+        assertEquals(List.of(H2Maintenance.DATA_FILE, "memory-graph/12/evidence.jsonl",
+                "memory-graph/12/term.jsonl", "memory-graph/3/term.jsonl"), zipNames(zip));
+        assertTrue(H2Maintenance.validateBackup(zip).ok());
+    }
+
+    @Test
+    void aBackupWithNoGraphIsTheDatabaseAlone() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 5);
+        var zip = tmp.resolve("b.zip");
+        H2Maintenance.backupOffline(dir, zip);
+        assertEquals(List.of(H2Maintenance.DATA_FILE), zipNames(zip));
+        assertTrue(H2Maintenance.validateBackup(zip).ok());
+    }
+
+    @Test
+    void restoreBringsBackTheGraphAndKeepsTheDisplacedOne() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 5);
+        graphFile(dir, "4/term.jsonl", "backed up\n");
+        var zip = tmp.resolve("b.zip");
+        H2Maintenance.backupOffline(dir, zip);
+        Files.writeString(dir.resolve("memory-graph/4/term.jsonl"), "after the backup\n");
+        graphFile(dir, "9/term.jsonl", "only live\n");
+
+        H2Maintenance.restore(zip, dir);
+
+        var graph = dir.resolve(H2Maintenance.GRAPH_DIR);
+        assertEquals("backed up\n", Files.readString(graph.resolve("4/term.jsonl")));
+        assertFalse(Files.exists(graph.resolve("9")), "the restored graph is the backup's alone");
+        var displaced = dir.resolve(H2Maintenance.GRAPH_PRE_RESTORE_DIR);
+        assertEquals("after the backup\n", Files.readString(displaced.resolve("4/term.jsonl")));
+        assertEquals("only live\n", Files.readString(displaced.resolve("9/term.jsonl")));
+        assertEquals(5, count(dir, "note"));
+    }
+
+    @Test
+    void anArchiveWithNoGraphRestoresAnEmptyGraph() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 5);
+        var zip = tmp.resolve("b.zip");
+        H2Maintenance.backupOffline(dir, zip);
+        graphFile(dir, "4/term.jsonl", "after the backup\n");
+
+        H2Maintenance.restore(zip, dir);
+
+        assertEquals(List.of(), names(dir.resolve(H2Maintenance.GRAPH_DIR)));
+        assertTrue(Files.exists(dir.resolve(H2Maintenance.GRAPH_PRE_RESTORE_DIR).resolve("4/term.jsonl")));
+    }
+
+    @Test
+    void aGraphEntryThatEscapesTheGraphIsRefusedAndNothingOnDiskChanges() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 5);
+        var good = tmp.resolve("good.zip");
+        H2Maintenance.backupOffline(dir, good);
+        var evil = tmp.resolve("evil.zip");
+        try (var in = new java.util.zip.ZipFile(good.toFile());
+             var out = new ZipOutputStream(Files.newOutputStream(evil))) {
+            var db = in.getEntry(H2Maintenance.DATA_FILE);
+            out.putNextEntry(new ZipEntry(H2Maintenance.DATA_FILE));
+            try (var s = in.getInputStream(db)) {
+                s.transferTo(out);
+            }
+            out.closeEntry();
+            out.putNextEntry(new ZipEntry("memory-graph/../x"));
+            out.write("escaped".getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+        var beforeSha = H2Maintenance.sha256(dataFile(dir));
+        var beforeNames = names(dir);
+
+        assertFalse(H2Maintenance.validateBackup(evil).ok(), "refused before the instance would stop");
+        assertThrows(IllegalArgumentException.class, () -> H2Maintenance.restore(evil, dir));
+
+        assertEquals(beforeNames, names(dir));
+        assertEquals(beforeSha, H2Maintenance.sha256(dataFile(dir)));
+        assertFalse(Files.exists(dir.resolve("x")));
+    }
+
+    /** The database from {@code good} plus one graph entry named {@code name}. */
+    private Path withGraphEntry(Path good, String name) throws Exception {
+        var zip = tmp.resolve("extra-" + System.nanoTime() + ".zip");
+        try (var in = new java.util.zip.ZipFile(good.toFile());
+             var out = new ZipOutputStream(Files.newOutputStream(zip))) {
+            out.putNextEntry(new ZipEntry(H2Maintenance.DATA_FILE));
+            try (var s = in.getInputStream(in.getEntry(H2Maintenance.DATA_FILE))) {
+                s.transferTo(out);
+            }
+            out.closeEntry();
+            out.putNextEntry(new ZipEntry(name));
+            out.write("x\n".getBytes(StandardCharsets.UTF_8));
+            out.closeEntry();
+        }
+        return zip;
+    }
+
+    @Test
+    void aGraphEntryNameThatIsNoPathIsRefusedRatherThanThrown() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 5);
+        var good = tmp.resolve("good.zip");
+        H2Maintenance.backupOffline(dir, good);
+
+        var check = H2Maintenance.validateBackup(withGraphEntry(good, "memory-graph/4/a\0b.jsonl"));
+
+        assertFalse(check.ok());
+        assertTrue(check.reason().startsWith("unsafe graph entry"), check.reason());
+    }
+
+    @Test
+    void aDotDotInsideAGraphFileNameIsNoEscapeAndRestores() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 5);
+        var good = tmp.resolve("good.zip");
+        H2Maintenance.backupOffline(dir, good);
+        var zip = withGraphEntry(good, "memory-graph/4/notes..jsonl");
+
+        assertTrue(H2Maintenance.validateBackup(zip).ok());
+        H2Maintenance.restore(zip, dir);
+
+        assertEquals("x\n", Files.readString(dir.resolve(H2Maintenance.GRAPH_DIR).resolve("4/notes..jsonl")));
+    }
+
     // ---- repair ----
 
     @Test

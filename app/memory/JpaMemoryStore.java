@@ -4,6 +4,7 @@ import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import llm.LlmProvider;
 import llm.ProviderRegistry;
+import memory.graph.GraphLifecycle;
 import models.Agent;
 import models.Memory;
 import models.MemoryDerivation;
@@ -490,6 +491,7 @@ public class JpaMemoryStore implements MemoryStore {
         // scope whose docCount() is 0. Same afterCompletion shape as
         // ConfigService.scheduleRollbackEviction.
         evictAfterCommit(pk);
+        GraphLifecycle.withdrawAllAfterCommit(pk);
         return deleted;
     }
 

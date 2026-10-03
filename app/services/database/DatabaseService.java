@@ -2,6 +2,7 @@ package services.database;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import memory.graph.GraphStore;
 import org.hibernate.JDBCException;
 import org.hibernate.Session;
 import org.jspecify.annotations.Nullable;
@@ -174,13 +175,27 @@ public final class DatabaseService {
     public static BackupInfo backupNow() throws SQLException, IOException {
         var dir = Files.createDirectories(backupsDir());
         var zip = dir.resolve(BACKUP_PREFIX + STAMP.format(AppClock.now()) + ".zip");
-        // doWork lends the session's connection; a JDBC refusal comes back wrapped, not as SQLException.
+        // Graph writers wait across both steps, so no withdrawal lands between the database and the graph.
         try {
-            JPA.em().unwrap(Session.class).doWork(connection -> H2Maintenance.backupOnline(connection, zip));
-        } catch (JDBCException e) {
-            throw e.getSQLException();
+            GraphStore.get().pauseWriters(() -> {
+                // doWork lends the session's connection; a JDBC refusal comes back wrapped, not as SQLException.
+                try {
+                    JPA.em().unwrap(Session.class).doWork(connection -> H2Maintenance.backupOnline(connection, zip));
+                } catch (JDBCException e) {
+                    throw e.getSQLException();
+                }
+                H2Maintenance.appendGraph(zip, dataDir());
+                return null;
+            });
+        } catch (SQLException | IOException | RuntimeException e) {
+            Files.deleteIfExists(zip);
+            throw e;
+        } catch (Exception e) {
+            Files.deleteIfExists(zip);
+            throw new IOException(e.getMessage(), e);
         }
         Files.deleteIfExists(dataDir().resolve(H2Maintenance.PRE_RESTORE_FILE));
+        H2Maintenance.deleteTree(dataDir().resolve(H2Maintenance.GRAPH_PRE_RESTORE_DIR));
         prune(dir, retention());
         EventLogger.info(CATEGORY, "Database backed up to " + zip.getFileName() + " (" + H2Maintenance.human(Files.size(zip)) + ")");
         return new BackupInfo(zip.getFileName().toString(), Files.size(zip), Files.getLastModifiedTime(zip).toInstant().toString());
