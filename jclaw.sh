@@ -984,21 +984,35 @@ USAGE
 
 usage_graphspike() {
     cat <<'USAGE'
-Usage: ./jclaw.sh graphspike --agent NAME --proposer PROVIDER/MODEL [options]
+Usage: ./jclaw.sh graphspike run --agent NAME [options]
+       ./jclaw.sh graphspike blind-sheet
+       ./jclaw.sh graphspike heldout-sample --agent NAME --count N [--seed S]
 
-Runs the labelled cases in evals/graph/cases.json through every proposer x
-decision-model pairing and reports wrong-record share, abstention rate, the
-threshold curve and the per-model allow-list (JCLAW-1344). Needs the backend
-running and spends model calls. Each case is stored as a memory of the agent
-for the run and deleted afterwards.
+Certifies local Ollama decision models for graph extraction (JCLAW-1356).
+Needs the backend running. evals/graph/README.md is the contract.
 
-Options:
+run             Scores every stage and the end-to-end pipeline over
+                evals/graph/cases.json, --runs times per model, and walks the
+                certification thresholds. Spends model calls. Each case is
+                stored as a memory of the agent and deleted afterwards. With
+                --set heldout it measures data/graph-eval/heldout.json instead,
+                reading the memories in place; that report carries counts only.
+blind-sheet     Writes data/graph-eval/blind-sheet.json: the ids and text of the
+                blind 15% a second labeller labels into
+                evals/graph/second-labels.json.
+heldout-sample  Copies --count of the agent's memories, read-only, into
+                data/graph-eval/heldout.json for labelling. Refuses to
+                overwrite an existing file.
+
+Options for run:
   --agent NAME             Agent whose memories hold the cases (required).
-  --proposer P/MODEL       Mention proposer as provider/model; repeatable (required).
-  --decision-model ID      Decision model; repeatable
-                           (default jev-latest, tev1, nimble).
-  --threshold P            Confidence threshold for the gate (default 0.50).
-  --concurrency N          Parallel calls, 1-4 (default 2).
+  --decision-model ID      Ollama decision model; repeatable
+                           (default: the models selected in Settings).
+  --set cases|heldout      Which set to run (default cases).
+  --runs N                 Runs per model, 1-3 (default 2).
+  --recall-floor R         Recall every certified threshold must meet (default 0.50).
+  --concurrency N          Parallel cases, 1-4 (default 2).
+  --timeout SECONDS        Per-decision timeout, 1-300 (default 30).
   --out FILE               Write the full JSON report to FILE.
 USAGE
 }
@@ -3919,22 +3933,37 @@ PYSUM
 
 # Same loopback + X-Loadtest-Auth boundary as scrapetest.
 do_graphspike() {
-    local agent="" threshold="" concurrency="" out=""
-    local -a proposers=() models=()
+    local sub="${1:-}"
+    case "$sub" in
+        run|blind-sheet|heldout-sample) shift ;;
+        --help|-h) usage_graphspike; exit 0 ;;
+        *) echo "Error: graphspike needs a subcommand: run, blind-sheet or heldout-sample."; usage_graphspike; exit 2 ;;
+    esac
+    local agent="" set="" runs="" floor="" concurrency="" timeout="" out="" count="" seed=""
+    local -a models=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --agent)          agent="${2:-}";        shift 2 ;;
-            --proposer)       proposers+=("${2:-}"); shift 2 ;;
-            --decision-model) models+=("${2:-}");    shift 2 ;;
-            --threshold)      threshold="${2:-}";    shift 2 ;;
-            --concurrency)    concurrency="${2:-}";  shift 2 ;;
-            --out)            out="${2:-}";          shift 2 ;;
+            --agent)          agent="${2:-}";       shift 2 ;;
+            --decision-model) models+=("${2:-}");   shift 2 ;;
+            --set)            set="${2:-}";         shift 2 ;;
+            --runs)           runs="${2:-}";        shift 2 ;;
+            --recall-floor)   floor="${2:-}";       shift 2 ;;
+            --concurrency)    concurrency="${2:-}"; shift 2 ;;
+            --timeout)        timeout="${2:-}";     shift 2 ;;
+            --out)            out="${2:-}";         shift 2 ;;
+            --count)          count="${2:-}";       shift 2 ;;
+            --seed)           seed="${2:-}";        shift 2 ;;
             --help|-h)        usage_graphspike; exit 0 ;;
-            *) echo "Error: unknown option for graphspike: $1"; usage_graphspike; exit 2 ;;
+            *) echo "Error: unknown option for graphspike $sub: $1"; usage_graphspike; exit 2 ;;
         esac
     done
-    if [[ -z "$agent" || ${#proposers[@]} -eq 0 ]]; then
-        echo "Error: graphspike needs --agent and at least one --proposer."
+    if [[ "$sub" != "blind-sheet" && -z "$agent" ]]; then
+        echo "Error: graphspike $sub needs --agent."
+        usage_graphspike
+        exit 2
+    fi
+    if [[ "$sub" == "heldout-sample" && -z "$count" ]]; then
+        echo "Error: graphspike heldout-sample needs --count."
         usage_graphspike
         exit 2
     fi
@@ -3956,35 +3985,60 @@ do_graphspike() {
         exit 1
     fi
 
-    local body
-    body=$(python3 - "$agent" "$threshold" "$concurrency" "${#proposers[@]}" \
-        "${proposers[@]}" ${models[@]+"${models[@]}"} <<'PYBODY'
+    local body path
+    case "$sub" in
+        run)            path="/api/graph/spike" ;;
+        blind-sheet)    path="/api/graph/spike/blind-sheet" ;;
+        heldout-sample) path="/api/graph/spike/heldout/sample" ;;
+    esac
+    body=$(python3 - "$sub" "$agent" "$set" "$runs" "$floor" "$concurrency" "$timeout" "$count" "$seed" \
+        ${models[@]+"${models[@]}"} <<'PYBODY'
 import json, sys
-agent, threshold, concurrency, n = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
-body = {"agent": agent, "proposers": sys.argv[5:5 + n]}
-if sys.argv[5 + n:]:
-    body["decisionModels"] = sys.argv[5 + n:]
-if threshold:
-    body["threshold"] = float(threshold)
-if concurrency:
-    body["concurrency"] = int(concurrency)
+sub, agent, set_, runs, floor, concurrency, timeout, count, seed = sys.argv[1:10]
+models = sys.argv[10:]
+body = {}
+if agent:
+    body["agent"] = agent
+if sub == "run":
+    if models:
+        body["decisionModels"] = models
+    if set_:
+        body["set"] = set_
+    if runs:
+        body["runs"] = int(runs)
+    if floor:
+        body["recallFloor"] = float(floor)
+    if concurrency:
+        body["concurrency"] = int(concurrency)
+    if timeout:
+        body["timeoutSeconds"] = int(timeout)
+elif sub == "heldout-sample":
+    body["count"] = int(count)
+    if seed:
+        body["seed"] = int(seed)
 print(json.dumps(body))
 PYBODY
-) || { echo "Error: --threshold must be a number and --concurrency an integer."; exit 2; }
+) || { echo "Error: --recall-floor must be a number; --runs, --concurrency, --timeout, --count and --seed integers."; exit 2; }
 
-    echo "==> Running graph-extraction cases for agent $agent"
+    echo "==> graphspike $sub${agent:+ for agent $agent}"
     local tmp status
     tmp=$(mktemp)
     status=$(curl -s -o "$tmp" -w '%{http_code}' \
         -H "X-Loadtest-Auth: $secret" \
         -H "Content-Type: application/json" \
         -X POST --data "$body" \
-        "http://localhost:$BACKEND_PORT/api/graph/spike")
+        "http://localhost:$BACKEND_PORT$path")
 
     if [[ "$status" != "200" ]]; then
-        echo "Error: graphspike failed (HTTP $status)"
+        echo "Error: graphspike $sub failed (HTTP $status)"
         cat "$tmp"; echo; rm -f "$tmp"
         exit 1
+    fi
+
+    if [[ "$sub" != "run" ]]; then
+        python3 -c 'import json,sys; [print("  %s: %s" % kv) for kv in json.load(open(sys.argv[1])).items()]' "$tmp"
+        rm -f "$tmp"
+        return 0
     fi
 
     # Saved before the summary runs, so a printing error cannot lose a report the model calls paid for.
@@ -4000,43 +4054,71 @@ import json, sys
 r = json.load(open(sys.argv[1]))
 def pct(v):
     return "-" if v is None else "%.1f%%" % (100 * v)
+def ratio(x):
+    return "%d/%d %s" % (x["hit"], x["total"], pct(x.get("rate")))
 print()
-print("  threshold %.2f" % r["threshold"])
-print()
-print("  %-32s %-12s %7s %7s %8s %8s %5s %5s %9s %6s" % ("proposer", "model", "written", "wrong",
-      "wrong%", "abstain%", "fail", "pfail", "discarded", "missed"))
-for p in r["pairings"]:
-    if p.get("skipped"):
-        print("  %-32s %-12s skipped: %s" % (p["proposer"], p["model"], p["skipped"]))
-        continue
-    print("  %-32s %-12s %7d %7d %8s %8s %5d %5d %9d %6d" % (p["proposer"], p["model"], p["written"], p["wrong"],
-          pct(p.get("wrongShare")), pct(p.get("abstentionRate")), p["decisionFailures"],
-          p["proposerFailures"], p["discardedMentions"], p["missedLabels"]))
-print()
-print("  threshold curve (wrong% / abstain%):")
-cols = sorted({(c["proposer"], c["model"]) for c in r["curve"]})
-by = {(c["threshold"], c["proposer"], c["model"]): c for c in r["curve"]}
-for t in sorted({c["threshold"] for c in r["curve"]}):
-    cells = []
-    for prop, model in cols:
-        c = by[(t, prop, model)]
-        cells.append("%s/%s" % (pct(c.get("wrongShare")), pct(c.get("abstentionRate"))))
-    print("    %.2f  %s" % (t, "  ".join(cells)))
-print("    columns: " + ", ".join("%s x %s" % pm for pm in cols))
-print()
-print("  allow-list:")
+print("  set %s: %d cases, %d runs, recall floor %.2f" % (r["set"], r["cases"], r["runs"], r["recallFloor"]))
+if r.get("unlabelled"):
+    print("  unlabelled (skipped): %d" % r["unlabelled"])
 for m in r["models"]:
-    lowest = m.get("lowestAllowedThreshold")
-    print("    %-12s %-11s worst wrong %-7s lowest allowed t %s" % (m["model"],
-          "ALLOWED" if m["allowed"] else "not allowed", pct(m.get("worstWrongShare")),
-          "-" if lowest is None else "%.2f" % lowest))
-print("    allowed at %.2f: %s" % (r["threshold"], ", ".join(r["allowed"]) or "(none)"))
-print()
+    print()
+    print("  == %s" % m["model"])
+    for run in m["runs"]:
+        s = run["stages"]
+        res = s["resolution"]
+        print("  run %d stages: candidates %s | typing %s | rejection %s | relation %s | no-relation %s | failures %d"
+              % (run["run"], ratio(s["candidateRecall"]), ratio(s["typing"]), ratio(s["rejection"]),
+                 ratio(s["relation"]), ratio(s["noRelation"]), s["failures"]))
+        print("        resolution: %d mentions -> %d clusters (%d gold), %d false merges, B3 P/R %s/%s, pairwise P/R %s/%s"
+              % (res["mentions"], res["clusters"], res["goldEntities"], res["falseMerges"],
+                 pct(res.get("bcubedPrecision")), pct(res.get("bcubedRecall")),
+                 pct(res.get("pairwisePrecision")), pct(res.get("pairwiseRecall"))))
+        print("        %5s %7s %6s %5s %5s %5s %5s %5s %7s %7s %8s %s" % ("t", "written", "wrong", "match", "type",
+              "dup", "rel", "noise", "recall", "wrong%", "bound", "pass"))
+        steps = {st["threshold"]: st for st in run["walk"]["steps"]}
+        for p in run["grid"]:
+            st = steps.get(p["threshold"], {})
+            print("        %5.2f %7d %6d %5d %5d %5d %5d %5d %7s %7s %8s %s" % (p["threshold"], p["written"],
+                  p["wrong"], p["wrongMatch"], p["wrongType"], p["wrongDuplicate"], p["wrongRelation"], p["noise"],
+                  pct(p.get("recall")), pct(p.get("wrongShare")), pct(st.get("upperBound")),
+                  "yes" if st.get("passes") else "no"))
+        w = run["walk"]
+        print("        walk: %s" % ("certified at %.2f" % w["threshold"] if w.get("threshold") is not None
+                                    else w.get("failure") or "nothing certified"))
+    if "certification" in m:
+        c = m["certification"]
+        t = c.get("threshold")
+        print("  certification: %s%s" % (c["status"], "" if t is None else " at %.2f" % t))
+        for reason in c["reasons"]:
+            print("    - %s" % reason)
+        if c.get("noiseRate") is not None:
+            print("    noise rate at threshold: %s" % pct(c["noiseRate"]))
+        wrong = m.get("wrongRecords") or []
+        print("  wrong records at %.2f (%d), for evals/graph/adjudications.json:" % (m["wrongRecordsAt"], len(wrong)))
+        for w in wrong:
+            print("    %-6s %-10s %s" % (w["caseId"], w["kind"], w["record"]))
+    else:
+        c = m["walk"]
+        t = c.get("threshold")
+        print("  combined walk (information only): %s" % ("%.2f" % t if t is not None else "none"))
+        for reason in c["reasons"]:
+            print("    - %s" % reason)
+a = r.get("agreement")
+if a:
+    print()
+    print("  agreement: %d/%d blind cases labelled%s; entity F1 %s, type kappa %s, relation F1 %s" % (
+          a["covered"], a["selected"], "" if a["complete"] else " (incomplete)", pct(a.get("entityF1")),
+          "-" if a.get("typeKappa") is None else "%.3f" % a["typeKappa"], pct(a.get("relationF1"))))
 mi = r["memoryIntegrity"]
-print("  memoryIntegrity: %d/%d unchanged; with an abstention or failure %d/%d unchanged" % (
-      mi["unchanged"], mi["checked"], mi["degradedUnchanged"], mi["degradedChecked"]))
-if mi["changed"]:
-    print("    CHANGED: " + ", ".join(mi["changed"]))
+print()
+if "present" in mi:
+    print("  memoryIntegrity: %d/%d unchanged, %d/%d present" % (mi["unchanged"], mi["checked"], mi["present"],
+          mi["checked"]))
+else:
+    print("  memoryIntegrity: %d/%d unchanged, %d/%d deleted" % (mi["unchanged"], mi["checked"], mi["deleted"],
+          mi["checked"]))
+    if mi["changed"]:
+        print("    CHANGED: " + ", ".join(mi["changed"]))
 print()
 PYSUM
     rm -f "$tmp"

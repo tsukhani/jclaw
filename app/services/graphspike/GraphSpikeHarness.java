@@ -8,24 +8,24 @@ import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.EventLogger;
 import services.Tx;
+import services.graphspike.Certifier.Adjudication;
+import services.graphspike.Certifier.Certification;
+import services.graphspike.Certifier.Combined;
+import services.graphspike.Certifier.Walk;
 import services.graphspike.ExtractionPipeline.CaseRun;
 import services.graphspike.ExtractionPipeline.Decider;
 import services.graphspike.GraphCases.Case;
-import services.graphspike.GraphSpikeScorer.CurvePoint;
-import services.graphspike.GraphSpikeScorer.ModelVerdict;
-import services.graphspike.GraphSpikeScorer.PairingRun;
-import services.graphspike.GraphSpikeScorer.PairingScore;
-import services.graphspike.MentionProposer.Proposal;
+import services.graphspike.GraphSpikeScorer.Point;
+import services.graphspike.GraphSpikeScorer.WrongRecord;
+import services.graphspike.StageScorer.StageRun;
+import services.graphspike.StageScorer.Stages;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -33,112 +33,80 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 /**
- * Runs every proposer × decision model pairing over the labelled cases (JCLAW-1344). Each case is stored as a real
- * memory of the requested agent for the run, and the harness proves the extraction left every row as it found it.
- * Graph records exist only in the returned report; nothing writes one anywhere.
+ * Certifies decision models for graph extraction (JCLAW-1344, JCLAW-1356): every stage and the end-to-end pipeline
+ * over the labelled cases, {@code runs} times per model. A synthetic case is stored as a real memory of the requested
+ * agent for the run; a held-out one is read where it lives. Either way the harness proves every row was left as it
+ * was found. Graph records exist only in the returned report; nothing writes one anywhere.
  */
 public final class GraphSpikeHarness {
 
+    public static final int DEFAULT_RUNS = 2;
+    public static final double LISTING_FLOOR = 0.50;
     private static final String CATEGORY = "graphspike";
     private static final String MEMORY_CATEGORY = "fact";
     private static final double IMPORTANCE = 0.5;
 
     private GraphSpikeHarness() {}
 
-    public record NamedProposer(String name, MentionProposer proposer) {}
+    public record DecisionModel(String name, Decider decider) {}
 
-    /** A decision model, or why it cannot run (its pairings are reported skipped and never allowed). */
-    public record DecisionModel(String name, @Nullable Decider decider, @Nullable String skipped) {
-        public static DecisionModel of(String name, Decider decider) {
-            return new DecisionModel(name, decider, null);
-        }
+    /** Whether every case memory was unchanged after the run, by case id, and deleted after it. */
+    public record MemoryIntegrity(int checked, int unchanged, List<String> changed, int deleted) {}
 
-        public static DecisionModel skipped(String name, String reason) {
-            return new DecisionModel(name, null, reason);
-        }
-    }
+    /** The held-out rows: how many were checked, unchanged and still present. Counts only. */
+    public record HeldOutIntegrity(int checked, int unchanged, int present) {}
+
+    /** One run of one model: the gold-fed stages, the end-to-end grid and the certification walk over it. */
+    public record RunReport(int run, Stages stages, List<Point> grid, Walk walk) {}
 
     /**
-     * Whether every case memory was byte-for-byte unchanged after the run, by case id; the {@code degraded} fields
-     * repeat it for the memories that saw an abstention or a failure.
+     * One model over the committed set. {@code wrongRecords} are every run's wrong records at the certified
+     * threshold, or at {@code wrongRecordsAt} 0.50 when nothing certified, for adjudication.
      */
-    public record MemoryIntegrity(int checked, int unchanged, List<String> changed, int degradedChecked,
-                                  int degradedUnchanged, List<String> degradedChanged) {}
+    public record ModelReport(String model, List<RunReport> runs, Certification certification, double wrongRecordsAt,
+                              List<WrongRecord> wrongRecords) {}
 
-    /** The whole result. It carries no timings, so a rerun with the same answers is identical. */
-    public record Report(double threshold, List<PairingScore> pairings, List<CurvePoint> curve,
-                         List<ModelVerdict> models, List<String> allowed, MemoryIntegrity memoryIntegrity,
-                         List<PairingRun> runs) {}
+    /** The committed set's whole result. It carries no timings, so a rerun with the same answers is identical. */
+    public record Report(String set, int cases, int runs, double recallFloor, Agreement.Result agreement,
+                         List<ModelReport> models, MemoryIntegrity memoryIntegrity) {}
+
+    /** One model over the held-out set; the walk is information only, since only the committed set certifies. */
+    public record HeldOutModel(String model, List<RunReport> runs, Combined walk) {}
+
+    /** The held-out set's result: aggregate counts only, never an id, a text or a span. */
+    public record HeldOutReport(String set, int cases, int unlabelled, int runs, double recallFloor,
+                                List<HeldOutModel> models, HeldOutIntegrity memoryIntegrity) {}
 
     /** The columns a decision must never touch. */
     private record Snapshot(String text, @Nullable String retrievalKey, Instant updatedAt,
                             @Nullable Instant supersededAt, @Nullable Long supersededById) {}
 
-    public static Report run(String agentId, List<Case> cases, OntologySchema schema, List<NamedProposer> proposers,
-                             List<DecisionModel> models, double threshold, int concurrency) {
+    private record CaseResult(StageRun stages, CaseRun e2e) {}
+
+    private record RunData(RunReport report, List<CaseRun> e2e) {}
+
+    /**
+     * Runs the committed set. {@code secondLabels} are the blind second labeller's cases, empty when there are none;
+     * {@code adjudications} are the verdicts on earlier wrong records.
+     */
+    public static Report run(String agentId, List<Case> cases, OntologySchema schema, List<DecisionModel> models,
+                             int runs, double recallFloor, int concurrency, List<Case> secondLabels,
+                             List<Adjudication> adjudications) {
         var store = MemoryStoreFactory.get();
         var provenance = new MemoryProvenance(null, null, MemoryProvenance.process(CATEGORY),
                 MemoryAuthorType.AGENT_SYNTHESIZED, List.of());
         var memoryIds = new LinkedHashMap<String, String>();
+        Map<String, @Nullable Snapshot> before;
+        Map<String, @Nullable Snapshot> after;
+        Map<String, List<RunData>> measured;
         try {
             for (var c : cases) {
                 memoryIds.put(c.id(), Tx.run(() -> store.storeDeferred(agentId, c.text(), MEMORY_CATEGORY, IMPORTANCE,
                         null, provenance)));
             }
-            var before = snapshot(memoryIds);
-
-            var proposalTasks = new ArrayList<Callable<Proposal>>();
-            for (var p : proposers) {
-                for (var c : cases) proposalTasks.add(() -> propose(p.proposer(), c.text()));
-            }
-            var proposalList = fanOut(proposalTasks, concurrency);
-            var proposals = new HashMap<String, Proposal>();
-            int i = 0;
-            for (var p : proposers) {
-                for (var c : cases) proposals.put(p.name() + "\n" + c.id(), proposalList.get(i++));
-            }
-
-            var runTasks = new ArrayList<Callable<CaseRun>>();
-            for (var p : proposers) {
-                for (var m : models) {
-                    var decider = m.decider();
-                    if (decider == null) continue;
-                    for (var c : cases) {
-                        var proposal = Objects.requireNonNull(proposals.get(p.name() + "\n" + c.id()));
-                        runTasks.add(() -> ExtractionPipeline.run(schema, c.id(), c.text(), proposal, m.name(), decider,
-                                threshold));
-                    }
-                }
-            }
-            var caseRuns = fanOut(runTasks, concurrency);
-
-            var runs = new ArrayList<PairingRun>();
-            int r = 0;
-            for (var p : proposers) {
-                for (var m : models) {
-                    if (m.decider() == null) {
-                        runs.add(new PairingRun(p.name(), m.name(), m.skipped(), List.of()));
-                        continue;
-                    }
-                    var forPairing = new ArrayList<>(caseRuns.subList(r, r + cases.size()));
-                    r += cases.size();
-                    forPairing.sort(Comparator.comparing(CaseRun::caseId));
-                    runs.add(new PairingRun(p.name(), m.name(), null, forPairing));
-                }
-            }
-            runs.sort(Comparator.comparing(PairingRun::proposer).thenComparing(PairingRun::model));
-
-            var integrity = integrity(before, snapshot(memoryIds), degraded(runs));
-            var score = GraphSpikeScorer.score(cases, runs, threshold);
-            var verdicts = score.models();
-            var allowed = score.allowed();
-            if (!integrity.changed().isEmpty()) {
-                // A run that touched a memory has not degraded safely, whatever its wrong share.
-                verdicts = verdicts.stream().map(v -> new ModelVerdict(v.model(), false, v.worstWrongShare(),
-                        List.of(), null)).toList();
-                allowed = List.of();
-            }
-            return new Report(threshold, score.pairings(), score.curve(), verdicts, allowed, integrity, runs);
+            before = snapshot(memoryIds);
+            measured = measure(cases, schema, models, runs, recallFloor, concurrency);
+            after = snapshot(memoryIds);
         } finally {
             for (var id : memoryIds.values()) {
                 try {
@@ -149,14 +117,93 @@ public final class GraphSpikeHarness {
                 }
             }
         }
+        var changed = new TreeSet<String>();
+        before.forEach((caseId, snapshot) -> {
+            if (snapshot == null || !snapshot.equals(after.get(caseId))) changed.add(caseId);
+        });
+        int deleted = (int) snapshot(memoryIds).values().stream().filter(s -> s == null).count();
+        var integrity = new MemoryIntegrity(before.size(), before.size() - changed.size(), List.copyOf(changed),
+                deleted);
+
+        var agreement = Agreement.compare(cases, secondLabels);
+        var reports = new ArrayList<ModelReport>();
+        for (var m : models) {
+            var data = measured.getOrDefault(m.name(), List.of());
+            var walks = data.stream().map(d -> d.report().walk()).toList();
+            var threshold = Certifier.combine(walks).threshold();
+            double listedAt = threshold == null ? LISTING_FLOOR : threshold;
+            var wrong = GraphSpikeScorer.union(data.stream()
+                    .map(d -> GraphSpikeScorer.score(cases, d.e2e(), listedAt).wrong()).toList());
+            var certification = Certifier.certify(walks, !changed.isEmpty(), agreement.complete(),
+                    threshold == null ? List.of() : wrong, adjudications);
+            reports.add(new ModelReport(m.name(), data.stream().map(RunData::report).toList(), certification,
+                    listedAt, wrong));
+        }
+        return new Report("cases", cases.size(), runs, recallFloor, agreement, reports, integrity);
     }
 
-    private static Proposal propose(MentionProposer proposer, String text) {
-        try {
-            return proposer.propose(text);
-        } catch (RuntimeException e) {
-            return Proposal.failed("proposer threw " + e.getClass().getSimpleName());
+    /** Runs the held-out set over the memories where they live: nothing is stored, edited or deleted. */
+    public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, OntologySchema schema, List<DecisionModel> models,
+                                           int runs, double recallFloor, int concurrency) {
+        var cases = loaded.cases().stream().map(HeldOut.HeldCase::labels).toList();
+        var memoryIds = new LinkedHashMap<String, String>();
+        loaded.cases().forEach(h -> memoryIds.put(h.labels().id(), String.valueOf(h.memoryId())));
+        var before = snapshot(memoryIds);
+        var measured = measure(cases, schema, models, runs, recallFloor, concurrency);
+        var after = snapshot(memoryIds);
+        int unchanged = 0;
+        int present = 0;
+        for (var entry : before.entrySet()) {
+            var now = after.get(entry.getKey());
+            if (now != null) present++;
+            if (entry.getValue() != null && entry.getValue().equals(now)) unchanged++;
         }
+        var reports = new ArrayList<HeldOutModel>();
+        for (var m : models) {
+            var data = measured.getOrDefault(m.name(), List.of());
+            var runReports = data.stream().map(RunData::report).toList();
+            reports.add(new HeldOutModel(m.name(), runReports,
+                    Certifier.combine(runReports.stream().map(RunReport::walk).toList())));
+        }
+        return new HeldOutReport("heldout", cases.size(), loaded.unlabelled(), runs, recallFloor, reports,
+                new HeldOutIntegrity(before.size(), unchanged, present));
+    }
+
+    /** Every model's runs over {@code cases}, by model name. */
+    private static Map<String, List<RunData>> measure(List<Case> cases, OntologySchema schema,
+                                                      List<DecisionModel> models, int runs, double recallFloor,
+                                                      int concurrency) {
+        var tasks = new ArrayList<Callable<CaseResult>>();
+        for (int r = 0; r < runs; r++) {
+            for (var m : models) {
+                for (var c : cases) tasks.add(() -> askCase(schema, c, m));
+            }
+        }
+        var results = fanOut(tasks, concurrency);
+        var out = new HashMap<String, List<RunData>>();
+        int i = 0;
+        for (int r = 0; r < runs; r++) {
+            for (var m : models) {
+                var slice = results.subList(i, i + cases.size());
+                i += cases.size();
+                var e2e = slice.stream().map(CaseResult::e2e).toList();
+                var stages = StageScorer.score(cases, slice.stream().map(CaseResult::stages).toList());
+                var grid = GraphSpikeScorer.grid(cases, e2e);
+                out.computeIfAbsent(m.name(), _ -> new ArrayList<>()).add(
+                        new RunData(new RunReport(r + 1, stages, grid, Certifier.walk(grid, recallFloor)), e2e));
+            }
+        }
+        return out;
+    }
+
+    /** The gold-fed typing and relation stages, then the end-to-end pipeline from generated candidates. */
+    private static CaseResult askCase(OntologySchema schema, Case c, DecisionModel m) {
+        var typing = ExtractionPipeline.type(schema, c.text(), StageScorer.typingSpans(c), m.name(), m.decider());
+        var relations = ExtractionPipeline.relate(schema, c.text(), StageScorer.relationTerms(c), m.name(),
+                m.decider());
+        var e2e = ExtractionPipeline.run(schema, c.id(), c.text(), CandidateGenerator.generate(c.text()), m.name(),
+                m.decider());
+        return new CaseResult(new StageRun(c.id(), typing, relations.decisions()), e2e);
     }
 
     /** Runs {@code tasks} on at most {@code concurrency} threads, returning results in task order. */
@@ -201,31 +248,5 @@ public final class GraphSpikeHarness {
             });
             return out;
         });
-    }
-
-    /** Case ids whose memory saw a proposer failure, a failed decision or an abstention in any pairing. */
-    private static Set<String> degraded(List<PairingRun> runs) {
-        var out = new TreeSet<String>();
-        for (var run : runs) {
-            for (var c : run.cases()) {
-                if (c.proposerFailure() != null || c.decisions().stream().anyMatch(d -> !d.outcome().equals(
-                        ExtractionPipeline.WRITTEN) && !d.outcome().equals(ExtractionPipeline.DECLINED))) {
-                    out.add(c.caseId());
-                }
-            }
-        }
-        return out;
-    }
-
-    private static MemoryIntegrity integrity(Map<String, @Nullable Snapshot> before,
-                                             Map<String, @Nullable Snapshot> after, Set<String> degraded) {
-        var changed = new TreeSet<String>();
-        before.forEach((caseId, snapshot) -> {
-            if (snapshot == null || !snapshot.equals(after.get(caseId))) changed.add(caseId);
-        });
-        var degradedChanged = changed.stream().filter(degraded::contains).toList();
-        int degradedChecked = (int) before.keySet().stream().filter(degraded::contains).count();
-        return new MemoryIntegrity(before.size(), before.size() - changed.size(), List.copyOf(changed),
-                degradedChecked, degradedChecked - degradedChanged.size(), degradedChanged);
     }
 }

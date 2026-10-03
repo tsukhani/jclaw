@@ -8,7 +8,7 @@ import java.util.HashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * JCLAW-1344: {@code POST /api/graph/spike}'s gate and validation. Every request here is refused before a model call,
+ * JCLAW-1344, JCLAW-1356: the graph spike endpoints' gate and validation. Every request here is refused before a model call,
  * so the test never spends one. Mirrors {@code ApiEvalsControllerTest}.
  */
 class ApiGraphSpikeControllerTest extends FunctionalTest {
@@ -68,30 +68,55 @@ class ApiGraphSpikeControllerTest extends FunctionalTest {
 
     @Test
     void aRequestWithoutTheSharedSecretIsRefused() {
-        var response = spike(loadtestRequest(null), "{\"agent\":\"" + AGENT + "\",\"proposers\":[\"p/m\"]}");
+        var response = spike(loadtestRequest(null), "{\"agent\":\"" + AGENT + "\"}");
         assertEquals(403, response.status.intValue());
     }
 
     @Test
     void anUnknownAgentIs400() {
-        var response = spike(authed(), "{\"agent\":\"no-such-graphspike-agent\",\"proposers\":[\"p/m\"]}");
+        var response = spike(authed(), "{\"agent\":\"no-such-graphspike-agent\",\"decisionModels\":[\"tev1\"]}");
         assertEquals(400, response.status.intValue());
         assertTrue(getContent(response).contains("no-such-graphspike-agent"), getContent(response));
     }
 
     @Test
-    void aProposerWithoutASlashIs400() {
-        assertRefused("{\"agent\":\"" + AGENT + "\",\"proposers\":[\"glm-5.3-flash\"]}", "must read provider/model");
+    void theHostedModelIs400() {
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"decisionModels\":[\"tev1\",\"jev-latest\"]}",
+                "local Ollama models only");
     }
 
     @Test
-    void anEmptyProposersArrayIs400() {
-        assertRefused("{\"agent\":\"" + AGENT + "\",\"proposers\":[]}", "at least one provider/model");
+    void proposersAreGoneAndAre400() {
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"proposers\":[\"p/m\"]}", "proposers are gone");
     }
 
     @Test
-    void aThresholdOutsideTheUnitIntervalIs400() {
-        assertRefused("{\"agent\":\"" + AGENT + "\",\"proposers\":[\"p/m\"],\"threshold\":0}", "threshold must be in");
-        assertRefused("{\"agent\":\"" + AGENT + "\",\"proposers\":[\"p/m\"],\"threshold\":1.5}", "threshold must be in");
+    void aThresholdIs400() {
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"threshold\":0.8}", "threshold is gone");
+    }
+
+    @Test
+    void anUnknownSetIs400() {
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"set\":\"everything\"}", "set must be");
+    }
+
+    @Test
+    void runsOutOfRangeAre400() {
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"runs\":0}", "runs must be between");
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"runs\":4}", "runs must be between");
+    }
+
+    @Test
+    void aRecallFloorOutsideTheUnitIntervalIs400() {
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"recallFloor\":1.5}", "recallFloor must be in");
+    }
+
+    @Test
+    void aSampleCountOutOfRangeIs400() {
+        seedAgent();
+        var response = POST(authed(), "/api/graph/spike/heldout/sample", "application/json",
+                "{\"agent\":\"" + AGENT + "\",\"count\":0}");
+        assertEquals(400, response.status.intValue(), getContent(response));
+        assertTrue(getContent(response).contains("count must be between"), getContent(response));
     }
 }
