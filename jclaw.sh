@@ -993,8 +993,10 @@ Needs the backend running. evals/graph/README.md is the contract.
 
 run             Scores every stage and the end-to-end pipeline over
                 evals/graph/cases.json, --runs times per model, and walks the
-                certification thresholds. Spends model calls. Each case is
-                stored as a memory of the agent and deleted afterwards. With
+                certification thresholds. One run is spot-checked: every tenth
+                case is asked again and must answer the same. Spends model calls.
+                Each case is stored as a memory of the agent and deleted
+                afterwards. With
                 --set heldout it measures data/graph-eval/heldout.json instead,
                 reading the memories in place; that report carries counts only.
 blind-sheet     Writes data/graph-eval/blind-sheet.json: the ids and text of the
@@ -1009,9 +1011,11 @@ Options for run:
   --decision-model ID      Ollama decision model; repeatable
                            (default: the models selected in Settings).
   --set cases|heldout      Which set to run (default cases).
-  --runs N                 Runs per model, 1-3 (default 2).
+  --runs N                 Runs per model, 1-3 (default 1; two when a
+                           spot-check differs).
   --recall-floor R         Recall every certified threshold must meet (default 0.50).
-  --concurrency N          Parallel cases, 1-4 (default 2).
+  --concurrency N          Parallel cases, 1-4 (default 1: a local Ollama
+                           answers one request at a time).
   --timeout SECONDS        Per-decision timeout, 1-300 (default 30).
   --out FILE               Write the full JSON report to FILE.
 USAGE
@@ -4089,6 +4093,10 @@ for m in r["models"]:
         print("        walk: %s" % ("certified at %.2f" % w["threshold"] if w.get("threshold") is not None
                                     else w.get("failure") or "nothing certified"))
     if "certification" in m:
+        sc = m.get("spotCheck")
+        if sc:
+            print("  spot-check: %d cases asked again, %d of %d decisions differ"
+                  % (sc["cases"], sc["differing"], sc["decisions"]))
         c = m["certification"]
         t = c.get("threshold")
         print("  certification: %s%s" % (c["status"], "" if t is None else " at %.2f" % t))

@@ -39,6 +39,7 @@ public final class ExtractionPipeline {
     public static final String NEITHER = "neither";
     public static final String OPERATOR_TYPE = "Person";
     public static final String EXCEEDS_CONTEXT = "exceeds context";
+    public static final int OLLAMA_ATTEMPTS = 3;
 
     /** The sentence each relation question asks the memory to state, X its source and Y its target. */
     public static final Map<String, String> SENTENCES = Map.ofEntries(
@@ -66,17 +67,27 @@ public final class ExtractionPipeline {
     public interface Decider {
         JsonObject decide(JsonObject request);
 
-        /** {@code model} on the Ollama server at {@code baseUrl}; a refused address throws a {@link SecurityException}. */
+        /**
+         * {@code model} on the Ollama server at {@code baseUrl}; a refused address throws a {@link SecurityException}.
+         * A request that times out while the model is still loading waits for the load and is sent again,
+         * {@link #OLLAMA_ATTEMPTS} times in all. One that times out on a loaded model is not: those timeouts count
+         * against the breaker the router's classifier shares.
+         */
         static Decider ollama(String baseUrl, String model, long timeoutMs) {
             return body -> {
                 var target = OllamaDecision.target(baseUrl, model);
                 OllamaDecision.addKeepAlive(body);
-                try {
-                    return JevApi.post(target, body, 1, timeoutMs);
-                } catch (JevException.Outage e) {
-                    // Ollama drops a load when its request is cancelled, so a timed-out cold model needs a load of its own.
-                    if (e.timedOut()) OllamaDecision.pin(baseUrl, model);
-                    throw e;
+                for (int attempt = 1; ; attempt++) {
+                    try {
+                        return JevApi.post(target, body, 1, timeoutMs);
+                    } catch (JevException.Outage e) {
+                        if (!e.timedOut()) throw e;
+                        boolean cold = OllamaDecision.stillLoading(baseUrl, model);
+                        // Ollama drops a load when its request is cancelled, so a timed-out cold model needs a load of its own.
+                        var load = OllamaDecision.pin(baseUrl, model);
+                        if (!cold || attempt == OLLAMA_ATTEMPTS) throw e;
+                        load.join();
+                    }
                 }
             };
         }

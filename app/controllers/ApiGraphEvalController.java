@@ -38,7 +38,7 @@ import static utils.GsonHolder.GSON;
 public class ApiGraphEvalController extends Controller {
 
     private static final int MAX_CONCURRENCY = 4;
-    private static final int DEFAULT_CONCURRENCY = 2;
+    private static final int DEFAULT_CONCURRENCY = 1;
     private static final int DEFAULT_TIMEOUT_SECONDS = 30;
     private static final int MAX_TIMEOUT_SECONDS = 300;
     private static final int MAX_RUNS = 3;

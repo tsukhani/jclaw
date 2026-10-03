@@ -35,6 +35,7 @@ import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -554,11 +555,15 @@ class ExtractionPipelineTest extends UnitTest {
             assertTrue(sent.stream().noneMatch(r -> r.url().encodedPath().equals("/api/generate")), "no pin while it answers");
 
             hang.set(true);
+            int before = sent.size();
             var timedOut = HttpFactories.callWith(client, () -> run(TEXT, spans("Dana Reyes"),
                     Decider.ollama(base, "tev1", 1_000)));
             var failed = timedOut.decisions().getFirst();
             assertTrue(failed.failed());
             assertTrue(failed.failure().contains("did not answer"), failed.failure());
+            assertEquals(1, sent.subList(before, sent.size()).stream()
+                    .filter(r -> r.url().encodedPath().equals("/v1/systemone")).count(),
+                    "a loaded model's timeout is not asked again: it counts against the shared breaker");
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
             while (sent.stream().noneMatch(r -> r.url().encodedPath().equals("/api/generate"))
                     && System.nanoTime() < deadline) {
@@ -568,6 +573,54 @@ class ExtractionPipelineTest extends UnitTest {
             // Let the pin finish so it cannot answer for another class's pin of the same model.
             HttpFactories.callWith(client, () -> OllamaDecision.pin(base, "tev1"))
                     .get(10, TimeUnit.SECONDS);
+        } finally {
+            JevBreakerTestSync.release();
+        }
+    }
+
+    @Test
+    void theOllamaDeciderLoadsTheModelAndAsksAgainAfterATimeout() throws Exception {
+        var base = "http://192.168.1.20:11434";
+        JevBreakerTestSync.acquire();
+        try {
+            var paths = new CopyOnWriteArrayList<String>();
+            var asked = new AtomicInteger();
+            Interceptor ollama = chain -> {
+                var path = chain.request().url().encodedPath();
+                paths.add(path);
+                var json = path.equals("/api/ps") ? "{\"models\":[]}" : "{\"done\":true}";
+                if (path.equals("/v1/systemone")) {
+                    var buffer = new Buffer();
+                    chain.request().body().writeTo(buffer);
+                    var body = JsonParser.parseString(buffer.readUtf8()).getAsJsonObject();
+                    if (asked.incrementAndGet() == 1) {
+                        try {
+                            Thread.sleep(1_300);
+                        } catch (InterruptedException _) {
+                            Thread.currentThread().interrupt();
+                        }
+                    }
+                    var answers = new JsonObject();
+                    for (var q : body.getAsJsonObject("questions").entrySet()) {
+                        answers.add(q.getKey(), answer(q.getValue().getAsJsonObject().getAsJsonObject("criteria").keySet(),
+                                "Person", 0.8));
+                    }
+                    var result = new JsonObject();
+                    result.add("answers", answers);
+                    json = result.toString();
+                }
+                return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200)
+                        .message("canned").body(ResponseBody.create(json, MediaType.get("application/json"))).build();
+            };
+            var client = new OkHttpClient.Builder().addInterceptor(ollama).build();
+
+            var run = HttpFactories.callWith(client, () -> run(TEXT, spans("Dana Reyes"),
+                    Decider.ollama(base, "tev1", 1_000)));
+            var decision = run.decisions().getFirst();
+            assertFalse(decision.failed(), String.valueOf(decision.failure()));
+            assertEquals("Person", decision.choice());
+            assertEquals(2, asked.get(), "asked once, timed out, asked again");
+            assertEquals(1, paths.stream().filter("/api/generate"::equals).count(), "the model loaded between the two");
         } finally {
             JevBreakerTestSync.release();
         }

@@ -35,6 +35,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 
@@ -285,6 +286,54 @@ class GraphEvalHarnessTest extends UnitTest {
         assertEquals(Certifier.NOT_CERTIFIED, certification.status());
         assertNull(certification.threshold());
         assertEquals(List.of(), Tx.run(() -> Memory.findByAgent(agentId)));
+    }
+
+    private GraphEvalHarness.Report runOnce(List<Case> cases, Decider decider) {
+        var blind = new HashSet<>(Agreement.blindSelection(cases));
+        var second = cases.stream().filter(c -> blind.contains(c.id())).toList();
+        return GraphEvalHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", decider)), 1,
+                Certifier.DEFAULT_RECALL_FLOOR, 1, second, List.of());
+    }
+
+    @Test
+    void aSingleRunIsSpotCheckedAndCertifiesWhenEveryAnswerRepeats() throws Exception {
+        var cases = committed();
+        var model = runOnce(cases, gold(cases)).models().getFirst();
+        assertEquals(1, model.runs().size());
+        var spot = model.spotCheck();
+        assertNotNull(spot, "a single run carries its spot-check");
+        int stride = GraphEvalHarness.SPOT_CHECK_STRIDE;
+        assertEquals((cases.size() + stride - 1) / stride, spot.cases());
+        assertTrue(spot.decisions() > 0);
+        assertEquals(0, spot.differing());
+        assertEquals(Certifier.CERTIFIED, model.certification().status(), model.certification().reasons().toString());
+    }
+
+    @Test
+    void aSpotCheckThatHearsADifferentAnswerRefusesTheModel() throws Exception {
+        var cases = committed();
+        var golden = gold(cases);
+        var first = cases.getFirst().text();
+        var calls = new AtomicInteger();
+        // The first case is always in the sample; every asking of it answers with a slightly different probability.
+        Decider drifting = request -> {
+            var response = golden.decide(request);
+            if (!request.getAsJsonObject("state").get("memory").getAsString().equals(first)) return response;
+            double p = 0.99 - 1e-6 * calls.incrementAndGet();
+            for (var e : response.getAsJsonObject("answers").entrySet()) {
+                var a = e.getValue().getAsJsonObject();
+                a.addProperty("confidence", p);
+                a.getAsJsonObject("probabilities").addProperty(a.get("choice").getAsString(), p);
+            }
+            return response;
+        };
+        var model = runOnce(cases, drifting).models().getFirst();
+        var spot = model.spotCheck();
+        assertNotNull(spot);
+        assertTrue(spot.differing() > 0, spot.toString());
+        assertEquals(Certifier.NOT_CERTIFIED, model.certification().status());
+        assertTrue(model.certification().reasons().stream().anyMatch(r -> r.contains("two full runs")),
+                model.certification().reasons().toString());
     }
 
     @Test

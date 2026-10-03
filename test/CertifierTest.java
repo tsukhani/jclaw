@@ -78,7 +78,7 @@ class CertifierTest extends UnitTest {
         var walk = Certifier.walk(grid, 0.5);
         assertNull(walk.threshold());
         assertTrue(walk.failure().contains("recall"), walk.failure());
-        var c = Certifier.certify(List.of(walk, walk), false, true, List.of(), List.of());
+        var c = Certifier.certify(List.of(walk, walk), false, true, List.of(), List.of(), null);
         assertEquals(Certifier.NOT_CERTIFIED, c.status());
         assertTrue(c.reasons().stream().anyMatch(r -> r.contains("recall")), c.reasons().toString());
     }
@@ -93,7 +93,7 @@ class CertifierTest extends UnitTest {
     @Test
     void aSecondRunThatFailsCertifiesNothing() {
         var failing = Certifier.walk(List.of(point(0.95, 200, 40, 0.9)), 0.5);
-        var c = Certifier.certify(List.of(walkDownTo(0.70), failing), false, true, List.of(), List.of());
+        var c = Certifier.certify(List.of(walkDownTo(0.70), failing), false, true, List.of(), List.of(), null);
         assertEquals(Certifier.NOT_CERTIFIED, c.status());
         assertNull(c.threshold());
         assertTrue(c.reasons().contains(Certifier.SECOND_RUN_FAILED), c.reasons().toString());
@@ -101,14 +101,14 @@ class CertifierTest extends UnitTest {
 
     @Test
     void noBlindLabelsIsPendingAgreement() {
-        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, false, List.of(), List.of());
+        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, false, List.of(), List.of(), null);
         assertEquals(Certifier.PENDING_AGREEMENT, c.status());
         assertEquals(0.5, c.threshold());
     }
 
     @Test
     void anUnadjudicatedWrongRecordIsPendingAdjudicationAndListed() {
-        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of());
+        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of(), null);
         assertEquals(Certifier.PENDING_ADJUDICATION, c.status());
         assertEquals(List.of(RECORD), c.unadjudicated());
     }
@@ -116,7 +116,7 @@ class CertifierTest extends UnitTest {
     @Test
     void everyWrongRecordAdjudicatedWrongCertifies() {
         var verdict = new Adjudication("c007", RECORD.record(), Certifier.WRONG, "a real miss");
-        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of(verdict));
+        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of(verdict), null);
         assertEquals(Certifier.CERTIFIED, c.status());
         assertEquals(0.5, c.threshold());
         assertEquals(List.of(), c.unadjudicated());
@@ -125,23 +125,52 @@ class CertifierTest extends UnitTest {
     @Test
     void aLabelErrorVerdictMeansTheLabelsNeedFixing() {
         var verdict = new Adjudication("c007", RECORD.record(), Certifier.LABEL_ERROR, "gold missed an alias");
-        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of(verdict));
+        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of(verdict), null);
         assertEquals(Certifier.NOT_CERTIFIED, c.status());
         assertTrue(c.reasons().contains(Certifier.LABELS_NEED_FIXING), c.reasons().toString());
         assertNull(c.threshold());
     }
 
     @Test
-    void oneRunCertifiesNothing() {
-        var c = Certifier.certify(List.of(walkDownTo(0.5)), false, true, List.of(), List.of());
+    void oneRunWithoutItsSpotCheckCertifiesNothing() {
+        var c = Certifier.certify(List.of(walkDownTo(0.5)), false, true, List.of(), List.of(), null);
         assertEquals(Certifier.NOT_CERTIFIED, c.status());
         assertNull(c.threshold());
-        assertTrue(c.reasons().contains(Certifier.NEEDS_TWO_RUNS), c.reasons().toString());
+        assertTrue(c.reasons().contains(Certifier.NEEDS_SPOT_CHECK), c.reasons().toString());
+    }
+
+    @Test
+    void oneRunWhoseSpotCheckAgreesCertifies() {
+        var c = Certifier.certify(List.of(walkDownTo(0.5)), false, true, List.of(), List.of(),
+                new Certifier.SpotCheck(14, 300, 0));
+        assertEquals(Certifier.CERTIFIED, c.status());
+        assertEquals(0.5, c.threshold());
+    }
+
+    @Test
+    void oneRunWhoseSpotCheckDiffersCertifiesNothingAndAsksForTwoRuns() {
+        var c = Certifier.certify(List.of(walkDownTo(0.5)), false, true, List.of(), List.of(),
+                new Certifier.SpotCheck(14, 300, 2));
+        assertEquals(Certifier.NOT_CERTIFIED, c.status());
+        assertNull(c.threshold());
+        assertTrue(c.reasons().stream().anyMatch(r -> r.contains("2 of 300") && r.contains("two full runs")),
+                c.reasons().toString());
+    }
+
+    @Test
+    void aRunWithAFailedDecisionPassesNowhere() {
+        var grid = passingDownTo(0.5).stream().map(p -> new Point(p.threshold(), p.written(), p.right(), p.wrong(),
+                p.wrongMatch(), p.wrongType(), p.wrongDuplicate(), p.wrongRelation(), p.noise(), p.gold(), p.recall(),
+                p.wrongShare(), 3, p.ruleWritten())).toList();
+        var walk = Certifier.walk(grid, Certifier.DEFAULT_RECALL_FLOOR);
+        assertNull(walk.threshold());
+        assertTrue(walk.failure().startsWith("3 decisions failed"), walk.failure());
+        assertFalse(walk.steps().stream().anyMatch(Certifier.Step::passes), "a failed decision fails every threshold");
     }
 
     @Test
     void aChangedMemoryCertifiesNothing() {
-        var c = Certifier.certify(List.of(walkDownTo(0.95), walkDownTo(0.95)), true, true, List.of(), List.of());
+        var c = Certifier.certify(List.of(walkDownTo(0.95), walkDownTo(0.95)), true, true, List.of(), List.of(), null);
         assertEquals(Certifier.NOT_CERTIFIED, c.status());
         assertNull(c.threshold());
     }

@@ -138,10 +138,19 @@ named owner is in both. Recall must also meet the floor
 at the first threshold that fails; the model certifies at the lowest threshold reached. So a
 model whose recall at 0.95 is under the floor certifies at nothing, by design.
 
-Certification needs two runs, the default; with `--runs 1` the report is information only and
-reads `certification needs two runs`. The certified threshold is the higher of the runs, and a
-run that certifies nowhere fails the model with `run N did not certify` (for run 2, `second run
-did not certify`). Then, in order:
+A run with any failed decision (a timeout, a request too large for the model's context)
+certifies nowhere: what it would have written is unknown. A request that times out while the
+model is still loading waits for the load and is sent again, three attempts in all; one that
+times out on a loaded model is not, since it counts against the breaker the router's
+classifier shares. Concurrency defaults to 1: a local Ollama answers one request at a time,
+so a second in flight only waits behind the first, toward the timeout.
+
+One run is the default. Local decision models answer the same question the same way, so a
+second full run repeats the first; instead every tenth case, from the first, is asked again,
+and every decision must come back identical. A difference refuses the model and says so;
+certify it with `--runs 2`, where every run must certify and the certified threshold is the
+higher of the runs (`run N did not certify`; for run 2, `second run did not certify`). Then, in
+order:
 
 1. any case memory changed by the run → `not-certified`;
 2. any record adjudicated `label-error` → `not-certified`, `labels need fixing`;

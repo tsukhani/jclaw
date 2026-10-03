@@ -13,6 +13,7 @@ import services.Tx;
 import services.grapheval.Certifier.Adjudication;
 import services.grapheval.Certifier.Certification;
 import services.grapheval.Certifier.Combined;
+import services.grapheval.Certifier.SpotCheck;
 import services.grapheval.Certifier.Walk;
 import services.grapheval.ExtractionPipeline.CaseRun;
 import services.grapheval.ExtractionPipeline.Decider;
@@ -44,7 +45,9 @@ import java.util.concurrent.Future;
  */
 public final class GraphEvalHarness {
 
-    public static final int DEFAULT_RUNS = 2;
+    public static final int DEFAULT_RUNS = 1;
+    /** A single run's spot-check asks every tenth case again. */
+    public static final int SPOT_CHECK_STRIDE = 10;
     public static final double LISTING_FLOOR = 0.50;
     private static final String CATEGORY = "grapheval";
     private static final String MEMORY_CATEGORY = "fact";
@@ -64,11 +67,12 @@ public final class GraphEvalHarness {
     public record RunReport(int run, Stages stages, List<Point> grid, Walk walk) {}
 
     /**
-     * One model over the committed set. {@code wrongRecords} are every run's wrong records at the certified
-     * threshold, or at {@code wrongRecordsAt} 0.50 when nothing certified, for adjudication.
+     * One model over the committed set. {@code spotCheck} is a single run's cases asked again, null for several runs.
+     * {@code wrongRecords} are every run's wrong records at the certified threshold, or at {@code wrongRecordsAt} 0.50
+     * when nothing certified, for adjudication.
      */
-    public record ModelReport(String model, List<RunReport> runs, Certification certification, double wrongRecordsAt,
-                              List<WrongRecord> wrongRecords) {}
+    public record ModelReport(String model, List<RunReport> runs, @Nullable SpotCheck spotCheck,
+                              Certification certification, double wrongRecordsAt, List<WrongRecord> wrongRecords) {}
 
     /**
      * The committed set's whole result. It carries no timings, so a rerun with the same answers is identical.
@@ -107,6 +111,7 @@ public final class GraphEvalHarness {
         Map<String, @Nullable Snapshot> before;
         Map<String, @Nullable Snapshot> after;
         Map<String, List<RunData>> measured;
+        Map<String, SpotCheck> spotChecks = new HashMap<>();
         try {
             for (var c : cases) {
                 memoryIds.put(c.id(), Tx.run(() -> store.storeDeferred(agentId, c.text(), MEMORY_CATEGORY, IMPORTANCE,
@@ -116,6 +121,14 @@ public final class GraphEvalHarness {
             var known = new ArrayList<>(knownNames(agentId));
             if (ownerName != null) known.add(ownerName);
             measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName);
+            if (runs == 1) {
+                for (var m : models) {
+                    var data = measured.getOrDefault(m.name(), List.of());
+                    if (!data.isEmpty()) {
+                        spotChecks.put(m.name(), spotCheck(cases, schema, m, data.getFirst().e2e(), known, concurrency));
+                    }
+                }
+            }
             after = snapshot(memoryIds);
         } finally {
             for (var id : memoryIds.values()) {
@@ -144,9 +157,10 @@ public final class GraphEvalHarness {
             double listedAt = threshold == null ? LISTING_FLOOR : threshold;
             var wrong = GraphEvalScorer.union(data.stream()
                     .map(d -> GraphEvalScorer.score(cases, d.e2e(), listedAt).wrong()).toList());
+            var spot = spotChecks.get(m.name());
             var certification = Certifier.certify(walks, !changed.isEmpty(), agreement.complete(),
-                    threshold == null ? List.of() : wrong, adjudications);
-            reports.add(new ModelReport(m.name(), data.stream().map(RunData::report).toList(), certification,
+                    threshold == null ? List.of() : wrong, adjudications, spot);
+            reports.add(new ModelReport(m.name(), data.stream().map(RunData::report).toList(), spot, certification,
                     listedAt, wrong));
         }
         return new Report("cases", schema.fingerprint(), cases.size(), runs, recallFloor, agreement, reports, integrity);
@@ -209,6 +223,36 @@ public final class GraphEvalHarness {
             }
         }
         return out;
+    }
+
+    /**
+     * Asks every {@link #SPOT_CHECK_STRIDE}th case again, from the first, and counts the decisions that differ from
+     * {@code first}, the run's own: a different answer, a failure, or a decision only one of the two made.
+     */
+    private static SpotCheck spotCheck(List<Case> cases, OntologySchema schema, DecisionModel m, List<CaseRun> first,
+                                       List<String> knownNames, int concurrency) {
+        var sample = new ArrayList<Case>();
+        for (int i = 0; i < cases.size(); i += SPOT_CHECK_STRIDE) sample.add(cases.get(i));
+        var tasks = new ArrayList<Callable<CaseRun>>();
+        for (var c : sample) {
+            tasks.add(() -> ExtractionPipeline.run(schema, c.id(), c.text(),
+                    CandidateGenerator.generate(c.text(), knownNames), m.name(), m.decider()));
+        }
+        var byId = new HashMap<String, CaseRun>();
+        first.forEach(r -> byId.put(r.caseId(), r));
+        int decisions = 0;
+        int differing = 0;
+        for (var again : fanOut(tasks, concurrency)) {
+            var before = byId.get(again.caseId());
+            var a = before == null ? List.<ExtractionPipeline.Decision>of() : before.decisions();
+            var b = again.decisions();
+            int n = Math.max(a.size(), b.size());
+            decisions += n;
+            for (int k = 0; k < n; k++) {
+                if (k >= a.size() || k >= b.size() || !a.get(k).equals(b.get(k))) differing++;
+            }
+        }
+        return new SpotCheck(sample.size(), decisions, differing);
     }
 
     /** The agent's Term names: a Term carries no aliases, so its name is the only known span. Read, never written. */

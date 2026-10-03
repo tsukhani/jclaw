@@ -191,7 +191,7 @@ public final class OllamaDecision {
      * Whether the server at {@code base} answers {@code GET /api/ps} without {@code model} among its loaded models, so
      * a call that timed out was waiting on a load. False when it cannot tell, which leaves the timeout counted.
      */
-    static boolean stillLoading(String base, String model) {
+    public static boolean stillLoading(String base, String model) {
         try {
             return !loadedModels(base, PS_TIMEOUT_SECONDS).contains(tagged(model));
         } catch (IOException | JsonParseException | IllegalStateException | ClassCastException _) {

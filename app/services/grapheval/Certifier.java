@@ -14,7 +14,9 @@ import java.util.Set;
 
 /**
  * Certifies a decision model from its end-to-end grids (JCLAW-1356): a threshold passes when the one-sided 95%
- * Clopper-Pearson upper bound on its wrong share is at most 5% and its recall meets the floor. Pure: no I/O, no clock.
+ * Clopper-Pearson upper bound on its wrong share is at most 5% and its recall meets the floor. One run certifies when
+ * a spot-check that re-asks a share of its cases gets the same decisions back; several runs must each certify.
+ * Pure: no I/O, no clock.
  */
 public final class Certifier {
 
@@ -31,8 +33,8 @@ public final class Certifier {
     public static final String LABEL_ERROR = "label-error";
     public static final String SECOND_RUN_FAILED = "second run did not certify";
     public static final String LABELS_NEED_FIXING = "labels need fixing";
-    public static final String NEEDS_TWO_RUNS = "certification needs two runs";
-    public static final int MIN_RUNS = 2;
+    public static final String NEEDS_SPOT_CHECK = "a single run needs its spot-check";
+    public static final double SPOT_CHECK_SHARE = 0.10;
 
     private Certifier() {}
 
@@ -55,6 +57,9 @@ public final class Certifier {
     }
 
     public record Adjudication(String caseId, String record, String verdict, String note) {}
+
+    /** A single run's cases asked again: how many decisions came back, and how many of them differ. */
+    public record SpotCheck(int cases, int decisions, int differing) {}
 
     /**
      * The verdict. {@code unadjudicated} lists the wrong records at {@code threshold} with no {@code wrong} verdict;
@@ -112,14 +117,17 @@ public final class Certifier {
 
     /**
      * Walks {@code grid} from 0.95 down, certifying at the lowest threshold where it and every one above it pass,
-     * and stopping at the first that does not.
+     * and stopping at the first that does not. A run with a failed decision passes nowhere: what it would have
+     * written is unknown.
      */
     public static Walk walk(List<Point> grid, double recallFloor) {
         var ordered = new ArrayList<>(grid);
         ordered.sort((a, b) -> Double.compare(b.threshold(), a.threshold()));
         var steps = new ArrayList<Step>();
         Double certified = null;
-        String failure = null;
+        int failed = grid.isEmpty() ? 0 : grid.getFirst().failures();
+        String failure = failed == 0 ? null : "%d decisions failed, and a run with a failed decision does not certify"
+                .formatted(failed);
         for (var p : ordered) {
             int denominator = p.written() - p.noise();
             double bound = upperBound(p.wrong(), denominator);
@@ -162,16 +170,28 @@ public final class Certifier {
 
     /**
      * Applies the preconditions to the combined walk. {@code wrongAtThreshold} are the wrong records of every run at
-     * the combined threshold; it is ignored when nothing certified.
+     * the combined threshold; it is ignored when nothing certified. {@code spotCheck} is required of a single run and
+     * ignored for several.
      */
     public static Certification certify(List<Walk> runs, boolean memoryChanged, boolean agreementCovered,
-                                        List<WrongRecord> wrongAtThreshold, List<Adjudication> adjudications) {
+                                        List<WrongRecord> wrongAtThreshold, List<Adjudication> adjudications,
+                                        @Nullable SpotCheck spotCheck) {
         var combined = combine(runs);
         var threshold = combined.threshold();
         var reasons = new ArrayList<>(combined.reasons());
-        if (runs.size() < MIN_RUNS) reasons.add(NEEDS_TWO_RUNS);
+        boolean unconfirmed = false;
+        if (runs.size() == 1) {
+            if (spotCheck == null) {
+                reasons.add(NEEDS_SPOT_CHECK);
+                unconfirmed = true;
+            } else if (spotCheck.differing() > 0) {
+                reasons.add("spot-check: %d of %d decisions differ when asked again; certify with two full runs"
+                        .formatted(spotCheck.differing(), spotCheck.decisions()));
+                unconfirmed = true;
+            }
+        }
         if (memoryChanged) reasons.addFirst("a case memory changed during the run");
-        if (memoryChanged || threshold == null || runs.size() < MIN_RUNS) {
+        if (memoryChanged || threshold == null || unconfirmed) {
             return new Certification(NOT_CERTIFIED, null, reasons, List.of(), null);
         }
         var noiseRate = noiseRate(runs, threshold);
