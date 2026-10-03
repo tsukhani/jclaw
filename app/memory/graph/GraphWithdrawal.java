@@ -63,12 +63,13 @@ public final class GraphWithdrawal {
             case Term t -> {
                 var evidence = prune(t.evidenceIds(), removed);
                 yield evidence.isEmpty() ? null
-                        : new Term(t.meta(), t.type(), t.name(), prune(t.mappingIds(), removed), evidence);
+                        : new Term(t.meta(), t.type(), t.name(), prune(t.mappingIds(), removed), evidence,
+                                t.aliases(), t.mergedInto());
             }
             case Mapping m -> {
                 var evidence = prune(m.evidenceIds(), removed);
                 yield evidence.isEmpty() || removed.contains(m.termId()) ? null
-                        : new Mapping(m.meta(), m.termId(), m.source(), evidence);
+                        : new Mapping(m.meta(), m.termId(), m.source(), evidence, m.surfaces());
             }
             case Relation r -> {
                 var evidence = prune(r.evidenceIds(), removed);

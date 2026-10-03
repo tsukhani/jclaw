@@ -1,8 +1,10 @@
 package memory.ontology;
 
+import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 
 /**
@@ -27,6 +29,26 @@ public sealed interface OntologyRecord
         FIRM
     }
 
+    /** A claim's status; the lower-case names are the schema's {@code claims.status} keys. */
+    enum Status {
+        HOLDS,
+        ENDED,
+        DENIED
+    }
+
+    /** How a successor relates to the row it retires; the schema's {@code system_time.lineage} keys. */
+    enum Lineage {
+        UPDATE,
+        RESTATEMENT,
+        CORRECTION
+    }
+
+    /** The schema's {@code claims.valence} keys. */
+    enum Valence {
+        FAVORABLE,
+        UNFAVORABLE
+    }
+
     /** Fields every record carries; the recall counters are maintained by the evolution loop. */
     record Meta(
             String id,
@@ -47,19 +69,43 @@ public sealed interface OntologyRecord
         return meta().id();
     }
 
-    /** An entity or concept, grounded by its Mappings. */
-    record Term(Meta meta, String type, String name, List<String> mappingIds, List<String> evidenceIds)
+    /**
+     * An entity or concept, grounded by its Mappings. {@code aliases} lists every accepted surface;
+     * {@code mergedInto} names the Term a merge copied this one's Mappings and Evidence into.
+     */
+    record Term(
+            Meta meta,
+            String type,
+            String name,
+            List<String> mappingIds,
+            List<String> evidenceIds,
+            List<String> aliases,
+            @Nullable String mergedInto)
             implements OntologyRecord {
         public Term {
             mappingIds = List.copyOf(mappingIds);
             evidenceIds = List.copyOf(evidenceIds);
+            aliases = List.copyOf(aliases);
+        }
+
+        public Term(Meta meta, String type, String name, List<String> mappingIds, List<String> evidenceIds) {
+            this(meta, type, name, mappingIds, evidenceIds, List.of(), null);
         }
     }
 
-    /** Grounds a Term in a physical source: a memory id, message id or file path. */
-    record Mapping(Meta meta, String termId, String source, List<String> evidenceIds) implements OntologyRecord {
+    /**
+     * Grounds a Term in a physical source: a memory id, message id or file path. {@code surfaces}
+     * holds the mention's verbatim strings, never offsets, and is empty for a Mapping written by rule.
+     */
+    record Mapping(Meta meta, String termId, String source, List<String> evidenceIds, List<String> surfaces)
+            implements OntologyRecord {
         public Mapping {
             evidenceIds = List.copyOf(evidenceIds);
+            surfaces = List.copyOf(surfaces);
+        }
+
+        public Mapping(Meta meta, String termId, String source, List<String> evidenceIds) {
+            this(meta, termId, source, evidenceIds, List.of());
         }
     }
 
@@ -82,6 +128,39 @@ public sealed interface OntologyRecord
         }
     }
 
-    /** Provenance for a claim; {@code subjectId}, when present, names any other record. */
-    record Evidence(Meta meta, String source, @Nullable String subjectId) implements OntologyRecord {}
+    /**
+     * Provenance for a record; {@code subjectId}, when present, names any other record. Evidence
+     * carrying any of {@code status}, {@code valid}, {@code occurs} or {@code valence} is
+     * claim-bearing: what {@code source} states about its subject.
+     */
+    record Evidence(
+            Meta meta,
+            String source,
+            @Nullable String subjectId,
+            @Nullable MemoryAuthorType authorType,
+            @Nullable Double confidence,
+            @Nullable String runId,
+            @Nullable Instant recordedAt,
+            @Nullable Instant retiredAt,
+            @Nullable String retiredBy,
+            @Nullable Lineage lineage,
+            @Nullable LocalDate changedBy,
+            @Nullable LocalDate anchor,
+            @Nullable Status status,
+            @Nullable EdtfInterval valid,
+            @Nullable EdtfInterval occurs,
+            @Nullable Valence valence)
+            implements OntologyRecord {
+        public Evidence(Meta meta, String source, @Nullable String subjectId) {
+            this(meta, source, subjectId, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        }
+
+        /**
+         * The id of the one claim-bearing Evidence per (record, source). The length prefix keeps
+         * ({@code a:b}, {@code c}) and ({@code a}, {@code b:c}) apart.
+         */
+        public static String claimId(String recordId, String source) {
+            return "ev:" + recordId.length() + ":" + recordId + ":" + source;
+        }
+    }
 }

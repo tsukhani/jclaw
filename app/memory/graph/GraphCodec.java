@@ -4,14 +4,19 @@ import com.google.gson.Strictness;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
+import memory.ontology.EdtfInterval;
 import memory.ontology.OntologyRecord;
 import memory.ontology.OntologyRecord.Constraint;
 import memory.ontology.OntologyRecord.Evidence;
+import memory.ontology.OntologyRecord.Lineage;
 import memory.ontology.OntologyRecord.Mapping;
 import memory.ontology.OntologyRecord.Meta;
 import memory.ontology.OntologyRecord.Relation;
+import memory.ontology.OntologyRecord.Status;
 import memory.ontology.OntologyRecord.Term;
 import memory.ontology.OntologyRecord.Tier;
+import memory.ontology.OntologyRecord.Valence;
+import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
@@ -19,6 +24,7 @@ import java.io.StringReader;
 import java.io.StringWriter;
 import java.io.UncheckedIOException;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -30,8 +36,9 @@ import java.util.Map;
 
 /**
  * The canonical line format of the graph documents: one JSON object per line, the common
- * {@link Meta} keys first and then the family's own keys in component order, so the same
- * record set always encodes to the same bytes.
+ * {@link Meta} keys first, then the family's required keys in component order, then whichever
+ * optional keys are set in their fixed order, so the same record set always encodes to the same
+ * bytes. An unset optional key is omitted, never written as null or an empty array.
  */
 public final class GraphCodec {
 
@@ -40,20 +47,24 @@ public final class GraphCodec {
 
     /** One document per family; the declaration order is the order files are written in. */
     public enum Family {
-        TERM("term.jsonl", List.of("type", "name", "mappingIds", "evidenceIds")),
-        MAPPING("mapping.jsonl", List.of("termId", "source", "evidenceIds")),
-        RELATION("relation.jsonl", List.of("type", "from", "to", "weight", "evidenceIds")),
-        CONSTRAINT("constraint.jsonl", List.of("termId", "rule", "evidenceIds")),
-        EVIDENCE("evidence.jsonl", List.of("source", "subjectId"));
+        TERM("term.jsonl", List.of("type", "name", "mappingIds", "evidenceIds"), List.of("aliases", "mergedInto")),
+        MAPPING("mapping.jsonl", List.of("termId", "source", "evidenceIds"), List.of("surfaces")),
+        RELATION("relation.jsonl", List.of("type", "from", "to", "weight", "evidenceIds"), List.of()),
+        CONSTRAINT("constraint.jsonl", List.of("termId", "rule", "evidenceIds"), List.of()),
+        EVIDENCE("evidence.jsonl", List.of("source", "subjectId"), List.of("authorType", "confidence", "runId",
+                "recordedAt", "retiredAt", "retiredBy", "lineage", "changedBy", "anchor", "status", "valid", "occurs",
+                "valence"));
 
         private final String fileName;
         private final List<String> keys;
+        private final List<String> optionalKeys;
 
-        Family(String fileName, List<String> ownKeys) {
+        Family(String fileName, List<String> ownKeys, List<String> optionalKeys) {
             this.fileName = fileName;
             var all = new ArrayList<>(META_KEYS);
             all.addAll(ownKeys);
             this.keys = List.copyOf(all);
+            this.optionalKeys = optionalKeys;
         }
 
         public String fileName() {
@@ -63,6 +74,11 @@ public final class GraphCodec {
         /** Every key a line of this family carries, in written order. */
         public List<String> keys() {
             return keys;
+        }
+
+        /** The keys a line carries only when set, written after {@link #keys()} in this order. */
+        public List<String> optionalKeys() {
+            return optionalKeys;
         }
 
         public static Family of(OntologyRecord record) {
@@ -116,11 +132,14 @@ public final class GraphCodec {
                     w.name("name").value(t.name());
                     strings(w.name("mappingIds"), t.mappingIds());
                     strings(w.name("evidenceIds"), t.evidenceIds());
+                    optionalStrings(w, "aliases", t.aliases());
+                    optional(w, "mergedInto", t.mergedInto());
                 }
                 case Mapping m -> {
                     w.name("termId").value(m.termId());
                     w.name("source").value(m.source());
                     strings(w.name("evidenceIds"), m.evidenceIds());
+                    optionalStrings(w, "surfaces", m.surfaces());
                 }
                 case Relation r -> {
                     w.name("type").value(r.type());
@@ -140,6 +159,26 @@ public final class GraphCodec {
                 case Evidence e -> {
                     w.name("source").value(e.source());
                     w.name("subjectId").value(e.subjectId());
+                    optional(w, "authorType", lower(e.authorType()));
+                    var confidence = e.confidence();
+                    if (confidence != null) {
+                        if (!Double.isFinite(confidence)) {
+                            throw new IllegalArgumentException(
+                                    "evidence " + e.id() + ": confidence " + confidence + " is not finite");
+                        }
+                        w.name("confidence").value(confidence);
+                    }
+                    optional(w, "runId", e.runId());
+                    optional(w, "recordedAt", text(e.recordedAt()));
+                    optional(w, "retiredAt", text(e.retiredAt()));
+                    optional(w, "retiredBy", e.retiredBy());
+                    optional(w, "lineage", lower(e.lineage()));
+                    optional(w, "changedBy", text(e.changedBy()));
+                    optional(w, "anchor", text(e.anchor()));
+                    optional(w, "status", lower(e.status()));
+                    optional(w, "valid", text(e.valid()));
+                    optional(w, "occurs", text(e.occurs()));
+                    optional(w, "valence", lower(e.valence()));
                 }
             }
             w.endObject();
@@ -153,6 +192,23 @@ public final class GraphCodec {
         w.beginArray();
         for (var v : values) w.value(v);
         w.endArray();
+    }
+
+    private static void optional(JsonWriter w, String key, @Nullable String value) throws IOException {
+        if (value != null) w.name(key).value(value);
+    }
+
+    private static void optionalStrings(JsonWriter w, String key, List<String> values) throws IOException {
+        if (!values.isEmpty()) strings(w.name(key), values);
+    }
+
+    private static @Nullable String lower(@Nullable Enum<?> value) {
+        return value == null ? null : value.name().toLowerCase(Locale.ROOT);
+    }
+
+    /** Instants, dates and EDTF intervals all round-trip through their {@code toString}. */
+    private static @Nullable String text(@Nullable Object value) {
+        return value == null ? null : value.toString();
     }
 
     /** Every record in a document; a blank document is empty. */
@@ -170,13 +226,24 @@ public final class GraphCodec {
      * One line back to its record.
      *
      * @throws IllegalArgumentException naming {@code file} and {@code lineNo} on a malformed
-     *                                  line, a missing key or an unknown one
+     *                                  line, a missing key, an unknown one, or an optional key written
+     *                                  as null or an empty array
      */
     public static OntologyRecord decode(Family family, String line, String file, int lineNo) {
         try {
             var values = readObject(line);
-            for (var key : values.keySet()) {
-                if (!family.keys().contains(key)) throw new IllegalArgumentException("unknown key '" + key + "'");
+            for (var entry : values.entrySet()) {
+                var key = entry.getKey();
+                if (family.keys().contains(key)) continue;
+                if (!family.optionalKeys().contains(key)) {
+                    throw new IllegalArgumentException("unknown key '" + key + "'");
+                }
+                if (entry.getValue() instanceof Value.Null) {
+                    throw new IllegalArgumentException("'" + key + "' is optional and must be omitted rather than null");
+                }
+                if (entry.getValue() instanceof Value.Texts(var texts) && texts.isEmpty()) {
+                    throw new IllegalArgumentException("'" + key + "' is optional and must be omitted rather than empty");
+                }
             }
             for (var key : family.keys()) {
                 if (!values.containsKey(key)) throw new IllegalArgumentException("missing key '" + key + "'");
@@ -187,14 +254,28 @@ public final class GraphCodec {
                     fields.intValue("graphVersion"));
             return switch (family) {
                 case TERM -> new Term(meta, fields.string("type"), fields.string("name"),
-                        fields.strings("mappingIds"), fields.strings("evidenceIds"));
+                        fields.strings("mappingIds"), fields.strings("evidenceIds"), fields.optionalStrings("aliases"),
+                        fields.optionalString("mergedInto"));
                 case MAPPING -> new Mapping(meta, fields.string("termId"), fields.string("source"),
-                        fields.strings("evidenceIds"));
+                        fields.strings("evidenceIds"), fields.optionalStrings("surfaces"));
                 case RELATION -> new Relation(meta, fields.string("type"), fields.string("from"), fields.string("to"),
                         fields.doubleValue("weight"), fields.strings("evidenceIds"));
                 case CONSTRAINT -> new Constraint(meta, fields.string("termId"), fields.string("rule"),
                         fields.strings("evidenceIds"));
-                case EVIDENCE -> new Evidence(meta, fields.string("source"), fields.nullableString("subjectId"));
+                case EVIDENCE -> new Evidence(meta, fields.string("source"), fields.nullableString("subjectId"),
+                        fields.optionalEnum("authorType", MemoryAuthorType.class),
+                        fields.optionalDouble("confidence"),
+                        fields.optionalString("runId"),
+                        instant(fields.optionalString("recordedAt")),
+                        instant(fields.optionalString("retiredAt")),
+                        fields.optionalString("retiredBy"),
+                        fields.optionalEnum("lineage", Lineage.class),
+                        date(fields.optionalString("changedBy")),
+                        date(fields.optionalString("anchor")),
+                        fields.optionalEnum("status", Status.class),
+                        interval(fields.optionalString("valid")),
+                        interval(fields.optionalString("occurs")),
+                        fields.optionalEnum("valence", Valence.class));
             };
         } catch (IllegalArgumentException | IllegalStateException | IOException | DateTimeParseException e) {
             throw new IllegalArgumentException(file + ":" + lineNo + ": " + e.getMessage(), e);
@@ -211,6 +292,14 @@ public final class GraphCodec {
 
     private static @Nullable Instant instant(@Nullable String value) {
         return value == null ? null : Instant.parse(value);
+    }
+
+    private static @Nullable LocalDate date(@Nullable String value) {
+        return value == null ? null : LocalDate.parse(value);
+    }
+
+    private static @Nullable EdtfInterval interval(@Nullable String value) {
+        return value == null ? null : EdtfInterval.parse(value);
     }
 
     /** A JSON value as read; a number keeps its literal so each field parses it at its own width. */
@@ -290,6 +379,28 @@ public final class GraphCodec {
         List<String> strings(String key) {
             if (values.get(key) instanceof Value.Texts(var texts)) return texts;
             throw new IllegalArgumentException("'" + key + "' is not a list of strings");
+        }
+
+        @Nullable String optionalString(String key) {
+            return values.containsKey(key) ? string(key) : null;
+        }
+
+        List<String> optionalStrings(String key) {
+            return values.containsKey(key) ? strings(key) : List.of();
+        }
+
+        @Nullable Double optionalDouble(String key) {
+            return values.containsKey(key) ? doubleValue(key) : null;
+        }
+
+        /** Only the constant's exact lower-case name decodes. */
+        <E extends Enum<E>> @Nullable E optionalEnum(String key, Class<E> type) {
+            if (!values.containsKey(key)) return null;
+            var text = string(key);
+            for (var constant : type.getEnumConstants()) {
+                if (constant.name().toLowerCase(Locale.ROOT).equals(text)) return constant;
+            }
+            throw new IllegalArgumentException("'" + key + "' value '" + text + "' is not a known " + key);
         }
     }
 }

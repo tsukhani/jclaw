@@ -1,16 +1,21 @@
 import memory.graph.GraphCodec;
 import memory.graph.GraphStore;
 import memory.graph.GraphStore.GraphRefusedException;
+import memory.ontology.EdtfInterval;
 import memory.ontology.OntologyRecord;
 import memory.ontology.OntologyRecord.Constraint;
 import memory.ontology.OntologyRecord.Evidence;
+import memory.ontology.OntologyRecord.Lineage;
 import memory.ontology.OntologyRecord.Mapping;
 import memory.ontology.OntologyRecord.Meta;
 import memory.ontology.OntologyRecord.Relation;
+import memory.ontology.OntologyRecord.Status;
 import memory.ontology.OntologyRecord.Term;
 import memory.ontology.OntologyRecord.Tier;
+import memory.ontology.OntologyRecord.Valence;
 import memory.ontology.OntologyValidator.Kind;
 import memory.ontology.OntologyValidator.Violation;
+import models.MemoryAuthorType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -22,6 +27,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
@@ -177,6 +183,115 @@ class MemoryGraphStoreTest extends UnitTest {
         var unknown = assertThrows(IllegalArgumentException.class, () -> GraphCodec.decode(
                 GraphCodec.Family.EVIDENCE, line.replace("}", ",\"extra\":1}"), "7/evidence.jsonl", 4));
         assertTrue(unknown.getMessage().startsWith("7/evidence.jsonl:4: unknown key 'extra'"), unknown.getMessage());
+        var explicitNull = assertThrows(IllegalArgumentException.class, () -> GraphCodec.decode(
+                GraphCodec.Family.EVIDENCE, line.replace("}", ",\"runId\":null}"), "7/evidence.jsonl", 5));
+        assertTrue(explicitNull.getMessage().startsWith(
+                "7/evidence.jsonl:5: 'runId' is optional and must be omitted rather than null"), explicitNull.getMessage());
+        var termLine = GraphCodec.encode(new Term(meta("t1"), "Topic", "Gardening", List.of(), List.of("e1")));
+        var explicitEmpty = assertThrows(IllegalArgumentException.class, () -> GraphCodec.decode(
+                GraphCodec.Family.TERM, termLine.replace("}", ",\"aliases\":[]}"), "7/term.jsonl", 6));
+        assertTrue(explicitEmpty.getMessage().startsWith(
+                "7/term.jsonl:6: 'aliases' is optional and must be omitted rather than empty"), explicitEmpty.getMessage());
+    }
+
+    private static Evidence fullyQualified() {
+        return new Evidence(meta("e9"), "memory:501", "r1", MemoryAuthorType.HUMAN_TURN, 0.875, "run-3",
+                Instant.parse("2026-02-15T09:00:00Z"), Instant.parse("2026-03-01T12:30:00Z"), "memory:612",
+                Lineage.UPDATE, LocalDate.parse("2026-03-01"), LocalDate.parse("2026-02-15"), Status.HOLDS,
+                EdtfInterval.parse("2019/.."), EdtfInterval.parse("2026-02-14"), Valence.FAVORABLE);
+    }
+
+    @Test
+    void optionalKeysFollowTheRequiredOnesInAFixedOrder() {
+        var evidence = fullyQualified();
+        var evidenceLine = "{\"id\":\"e9\",\"agentId\":7,\"tier\":\"tentative\",\"usefulRecallCount\":0,"
+                + "\"lastUsefulRecall\":null,\"graphVersion\":1,\"source\":\"memory:501\",\"subjectId\":\"r1\","
+                + "\"authorType\":\"human_turn\",\"confidence\":0.875,\"runId\":\"run-3\","
+                + "\"recordedAt\":\"2026-02-15T09:00:00Z\",\"retiredAt\":\"2026-03-01T12:30:00Z\","
+                + "\"retiredBy\":\"memory:612\",\"lineage\":\"update\",\"changedBy\":\"2026-03-01\","
+                + "\"anchor\":\"2026-02-15\",\"status\":\"holds\",\"valid\":\"2019/..\",\"occurs\":\"2026-02-14\","
+                + "\"valence\":\"favorable\"}";
+        assertEquals(evidenceLine, GraphCodec.encode(evidence));
+        assertEquals(evidence, GraphCodec.decode(GraphCodec.Family.EVIDENCE, evidenceLine, "7/evidence.jsonl", 1));
+
+        var term = new Term(meta("p1"), "Person", "Ada", List.of(), List.of("e1"), List.of("Ada L.", "Countess"), "p0");
+        var termLine = "{\"id\":\"p1\",\"agentId\":7,\"tier\":\"tentative\",\"usefulRecallCount\":0,"
+                + "\"lastUsefulRecall\":null,\"graphVersion\":1,\"type\":\"Person\",\"name\":\"Ada\","
+                + "\"mappingIds\":[],\"evidenceIds\":[\"e1\"],\"aliases\":[\"Ada L.\",\"Countess\"],\"mergedInto\":\"p0\"}";
+        assertEquals(termLine, GraphCodec.encode(term));
+        assertEquals(term, GraphCodec.decode(GraphCodec.Family.TERM, termLine, "7/term.jsonl", 1));
+
+        var mapping = new Mapping(meta("m1"), "p1", "memory:1", List.of("e1"), List.of("Ada", "my aunt"));
+        var mappingLine = "{\"id\":\"m1\",\"agentId\":7,\"tier\":\"tentative\",\"usefulRecallCount\":0,"
+                + "\"lastUsefulRecall\":null,\"graphVersion\":1,\"termId\":\"p1\",\"source\":\"memory:1\","
+                + "\"evidenceIds\":[\"e1\"],\"surfaces\":[\"Ada\",\"my aunt\"]}";
+        assertEquals(mappingLine, GraphCodec.encode(mapping));
+        assertEquals(mapping, GraphCodec.decode(GraphCodec.Family.MAPPING, mappingLine, "7/mapping.jsonl", 1));
+    }
+
+    @Test
+    void aLineWithoutOptionalKeysDecodesToUnsetFields() {
+        var line = "{\"id\":\"e1\",\"agentId\":7,\"tier\":\"tentative\",\"usefulRecallCount\":0,"
+                + "\"lastUsefulRecall\":null,\"graphVersion\":1,\"source\":\"memory:1\",\"subjectId\":null}";
+        var evidence = (Evidence) GraphCodec.decode(GraphCodec.Family.EVIDENCE, line, "7/evidence.jsonl", 1);
+        assertEquals(new Evidence(meta("e1"), "memory:1", null), evidence);
+        assertNull(evidence.authorType());
+        assertNull(evidence.valid());
+        assertEquals(line, GraphCodec.encode(evidence));
+        var term = (Term) GraphCodec.decode(GraphCodec.Family.TERM,
+                GraphCodec.encode(new Term(meta("t1"), "Topic", "x", List.of(), List.of("e1"))), "7/term.jsonl", 1);
+        assertEquals(List.of(), term.aliases());
+        assertNull(term.mergedInto());
+    }
+
+    @Test
+    void theNeverFormAnApproximateStartAndUnattributedRoundTrip() {
+        for (var e : List.of(
+                new Evidence(meta("e1"), "memory:1", "r1", null, null, null, null, null, null, null, null, null,
+                        Status.DENIED, EdtfInterval.parse("../2026-02-15"), null, null),
+                new Evidence(meta("e2"), "memory:2", "r1", null, null, null, null, null, null, null, null, null,
+                        Status.HOLDS, EdtfInterval.parse("2023~/.."), null, null),
+                new Evidence(meta("e3"), "memory:3", null, MemoryAuthorType.UNATTRIBUTED, null, null, null, null,
+                        null, null, null, null, null, null, null, null))) {
+            var line = GraphCodec.encode(e);
+            assertEquals(e, GraphCodec.decode(GraphCodec.Family.EVIDENCE, line, "7/evidence.jsonl", 1), line);
+        }
+        assertTrue(GraphCodec.encode(new Evidence(meta("e3"), "memory:3", null, MemoryAuthorType.UNATTRIBUTED, null,
+                null, null, null, null, null, null, null, null, null, null, null)).contains("\"authorType\":\"unattributed\""));
+    }
+
+    @Test
+    void aMalformedOptionalValueIsRefusedNamingTheLine() {
+        var line = GraphCodec.encode(new Evidence(meta("e1"), "memory:1", null));
+        int lineNo = 10;
+        for (var extra : List.of("\"valid\":\"2019-13\"", "\"status\":\"Holds\"", "\"anchor\":\"2026-02-30\"",
+                "\"recordedAt\":\"yesterday\"", "\"authorType\":\"HUMAN_TURN\"", "\"confidence\":\"high\"")) {
+            var n = lineNo++;
+            var e = assertThrows(IllegalArgumentException.class, () -> GraphCodec.decode(
+                    GraphCodec.Family.EVIDENCE, line.replace("}", "," + extra + "}"), "7/evidence.jsonl", n), extra);
+            assertTrue(e.getMessage().startsWith("7/evidence.jsonl:" + n + ": "), e.getMessage());
+        }
+    }
+
+    @Test
+    void aNonFiniteConfidenceIsRefusedOnEncode() {
+        var e = new Evidence(meta("e1"), "memory:1", null, null, Double.NaN, null, null, null, null, null, null,
+                null, null, null, null, null);
+        assertThrows(IllegalArgumentException.class, () -> GraphCodec.encode(e));
+    }
+
+    @Test
+    void aDocumentInTodaysFormatRewritesByteIdentically() throws Exception {
+        var dir = Files.createDirectories(store.agentDir(AGENT));
+        var today = new TreeMap<String, String>();
+        for (var family : GraphCodec.Family.values()) {
+            var doc = GraphCodec.document(family, fullSet());
+            today.put(family.fileName(), doc);
+            Files.writeString(dir.resolve(family.fileName()), doc);
+        }
+        assertFalse(String.join("", today.values()).contains("authorType"));
+        store.write(AGENT, store.read(AGENT));
+        assertEquals(today, snapshot());
     }
 
     @Test

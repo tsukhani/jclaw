@@ -3,7 +3,8 @@ package models;
 /**
  * Whose words a {@link Memory} rests on (JCLAW-1318). Lives in {@code models} rather than
  * {@code memory} because {@code models} must not import from {@code memory}. A null
- * {@link Memory#authorType} is a row written before provenance existed.
+ * {@link Memory#authorType} is a row written before provenance existed; {@link #UNATTRIBUTED}
+ * is the graph Evidence's name for such a row.
  */
 public enum MemoryAuthorType {
     /** Grounded in something the operator said in a conversation turn. */
@@ -13,5 +14,10 @@ public enum MemoryAuthorType {
     /** Written by an agent with no human turn behind it — a task run, say. */
     AGENT_SYNTHESIZED,
     /** Derived from other memories; exactly the rows carrying {@link MemoryDerivation} links. */
-    CONSOLIDATION_DERIVED
+    CONSOLIDATION_DERIVED,
+    /**
+     * Used on graph Evidence only, never assigned to a Memory row: Evidence drawn from a row with a
+     * null author type (written before JCLAW-1318) carries it, and it reads as the owner's.
+     */
+    UNATTRIBUTED
 }
