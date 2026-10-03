@@ -14,9 +14,10 @@ import java.util.Set;
 /**
  * Strict end-to-end scoring of extraction runs against the case labels (JCLAW-1356). A written term is right only
  * when its span is the mention or an alias of a labelled entity, of the labelled type, written once; a written
- * relation is right only when the labels state it between the entities its endpoints wrote. The operator's Person is
- * written by rule rather than decided, so it counts in neither written nor gold, only in {@code ruleWritten}; its
- * span still stands as a relation endpoint. Pure: no I/O, no clock.
+ * relation is right only when the labels state it between the entities its endpoints wrote. An implicit operator or
+ * one mentioned as "The user" is written by rule rather than decided, so it counts in neither written nor gold, only
+ * in {@code ruleWritten}; its span still stands as a relation endpoint. An owner mentioned by name is decided and
+ * counted like any other term. Pure: no I/O, no clock.
  */
 public final class GraphSpikeScorer {
 
@@ -40,8 +41,8 @@ public final class GraphSpikeScorer {
 
     /**
      * Every case scored at one threshold. {@code wrongShare} is wrong / (written - noise), null when that is zero;
-     * {@code recall} is right / gold, gold counting only non-noise labels. {@code ruleWritten} counts the operator
-     * terms left out of both.
+     * {@code recall} is right / gold, gold counting only non-noise labels. {@code ruleWritten} counts the
+     * rule-written operator terms left out of both.
      */
     public record Point(double threshold, int written, int right, int wrong, int wrongMatch, int wrongType,
                         int wrongDuplicate, int wrongRelation, int noise, int gold, @Nullable Double recall,
@@ -77,9 +78,9 @@ public final class GraphSpikeScorer {
         return new Scored(point, tally.wrong);
     }
 
-    /** The non-noise labels in {@code c}, terms other than the operator plus relations. */
+    /** The non-noise labels in {@code c}, terms other than a rule-written operator plus relations. */
     public static int gold(Case c) {
-        return (int) (c.entities().stream().filter(e -> !e.noise() && !e.operator()).count()
+        return (int) (c.entities().stream().filter(e -> !e.noise() && !e.ruleWritten()).count()
                 + c.relations().stream().filter(r -> !r.noise()).count());
     }
 

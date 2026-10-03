@@ -7,6 +7,7 @@ import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import memory.ontology.OntologySchema;
 import org.jspecify.annotations.Nullable;
+import services.WorkspaceFiles;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -34,8 +35,10 @@ public final class GraphCases {
     public static final List<String> HARD_NEGATIVE_TAGS = List.of("weekday-time", "role", "everyday-object",
             "descriptive-phrase", "reversed-direction", "employer-tool");
     public static final String PLAIN = "plain";
+    /** A memory about a guest, not the owner: it carries no operator. */
+    public static final String GUEST = "guest";
     public static final Set<String> TAGS = Set.of("weekday-time", "role", "everyday-object", "descriptive-phrase",
-            "reversed-direction", "employer-tool", PLAIN);
+            "reversed-direction", "employer-tool", PLAIN, GUEST);
 
     private GraphCases() {}
 
@@ -56,6 +59,11 @@ public final class GraphCases {
 
         public boolean operator() {
             return id.equals(OPERATOR);
+        }
+
+        /** Whether the harness writes it without asking: the implicit operator, or one mentioned as "The user". */
+        public boolean ruleWritten() {
+            return operator() && (implicit || IMPLICIT_OPERATOR_SPAN.equalsIgnoreCase(mention));
         }
 
         /** The span a question names it by: the mention, or {@link #IMPLICIT_OPERATOR_SPAN}. */
@@ -116,6 +124,7 @@ public final class GraphCases {
      */
     public static List<Case> parse(String json, OntologySchema schema) {
         var root = root(json);
+        var owner = ownerName(root);
         var cases = new ArrayList<Case>();
         var types = new HashMap<String, String>();
         var ids = new HashSet<String>();
@@ -126,10 +135,36 @@ public final class GraphCases {
             var object = element.getAsJsonObject();
             var id = text(object, "id", where);
             var c = parseCase(object, id, true, schema, types);
+            var operator = c.entity(OPERATOR);
+            var mention = operator == null ? null : operator.mention();
+            if (owner != null && mention != null && !mention.equalsIgnoreCase(IMPLICIT_OPERATOR_SPAN)
+                    && !mention.equals(owner)) {
+                throw new IllegalArgumentException("case " + c.id() + ": the operator is mentioned as '" + mention
+                        + "', neither \"The user\" nor the declared owner '" + owner + "'");
+            }
             if (!ids.add(c.id())) throw new IllegalArgumentException("case " + c.id() + ": duplicate id");
             cases.add(c);
         }
         return List.copyOf(cases);
+    }
+
+    /**
+     * The owner's name declared by the set's optional root {@code userMd}, a USER.md header, or null when it declares
+     * none.
+     *
+     * @throws IllegalArgumentException when {@code json} is not a case set, or {@code userMd} is not a string
+     */
+    public static @Nullable String ownerName(String json) {
+        return ownerName(root(json));
+    }
+
+    private static @Nullable String ownerName(JsonObject root) {
+        var userMd = root.get("userMd");
+        if (userMd == null) return null;
+        if (!userMd.isJsonPrimitive() || !userMd.getAsJsonPrimitive().isString()) {
+            throw new IllegalArgumentException("graph cases: 'userMd' must be a string");
+        }
+        return WorkspaceFiles.ownerNameIn(userMd.getAsString());
     }
 
     static JsonObject root(String json) {
@@ -291,8 +326,9 @@ public final class GraphCases {
         return value.getAsJsonArray();
     }
 
-    /** Whether {@code text} opens with the operator in either of the two shapes the guide allows. */
-    public static boolean operatorVoice(String text) {
-        return text.startsWith("The user") || CandidateGenerator.subjectless(text);
+    /** Whether {@code text} opens with the operator: "The user", the owner's name, or a subjectless verb. */
+    public static boolean operatorVoice(String text, @Nullable String ownerName) {
+        return text.startsWith("The user") || (ownerName != null && text.startsWith(ownerName))
+                || CandidateGenerator.subjectless(text);
     }
 }

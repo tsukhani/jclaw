@@ -552,8 +552,12 @@ public final class WorkspaceFiles {
     public static @Nullable String ownerName(String agentName) {
         if (!Files.isRegularFile(workspacePath(agentName).resolve("USER.md"))) return null;
         var text = readWorkspaceFile(agentName, "USER.md");
-        if (text == null) return null;
-        var m = NAME_LINE.matcher(headerOf(text));
+        return text == null ? null : ownerNameIn(text);
+    }
+
+    /** The owner's name on the Name line of a USER.md text, or null when that line is missing, empty or a placeholder. */
+    public static @Nullable String ownerNameIn(String userMd) {
+        var m = NAME_LINE.matcher(headerOf(userMd));
         if (!m.find()) return null;
         var name = m.group(1).strip().replaceAll("^[*_]+|[*_]+$", "").strip();
         return name.isEmpty() || name.startsWith("<") ? null : name;

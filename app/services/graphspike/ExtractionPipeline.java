@@ -86,9 +86,10 @@ public final class ExtractionPipeline {
      * One question's answer. {@code subject} is the span, {@code from -> to} for a relation (whose endpoint spans are
      * also in {@code from} and {@code to}), or the overlapping spans joined by {@code " | "}. {@code confidence} is the
      * chosen option's probability, or a relation's {@code noul} yes probability; a failed question has no choice,
-     * confidence 0 and its reason in {@code failure}. An {@code operator} term was never asked: it is written as a
-     * Person at confidence 1. {@code floor} is what the decision also needs to reach a threshold: a surviving
-     * overlap span's settling confidence, or a relation's weakest endpoint; 1 when nothing gates it.
+     * confidence 0 and its reason in {@code failure}. An {@code operator} term, the implicit operator or "the user",
+     * was never asked: it is written as a Person at confidence 1; an owner named in the text is asked like any term.
+     * {@code floor} is what the decision also needs to reach a threshold: a surviving overlap span's settling
+     * confidence, or a relation's weakest endpoint; 1 when nothing gates it.
      */
     public record Decision(String stage, String subject, @Nullable String from, @Nullable String to,
                            @Nullable String choice, double confidence, boolean operator, @Nullable String failure,
@@ -181,8 +182,9 @@ public final class ExtractionPipeline {
     }
 
     /**
-     * Writes the operator as a Person unasked, settles each set of overlapping candidates, types the survivors, then
-     * relates the typed terms, the operator included. A term is typed when its choice is a term type, at any
+     * Writes an operator candidate (implicit, or "the user") as a Person unasked, settles each set of overlapping
+     * candidates, types the survivors (an owner named in the text among them), then relates the typed terms, the
+     * operator included. A term is typed when its choice is a term type, at any
      * confidence; its relations carry its strength as their floor.
      */
     public static CaseRun run(OntologySchema schema, String caseId, String text, List<Candidate> candidates,

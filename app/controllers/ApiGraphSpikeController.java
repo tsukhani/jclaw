@@ -105,6 +105,12 @@ public class ApiGraphSpikeController extends Controller {
 
         var agentId = agentId(body);
         var cases = cases(schema);
+        String ownerName;
+        try {
+            ownerName = GraphCases.ownerName(Files.readString(appPath(GraphCases.DEFAULT_PATH)));
+        } catch (IOException | RuntimeException e) {
+            throw invalid("invalid case set: " + e.getMessage());
+        }
         List<GraphCases.Case> secondLabels;
         List<Certifier.Adjudication> adjudications;
         try {
@@ -115,7 +121,7 @@ public class ApiGraphSpikeController extends Controller {
         } catch (IOException | RuntimeException e) {
             throw invalid("invalid second labels or adjudications: " + e.getMessage());
         }
-        renderJSON(GSON.toJson(GraphSpikeHarness.run(agentId, cases, schema, models, runs, recallFloor, concurrency,
+        renderJSON(GSON.toJson(GraphSpikeHarness.run(agentId, cases, ownerName, schema, models, runs, recallFloor, concurrency,
                 secondLabels, adjudications)));
     }
 

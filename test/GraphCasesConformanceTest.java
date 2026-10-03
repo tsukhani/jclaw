@@ -2,6 +2,7 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import memory.ontology.OntologySchema;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
@@ -14,6 +15,7 @@ import services.graphspike.GraphSpikeScorer;
 
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -22,13 +24,14 @@ import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
 /**
- * JCLAW-1356: the committed v2 cases load against the seed ontology and meet every composition target, a set short
- * of any target fails naming it, and each refusal rule fires, naming the case, on an edited copy of the file.
+ * JCLAW-1356, JCLAW-1358: the committed v2 cases load against the seed ontology and meet every composition target, a
+ * set short of any target fails naming it, and each refusal rule fires, naming the case, on an edited copy of the file.
  */
 class GraphCasesConformanceTest extends UnitTest {
 
     private static final OntologySchema SCHEMA = OntologySchema.seed();
     private static final Pattern URL = Pattern.compile("https?://[^\\s,]+");
+    private static final String OWNER = "Avery Lin";
 
     private static String tracked() throws Exception {
         return Files.readString(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH));
@@ -44,9 +47,15 @@ class GraphCasesConformanceTest extends UnitTest {
         int n = cases.size();
         if (n < 120) out.add("at least 120 cases");
         long user = cases.stream().filter(c -> c.text().startsWith("The user")).count();
-        if (user * 100 < 85L * n) out.add("at least 85% begin \"The user\"");
-        if (cases.stream().anyMatch(c -> !GraphCases.operatorVoice(c.text()))) {
-            out.add("every other case is subjectless");
+        if (user * 100 < 12L * n || user * 100 > 17L * n) out.add("12-17% begin \"The user\"");
+        long owner = cases.stream().filter(c -> c.text().startsWith(OWNER)).count();
+        if (owner * 100 < 60L * n) out.add("at least 60% begin \"" + OWNER + "\"");
+        if (cases.stream().anyMatch(c -> !GraphCases.operatorVoice(c.text(), OWNER) && !guest(c))) {
+            out.add("every case is owner-voiced or guest");
+        }
+        var guests = cases.stream().filter(GraphCasesConformanceTest::guest).toList();
+        if (guests.size() < 6 || guests.stream().noneMatch(c -> c.text().startsWith("A guest"))) {
+            out.add("at least 6 guest cases, one opening \"A guest\"");
         }
         double words = cases.stream().mapToInt(c -> c.text().split("\\s+").length).average().orElse(0);
         if (words < 17 || words > 23) out.add("mean length 17-23 words");
@@ -72,6 +81,19 @@ class GraphCasesConformanceTest extends UnitTest {
         return out;
     }
 
+    private static boolean guest(Case c) {
+        return c.tags().contains(GraphCases.GUEST);
+    }
+
+    /** What is wrong with a guest case's operator labels, or null when nothing is. */
+    static @Nullable String guestViolation(Case c) {
+        if (c.entity(GraphCases.OPERATOR) != null) return c.id() + ": a guest case has no operator";
+        if (c.relations().stream().anyMatch(r -> r.from().equals(GraphCases.OPERATOR) || r.to().equals(GraphCases.OPERATOR))) {
+            return c.id() + ": a guest case relates nothing to the operator";
+        }
+        return CandidateGenerator.subjectless(c.text()) ? c.id() + ": a guest case is not subjectless" : null;
+    }
+
     @Test
     void theCommittedSetMeetsEveryCompositionTarget() throws Exception {
         assertEquals(List.of(), shortfalls(committed()));
@@ -81,9 +103,11 @@ class GraphCasesConformanceTest extends UnitTest {
     void aSetShortOfATargetFailsNamingIt() throws Exception {
         var cases = committed();
         assertShort(cases.subList(0, 119), "at least 120 cases");
-        assertShort(map(cases, c -> c.text().startsWith("The user")
-                ? withText(c, "Someone" + c.text().substring("The user".length())) : c),
-                "at least 85% begin \"The user\"", "every other case is subjectless");
+        assertShort(map(cases, c -> c.text().startsWith("The user") || c.text().startsWith(OWNER)
+                ? withText(c, "Someone" + c.text().substring(c.text().startsWith(OWNER) ? OWNER.length() : "The user".length()))
+                : c), "12-17% begin \"The user\"", "at least 60% begin \"" + OWNER + "\"",
+                "every case is owner-voiced or guest");
+        assertShort(cases.stream().filter(c -> !guest(c)).toList(), "at least 6 guest cases, one opening \"A guest\"");
         assertShort(map(cases, c -> withText(c, c.text() + " This sentence pads the memory well past its usual length.")),
                 "mean length 17-23 words");
         assertShort(map(cases, c -> withTags(c, c.tags().stream().filter(t -> !t.equals("role")).toList())),
@@ -106,21 +130,129 @@ class GraphCasesConformanceTest extends UnitTest {
     }
 
     @Test
+    void theUserBandFailsJustOutsideItAndPassesAtItsEdges() throws Exception {
+        var cases = committed();
+        assertEquals(140, cases.size(), "the band edges below assume 140 cases");
+        assertShort(withUserOpeners(cases, 16), "12-17% begin \"The user\"");
+        assertFalse(shortfalls(withUserOpeners(cases, 17)).contains("12-17% begin \"The user\""));
+        assertFalse(shortfalls(withUserOpeners(cases, 23)).contains("12-17% begin \"The user\""));
+        assertShort(withUserOpeners(cases, 24), "12-17% begin \"The user\"");
+    }
+
+    @Test
+    void theOwnerShareFailsJustBelowSixtyPercentAndPassesAtIt() throws Exception {
+        var cases = committed();
+        assertEquals(140, cases.size(), "84 owner openers is exactly 60% of 140");
+        var target = "at least 60% begin \"" + OWNER + "\"";
+        assertFalse(shortfalls(withUserOpeners(cases, 31)).contains(target));
+        assertShort(withUserOpeners(cases, 32), target);
+    }
+
+    @Test
+    void theGuestFloorFailsAtFiveAndPassesAtSix() throws Exception {
+        var cases = committed();
+        var target = "at least 6 guest cases, one opening \"A guest\"";
+        assertFalse(shortfalls(withGuests(cases, 6)).contains(target));
+        assertShort(withGuests(cases, 5), target);
+    }
+
+    /** {@code cases} keeping only {@code k} guest cases, the one opening "A guest" among them. */
+    private static List<Case> withGuests(List<Case> cases, int k) {
+        var keep = cases.stream().filter(GraphCasesConformanceTest::guest)
+                .sorted(Comparator.comparing(c -> !c.text().startsWith("A guest"))).limit(k).toList();
+        return cases.stream().filter(c -> !guest(c) || keep.contains(c)).toList();
+    }
+
+    /** {@code cases} with exactly the first {@code k} owner-voiced, named cases opening "The user", the rest the owner. */
+    private static List<Case> withUserOpeners(List<Case> cases, int k) {
+        var out = new ArrayList<Case>();
+        int given = 0;
+        for (var c : cases) {
+            var t = c.text();
+            var rest = t.startsWith("The user") ? t.substring("The user".length())
+                    : t.startsWith(OWNER) ? t.substring(OWNER.length()) : null;
+            out.add(rest == null ? c : withText(c, (given++ < k ? "The user" : OWNER) + rest));
+        }
+        return out;
+    }
+
+    @Test
     void theCommittedCasesStaySyntheticAndOperatorVoiced() throws Exception {
+        assertEquals(OWNER, GraphCases.ownerName(tracked()));
         var cases = committed();
         for (var c : cases) {
-            assertTrue(GraphCases.operatorVoice(c.text()), c.id() + " opens neither with \"The user\" nor a subjectless verb");
-            assertEquals(1, c.entities().stream().filter(Entity::operator).count(), c.id() + ": exactly one operator");
-            var operator = c.entity(GraphCases.OPERATOR);
-            assertEquals(!c.text().toLowerCase().contains("the user"), operator != null && operator.implicit(),
-                    c.id() + ": the operator is implicit exactly when the text never says \"the user\"");
             var m = URL.matcher(c.text());
             while (m.find()) {
                 var host = m.group().replaceFirst("https?://", "").split("/")[0];
                 assertTrue(host.equals("example.com") || host.endsWith(".example.com"), c.id() + ": " + m.group());
             }
+            if (guest(c)) {
+                assertNull(guestViolation(c));
+                continue;
+            }
+            assertTrue(GraphCases.operatorVoice(c.text(), OWNER),
+                    c.id() + " opens neither with \"The user\", \"" + OWNER + "\" nor a subjectless verb");
+            assertEquals(1, c.entities().stream().filter(Entity::operator).count(), c.id() + ": exactly one operator");
+            boolean user = c.text().toLowerCase().contains("the user");
+            boolean named = c.text().contains(OWNER);
+            assertFalse(user && named, c.id() + ": says both \"" + OWNER + "\" and \"the user\"");
+            var operator = c.entity(GraphCases.OPERATOR);
+            assertEquals(!user && !named, operator != null && operator.implicit(),
+                    c.id() + ": the operator is implicit exactly when the text names neither the owner nor the user");
         }
         assertTrue(cases.stream().anyMatch(c -> CandidateGenerator.subjectless(c.text())), "some cases are subjectless");
+    }
+
+    @Test
+    void aSetWithoutAUsableUserMdDeclaresNoOwner() throws Exception {
+        var root = JsonParser.parseString(tracked()).getAsJsonObject();
+        root.addProperty("userMd", "Name: <your name>");
+        assertNull(GraphCases.ownerName(root.toString()));
+        root.remove("userMd");
+        assertNull(GraphCases.ownerName(root.toString()));
+    }
+
+    @Test
+    void aGuestCaseRelatedToTheOperatorIsRefused() throws Exception {
+        var guests = committed().stream().filter(GraphCasesConformanceTest::guest)
+                .filter(c -> !c.relations().isEmpty()).toList();
+        var related = guests.get(0);
+        var person = related.entities().getFirst();
+        var withOperator = new Case(related.id(), related.tags(), related.text(), related.entities(),
+                List.of(Relation.of(GraphCases.OPERATOR, "family_of", person.id())), related.negatives());
+        assertEquals(related.id() + ": a guest case relates nothing to the operator", guestViolation(withOperator));
+        var entities = new ArrayList<>(related.entities());
+        entities.add(Entity.implicitOperator());
+        assertEquals(related.id() + ": a guest case has no operator", guestViolation(new Case(related.id(),
+                related.tags(), related.text(), entities, related.relations(), related.negatives())));
+        var sibling = guests.get(1);
+        assertTrue(sibling.relations().stream().noneMatch(r -> r.from().equals(GraphCases.OPERATOR)
+                || r.to().equals(GraphCases.OPERATOR)), sibling.id());
+        assertNull(guestViolation(sibling));
+    }
+
+    @Test
+    void aNamedOperatorMentionThatIsNotTheDeclaredOwnerIsRefused() throws Exception {
+        var root = JsonParser.parseString(tracked()).getAsJsonObject();
+        var cases = root.getAsJsonArray("cases");
+        JsonObject named = null;
+        for (var c : cases) {
+            if (c.getAsJsonObject().get("text").getAsString().startsWith(OWNER + " ")) {
+                named = c.getAsJsonObject();
+                break;
+            }
+        }
+        assertNotNull(named, "a case names the owner");
+        var id = named.get("id").getAsString();
+        named.addProperty("text", "Avery" + named.get("text").getAsString().substring(OWNER.length()));
+        entity(named, 0).addProperty("mention", "Avery");
+        var e = assertThrows(IllegalArgumentException.class, () -> GraphCases.parse(root.toString(), SCHEMA));
+        assertTrue(e.getMessage().startsWith("case " + id + ": "), e.getMessage());
+        assertTrue(e.getMessage().contains("'Avery'"), e.getMessage());
+
+        named.addProperty("text", "The user" + named.get("text").getAsString().substring("Avery".length()));
+        entity(named, 0).addProperty("mention", "The user");
+        assertEquals(140, GraphCases.parse(root.toString(), SCHEMA).size());
     }
 
     @Test

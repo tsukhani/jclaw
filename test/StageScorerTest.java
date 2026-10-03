@@ -11,7 +11,7 @@ import services.graphspike.StageScorer.StageRun;
 
 import java.util.List;
 
-/** JCLAW-1356, JCLAW-1357: each gold-fed stage scored on its own answers. Pure, so no fixtures. */
+/** JCLAW-1356, JCLAW-1357, JCLAW-1358: each gold-fed stage scored on its own answers. Pure, so no fixtures. */
 class StageScorerTest extends UnitTest {
 
     private static final Case A = new Case("a", List.of("role"),
@@ -46,6 +46,26 @@ class StageScorerTest extends UnitTest {
     }
 
     @Test
+    void typingSpansIncludeTheNamedOwnerButNotTheUser() {
+        var named = new Case("o", List.of("plain"), "Avery Lin works at Harborlight Analytics.",
+                List.of(Entity.of("operator", "Avery Lin", "Person"),
+                        Entity.of("harborlight", "Harborlight Analytics", "Organization")),
+                List.of(Relation.of("operator", "works_at", "harborlight")), List.of());
+        assertEquals(List.of("Avery Lin", "Harborlight Analytics"), StageScorer.typingSpans(named));
+        assertFalse(StageScorer.typingSpans(A).contains("The user"));
+        var s = StageScorer.score(List.of(named), List.of(new StageRun("o", List.of(),
+                List.of(term("Avery Lin", "Person"), term("Harborlight Analytics", "Organization")), List.of())), null);
+        assertEquals(2, s.typing().hit());
+        var resolved = StageScorer.resolution(List.of(named, A), "Avery Lin");
+        assertEquals(3, resolved.clusters(), "operator x2, harborlight x2, kestrel");
+        assertEquals(0, resolved.falseMerges());
+        assertEquals(4, StageScorer.resolution(List.of(named, A), null).clusters(), "unnamed, the owner stands apart");
+        var all = StageScorer.resolution(List.of(named, A, B), "Avery Lin");
+        assertEquals(4, all.clusters(), "the named, \"The user\" and implicit operator are one cluster");
+        assertEquals(0, all.falseMerges());
+    }
+
+    @Test
     void typingRejectionRelationAndNoRelationAreScoredSeparately() {
         var run = new StageRun("a", List.of(),
                 List.of(term("Harborlight Analytics", "Organization"), term("Kestrel CI", "Project"),
@@ -53,7 +73,7 @@ class StageScorerTest extends UnitTest {
                 List.of(relation("The user", "works_at", "Harborlight Analytics", 0.9),
                         relation("Kestrel CI", "uses", "Harborlight Analytics", 0.9),
                         relation("The user", "uses", "Kestrel CI", 0.3)));
-        var s = StageScorer.score(List.of(A), List.of(run));
+        var s = StageScorer.score(List.of(A), List.of(run), null);
         assertEquals(1, s.typing().hit());
         assertEquals(2, s.typing().total());
         assertEquals(1.0, s.rejection().rate());
@@ -74,7 +94,7 @@ class StageScorerTest extends UnitTest {
         var s = StageScorer.score(List.of(c), List.of(new StageRun("f", List.of(), List.of(),
                 List.of(relation("Wren Castillo", "family_of", "The user", 0.5),
                         relation("Wren Castillo", "works_at", "Harborlight", 0.49),
-                        relation("The user", "works_at", "Harborlight", 0.5)))));
+                        relation("The user", "works_at", "Harborlight", 0.5)))), null);
         assertEquals(1, s.relation().hit());
         assertEquals(2, s.relation().total());
         assertEquals(0, s.noRelation().hit(), "yes at one half is a yes");
@@ -87,7 +107,7 @@ class StageScorerTest extends UnitTest {
                 overlap("Kestrel", "Kestrel", "Kestrel CI"),
                 overlap(ExtractionPipeline.NEITHER, "data", "data engineer"),
                 overlap(ExtractionPipeline.NEITHER, "Kestrel CI", "CI runs")), List.of(), List.of());
-        var s = StageScorer.score(List.of(A), List.of(run));
+        var s = StageScorer.score(List.of(A), List.of(run), null);
         assertEquals(2, s.overlap().hit());
         assertEquals(4, s.overlap().total());
     }
@@ -102,7 +122,7 @@ class StageScorerTest extends UnitTest {
         var run = new StageRun("n", List.of(overlap(ExtractionPipeline.NEITHER, "Lapsang", "Lapsang tea"),
                 overlap("Lapsang tea", "Lapsang tea", "tea at Harborlight"),
                 overlap("Lapsang tea", "Lapsang tea", "Harborlight")), List.of(), List.of());
-        var s = StageScorer.score(List.of(c), List.of(run));
+        var s = StageScorer.score(List.of(c), List.of(run), null);
         assertEquals(1, s.overlap().hit(), "neither is right beside noise, and choosing noise over gold is wrong");
         assertEquals(3, s.overlap().total());
     }
@@ -110,7 +130,7 @@ class StageScorerTest extends UnitTest {
     @Test
     void aFailedQuestionCountsAsAFailureAndAMiss() {
         var failed = new Decision(ExtractionPipeline.TERM, "Kestrel CI", null, null, null, 0, false, "invalid");
-        var s = StageScorer.score(List.of(A), List.of(new StageRun("a", List.of(), List.of(failed), List.of())));
+        var s = StageScorer.score(List.of(A), List.of(new StageRun("a", List.of(), List.of(failed), List.of())), null);
         assertEquals(1, s.failures());
         assertEquals(0, s.typing().hit());
         assertEquals(1, s.typing().total());
@@ -118,7 +138,7 @@ class StageScorerTest extends UnitTest {
 
     @Test
     void candidateRecallCountsEveryNonImplicitGoldEntity() {
-        var r = StageScorer.candidateRecall(List.of(A, B));
+        var r = StageScorer.candidateRecall(List.of(A, B), null);
         assertEquals(5, r.total());
         assertEquals(5, r.hit());
     }
@@ -129,7 +149,7 @@ class StageScorerTest extends UnitTest {
                 List.of(Entity.of("operator", "The user", "Person"),
                         Entity.of("harborlight", "Harborlight", "Organization")),
                 List.of(), List.of());
-        var r = StageScorer.resolution(List.of(A, B, other));
+        var r = StageScorer.resolution(List.of(A, B, other), null);
         assertEquals(8, r.mentions());
         // operator x3, harborlight (A), kestrel x2, "Harborlight" (office in B + harborlight in c).
         assertEquals(4, r.clusters());

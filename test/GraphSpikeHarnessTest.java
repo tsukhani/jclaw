@@ -2,6 +2,7 @@ import com.google.gson.JsonObject;
 import memory.MemoryStoreFactory;
 import memory.ontology.OntologySchema;
 import models.Memory;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.Tx;
 import services.graphspike.Agreement;
+import services.graphspike.CandidateGenerator;
 import services.graphspike.Certifier;
 import services.graphspike.Certifier.Adjudication;
 import services.graphspike.ExtractionPipeline;
@@ -22,6 +24,8 @@ import services.graphspike.GraphSpikeScorer;
 import services.graphspike.GraphSpikeScorer.WrongRecord;
 import services.graphspike.HeldOut;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -60,6 +64,14 @@ class GraphSpikeHarnessTest extends UnitTest {
 
     private static List<Case> committed() throws Exception {
         return GraphCases.load(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH), SCHEMA);
+    }
+
+    private static @Nullable String owner() {
+        try {
+            return GraphCases.ownerName(Files.readString(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH)));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     /** The {@code noul} question's relation, matched against each sentence over its two quoted spans. */
@@ -129,7 +141,7 @@ class GraphSpikeHarnessTest extends UnitTest {
     }
 
     private GraphSpikeHarness.Report run(List<Case> cases, Decider decider) {
-        return GraphSpikeHarness.run(agentId, cases, SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
+        return GraphSpikeHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
                 Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), List.of());
     }
 
@@ -155,7 +167,7 @@ class GraphSpikeHarnessTest extends UnitTest {
     private GraphSpikeHarness.Report runWithLabels(List<Case> cases, Decider decider, List<Adjudication> verdicts) {
         var blind = new HashSet<>(Agreement.blindSelection(cases));
         var second = cases.stream().filter(c -> blind.contains(c.id())).toList();
-        return GraphSpikeHarness.run(agentId, cases, SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
+        return GraphSpikeHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
                 Certifier.DEFAULT_RECALL_FLOOR, 1, second, verdicts);
     }
 
@@ -199,9 +211,11 @@ class GraphSpikeHarnessTest extends UnitTest {
         assertEquals(List.of(), integrity.changed());
 
         int goldWithoutOperator = 0;
+        int ruleWritten = 0;
         for (var c : cases) {
-            goldWithoutOperator += (int) (c.entities().stream().filter(e -> !e.noise() && !e.operator()).count()
+            goldWithoutOperator += (int) (c.entities().stream().filter(e -> !e.noise() && !e.ruleWritten()).count()
                     + c.relations().stream().filter(r -> !r.noise()).count());
+            if (c.text().startsWith("The user") || CandidateGenerator.subjectless(c.text())) ruleWritten++;
         }
         var model = report.models().getFirst();
         assertEquals(2, model.runs().size());
@@ -216,7 +230,7 @@ class GraphSpikeHarnessTest extends UnitTest {
             assertEquals(0, s.failures());
             assertEquals(0.50, run.walk().threshold(), "run " + run.run() + ": " + run.walk().failure());
             for (var p : run.grid()) {
-                assertEquals(cases.size(), p.ruleWritten(), "one rule-written operator per case");
+                assertEquals(ruleWritten, p.ruleWritten(), "one per \"The user\" or subjectless case");
                 assertEquals(goldWithoutOperator, p.gold());
             }
             var bottom = run.grid().getLast();

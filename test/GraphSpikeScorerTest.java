@@ -72,6 +72,26 @@ class GraphSpikeScorerTest extends UnitTest {
     }
 
     @Test
+    void aNamedOwnerIsDecidedWrittenAndGold() {
+        var c = new Case("n1", List.of("plain"), "Avery Lin works at Harborlight Analytics.",
+                List.of(Entity.of("operator", "Avery Lin", "Person"),
+                        Entity.of("harborlight", "Harborlight Analytics", "Organization")),
+                List.of(Relation.of("operator", "works_at", "harborlight")), List.of());
+        var works = new Decision(ExtractionPipeline.RELATION, "Avery Lin -> Harborlight Analytics", "Avery Lin",
+                "Harborlight Analytics", "works_at", 0.9, false, null, 0.8);
+        var s = score(c, term("Avery Lin", "Person", 0.8), term("Harborlight Analytics", "Organization"), works)
+                .point();
+        assertEquals(3, s.written());
+        assertEquals(3, s.right());
+        assertEquals(3, s.gold(), "the named owner is gold");
+        assertEquals(0, s.ruleWritten());
+        assertEquals(GraphSpikeScorer.TYPE, score(c, term("Avery Lin", "Organization")).wrong().getFirst().kind());
+        var untyped = score(c, term("Harborlight Analytics", "Organization")).point();
+        assertEquals(1, untyped.right());
+        assertEquals(1.0 / 3, untyped.recall(), "an untyped owner is a recall miss");
+    }
+
+    @Test
     void aRelationToTheOperatorStillCountsWithAYesExactlyAtT() {
         var works = new Decision(ExtractionPipeline.RELATION, "The user -> Harborlight Analytics", "The user",
                 "Harborlight Analytics", "works_at", 0.5, false, null, 0.9);

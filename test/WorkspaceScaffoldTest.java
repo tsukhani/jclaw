@@ -100,6 +100,15 @@ class WorkspaceScaffoldTest extends UnitTest {
     }
 
     @Test
+    void theOwnerNameIsReadFromAUserMdText() {
+        assertEquals("Avery Lin", WorkspaceFiles.ownerNameIn("Name: Avery Lin"));
+        assertEquals("Avery Lin", WorkspaceFiles.ownerNameIn("- **Name:** Avery Lin"));
+        assertNull(WorkspaceFiles.ownerNameIn("Name:"));
+        assertNull(WorkspaceFiles.ownerNameIn("Name: <your name>"));
+        assertNull(WorkspaceFiles.ownerNameIn(""));
+    }
+
+    @Test
     void anOlderWorkspaceGainsTheNameLineAndTheBootstrapStepOnce() throws Exception {
         var name = "owner-name-upgrade";
         WorkspaceFiles.resetWorkspace(name);
