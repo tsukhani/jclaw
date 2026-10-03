@@ -95,7 +95,8 @@ class OntologyValidatorTest extends UnitTest {
     void disallowedEndpointsAreReported() {
         var violations = validate(with(
                 relation("r2", "works_at", "p1", "pr1"),
-                relation("r3", "part_of", "a1", "a1"),
+                term("a2", "Artifact"),
+                relation("r3", "part_of", "a1", "a2"),
                 relation("r4", "kind_of", "t1", "p1")));
         assertEquals(List.of(
                 new Violation("r2", Kind.DISALLOWED_ENDPOINT, "relation r2: works_at does not allow Person -> Project"),
@@ -225,7 +226,8 @@ class OntologyValidatorTest extends UnitTest {
                 relation("r3", "works_at", "p1", "nobody"),
                 new Mapping(meta("m2"), "e1", "", List.of()),
                 new Evidence(meta("e4"), " ", "e4"),
-                evidence("t2"));
+                evidence("t2"),
+                relation("r4", "part_of", "o1", "o1"));
         var first = validate(faulty);
         assertEquals(EnumSet.allOf(Kind.class),
                 first.stream().map(Violation::kind).collect(Collectors.toCollection(() -> EnumSet.noneOf(Kind.class))),
@@ -249,5 +251,47 @@ class OntologyValidatorTest extends UnitTest {
         assertEquals(expected, validate(records));
         Collections.reverse(records);
         assertEquals(expected, validate(records));
+    }
+
+    @Test
+    void anIrreflexiveSelfLoopIsAnAxiomViolation() {
+        record Loop(String type, String termId, String termType) {}
+        for (var loop : List.of(
+                new Loop("part_of", "o1", "Organization"),
+                new Loop("family_of", "p1", "Person"),
+                new Loop("kind_of", "t1", "Topic"),
+                new Loop("same_as", "pl1", "Place"),
+                new Loop("derived_from", "a1", "Artifact"))) {
+            assertTrue(SCHEMA.irreflexive(loop.type()), loop.type());
+            assertTrue(SCHEMA.allows(loop.type(), loop.termType(), loop.termType()), loop.type());
+            assertEquals(List.of(new Violation("r9", Kind.AXIOM, "relation r9: " + loop.type()
+                            + " is irreflexive, but from and to are both '" + loop.termId() + "'")),
+                    validate(with(relation("r9", loop.type(), loop.termId(), loop.termId()))), loop.type());
+        }
+    }
+
+    @Test
+    void aSymmetricRelationStoredBothWaysIsReportedOnEachNamingTheOther() {
+        var records = with(term("p2", "Person"),
+                relation("r8", "family_of", "p1", "p2"),
+                relation("r9", "family_of", "p2", "p1"));
+        var expected = List.of(
+                new Violation("r8", Kind.AXIOM, "relation r8: family_of is symmetric, and r9 states it the other way round"),
+                new Violation("r9", Kind.AXIOM, "relation r9: family_of is symmetric, and r8 states it the other way round"));
+        assertEquals(expected, validate(records));
+        Collections.reverse(records);
+        assertEquals(expected, validate(records));
+
+        assertEquals(List.of(), validate(with(term("p2", "Person"), relation("r8", "family_of", "p1", "p2"))),
+                "one direction alone is fine");
+        assertEquals(List.of(), validate(with(relation("r8", "part_of", "pl1", "pl2"), relation("r9", "part_of", "pl2", "pl1"))),
+                "part_of is not symmetric");
+    }
+
+    @Test
+    void aSymmetricSelfLoopIsReportedOnceAsIrreflexive() {
+        assertEquals(List.of(new Violation("r9", Kind.AXIOM,
+                        "relation r9: family_of is irreflexive, but from and to are both 'p1'")),
+                validate(with(relation("r9", "family_of", "p1", "p1"))));
     }
 }

@@ -9,9 +9,11 @@ import memory.ontology.OntologyRecord.Term;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
@@ -31,13 +33,20 @@ public final class OntologyValidator {
             "Term, Mapping, Relation, Constraint -> Evidence",
             "Evidence -> Any");
 
+    /** Mirrors the schema document's {@code claims.status} keys; {@code OntologySchemaTest} pins the two equal. */
+    public static final List<String> STATUSES = List.of("holds", "ended", "denied");
+
+    /** Mirrors the schema document's {@code system_time.lineage} keys; {@code OntologySchemaTest} pins the two equal. */
+    public static final List<String> LINEAGES = List.of("update", "restatement", "correction");
+
     public enum Kind {
         UNDECLARED_TYPE,
         DISALLOWED_ENDPOINT,
         UNRESOLVED_REFERENCE,
         MISSING_EVIDENCE,
         MISSING_SOURCE,
-        DUPLICATE_ID
+        DUPLICATE_ID,
+        AXIOM
     }
 
     public record Violation(String recordId, Kind kind, String message) {}
@@ -67,10 +76,17 @@ public final class OntologyValidator {
         private final OntologySchema schema;
         private final TreeMap<String, List<OntologyRecord>> byId;
         private final List<Violation> violations = new ArrayList<>();
+        /** Relation ids keyed by (type, from, to), for the symmetric check's reverse lookup. */
+        private final Map<List<String>, TreeSet<String>> relationsByEnds = new HashMap<>();
 
         Run(OntologySchema schema, TreeMap<String, List<OntologyRecord>> byId) {
             this.schema = schema;
             this.byId = byId;
+            byId.values().forEach(records -> records.forEach(record -> {
+                if (record instanceof Relation r) {
+                    relationsByEnds.computeIfAbsent(List.of(r.type(), r.from(), r.to()), k -> new TreeSet<>()).add(r.id());
+                }
+            }));
         }
 
         void add(String recordId, Kind kind, String message) {
@@ -124,6 +140,7 @@ public final class OntologyValidator {
             var fromTypes = declaredTypes(resolve(relation, "from", relation.from(), Term.class));
             var toTypes = declaredTypes(resolve(relation, "to", relation.to(), Term.class));
             evidence(relation, relation.evidenceIds());
+            if (declared) axioms(relation);
             if (!declared || fromTypes.isEmpty() || toTypes.isEmpty()) return;
             for (var fromType : fromTypes) {
                 for (var toType : toTypes) {
@@ -133,6 +150,23 @@ public final class OntologyValidator {
             add(relation.id(), Kind.DISALLOWED_ENDPOINT,
                     label(relation) + ": " + relation.type() + " does not allow " + fromTypes.first() + " -> "
                             + toTypes.first());
+        }
+
+        /** A self-loop is judged only as irreflexive, so {@code A family_of A} is reported once. */
+        private void axioms(Relation relation) {
+            var type = relation.type();
+            if (relation.from().equals(relation.to())) {
+                if (schema.irreflexive(type)) {
+                    add(relation.id(), Kind.AXIOM, label(relation) + ": " + type
+                            + " is irreflexive, but from and to are both '" + relation.from() + "'");
+                }
+                return;
+            }
+            if (!schema.symmetric(type)) return;
+            var reverse = relationsByEnds.get(List.of(type, relation.to(), relation.from()));
+            if (reverse == null) return;
+            add(relation.id(), Kind.AXIOM, label(relation) + ": " + type + " is symmetric, and "
+                    + String.join(", ", reverse) + " states it the other way round");
         }
 
         /** Declared term types among the resolved Terms; an undeclared one is reported on its own Term. */

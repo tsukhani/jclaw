@@ -125,7 +125,12 @@ class ExtractionPipelineTest extends UnitTest {
     }
 
     private static CaseRun run(String text, List<Candidate> candidates, String model, Decider decider) {
-        return ExtractionPipeline.run(SCHEMA, "c", text, candidates, model, decider);
+        return run(SCHEMA, text, candidates, model, decider);
+    }
+
+    private static CaseRun run(OntologySchema schema, String text, List<Candidate> candidates, String model,
+                               Decider decider) {
+        return ExtractionPipeline.run(schema, "c", text, candidates, model, decider);
     }
 
     private static List<Candidate> spans(String... spans) {
@@ -345,6 +350,25 @@ class ExtractionPipelineTest extends UnitTest {
         var failed = run(text, candidates, failing);
         assertTrue(stage(failed, ExtractionPipeline.OVERLAP).getFirst().failed());
         assertTrue(stage(failed, ExtractionPipeline.TERM).stream().allMatch(Decision::operator));
+    }
+
+    @Test
+    void theV3SeedAsksTheSameTypingAndOverlapQuestionsAsV2() {
+        var text = "The user plans the Meridian kickoff.";
+        var candidates = CandidateGenerator.generate(text, List.of("Meridian kickoff"));
+        var choices = Map.of("Meridian | Meridian kickoff", "Meridian kickoff", "Meridian kickoff", "Event");
+
+        run(OntologySchema.parse(OntologySchemaTest.V2_SEED), text, candidates, "tev1", scripted(choices, Map.of()));
+        var v2 = requests.stream().map(JsonObject::toString).toList();
+        requests.clear();
+        run(OntologySchema.seed(), text, candidates, "tev1", scripted(choices, Map.of()));
+        var v3 = requests.stream().map(JsonObject::toString).toList();
+
+        var ids = new HashSet<String>();
+        requests.forEach(r -> ids.addAll(r.getAsJsonObject("questions").keySet()));
+        assertTrue(ids.stream().anyMatch(id -> id.startsWith("o")), ids.toString());
+        assertTrue(ids.stream().anyMatch(id -> id.startsWith("m")), ids.toString());
+        assertEquals(v2, v3);
     }
 
     private static List<Candidate> manySpans(int n) {
