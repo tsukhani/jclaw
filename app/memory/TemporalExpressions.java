@@ -163,8 +163,9 @@ public final class TemporalExpressions {
             "each", "per", "this", "last", "next", "between");
     private static final Set<String> RECURRENCE_WORDS = orderedSet("every", "each", "per");
     private static final int PHRASE_LOOKBACK = 3;
+    private static final Pattern WORD = Pattern.compile("\\p{L}+");
 
-    private static final Pattern FISCAL_CUE = Pattern.compile("(?i)\\bfiscal\\b|\\bFY");
+    private static final Pattern FISCAL_CUE = Pattern.compile("(?i:\\bfiscal\\b)|\\bFY(?=\\s?'?\\d)");
     private static final Pattern CLAUSE_BREAK = Pattern.compile("[.;!?](?=\\s|$)");
     private static final Pattern PRECEDING_THE = Pattern.compile("(?i)\\bthe\\s+$");
     private static final String CURRENCY_OR_HASH = "$£€#";
@@ -215,7 +216,8 @@ public final class TemporalExpressions {
             rule("\\bQ([1-4])\\b", 0, (m, t, a) -> relative(Kind.QUARTER,
                     EdtfDate.ofQuarter(a.getYear(), Integer.parseInt(m.group(1))))),
             rule("(?i)\\b" + DEICTIC + "\\s+(week|month|quarter|year)\\b", 0, TemporalExpressions::deicticUnit),
-            rule("(?i)\\b(today|tomorrow|yesterday|tonight)\\b|\\blast\\s+night\\b"
+            rule("(?i)\\bthe\\s+day\\s+(?:before\\s+yesterday|after\\s+tomorrow)\\b"
+                    + "|\\b(today|tomorrow|yesterday|tonight)\\b|\\blast\\s+night\\b"
                     + "|\\bthis\\s+(?:morning|afternoon|evening)\\b", 0, TemporalExpressions::dayWord),
             rule("(?i)\\b" + NUMBER + "\\s+" + UNIT + "\\s+ago\\b", 0, (m, t, a) -> offset(m, a, -1)),
             rule("(?i)\\bin\\s+" + NUMBER + "\\s+" + UNIT + "\\b", 0, (m, t, a) -> offset(m, a, 1)),
@@ -284,7 +286,7 @@ public final class TemporalExpressions {
             var span = text.substring(h.spanStart(), h.spanEnd());
             int phraseStart = phraseStart(text, h.start());
             var phrase = text.substring(phraseStart, Math.max(h.end(), h.spanEnd()));
-            boolean recurring = recurring(phrase);
+            boolean recurring = recurring(text, phraseStart, Math.max(h.end(), h.spanEnd()));
             switch (h.outcome()) {
                 case Refusal r -> refused.add(new Refused(h.spanStart(), h.spanEnd(), span,
                         recurring && r.reason() == Reason.WEEKDAY ? Reason.RECURRING : r.reason()));
@@ -300,7 +302,7 @@ public final class TemporalExpressions {
         return new Result(List.copyOf(found), List.copyOf(refused));
     }
 
-    /** The offsets {@link #find} reports as found; they do not depend on the anchor. */
+    /** The offsets {@link #find} reports as found, taken at a fixed leap-year anchor so "February 29" is a day. */
     public static List<Range> claimedSpans(String text) {
         return find(text, CLAIM_ANCHOR).found().stream().map(d -> new Range(d.start(), d.end())).toList();
     }
@@ -327,6 +329,7 @@ public final class TemporalExpressions {
     }
 
     private static @Nullable Outcome range(MatchResult m, String text, LocalDate anchor) {
+        if (afterCurrencyOrHash(text, m.start(1))) return new Refusal(Reason.LITERAL);
         var from = rangeEnd(m.group(2));
         var to = rangeEnd(m.group(3));
         var interval = EdtfInterval.between(new EdtfInterval.Point(from), new EdtfInterval.Point(to));
@@ -341,19 +344,21 @@ public final class TemporalExpressions {
     }
 
     private static @Nullable Outcome year(MatchResult m, String text, LocalDate anchor) {
-        if (m.start() > 0 && CURRENCY_OR_HASH.indexOf(text.charAt(m.start() - 1)) >= 0) {
-            return new Refusal(Reason.LITERAL);
-        }
+        if (afterCurrencyOrHash(text, m.start())) return new Refusal(Reason.LITERAL);
         return absolute(Kind.YEAR, EdtfDate.ofYear(Integer.parseInt(m.group(1)), false));
     }
 
-    /** "the last June" and "the next week" are ordinals, not deixis. */
+    private static boolean afterCurrencyOrHash(String text, int start) {
+        return start > 0 && CURRENCY_OR_HASH.indexOf(text.charAt(start - 1)) >= 0;
+    }
+
+    /** "the last June" and "the next week" are ordinals, not deixis: refused so no shorter shape claims them. */
     private static boolean afterThe(String text, int start) {
         return PRECEDING_THE.matcher(text.substring(Math.max(0, start - 8), start)).find();
     }
 
     private static @Nullable Outcome deicticMonth(MatchResult m, String text, LocalDate anchor) {
-        if (afterThe(text, m.start())) return null;
+        if (afterThe(text, m.start())) return new Refusal(Reason.VAGUE);
         var which = m.group(1).toLowerCase(Locale.ROOT);
         int month = month(m.group(2));
         int year = anchor.getYear();
@@ -366,7 +371,7 @@ public final class TemporalExpressions {
     }
 
     private static @Nullable Outcome deicticSeason(MatchResult m, String text, LocalDate anchor) {
-        if (afterThe(text, m.start())) return null;
+        if (afterThe(text, m.start())) return new Refusal(Reason.VAGUE);
         return relative(Kind.SEASON, seasonInstance(m.group(1).toLowerCase(Locale.ROOT), season(m.group(2)), anchor));
     }
 
@@ -392,7 +397,7 @@ public final class TemporalExpressions {
     }
 
     private static @Nullable Outcome deicticUnit(MatchResult m, String text, LocalDate anchor) {
-        if (afterThe(text, m.start())) return null;
+        if (afterThe(text, m.start())) return new Refusal(Reason.VAGUE);
         var which = m.group(1).toLowerCase(Locale.ROOT);
         int step = switch (which) {
             case "last" -> -1;
@@ -413,7 +418,8 @@ public final class TemporalExpressions {
 
     private static Outcome dayWord(MatchResult m, String text, LocalDate anchor) {
         var word = m.group().toLowerCase(Locale.ROOT);
-        var day = word.equals("tomorrow") ? anchor.plusDays(1)
+        var day = word.startsWith("the") ? anchor.plusDays(word.endsWith("yesterday") ? -2 : 2)
+                : word.equals("tomorrow") ? anchor.plusDays(1)
                 : word.equals("yesterday") || word.startsWith("last") ? anchor.minusDays(1) : anchor;
         return relative(Kind.DAY, EdtfDate.ofDay(day, false));
     }
@@ -500,7 +506,7 @@ public final class TemporalExpressions {
         int i = start;
         for (int words = 0; words < PHRASE_LOOKBACK; words++) {
             int e = i;
-            while (e > 0 && text.charAt(e - 1) == ' ') e--;
+            while (e > 0 && Character.isWhitespace(text.charAt(e - 1))) e--;
             if (e == i) return start;
             int s = e;
             while (s > 0 && Character.isLetter(text.charAt(s - 1))) s--;
@@ -517,11 +523,24 @@ public final class TemporalExpressions {
         return text.substring(start, e).toLowerCase(Locale.ROOT);
     }
 
-    private static boolean recurring(String phrase) {
-        for (var word : phrase.split("[^\\p{L}]+")) {
-            if (RECURRENCE_WORDS.contains(word.toLowerCase(Locale.ROOT))) return true;
+    /** Whether {@code text[start, end)} holds a recurrence word; "as per" cites, it does not recur. */
+    private static boolean recurring(String text, int start, int end) {
+        var m = WORD.matcher(text).region(start, end);
+        @Nullable String previous = previousWord(text, start);
+        while (m.find()) {
+            var word = m.group().toLowerCase(Locale.ROOT);
+            if (RECURRENCE_WORDS.contains(word) && !(word.equals("per") && "as".equals(previous))) return true;
+            previous = word;
         }
         return false;
+    }
+
+    private static @Nullable String previousWord(String text, int start) {
+        int e = start;
+        while (e > 0 && Character.isWhitespace(text.charAt(e - 1))) e--;
+        int s = e;
+        while (s > 0 && Character.isLetter(text.charAt(s - 1))) s--;
+        return s == e ? null : text.substring(s, e).toLowerCase(Locale.ROOT);
     }
 
     private static String clause(String text, int at) {
@@ -560,11 +579,18 @@ public final class TemporalExpressions {
     public static final List<String> PERFECT_NEVER =
             List.of("has never", "have never", "had never", "'s never", "'ve never", "'d never");
 
-    private static final Pattern NEGATION = Pattern.compile(
-            "(?i)\\b(?:not|never|no|none|nobody|nothing|neither|nor|without)\\b|\\b\\w+n['\u2019]t\\b");
+    private static final Pattern NEGATION = Pattern.compile("(?i)" + NEGATION_CUES.stream()
+            .map(c -> (c.startsWith("n'") ? "\\b\\w+" : "\\b") + lexiconRegex(c) + "\\b")
+            .collect(Collectors.joining("|")));
 
-    private static final Pattern PERFECT_NEVER_PATTERN = Pattern.compile("(?i)(?:\\b(?:has|have|had)\\s+|"
-            + "['\u2019](?:s|ve|d)\\s+)never\\b");
+    private static final Pattern PERFECT_NEVER_PATTERN = Pattern.compile("(?i)" + PERFECT_NEVER.stream()
+            .map(p -> (Character.isLetter(p.charAt(0)) ? "\\b" : "") + lexiconRegex(p) + "\\b")
+            .collect(Collectors.joining("|")));
+
+    /** A lexicon entry as a regex: an apostrophe matches ' or \u2019, a space any run of whitespace. */
+    private static String lexiconRegex(String entry) {
+        return entry.replace("'", "['\u2019]").replace(" ", "\\s+");
+    }
 
     /** A valence frame; {@code ending} marks one that says the stance stopped. */
     public record Frame(Pattern pattern, boolean ending) {}

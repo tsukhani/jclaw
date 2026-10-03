@@ -43,7 +43,7 @@ class AnchorResolverJpaLookupTest extends UnitTest {
         LuceneTestSync.release();
     }
 
-    private record Seeded(long memory, long message, long superseded, long input) {}
+    private record Seeded(long memory, long message, long superseded, long input, long foreign) {}
 
     private static LocalDate day(Instant at) {
         return at.atZone(TimezoneResolver.appZone()).toLocalDate();
@@ -77,10 +77,18 @@ class AnchorResolverJpaLookupTest extends UnitTest {
             superseded.supersededById = memory.id;
             superseded.save();
             Memory input = at(SUPERSEDED, () -> mem(agent, "The user planned a move last year.", null, false));
+            var stranger = new Agent();
+            stranger.name = "anchor-" + UUID.randomUUID();
+            stranger.modelProvider = "openrouter";
+            stranger.modelId = "gpt-4.1";
+            stranger.save();
+            Memory foreign = at(SUPERSEDED, () -> mem(stranger, "Another agent's row.", null, false));
+            foreign.supersededById = memory.id;
+            foreign.save();
             derivation(memory, input.id, null);
             derivation(memory, null, message.id);
             derivation(memory, 999_999_999L, 999_999_998L);
-            return new Seeded(memory.id, message.id, superseded.id, input.id);
+            return new Seeded(memory.id, message.id, superseded.id, input.id, foreign.id);
         });
     }
 
@@ -120,6 +128,8 @@ class AnchorResolverJpaLookupTest extends UnitTest {
         var seeded = seed();
         var predecessors = lookup.node(seeded.memory()).orElseThrow().predecessors();
         assertTrue(predecessors.contains(new MemoryPred(seeded.superseded(), SUPERSEDED)), predecessors.toString());
+        assertTrue(predecessors.stream().noneMatch(p -> p instanceof MemoryPred m && m.id() == seeded.foreign()),
+                predecessors.toString());
     }
 
     @Test

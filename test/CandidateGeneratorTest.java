@@ -104,6 +104,11 @@ class CandidateGeneratorTest extends UnitTest {
     }
 
     @Test
+    void anImpossibleDateLeavesTheCandidates() {
+        assertEquals(List.of("The user", "Ana"), spans("The user met Ana on June 31."));
+    }
+
+    @Test
     void aTimeWordOpeningANameIsKept() {
         assertTrue(spans("The user works at Fridays Ltd.").contains("Fridays Ltd"));
         assertTrue(spans("The user met May Chen in Lisbon.").contains("May Chen"));

@@ -60,8 +60,9 @@ public final class AnchorResolver {
         this.lookup = lookup;
     }
 
-    /** The day {@code span} of memory {@code memoryId} resolves against, or empty when it cannot be told. */
+    /** The day {@code span} of memory {@code memoryId} resolves against, or empty when it cannot be told or is blank. */
     public Optional<LocalDate> base(long memoryId, String span) {
+        if (span.isBlank()) return Optional.empty();
         return base(memoryId, statedBy(span), new HashSet<>());
     }
 

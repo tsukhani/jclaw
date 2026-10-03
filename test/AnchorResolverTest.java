@@ -42,6 +42,13 @@ class AnchorResolverTest extends UnitTest {
     }
 
     @Test
+    void aBlankSpanIsUnresolved() {
+        node(1, "Moved to Porto.", M_DAY, "We moved to Porto.", false);
+        assertEquals(Optional.empty(), resolver.base(1, " "));
+        assertEquals(Optional.empty(), resolver.base(1, ""));
+    }
+
+    @Test
     void theMatchIsWordBounded() {
         node(1, "Back next week.", M_DAY, "Off until next weekend.", false);
         node(2, "Back next week.", M_DAY, "Off until next weekend.", true);

@@ -57,6 +57,8 @@ class TemporalExpressionsTest extends UnitTest {
         assertEquals("2026-10-03", read("tonight"));
         assertEquals("2026-10-02", read("last night"));
         assertEquals("2026-10-03", read("this morning"));
+        assertEquals("2026-10-01", read("the day before yesterday"));
+        assertEquals("2026-10-05", read("the day after tomorrow"));
     }
 
     @Test
@@ -191,6 +193,27 @@ class TemporalExpressionsTest extends UnitTest {
         assertEquals(List.of("every quarter"), refused("during the last week of every quarter", Reason.RECURRING));
         assertEquals(List.of("Thursday"), refused("every other Thursday", Reason.RECURRING));
         assertEquals(List.of(), found("during the last week of every quarter"));
+        assertEquals(List.of("June"), refused("every\nJune", Reason.RECURRING));
+    }
+
+    @Test
+    void asPerCitesRatherThanRecurs() {
+        assertEquals(List.of("March 3"), found("as per our March 3 call"));
+    }
+
+    @Test
+    void anOrdinalAfterTheIsNoDate() {
+        assertEquals(List.of(), found("the last June"));
+        assertEquals(List.of(), found("the next winter"));
+    }
+
+    @Test
+    void anImpossibleDateNeverThrows() {
+        assertEquals(List.of("June"), found("Met on June 31."));
+        assertEquals(List.of("2026"), found("2026-13-45"));
+        var leap = TemporalExpressions.find("February 29", ANCHOR);
+        assertEquals(List.of("February"), leap.found().stream().map(DateSpan::span).toList());
+        assertEquals(List.of(), leap.refused());
     }
 
     @Test
@@ -213,6 +236,8 @@ class TemporalExpressionsTest extends UnitTest {
         var text = "report-2019.pdf at https://x/2020 and /srv/2021 for JCLAW-2022, cost $2023 on ticket #2024";
         assertEquals(List.of(), found(text));
         assertEquals(List.of("2019", "2020", "2021", "2022", "2023", "2024"), refused(text, Reason.LITERAL));
+        assertEquals(List.of(), found("cost $2000-2050 for #2019-2021"));
+        assertEquals(List.of("2000-2050", "2019-2021"), refused("cost $2000-2050 for #2019-2021", Reason.LITERAL));
     }
 
     @Test
@@ -225,6 +250,8 @@ class TemporalExpressionsTest extends UnitTest {
         assertEquals(List.of("this quarter"), refused("Closed this quarter, ahead of the fiscal plan.", Reason.FISCAL));
         assertEquals(List.of("Q2", "FY27"), refused("Q2 FY27 looks flat.", Reason.FISCAL));
         assertEquals(List.of("this quarter"), found("Closed this quarter. The fiscal plan is separate."));
+        assertEquals(List.of("2021"), found("FYI, we launched in 2021."));
+        assertEquals(List.of("2019"), found("Fyodor joined in 2019."));
         assertEquals(List.of("7/10", "12-03-2026"), refused("due 7/10 and 12-03-2026", Reason.NUMERIC_DM));
     }
 
@@ -331,6 +358,7 @@ class TemporalExpressionsTest extends UnitTest {
             Avery Lin joins the reading circle every other Thursday.
               - [47,55) "Thursday" RECURRING
             Avery Lin is the on-call lead during the last week of every quarter.
+              - [41,50) "last week" VAGUE
               - [54,67) "every quarter" RECURRING
             Jonah Pell tracks every late shipment before noon.
               - [45,49) "noon" CLOCK
