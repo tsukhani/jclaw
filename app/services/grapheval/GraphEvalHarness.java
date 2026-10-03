@@ -104,6 +104,14 @@ public final class GraphEvalHarness {
     public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,
                              List<DecisionModel> models, int runs, double recallFloor, int concurrency,
                              List<Case> secondLabels, List<Adjudication> adjudications) {
+        return run(agentId, cases, ownerName, schema, models, runs, recallFloor, concurrency, secondLabels,
+                adjudications, EvalProgress.none());
+    }
+
+    /** {@link #run} reporting each case to {@code progress}; the report is the same either way. */
+    public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,
+                             List<DecisionModel> models, int runs, double recallFloor, int concurrency,
+                             List<Case> secondLabels, List<Adjudication> adjudications, EvalProgress progress) {
         var store = MemoryStoreFactory.get();
         var provenance = new MemoryProvenance(null, null, MemoryProvenance.process(CATEGORY),
                 MemoryAuthorType.AGENT_SYNTHESIZED, List.of());
@@ -120,7 +128,7 @@ public final class GraphEvalHarness {
             before = snapshot(memoryIds);
             var known = new ArrayList<>(knownNames(agentId));
             if (ownerName != null) known.add(ownerName);
-            measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName);
+            measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName, progress);
             if (runs == 1) {
                 for (var m : models) {
                     var data = measured.getOrDefault(m.name(), List.of());
@@ -172,12 +180,19 @@ public final class GraphEvalHarness {
      */
     public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, @Nullable String ownerName, OntologySchema schema,
                                            List<DecisionModel> models, int runs, double recallFloor, int concurrency) {
+        return runHeldOut(loaded, ownerName, schema, models, runs, recallFloor, concurrency, EvalProgress.none());
+    }
+
+    /** {@link #runHeldOut} reporting each case to {@code progress}; the report is the same either way. */
+    public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, @Nullable String ownerName, OntologySchema schema,
+                                           List<DecisionModel> models, int runs, double recallFloor, int concurrency,
+                                           EvalProgress progress) {
         var cases = loaded.cases().stream().map(HeldOut.HeldCase::labels).toList();
         var memoryIds = new LinkedHashMap<String, String>();
         loaded.cases().forEach(h -> memoryIds.put(h.labels().id(), String.valueOf(h.memoryId())));
         var before = snapshot(memoryIds);
         var known = ownerName == null ? List.<String>of() : List.of(ownerName);
-        var measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName);
+        var measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName, progress);
         var after = snapshot(memoryIds);
         int unchanged = 0;
         int present = 0;
@@ -201,11 +216,21 @@ public final class GraphEvalHarness {
     private static Map<String, List<RunData>> measure(List<Case> cases, OntologySchema schema,
                                                       List<DecisionModel> models, int runs, double recallFloor,
                                                       int concurrency, List<String> knownNames,
-                                                      @Nullable String ownerName) {
+                                                      @Nullable String ownerName, EvalProgress progress) {
+        progress.plan(models.stream().map(DecisionModel::name).toList(), runs, cases.size());
         var tasks = new ArrayList<Callable<CaseResult>>();
+        int pass = 0;
         for (int r = 0; r < runs; r++) {
             for (var m : models) {
-                for (var c : cases) tasks.add(() -> askCase(schema, c, m, knownNames));
+                int p = pass++;
+                for (var c : cases) {
+                    tasks.add(() -> {
+                        progress.caseStarted(p);
+                        var result = askCase(schema, c, m, knownNames);
+                        progress.caseFinished(p, failures(result));
+                        return result;
+                    });
+                }
             }
         }
         var results = fanOut(tasks, concurrency);
@@ -253,6 +278,15 @@ public final class GraphEvalHarness {
             }
         }
         return new SpotCheck(sample.size(), decisions, differing);
+    }
+
+    /** Every decision the case asked that failed, across the stages and the end-to-end pipeline. */
+    private static int failures(CaseResult result) {
+        var stages = result.stages();
+        return (int) (stages.overlap().stream().filter(o -> o.decision().failed()).count()
+                + stages.typing().stream().filter(ExtractionPipeline.Decision::failed).count()
+                + stages.relations().stream().filter(ExtractionPipeline.Decision::failed).count()
+                + result.e2e().decisions().stream().filter(ExtractionPipeline.Decision::failed).count());
     }
 
     /** The agent's Term names: a Term carries no aliases, so its name is the only known span. Read, never written. */

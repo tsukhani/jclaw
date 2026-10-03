@@ -14,6 +14,7 @@ import services.grapheval.Agreement;
 import services.grapheval.CandidateGenerator;
 import services.grapheval.Certifier;
 import services.grapheval.Certifier.Adjudication;
+import services.grapheval.EvalProgress;
 import services.grapheval.ExtractionPipeline;
 import services.grapheval.ExtractionPipeline.Decider;
 import services.grapheval.GraphCases;
@@ -28,6 +29,7 @@ import services.grapheval.StageScorer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -193,6 +195,48 @@ class GraphEvalHarnessTest extends UnitTest {
         assertEquals(Certifier.CERTIFIED, certified.certification().status(),
                 certified.certification().reasons().toString());
         assertEquals(0.50, certified.certification().threshold());
+    }
+
+    @Test
+    void progressPrintsOnePassLinePerModelAndRunInCompletionOrderAndLeavesTheReportAlone() throws Exception {
+        var cases = committed().subList(0, 6);
+        var events = new ArrayList<JsonObject>();
+        var progress = new EvalProgress(events::add);
+        var beat = new AtomicBoolean();
+        var golden = gold(cases);
+        Decider beating = request -> {
+            if (beat.compareAndSet(false, true)) progress.heartbeat();
+            return golden.decide(request);
+        };
+        Decider broken = _ -> {
+            throw new IllegalStateException("cold load");
+        };
+        Function<EvalProgress, GraphEvalHarness.Report> run = p -> GraphEvalHarness.run(agentId, cases, owner(), SCHEMA,
+                List.of(new DecisionModel("tev1", beating), new DecisionModel("tev2", broken)), 2,
+                Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), List.of(), p);
+
+        var streamed = run.apply(progress);
+        var quiet = run.apply(EvalProgress.none());
+
+        assertEquals(GSON.toJson(quiet), GSON.toJson(streamed));
+        var beats = events.stream().filter(e -> e.get("event").getAsString().equals(EvalProgress.HEARTBEAT)).toList();
+        assertEquals(1, beats.size(), events.toString());
+        var heartbeat = beats.getFirst();
+        assertEquals("tev1", heartbeat.get("model").getAsString());
+        assertEquals(1, heartbeat.get("run").getAsInt());
+        assertEquals(0, heartbeat.get("done").getAsInt());
+        var passes = events.stream().filter(e -> e.get("event").getAsString().equals(EvalProgress.PASS)).toList();
+        assertEquals(List.of("tev1 1/2", "tev2 1/2", "tev1 2/2", "tev2 2/2"), passes.stream()
+                .map(e -> e.get("model").getAsString() + " " + e.get("run").getAsInt() + "/" + e.get("runs").getAsInt())
+                .toList());
+        for (var pass : passes) {
+            assertEquals(cases.size(), pass.get("done").getAsInt(), pass.toString());
+            assertEquals(cases.size(), pass.get("cases").getAsInt(), pass.toString());
+            assertTrue(pass.get("seconds").getAsDouble() >= 0, pass.toString());
+        }
+        assertEquals(0, passes.getFirst().get("failed").getAsInt());
+        int stageFailures = streamed.models().get(1).runs().getFirst().stages().failures();
+        assertTrue(stageFailures > 0 && passes.get(1).get("failed").getAsInt() >= stageFailures, passes.toString());
     }
 
     @Test
@@ -394,11 +438,21 @@ class GraphEvalHarnessTest extends UnitTest {
                             "relations", List.of())));
             Files.writeString(file, GSON.toJson(labelled));
             var loaded = HeldOut.load(file, SCHEMA);
-            var report = GraphEvalHarness.runHeldOut(loaded, null, SCHEMA,
-                    List.of(new DecisionModel("tev1", gold(loaded.cases().stream().map(HeldOut.HeldCase::labels).toList()))),
-                    2, Certifier.DEFAULT_RECALL_FLOOR, 1);
+            var events = new ArrayList<JsonObject>();
+            var progress = new EvalProgress(events::add);
+            var golden = gold(loaded.cases().stream().map(HeldOut.HeldCase::labels).toList());
+            Decider beating = request -> {
+                progress.heartbeat();
+                return golden.decide(request);
+            };
+            var report = GraphEvalHarness.runHeldOut(loaded, null, SCHEMA, List.of(new DecisionModel("tev1", beating)),
+                    2, Certifier.DEFAULT_RECALL_FLOOR, 1, progress);
 
-            var json = GSON.toJson(report);
+            assertTrue(events.stream().anyMatch(e -> e.get("event").getAsString().equals(EvalProgress.HEARTBEAT)),
+                    events.toString());
+            assertEquals(2, events.stream().filter(e -> e.get("event").getAsString().equals(EvalProgress.PASS)).count(),
+                    events.toString());
+            var json = GSON.toJson(report) + events;
             for (var secret : List.of("memoryId", text, "Harborlight", "Kestrel", "The user", "term:", "rel:")) {
                 assertFalse(json.contains(secret), "the report names " + secret + ": " + json);
             }
