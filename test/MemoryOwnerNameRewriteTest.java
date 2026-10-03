@@ -63,11 +63,16 @@ class MemoryOwnerNameRewriteTest extends UnitTest {
         assertEquals(0, MemoryOwnerNameRewrite.run(agent), "nothing changes while USER.md names no owner");
         assertEquals("The user prefers metric units.", textOf(active));
 
-        var namesTheOwner = store(agent, "The user's name is Ada Lovelace.");
+        var statesTheName = store(agent, "The user's name is Ada Lovelace.");
+        var oldCopy = store(agent, "The user goes by the name Ada.");
+        Memory superseded2 = Memory.findById(oldCopy);
+        superseded2.supersededAt = Instant.now();
+        superseded2.save();
         WorkspaceFiles.writeWorkspaceFile(agent.name, "USER.md", "# User Information\n\nName: Ada Lovelace\n");
         assertEquals(1, MemoryOwnerNameRewrite.run(agent));
         assertEquals("Ada Lovelace prefers metric units.", textOf(active));
-        assertEquals("The user's name is Ada Lovelace.", textOf(namesTheOwner), "never \"Ada Lovelace's name is Ada Lovelace\"");
+        assertNull(Memory.findById(statesTheName), "USER.md holds the name, so a memory stating it goes");
+        assertNull(Memory.findById(oldCopy), "and so do its superseded copies");
         assertEquals("The user lives in Leeds.", textOf(superseded), "a superseded row keeps its text");
         assertEquals(0, MemoryOwnerNameRewrite.run(agent), "a second run finds nothing to rewrite");
     }

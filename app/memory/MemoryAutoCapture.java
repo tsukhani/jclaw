@@ -92,6 +92,7 @@ public final class MemoryAutoCapture {
     private static final String KEY_CATEGORY = "category";
     private static final String KEY_IMPORTANCE = "importance";
     private static final String KEY_QUESTIONS = "questions";
+    private static final String KEY_OWNER_NAME = "ownerName";
 
     // Field names in the consolidation judge's output (see CONSOLIDATION_INSTRUCTIONS).
     private static final String KEY_SUPERSESSIONS = "supersessions";
@@ -476,7 +477,7 @@ public final class MemoryAutoCapture {
         try {
             var subject = MemorySubject.directive(WorkspaceFiles.ownerName(agentName), provenance.authorType(), userMessage);
             var messages = List.<ChatMessage>of(
-                    ChatMessage.system(subject == null ? EXTRACTION_INSTRUCTIONS : EXTRACTION_INSTRUCTIONS + "\n" + subject),
+                    ChatMessage.system(EXTRACTION_INSTRUCTIONS + "\n" + subject),
                     ChatMessage.user(userMessage.strip()),
                     ChatMessage.assistant(assistantResponse.strip()),
                     ChatMessage.user(EXTRACTION_REQUEST));
@@ -499,6 +500,17 @@ public final class MemoryAutoCapture {
         // fewer memories whenever a batch contained duplicates.
         int maxCandidates = ConfigService.getInt("memory.autocapture.maxCandidates", 25);
         List<Candidate> parsed = dedupeWithinBatch(parseCandidates(raw));
+        // The owner's name lives on USER.md's Name line, never in memory; a guest's turn cannot set it.
+        if (provenance.authorType() != MemoryAuthorType.GUEST_TURN) {
+            // Both names: "Tarun prefers to be called Ty" states the name the turn has just replaced.
+            var before = WorkspaceFiles.ownerName(agentName);
+            var stated = parseOwnerName(raw);
+            if (stated != null && MemorySubject.isNameShaped(stated)) WorkspaceFiles.setOwnerName(agentName, stated);
+            var after = WorkspaceFiles.ownerName(agentName);
+            parsed = parsed.stream()
+                    .filter(c -> !MemorySubject.statesOwnerName(c.text(), before) && !MemorySubject.statesOwnerName(c.text(), after))
+                    .toList();
+        }
         if (parsed.size() > maxCandidates) {
             EventLogger.warn(EVENT_CATEGORY, agentName, null,
                     "Extractor returned %d candidates; capping at %d".formatted(parsed.size(), maxCandidates));
@@ -1073,6 +1085,19 @@ public final class MemoryAutoCapture {
             return new ArrayList<>();
         }
         return out;
+    }
+
+    /** The top-level {@code ownerName} of the extractor's reply, or null when it gives none. */
+    static @Nullable String parseOwnerName(@Nullable String raw) {
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            var object = ReplyJson.lenientObject(raw).orElse(null);
+            if (object == null || !object.has(KEY_OWNER_NAME) || !object.get(KEY_OWNER_NAME).isJsonPrimitive()) return null;
+            var name = object.get(KEY_OWNER_NAME).getAsString().strip();
+            return name.isEmpty() ? null : name;
+        } catch (RuntimeException _) {
+            return null;
+        }
     }
 
     /** The extractor's rows: the last object carrying {@code memories}, else the last bare array. */

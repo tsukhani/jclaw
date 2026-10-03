@@ -1,5 +1,6 @@
 import memory.MemoryAutoCapture;
 import memory.MemoryCategory;
+import memory.MemoryStore;
 import memory.MemoryStoreFactory;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -233,6 +234,36 @@ class MemoryAutoCaptureTest extends UnitTest {
         assertTrue(system.contains("a guest, not the owner"), system);
         assertTrue(system.contains("\"Priya\""), system);
         assertFalse(system.contains("Ada Lovelace"), "the owner's name must not reach a guest's capture");
+    }
+
+    @Test
+    void aNameTheOwnerStatesGoesToUserMdNotToMemory() {
+        var name = "agent-states-name";
+        services.WorkspaceFiles.resetWorkspace(name);
+        services.WorkspaceFiles.writeWorkspaceFile(name, "USER.md", "# User Information\n\nName: Tarun\n");
+        MemoryAutoCapture.Extractor extractor = msgs -> """
+                {"memories":[{"text":"Tarun prefers to be called Ty","category":"preference","importance":0.6},
+                             {"text":"Tarun works at Acme Corp on widgets","category":"fact","importance":0.6}],
+                 "ownerName":"Ty"}""";
+        MemoryAutoCapture.capture(agentId(name), name, "Call me Ty from now on. I work at Acme Corp on widgets", "Will do, Ty.",
+                extractor, null, freshBreaker(), memory.MemoryProvenance.extractor("m", models.MemoryAuthorType.HUMAN_TURN));
+
+        assertEquals("Ty", services.WorkspaceFiles.ownerName(name));
+        assertTrue(services.WorkspaceFiles.readWorkspaceFile(name, "USER.md").contains("Also known as: Tarun"),
+                "the earlier name stays an alias");
+        var texts = MemoryStoreFactory.get().list(agentId(name)).stream().map(MemoryStore.MemoryEntry::text).toList();
+        assertEquals(java.util.List.of("Tarun works at Acme Corp on widgets"), texts, "the name is not stored as a memory");
+    }
+
+    @Test
+    void aGuestCannotRenameTheOwner() {
+        var name = "agent-guest-rename";
+        services.WorkspaceFiles.resetWorkspace(name);
+        services.WorkspaceFiles.writeWorkspaceFile(name, "USER.md", "# User Information\n\nName: Tarun\n");
+        MemoryAutoCapture.Extractor extractor = msgs -> "{\"memories\":[],\"ownerName\":\"Priya\"}";
+        MemoryAutoCapture.capture(agentId(name), name, "[Priya (id 3)]: My name is Priya and I work at Acme on widgets", "Hi Priya.",
+                extractor, null, freshBreaker(), memory.MemoryProvenance.extractor("m", models.MemoryAuthorType.GUEST_TURN));
+        assertEquals("Tarun", services.WorkspaceFiles.ownerName(name));
     }
 
     @Test

@@ -122,6 +122,23 @@ class WorkspaceScaffoldTest extends UnitTest {
     }
 
     @Test
+    void settingTheOwnerNameFillsTheLineAndKeepsAnEarlierNameAsAnAlias() throws Exception {
+        var name = "owner-name-set";
+        WorkspaceFiles.resetWorkspace(name);
+        WorkspaceFiles.writeWorkspaceFile(name, "USER.md", "# User Information\n\nName:\n\n## Movies\n\n- Likes sci-fi\n");
+        WorkspaceFiles.setOwnerName(name, "Tarun");
+        assertEquals("# User Information\n\nName: Tarun\n\n## Movies\n\n- Likes sci-fi\n", read(name, "USER.md"));
+
+        WorkspaceFiles.setOwnerName(name, "Ty");
+        WorkspaceFiles.setOwnerName(name, "Ty");
+        assertEquals("# User Information\n\nName: Ty\nAlso known as: Tarun\n\n## Movies\n\n- Likes sci-fi\n", read(name, "USER.md"));
+
+        WorkspaceFiles.setOwnerName(name, "T");
+        assertEquals("# User Information\n\nName: T\nAlso known as: Tarun, Ty\n\n## Movies\n\n- Likes sci-fi\n", read(name, "USER.md"));
+        assertEquals("T", WorkspaceFiles.ownerName(name));
+    }
+
+    @Test
     void anEditedBootstrapKeepsItsTextAndAFilledNameIsLeftAlone() throws Exception {
         var name = "owner-name-edited";
         WorkspaceFiles.resetWorkspace(name);

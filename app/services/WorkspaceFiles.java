@@ -559,6 +559,41 @@ public final class WorkspaceFiles {
         return name.isEmpty() || name.startsWith("<") ? null : name;
     }
 
+    private static final Pattern ALSO_KNOWN_AS = Pattern.compile("(?im)^[ \\t]*also known as[ \\t]*:[ \\t]*(.*)$");
+
+    /**
+     * Writes {@code name} on the Name line of the agent's USER.md, adding the line when it is missing. A different
+     * name already there moves to an "Also known as" line, so memories written under it still name the owner.
+     */
+    public static void setOwnerName(String agentName, String name) {
+        if (!Files.isDirectory(workspacePath(agentName))) return;
+        var current = Files.isRegularFile(workspacePath(agentName).resolve("USER.md"))
+                ? readWorkspaceFile(agentName, "USER.md") : null;
+        var updated = withOwnerName(current == null ? USER_TEMPLATE : current, name);
+        if (!updated.equals(current)) writeWorkspaceFile(agentName, "USER.md", updated);
+    }
+
+    static String withOwnerName(String text, String name) {
+        var section = Pattern.compile("(?m)^##").matcher(text);
+        int headerEnd = section.find() ? section.start() : text.length();
+        var line = NAME_LINE.matcher(text).region(0, headerEnd);
+        if (!line.find()) return afterTitle(text, "Name: " + name + "\n");
+        var previous = line.group(1).strip().replaceAll("^[*_]+|[*_]+$", "").strip();
+        if (previous.equals(name)) return text;
+        var nameLine = "Name: " + name;
+        var out = text.substring(0, line.start()) + nameLine + text.substring(line.end());
+        if (previous.isEmpty() || previous.startsWith("<")) return out;
+        int nameLineEnd = line.start() + nameLine.length();
+        int shiftedHeaderEnd = headerEnd + nameLine.length() - (line.end() - line.start());
+        var aka = ALSO_KNOWN_AS.matcher(out).region(0, shiftedHeaderEnd);
+        if (!aka.find()) {
+            return out.substring(0, nameLineEnd) + "\nAlso known as: " + previous + out.substring(nameLineEnd);
+        }
+        var known = aka.group(1).strip();
+        if (List.of(known.split("\\s*,\\s*")).contains(previous)) return out;
+        return out.substring(0, aka.start(1)) + (known.isEmpty() ? previous : known + ", " + previous) + out.substring(aka.end(1));
+    }
+
     private static String headerOf(String text) {
         var bare = text.replaceAll("(?s)<!--.*?-->", "");
         var section = Pattern.compile("(?m)^##").matcher(bare);
