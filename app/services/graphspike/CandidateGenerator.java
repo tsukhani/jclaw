@@ -1,6 +1,7 @@
 package services.graphspike;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -9,9 +10,10 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * The spans of a memory that may name a term, found by fixed rules rather than a model (JCLAW-1356): the operator,
- * capitalized runs, URLs, file paths, ticket keys and the object of a stated preference. Deterministic, so a run's
- * candidates never vary between runs or models.
+ * The spans of a memory that may name a term, found by fixed rules rather than a model (JCLAW-1356, JCLAW-1357): the
+ * operator, capitalized runs less their time words, URLs, file paths, ticket keys, the object of a stated preference or
+ * view, both sides of "X is a kind of Y", and the agent's known Term names. Deterministic, so a run's candidates never
+ * vary between runs or models. Spans may overlap; the decision model settles which one stands.
  */
 public final class CandidateGenerator {
 
@@ -33,19 +35,48 @@ public final class CandidateGenerator {
             "\\b[\\w\\-]+\\.(?:md|txt|pdf|csv|json|yaml|yml|xlsx|docx|pptx|py|java|sh|log|sql|zip)\\b");
     private static final Pattern TICKET = Pattern.compile("\\b[A-Z]+-\\d+\\b");
     private static final Pattern PREFERENCE = Pattern.compile(
-            "(?i)\\b(?:prefers|likes|loves|dislikes|hates|thinks that|is interested in)\\s+");
+            "(?i)\\b(?:prefers|likes|loves|dislikes|hates|is interested in)\\s+");
     private static final Pattern PREFERENCE_END = Pattern.compile("[,;:!?]|\\.(?=\\s|$)|\\s(?:over|because|when|than)\\b");
+    /** Topic frames: the view in "thinks that X", and both sides of "X is a kind of Y" or "considers X a kind of Y". */
+    private static final Pattern VIEW = Pattern.compile("(?i)\\b(?:thinks|believes) that\\s+");
+    private static final Pattern KIND_OF = Pattern.compile("(?i)\\s(?:is|are|as)?\\s*(?:a|an) (?:kind|type|form|sort) of\\s+");
+    private static final Pattern CONSIDERS = Pattern.compile("(?i)\\b(?:considers|counts?|regards) ");
+    private static final Pattern RELATIVE = Pattern.compile("(?i)(?:which|that|who|it|they|this)\\b");
+    private static final int KIND_SUBJECT_WORDS = 4;
+    private static final Pattern KIND_END = Pattern.compile(
+            "[,;:!?]|\\.(?=\\s|$)|\\s(?:and|or|but|which|that|who|so|because|over|than|when)\\b");
+    private static final Pattern CLAUSE_START = Pattern.compile(
+            "(?i)(?:^|[,;:!?.]\\s|\\bthat\\s|\\bthinks\\s|\\bbelieves\\s|\\bconsiders\\s)");
+    /**
+     * Weekday and month names, their abbreviations, and the relative day and period words: a capitalized run never
+     * stands on one of these alone.
+     */
+    public static final Set<String> TIME_WORDS = Set.of("monday", "tuesday", "wednesday", "thursday", "friday",
+            "saturday", "sunday", "mondays", "tuesdays", "wednesdays", "thursdays", "fridays", "saturdays", "sundays",
+            "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun", "january", "february", "march",
+            "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb",
+            "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec", "today", "tomorrow", "yesterday",
+            "tonight", "morning", "afternoon", "evening", "night", "weekend", "week", "month", "year");
     private static final Pattern SENTENCE_END = Pattern.compile("[.!?][\"'\u201d\u2019)]*$");
 
     private CandidateGenerator() {}
 
     /**
-     * A span to type. An operator candidate is written as a Person without a question; an implicit one has no span
-     * in the text and is named {@link GraphCases#IMPLICIT_OPERATOR_SPAN}.
+     * A span to type, at {@code [start, end)} of the text. An operator candidate is written as a Person without a
+     * question; an implicit one has no span in the text and is named {@link GraphCases#IMPLICIT_OPERATOR_SPAN}. A
+     * candidate with no position has offsets -1 and overlaps nothing.
      */
-    public record Candidate(String span, boolean operator, boolean implicit) {
+    public record Candidate(String span, boolean operator, boolean implicit, int start, int end) {
+        public Candidate(String span, boolean operator, boolean implicit) {
+            this(span, operator, implicit, -1, -1);
+        }
+
         public static Candidate of(String span) {
             return new Candidate(span, false, false);
+        }
+
+        public boolean overlaps(Candidate other) {
+            return start >= 0 && other.start >= 0 && start < other.end && other.start < end;
         }
     }
 
@@ -61,13 +92,21 @@ public final class CandidateGenerator {
         return SUBJECTLESS_VERBS.contains(token.substring(s, e));
     }
 
-    /** The candidates in {@code text}: the operator first, then by position, each span once. */
+    /** {@link #generate(String, Collection)} with no known Term names. */
     public static List<Candidate> generate(String text) {
+        return generate(text, List.of());
+    }
+
+    /**
+     * The candidates in {@code text}: the operator first, then by position, each span once. Each of {@code knownNames}
+     * is a candidate wherever it appears as whole words, in any case.
+     */
+    public static List<Candidate> generate(String text, Collection<String> knownNames) {
         var out = new ArrayList<Candidate>();
         var user = THE_USER.matcher(text);
         boolean implicit = false;
         if (user.find()) {
-            out.add(new Candidate(user.group(), true, false));
+            out.add(new Candidate(user.group(), true, false, user.start(), user.end()));
         } else if (subjectless(text)) {
             implicit = true;
             out.add(new Candidate(GraphCases.IMPLICIT_OPERATOR_SPAN, true, true));
@@ -96,13 +135,13 @@ public final class CandidateGenerator {
         while (ticket.find()) {
             if (free(taken, ticket.start(), ticket.end())) found.add(new int[] {ticket.start(), ticket.end()});
         }
-        var preference = PREFERENCE.matcher(text);
-        while (preference.find()) {
-            int s = preference.end();
-            var stop = PREFERENCE_END.matcher(text).region(s, text.length());
-            int e = stop.find() ? stop.start() : text.length();
-            while (e > s && Character.isWhitespace(text.charAt(e - 1))) e--;
-            if (e > s && free(taken, s, e)) found.add(new int[] {s, e});
+        objects(text, PREFERENCE, PREFERENCE_END, taken, found);
+        objects(text, VIEW, PREFERENCE_END, taken, found);
+        kindOf(text, taken, found);
+        for (var name : knownNames) {
+            if (name.isBlank()) continue;
+            var known = Pattern.compile("(?i)(?<![\\w])" + Pattern.quote(name.strip()) + "(?![\\w])").matcher(text);
+            while (known.find()) found.add(new int[] {known.start(), known.end()});
         }
         capitalizedRuns(text, implicit, found);
 
@@ -111,10 +150,74 @@ public final class CandidateGenerator {
         out.forEach(c -> seen.add(c.span()));
         for (var r : found) {
             var span = text.substring(r[0], r[1]);
-            if (span.isEmpty() || span.equalsIgnoreCase(GraphCases.IMPLICIT_OPERATOR_SPAN)) continue;
-            if (seen.add(span)) out.add(Candidate.of(span));
+            if (span.isEmpty() || span.equalsIgnoreCase(GraphCases.IMPLICIT_OPERATOR_SPAN) || onlyTime(span)) continue;
+            if (seen.add(span)) out.add(new Candidate(span, false, false, r[0], r[1]));
         }
         return List.copyOf(out);
+    }
+
+    /** The span after each match of {@code frame}, up to {@code end}'s first match or the end of the text. */
+    private static void objects(String text, Pattern frame, Pattern end, List<int[]> taken, List<int[]> found) {
+        var m = frame.matcher(text);
+        while (m.find()) {
+            int s = m.end();
+            var stop = end.matcher(text).region(s, text.length());
+            int e = stop.find() ? stop.start() : text.length();
+            e = trimSpace(text, s, e);
+            if (e > s && free(taken, s, e)) found.add(new int[] {s, e});
+        }
+    }
+
+    /** Both sides of "X is a kind of Y" and "considers X a kind of Y"; X starts at its clause. */
+    private static void kindOf(String text, List<int[]> taken, List<int[]> found) {
+        var m = KIND_OF.matcher(text);
+        while (m.find()) {
+            int xEnd = trimSpace(text, 0, m.start());
+            int xStart = -1;
+            var considers = CONSIDERS.matcher(text).region(0, xEnd);
+            while (considers.find()) xStart = considers.end();
+            if (xStart < 0) {
+                var clause = CLAUSE_START.matcher(text).region(0, xEnd);
+                xStart = 0;
+                while (clause.find()) xStart = clause.end();
+            }
+            xStart = lastWords(text, xStart, xEnd, KIND_SUBJECT_WORDS);
+            var x = text.substring(xStart, xEnd);
+            if (xEnd > xStart && !RELATIVE.matcher(x).lookingAt() && free(taken, xStart, xEnd)) {
+                found.add(new int[] {xStart, xEnd});
+            }
+            int s = m.end();
+            var stop = KIND_END.matcher(text).region(s, text.length());
+            int e = trimSpace(text, s, stop.find() ? stop.start() : text.length());
+            if (e > s && free(taken, s, e)) found.add(new int[] {s, e});
+        }
+    }
+
+    /** The start of the last {@code words} words of {@code [start, end)}. */
+    private static int lastWords(String text, int start, int end, int words) {
+        var m = TOKEN.matcher(text).region(start, end);
+        var starts = new ArrayList<Integer>();
+        while (m.find()) starts.add(m.start());
+        return starts.isEmpty() ? end : starts.get(Math.max(0, starts.size() - words));
+    }
+
+    private static int trimSpace(String text, int start, int end) {
+        while (end > start && Character.isWhitespace(text.charAt(end - 1))) end--;
+        return end;
+    }
+
+    /** Whether every word of {@code span} is a time word or a connector, with at least one time word. */
+    private static boolean onlyTime(String span) {
+        boolean time = false;
+        for (var word : span.split("\\s+")) {
+            var core = word.toLowerCase(Locale.ROOT);
+            if (TIME_WORDS.contains(core)) {
+                time = true;
+            } else if (!CONNECTORS.contains(core) && !core.chars().allMatch(Character::isDigit)) {
+                return false;
+            }
+        }
+        return time;
     }
 
     private record Token(String core, int start, int end, boolean connector, boolean sentenceInitial) {}
@@ -156,9 +259,35 @@ public final class CandidateGenerator {
         close(run, implicit, found);
     }
 
+    /**
+     * Closes a run, split at its time words, which are dropped. A time word directly followed by a capitalized word
+     * that is not one opens a name ("May Chen", "Fridays Ltd") and stays.
+     */
     private static void close(List<Token> run, boolean implicit, List<int[]> found) {
-        var r = new ArrayList<>(run);
+        var tokens = new ArrayList<>(run);
         run.clear();
+        var segment = new ArrayList<Token>();
+        for (int i = 0; i < tokens.size(); i++) {
+            var token = tokens.get(i);
+            var next = i + 1 < tokens.size() ? tokens.get(i + 1) : null;
+            boolean opensName = next != null && !next.connector() && !time(next);
+            if (time(token) && !opensName) {
+                closeSegment(segment, implicit, found);
+                segment.clear();
+            } else {
+                segment.add(token);
+            }
+        }
+        closeSegment(segment, implicit, found);
+    }
+
+    private static boolean time(Token token) {
+        return !token.connector() && TIME_WORDS.contains(token.core().toLowerCase(Locale.ROOT));
+    }
+
+    private static void closeSegment(List<Token> segment, boolean implicit, List<int[]> found) {
+        var r = new ArrayList<>(segment);
+        while (!r.isEmpty() && r.getFirst().connector()) r.removeFirst();
         while (!r.isEmpty() && r.getLast().connector()) r.removeLast();
         if (!r.isEmpty() && r.getFirst().sentenceInitial()) {
             var first = r.getFirst();

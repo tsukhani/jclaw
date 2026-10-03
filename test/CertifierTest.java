@@ -16,7 +16,7 @@ class CertifierTest extends UnitTest {
 
     private static Point point(double t, int written, int wrong, double recall) {
         return new Point(t, written, written - wrong, wrong, wrong, 0, 0, 0, 0, 100, recall,
-                written == 0 ? null : (double) wrong / written, 0);
+                written == 0 ? null : (double) wrong / written, 0, 0);
     }
 
     /** A grid passing every threshold at or above {@code lowest} and failing on the bound below it. */

@@ -151,7 +151,7 @@ public final class JevApi {
         }
         // Status only: the body comes from a server whose address the operator chose (JCLAW-778).
         if (code == 429 || code >= 500) throw new JevException.Outage(target.name() + " returned HTTP " + code, false);
-        if (!response.isSuccessful()) throw new JevException(target.name() + " returned HTTP " + code);
+        if (!response.isSuccessful()) throw new JevException(target.name() + " returned HTTP " + code, code);
     }
 
     private static JsonObject parseAnswer(Response response) throws IOException {
@@ -201,6 +201,33 @@ public final class JevApi {
     public static JsonObject choiceQuestion(JsonObject criteria, JsonObject instructions) {
         var question = new JsonObject();
         question.addProperty("type", "choice");
+        question.add("criteria", criteria);
+        question.add("instructions", instructions);
+        return question;
+    }
+
+    /**
+     * The {@code noul} of a yes/no answer, if it is a finite number in [0, 1]: the probability that the true
+     * criterion holds. A {@code confidence} is not required.
+     */
+    public static double validateNoul(@Nullable JsonElement raw) {
+        try {
+            if (raw == null || !raw.isJsonObject()) throw new JevException(INVALID);
+            return unitNumber(raw.getAsJsonObject().get("noul"));
+        } catch (JevException e) {
+            throw e;
+        } catch (RuntimeException _) {
+            throw new JevException(INVALID);
+        }
+    }
+
+    /** One {@code noul} question: the probability that {@code trueCriterion} rather than {@code falseCriterion} holds. */
+    public static JsonObject noulQuestion(String trueCriterion, String falseCriterion, JsonObject instructions) {
+        var criteria = new JsonObject();
+        criteria.addProperty("true", trueCriterion);
+        criteria.addProperty("false", falseCriterion);
+        var question = new JsonObject();
+        question.addProperty("type", "noul");
         question.add("criteria", criteria);
         question.add("instructions", instructions);
         return question;

@@ -4066,8 +4066,8 @@ for m in r["models"]:
     for run in m["runs"]:
         s = run["stages"]
         res = s["resolution"]
-        print("  run %d stages: candidates %s | typing %s | rejection %s | relation %s | no-relation %s | failures %d"
-              % (run["run"], ratio(s["candidateRecall"]), ratio(s["typing"]), ratio(s["rejection"]),
+        print("  run %d stages: candidates %s | overlap %s | typing %s | rejection %s | relation %s | no-relation %s | failures %d"
+              % (run["run"], ratio(s["candidateRecall"]), ratio(s["overlap"]), ratio(s["typing"]), ratio(s["rejection"]),
                  ratio(s["relation"]), ratio(s["noRelation"]), s["failures"]))
         print("        resolution: %d mentions -> %d clusters (%d gold), %d false merges, B3 P/R %s/%s, pairwise P/R %s/%s"
               % (res["mentions"], res["clusters"], res["goldEntities"], res["falseMerges"],
@@ -4082,6 +4082,8 @@ for m in r["models"]:
                   p["wrong"], p["wrongMatch"], p["wrongType"], p["wrongDuplicate"], p["wrongRelation"], p["noise"],
                   pct(p.get("recall")), pct(p.get("wrongShare")), pct(st.get("upperBound")),
                   "yes" if st.get("passes") else "no"))
+        if run["grid"]:
+            print("        rule-written operator terms left out: %d" % run["grid"][0]["ruleWritten"])
         w = run["walk"]
         print("        walk: %s" % ("certified at %.2f" % w["threshold"] if w.get("threshold") is not None
                                     else w.get("failure") or "nothing certified"))

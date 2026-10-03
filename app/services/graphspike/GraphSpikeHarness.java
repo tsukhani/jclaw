@@ -2,6 +2,8 @@ package services.graphspike;
 
 import memory.MemoryProvenance;
 import memory.MemoryStoreFactory;
+import memory.graph.GraphStore;
+import memory.ontology.OntologyRecord;
 import memory.ontology.OntologySchema;
 import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
@@ -20,6 +22,8 @@ import services.graphspike.GraphSpikeScorer.WrongRecord;
 import services.graphspike.StageScorer.StageRun;
 import services.graphspike.StageScorer.Stages;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -105,7 +109,7 @@ public final class GraphSpikeHarness {
                         null, provenance)));
             }
             before = snapshot(memoryIds);
-            measured = measure(cases, schema, models, runs, recallFloor, concurrency);
+            measured = measure(cases, schema, models, runs, recallFloor, concurrency, knownNames(agentId));
             after = snapshot(memoryIds);
         } finally {
             for (var id : memoryIds.values()) {
@@ -149,7 +153,7 @@ public final class GraphSpikeHarness {
         var memoryIds = new LinkedHashMap<String, String>();
         loaded.cases().forEach(h -> memoryIds.put(h.labels().id(), String.valueOf(h.memoryId())));
         var before = snapshot(memoryIds);
-        var measured = measure(cases, schema, models, runs, recallFloor, concurrency);
+        var measured = measure(cases, schema, models, runs, recallFloor, concurrency, List.of());
         var after = snapshot(memoryIds);
         int unchanged = 0;
         int present = 0;
@@ -172,11 +176,11 @@ public final class GraphSpikeHarness {
     /** Every model's runs over {@code cases}, by model name. */
     private static Map<String, List<RunData>> measure(List<Case> cases, OntologySchema schema,
                                                       List<DecisionModel> models, int runs, double recallFloor,
-                                                      int concurrency) {
+                                                      int concurrency, List<String> knownNames) {
         var tasks = new ArrayList<Callable<CaseResult>>();
         for (int r = 0; r < runs; r++) {
             for (var m : models) {
-                for (var c : cases) tasks.add(() -> askCase(schema, c, m));
+                for (var c : cases) tasks.add(() -> askCase(schema, c, m, knownNames));
             }
         }
         var results = fanOut(tasks, concurrency);
@@ -196,14 +200,30 @@ public final class GraphSpikeHarness {
         return out;
     }
 
-    /** The gold-fed typing and relation stages, then the end-to-end pipeline from generated candidates. */
-    private static CaseResult askCase(OntologySchema schema, Case c, DecisionModel m) {
+    /** The agent's Term names: a Term carries no aliases, so its name is the only known span. Read, never written. */
+    private static List<String> knownNames(String agentId) {
+        try {
+            return GraphStore.get().read(Long.parseLong(agentId)).stream()
+                    .filter(r -> r instanceof OntologyRecord.Term)
+                    .map(r -> ((OntologyRecord.Term) r).name()).toList();
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    /**
+     * The overlap stage over generated candidates, the gold-fed typing and relation stages, then the end-to-end
+     * pipeline from generated candidates.
+     */
+    private static CaseResult askCase(OntologySchema schema, Case c, DecisionModel m, List<String> knownNames) {
+        var candidates = CandidateGenerator.generate(c.text(), knownNames);
+        var overlap = ExtractionPipeline.settle(c.text(),
+                candidates.stream().filter(k -> !k.operator()).toList(), m.name(), m.decider());
         var typing = ExtractionPipeline.type(schema, c.text(), StageScorer.typingSpans(c), m.name(), m.decider());
         var relations = ExtractionPipeline.relate(schema, c.text(), StageScorer.relationTerms(c), m.name(),
                 m.decider());
-        var e2e = ExtractionPipeline.run(schema, c.id(), c.text(), CandidateGenerator.generate(c.text()), m.name(),
-                m.decider());
-        return new CaseResult(new StageRun(c.id(), typing, relations.decisions()), e2e);
+        var e2e = ExtractionPipeline.run(schema, c.id(), c.text(), candidates, m.name(), m.decider());
+        return new CaseResult(new StageRun(c.id(), overlap, typing, relations.decisions()), e2e);
     }
 
     /** Runs {@code tasks} on at most {@code concurrency} threads, returning results in task order. */

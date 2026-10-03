@@ -35,7 +35,7 @@ import java.util.regex.Pattern;
 import static utils.GsonHolder.GSON;
 
 /**
- * JCLAW-1356: the harness over the committed set with a decider that answers gold, one that mis-types a term, one
+ * JCLAW-1356, JCLAW-1357: the harness over the committed set with a decider that answers gold, one that mis-types a term, one
  * that edits a memory, and the
  * held-out set. Concurrency 1 keeps every step on the test thread, inside the test's transaction.
  */
@@ -62,9 +62,18 @@ class GraphSpikeHarnessTest extends UnitTest {
         return GraphCases.load(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH), SCHEMA);
     }
 
+    /** The {@code noul} question's relation, matched against each sentence over its two quoted spans. */
+    private static String relationOf(String rules, String from, String to) {
+        for (var relation : ExtractionPipeline.SENTENCES.keySet()) {
+            if (rules.contains(ExtractionPipeline.sentence(relation, from, to))) return relation;
+        }
+        throw new AssertionError("no relation sentence in " + rules);
+    }
+
     /**
-     * Answers gold at 0.99: a term is its entity's type when the quoted span is that entity's mention, and a pair is
-     * its labelled relation, read back from the case whose text is {@code state.memory}.
+     * Answers gold, read back from the case whose text is {@code state.memory}: a term is its entity's type at 0.99
+     * when the quoted span is that entity's mention; an overlap is the span naming an entity, else neither; a relation
+     * question is yes 0.99 when the case labels that relation in that direction (either, if symmetric), else 0.01.
      */
     private static Decider gold(List<Case> cases) {
         var byText = new HashMap<String, Case>();
@@ -74,19 +83,34 @@ class GraphSpikeHarnessTest extends UnitTest {
             var answers = new JsonObject();
             for (var q : request.getAsJsonObject("questions").entrySet()) {
                 var question = q.getValue().getAsJsonObject();
-                var spans = QUOTED.matcher(question.getAsJsonObject("instructions").get("rules").getAsString())
-                        .results().map(m -> m.group(1)).toList();
-                String choice;
-                if (q.getKey().startsWith("m")) {
-                    var e = c.entityAt(spans.getFirst());
-                    choice = e != null && spans.getFirst().equals(e.mention()) ? e.type() : ExtractionPipeline.NOT_AN_ENTITY;
-                } else {
+                var rules = question.getAsJsonObject("instructions").get("rules").getAsString();
+                var spans = QUOTED.matcher(rules).results().map(m -> m.group(1)).toList();
+                if (q.getKey().startsWith("r")) {
                     var from = c.entityAt(spans.get(0));
                     var to = c.entityAt(spans.get(1));
                     var r = from == null || to == null ? null : c.relation(from.id(), to.id());
-                    choice = r == null ? ExtractionPipeline.NONE : r.type();
+                    var yes = r != null && r.type().equals(relationOf(rules, spans.get(0), spans.get(1)));
+                    var noul = new JsonObject();
+                    noul.addProperty("type", "noul");
+                    noul.addProperty("noul", yes ? 0.99 : 0.01);
+                    answers.add(q.getKey(), noul);
+                    continue;
                 }
-                answers.add(q.getKey(), answer(question.getAsJsonObject("criteria").keySet(), choice, 0.99));
+                var ids = question.getAsJsonObject("criteria").keySet();
+                String choice;
+                if (q.getKey().startsWith("o")) {
+                    choice = ids.stream().filter(id -> {
+                        var e = c.entityAt(id);
+                        return e != null && id.equals(e.mention());
+                    }).findFirst().orElse(ids.stream().filter(id -> c.entityAt(id) != null).findFirst()
+                            .orElse(ExtractionPipeline.NEITHER));
+                } else if (q.getKey().startsWith("m")) {
+                    var e = c.entityAt(spans.getFirst());
+                    choice = e != null && spans.getFirst().equals(e.mention()) ? e.type() : ExtractionPipeline.NOT_AN_ENTITY;
+                } else {
+                    throw new AssertionError("unexpected question " + q.getKey());
+                }
+                answers.add(q.getKey(), answer(ids, choice, 0.99));
             }
             var response = new JsonObject();
             response.add("answers", answers);
@@ -174,6 +198,11 @@ class GraphSpikeHarnessTest extends UnitTest {
         assertEquals(cases.size(), integrity.deleted());
         assertEquals(List.of(), integrity.changed());
 
+        int goldWithoutOperator = 0;
+        for (var c : cases) {
+            goldWithoutOperator += (int) (c.entities().stream().filter(e -> !e.noise() && !e.operator()).count()
+                    + c.relations().stream().filter(r -> !r.noise()).count());
+        }
         var model = report.models().getFirst();
         assertEquals(2, model.runs().size());
         for (var run : model.runs()) {
@@ -181,10 +210,18 @@ class GraphSpikeHarnessTest extends UnitTest {
             assertEquals(1.0, s.typing().rate(), "typing");
             assertEquals(1.0, s.rejection().rate(), "rejection");
             assertEquals(1.0, s.relation().rate(), "relation");
+            assertEquals(1.0, s.noRelation().rate(), "no-relation");
+            assertTrue(s.overlap().total() == 0 || s.overlap().rate() == 1.0, "overlap " + s.overlap());
             assertEquals(1.0, s.resolution().bcubedPrecision(), "resolution precision");
             assertEquals(1.0, s.resolution().bcubedRecall(), "resolution recall");
             assertEquals(0, s.failures());
             assertEquals(0.50, run.walk().threshold(), "run " + run.run() + ": " + run.walk().failure());
+            for (var p : run.grid()) {
+                assertEquals(cases.size(), p.ruleWritten(), "one rule-written operator per case");
+                assertEquals(goldWithoutOperator, p.gold());
+            }
+            var bottom = run.grid().getLast();
+            assertEquals(0, bottom.wrong(), bottom.toString());
         }
         assertEquals(Certifier.PENDING_AGREEMENT, model.certification().status(), model.certification().reasons().toString());
         assertEquals(0.50, model.certification().threshold());
