@@ -25,15 +25,14 @@ import java.util.Locale;
  * pick a provider class:
  *
  * <ul>
- *   <li><b>Ollama</b> — {@code keep_alive: -1} holds the model until the server exits, and
- *       only its native API honors the field: sending it on the OpenAI-compatible
- *       {@code /v1} route left {@code ollama ps} reporting the ordinary five-minute expiry,
- *       while the same value on {@code /api/embed} reported "Forever". Hence the URL
- *       derivation below. The pin is durable against other models loading — measured by
- *       loading a 1.3 GB and a 9 GB model alongside it on a 48 GB host, after which all
- *       three were resident and the embed model still read "Forever". Reports of a pinned
- *       model being evicted anyway exist but track constrained-VRAM scheduler bugs, which
- *       did not reproduce here.</li>
+ *   <li><b>Ollama</b> — {@code keep_alive: -1} stops the idle expiry, and only its native API
+ *       honors the field: sending it on the OpenAI-compatible {@code /v1} route left
+ *       {@code ollama ps} reporting the ordinary five-minute expiry, while the same value on
+ *       {@code /api/embed} reported "Forever". Hence the URL derivation below. The pin does
+ *       not survive eviction for space: on Apple Silicon Ollama caps a load by the system's
+ *       free memory rather than the GPU budget, and a 9 GB decision model loading while that
+ *       ran short evicted the pinned model (2026-10-03). The next embed reloads it through
+ *       {@code /v1}, so unpinned, until this pin runs again.</li>
  *   <li><b>LM Studio</b> — JIT-loaded models carry a 60-minute idle TTL, and {@code ttl}
  *       (seconds) overrides it on the OpenAI-compatible route, so no special URL is needed.
  *       No infinite value is documented, so this asks for a long one. An operator who wants
