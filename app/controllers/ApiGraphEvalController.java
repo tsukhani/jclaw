@@ -8,12 +8,15 @@ import play.Play;
 import play.db.jpa.NoTransaction;
 import play.mvc.Before;
 import play.mvc.Controller;
+import play.mvc.Http;
+import services.EventLogger;
 import services.Tx;
 import services.WorkspaceFiles;
 import services.decision.JevApi;
 import services.decision.OllamaDecision;
 import services.grapheval.Agreement;
 import services.grapheval.Certifier;
+import services.grapheval.EvalProgress;
 import services.grapheval.ExtractionPipeline.Decider;
 import services.grapheval.GraphCases;
 import services.grapheval.GraphEvalHarness;
@@ -22,10 +25,14 @@ import services.grapheval.HeldOut;
 import utils.ApiResponses;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
@@ -45,6 +52,7 @@ public class ApiGraphEvalController extends Controller {
     private static final int MAX_SAMPLE = 1000;
     private static final long DEFAULT_SEED = 1356;
     private static final String BLIND_SHEET = "blind-sheet.json";
+    private static final long HEARTBEAT_SECONDS = 30;
 
     @Before
     static void requireLoadtestAuth() {
@@ -54,7 +62,7 @@ public class ApiGraphEvalController extends Controller {
     /**
      * {@code POST /api/graph/eval} with {@code {agent, decisionModels?, set?: "cases"|"heldout", runs?,
      * recallFloor?, concurrency?, timeoutSeconds?}}. Model calls run outside any transaction, so each DB step opens
-     * its own.
+     * its own. A refused request is a 400; an accepted one is {@linkplain #stream streamed}.
      */
     @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,
@@ -77,6 +85,7 @@ public class ApiGraphEvalController extends Controller {
             }
             if (!(recallFloor >= 0 && recallFloor <= 1)) throw invalid("recallFloor must be in [0, 1]");
         }
+        double floor = recallFloor;
         int timeoutSeconds = Math.clamp(readInt(body, "timeoutSeconds", DEFAULT_TIMEOUT_SECONDS), 1, MAX_TIMEOUT_SECONDS);
         int concurrency = Math.clamp(readInt(body, "concurrency", DEFAULT_CONCURRENCY), 1, MAX_CONCURRENCY);
         var modelNames = body.has("decisionModels") ? strings(body, "decisionModels") : OllamaDecision.selectedModels();
@@ -102,8 +111,8 @@ public class ApiGraphEvalController extends Controller {
             } catch (IOException | RuntimeException e) {
                 throw invalid("invalid held-out set: " + e.getMessage());
             }
-            renderJSON(GSON.toJson(GraphEvalHarness.runHeldOut(loaded, ownerName, schema, models, runs, recallFloor,
-                    concurrency)));
+            stream(progress -> GraphEvalHarness.runHeldOut(loaded, ownerName, schema, models, runs, floor,
+                    concurrency, progress), true);
             return;
         }
 
@@ -125,8 +134,48 @@ public class ApiGraphEvalController extends Controller {
         } catch (IOException | RuntimeException e) {
             throw invalid("invalid second labels or adjudications: " + e.getMessage());
         }
-        renderJSON(GSON.toJson(GraphEvalHarness.run(agentId, cases, ownerName, schema, models, runs, recallFloor, concurrency,
-                secondLabels, adjudications)));
+        stream(progress -> GraphEvalHarness.run(agentId, cases, ownerName, schema, models, runs, floor, concurrency,
+                secondLabels, adjudications, progress), false);
+    }
+
+    /**
+     * Streams newline-delimited JSON (JCLAW-1359): progress events as they happen, then the report as the last line.
+     * Once a line is out the status is fixed, so a failure arrives as an {@code error} event; a held-out one names
+     * only the exception's class, since its message could carry a memory's text.
+     */
+    private static void stream(Function<EvalProgress, Object> measure, boolean heldOut) {
+        var target = response;
+        target.contentType = "application/x-ndjson";
+        var progress = new EvalProgress(event -> writeLine(target, GSON.toJson(event)));
+        var timer = Executors.newSingleThreadScheduledExecutor(
+                Thread.ofPlatform().daemon().name("grapheval-heartbeat").factory());
+        timer.scheduleAtFixedRate(progress::heartbeat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
+        Object report = null;
+        String failure = null;
+        try {
+            report = measure.apply(progress);
+        } catch (RuntimeException e) {
+            var cause = e.getCause();
+            failure = heldOut ? e.getClass().getSimpleName()
+                    : e.getMessage() + (cause == null ? "" : ": " + cause.getMessage());
+            EventLogger.warn("grapheval", "graph eval failed: " + failure);
+        } finally {
+            timer.shutdown();
+            progress.close();
+        }
+        if (report != null) {
+            writeLine(target, GSON.toJson(report));
+            return;
+        }
+        var error = new JsonObject();
+        error.addProperty("event", "error");
+        error.addProperty("message", failure);
+        writeLine(target, GSON.toJson(error));
+    }
+
+    /** Bytes, not a String: Play encodes a String chunk with {@code Response.current()}, unset on the timer thread. */
+    private static void writeLine(Http.Response target, String json) {
+        target.writeChunk((json + "\n").getBytes(StandardCharsets.UTF_8));
     }
 
     /** {@code POST /api/graph/eval/blind-sheet}: writes the blind subset's ids, text and owner for a second labeller. */

@@ -999,6 +999,8 @@ run             Scores every stage and the end-to-end pipeline over
                 afterwards. With
                 --set heldout it measures data/graph-eval/heldout.json instead,
                 reading the memories in place; that report carries counts only.
+                Prints a line as each model finishes a run, and every 30 s the
+                runs under way.
 blind-sheet     Writes data/graph-eval/blind-sheet.json: the ids and text of the
                 blind 15% a second labeller labels into
                 evals/graph/second-labels.json.
@@ -4027,11 +4029,66 @@ PYBODY
     echo "==> grapheval $sub${agent:+ for agent $agent}"
     local tmp status
     tmp=$(mktemp)
-    status=$(curl -s -o "$tmp" -w '%{http_code}' \
-        -H "X-Loadtest-Auth: $secret" \
-        -H "Content-Type: application/json" \
-        -X POST --data "$body" \
-        "http://localhost:$BACKEND_PORT$path")
+    if [[ "$sub" == "run" ]]; then
+        # An accepted run streams one JSON line per progress event and the report last (JCLAW-1359). The reader
+        # prints the events, writes every other line - the report, or a refusal's body - to $tmp, and exits
+        # 3 on an error event or 4 on a stream that ends without a report.
+        local reader headers streamed=0
+        read -r -d '' reader <<'PYSTREAM' || true
+import json, sys
+out = open(sys.argv[1], "w")
+failure = None
+report = False
+for line in iter(sys.stdin.readline, ""):
+    try:
+        event = json.loads(line)
+    except ValueError:
+        event = None
+    kind = event.get("event") if isinstance(event, dict) else None
+    if kind == "pass":
+        s = int(event["seconds"])
+        print("  %s run %d/%d: %d/%d cases, %d failed decisions, %dm%02ds" % (event["model"], event["run"],
+              event["runs"], event["done"], event["cases"], event["failed"], s // 60, s % 60), flush=True)
+    elif kind == "heartbeat":
+        print("  ... %s run %d/%d: %d/%d cases so far" % (event["model"], event["run"], event["runs"],
+              event["done"], event["cases"]), flush=True)
+    elif kind == "error":
+        failure = event.get("message")
+    else:
+        out.write(line)
+        report = report or bool(line.strip())
+out.close()
+if failure is not None:
+    print("Error: grapheval run failed: %s" % failure)
+    sys.exit(3)
+if not report:
+    sys.exit(4)
+PYSTREAM
+        headers=$(mktemp)
+        curl -sN -D "$headers" \
+            -H "X-Loadtest-Auth: $secret" \
+            -H "Content-Type: application/json" \
+            -X POST --data "$body" \
+            "http://localhost:$BACKEND_PORT$path" | python3 -u -c "$reader" "$tmp" || streamed=$?
+        status=$(awk '/^HTTP/ {s = $2} END {print (s == "" ? "000" : s)}' "$headers")
+        rm -f "$headers"
+        if [[ "$status" == "200" && "$streamed" != "0" ]]; then
+            # 3 is the reader's error event, already printed; 4 is its empty stream; anything else is curl's.
+            case "$streamed" in
+                3) ;;
+                4) echo "Error: grapheval run ended without a report" ;;
+                *) echo "Error: grapheval run stream broke (curl exit $streamed)" ;;
+            esac
+            rm -f "$tmp"
+            exit 1
+        fi
+    else
+        status=$(curl -s -o "$tmp" -w '%{http_code}' \
+            -H "X-Loadtest-Auth: $secret" \
+            -H "Content-Type: application/json" \
+            -X POST --data "$body" \
+            "http://localhost:$BACKEND_PORT$path")
+    fi
 
     if [[ "$status" != "200" ]]; then
         echo "Error: grapheval $sub failed (HTTP $status)"

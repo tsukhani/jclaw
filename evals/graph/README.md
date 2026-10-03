@@ -204,7 +204,17 @@ files live under `data/graph-eval/`, which is gitignored, and never leave that m
    as the operator. A file holding memories of two agents is refused.
 
 The held-out report carries aggregate counts only: no memory id, text, span or per-case
-result. Its walk is information; only the committed set certifies.
+result. Its walk is information; only the committed set certifies. Its progress lines and a
+failure's message are held to the same rule.
+
+## Progress
+
+An accepted run answers newline-delimited JSON: `pass` and `heartbeat` events as they happen,
+then the report as the last line. A refused request is still a plain 400. `pass` comes when a
+model finishes one run over the set (`model`, `run`, `runs`, `done`, `cases`, `failed`
+decisions, `seconds`); `heartbeat` names every pass under way every 30 seconds. A failure
+after the first line arrives as an `error` event, and the command exits 1. The report never
+sees any of it, so it still carries no timings.
 
 ## Synthetic only
 
