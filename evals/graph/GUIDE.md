@@ -61,9 +61,9 @@ A memory about someone talking to the agent who is not the owner is a guest case
 
 ## 5. Preferences are views on a Topic
 
-A stated preference, like or dislike makes its object a Topic, linked
-`<person> holds_view_on <topic>` (`operator` for the owner). "Avery Lin prefers oat milk over
-dairy" labels "oat milk" as a Topic. The thing it is preferred over ("dairy") is not labelled: list it as a negative. A
+A stated preference, like or dislike makes its object a Topic, linked `<person> holds_view_on
+<topic>` (`operator` for the owner). "Avery Lin prefers oat milk over dairy" labels "oat milk"
+as a Topic. The thing it is preferred over ("dairy") is not labelled: list it as a negative. A
 dislike is labelled the same way as a like; the view's polarity is not recorded.
 
 ## 6. One relation per ordered pair
@@ -92,10 +92,11 @@ A negative never equals a mention or an alias in the same case.
 
 ## 8. Ids are stable across cases
 
-An entity keeps one id, and one type, in every case it appears in, and its mention reads the same
-in every case (case, a leading "the" and a possessive "'s" aside), so exact-match resolution has
-real merges to score. The operator is the one exception: it reads as the owner's name, "The user"
-or nothing, and resolution joins all three by rule and by the declared name. Two different entities never share a surface and type.
+An entity keeps one id, and one type, in every case it appears in, and its mention reads the
+same in every case (case, a leading "the" and a possessive "'s" aside), so exact-match
+resolution has real merges to score. The operator is the one exception: it reads as the owner's
+name, "The user" or nothing, and resolution joins all three by rule and by the declared name.
+Two different entities never share a surface and type.
 
 ## 9. Adjudication
 

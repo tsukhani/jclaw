@@ -32,8 +32,8 @@ models selected in Settings. A hosted model such as `jev-latest` is refused with
 - Every case but a guest case has exactly one `operator` entity, mentioned by the declared
   name or, in a legacy case captured before the owner had a name, as "The user". A text that
   says neither opens with a subjectless verb ("Prefers ...") and its operator is
-  `{"id": "operator", "type": "Person", "implicit": true}`, with no mention. Any other
-  operator mention is refused.
+  `{"id": "operator", "type": "Person", "implicit": true}`, with no mention. When the set
+  declares an owner, any other operator mention is refused.
 - A `guest` case is about someone other than the owner: a named guest is an ordinary Person,
   "a guest" is a negative, and the case has no `operator` entity and no relation to one.
 - Every `mention` and alias appears verbatim in `text`. Its `type` is one of the seed
@@ -46,13 +46,14 @@ models selected in Settings. A hosted model such as `jev-latest` is refused with
 - `tags` are from `weekday-time`, `role`, `everyday-object`, `descriptive-phrase`,
   `reversed-direction`, `employer-tool` (the hard negatives), `plain` and `guest`.
 
-`services.graphspike.GraphCases` refuses a set that breaks any of these, naming the case.
-`GraphCasesConformanceTest` fails the build on a refusal or on a missed composition target:
-at least 120 cases, 12-17% beginning "The user", at least 60% beginning the owner's name,
-every case owner-voiced (one of those two or subjectless) or `guest`, at least 6 guest cases
-with one opening "A guest", a mean length of 17-23 words, at least 12 cases per hard-negative tag and at least half carrying
-one, at least 420 non-noise gold records, every term type and relation used, and entity ids
-recurring across cases.
+`services.graphspike.GraphCases` refuses a set that breaks the mention, type, relation,
+negative, tag or operator-mention rules, naming the case; `GraphCasesConformanceTest` checks
+the operator count and the guest rules, and fails the build on a refusal or on a missed
+composition target: at least 120 cases, 12-17% beginning "The user", at least 60% beginning the
+owner's name, every case owner-voiced (one of those two or subjectless) or `guest`, at least 6
+guest cases with one opening "A guest", a mean length of 17-23 words, at least 12 cases per
+hard-negative tag and at least half carrying one, at least 420 non-noise gold records, every
+term type and relation used, and entity ids recurring across cases.
 
 ## Pipeline
 
@@ -107,11 +108,12 @@ operator's cluster.
   least 0.5; no-relation: unlabelled pairs whose kept relation is below 0.5;
 - resolution: B-cubed and pairwise precision and recall, and false merges, over gold mentions.
 
-**End to end**, strictly. At a threshold t a decision is written only when its probability
-and its floor are at least t; a relation also needs both endpoint terms written at t. An
-implicit operator or "The user" is written by rule, not decided, so it counts in neither
-written nor gold; the grid's `ruleWritten` reports how many were left out, and relations to
-the operator still count. The owner named in the text is decided, so it counts in both. Each written record is right, noise or wrong:
+**End to end**, strictly. At a threshold t a decision is written only when its probability and
+its floor are at least t; a relation also needs both endpoint terms written at t. An implicit
+operator or "The user" is written by rule, not decided, so it counts in neither written nor
+gold; the grid's `ruleWritten` reports how many were left out, and relations to the operator
+still count. The owner named in the text is decided, so it counts in both. Each written record
+is right, noise or wrong:
 
 - **match** — the span is no labelled mention or alias (a partial span is wrong);
 - **type** — a matched span typed differently from its label;
@@ -163,7 +165,7 @@ F1, Cohen's kappa on matched entity types and relation F1.
 
 ```json
 [{"caseId": "c042", "record": "term:Kestrel:System", "verdict": "wrong", "note": "partial span"},
- {"caseId": "c017", "record": "rel:Avery Lin:uses:Fenwick", "verdict": "label-error", "note": "missing alias"}]
+ {"caseId": "c018", "record": "rel:Avery Lin:uses:Fenwick", "verdict": "label-error", "note": "missing alias"}]
 ```
 
 `record` is the report's stable key, `term:<span>:<type>` or `rel:<from>:<type>:<to>`.
