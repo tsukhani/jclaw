@@ -86,6 +86,9 @@ class GraphSpikeScorerTest extends UnitTest {
         assertEquals(3, s.gold(), "the named owner is gold");
         assertEquals(0, s.ruleWritten());
         assertEquals(GraphSpikeScorer.TYPE, score(c, term("Avery Lin", "Organization")).wrong().getFirst().kind());
+        var untyped = score(c, term("Harborlight Analytics", "Organization")).point();
+        assertEquals(1, untyped.right());
+        assertEquals(1.0 / 3, untyped.recall(), "an untyped owner is a recall miss");
     }
 
     @Test

@@ -87,8 +87,9 @@ public final class ExtractionPipeline {
      * also in {@code from} and {@code to}), or the overlapping spans joined by {@code " | "}. {@code confidence} is the
      * chosen option's probability, or a relation's {@code noul} yes probability; a failed question has no choice,
      * confidence 0 and its reason in {@code failure}. An {@code operator} term, the implicit operator or "the user",
-     * was never asked: it is written as a Person at confidence 1; an owner named in the text is asked like any term. {@code floor} is what the decision also needs to reach a threshold: a surviving
-     * overlap span's settling confidence, or a relation's weakest endpoint; 1 when nothing gates it.
+     * was never asked: it is written as a Person at confidence 1; an owner named in the text is asked like any term.
+     * {@code floor} is what the decision also needs to reach a threshold: a surviving overlap span's settling
+     * confidence, or a relation's weakest endpoint; 1 when nothing gates it.
      */
     public record Decision(String stage, String subject, @Nullable String from, @Nullable String to,
                            @Nullable String choice, double confidence, boolean operator, @Nullable String failure,

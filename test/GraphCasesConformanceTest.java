@@ -196,6 +196,10 @@ class GraphCasesConformanceTest extends UnitTest {
         var withOperator = new Case(related.id(), related.tags(), related.text(), related.entities(),
                 List.of(Relation.of(GraphCases.OPERATOR, "family_of", person.id())), related.negatives());
         assertEquals(related.id() + ": a guest case relates nothing to the operator", guestViolation(withOperator));
+        var entities = new ArrayList<>(related.entities());
+        entities.add(Entity.implicitOperator());
+        assertEquals(related.id() + ": a guest case has no operator", guestViolation(new Case(related.id(),
+                related.tags(), related.text(), entities, related.relations(), related.negatives())));
         var sibling = guests.get(1);
         assertTrue(sibling.relations().stream().noneMatch(r -> r.from().equals(GraphCases.OPERATOR)
                 || r.to().equals(GraphCases.OPERATOR)), sibling.id());

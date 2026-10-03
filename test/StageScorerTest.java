@@ -60,6 +60,9 @@ class StageScorerTest extends UnitTest {
         assertEquals(3, resolved.clusters(), "operator x2, harborlight x2, kestrel");
         assertEquals(0, resolved.falseMerges());
         assertEquals(4, StageScorer.resolution(List.of(named, A), null).clusters(), "unnamed, the owner stands apart");
+        var all = StageScorer.resolution(List.of(named, A, B), "Avery Lin");
+        assertEquals(4, all.clusters(), "the named, \"The user\" and implicit operator are one cluster");
+        assertEquals(0, all.falseMerges());
     }
 
     @Test
