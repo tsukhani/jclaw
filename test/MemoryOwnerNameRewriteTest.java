@@ -63,9 +63,11 @@ class MemoryOwnerNameRewriteTest extends UnitTest {
         assertEquals(0, MemoryOwnerNameRewrite.run(agent), "nothing changes while USER.md names no owner");
         assertEquals("The user prefers metric units.", textOf(active));
 
+        var namesTheOwner = store(agent, "The user's name is Ada Lovelace.");
         WorkspaceFiles.writeWorkspaceFile(agent.name, "USER.md", "# User Information\n\nName: Ada Lovelace\n");
         assertEquals(1, MemoryOwnerNameRewrite.run(agent));
         assertEquals("Ada Lovelace prefers metric units.", textOf(active));
+        assertEquals("The user's name is Ada Lovelace.", textOf(namesTheOwner), "never \"Ada Lovelace's name is Ada Lovelace\"");
         assertEquals("The user lives in Leeds.", textOf(superseded), "a superseded row keeps its text");
         assertEquals(0, MemoryOwnerNameRewrite.run(agent), "a second run finds nothing to rewrite");
     }

@@ -27,6 +27,8 @@ public final class MemoryOwnerNameRewrite {
     // "the user" not run into a longer word: "the username" and "the user-facing" are left alone.
     private static final Pattern POSSESSIVE = Pattern.compile("(?i)\\bthe user['’]s\\b");
     private static final Pattern PLAIN = Pattern.compile("(?i)\\bthe user\\b(?![-\\w'’])");
+    // "The user's name is Tarun" would read "Tarun's name is Tarun"; a memory stating the owner's name keeps its text.
+    private static final Pattern NAMES_THE_OWNER = Pattern.compile("(?i)\\bthe user['’]s (?:full |first |last |preferred )?name\\b");
 
     /** {@code text} with "the user" written as {@code name}; a lower-case name takes a capital at a sentence start. */
     public static String named(String text, String name) {
@@ -62,6 +64,7 @@ public final class MemoryOwnerNameRewrite {
                 List<Memory> rows = Memory.find("agent.id = ?1 AND supersededAt IS NULL AND LOWER(text) LIKE ?2",
                         agent.id, "%the user%").fetch();
                 for (var memory : rows) {
+                    if (NAMES_THE_OWNER.matcher(memory.text).find()) continue;
                     var text = named(memory.text, memory.authorType == MemoryAuthorType.GUEST_TURN ? guestName(memory) : owner);
                     if (text.equals(memory.text)) continue;
                     memory.text = text;
