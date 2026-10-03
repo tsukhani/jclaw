@@ -320,6 +320,29 @@ class OntologySchemaTest extends UnitTest {
     }
 
     @Test
+    void diffReportsGlossSectionChangesAndRemovals() throws IOException {
+        var seed = seedText();
+        var edited = edit(edit(edit(seed,
+                "\"When JClaw recorded the source\"", "\"When JClaw stored the source\""),
+                "dates: {covers: \"YYYY,", "dates: {covers: \"Year YYYY,"),
+                "ended:  {standard: \"pq:P582\", match: close,", "ended:  {standard: \"pq:P580\", match: exact,");
+
+        var lines = OntologySchema.diff(OntologySchema.parse(seed), OntologySchema.parse(edited));
+
+        var datesCovers = OntologySchema.seed().dates().covers();
+        assertEquals(List.of(
+                "~ claims status ended match: close -> exact",
+                "~ claims status ended standard: pq:P582 -> pq:P580",
+                "~ dates covers: " + datesCovers + " -> " + datesCovers.replaceFirst("^YYYY,", "Year YYYY,"),
+                "~ system_time recordedAt covers: When JClaw recorded the source -> When JClaw stored the source"),
+                lines);
+
+        var reverse = OntologySchema.diff(OntologySchema.seed(), OntologySchema.parse(V2_SEED));
+        assertTrue(reverse.contains("- dates"), reverse::toString);
+        assertTrue(reverse.contains("- claims status holds"), reverse::toString);
+    }
+
+    @Test
     void aNonIntegerVersionIsRefused() throws IOException {
         var text = seedText().replace("version: 3\n", "version: one\n");
         var e = assertThrows(IllegalArgumentException.class, () -> OntologySchema.parse(text));
