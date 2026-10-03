@@ -126,6 +126,25 @@ class CandidateGeneratorTest extends UnitTest {
     }
 
     @Test
+    void aSpanInsideAFoundDateIsNeverACandidate() {
+        assertEquals(List.of(), spans("The launch slipped to Q3 2027."));
+    }
+
+    @Test
+    void aSpanHoldingOrOverlappingAFoundDateIsKept() {
+        assertEquals(List.of("Avery Lin", "Ashgrove", "Larchmere House", "Juniper Clinic"),
+                spans("Avery Lin says Ashgrove includes Larchmere House, their home since 2019, and the Juniper Clinic"
+                        + " branch nearby."));
+        assertTrue(spans("Avery Lin prefers the June 2026 Lisbon Summit.").contains("the June 2026 Lisbon Summit"));
+    }
+
+    @Test
+    void aKnownNameIsKeptEvenInsideAFoundDate() {
+        var candidates = CandidateGenerator.generate("The launch slipped to Q3 2027.", List.of("Q3"));
+        assertTrue(candidates.stream().anyMatch(c -> c.span().equals("Q3")), candidates.toString());
+    }
+
+    @Test
     void aRecurringSpanKeepsTheOccurrenceThatOverlaps() {
         var text = "Meridian ships soon. The Meridian kickoff is Friday.";
         var candidates = CandidateGenerator.generate(text, List.of("Meridian kickoff"));

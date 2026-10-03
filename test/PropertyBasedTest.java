@@ -3,9 +3,13 @@ import channels.TelegramOutboundPlanner.FileSegment;
 import channels.TelegramOutboundPlanner.MediaGroupSegment;
 import channels.TelegramOutboundPlanner.TextSegment;
 import com.google.gson.JsonObject;
+import memory.TemporalExpressions;
+import memory.ontology.EdtfDate;
+import memory.ontology.EdtfInterval;
 import models.Agent;
 import net.jqwik.api.Arbitraries;
 import net.jqwik.api.Arbitrary;
+import net.jqwik.api.Combinators;
 import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
@@ -26,6 +30,8 @@ import utils.Filenames;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.YearMonth;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -332,6 +338,71 @@ class PropertyBasedTest extends UnitTest {
         } catch (IOException _) {
             // best effort
         }
+    }
+
+    // ── EDTF and temporal expressions (JCLAW-1361) ──
+
+    @Provide
+    Arbitrary<EdtfDate> edtfDates() {
+        var approximate = Arbitraries.of(true, false);
+        var years = Arbitraries.integers().between(0, 9999);
+        var yearDates = Combinators.combine(years, approximate).as(EdtfDate::ofYear);
+        var monthDates = Combinators.combine(years, Arbitraries.integers().between(1, 12), approximate)
+                .as((y, m, a) -> EdtfDate.ofMonth(YearMonth.of(y, m), a));
+        var dayDates = Combinators.combine(Arbitraries.integers().between(0, 9999 * 365), approximate)
+                .as((n, a) -> EdtfDate.ofDay(LocalDate.of(0, 1, 1).plusDays(n), a));
+        var codeDates = Combinators.combine(years, Arbitraries.integers().between(1, 8), approximate)
+                .as((y, c, a) -> EdtfDate.parse("%04d-%d%s".formatted(y, c <= 4 ? 20 + c : 28 + c, a ? "~" : "")));
+        return Arbitraries.oneOf(yearDates, monthDates, dayDates, codeDates);
+    }
+
+    // tries=500: a parse and a format per try, microseconds each — under 20 ms.
+    @Property(tries = 500)
+    void anEdtfDateAndItsSingleIntervalRoundTrip(@ForAll("edtfDates") EdtfDate date) {
+        assertEquals(date, EdtfDate.parse(date.toString()), () -> "date round trip diverged for " + date);
+        var interval = EdtfInterval.of(date);
+        assertEquals(interval, EdtfInterval.parse(interval.toString()), () -> "interval round trip diverged for " + date);
+    }
+
+    // tries=500: two LocalDate computations per try — under 10 ms.
+    @Property(tries = 500)
+    void anEdtfDateCoversAtLeastOneDay(@ForAll("edtfDates") EdtfDate date) {
+        assertTrue(date.lo().isBefore(date.hi()), () -> date + " lo " + date.lo() + " is not before hi " + date.hi());
+    }
+
+    /** Anchors from April to January: neither the anchor nor any probe's offset reaches a leap day. */
+    @Provide
+    Arbitrary<LocalDate> shiftableAnchors() {
+        return Combinators.combine(Arbitraries.integers().between(1990, 2090), Arbitraries.integers().between(0, 305))
+                .as((y, d) -> LocalDate.of(y, 4, 1).plusDays(d));
+    }
+
+    // tries=60: each try runs the finder over every normalizer probe at two anchors (~0.5 ms) — under 40 ms.
+    @Property(tries = 60)
+    void aRelativeReadingMovesOneYearWithItsAnchor(@ForAll("shiftableAnchors") LocalDate anchor) {
+        var later = anchor.plusYears(1);
+        for (var probe : TemporalExpressions.NORMALIZER_PROBES) {
+            var now = TemporalExpressions.find(probe, anchor).found();
+            var next = TemporalExpressions.find(probe, later).found();
+            assertEquals(now.size(), next.size(), () -> probe + " found differently at " + anchor + " and " + later);
+            for (int i = 0; i < now.size(); i++) {
+                var a = now.get(i);
+                var b = next.get(i);
+                var shifted = a.relative() ? a.readings().stream().map(PropertyBasedTest::plusOneYear).toList()
+                        : a.readings();
+                assertEquals(shifted, b.readings(), () -> probe + " at " + anchor + " read " + a.readings()
+                        + ", at " + later + " read " + b.readings());
+                assertEquals(a.duration(), b.duration(), () -> probe + " duration moved between " + anchor
+                        + " and " + later);
+            }
+        }
+    }
+
+    private static EdtfInterval plusOneYear(EdtfInterval interval) {
+        return switch (interval.start()) {
+            case EdtfInterval.Point(var d) when interval.single() -> EdtfInterval.of(d.plusYears(1));
+            default -> throw new AssertionError("a relative probe read as a range: " + interval);
+        };
     }
 
     /** Renders control characters so a shrunk counterexample survives the XML report legibly. */
