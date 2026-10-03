@@ -211,7 +211,6 @@ class GraphSpikeHarnessTest extends UnitTest {
             assertEquals(1.0, s.rejection().rate(), "rejection");
             assertEquals(1.0, s.relation().rate(), "relation");
             assertEquals(1.0, s.noRelation().rate(), "no-relation");
-            assertTrue(s.overlap().total() == 0 || s.overlap().rate() == 1.0, "overlap " + s.overlap());
             assertEquals(1.0, s.resolution().bcubedPrecision(), "resolution precision");
             assertEquals(1.0, s.resolution().bcubedRecall(), "resolution recall");
             assertEquals(0, s.failures());
@@ -226,6 +225,21 @@ class GraphSpikeHarnessTest extends UnitTest {
         assertEquals(Certifier.PENDING_AGREEMENT, model.certification().status(), model.certification().reasons().toString());
         assertEquals(0.50, model.certification().threshold());
         assertFalse(report.agreement().complete());
+    }
+
+    @Test
+    void aGoldDeciderSettlesEveryOverlap() {
+        // The committed cases raise no overlap, so this one is built to: a preference object around a name.
+        var c = new Case("o1", List.of("plain"), "The user prefers Kestrel CI pipelines.",
+                List.of(GraphCases.Entity.of("operator", "The user", "Person"),
+                        GraphCases.Entity.of("kestrel", "Kestrel CI", "System")),
+                List.of(), List.of());
+        var report = run(List.of(c), gold(List.of(c)));
+        for (var run : report.models().getFirst().runs()) {
+            var overlap = run.stages().overlap();
+            assertTrue(overlap.total() > 0, "the case raises an overlap");
+            assertEquals(1.0, overlap.rate(), "overlap " + overlap);
+        }
     }
 
     @Test

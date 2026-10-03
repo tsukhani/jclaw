@@ -95,9 +95,9 @@ public final class StageScorer {
                 var d = o.decision();
                 if (d.failed()) failures++;
                 overlapTotal++;
-                boolean anyGold = o.spans().stream().anyMatch(span -> c.entityAt(span) != null);
+                boolean anyGold = o.spans().stream().anyMatch(span -> gold(c, span));
                 var choice = d.choice();
-                if (anyGold ? choice != null && !d.declined() && c.entityAt(choice) != null
+                if (anyGold ? choice != null && !d.declined() && gold(c, choice)
                         : ExtractionPipeline.NEITHER.equals(choice)) {
                     overlapRight++;
                 }
@@ -133,6 +133,11 @@ public final class StageScorer {
         }
         return new Stages(candidateRecall(cases), Ratio.of(overlapRight, overlapTotal), Ratio.of(typedRight, typedTotal), Ratio.of(rejected, negatives),
                 Ratio.of(relationRight, relationTotal), Ratio.of(noneRight, noneTotal), resolution(cases), failures);
+    }
+
+    private static boolean gold(Case c, String span) {
+        var e = c.entityAt(span);
+        return e != null && !e.noise();
     }
 
     /** Gold non-implicit entities whose mention or an alias is one of the case's candidates. */

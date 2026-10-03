@@ -93,6 +93,21 @@ class StageScorerTest extends UnitTest {
     }
 
     @Test
+    void aNoiseEntityIsNotGoldInAnOverlap() {
+        var c = new Case("n", List.of("plain"), "The user drinks Lapsang tea at Harborlight.",
+                List.of(Entity.of("operator", "The user", "Person"),
+                        new Entity("tea", "Lapsang tea", "Concept", List.of(), false, true),
+                        Entity.of("harborlight", "Harborlight", "Organization")),
+                List.of(), List.of());
+        var run = new StageRun("n", List.of(overlap(ExtractionPipeline.NEITHER, "Lapsang", "Lapsang tea"),
+                overlap("Lapsang tea", "Lapsang tea", "tea at Harborlight"),
+                overlap("Lapsang tea", "Lapsang tea", "Harborlight")), List.of(), List.of());
+        var s = StageScorer.score(List.of(c), List.of(run));
+        assertEquals(1, s.overlap().hit(), "neither is right beside noise, and choosing noise over gold is wrong");
+        assertEquals(3, s.overlap().total());
+    }
+
+    @Test
     void aFailedQuestionCountsAsAFailureAndAMiss() {
         var failed = new Decision(ExtractionPipeline.TERM, "Kestrel CI", null, null, null, 0, false, "invalid");
         var s = StageScorer.score(List.of(A), List.of(new StageRun("a", List.of(), List.of(failed), List.of())));

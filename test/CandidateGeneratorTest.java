@@ -100,6 +100,7 @@ class CandidateGeneratorTest extends UnitTest {
         assertEquals(List.of("The user", "Ana"), spans("The user meets Ana on Friday in March."));
         assertEquals(List.of("The user", "Ana"), spans("The user meets Ana every Friday Morning."));
         assertEquals(List.of("The user", "Ana"), spans("The user meets Ana on Tue."));
+        assertEquals(List.of("The user"), spans("The user prefers Friday mornings."));
     }
 
     @Test
@@ -115,6 +116,23 @@ class CandidateGeneratorTest extends UnitTest {
         assertTrue(candidates.stream().anyMatch(c -> c.span().equals("kestrel ci")), candidates.toString());
         assertTrue(candidates.stream().noneMatch(c -> c.span().equals("kestrelci")), candidates.toString());
         assertEquals(List.of("The user"), spans("The user moved the kestrel ci jobs."), "unknown without the name");
+    }
+
+    @Test
+    void aKnownNameIsKeptEvenWhenItIsATimeWord() {
+        var candidates = CandidateGenerator.generate("The user met May at the fair.", List.of("May"));
+        assertTrue(candidates.stream().anyMatch(c -> c.span().equals("May")), candidates.toString());
+        assertFalse(spans("The user met May at the fair.").contains("May"), "a bare time word without the name");
+    }
+
+    @Test
+    void aRecurringSpanKeepsTheOccurrenceThatOverlaps() {
+        var text = "Meridian ships soon. The Meridian kickoff is Friday.";
+        var candidates = CandidateGenerator.generate(text, List.of("Meridian kickoff"));
+        var meridian = candidates.stream().filter(c -> c.span().equals("Meridian")).toList();
+        assertEquals(1, meridian.size(), candidates.toString());
+        assertEquals(25, meridian.getFirst().start(), "the occurrence inside Meridian kickoff");
+        assertTrue(candidates.stream().anyMatch(c -> c.span().equals("Meridian kickoff")), candidates.toString());
     }
 
     @Test
@@ -135,6 +153,12 @@ class CandidateGeneratorTest extends UnitTest {
         var relative = spans("The user loves mochi, which is a type of rice cake.");
         assertTrue(relative.contains("rice cake"), relative.toString());
         assertFalse(relative.contains("which"), relative.toString());
+        assertTrue(spans("Ana bought a kind of tea.").stream().noneMatch(sp -> sp.contains("bought")),
+                "no copula and no considers verb means no X");
+        assertTrue(spans("The user says the soup has a kind of smoky taste.").stream().noneMatch(sp -> sp.contains("has")));
+        var split = spans("The user considers Bo smart. Tea is a kind of drink.");
+        assertTrue(split.contains("Tea") && split.contains("drink"), split.toString());
+        assertTrue(split.stream().noneMatch(sp -> sp.contains("smart")), "considers does not reach past its sentence");
     }
 
     @Test

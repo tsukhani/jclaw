@@ -1,5 +1,7 @@
+import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import memory.ontology.OntologySchema;
 import okhttp3.Interceptor;
 import okhttp3.MediaType;
@@ -227,6 +229,41 @@ class ExtractionPipelineTest extends UnitTest {
     }
 
     @Test
+    void aFailedRelationAnswerFailsItsPair() {
+        var text = "Atlas and Beacon are linked.";
+        var valid = scripted(Map.of("Atlas", "Project", "Beacon", "Project"),
+                Map.of("Atlas", 0.99, "Beacon", 0.99, "Beacon kind_of Atlas", 0.95));
+        for (var broken : List.of(new JsonPrimitive(1.5), JsonNull.INSTANCE)) {
+            Decider oneInvalid = request -> {
+                var response = valid.decide(request);
+                for (var q : request.getAsJsonObject("questions").entrySet()) {
+                    if (q.getKey().startsWith("r") && relationKey(q.getValue().getAsJsonObject()).equals("Atlas part_of Beacon")) {
+                        var answer = response.getAsJsonObject("answers").getAsJsonObject(q.getKey());
+                        if (broken.isJsonNull()) answer.remove("noul");
+                        else answer.add("noul", broken);
+                    }
+                }
+                return response;
+            };
+            var relations = stage(run(text, spans("Atlas", "Beacon"), oneInvalid), ExtractionPipeline.RELATION);
+            assertEquals(1, relations.size(), relations.toString());
+            assertEquals(JevApi.INVALID, relations.getFirst().failure(), "noul " + broken);
+            assertFalse(relations.getFirst().writes(0.0), "beside a valid 0.95 yes, nothing is written");
+        }
+
+        Decider throwing = request -> {
+            if (request.getAsJsonObject("questions").keySet().stream().anyMatch(k -> k.startsWith("r"))) {
+                throw new IllegalStateException("secret detail");
+            }
+            return valid.decide(request);
+        };
+        var relations = stage(run(text, spans("Atlas", "Beacon"), throwing), ExtractionPipeline.RELATION);
+        assertEquals(1, relations.size(), relations.toString());
+        assertEquals("IllegalStateException", relations.getFirst().failure());
+        assertFalse(relations.getFirst().writes(0.0));
+    }
+
+    @Test
     void recordsPartitionEveryDecisionExactlyOnce() {
         var text = "Ana Ruiz met Bo Lee at Meridian kickoff with Cora.";
         var candidates = List.of(Candidate.of("Ana Ruiz"), Candidate.of("Bo Lee"),
@@ -401,6 +438,53 @@ class ExtractionPipelineTest extends UnitTest {
         assertTrue(d.failed());
         assertEquals(JevApi.INVALID, d.failure());
         assertNull(d.choice());
+    }
+
+    @Test
+    void theOllamaDeciderHalvesOnARealHttp400() throws Exception {
+        var base = "http://192.168.1.20:11434";
+        JevBreakerTestSync.acquire();
+        try {
+            var sizes = new CopyOnWriteArrayList<Integer>();
+            Interceptor ollama = chain -> {
+                var path = chain.request().url().encodedPath();
+                var json = "{\"done\":true}";
+                int code = 200;
+                if (path.equals("/api/ps")) {
+                    json = "{\"models\":[{\"name\":\"tev1:latest\"}]}";
+                } else if (!path.equals("/api/generate")) {
+                    var buffer = new Buffer();
+                    chain.request().body().writeTo(buffer);
+                    var questions = JsonParser.parseString(buffer.readUtf8()).getAsJsonObject().getAsJsonObject("questions");
+                    sizes.add(questions.size());
+                    var answers = new JsonObject();
+                    for (var q : questions.entrySet()) {
+                        answers.add(q.getKey(), q.getKey().startsWith("r") ? noul(0.1)
+                                : answer(q.getValue().getAsJsonObject().getAsJsonObject("criteria").keySet(), "Person", 0.8));
+                    }
+                    var result = new JsonObject();
+                    result.add("answers", answers);
+                    json = result.toString();
+                    if (questions.size() > 3) {
+                        code = 400;
+                        json = "{\"error\":\"context\"}";
+                    }
+                }
+                return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(code)
+                        .message("canned").body(ResponseBody.create(json, MediaType.get("application/json"))).build();
+            };
+            var client = new OkHttpClient.Builder().addInterceptor(ollama).build();
+            var run = HttpFactories.callWith(client, () -> run(TEXT, manySpans(12), "clef-flash",
+                    Decider.ollama(base, "tev1", 5_000)));
+            assertEquals(12, sizes.getFirst(), "one request first, refused with 400");
+            assertTrue(sizes.stream().anyMatch(n -> n <= 3), sizes.toString());
+            assertTrue(run.decisions().stream().noneMatch(Decision::failed), "every decision answered");
+            var terms = stage(run, ExtractionPipeline.TERM);
+            assertEquals(12, terms.size());
+            terms.forEach(d -> assertEquals("Person", d.choice(), d.toString()));
+        } finally {
+            JevBreakerTestSync.release();
+        }
     }
 
     @Test

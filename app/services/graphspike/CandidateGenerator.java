@@ -3,7 +3,8 @@ package services.graphspike;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
-import java.util.LinkedHashSet;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -39,10 +40,11 @@ public final class CandidateGenerator {
     private static final Pattern PREFERENCE_END = Pattern.compile("[,;:!?]|\\.(?=\\s|$)|\\s(?:over|because|when|than)\\b");
     /** Topic frames: the view in "thinks that X", and both sides of "X is a kind of Y" or "considers X a kind of Y". */
     private static final Pattern VIEW = Pattern.compile("(?i)\\b(?:thinks|believes) that\\s+");
-    private static final Pattern KIND_OF = Pattern.compile("(?i)\\s(?:is|are|as)?\\s*(?:a|an) (?:kind|type|form|sort) of\\s+");
+    private static final Pattern KIND_OF = Pattern.compile("(?i)\\s(is|are|as)?\\s*(?:a|an) (?:kind|type|form|sort) of\\s+");
     private static final Pattern CONSIDERS = Pattern.compile("(?i)\\b(?:considers|counts?|regards) ");
     private static final Pattern RELATIVE = Pattern.compile("(?i)(?:which|that|who|it|they|this)\\b");
     private static final int KIND_SUBJECT_WORDS = 4;
+    private static final Pattern CLAUSE_END = Pattern.compile("[,;:!?.]\\s");
     private static final Pattern KIND_END = Pattern.compile(
             "[,;:!?]|\\.(?=\\s|$)|\\s(?:and|or|but|which|that|who|so|because|over|than|when)\\b");
     private static final Pattern CLAUSE_START = Pattern.compile(
@@ -56,7 +58,8 @@ public final class CandidateGenerator {
             "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun", "january", "february", "march",
             "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb",
             "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec", "today", "tomorrow", "yesterday",
-            "tonight", "morning", "afternoon", "evening", "night", "weekend", "week", "month", "year");
+            "tonight", "morning", "afternoon", "evening", "night", "weekend", "week", "month", "year", "mornings",
+            "afternoons", "evenings", "nights", "weekends", "weeks", "months", "years");
     private static final Pattern SENTENCE_END = Pattern.compile("[.!?][\"'\u201d\u2019)]*$");
 
     private CandidateGenerator() {}
@@ -99,7 +102,8 @@ public final class CandidateGenerator {
 
     /**
      * The candidates in {@code text}: the operator first, then by position, each span once. Each of {@code knownNames}
-     * is a candidate wherever it appears as whole words, in any case.
+     * is a candidate wherever it appears as whole words, in any case, even when it is a time word. A recurring span
+     * keeps the occurrence that overlaps another candidate, else its first.
      */
     public static List<Candidate> generate(String text, Collection<String> knownNames) {
         var out = new ArrayList<Candidate>();
@@ -138,22 +142,39 @@ public final class CandidateGenerator {
         objects(text, PREFERENCE, PREFERENCE_END, taken, found);
         objects(text, VIEW, PREFERENCE_END, taken, found);
         kindOf(text, taken, found);
+        var known = new ArrayList<int[]>();
         for (var name : knownNames) {
             if (name.isBlank()) continue;
-            var known = Pattern.compile("(?i)(?<![\\w])" + Pattern.quote(name.strip()) + "(?![\\w])").matcher(text);
-            while (known.find()) found.add(new int[] {known.start(), known.end()});
+            var m = Pattern.compile("(?i)(?<![\\w])" + Pattern.quote(name.strip()) + "(?![\\w])").matcher(text);
+            while (m.find()) known.add(new int[] {m.start(), m.end()});
         }
         capitalizedRuns(text, implicit, found);
+        found.removeIf(r -> onlyTime(text.substring(r[0], r[1])));
+        found.addAll(known);
 
         found.sort(Comparator.comparingInt(r -> r[0]));
-        var seen = new LinkedHashSet<String>();
-        out.forEach(c -> seen.add(c.span()));
+        var operators = new HashSet<String>();
+        out.forEach(c -> operators.add(c.span()));
+        var chosen = new LinkedHashMap<String, int[]>();
         for (var r : found) {
             var span = text.substring(r[0], r[1]);
-            if (span.isEmpty() || span.equalsIgnoreCase(GraphCases.IMPLICIT_OPERATOR_SPAN) || onlyTime(span)) continue;
-            if (seen.add(span)) out.add(new Candidate(span, false, false, r[0], r[1]));
+            if (span.isEmpty() || span.equalsIgnoreCase(GraphCases.IMPLICIT_OPERATOR_SPAN) || operators.contains(span)) {
+                continue;
+            }
+            var first = chosen.get(span);
+            if (first == null || (!overlapsAnother(text, first, found) && overlapsAnother(text, r, found))) {
+                chosen.put(span, r);
+            }
         }
+        chosen.values().stream().sorted(Comparator.comparingInt(r -> r[0]))
+                .forEach(r -> out.add(new Candidate(text.substring(r[0], r[1]), false, false, r[0], r[1])));
         return List.copyOf(out);
+    }
+
+    /** Whether {@code r} overlaps a found range of a different span. */
+    private static boolean overlapsAnother(String text, int[] r, List<int[]> found) {
+        var span = text.substring(r[0], r[1]);
+        return found.stream().anyMatch(q -> q[0] < r[1] && r[0] < q[1] && !text.substring(q[0], q[1]).equals(span));
     }
 
     /** The span after each match of {@code frame}, up to {@code end}'s first match or the end of the text. */
@@ -168,15 +189,23 @@ public final class CandidateGenerator {
         }
     }
 
-    /** Both sides of "X is a kind of Y" and "considers X a kind of Y"; X starts at its clause. */
+    /**
+     * Both sides of "X is a kind of Y" and "considers X a kind of Y"; X starts at its clause, and without the copula
+     * there is an X only after a considers verb in the same clause.
+     */
     private static void kindOf(String text, List<int[]> taken, List<int[]> found) {
         var m = KIND_OF.matcher(text);
         while (m.find()) {
             int xEnd = trimSpace(text, 0, m.start());
+            int clauseStart = 0;
+            var clauseEnd = CLAUSE_END.matcher(text).region(0, xEnd);
+            while (clauseEnd.find()) clauseStart = clauseEnd.end();
             int xStart = -1;
-            var considers = CONSIDERS.matcher(text).region(0, xEnd);
+            var considers = CONSIDERS.matcher(text).region(clauseStart, xEnd);
             while (considers.find()) xStart = considers.end();
-            if (xStart < 0) {
+            if (xStart < 0 && m.group(1) == null) {
+                xStart = xEnd;
+            } else if (xStart < 0) {
                 var clause = CLAUSE_START.matcher(text).region(0, xEnd);
                 xStart = 0;
                 while (clause.find()) xStart = clause.end();
