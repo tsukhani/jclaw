@@ -15,6 +15,7 @@ import services.graphspike.GraphSpikeScorer;
 
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -136,6 +137,30 @@ class GraphCasesConformanceTest extends UnitTest {
         assertFalse(shortfalls(withUserOpeners(cases, 17)).contains("12-17% begin \"The user\""));
         assertFalse(shortfalls(withUserOpeners(cases, 23)).contains("12-17% begin \"The user\""));
         assertShort(withUserOpeners(cases, 24), "12-17% begin \"The user\"");
+    }
+
+    @Test
+    void theOwnerShareFailsJustBelowSixtyPercentAndPassesAtIt() throws Exception {
+        var cases = committed();
+        assertEquals(140, cases.size(), "84 owner openers is exactly 60% of 140");
+        var target = "at least 60% begin \"" + OWNER + "\"";
+        assertFalse(shortfalls(withUserOpeners(cases, 31)).contains(target));
+        assertShort(withUserOpeners(cases, 32), target);
+    }
+
+    @Test
+    void theGuestFloorFailsAtFiveAndPassesAtSix() throws Exception {
+        var cases = committed();
+        var target = "at least 6 guest cases, one opening \"A guest\"";
+        assertFalse(shortfalls(withGuests(cases, 6)).contains(target));
+        assertShort(withGuests(cases, 5), target);
+    }
+
+    /** {@code cases} keeping only {@code k} guest cases, the one opening "A guest" among them. */
+    private static List<Case> withGuests(List<Case> cases, int k) {
+        var keep = cases.stream().filter(GraphCasesConformanceTest::guest)
+                .sorted(Comparator.comparing(c -> !c.text().startsWith("A guest"))).limit(k).toList();
+        return cases.stream().filter(c -> !guest(c) || keep.contains(c)).toList();
     }
 
     /** {@code cases} with exactly the first {@code k} owner-voiced, named cases opening "The user", the rest the owner. */
