@@ -288,6 +288,7 @@ public class ApiMemoryController extends Controller {
             badRequest();
             throw ApiResponses.unreachable();
         }
+        boolean changed = false;
         if (body.has(KEY_IMPORTANCE) && !body.get(KEY_IMPORTANCE).isJsonNull()) {
             double imp = body.get(KEY_IMPORTANCE).getAsDouble();
             // JCLAW-970: the body parser is lenient, so NaN arrives as a number and passes both
@@ -295,6 +296,7 @@ public class ApiMemoryController extends Controller {
             if (!Double.isFinite(imp) || imp < 0.0 || imp > 1.0) {
                 ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "importance must be between 0.0 and 1.0");
             }
+            changed |= imp != memory.importance;
             memory.importance = imp;
         }
         if (body.has(KEY_CATEGORY) && !body.get(KEY_CATEGORY).isJsonNull()) {
@@ -307,10 +309,16 @@ public class ApiMemoryController extends Controller {
                 ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                         "category must be one of " + MemoryCategory.labels());
             }
-            if (normalized != null) memory.category = normalized;
+            if (normalized != null && !normalized.equals(memory.category)) {
+                memory.category = normalized;
+                changed = true;
+            }
         }
-        memory.save();
-        MemoryVerification.record(memory, MemoryProvenance.OPERATOR_ACTOR, MemoryVerification.Kind.EDITED);
+        // A save that changes nothing is not a review: MemoryTrust reads any human event as firm.
+        if (changed) {
+            memory.save();
+            MemoryVerification.record(memory, MemoryProvenance.OPERATOR_ACTOR, MemoryVerification.Kind.EDITED);
+        }
         renderJSON(gson.toJson(toDto(memory, agentNamesById())));
     }
 
