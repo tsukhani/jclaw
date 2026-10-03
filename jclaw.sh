@@ -167,8 +167,9 @@ Commands:
   backup    Back up the database (online through the running instance, or from
             the closed file), into data/backups/. --list shows what is there.
   restore   Replace the database with a backup zip or a listed backup id. Stops
-            and restarts a running instance; keeps the current file as
-            data/jclaw.mv.db.pre-restore until the next backup.
+            and restarts a running instance; keeps the current file and graph
+            as data/jclaw.mv.db.pre-restore and data/memory-graph.pre-restore
+            until the next backup.
   repair    Rebuild a damaged database from what H2's recovery tool can still
             read, verify it, and keep the damaged file aside. Stops and
             restarts a running instance.
@@ -307,8 +308,9 @@ Commands:
   backup    Back up the database (online through the running instance, or from
             the closed file), into data/backups/. --list shows what is there.
   restore   Replace the database with a backup zip or a listed backup id. Stops
-            and restarts a running instance; keeps the current file as
-            data/jclaw.mv.db.pre-restore until the next backup.
+            and restarts a running instance; keeps the current file and graph
+            as data/jclaw.mv.db.pre-restore and data/memory-graph.pre-restore
+            until the next backup.
   repair    Rebuild a damaged database from what H2's recovery tool can still
             read, verify it, and keep the damaged file aside. Stops and
             restarts a running instance.
@@ -843,7 +845,8 @@ backup     Write an H2 online backup (a zip of data/jclaw.mv.db) to data/backups
 restore    Replace the database with a backup. The file is validated first —
            anything that is not an H2 backup is refused and nothing changes.
            A running instance is stopped and started again; the current file
-           is kept as data/jclaw.mv.db.pre-restore until the next backup.
+           and graph are kept as data/jclaw.mv.db.pre-restore and
+           data/memory-graph.pre-restore until the next backup.
 repair     The recovery procedure, run for you: H2's Recover tool reads the
            damaged file into a script, the file and its trace are moved aside,
            a fresh database is rebuilt from the script (ENUM columns cast back
@@ -5619,8 +5622,9 @@ do_db_restore() {
     local note=""
     [[ -n "$was_running" ]] && note=" JClaw will be stopped and started again."
     db_confirm "This replaces the database with the backup from $(db_mtime "$zip").
-Everything written since then is lost. The current file is kept as
-data/jclaw.mv.db.pre-restore until the next successful backup.${note}" || exit 0
+Everything written since then is lost. The current file and graph are kept as
+data/jclaw.mv.db.pre-restore and data/memory-graph.pre-restore until the next
+successful backup.${note}" || exit 0
 
     local backup_name
     backup_name=$(basename "$zip")
