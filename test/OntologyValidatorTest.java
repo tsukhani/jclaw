@@ -371,6 +371,20 @@ class OntologyValidatorTest extends UnitTest {
     }
 
     @Test
+    void aClaimOnAnUndeclaredRelationOrFromTypeIsSkippedNotThrown() {
+        var violations = validate(with(
+                listed("r9", "likes", "p1", "t1", "k1"),
+                claim("k1", SOURCE, "r9", Status.HOLDS, "2019/..", null, Valence.FAVORABLE, ANCHOR),
+                term("v1", "Vehicle"),
+                listed("r8", "works_at", "v1", "o1", "k2", "k3"),
+                claim("k2", "r8", Status.ENDED, null),
+                claim("k3", "file:/v", "r8", null, "2019/2020", null, null, ANCHOR)));
+        assertEquals(List.of(
+                new Violation("r9", Kind.UNDECLARED_TYPE, "relation r9: type 'likes' is not declared"),
+                new Violation("v1", Kind.UNDECLARED_TYPE, "term v1: type 'Vehicle' is not declared")), violations);
+    }
+
+    @Test
     void aClaimWithANullUnresolvedOrSelfSubjectIsAClaimLink() {
         assertEquals(List.of(
                 new Violation("k1", Kind.CLAIM_LINK, "evidence k1: a claim needs a subjectId"),

@@ -36,6 +36,7 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.stream.Stream;
 
 /**
  * Certifies decision models for graph extraction (JCLAW-1344, JCLAW-1356): every stage and the end-to-end pipeline
@@ -289,12 +290,13 @@ public final class GraphEvalHarness {
                 + result.e2e().decisions().stream().filter(ExtractionPipeline.Decision::failed).count());
     }
 
-    /** The agent's Term names: a Term carries no aliases, so its name is the only known span. Read, never written. */
+    /** The agent's known spans: each Term's name followed by its aliases. Read, never written. */
     private static List<String> knownNames(String agentId) {
         try {
             return GraphStore.get().read(Long.parseLong(agentId)).stream()
                     .filter(r -> r instanceof OntologyRecord.Term)
-                    .map(r -> ((OntologyRecord.Term) r).name()).toList();
+                    .map(r -> (OntologyRecord.Term) r)
+                    .flatMap(t -> Stream.concat(Stream.of(t.name()), t.aliases().stream())).toList();
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
