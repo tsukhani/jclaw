@@ -3,8 +3,20 @@ package services.decision;
 /** A JEV call that returned no usable answer. The message is shown to an agent or logged, so it never carries the key. */
 public class JevException extends RuntimeException {
 
+    private final int status;
+
     public JevException(String message) {
+        this(message, 0);
+    }
+
+    /** {@code status} is the HTTP status the provider refused the request with, or 0 when it gave none. */
+    public JevException(String message, int status) {
         super(message);
+        this.status = status;
+    }
+
+    public int status() {
+        return status;
     }
 
     /** JEV's circuit breaker, open or isolated by the operator, turned the call away before anything was sent. */

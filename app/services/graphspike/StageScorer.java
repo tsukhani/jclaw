@@ -3,6 +3,7 @@ package services.graphspike;
 import org.jspecify.annotations.Nullable;
 import services.graphspike.ExactMatchResolver.Mention;
 import services.graphspike.ExtractionPipeline.Decision;
+import services.graphspike.ExtractionPipeline.Overlap;
 import services.graphspike.GraphCases.Case;
 import services.graphspike.GraphCases.Entity;
 
@@ -17,6 +18,9 @@ import java.util.List;
  */
 public final class StageScorer {
 
+    /** The yes probability a kept relation needs to count as answered yes. */
+    private static final double HALF = 0.5;
+
     private StageScorer() {}
 
     /** {@code hit} of {@code total}; {@code rate} is null when {@code total} is zero. */
@@ -26,9 +30,13 @@ public final class StageScorer {
         }
     }
 
-    /** One case's answers to the gold-fed questions: the typing of its spans, the relations of its gold terms. */
-    public record StageRun(String caseId, List<Decision> typing, List<Decision> relations) {
+    /**
+     * One case's answers to the stage questions: the settling of its overlapping candidates, the typing of its gold
+     * spans, the relations of its gold terms.
+     */
+    public record StageRun(String caseId, List<Overlap> overlap, List<Decision> typing, List<Decision> relations) {
         public StageRun {
+            overlap = List.copyOf(overlap);
             typing = List.copyOf(typing);
             relations = List.copyOf(relations);
         }
@@ -42,7 +50,12 @@ public final class StageScorer {
                              @Nullable Double bcubedPrecision, @Nullable Double bcubedRecall,
                              @Nullable Double pairwisePrecision, @Nullable Double pairwiseRecall) {}
 
-    public record Stages(Ratio candidateRecall, Ratio typing, Ratio rejection, Ratio relation, Ratio noRelation,
+    /**
+     * {@code overlap} counts the overlap groups settled on a gold span, or on neither when no span is gold;
+     * {@code relation} the labelled pairs whose kept relation is the label, in its direction, with yes at least
+     * one half; {@code noRelation} the unlabelled pairs whose kept relation has yes below one half.
+     */
+    public record Stages(Ratio candidateRecall, Ratio overlap, Ratio typing, Ratio rejection, Ratio relation, Ratio noRelation,
                          Resolution resolution, int failures) {}
 
     /** The non-operator spans the typing stage is asked about, in question order: gold mentions, then negatives. */
@@ -73,9 +86,22 @@ public final class StageScorer {
         int noneRight = 0;
         int noneTotal = 0;
         int failures = 0;
+        int overlapRight = 0;
+        int overlapTotal = 0;
         for (var run : runs) {
             var c = byId.get(run.caseId());
             if (c == null) continue;
+            for (var o : run.overlap()) {
+                var d = o.decision();
+                if (d.failed()) failures++;
+                overlapTotal++;
+                boolean anyGold = o.spans().stream().anyMatch(span -> gold(c, span));
+                var choice = d.choice();
+                if (anyGold ? choice != null && !d.declined() && gold(c, choice)
+                        : ExtractionPipeline.NEITHER.equals(choice)) {
+                    overlapRight++;
+                }
+            }
             for (var d : run.typing()) {
                 if (d.failed()) failures++;
                 var entity = c.entityAt(d.subject());
@@ -92,18 +118,26 @@ public final class StageScorer {
                 var from = d.from() == null ? null : c.entityAt(d.from());
                 var to = d.to() == null ? null : c.entityAt(d.to());
                 if (from == null || to == null) continue;
-                var gold = c.relation(from.id(), to.id());
+                var forward = c.relation(from.id(), to.id());
+                var gold = forward != null ? forward : c.relation(to.id(), from.id());
+                boolean yes = !d.failed() && d.confidence() >= HALF;
                 if (gold != null) {
                     relationTotal++;
-                    if (gold.type().equals(d.choice())) relationRight++;
+                    boolean directed = forward != null || GraphSpikeScorer.SYMMETRIC.contains(gold.type());
+                    if (yes && directed && gold.type().equals(d.choice())) relationRight++;
                 } else {
                     noneTotal++;
-                    if (ExtractionPipeline.NONE.equals(d.choice())) noneRight++;
+                    if (!d.failed() && !yes) noneRight++;
                 }
             }
         }
-        return new Stages(candidateRecall(cases), Ratio.of(typedRight, typedTotal), Ratio.of(rejected, negatives),
+        return new Stages(candidateRecall(cases), Ratio.of(overlapRight, overlapTotal), Ratio.of(typedRight, typedTotal), Ratio.of(rejected, negatives),
                 Ratio.of(relationRight, relationTotal), Ratio.of(noneRight, noneTotal), resolution(cases), failures);
+    }
+
+    private static boolean gold(Case c, String span) {
+        var e = c.entityAt(span);
+        return e != null && !e.noise();
     }
 
     /** Gold non-implicit entities whose mention or an alias is one of the case's candidates. */

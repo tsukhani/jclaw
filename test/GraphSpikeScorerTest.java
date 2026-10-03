@@ -11,7 +11,7 @@ import services.graphspike.GraphSpikeScorer.WrongRecord;
 
 import java.util.List;
 
-/** JCLAW-1356: the strict end-to-end scorer against the spec's I/O matrix. Pure, so no fixtures. */
+/** JCLAW-1356, JCLAW-1357: the strict end-to-end scorer against the spec's I/O matrix. Pure, so no fixtures. */
 class GraphSpikeScorerTest extends UnitTest {
 
     private static final Case KESTREL = new Case("c1", List.of("plain"),
@@ -62,11 +62,32 @@ class GraphSpikeScorerTest extends UnitTest {
         var s = score(KESTREL, operator(), term("Harborlight Analytics", "Organization"),
                 term("Kestrel CI", "System"), relation("The user", "works_at", "Harborlight Analytics"),
                 relation("Harborlight Analytics", "uses", "Kestrel CI")).point();
-        assertEquals(5, s.written());
-        assertEquals(5, s.right());
+        assertEquals(4, s.written(), "the rule-written operator is left out");
+        assertEquals(4, s.right());
         assertEquals(0, s.wrong());
+        assertEquals(4, s.gold(), "and is no gold either");
+        assertEquals(1, s.ruleWritten());
         assertEquals(1.0, s.recall());
         assertEquals(0.0, s.wrongShare());
+    }
+
+    @Test
+    void aRelationToTheOperatorStillCountsWithAYesExactlyAtT() {
+        var works = new Decision(ExtractionPipeline.RELATION, "The user -> Harborlight Analytics", "The user",
+                "Harborlight Analytics", "works_at", 0.5, false, null, 0.9);
+        var s = score(KESTREL, operator(), term("Harborlight Analytics", "Organization"), works).point();
+        assertEquals(2, s.written());
+        assertEquals(2, s.right());
+        assertEquals(1, s.ruleWritten());
+
+        var below = new Decision(ExtractionPipeline.RELATION, "The user -> Harborlight Analytics", "The user",
+                "Harborlight Analytics", "works_at", 0.4999, false, null, 0.9);
+        assertEquals(1, score(KESTREL, operator(), term("Harborlight Analytics", "Organization"), below).point()
+                .written());
+        var floored = new Decision(ExtractionPipeline.RELATION, "The user -> Harborlight Analytics", "The user",
+                "Harborlight Analytics", "works_at", 0.9, false, null, 0.4999);
+        assertEquals(1, score(KESTREL, operator(), term("Harborlight Analytics", "Organization"), floored).point()
+                .written(), "a floor below t holds the relation back");
     }
 
     @Test
@@ -103,12 +124,12 @@ class GraphSpikeScorerTest extends UnitTest {
     void noiseIsInNeitherTheWrongCountNorTheDenominator() {
         var s = score(NOISY, operator(), term("Kestrel CI", "System"), term("Harborlight Analytics", "Organization"),
                 relation("The user", "uses", "Kestrel CI"), term("Monday", "Event")).point();
-        assertEquals(5, s.written());
+        assertEquals(4, s.written());
         assertEquals(2, s.noise());
-        assertEquals(2, s.right());
+        assertEquals(1, s.right());
         assertEquals(1, s.wrong());
-        assertEquals(1.0 / 3, s.wrongShare(), 1e-9);
-        assertEquals(3, s.gold(), "noise labels are not gold");
+        assertEquals(1.0 / 2, s.wrongShare(), 1e-9);
+        assertEquals(2, s.gold(), "noise labels and the operator are not gold");
     }
 
     @Test
@@ -116,8 +137,8 @@ class GraphSpikeScorerTest extends UnitTest {
         var s = score(MERIDIAN, operator(), term("Wren Castillo", "Person"),
                 relation("The user", "family_of", "Wren Castillo"),
                 relation("Wren Castillo", "family_of", "The user")).point();
-        assertEquals(3, s.written());
-        assertEquals(3, s.right());
+        assertEquals(2, s.written());
+        assertEquals(2, s.right());
         assertEquals(0, s.wrong());
     }
 
@@ -132,7 +153,8 @@ class GraphSpikeScorerTest extends UnitTest {
     @Test
     void aRelationWithAnUnwrittenEndpointIsNotCounted() {
         var s = score(KESTREL, operator(), relation("The user", "works_at", "Harborlight Analytics")).point();
-        assertEquals(1, s.written());
+        assertEquals(0, s.written());
+        assertEquals(1, s.ruleWritten());
     }
 
     @Test

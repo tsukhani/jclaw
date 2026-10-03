@@ -48,24 +48,59 @@ recurring across cases.
 
 ## Pipeline
 
-Candidates come from fixed rules, not a model (`CandidateGenerator`): the operator,
-capitalized runs, URLs, file paths, ticket keys and the object of a stated preference. The
-decision model types each candidate (or answers `not_an_entity`) and is asked about
-relations between the typed terms, over every relation the schema allows. Mentions are
-clustered by `ExactMatchResolver` (case-folded, a leading "the" and a possessive stripped).
+Decision-only: code finds every candidate and the decision model only chooses
+(`CandidateGenerator`, `ExtractionPipeline`).
+
+1. **Candidates**, all spans of the memory: the operator, the agent's known Term names
+   (matched case-insensitively on word boundaries; a Term has no aliases), capitalized runs
+   split at time words (weekdays, months, today, morning, weekend and the like, which never
+   stand as candidates), URLs, file paths, ticket keys, the object of a stated preference,
+   and the Topic frames "thinks that X" and "X is a kind of Y".
+2. **Operator.** The operator's Person is written by rule at confidence 1 and never asked.
+3. **Overlap.** Each set of candidates whose spans overlap gets one choice over its spans
+   plus `neither`; only the chosen span is typed, and `neither` or a failure types none.
+4. **Typing.** Each surviving candidate gets one choice over the term types plus
+   `not_an_entity`.
+5. **Relations.** For every ordered pair of typed terms and every relation the schema allows
+   between them, one `noul` yes/no question: does the memory state the relation's sentence
+   ("X is a kind of Y", "X is a family member of Y", ...)? The false criterion names the
+   near-misses: the two only co-occur, share a topic, are related the other way round (except
+   for the symmetric `family_of` and `same_as`, which are asked once per pair), or the
+   relation is an inference. Per unordered pair only the highest-yes relation and direction
+   is kept, so a pair never holds two relations or one written both ways.
+
+A decision's confidence is the chosen option's probability, or the kept relation's yes
+probability. A term chosen from an overlap set also needs that choice to reach the
+threshold, and a relation needs both endpoints to: that requirement is the decision's
+`floor`. The pipeline applies no threshold; `Records.at(run, t)` sorts every decision into
+written, abstained (a choice below t or its floor), declined (`not_an_entity`, `neither`) or
+failed.
+
+Questions are packed greedily into `/v1/systemone` requests that fit the model's context
+(`DecisionContext`: tev1 2050, nimble 8194, clef-flash 16384 tokens, any other model 2050;
+the cl100k estimate is inflated by 1.25 since it is not the models' tokenizer), and are
+never truncated. A request refused with HTTP 400 is split in half and retried; a question
+that cannot fit alone fails with `exceeds context`.
+
+Mentions are clustered by `ExactMatchResolver` (case-folded, a leading "the" and a
+possessive stripped).
 
 ## Scoring
 
 **Stages**, each with gold swapped in for the stages before it, so a stage's score is its own:
 
 - candidate recall: gold mentions (or an alias) among the generated candidates;
+- overlap: overlap sets settled on a gold span, or on `neither` when no span is gold;
 - typing: gold spans typed as labelled; rejection: negatives answered `not_an_entity`;
-- relation: gold relations found between gold terms; no-relation: unlabelled pairs left empty;
+- relation: labelled pairs whose kept relation is the label, in its direction, at yes of at
+  least 0.5; no-relation: unlabelled pairs whose kept relation is below 0.5;
 - resolution: B-cubed and pairwise precision and recall, and false merges, over gold mentions.
 
 **End to end**, strictly. At a threshold t a decision is written only when its probability
-is at least t; a relation also needs both endpoint terms written at t. Each written record
-is right, noise or wrong:
+and its floor are at least t; a relation also needs both endpoint terms written at t. The
+operator's Person is written by rule, not decided, so it counts in neither written nor gold;
+the grid's `ruleWritten` reports how many were left out, and relations to the operator
+still count. Each written record is right, noise or wrong:
 
 - **match** — the span is no labelled mention or alias (a partial span is wrong);
 - **type** — a matched span typed differently from its label;
@@ -84,7 +119,8 @@ The grid scores every threshold from 0.95 to 0.50 by 0.05.
 
 At each threshold the one-sided 95% Clopper-Pearson upper bound on the wrong share must be at
 most 5%: with no wrong record that takes 59 written, with one 93, two 124, three 153, five
-208. Recall must also meet the floor (default 0.50). The walk runs from 0.95 down and stops
+208. Rule-written operator terms are in neither count. Recall must also meet the floor
+(default 0.50). The walk runs from 0.95 down and stops
 at the first threshold that fails; the model certifies at the lowest threshold reached. So a
 model whose recall at 0.95 is under the floor certifies at nothing, by design.
 

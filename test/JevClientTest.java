@@ -1,5 +1,6 @@
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import llm.TokenUsageEstimator;
 import llm.routing.JevRouterClassifier;
 import okhttp3.Interceptor;
 import okhttp3.MediaType;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import play.test.UnitTest;
+import services.decision.DecisionContext;
 import services.decision.JevApi;
 import services.decision.JevException;
 import tools.jev.JevActionSpace;
@@ -150,6 +152,52 @@ class JevClientTest extends UnitTest {
         var e = assertThrows(JevException.class,
                 () -> JevApi.validateChoice(JsonParser.parseString(raw), Set.of("a", "b")));
         assertEquals("Invalid Jev response", e.getMessage(), raw);
+    }
+
+    @Test
+    void aNoulQuestionCarriesBothCriteriaAndItsInstructions() {
+        var instructions = new JsonObject();
+        instructions.addProperty("rules", "Does it?");
+        var q = JevApi.noulQuestion("yes it does", "no it does not", instructions);
+        assertEquals("{\"type\":\"noul\",\"criteria\":{\"true\":\"yes it does\",\"false\":\"no it does not\"},"
+                + "\"instructions\":{\"rules\":\"Does it?\"}}", q.toString());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"type\":\"noul\",\"noul\":0}", "{\"type\":\"noul\",\"noul\":1}",
+            "{\"noul\":0.97}"})
+    void aNoulInTheUnitIntervalIsAcceptedWithoutAConfidence(String raw) {
+        var p = JevApi.validateNoul(JsonParser.parseString(raw));
+        assertEquals(JsonParser.parseString(raw).getAsJsonObject().get("noul").getAsDouble(), p, 0.0);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"type\":\"noul\",\"noul\":-0.01}", "{\"type\":\"noul\",\"noul\":1.01}",
+            "{\"type\":\"noul\",\"noul\":NaN}", "{\"type\":\"noul\",\"noul\":\"0.5\"}",
+            "{\"type\":\"noul\"}", "[0.5]"})
+    void aNoulOutsideTheUnitIntervalOrMissingIsRefused(String raw) {
+        var e = assertThrows(JevException.class, () -> JevApi.validateNoul(JsonParser.parseString(raw)));
+        assertEquals("Invalid Jev response", e.getMessage(), raw);
+        assertThrows(JevException.class, () -> JevApi.validateNoul(null));
+    }
+
+    @Test
+    void theContextBudgetIsPerModelWithItsTagIgnored() {
+        assertEquals(2050, DecisionContext.promptBudget("tev1"));
+        assertEquals(8194, DecisionContext.promptBudget("nimble:latest"));
+        assertEquals(16384, DecisionContext.promptBudget("clef-flash:q4"));
+        assertEquals(2050, DecisionContext.promptBudget("unmeasured"), "the smallest measured limit");
+    }
+
+    @Test
+    void aRequestExactlyAtTheBudgetFitsAndOneTokenMoreDoesNot() {
+        // tev1's 2050 over the 1.25 margin leaves 1640 cl100k tokens.
+        var atBudget = "a" + " a".repeat(1639);
+        assertEquals(1640, TokenUsageEstimator.estimateText(null, atBudget).tokens(), "one token per word");
+        assertTrue(DecisionContext.fits("tev1", atBudget));
+        var over = atBudget + " a";
+        assertEquals(1641, TokenUsageEstimator.estimateText(null, over).tokens());
+        assertFalse(DecisionContext.fits("tev1", over));
     }
 
     @Test

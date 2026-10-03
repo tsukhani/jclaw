@@ -14,7 +14,9 @@ import java.util.Set;
 /**
  * Strict end-to-end scoring of extraction runs against the case labels (JCLAW-1356). A written term is right only
  * when its span is the mention or an alias of a labelled entity, of the labelled type, written once; a written
- * relation is right only when the labels state it between the entities its endpoints wrote. Pure: no I/O, no clock.
+ * relation is right only when the labels state it between the entities its endpoints wrote. The operator's Person is
+ * written by rule rather than decided, so it counts in neither written nor gold, only in {@code ruleWritten}; its
+ * span still stands as a relation endpoint. Pure: no I/O, no clock.
  */
 public final class GraphSpikeScorer {
 
@@ -38,11 +40,12 @@ public final class GraphSpikeScorer {
 
     /**
      * Every case scored at one threshold. {@code wrongShare} is wrong / (written - noise), null when that is zero;
-     * {@code recall} is right / gold, gold counting only non-noise labels.
+     * {@code recall} is right / gold, gold counting only non-noise labels. {@code ruleWritten} counts the operator
+     * terms left out of both.
      */
     public record Point(double threshold, int written, int right, int wrong, int wrongMatch, int wrongType,
                         int wrongDuplicate, int wrongRelation, int noise, int gold, @Nullable Double recall,
-                        @Nullable Double wrongShare, int failures) {}
+                        @Nullable Double wrongShare, int failures, int ruleWritten) {}
 
     public record Scored(Point point, List<WrongRecord> wrong) {
         public Scored {
@@ -69,13 +72,14 @@ public final class GraphSpikeScorer {
         var point = new Point(t, tally.written, tally.right, tally.wrong.size(), tally.count(MATCH),
                 tally.count(TYPE), tally.count(DUPLICATE), tally.count(RELATION), tally.noise, tally.gold,
                 tally.gold == 0 ? null : (double) tally.right / tally.gold,
-                denominator == 0 ? null : (double) tally.wrong.size() / denominator, tally.failures);
+                denominator == 0 ? null : (double) tally.wrong.size() / denominator, tally.failures,
+                tally.ruleWritten);
         return new Scored(point, tally.wrong);
     }
 
-    /** The non-noise labels in {@code c}, terms plus relations. */
+    /** The non-noise labels in {@code c}, terms other than the operator plus relations. */
     public static int gold(Case c) {
-        return (int) (c.entities().stream().filter(e -> !e.noise()).count()
+        return (int) (c.entities().stream().filter(e -> !e.noise() && !e.operator()).count()
                 + c.relations().stream().filter(r -> !r.noise()).count());
     }
 
@@ -85,6 +89,7 @@ public final class GraphSpikeScorer {
         int right;
         int noise;
         int failures;
+        int ruleWritten;
         final List<WrongRecord> wrong = new ArrayList<>();
 
         int count(String kind) {
@@ -102,9 +107,15 @@ public final class GraphSpikeScorer {
             if (!d.stage().equals(ExtractionPipeline.TERM) || !d.writes(t)) continue;
             var type = d.choice();
             if (type == null || !writtenSpans.add(d.subject())) continue;
+            if (d.operator()) {
+                tally.ruleWritten++;
+                ids.put(d.subject(), GraphCases.OPERATOR);
+                seen.add(GraphCases.OPERATOR);
+                continue;
+            }
             tally.written++;
             var key = "term:" + d.subject() + ":" + type;
-            var entity = d.operator() ? c.entity(GraphCases.OPERATOR) : c.entityAt(d.subject());
+            var entity = c.entityAt(d.subject());
             if (entity == null) {
                 tally.wrong.add(new WrongRecord(c.id(), key, MATCH));
             } else if (!seen.add(entity.id())) {
