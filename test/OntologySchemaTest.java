@@ -76,7 +76,7 @@ class OntologySchemaTest extends UnitTest {
                 Map.entry("holds_view_on", new Expected("Association", none, List.of("Person -> Topic"))),
                 Map.entry("part_of", new Expected("Composition", new Identifier("schema:isPartOf", Match.CLOSE),
                         List.of("Organization -> Organization", "Project -> Project", "System -> System",
-                                "Artifact -> Project"))),
+                                "Artifact -> Project", "Place -> Place"))),
                 Map.entry("kind_of", new Expected("Hierarchy", new Identifier("skos:broader", Match.EXACT),
                         List.of("same"))),
                 Map.entry("same_as", new Expected("Equivalence", new Identifier("schema:sameAs", Match.CLOSE),
@@ -100,9 +100,12 @@ class OntologySchemaTest extends UnitTest {
         assertTrue(schema.allows("works_on", "Organization", "Project"));
         assertTrue(schema.allows("owns", "Organization", "Place"));
         assertTrue(schema.allows("part_of", "Artifact", "Project"));
+        assertTrue(schema.allows("part_of", "Place", "Place"));
         assertTrue(schema.allows("kind_of", "Topic", "Topic"));
         assertTrue(schema.allows("same_as", "Place", "Place"));
         assertFalse(schema.allows("part_of", "Artifact", "Artifact"));
+        assertFalse(schema.allows("part_of", "Place", "Organization"));
+        assertFalse(schema.allows("part_of", "Event", "Place"));
         assertFalse(schema.allows("works_at", "Person", "Project"));
         assertFalse(schema.allows("kind_of", "Topic", "Person"));
         assertFalse(schema.allows("kind_of", "Vehicle", "Vehicle"));
@@ -166,7 +169,7 @@ class OntologySchemaTest extends UnitTest {
         var edited = seed
                 .replace("term_types:\n", "term_types:\n  Vehicle: {standard: \"schema:Vehicle\", match: exact, "
                         + "covers: \"Car, bike, boat\"}\n")
-                .replace("\"System -> System\", \"Artifact -> Project\"]", "\"System -> System\"]")
+                .replace("\"System -> System\", \"Artifact -> Project\", \"Place -> Place\"]", "\"System -> System\"]")
                 .replace("\"schema:SoftwareApplication\"", "\"schema:Product\"");
         assertNotEquals(seed, edited);
 
@@ -175,7 +178,8 @@ class OntologySchemaTest extends UnitTest {
         assertEquals(List.of(
                 "+ term type Vehicle (schema:Vehicle, exact)",
                 "~ relation part_of endpoints: [Organization -> Organization, Project -> Project, System -> System, "
-                        + "Artifact -> Project] -> [Organization -> Organization, Project -> Project, System -> System]",
+                        + "Artifact -> Project, Place -> Place] -> [Organization -> Organization, Project -> Project, "
+                        + "System -> System]",
                 "~ term type System standard: schema:SoftwareApplication -> schema:Product"), lines);
     }
 
@@ -204,7 +208,7 @@ class OntologySchemaTest extends UnitTest {
 
     @Test
     void aNonIntegerVersionIsRefused() throws IOException {
-        var text = seedText().replace("version: 1\n", "version: one\n");
+        var text = seedText().replace("version: 2\n", "version: one\n");
         var e = assertThrows(IllegalArgumentException.class, () -> OntologySchema.parse(text));
         assertTrue(e.getMessage().contains("version"), e.getMessage());
     }
@@ -230,7 +234,7 @@ class OntologySchemaTest extends UnitTest {
     @Test
     void diffReportsVersionFamilyReferenceCoversAndKindChanges() throws IOException {
         var seed = seedText();
-        var edited = seed.replace("version: 1\n", "version: 2\n")
+        var edited = seed.replace("version: 2\n", "version: 3\n")
                 .replace("must_link: \"One or more Evidence\"", "must_link: \"At least one Evidence\"")
                 .replace("  - \"Evidence -> Any\"\n", "  - \"Evidence -> Any\"\n  - \"Evidence -> Term\"\n")
                 .replace("covers: \"City, address, property\"", "covers: \"City, address, property, region\"")
@@ -244,7 +248,40 @@ class OntologySchemaTest extends UnitTest {
                         "~ family Term must_link: One or more Evidence -> At least one Evidence",
                         "~ relation same_as kind: Equivalence -> Alias",
                         "~ term type Place covers: City, address, property -> City, address, property, region",
-                        "~ version: 1 -> 2"),
+                        "~ version: 2 -> 3"),
                 lines);
+    }
+
+    @Test
+    void theEventTypeCoversOnlyASpecificDatedOccurrence() {
+        var covers = OntologySchema.seed().termTypes().get("Event").covers();
+        for (var included : List.of("trip", "renewal", "scheduled run", "a particular deadline")) {
+            assertTrue(covers.contains(included), included + " in: " + covers);
+        }
+        for (var excluded : List.of("weekday", "recurring time", "'deadlines'")) {
+            assertTrue(covers.contains("never") && covers.contains(excluded), excluded + " in: " + covers);
+        }
+    }
+
+    @Test
+    void versionTwoDiffersFromVersionOneByExactlyTheTwoSpikeEdits() throws IOException {
+        var v2 = seedText();
+        var v1 = v2.replace("version: 2\n", "version: 1\n")
+                .replace("covers: \"A specific dated occurrence: a trip, a renewal, a scheduled run, a particular "
+                        + "deadline; never a weekday, a recurring time or a category such as 'deadlines'\"",
+                        "covers: \"Something dated: trip, deadline, renewal, scheduled run\"")
+                .replace(", \"Place -> Place\"]", "]");
+        assertNotEquals(v2, v1);
+
+        var lines = OntologySchema.diff(OntologySchema.parse(v1), OntologySchema.parse(v2));
+
+        assertEquals(List.of(
+                "~ relation part_of endpoints: [Organization -> Organization, Project -> Project, System -> System, "
+                        + "Artifact -> Project] -> [Organization -> Organization, Project -> Project, System -> System, "
+                        + "Artifact -> Project, Place -> Place]",
+                "~ term type Event covers: Something dated: trip, deadline, renewal, scheduled run -> A specific dated "
+                        + "occurrence: a trip, a renewal, a scheduled run, a particular deadline; never a weekday, a "
+                        + "recurring time or a category such as 'deadlines'",
+                "~ version: 1 -> 2"), lines);
     }
 }

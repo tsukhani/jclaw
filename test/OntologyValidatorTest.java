@@ -115,6 +115,22 @@ class OntologyValidatorTest extends UnitTest {
     }
 
     @Test
+    void aPlaceMayBePartOfAPlaceButNotOfItsNeighbours() {
+        assertEquals(List.of(), validate(with(relation("r2", "part_of", "pl1", "pl2"))));
+        var violations = validate(with(
+                term("ev1", "Event"),
+                relation("r3", "part_of", "pl1", "o1"),
+                relation("r4", "part_of", "ev1", "pl1"),
+                relation("r5", "part_of", "o1", "pl1")));
+        assertEquals(List.of(
+                new Violation("r3", Kind.DISALLOWED_ENDPOINT, "relation r3: part_of does not allow Place -> Organization"),
+                new Violation("r4", Kind.DISALLOWED_ENDPOINT, "relation r4: part_of does not allow Event -> Place"),
+                new Violation("r5", Kind.DISALLOWED_ENDPOINT,
+                        "relation r5: part_of does not allow Organization -> Place")),
+                violations);
+    }
+
+    @Test
     void anEndpointTermOfUndeclaredTypeSkipsTheEndpointCheck() {
         var violations = validate(with(term("v1", "Vehicle"), relation("r2", "owns", "p1", "v1")));
         assertEquals(List.of(new Violation("v1", Kind.UNDECLARED_TYPE, "term v1: type 'Vehicle' is not declared")),

@@ -12,7 +12,7 @@
 # "same" means any declared term type to itself. Keep one line per type so a diff of two
 # versions is one line per change.
 
-version: 1
+version: 2
 
 families:
   Term:       {meaning: "An entity or concept", must_link: "One or more Evidence", standard: none}
@@ -37,7 +37,7 @@ term_types:
   System:       {standard: "schema:SoftwareApplication", match: close, covers: "Tool, service, device or server the operator uses or runs"}
   Artifact:     {standard: "schema:CreativeWork", match: close, covers: "A concrete addressable thing: file, URL, document, ticket, dataset"}
   Place:        {standard: "schema:Place", match: exact, covers: "City, address, property"}
-  Event:        {standard: "schema:Event", match: exact, covers: "Something dated: trip, deadline, renewal, scheduled run"}
+  Event:        {standard: "schema:Event", match: exact, covers: "A specific dated occurrence: a trip, a renewal, a scheduled run, a particular deadline; never a weekday, a recurring time or a category such as 'deadlines'"}
   Topic:        {standard: "skos:Concept", match: exact, covers: "The subject a view or interest is about"}
 
 relations:
@@ -49,7 +49,7 @@ relations:
   located_in:    {kind: Association, standard: "schema:location", match: close, endpoints: ["Person, Organization, Event -> Place"]}
   involves:      {kind: Association, standard: none, endpoints: ["Event -> Person, Organization, Project"]}
   holds_view_on: {kind: Association, standard: none, endpoints: ["Person -> Topic"]}
-  part_of:       {kind: Composition, standard: "schema:isPartOf", match: close, endpoints: ["Organization -> Organization", "Project -> Project", "System -> System", "Artifact -> Project"]}
+  part_of:       {kind: Composition, standard: "schema:isPartOf", match: close, endpoints: ["Organization -> Organization", "Project -> Project", "System -> System", "Artifact -> Project", "Place -> Place"]}
   kind_of:       {kind: Hierarchy, standard: "skos:broader", match: exact, endpoints: [same]}
   same_as:       {kind: Equivalence, standard: "schema:sameAs", match: close, endpoints: [same]}
   derived_from:  {kind: Derivation, standard: "prov:wasDerivedFrom", match: exact, endpoints: ["Artifact -> Artifact, Project"]}
