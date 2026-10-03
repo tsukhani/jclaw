@@ -1,4 +1,4 @@
-# Graph-extraction cases (JCLAW-1356)
+# Graph-extraction cases (JCLAW-1356, JCLAW-1358)
 
 `cases.json` is the labelled set that certifies a local Ollama decision model for graph
 extraction (`POST /api/graph/spike`, `./jclaw.sh graphspike run`). It is not an
@@ -11,10 +11,11 @@ models selected in Settings. A hosted model such as `jev-latest` is refused with
 ## Format
 
 ```json
-{"cases": [
+{"userMd": "Name: Avery Lin",
+ "cases": [
   {"id": "c042", "tags": ["role", "employer-tool"],
-   "text": "The user is a data engineer at Harborlight Analytics, which runs Kestrel CI, the team's deployment platform, every Tuesday.",
-   "entities": [{"id": "operator", "mention": "The user", "type": "Person"},
+   "text": "Avery Lin is a data engineer at Harborlight Analytics, which runs Kestrel CI, the team's deployment platform, every Tuesday.",
+   "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
                 {"id": "harborlight", "mention": "Harborlight Analytics", "type": "Organization"},
                 {"id": "kestrel-ci", "mention": "Kestrel CI", "type": "System",
                  "aliases": ["the team's deployment platform"]}],
@@ -26,9 +27,15 @@ models selected in Settings. A hosted model such as `jev-latest` is refused with
 
 - `id` is unique. `text` is stored verbatim as one memory of the requested agent for the run,
   snapshotted, checked and deleted afterwards.
-- Every case has exactly one `operator` entity. A text that never says "the user" opens with
-  a subjectless verb ("Prefers ...") and its operator is `{"id": "operator", "type": "Person",
-  "implicit": true}`, with no mention.
+- `userMd` is a USER.md header declaring the owner, read by the same `WorkspaceFiles` parse
+  the live owner name uses. The committed owner is the synthetic Avery Lin.
+- Every case but a guest case has exactly one `operator` entity, mentioned by the declared
+  name or, in a legacy case captured before the owner had a name, as "The user". A text that
+  says neither opens with a subjectless verb ("Prefers ...") and its operator is
+  `{"id": "operator", "type": "Person", "implicit": true}`, with no mention. Any other
+  operator mention is refused.
+- A `guest` case is about someone other than the owner: a named guest is an ordinary Person,
+  "a guest" is a negative, and the case has no `operator` entity and no relation to one.
 - Every `mention` and alias appears verbatim in `text`. Its `type` is one of the seed
   ontology's term types (`conf/ontology/seed-schema.yaml`), and an entity id keeps one type
   across every case it appears in.
@@ -37,12 +44,13 @@ models selected in Settings. A hosted model such as `jev-latest` is refused with
 - `negatives` are spans that must not become terms; none may be a labelled mention or alias.
 - An entity or relation that is true but not worth a graph record carries `"noise": true`.
 - `tags` are from `weekday-time`, `role`, `everyday-object`, `descriptive-phrase`,
-  `reversed-direction`, `employer-tool` (the hard negatives) and `plain`.
+  `reversed-direction`, `employer-tool` (the hard negatives), `plain` and `guest`.
 
 `services.graphspike.GraphCases` refuses a set that breaks any of these, naming the case.
 `GraphCasesConformanceTest` fails the build on a refusal or on a missed composition target:
-at least 120 cases, at least 85% beginning "The user" and the rest subjectless, a mean
-length of 17-23 words, at least 12 cases per hard-negative tag and at least half carrying
+at least 120 cases, 12-17% beginning "The user", at least 60% beginning the owner's name,
+every case owner-voiced (one of those two or subjectless) or `guest`, at least 6 guest cases
+with one opening "A guest", a mean length of 17-23 words, at least 12 cases per hard-negative tag and at least half carrying
 one, at least 420 non-noise gold records, every term type and relation used, and entity ids
 recurring across cases.
 
@@ -51,12 +59,14 @@ recurring across cases.
 Decision-only: code finds every candidate and the decision model only chooses
 (`CandidateGenerator`, `ExtractionPipeline`).
 
-1. **Candidates**, all spans of the memory: the operator, the agent's known Term names
+1. **Candidates**, all spans of the memory: the operator, the agent's known Term names and
+   the set's declared owner name
    (matched case-insensitively on word boundaries; a Term has no aliases), capitalized runs
    split at time words (weekdays, months, today, morning, weekend and the like, which never
    stand as candidates), URLs, file paths, ticket keys, the object of a stated preference,
    and the Topic frames "thinks that X" and "X is a kind of Y".
-2. **Operator.** The operator's Person is written by rule at confidence 1 and never asked.
+2. **Operator.** An implicit operator or "the user" is written by rule as a Person at
+   confidence 1 and never asked. The owner's name is an ordinary candidate, decided and typed.
 3. **Overlap.** Each set of candidates whose spans overlap gets one choice over its spans
    plus `neither`; only the chosen span is typed, and `neither` or a failure types none.
 4. **Typing.** Each surviving candidate gets one choice over the term types plus
@@ -83,7 +93,8 @@ never truncated. A request refused with HTTP 400 is split in half and retried; a
 that cannot fit alone fails with `exceeds context`.
 
 Mentions are clustered by `ExactMatchResolver` (case-folded, a leading "the" and a
-possessive stripped).
+possessive stripped). A Person whose surface normalizes to the declared owner name joins the
+operator's cluster.
 
 ## Scoring
 
@@ -97,10 +108,10 @@ possessive stripped).
 - resolution: B-cubed and pairwise precision and recall, and false merges, over gold mentions.
 
 **End to end**, strictly. At a threshold t a decision is written only when its probability
-and its floor are at least t; a relation also needs both endpoint terms written at t. The
-operator's Person is written by rule, not decided, so it counts in neither written nor gold;
-the grid's `ruleWritten` reports how many were left out, and relations to the operator
-still count. Each written record is right, noise or wrong:
+and its floor are at least t; a relation also needs both endpoint terms written at t. An
+implicit operator or "The user" is written by rule, not decided, so it counts in neither
+written nor gold; the grid's `ruleWritten` reports how many were left out, and relations to
+the operator still count. The owner named in the text is decided, so it counts in both. Each written record is right, noise or wrong:
 
 - **match** — the span is no labelled mention or alias (a partial span is wrong);
 - **type** — a matched span typed differently from its label;
@@ -119,7 +130,8 @@ The grid scores every threshold from 0.95 to 0.50 by 0.05.
 
 At each threshold the one-sided 95% Clopper-Pearson upper bound on the wrong share must be at
 most 5%: with no wrong record that takes 59 written, with one 93, two 124, three 153, five
-208. Rule-written operator terms are in neither count. Recall must also meet the floor
+208. Rule-written operator terms (implicit or "The user") are in neither count; the
+named owner is in both. Recall must also meet the floor
 (default 0.50). The walk runs from 0.95 down and stops
 at the first threshold that fails; the model certifies at the lowest threshold reached. So a
 model whose recall at 0.95 is under the floor certifies at nothing, by design.
@@ -151,7 +163,7 @@ F1, Cohen's kappa on matched entity types and relation F1.
 
 ```json
 [{"caseId": "c042", "record": "term:Kestrel:System", "verdict": "wrong", "note": "partial span"},
- {"caseId": "c017", "record": "rel:The user:uses:Fenwick", "verdict": "label-error", "note": "missing alias"}]
+ {"caseId": "c017", "record": "rel:Avery Lin:uses:Fenwick", "verdict": "label-error", "note": "missing alias"}]
 ```
 
 `record` is the report's stable key, `term:<span>:<type>` or `rel:<from>:<type>:<to>`.

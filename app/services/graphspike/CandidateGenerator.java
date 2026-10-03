@@ -12,9 +12,10 @@ import java.util.regex.Pattern;
 
 /**
  * The spans of a memory that may name a term, found by fixed rules rather than a model (JCLAW-1356, JCLAW-1357): the
- * operator, capitalized runs less their time words, URLs, file paths, ticket keys, the object of a stated preference or
- * view, both sides of "X is a kind of Y", and the agent's known Term names. Deterministic, so a run's candidates never
- * vary between runs or models. Spans may overlap; the decision model settles which one stands.
+ * operator when the memory says "the user" or states no subject, capitalized runs less their time words, URLs, file
+ * paths, ticket keys, the object of a stated preference or view, both sides of "X is a kind of Y", and the agent's
+ * known Term names, the owner's name among them. Deterministic, so a run's candidates never vary between runs or
+ * models. Spans may overlap; the decision model settles which one stands.
  */
 public final class CandidateGenerator {
 
@@ -65,9 +66,10 @@ public final class CandidateGenerator {
     private CandidateGenerator() {}
 
     /**
-     * A span to type, at {@code [start, end)} of the text. An operator candidate is written as a Person without a
-     * question; an implicit one has no span in the text and is named {@link GraphCases#IMPLICIT_OPERATOR_SPAN}. A
-     * candidate with no position has offsets -1 and overlaps nothing.
+     * A span to type, at {@code [start, end)} of the text. An operator candidate ("the user", or implicit) is written
+     * as a Person without a question, and an implicit one has no span in the text and is named
+     * {@link GraphCases#IMPLICIT_OPERATOR_SPAN}; an owner named in the text is an ordinary candidate. A candidate with
+     * no position has offsets -1 and overlaps nothing.
      */
     public record Candidate(String span, boolean operator, boolean implicit, int start, int end) {
         public Candidate(String span, boolean operator, boolean implicit) {

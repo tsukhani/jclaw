@@ -1,5 +1,7 @@
 package services.graphspike;
 
+import org.jspecify.annotations.Nullable;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -15,7 +17,7 @@ public final class ExactMatchResolver {
 
     private ExactMatchResolver() {}
 
-    /** One typed mention; {@code ref} identifies it to the caller, and every operator mention joins one cluster. */
+    /** One typed mention; {@code ref} identifies it to the caller, and every {@code operator} mention joins one cluster. */
     public record Mention(String ref, String surface, String type, boolean operator) {}
 
     /** Case-folded, a leading {@code the } and a possessive {@code 's} stripped, whitespace collapsed. */
@@ -26,11 +28,17 @@ public final class ExactMatchResolver {
         return s.strip();
     }
 
-    /** The clusters, each a list of mention refs, in order of first appearance. */
-    public static List<List<String>> resolve(List<Mention> mentions) {
+    /**
+     * The clusters, each a list of mention refs, in order of first appearance. A Person whose surface normalizes to
+     * {@code ownerName}'s joins the operator's cluster.
+     */
+    public static List<List<String>> resolve(List<Mention> mentions, @Nullable String ownerName) {
+        var owner = ownerName == null ? null : normalize(ownerName);
         var clusters = new LinkedHashMap<String, List<String>>();
         for (var m : mentions) {
-            var key = m.operator() ? OPERATOR_KEY : m.type() + "\u0000" + normalize(m.surface());
+            boolean named = owner != null && m.type().equals(ExtractionPipeline.OPERATOR_TYPE)
+                    && normalize(m.surface()).equals(owner);
+            var key = m.operator() || named ? OPERATOR_KEY : m.type() + "\u0000" + normalize(m.surface());
             clusters.computeIfAbsent(key, _ -> new ArrayList<>()).add(m.ref());
         }
         return clusters.values().stream().map(List::copyOf).toList();

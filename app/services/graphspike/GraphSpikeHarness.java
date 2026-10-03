@@ -90,12 +90,13 @@ public final class GraphSpikeHarness {
     private record RunData(RunReport report, List<CaseRun> e2e) {}
 
     /**
-     * Runs the committed set. {@code secondLabels} are the blind second labeller's cases, empty when there are none;
-     * {@code adjudications} are the verdicts on earlier wrong records.
+     * Runs the committed set. {@code ownerName} is the set's declared owner, a known name to the candidates, or null;
+     * {@code secondLabels} are the blind second labeller's cases, empty when there are none; {@code adjudications}
+     * are the verdicts on earlier wrong records.
      */
-    public static Report run(String agentId, List<Case> cases, OntologySchema schema, List<DecisionModel> models,
-                             int runs, double recallFloor, int concurrency, List<Case> secondLabels,
-                             List<Adjudication> adjudications) {
+    public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,
+                             List<DecisionModel> models, int runs, double recallFloor, int concurrency,
+                             List<Case> secondLabels, List<Adjudication> adjudications) {
         var store = MemoryStoreFactory.get();
         var provenance = new MemoryProvenance(null, null, MemoryProvenance.process(CATEGORY),
                 MemoryAuthorType.AGENT_SYNTHESIZED, List.of());
@@ -109,7 +110,9 @@ public final class GraphSpikeHarness {
                         null, provenance)));
             }
             before = snapshot(memoryIds);
-            measured = measure(cases, schema, models, runs, recallFloor, concurrency, knownNames(agentId));
+            var known = new ArrayList<>(knownNames(agentId));
+            if (ownerName != null) known.add(ownerName);
+            measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName);
             after = snapshot(memoryIds);
         } finally {
             for (var id : memoryIds.values()) {
@@ -153,7 +156,7 @@ public final class GraphSpikeHarness {
         var memoryIds = new LinkedHashMap<String, String>();
         loaded.cases().forEach(h -> memoryIds.put(h.labels().id(), String.valueOf(h.memoryId())));
         var before = snapshot(memoryIds);
-        var measured = measure(cases, schema, models, runs, recallFloor, concurrency, List.of());
+        var measured = measure(cases, schema, models, runs, recallFloor, concurrency, List.of(), null);
         var after = snapshot(memoryIds);
         int unchanged = 0;
         int present = 0;
@@ -176,7 +179,8 @@ public final class GraphSpikeHarness {
     /** Every model's runs over {@code cases}, by model name. */
     private static Map<String, List<RunData>> measure(List<Case> cases, OntologySchema schema,
                                                       List<DecisionModel> models, int runs, double recallFloor,
-                                                      int concurrency, List<String> knownNames) {
+                                                      int concurrency, List<String> knownNames,
+                                                      @Nullable String ownerName) {
         var tasks = new ArrayList<Callable<CaseResult>>();
         for (int r = 0; r < runs; r++) {
             for (var m : models) {
@@ -191,7 +195,7 @@ public final class GraphSpikeHarness {
                 var slice = results.subList(i, i + cases.size());
                 i += cases.size();
                 var e2e = slice.stream().map(CaseResult::e2e).toList();
-                var stages = StageScorer.score(cases, slice.stream().map(CaseResult::stages).toList());
+                var stages = StageScorer.score(cases, slice.stream().map(CaseResult::stages).toList(), ownerName);
                 var grid = GraphSpikeScorer.grid(cases, e2e);
                 out.computeIfAbsent(m.name(), _ -> new ArrayList<>()).add(
                         new RunData(new RunReport(r + 1, stages, grid, Certifier.walk(grid, recallFloor)), e2e));

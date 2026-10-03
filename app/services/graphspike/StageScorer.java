@@ -58,12 +58,15 @@ public final class StageScorer {
     public record Stages(Ratio candidateRecall, Ratio overlap, Ratio typing, Ratio rejection, Ratio relation, Ratio noRelation,
                          Resolution resolution, int failures) {}
 
-    /** The non-operator spans the typing stage is asked about, in question order: gold mentions, then negatives. */
+    /**
+     * The spans the typing stage is asked about, in question order: gold mentions, the named owner's included, then
+     * negatives. Only a rule-written operator is left out.
+     */
     public static List<String> typingSpans(Case c) {
         var out = new ArrayList<String>();
         for (var e : c.entities()) {
             var mention = e.mention();
-            if (!e.operator() && mention != null) out.add(mention);
+            if (!e.ruleWritten() && mention != null) out.add(mention);
         }
         out.addAll(c.negatives());
         return out;
@@ -74,7 +77,8 @@ public final class StageScorer {
         return c.entities().stream().map(e -> new ExtractionPipeline.Typed(e.span(), e.type())).toList();
     }
 
-    public static Stages score(List<Case> cases, List<StageRun> runs) {
+    /** Every stage over {@code runs}; {@code ownerName} is the set's declared owner, null when it declares none. */
+    public static Stages score(List<Case> cases, List<StageRun> runs, @Nullable String ownerName) {
         var byId = new HashMap<String, Case>();
         cases.forEach(c -> byId.put(c.id(), c));
         int typedRight = 0;
@@ -131,8 +135,9 @@ public final class StageScorer {
                 }
             }
         }
-        return new Stages(candidateRecall(cases), Ratio.of(overlapRight, overlapTotal), Ratio.of(typedRight, typedTotal), Ratio.of(rejected, negatives),
-                Ratio.of(relationRight, relationTotal), Ratio.of(noneRight, noneTotal), resolution(cases), failures);
+        return new Stages(candidateRecall(cases, ownerName), Ratio.of(overlapRight, overlapTotal),
+                Ratio.of(typedRight, typedTotal), Ratio.of(rejected, negatives), Ratio.of(relationRight, relationTotal),
+                Ratio.of(noneRight, noneTotal), resolution(cases, ownerName), failures);
     }
 
     private static boolean gold(Case c, String span) {
@@ -140,13 +145,17 @@ public final class StageScorer {
         return e != null && !e.noise();
     }
 
-    /** Gold non-implicit entities whose mention or an alias is one of the case's candidates. */
-    public static Ratio candidateRecall(List<Case> cases) {
+    /**
+     * Gold non-implicit entities whose mention or an alias is one of the case's candidates, generated with
+     * {@code ownerName} as a known name.
+     */
+    public static Ratio candidateRecall(List<Case> cases, @Nullable String ownerName) {
+        var known = ownerName == null ? List.<String>of() : List.of(ownerName);
         int hit = 0;
         int total = 0;
         for (var c : cases) {
             var spans = new HashSet<String>();
-            CandidateGenerator.generate(c.text()).forEach(k -> spans.add(k.span()));
+            CandidateGenerator.generate(c.text(), known).forEach(k -> spans.add(k.span()));
             for (var e : c.entities()) {
                 if (e.implicit()) continue;
                 total++;
@@ -157,17 +166,17 @@ public final class StageScorer {
     }
 
     /** {@link ExactMatchResolver} over every gold entity's mention, scored against the gold ids. */
-    public static Resolution resolution(List<Case> cases) {
+    public static Resolution resolution(List<Case> cases, @Nullable String ownerName) {
         var mentions = new ArrayList<Mention>();
         var gold = new HashMap<String, String>();
         for (var c : cases) {
             for (Entity e : c.entities()) {
                 var ref = c.id() + "\u0000" + e.id();
-                mentions.add(new Mention(ref, e.span(), e.type(), e.operator()));
+                mentions.add(new Mention(ref, e.span(), e.type(), e.ruleWritten()));
                 gold.put(ref, e.id());
             }
         }
-        var clusters = ExactMatchResolver.resolve(mentions);
+        var clusters = ExactMatchResolver.resolve(mentions, ownerName);
         var goldSize = new HashMap<String, Integer>();
         gold.values().forEach(id -> goldSize.merge(id, 1, Integer::sum));
 
