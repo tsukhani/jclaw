@@ -73,6 +73,24 @@ At most one relation from A to B. When two fit, pick the most specific the text 
 them once, in either direction. Label only relations the text states; never infer one from world
 knowledge.
 
+## 6a. A verb states the relation
+
+A memory rarely uses the relation's own word. These readings are settled:
+
+- **A home or base is `located_in`; a venue is noise.** Where a person lives, works from or is
+  based ("has lived there since 2019", "their home", "works from an armchair at Larchmere
+  House") is `located_in`. A place where they only do something ("goes bouldering at Hollis
+  Park", "plays football at Hollis Park") is `located_in` with `"noise": true`.
+- **Working for a project is `works_on`:** drafting a document for it, reviewing its burndown,
+  tracking tickets against it.
+- **Keeping or paying for a thing is `owns`:** keeping a file or a URL ("keeps the deploy steps
+  at https://wiki.example.com/runbooks/deploy"), paying for a system, a vendor's own product
+  ("the on-call alerting app from Harborlight Analytics").
+- **Operating a system is `uses`,** whatever the verb: backing up to it, checking it, running
+  something on it, a project shipping through it.
+- **A classification is not a view.** "considers X a kind of Y" labels `X kind_of Y`; the
+  holder's `holds_view_on X` is noise.
+
 ## 7. Hard negatives
 
 Each case carries one or more tags. Six tags name a trap the case sets; `plain` means none;
