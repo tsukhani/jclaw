@@ -33,7 +33,6 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -42,7 +41,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
 import java.util.function.Predicate;
-import java.util.regex.Pattern;
 
 /**
  * Memory auto-capture (JCLAW-39). After a conversation turn completes, an
@@ -987,47 +985,6 @@ public final class MemoryAutoCapture {
                 !VALUE_MARKERS.contains(t) && !t.chars().allMatch(Character::isDigit));
     }
 
-    private static final String MONTHS =
-            "january|february|march|april|may|june|july|august|september|october|november|december"
-                    + "|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec";
-
-    /** A value-bearing shape and the kind of value it pins. */
-    private record ValueShape(Pattern pattern, String kind) {}
-
-    /**
-     * Ordered most specific first. {@link #valueKinds} strips each shape's matches before
-     * trying the next, so "7:00 pm" is read as a clock and not additionally as the bare
-     * numbers 7 and 0 — without that, any text holding a time would also count as carrying
-     * a quantity and the guard would wave through a replacement that dropped one.
-     */
-    private static final List<ValueShape> VALUE_SHAPES = List.of(
-            new ValueShape(Pattern.compile(
-                    "\\b\\d{1,2}:\\d{2}\\s*(?:am|pm)?|\\b\\d{1,2}\\s*(?:am|pm)\\b"), "clock"),
-            // Possessive throughout: the two \s around the optional hyphen are an overlapping
-            // pair, so trailing spaces backtrack polynomially on conversation text (JCLAW-1048).
-            new ValueShape(Pattern.compile(
-                    "\\b\\d++\\s*+-?+\\s*+(?:second|minute|hour|day|week|month|year|decade)s?+\\b"), "duration"),
-            new ValueShape(Pattern.compile(
-                    "\\b(?:" + MONTHS + ")\\b\\s*\\d{0,4}(?:st|nd|rd|th)?"
-                            + "|\\b\\d{1,2}(?:st|nd|rd|th)?\\s+(?:of\\s+)?(?:" + MONTHS + ")\\b"), "date"),
-            new ValueShape(Pattern.compile(
-                    "\\b\\d{4}[-/]\\d{1,2}[-/]\\d{1,2}\\b|\\b\\d{1,2}[-/]\\d{1,2}(?:[-/]\\d{2,4})?\\b"), "date"),
-            new ValueShape(Pattern.compile("\\b(?:19|20)\\d{2}\\b"), "year"),
-            new ValueShape(Pattern.compile("\\b\\d+(?:\\.\\d+)?\\b"), "quantity"));
-
-    /** Which kinds of value a text pins down. */
-    private static Set<String> valueKinds(String text) {
-        var remaining = text.toLowerCase(Locale.ROOT);
-        var kinds = new HashSet<String>();
-        for (var shape : VALUE_SHAPES) {
-            var m = shape.pattern().matcher(remaining);
-            if (!m.find()) continue;
-            kinds.add(shape.kind());
-            remaining = m.replaceAll(" ");
-        }
-        return kinds;
-    }
-
     /**
      * Whether {@code replacement} still pins every kind of value {@code existing} did
      * (JCLAW-942).
@@ -1049,13 +1006,13 @@ public final class MemoryAutoCapture {
      * "caught 9 bass on 7/22" — which stays a judge problem, as 08454ef4 recorded.
      */
     private static boolean preservesValues(String existing, String replacement) {
-        return valueKinds(replacement).containsAll(valueKinds(existing));
+        return TemporalExpressions.valueKinds(replacement).containsAll(TemporalExpressions.valueKinds(existing));
     }
 
     /** The kinds in the event log line, so an operator sees what the refusal protected. */
     private static String lostValueKinds(String existing, String replacement) {
-        var lost = valueKinds(existing);
-        lost.removeAll(valueKinds(replacement));
+        var lost = TemporalExpressions.valueKinds(existing);
+        lost.removeAll(TemporalExpressions.valueKinds(replacement));
         return String.join("/", lost);
     }
 

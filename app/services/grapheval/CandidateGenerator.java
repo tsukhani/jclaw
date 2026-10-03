@@ -1,5 +1,8 @@
 package services.grapheval;
 
+import memory.LiteralSpans;
+import memory.TemporalExpressions;
+
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -31,11 +34,6 @@ public final class CandidateGenerator {
 
     private static final Pattern THE_USER = Pattern.compile("(?i)\\bthe user\\b");
     private static final Pattern TOKEN = Pattern.compile("\\S+");
-    private static final Pattern URL = Pattern.compile("https?://\\S+");
-    private static final Pattern PATH = Pattern.compile("(?<![\\w:/.~])(?:~/|\\./|/)[\\w.\\-/]*\\w");
-    private static final Pattern FILE = Pattern.compile(
-            "\\b[\\w\\-]+\\.(?:md|txt|pdf|csv|json|yaml|yml|xlsx|docx|pptx|py|java|sh|log|sql|zip)\\b");
-    private static final Pattern TICKET = Pattern.compile("\\b[A-Z]+-\\d+\\b");
     private static final Pattern PREFERENCE = Pattern.compile(
             "(?i)\\b(?:prefers|likes|loves|dislikes|hates|is interested in)\\s+");
     private static final Pattern PREFERENCE_END = Pattern.compile("[,;:!?]|\\.(?=\\s|$)|\\s(?:over|because|when|than)\\b");
@@ -50,17 +48,6 @@ public final class CandidateGenerator {
             "[,;:!?]|\\.(?=\\s|$)|\\s(?:and|or|but|which|that|who|so|because|over|than|when)\\b");
     private static final Pattern CLAUSE_START = Pattern.compile(
             "(?i)(?:^|[,;:!?.]\\s|\\bthat\\s|\\bthinks\\s|\\bbelieves\\s|\\bconsiders\\s)");
-    /**
-     * Weekday and month names, their abbreviations, and the relative day and period words: a capitalized run never
-     * stands on one of these alone.
-     */
-    private static final Set<String> TIME_WORDS = Set.of("monday", "tuesday", "wednesday", "thursday", "friday",
-            "saturday", "sunday", "mondays", "tuesdays", "wednesdays", "thursdays", "fridays", "saturdays", "sundays",
-            "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun", "january", "february", "march",
-            "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb",
-            "mar", "apr", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec", "today", "tomorrow", "yesterday",
-            "tonight", "morning", "afternoon", "evening", "night", "weekend", "week", "month", "year", "mornings",
-            "afternoons", "evenings", "nights", "weekends", "weeks", "months", "years");
     private static final Pattern SENTENCE_END = Pattern.compile("[.!?][\"'\u201d\u2019)]*$");
 
     private CandidateGenerator() {}
@@ -120,26 +107,10 @@ public final class CandidateGenerator {
 
         var found = new ArrayList<int[]>();
         var taken = new ArrayList<int[]>();
-        var url = URL.matcher(text);
-        while (url.find()) {
-            int e = trimTrailing(text, url.start(), url.end());
-            taken.add(new int[] {url.start(), e});
-            found.add(new int[] {url.start(), e});
-        }
-        var path = PATH.matcher(text);
-        while (path.find()) {
-            if (free(taken, path.start(), path.end())) {
-                taken.add(new int[] {path.start(), path.end()});
-                found.add(new int[] {path.start(), path.end()});
-            }
-        }
-        var file = FILE.matcher(text);
-        while (file.find()) {
-            if (free(taken, file.start(), file.end())) found.add(new int[] {file.start(), file.end()});
-        }
-        var ticket = TICKET.matcher(text);
-        while (ticket.find()) {
-            if (free(taken, ticket.start(), ticket.end())) found.add(new int[] {ticket.start(), ticket.end()});
+        for (var literal : LiteralSpans.spans(text)) {
+            var range = new int[] {literal.start(), literal.end()};
+            found.add(range);
+            if (literal.kind() == LiteralSpans.Kind.URL || literal.kind() == LiteralSpans.Kind.PATH) taken.add(range);
         }
         objects(text, PREFERENCE, PREFERENCE_END, taken, found);
         objects(text, VIEW, PREFERENCE_END, taken, found);
@@ -152,6 +123,8 @@ public final class CandidateGenerator {
         }
         capitalizedRuns(text, implicit, found);
         found.removeIf(r -> onlyTime(text.substring(r[0], r[1])));
+        var claimed = TemporalExpressions.claimedSpans(text);
+        found.removeIf(r -> claimed.stream().anyMatch(c -> c.start() <= r[0] && r[1] <= c.end()));
         found.addAll(known);
 
         found.sort(Comparator.comparingInt(r -> r[0]));
@@ -242,7 +215,7 @@ public final class CandidateGenerator {
         boolean time = false;
         for (var word : span.split("\\s+")) {
             var core = word.toLowerCase(Locale.ROOT);
-            if (TIME_WORDS.contains(core)) {
+            if (TemporalExpressions.TIME_WORDS.contains(core)) {
                 time = true;
             } else if (!CONNECTORS.contains(core) && !core.chars().allMatch(Character::isDigit)) {
                 return false;
@@ -313,7 +286,7 @@ public final class CandidateGenerator {
     }
 
     private static boolean time(Token token) {
-        return !token.connector() && TIME_WORDS.contains(token.core().toLowerCase(Locale.ROOT));
+        return !token.connector() && TemporalExpressions.TIME_WORDS.contains(token.core().toLowerCase(Locale.ROOT));
     }
 
     private static void closeSegment(List<Token> segment, boolean implicit, List<int[]> found) {
@@ -330,11 +303,6 @@ public final class CandidateGenerator {
             }
         }
         if (!r.isEmpty()) found.add(new int[] {r.getFirst().start(), r.getLast().end()});
-    }
-
-    private static int trimTrailing(String text, int start, int end) {
-        while (end > start && TRAIL.indexOf(text.charAt(end - 1)) >= 0) end--;
-        return end;
     }
 
     private static boolean free(List<int[]> taken, int start, int end) {

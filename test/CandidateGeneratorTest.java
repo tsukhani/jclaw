@@ -104,6 +104,11 @@ class CandidateGeneratorTest extends UnitTest {
     }
 
     @Test
+    void anImpossibleDateLeavesTheCandidates() {
+        assertEquals(List.of("The user", "Ana"), spans("The user met Ana on June 31."));
+    }
+
+    @Test
     void aTimeWordOpeningANameIsKept() {
         assertTrue(spans("The user works at Fridays Ltd.").contains("Fridays Ltd"));
         assertTrue(spans("The user met May Chen in Lisbon.").contains("May Chen"));
@@ -123,6 +128,25 @@ class CandidateGeneratorTest extends UnitTest {
         var candidates = CandidateGenerator.generate("The user met May at the fair.", List.of("May"));
         assertTrue(candidates.stream().anyMatch(c -> c.span().equals("May")), candidates.toString());
         assertFalse(spans("The user met May at the fair.").contains("May"), "a bare time word without the name");
+    }
+
+    @Test
+    void aSpanInsideAFoundDateIsNeverACandidate() {
+        assertEquals(List.of(), spans("The launch slipped to Q3 2027."));
+    }
+
+    @Test
+    void aSpanHoldingOrOverlappingAFoundDateIsKept() {
+        assertEquals(List.of("Avery Lin", "Ashgrove", "Larchmere House", "Juniper Clinic"),
+                spans("Avery Lin says Ashgrove includes Larchmere House, their home since 2019, and the Juniper Clinic"
+                        + " branch nearby."));
+        assertTrue(spans("Avery Lin prefers the June 2026 Lisbon Summit.").contains("the June 2026 Lisbon Summit"));
+    }
+
+    @Test
+    void aKnownNameIsKeptEvenInsideAFoundDate() {
+        var candidates = CandidateGenerator.generate("The launch slipped to Q3 2027.", List.of("Q3"));
+        assertTrue(candidates.stream().anyMatch(c -> c.span().equals("Q3")), candidates.toString());
     }
 
     @Test
