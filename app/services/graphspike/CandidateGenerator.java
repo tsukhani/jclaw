@@ -53,7 +53,7 @@ public final class CandidateGenerator {
      * Weekday and month names, their abbreviations, and the relative day and period words: a capitalized run never
      * stands on one of these alone.
      */
-    public static final Set<String> TIME_WORDS = Set.of("monday", "tuesday", "wednesday", "thursday", "friday",
+    private static final Set<String> TIME_WORDS = Set.of("monday", "tuesday", "wednesday", "thursday", "friday",
             "saturday", "sunday", "mondays", "tuesdays", "wednesdays", "thursdays", "fridays", "saturdays", "sundays",
             "mon", "tue", "tues", "wed", "thu", "thur", "thurs", "fri", "sat", "sun", "january", "february", "march",
             "april", "may", "june", "july", "august", "september", "october", "november", "december", "jan", "feb",

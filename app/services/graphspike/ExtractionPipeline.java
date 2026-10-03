@@ -37,8 +37,6 @@ public final class ExtractionPipeline {
     public static final String OVERLAP = "overlap";
     public static final String NOT_AN_ENTITY = "not_an_entity";
     public static final String NEITHER = "neither";
-    /** No longer an answer: a relation decision always names its strongest relation. Kept for the declined set. */
-    public static final String NONE = "none";
     public static final String OPERATOR_TYPE = "Person";
     public static final String EXCEEDS_CONTEXT = "exceeds context";
 
@@ -107,7 +105,7 @@ public final class ExtractionPipeline {
 
         /** Whether the model answered that there is nothing to record: {@code not_an_entity} or {@code neither}. */
         public boolean declined() {
-            return choice != null && (choice.equals(NOT_AN_ENTITY) || choice.equals(NEITHER) || choice.equals(NONE));
+            return choice != null && (choice.equals(NOT_AN_ENTITY) || choice.equals(NEITHER));
         }
 
         /** Whether the decision writes at threshold {@code t}: a choice to record, with it and its floor at least t. */
@@ -325,13 +323,18 @@ public final class ExtractionPipeline {
                 for (var direction : List.of(new Typed[] {a, b}, new Typed[] {b, a})) {
                     var from = direction[0];
                     var to = direction[1];
-                    int before = asked.size();
+                    boolean allowed = false;
                     for (var relation : schema.relations().keySet()) {
-                        if (schema.allows(relation, from.type(), to.type())) {
-                            asked.add(new Asked(from.span(), to.span(), relation));
+                        if (!schema.allows(relation, from.type(), to.type())) continue;
+                        allowed = true;
+                        // A symmetric relation asked one way has been asked both ways.
+                        if (GraphSpikeScorer.SYMMETRIC.contains(relation)
+                                && asked.contains(new Asked(to.span(), from.span(), relation))) {
+                            continue;
                         }
+                        asked.add(new Asked(from.span(), to.span(), relation));
                     }
-                    if (asked.size() == before) pruned++;
+                    if (!allowed) pruned++;
                 }
                 if (asked.isEmpty()) continue;
                 for (var q : asked) {
@@ -489,10 +492,11 @@ public final class ExtractionPipeline {
 
     private static JsonObject relationQuestion(String from, String to, String relation) {
         var stated = sentence(relation, from, to);
-        var reverse = sentence(relation, to, from);
-        var falseCriterion = ("state.memory does not state that %s: the two only appear together, share a topic, are "
-                + "related the other way round (%s), or the relation is an inference the memory does not state")
-                .formatted(stated, reverse);
+        // The reverse of a symmetric relation is the same fact, so it is no near-miss.
+        var reverse = GraphSpikeScorer.SYMMETRIC.contains(relation) ? ""
+                : " are related the other way round (%s),".formatted(sentence(relation, to, from));
+        var falseCriterion = ("state.memory does not state that %s: the two only appear together, share a topic,%s "
+                + "or the relation is an inference the memory does not state").formatted(stated, reverse);
         return JevApi.noulQuestion("state.memory states that " + stated, falseCriterion, rules(
                 "Does state.memory state that %s?".formatted(stated) + DATA_NOT_INSTRUCTIONS));
     }

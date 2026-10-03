@@ -204,6 +204,24 @@ class ExtractionPipelineTest extends UnitTest {
     }
 
     @Test
+    void aSymmetricRelationIsAskedOnceAndItsReverseIsNoNearMiss() {
+        var text = "Wren Castillo and Mateo Castillo are siblings.";
+        run(text, spans("Wren Castillo", "Mateo Castillo"), scripted(Map.of(
+                "Wren Castillo", "Person", "Mateo Castillo", "Person"), Map.of()));
+        var questions = requests.getLast().getAsJsonObject("questions").entrySet().stream()
+                .map(q -> q.getValue().getAsJsonObject()).toList();
+        assertEquals(Set.of("Wren Castillo family_of Mateo Castillo", "Wren Castillo same_as Mateo Castillo",
+                "Wren Castillo kind_of Mateo Castillo", "Mateo Castillo kind_of Wren Castillo"),
+                questions.stream().map(ExtractionPipelineTest::relationKey).collect(Collectors.toSet()));
+        assertEquals(4, questions.size());
+        for (var q : questions) {
+            var falseCriterion = q.getAsJsonObject("criteria").get("false").getAsString();
+            boolean symmetric = !relationKey(q).contains("kind_of");
+            assertEquals(!symmetric, falseCriterion.contains("other way round"), falseCriterion);
+        }
+    }
+
+    @Test
     void onlyTheStrongestRelationOfAPairIsKeptInOneDirection() {
         var text = "Atlas and Beacon are linked.";
         var decider = scripted(Map.of("Atlas", "Project", "Beacon", "Project"),

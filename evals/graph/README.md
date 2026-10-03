@@ -64,7 +64,8 @@ Decision-only: code finds every candidate and the decision model only chooses
 5. **Relations.** For every ordered pair of typed terms and every relation the schema allows
    between them, one `noul` yes/no question: does the memory state the relation's sentence
    ("X is a kind of Y", "X is a family member of Y", ...)? The false criterion names the
-   near-misses: the two only co-occur, share a topic, are related the other way round, or the
+   near-misses: the two only co-occur, share a topic, are related the other way round (except
+   for the symmetric `family_of` and `same_as`, which are asked once per pair), or the
    relation is an inference. Per unordered pair only the highest-yes relation and direction
    is kept, so a pair never holds two relations or one written both ways.
 
