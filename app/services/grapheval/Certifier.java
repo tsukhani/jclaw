@@ -1,10 +1,10 @@
-package services.graphspike;
+package services.grapheval;
 
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
 import org.jspecify.annotations.Nullable;
-import services.graphspike.GraphSpikeScorer.Point;
-import services.graphspike.GraphSpikeScorer.WrongRecord;
+import services.grapheval.GraphEvalScorer.Point;
+import services.grapheval.GraphEvalScorer.WrongRecord;
 
 import java.util.ArrayList;
 import java.util.HashSet;

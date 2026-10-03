@@ -1,11 +1,11 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.graphspike.Certifier;
-import services.graphspike.Certifier.Adjudication;
-import services.graphspike.Certifier.Walk;
-import services.graphspike.GraphSpikeScorer;
-import services.graphspike.GraphSpikeScorer.Point;
-import services.graphspike.GraphSpikeScorer.WrongRecord;
+import services.grapheval.Certifier;
+import services.grapheval.Certifier.Adjudication;
+import services.grapheval.Certifier.Walk;
+import services.grapheval.GraphEvalScorer;
+import services.grapheval.GraphEvalScorer.Point;
+import services.grapheval.GraphEvalScorer.WrongRecord;
 
 import java.util.List;
 
@@ -21,7 +21,7 @@ class CertifierTest extends UnitTest {
 
     /** A grid passing every threshold at or above {@code lowest} and failing on the bound below it. */
     private static List<Point> passingDownTo(double lowest) {
-        return GraphSpikeScorer.THRESHOLDS.stream()
+        return GraphEvalScorer.THRESHOLDS.stream()
                 .map(t -> t >= lowest - 1e-9 ? point(t, 200, 0, 0.9) : point(t, 200, 40, 0.9)).toList();
     }
 
@@ -29,7 +29,7 @@ class CertifierTest extends UnitTest {
         return Certifier.walk(passingDownTo(lowest), Certifier.DEFAULT_RECALL_FLOOR);
     }
 
-    private static final WrongRecord RECORD = new WrongRecord("c007", "term:Meridian:Project", GraphSpikeScorer.MATCH);
+    private static final WrongRecord RECORD = new WrongRecord("c007", "term:Meridian:Project", GraphEvalScorer.MATCH);
 
     @Test
     void theBoundaryRowsPass() {
@@ -63,7 +63,7 @@ class CertifierTest extends UnitTest {
 
     @Test
     void theWalkStopsAtTheFirstFailure() {
-        var grid = GraphSpikeScorer.THRESHOLDS.stream()
+        var grid = GraphEvalScorer.THRESHOLDS.stream()
                 .map(t -> Math.abs(t - 0.70) < 1e-9 ? point(t, 200, 40, 0.9) : point(t, 200, 0, 0.9)).toList();
         var walk = Certifier.walk(grid, 0.5);
         assertEquals(0.75, walk.threshold());
@@ -74,7 +74,7 @@ class CertifierTest extends UnitTest {
 
     @Test
     void recallBelowTheFloorAtTheTopCertifiesNothingAndSaysRecall() {
-        var grid = GraphSpikeScorer.THRESHOLDS.stream().map(t -> point(t, 200, 0, t > 0.9 ? 0.4 : 0.9)).toList();
+        var grid = GraphEvalScorer.THRESHOLDS.stream().map(t -> point(t, 200, 0, t > 0.9 ? 0.4 : 0.9)).toList();
         var walk = Certifier.walk(grid, 0.5);
         assertNull(walk.threshold());
         assertTrue(walk.failure().contains("recall"), walk.failure());

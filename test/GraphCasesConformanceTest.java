@@ -6,12 +6,12 @@ import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
-import services.graphspike.CandidateGenerator;
-import services.graphspike.GraphCases;
-import services.graphspike.GraphCases.Case;
-import services.graphspike.GraphCases.Entity;
-import services.graphspike.GraphCases.Relation;
-import services.graphspike.GraphSpikeScorer;
+import services.grapheval.CandidateGenerator;
+import services.grapheval.GraphCases;
+import services.grapheval.GraphCases.Case;
+import services.grapheval.GraphCases.Entity;
+import services.grapheval.GraphCases.Relation;
+import services.grapheval.GraphEvalScorer;
 
 import java.nio.file.Files;
 import java.util.ArrayList;
@@ -64,7 +64,7 @@ class GraphCasesConformanceTest extends UnitTest {
         }
         long hard = cases.stream().filter(c -> c.tags().stream().anyMatch(GraphCases.HARD_NEGATIVE_TAGS::contains)).count();
         if (hard * 2 < n) out.add("hard-negative cases at least 50%");
-        if (cases.stream().mapToInt(GraphSpikeScorer::gold).sum() < 420) out.add("at least 420 non-noise gold records");
+        if (cases.stream().mapToInt(GraphEvalScorer::gold).sum() < 420) out.add("at least 420 non-noise gold records");
         var types = new HashSet<String>();
         var relations = new HashSet<String>();
         var seenIn = new HashMap<String, Integer>();

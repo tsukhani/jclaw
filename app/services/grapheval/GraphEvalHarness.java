@@ -1,4 +1,4 @@
-package services.graphspike;
+package services.grapheval;
 
 import memory.MemoryProvenance;
 import memory.MemoryStoreFactory;
@@ -10,17 +10,17 @@ import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.EventLogger;
 import services.Tx;
-import services.graphspike.Certifier.Adjudication;
-import services.graphspike.Certifier.Certification;
-import services.graphspike.Certifier.Combined;
-import services.graphspike.Certifier.Walk;
-import services.graphspike.ExtractionPipeline.CaseRun;
-import services.graphspike.ExtractionPipeline.Decider;
-import services.graphspike.GraphCases.Case;
-import services.graphspike.GraphSpikeScorer.Point;
-import services.graphspike.GraphSpikeScorer.WrongRecord;
-import services.graphspike.StageScorer.StageRun;
-import services.graphspike.StageScorer.Stages;
+import services.grapheval.Certifier.Adjudication;
+import services.grapheval.Certifier.Certification;
+import services.grapheval.Certifier.Combined;
+import services.grapheval.Certifier.Walk;
+import services.grapheval.ExtractionPipeline.CaseRun;
+import services.grapheval.ExtractionPipeline.Decider;
+import services.grapheval.GraphCases.Case;
+import services.grapheval.GraphEvalScorer.Point;
+import services.grapheval.GraphEvalScorer.WrongRecord;
+import services.grapheval.StageScorer.StageRun;
+import services.grapheval.StageScorer.Stages;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -42,15 +42,15 @@ import java.util.concurrent.Future;
  * agent for the run; a held-out one is read where it lives. Either way the harness proves every row was left as it
  * was found. Graph records exist only in the returned report; nothing writes one anywhere.
  */
-public final class GraphSpikeHarness {
+public final class GraphEvalHarness {
 
     public static final int DEFAULT_RUNS = 2;
     public static final double LISTING_FLOOR = 0.50;
-    private static final String CATEGORY = "graphspike";
+    private static final String CATEGORY = "grapheval";
     private static final String MEMORY_CATEGORY = "fact";
     private static final double IMPORTANCE = 0.5;
 
-    private GraphSpikeHarness() {}
+    private GraphEvalHarness() {}
 
     public record DecisionModel(String name, Decider decider) {}
 
@@ -70,15 +70,18 @@ public final class GraphSpikeHarness {
     public record ModelReport(String model, List<RunReport> runs, Certification certification, double wrongRecordsAt,
                               List<WrongRecord> wrongRecords) {}
 
-    /** The committed set's whole result. It carries no timings, so a rerun with the same answers is identical. */
-    public record Report(String set, int cases, int runs, double recallFloor, Agreement.Result agreement,
-                         List<ModelReport> models, MemoryIntegrity memoryIntegrity) {}
+    /**
+     * The committed set's whole result. It carries no timings, so a rerun with the same answers is identical.
+     * {@code schema} is the seed's {@link OntologySchema#fingerprint()}: a certificate is void under any other.
+     */
+    public record Report(String set, String schema, int cases, int runs, double recallFloor,
+                         Agreement.Result agreement, List<ModelReport> models, MemoryIntegrity memoryIntegrity) {}
 
     /** One model over the held-out set; the walk is information only, since only the committed set certifies. */
     public record HeldOutModel(String model, List<RunReport> runs, Combined walk) {}
 
     /** The held-out set's result: aggregate counts only, never an id, a text or a span. */
-    public record HeldOutReport(String set, int cases, int unlabelled, int runs, double recallFloor,
+    public record HeldOutReport(String set, String schema, int cases, int unlabelled, int runs, double recallFloor,
                                 List<HeldOutModel> models, HeldOutIntegrity memoryIntegrity) {}
 
     /** The columns a decision must never touch. */
@@ -139,24 +142,28 @@ public final class GraphSpikeHarness {
             var walks = data.stream().map(d -> d.report().walk()).toList();
             var threshold = Certifier.combine(walks).threshold();
             double listedAt = threshold == null ? LISTING_FLOOR : threshold;
-            var wrong = GraphSpikeScorer.union(data.stream()
-                    .map(d -> GraphSpikeScorer.score(cases, d.e2e(), listedAt).wrong()).toList());
+            var wrong = GraphEvalScorer.union(data.stream()
+                    .map(d -> GraphEvalScorer.score(cases, d.e2e(), listedAt).wrong()).toList());
             var certification = Certifier.certify(walks, !changed.isEmpty(), agreement.complete(),
                     threshold == null ? List.of() : wrong, adjudications);
             reports.add(new ModelReport(m.name(), data.stream().map(RunData::report).toList(), certification,
                     listedAt, wrong));
         }
-        return new Report("cases", cases.size(), runs, recallFloor, agreement, reports, integrity);
+        return new Report("cases", schema.fingerprint(), cases.size(), runs, recallFloor, agreement, reports, integrity);
     }
 
-    /** Runs the held-out set over the memories where they live: nothing is stored, edited or deleted. */
-    public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, OntologySchema schema, List<DecisionModel> models,
-                                           int runs, double recallFloor, int concurrency) {
+    /**
+     * Runs the held-out set over the memories where they live: nothing is stored, edited or deleted. {@code ownerName}
+     * is the owner their agent's USER.md names, a known name to the candidates, or null.
+     */
+    public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, @Nullable String ownerName, OntologySchema schema,
+                                           List<DecisionModel> models, int runs, double recallFloor, int concurrency) {
         var cases = loaded.cases().stream().map(HeldOut.HeldCase::labels).toList();
         var memoryIds = new LinkedHashMap<String, String>();
         loaded.cases().forEach(h -> memoryIds.put(h.labels().id(), String.valueOf(h.memoryId())));
         var before = snapshot(memoryIds);
-        var measured = measure(cases, schema, models, runs, recallFloor, concurrency, List.of(), null);
+        var known = ownerName == null ? List.<String>of() : List.of(ownerName);
+        var measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName);
         var after = snapshot(memoryIds);
         int unchanged = 0;
         int present = 0;
@@ -172,8 +179,8 @@ public final class GraphSpikeHarness {
             reports.add(new HeldOutModel(m.name(), runReports,
                     Certifier.combine(runReports.stream().map(RunReport::walk).toList())));
         }
-        return new HeldOutReport("heldout", cases.size(), loaded.unlabelled(), runs, recallFloor, reports,
-                new HeldOutIntegrity(before.size(), unchanged, present));
+        return new HeldOutReport("heldout", schema.fingerprint(), cases.size(), loaded.unlabelled(), runs, recallFloor,
+                reports, new HeldOutIntegrity(before.size(), unchanged, present));
     }
 
     /** Every model's runs over {@code cases}, by model name. */
@@ -196,7 +203,7 @@ public final class GraphSpikeHarness {
                 i += cases.size();
                 var e2e = slice.stream().map(CaseResult::e2e).toList();
                 var stages = StageScorer.score(cases, slice.stream().map(CaseResult::stages).toList(), ownerName);
-                var grid = GraphSpikeScorer.grid(cases, e2e);
+                var grid = GraphEvalScorer.grid(cases, e2e);
                 out.computeIfAbsent(m.name(), _ -> new ArrayList<>()).add(
                         new RunData(new RunReport(r + 1, stages, grid, Certifier.walk(grid, recallFloor)), e2e));
             }
@@ -246,11 +253,11 @@ public final class GraphSpikeHarness {
             return results;
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new IllegalStateException("graph spike interrupted", e);
+            throw new IllegalStateException("graph eval interrupted", e);
         } catch (ExecutionException e) {
-            throw new IllegalStateException("graph spike task failed", e.getCause());
+            throw new IllegalStateException("graph eval task failed", e.getCause());
         } catch (Exception e) {
-            throw new IllegalStateException("graph spike task failed", e);
+            throw new IllegalStateException("graph eval task failed", e);
         }
     }
 

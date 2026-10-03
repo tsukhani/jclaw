@@ -1,7 +1,7 @@
 # Graph-extraction cases (JCLAW-1356, JCLAW-1358)
 
 `cases.json` is the labelled set that certifies a local Ollama decision model for graph
-extraction (`POST /api/graph/spike`, `./jclaw.sh graphspike run`). It is not an
+extraction (`POST /api/graph/eval`, `./jclaw.sh grapheval run`). It is not an
 `evals/suites/` dataset: those are offline and agent-turn shaped, while this one needs a
 live decision provider. `GUIDE.md` is how to label; this file is the format and the scoring.
 
@@ -46,7 +46,7 @@ models selected in Settings. A hosted model such as `jev-latest` is refused with
 - `tags` are from `weekday-time`, `role`, `everyday-object`, `descriptive-phrase`,
   `reversed-direction`, `employer-tool` (the hard negatives), `plain` and `guest`.
 
-`services.graphspike.GraphCases` refuses a set that breaks the mention, type, relation,
+`services.grapheval.GraphCases` refuses a set that breaks the mention, type, relation,
 negative, tag or operator-mention rules, naming the case; `GraphCasesConformanceTest` checks
 the operator count and the guest rules, and fails the build on a refusal or on a missed
 composition target: at least 120 cases, 12-17% beginning "The user", at least 60% beginning the
@@ -153,10 +153,16 @@ The report lists the wrong records at the certified threshold (at 0.50 when noth
 certified). A written set only grows as t falls, so adjudicating those covers every
 threshold above it.
 
+The report's `schema` is the seed's fingerprint, `v<version>@<12 hex>`: a SHA-256 prefix over
+each term type's name and covers text and each relation's name and endpoints, the parts of
+the schema the questions are built from. A certificate holds only while the loaded seed has
+that fingerprint; any edit to those parts means certifying again.
+
 ## Second labels and adjudications
 
-`./jclaw.sh graphspike blind-sheet` writes `data/graph-eval/blind-sheet.json`: the ids and
-text of the blind subset, ceil(15%) of the cases chosen by SHA-256 of `"jclaw-1356:" + id`.
+`./jclaw.sh grapheval blind-sheet` writes `data/graph-eval/blind-sheet.json`: the ids and
+text of the blind subset, ceil(15%) of the cases chosen by SHA-256 of `"jclaw-1356:" + id`,
+and the set's `userMd`, which says whose name stands for the operator.
 A second labeller works from that sheet and `GUIDE.md` alone and commits
 `evals/graph/second-labels.json` in the same format as `cases.json`. The report gives entity
 F1, Cohen's kappa on matched entity types and relation F1.
@@ -177,14 +183,16 @@ certification until `cases.json` is fixed.
 The held-out set measures a model on real memories and runs only on the operator's Mac. Its
 files live under `data/graph-eval/`, which is gitignored, and never leave that machine.
 
-1. `./jclaw.sh graphspike heldout-sample --agent NAME --count 100 [--seed S]` reads that
+1. `./jclaw.sh grapheval heldout-sample --agent NAME --count 100 [--seed S]` reads that
    many of the agent's active memories, read-only, into `data/graph-eval/heldout.json`,
    each with `labelled: false` and its generated candidates. It refuses to overwrite an
    existing file.
 2. Label each case in place under `GUIDE.md` (tags optional) and set `labelled: true`.
-3. `./jclaw.sh graphspike run --agent NAME --set heldout` reads the memories where they live:
+3. `./jclaw.sh grapheval run --agent NAME --set heldout` reads the memories where they live:
    nothing is stored, edited or deleted, and the report checks every row is unchanged and
-   still present. Unlabelled cases are skipped and counted.
+   still present. Unlabelled cases are skipped and counted. The owner is the one named in
+   the USER.md of the agent the sampled memories belong to; label their mentions of that name
+   as the operator. A file holding memories of two agents is refused.
 
 The held-out report carries aggregate counts only: no memory id, text, span or per-case
 result. Its walk is information; only the committed set certifies.

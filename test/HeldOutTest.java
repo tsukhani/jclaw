@@ -9,26 +9,29 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.AgentService;
 import services.Tx;
-import services.graphspike.HeldOut;
+import services.grapheval.GraphCases;
+import services.grapheval.HeldOut;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Function;
 
 /** JCLAW-1356: sampling reads an agent's memories into a file without touching them; loading skips unlabelled rows. */
 class HeldOutTest extends UnitTest {
 
     private String agentId;
+    private String agentName;
     private final List<String> memoryIds = new ArrayList<>();
     private Path dir;
 
     @BeforeEach
     void setUp() throws Exception {
         LuceneTestSync.closedForTest();
-        agentId = String.valueOf(AgentService.create("heldout-" + UUID.randomUUID().toString().substring(0, 8),
-                "test-provider", "test-model").id);
+        agentName = "heldout-" + UUID.randomUUID().toString().substring(0, 8);
+        agentId = String.valueOf(AgentService.create(agentName, "test-provider", "test-model").id);
         var store = MemoryStoreFactory.get();
         for (int i = 0; i < 5; i++) {
             var text = "The user keeps notebook " + i + " at Harborlight Analytics.";
@@ -120,5 +123,22 @@ class HeldOutTest extends UnitTest {
         e = assertThrows(IllegalArgumentException.class, () -> HeldOut.load(file, OntologySchema.seed()));
         assertEquals("case h0: labels break the v2 rules in GUIDE.md", e.getMessage());
         assertFalse(e.getMessage().contains("Quillfeather"), "a refusal never quotes a span");
+    }
+
+    @Test
+    void theHeldOutAgentIsTheOneItsMemoriesBelongTo() throws Exception {
+        Function<List<String>, HeldOut.Loaded> loaded = ids -> new HeldOut.Loaded(ids.stream()
+                .map(id -> new HeldOut.HeldCase(Long.parseLong(id), new GraphCases.Case("h", List.of(), "x", List.of(),
+                        List.of(), List.of()))).toList(), 0);
+        assertEquals(agentName, HeldOut.agentName(loaded.apply(memoryIds)));
+        assertNull(HeldOut.agentName(loaded.apply(List.of())));
+        assertNull(HeldOut.agentName(loaded.apply(List.of("999999999"))), "no stored memory, no agent");
+
+        var other = String.valueOf(AgentService.create("heldout-other-" + UUID.randomUUID().toString().substring(0, 8),
+                "test-provider", "test-model").id);
+        var foreign = Tx.run(() -> MemoryStoreFactory.get().storeDeferred(other, "The user keeps a ledger.", "fact", 0.5));
+        memoryIds.add(foreign);
+        var e = assertThrows(IllegalArgumentException.class, () -> HeldOut.agentName(loaded.apply(memoryIds)));
+        assertTrue(e.getMessage().contains("more than one agent"), e.getMessage());
     }
 }

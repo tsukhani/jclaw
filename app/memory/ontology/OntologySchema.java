@@ -9,10 +9,14 @@ import play.Play;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -38,6 +42,8 @@ public record OntologySchema(
     public static final String SAME = "same";
     public static final String ANY = "Any";
     private static final String ARROW = "->";
+    // ASCII unit separator: no name, covers text or endpoint holds it, so two schemas cannot render alike.
+    private static final char FIELD_SEP = (char) 0x1F;
 
     public enum Match {
         EXACT,
@@ -90,6 +96,27 @@ public record OntologySchema(
                 && termTypes.containsKey(fromType)
                 && termTypes.containsKey(toType)
                 && relation.allows(fromType, toType);
+    }
+
+    /**
+     * {@code v<version>@<12 hex>}: the version and a SHA-256 prefix over what extraction asks with, each term type's
+     * name and covers text and each relation's name and endpoints. A graph-eval certificate holds only under the
+     * fingerprint it was measured with.
+     */
+    public String fingerprint() {
+        var canonical = new StringBuilder();
+        termTypes.forEach((name, t) -> canonical.append(name).append(FIELD_SEP).append(t.covers()).append(FIELD_SEP));
+        relations.forEach((name, r) -> {
+            canonical.append(name);
+            r.endpoints().forEach(e -> canonical.append(FIELD_SEP).append(e));
+            canonical.append(FIELD_SEP);
+        });
+        try {
+            var digest = MessageDigest.getInstance("SHA-256").digest(canonical.toString().getBytes(StandardCharsets.UTF_8));
+            return "v" + version + "@" + HexFormat.of().formatHex(digest).substring(0, 12);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 
     public static OntologySchema seed() {

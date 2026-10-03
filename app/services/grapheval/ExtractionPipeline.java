@@ -1,4 +1,4 @@
-package services.graphspike;
+package services.grapheval;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -8,7 +8,7 @@ import services.decision.DecisionContext;
 import services.decision.JevApi;
 import services.decision.JevException;
 import services.decision.OllamaDecision;
-import services.graphspike.CandidateGenerator.Candidate;
+import services.grapheval.CandidateGenerator.Candidate;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -330,7 +330,7 @@ public final class ExtractionPipeline {
                         if (!schema.allows(relation, from.type(), to.type())) continue;
                         allowed = true;
                         // A symmetric relation asked one way has been asked both ways.
-                        if (GraphSpikeScorer.SYMMETRIC.contains(relation)
+                        if (GraphEvalScorer.SYMMETRIC.contains(relation)
                                 && asked.contains(new Asked(to.span(), from.span(), relation))) {
                             continue;
                         }
@@ -495,7 +495,7 @@ public final class ExtractionPipeline {
     private static JsonObject relationQuestion(String from, String to, String relation) {
         var stated = sentence(relation, from, to);
         // The reverse of a symmetric relation is the same fact, so it is no near-miss.
-        var reverse = GraphSpikeScorer.SYMMETRIC.contains(relation) ? ""
+        var reverse = GraphEvalScorer.SYMMETRIC.contains(relation) ? ""
                 : " are related the other way round (%s),".formatted(sentence(relation, to, from));
         var falseCriterion = ("state.memory does not state that %s: the two only appear together, share a topic,%s "
                 + "or the relation is an inference the memory does not state").formatted(stated, reverse);

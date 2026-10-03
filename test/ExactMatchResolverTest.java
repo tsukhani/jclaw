@@ -1,7 +1,7 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.graphspike.ExactMatchResolver;
-import services.graphspike.ExactMatchResolver.Mention;
+import services.grapheval.ExactMatchResolver;
+import services.grapheval.ExactMatchResolver.Mention;
 
 import java.util.List;
 

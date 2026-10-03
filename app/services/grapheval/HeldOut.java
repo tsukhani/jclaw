@@ -1,12 +1,13 @@
-package services.graphspike;
+package services.grapheval;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import memory.ontology.OntologySchema;
+import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.db.jpa.JPA;
 import services.Tx;
-import services.graphspike.GraphCases.Case;
+import services.grapheval.GraphCases.Case;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -82,6 +83,22 @@ public final class HeldOut {
         Files.createDirectories(file.toAbsolutePath().getParent());
         Files.writeString(file, GSON.toJson(root));
         return new Sampled(cases.size(), rows.size());
+    }
+
+    /**
+     * The name of the agent whose memories {@code loaded} holds, so its USER.md can name the owner; null when none of
+     * them is still stored.
+     *
+     * @throws IllegalArgumentException when they belong to more than one agent
+     */
+    public static @Nullable String agentName(Loaded loaded) {
+        var ids = loaded.cases().stream().map(HeldCase::memoryId).toList();
+        if (ids.isEmpty()) return null;
+        List<String> names = Tx.run(() -> JPA.em().createQuery(
+                        "SELECT DISTINCT m.agent.name FROM Memory m WHERE m.id IN :ids", String.class)
+                .setParameter("ids", ids).getResultList());
+        if (names.size() > 1) throw new IllegalArgumentException("the held-out memories belong to more than one agent");
+        return names.isEmpty() ? null : names.getFirst();
     }
 
     /**

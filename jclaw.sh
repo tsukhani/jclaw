@@ -393,7 +393,7 @@ usage_for() {
         backup|restore|repair|db-clean|db-status) usage_database ;;
         loadtest) usage_loadtest ;;
         scrapetest) usage_scrapetest ;;
-        graphspike) usage_graphspike ;;
+        grapheval) usage_grapheval ;;
         evals)    usage_evals    ;;
         diagnostics) usage_diagnostics ;;
         test)     usage_test     ;;
@@ -982,11 +982,11 @@ Build or refresh the corpus first:
 USAGE
 }
 
-usage_graphspike() {
+usage_grapheval() {
     cat <<'USAGE'
-Usage: ./jclaw.sh graphspike run --agent NAME [options]
-       ./jclaw.sh graphspike blind-sheet
-       ./jclaw.sh graphspike heldout-sample --agent NAME --count N [--seed S]
+Usage: ./jclaw.sh grapheval run --agent NAME [options]
+       ./jclaw.sh grapheval blind-sheet
+       ./jclaw.sh grapheval heldout-sample --agent NAME --count N [--seed S]
 
 Certifies local Ollama decision models for graph extraction (JCLAW-1356).
 Needs the backend running. evals/graph/README.md is the contract.
@@ -1550,19 +1550,19 @@ while [[ $# -gt 0 ]]; do
             SCRAPETEST_ARGS=("$@")
             break
             ;;
-        graphspike)
+        grapheval)
             # Developer-only; flags are forwarded verbatim, as for scrapetest.
             if ! is_developer_clone; then
-                echo "Error: 'graphspike' is a developer-only command, not available in this distribution."
+                echo "Error: 'grapheval' is a developer-only command, not available in this distribution."
                 exit 1
             fi
             COMMAND="$1"
             shift
             if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-                usage_graphspike
+                usage_grapheval
                 exit 0
             fi
-            GRAPHSPIKE_ARGS=("$@")
+            GRAPHEVAL_ARGS=("$@")
             break
             ;;
         evals)
@@ -3932,12 +3932,12 @@ PYSUM
 }
 
 # Same loopback + X-Loadtest-Auth boundary as scrapetest.
-do_graphspike() {
+do_grapheval() {
     local sub="${1:-}"
     case "$sub" in
         run|blind-sheet|heldout-sample) shift ;;
-        --help|-h) usage_graphspike; exit 0 ;;
-        *) echo "Error: graphspike needs a subcommand: run, blind-sheet or heldout-sample."; usage_graphspike; exit 2 ;;
+        --help|-h) usage_grapheval; exit 0 ;;
+        *) echo "Error: grapheval needs a subcommand: run, blind-sheet or heldout-sample."; usage_grapheval; exit 2 ;;
     esac
     local agent="" set="" runs="" floor="" concurrency="" timeout="" out="" count="" seed=""
     local -a models=()
@@ -3953,18 +3953,18 @@ do_graphspike() {
             --out)            out="${2:-}";         shift 2 ;;
             --count)          count="${2:-}";       shift 2 ;;
             --seed)           seed="${2:-}";        shift 2 ;;
-            --help|-h)        usage_graphspike; exit 0 ;;
-            *) echo "Error: unknown option for graphspike $sub: $1"; usage_graphspike; exit 2 ;;
+            --help|-h)        usage_grapheval; exit 0 ;;
+            *) echo "Error: unknown option for grapheval $sub: $1"; usage_grapheval; exit 2 ;;
         esac
     done
     if [[ "$sub" != "blind-sheet" && -z "$agent" ]]; then
-        echo "Error: graphspike $sub needs --agent."
-        usage_graphspike
+        echo "Error: grapheval $sub needs --agent."
+        usage_grapheval
         exit 2
     fi
     if [[ "$sub" == "heldout-sample" && -z "$count" ]]; then
-        echo "Error: graphspike heldout-sample needs --count."
-        usage_graphspike
+        echo "Error: grapheval heldout-sample needs --count."
+        usage_grapheval
         exit 2
     fi
 
@@ -3974,7 +3974,7 @@ do_graphspike() {
     var_name=$(secret_var_name)
     secret=${!var_name:-}
     if [[ -z "$secret" ]]; then
-        echo "Error: $var_name is not set - graphspike authenticates with it via the"
+        echo "Error: $var_name is not set - grapheval authenticates with it via the"
         echo "       X-Loadtest-Auth header. Generate or rotate via: $0 secret"
         exit 1
     fi
@@ -3987,9 +3987,9 @@ do_graphspike() {
 
     local body path
     case "$sub" in
-        run)            path="/api/graph/spike" ;;
-        blind-sheet)    path="/api/graph/spike/blind-sheet" ;;
-        heldout-sample) path="/api/graph/spike/heldout/sample" ;;
+        run)            path="/api/graph/eval" ;;
+        blind-sheet)    path="/api/graph/eval/blind-sheet" ;;
+        heldout-sample) path="/api/graph/eval/heldout/sample" ;;
     esac
     body=$(python3 - "$sub" "$agent" "$set" "$runs" "$floor" "$concurrency" "$timeout" "$count" "$seed" \
         ${models[@]+"${models[@]}"} <<'PYBODY'
@@ -4020,7 +4020,7 @@ print(json.dumps(body))
 PYBODY
 ) || { echo "Error: --recall-floor must be a number; --runs, --concurrency, --timeout, --count and --seed integers."; exit 2; }
 
-    echo "==> graphspike $sub${agent:+ for agent $agent}"
+    echo "==> grapheval $sub${agent:+ for agent $agent}"
     local tmp status
     tmp=$(mktemp)
     status=$(curl -s -o "$tmp" -w '%{http_code}' \
@@ -4030,7 +4030,7 @@ PYBODY
         "http://localhost:$BACKEND_PORT$path")
 
     if [[ "$status" != "200" ]]; then
-        echo "Error: graphspike $sub failed (HTTP $status)"
+        echo "Error: grapheval $sub failed (HTTP $status)"
         cat "$tmp"; echo; rm -f "$tmp"
         exit 1
     fi
@@ -4057,7 +4057,8 @@ def pct(v):
 def ratio(x):
     return "%d/%d %s" % (x["hit"], x["total"], pct(x.get("rate")))
 print()
-print("  set %s: %d cases, %d runs, recall floor %.2f" % (r["set"], r["cases"], r["runs"], r["recallFloor"]))
+print("  set %s: %d cases, %d runs, recall floor %.2f, schema %s"
+      % (r["set"], r["cases"], r["runs"], r["recallFloor"], r["schema"]))
 if r.get("unlabelled"):
     print("  unlabelled (skipped): %d" % r["unlabelled"])
 for m in r["models"]:
@@ -5964,8 +5965,8 @@ case "$COMMAND" in
     scrapetest)
         do_scrapetest ${SCRAPETEST_ARGS[@]+"${SCRAPETEST_ARGS[@]}"}
         ;;
-    graphspike)
-        do_graphspike ${GRAPHSPIKE_ARGS[@]+"${GRAPHSPIKE_ARGS[@]}"}
+    grapheval)
+        do_grapheval ${GRAPHEVAL_ARGS[@]+"${GRAPHEVAL_ARGS[@]}"}
         ;;
     evals)
         do_evals

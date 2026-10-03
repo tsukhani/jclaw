@@ -1,10 +1,10 @@
-package services.graphspike;
+package services.grapheval;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import org.jspecify.annotations.Nullable;
-import services.graphspike.GraphCases.Case;
-import services.graphspike.GraphCases.Entity;
+import services.grapheval.GraphCases.Case;
+import services.grapheval.GraphCases.Entity;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -41,8 +41,11 @@ public final class Agreement {
         return cases.stream().map(Case::id).sorted(Comparator.comparing(Agreement::hash)).limit(count).toList();
     }
 
-    /** The sheet a blind labeller works from: the selected cases' ids and text, and nothing else. */
-    public static JsonObject blindSheet(List<Case> cases) {
+    /**
+     * The sheet a blind labeller works from: the selected cases' ids and text, and the set's {@code userMd} when it
+     * declares an owner, so the labeller knows whose name stands for the operator. Nothing else.
+     */
+    public static JsonObject blindSheet(List<Case> cases, @Nullable String userMd) {
         var selected = new HashSet<>(blindSelection(cases));
         var out = new JsonArray();
         for (var c : cases) {
@@ -53,6 +56,7 @@ public final class Agreement {
             out.add(o);
         }
         var root = new JsonObject();
+        if (userMd != null) root.addProperty("userMd", userMd);
         root.add("cases", out);
         return root;
     }
@@ -131,7 +135,7 @@ public final class Agreement {
     }
 
     private static List<String> key(String from, String type, String to) {
-        if (GraphSpikeScorer.SYMMETRIC.contains(type) && from.compareTo(to) > 0) return List.of(to, type, from);
+        if (GraphEvalScorer.SYMMETRIC.contains(type) && from.compareTo(to) > 0) return List.of(to, type, from);
         return List.of(from, type, to);
     }
 

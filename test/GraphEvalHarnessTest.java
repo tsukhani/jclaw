@@ -10,19 +10,20 @@ import play.Play;
 import play.test.UnitTest;
 import services.AgentService;
 import services.Tx;
-import services.graphspike.Agreement;
-import services.graphspike.CandidateGenerator;
-import services.graphspike.Certifier;
-import services.graphspike.Certifier.Adjudication;
-import services.graphspike.ExtractionPipeline;
-import services.graphspike.ExtractionPipeline.Decider;
-import services.graphspike.GraphCases;
-import services.graphspike.GraphCases.Case;
-import services.graphspike.GraphSpikeHarness;
-import services.graphspike.GraphSpikeHarness.DecisionModel;
-import services.graphspike.GraphSpikeScorer;
-import services.graphspike.GraphSpikeScorer.WrongRecord;
-import services.graphspike.HeldOut;
+import services.grapheval.Agreement;
+import services.grapheval.CandidateGenerator;
+import services.grapheval.Certifier;
+import services.grapheval.Certifier.Adjudication;
+import services.grapheval.ExtractionPipeline;
+import services.grapheval.ExtractionPipeline.Decider;
+import services.grapheval.GraphCases;
+import services.grapheval.GraphCases.Case;
+import services.grapheval.GraphEvalHarness;
+import services.grapheval.GraphEvalHarness.DecisionModel;
+import services.grapheval.GraphEvalScorer;
+import services.grapheval.GraphEvalScorer.WrongRecord;
+import services.grapheval.HeldOut;
+import services.grapheval.StageScorer;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -34,6 +35,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 import static utils.GsonHolder.GSON;
@@ -43,7 +45,7 @@ import static utils.GsonHolder.GSON;
  * that edits a memory, and the
  * held-out set. Concurrency 1 keeps every step on the test thread, inside the test's transaction.
  */
-class GraphSpikeHarnessTest extends UnitTest {
+class GraphEvalHarnessTest extends UnitTest {
 
     private static final Pattern QUOTED = Pattern.compile("\"([^\"]*)\"");
     private static final OntologySchema SCHEMA = OntologySchema.seed();
@@ -53,7 +55,7 @@ class GraphSpikeHarnessTest extends UnitTest {
     @BeforeEach
     void setUp() {
         LuceneTestSync.closedForTest();
-        agentId = String.valueOf(AgentService.create("graphspike-" + UUID.randomUUID().toString().substring(0, 8),
+        agentId = String.valueOf(AgentService.create("grapheval-" + UUID.randomUUID().toString().substring(0, 8),
                 "test-provider", "test-model").id);
     }
 
@@ -140,8 +142,8 @@ class GraphSpikeHarnessTest extends UnitTest {
         return a;
     }
 
-    private GraphSpikeHarness.Report run(List<Case> cases, Decider decider) {
-        return GraphSpikeHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
+    private GraphEvalHarness.Report run(List<Case> cases, Decider decider) {
+        return GraphEvalHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
                 Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), List.of());
     }
 
@@ -164,17 +166,17 @@ class GraphSpikeHarnessTest extends UnitTest {
         };
     }
 
-    private GraphSpikeHarness.Report runWithLabels(List<Case> cases, Decider decider, List<Adjudication> verdicts) {
+    private GraphEvalHarness.Report runWithLabels(List<Case> cases, Decider decider, List<Adjudication> verdicts) {
         var blind = new HashSet<>(Agreement.blindSelection(cases));
         var second = cases.stream().filter(c -> blind.contains(c.id())).toList();
-        return GraphSpikeHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
+        return GraphEvalHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", decider)), 2,
                 Certifier.DEFAULT_RECALL_FLOOR, 1, second, verdicts);
     }
 
     @Test
     void aWrongRecordAtTheCertifiedThresholdAwaitsAdjudicationThenCertifies() throws Exception {
         var cases = committed();
-        var expected = new WrongRecord("c015", "term:Larchmere House:Organization", GraphSpikeScorer.TYPE);
+        var expected = new WrongRecord("c015", "term:Larchmere House:Organization", GraphEvalScorer.TYPE);
 
         var pending = runWithLabels(cases, oneMistyped(cases), List.of());
         assertTrue(pending.agreement().complete(), pending.agreement().toString());
@@ -204,6 +206,7 @@ class GraphSpikeHarnessTest extends UnitTest {
 
         assertTrue(stored.get(), "every case is a stored memory while the decisions run");
         assertEquals(List.of(), Tx.run(() -> Memory.findByAgent(agentId)), "every case memory deleted afterwards");
+        assertEquals(SCHEMA.fingerprint(), report.schema(), "the report names the schema it certified under");
         var integrity = report.memoryIntegrity();
         assertEquals(cases.size(), integrity.checked());
         assertEquals(cases.size(), integrity.unchanged());
@@ -285,6 +288,44 @@ class GraphSpikeHarnessTest extends UnitTest {
     }
 
     @Test
+    void aHeldOutOwnerNamedInTheTextJoinsTheOperatorOnlyWhenTheOwnerIsKnown() throws Exception {
+        var named = "Ada Pell works at Harborlight Analytics, which runs Kestrel CI for every release.";
+        var legacy = "The user works at Harborlight Analytics and reviews every release there.";
+        var store = MemoryStoreFactory.get();
+        var namedId = Tx.run(() -> store.storeDeferred(agentId, named, "fact", 0.5));
+        var legacyId = Tx.run(() -> store.storeDeferred(agentId, legacy, "fact", 0.5));
+        var dir = Files.createTempDirectory("graph-heldout-owner");
+        var file = dir.resolve(HeldOut.FILE);
+        try {
+            Files.writeString(file, GSON.toJson(Map.of("cases", List.of(
+                    Map.of("memoryId", Long.parseLong(namedId), "labelled", true, "text", named,
+                            "entities", List.of(Map.of("id", "operator", "mention", "Ada Pell", "type", "Person"),
+                                    Map.of("id", "harborlight", "mention", "Harborlight Analytics", "type", "Organization")),
+                            "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight"))),
+                    Map.of("memoryId", Long.parseLong(legacyId), "labelled", true, "text", legacy,
+                            "entities", List.of(Map.of("id", "operator", "mention", "The user", "type", "Person"),
+                                    Map.of("id", "harborlight", "mention", "Harborlight Analytics", "type", "Organization")),
+                            "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight")))))));
+            var loaded = HeldOut.load(file, SCHEMA);
+            var decider = gold(loaded.cases().stream().map(HeldOut.HeldCase::labels).toList());
+            Function<@Nullable String, StageScorer.Resolution> resolution = owner -> GraphEvalHarness.runHeldOut(loaded,
+                            owner, SCHEMA, List.of(new DecisionModel("tev1", decider)), 1, Certifier.DEFAULT_RECALL_FLOOR, 1)
+                    .models().getFirst().runs().getFirst().stages().resolution();
+
+            var known = resolution.apply("Ada Pell");
+            assertEquals(known.goldEntities(), known.clusters(), "the owner's name and \"The user\" are one operator");
+            assertEquals(1.0, known.pairwiseRecall());
+            var unknown = resolution.apply(null);
+            assertEquals(unknown.goldEntities() + 1, unknown.clusters(), "without the owner the operator splits in two");
+        } finally {
+            Files.deleteIfExists(file);
+            Files.deleteIfExists(dir);
+            Tx.run(() -> store.delete(namedId));
+            Tx.run(() -> store.delete(legacyId));
+        }
+    }
+
+    @Test
     void aHeldOutRunReportsNoIdTextOrSpanAndLeavesEveryRowAsItWas() throws Exception {
         var text = "The user works at Harborlight Analytics, which runs Kestrel CI for every release.";
         var store = MemoryStoreFactory.get();
@@ -304,7 +345,7 @@ class GraphSpikeHarnessTest extends UnitTest {
                             "relations", List.of())));
             Files.writeString(file, GSON.toJson(labelled));
             var loaded = HeldOut.load(file, SCHEMA);
-            var report = GraphSpikeHarness.runHeldOut(loaded, SCHEMA,
+            var report = GraphEvalHarness.runHeldOut(loaded, null, SCHEMA,
                     List.of(new DecisionModel("tev1", gold(loaded.cases().stream().map(HeldOut.HeldCase::labels).toList()))),
                     2, Certifier.DEFAULT_RECALL_FLOOR, 1);
 
@@ -314,7 +355,7 @@ class GraphSpikeHarnessTest extends UnitTest {
             }
             assertEquals(1, report.cases());
             assertEquals(1, report.unlabelled());
-            assertEquals(new GraphSpikeHarness.HeldOutIntegrity(1, 1, 1), report.memoryIntegrity());
+            assertEquals(new GraphEvalHarness.HeldOutIntegrity(1, 1, 1), report.memoryIntegrity());
             assertNull(report.models().getFirst().walk().threshold(), "five records cannot bound the wrong share");
             assertEquals(text, Tx.run(() -> Memory.<Memory>findById(Long.parseLong(memoryId))).text);
         } finally {

@@ -1,4 +1,4 @@
-package services.graphspike;
+package services.grapheval;
 
 import java.util.ArrayList;
 import java.util.Collection;

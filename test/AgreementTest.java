@@ -2,11 +2,11 @@ import memory.ontology.OntologySchema;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
-import services.graphspike.Agreement;
-import services.graphspike.GraphCases;
-import services.graphspike.GraphCases.Case;
-import services.graphspike.GraphCases.Entity;
-import services.graphspike.GraphCases.Relation;
+import services.grapheval.Agreement;
+import services.grapheval.GraphCases;
+import services.grapheval.GraphCases.Case;
+import services.grapheval.GraphCases.Entity;
+import services.grapheval.GraphCases.Relation;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -37,11 +37,14 @@ class AgreementTest extends UnitTest {
     }
 
     @Test
-    void theBlindSheetCarriesOnlyIdsAndText() throws Exception {
-        var sheet = Agreement.blindSheet(committed());
+    void theBlindSheetCarriesOnlyIdsTextAndTheOwner() throws Exception {
+        var sheet = Agreement.blindSheet(committed(), "Name: Avery Lin");
+        assertEquals(Set.of("userMd", "cases"), sheet.keySet());
+        assertEquals("Name: Avery Lin", sheet.get("userMd").getAsString());
         var rows = sheet.getAsJsonArray("cases");
         assertEquals(Agreement.blindSelection(committed()).size(), rows.size());
         for (var row : rows) assertEquals(Set.of("id", "text"), row.getAsJsonObject().keySet());
+        assertEquals(Set.of("cases"), Agreement.blindSheet(committed(), null).keySet(), "no owner declared, none written");
     }
 
     @Test

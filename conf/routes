@@ -408,9 +408,9 @@ POST    /api/scrape/harness                     ApiScrapeTestController.harness
 # Graph-extraction certifier (JCLAW-1344, JCLAW-1356): labelled memories through every
 # local decision model, the blind second-labeller sheet, and the held-out sample.
 # Same loopback + X-Loadtest-Auth gate.
-POST    /api/graph/spike                        ApiGraphSpikeController.spike
-POST    /api/graph/spike/blind-sheet            ApiGraphSpikeController.blindSheet
-POST    /api/graph/spike/heldout/sample         ApiGraphSpikeController.heldOutSample
+POST    /api/graph/eval                         ApiGraphEvalController.run
+POST    /api/graph/eval/blind-sheet             ApiGraphEvalController.blindSheet
+POST    /api/graph/eval/heldout/sample          ApiGraphEvalController.heldOutSample
 
 # Apps registry (SPEC-apps): operator-hosted mini-apps under public/apps/<slug>/
 GET     /api/apps                               ApiAppsController.list

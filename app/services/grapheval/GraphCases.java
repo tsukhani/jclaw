@@ -1,4 +1,4 @@
-package services.graphspike;
+package services.grapheval;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
@@ -107,7 +107,7 @@ public final class GraphCases {
         public @Nullable Relation relation(String from, String to) {
             for (var r : relations) {
                 if (r.from().equals(from) && r.to().equals(to)) return r;
-                if (GraphSpikeScorer.SYMMETRIC.contains(r.type()) && r.from().equals(to) && r.to().equals(from)) return r;
+                if (GraphEvalScorer.SYMMETRIC.contains(r.type()) && r.from().equals(to) && r.to().equals(from)) return r;
             }
             return null;
         }
@@ -158,13 +158,27 @@ public final class GraphCases {
         return ownerName(root(json));
     }
 
-    private static @Nullable String ownerName(JsonObject root) {
+    /**
+     * The set's root {@code userMd} as written, or null when it declares none.
+     *
+     * @throws IllegalArgumentException when {@code json} is not a case set, or {@code userMd} is not a string
+     */
+    public static @Nullable String userMd(String json) {
+        return userMd(root(json));
+    }
+
+    private static @Nullable String userMd(JsonObject root) {
         var userMd = root.get("userMd");
         if (userMd == null) return null;
         if (!userMd.isJsonPrimitive() || !userMd.getAsJsonPrimitive().isString()) {
             throw new IllegalArgumentException("graph cases: 'userMd' must be a string");
         }
-        return WorkspaceFiles.ownerNameIn(userMd.getAsString());
+        return userMd.getAsString();
+    }
+
+    private static @Nullable String ownerName(JsonObject root) {
+        var userMd = userMd(root);
+        return userMd == null ? null : WorkspaceFiles.ownerNameIn(userMd);
     }
 
     static JsonObject root(String json) {
@@ -232,7 +246,7 @@ public final class GraphCases {
                 throw new IllegalArgumentException(where + ": the schema does not allow " + fromEntity.type() + " "
                         + type + " " + toEntity.type() + " ('" + from + "' -> '" + to + "')");
             }
-            boolean reversedSymmetric = GraphSpikeScorer.SYMMETRIC.contains(type) && pairs.contains(List.of(to, from));
+            boolean reversedSymmetric = GraphEvalScorer.SYMMETRIC.contains(type) && pairs.contains(List.of(to, from));
             if (!pairs.add(List.of(from, to)) || reversedSymmetric) {
                 throw new IllegalArgumentException(where + ": two relations on '" + from + "' -> '" + to + "'");
             }

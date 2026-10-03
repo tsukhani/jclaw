@@ -2,9 +2,9 @@ import memory.ontology.OntologySchema;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
-import services.graphspike.CandidateGenerator;
-import services.graphspike.CandidateGenerator.Candidate;
-import services.graphspike.GraphCases;
+import services.grapheval.CandidateGenerator;
+import services.grapheval.CandidateGenerator.Candidate;
+import services.grapheval.GraphCases;
 
 import java.util.ArrayList;
 import java.util.List;

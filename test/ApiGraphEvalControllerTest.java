@@ -5,9 +5,9 @@ import org.junit.jupiter.api.Test;
 import play.Play;
 import play.mvc.Http;
 import play.test.FunctionalTest;
-import services.graphspike.Agreement;
-import services.graphspike.GraphCases;
-import services.graphspike.HeldOut;
+import services.grapheval.Agreement;
+import services.grapheval.GraphCases;
+import services.grapheval.HeldOut;
 
 import java.nio.file.Files;
 import java.util.HashMap;
@@ -16,12 +16,12 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * JCLAW-1344, JCLAW-1356: the graph spike endpoints' gate, validation and blind sheet. No request here reaches a model
+ * JCLAW-1344, JCLAW-1356: the graph eval endpoints' gate, validation and blind sheet. No request here reaches a model
  * call, so the test never spends one. Mirrors {@code ApiEvalsControllerTest}.
  */
-class ApiGraphSpikeControllerTest extends FunctionalTest {
+class ApiGraphEvalControllerTest extends FunctionalTest {
 
-    private static final String AGENT = "graphspike-ctl-fixture-agent";
+    private static final String AGENT = "grapheval-ctl-fixture-agent";
 
     private Http.Request loadtestRequest(String headerValue) {
         var req = newRequest();
@@ -63,28 +63,28 @@ class ApiGraphSpikeControllerTest extends FunctionalTest {
         if (err.get() != null) throw new IllegalStateException(err.get());
     }
 
-    private Http.Response spike(Http.Request request, String body) {
-        return POST(request, "/api/graph/spike", "application/json", body);
+    private Http.Response evaluate(Http.Request request, String body) {
+        return POST(request, "/api/graph/eval", "application/json", body);
     }
 
     private void assertRefused(String body, String expected) {
         seedAgent();
-        var response = spike(authed(), body);
+        var response = evaluate(authed(), body);
         assertEquals(400, response.status.intValue(), getContent(response));
         assertTrue(getContent(response).contains(expected), getContent(response));
     }
 
     @Test
     void aRequestWithoutTheSharedSecretIsRefused() {
-        var response = spike(loadtestRequest(null), "{\"agent\":\"" + AGENT + "\"}");
+        var response = evaluate(loadtestRequest(null), "{\"agent\":\"" + AGENT + "\"}");
         assertEquals(403, response.status.intValue());
     }
 
     @Test
     void anUnknownAgentIs400() {
-        var response = spike(authed(), "{\"agent\":\"no-such-graphspike-agent\",\"decisionModels\":[\"tev1\"]}");
+        var response = evaluate(authed(), "{\"agent\":\"no-such-grapheval-agent\",\"decisionModels\":[\"tev1\"]}");
         assertEquals(400, response.status.intValue());
-        assertTrue(getContent(response).contains("no-such-graphspike-agent"), getContent(response));
+        assertTrue(getContent(response).contains("no-such-grapheval-agent"), getContent(response));
     }
 
     @Test
@@ -122,18 +122,18 @@ class ApiGraphSpikeControllerTest extends FunctionalTest {
     @Test
     void aSampleCountOutOfRangeIs400() {
         seedAgent();
-        var response = POST(authed(), "/api/graph/spike/heldout/sample", "application/json",
+        var response = POST(authed(), "/api/graph/eval/heldout/sample", "application/json",
                 "{\"agent\":\"" + AGENT + "\",\"count\":0}");
         assertEquals(400, response.status.intValue(), getContent(response));
         assertTrue(getContent(response).contains("count must be between"), getContent(response));
     }
 
     @Test
-    void theBlindSheetHoldsOnlyTheSelectedIdsAndText() throws Exception {
+    void theBlindSheetHoldsOnlyTheSelectedIdsTextAndOwner() throws Exception {
         var file = Play.applicationPath.toPath().resolve(HeldOut.DIR).resolve("blind-sheet.json");
         var saved = Files.exists(file) ? Files.readString(file) : null;
         try {
-            var response = POST(authed(), "/api/graph/spike/blind-sheet", "application/json", "{}");
+            var response = POST(authed(), "/api/graph/eval/blind-sheet", "application/json", "{}");
             assertEquals(200, response.status.intValue(), getContent(response));
             var cases = GraphCases.load(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH),
                     OntologySchema.seed());
@@ -141,8 +141,12 @@ class ApiGraphSpikeControllerTest extends FunctionalTest {
             var body = JsonParser.parseString(getContent(response)).getAsJsonObject();
             assertEquals(selected.size(), body.get("cases").getAsInt());
 
+            var sheet = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+            var declared = GraphCases.userMd(Files.readString(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH)));
+            assertEquals(declared, sheet.has("userMd") ? sheet.get("userMd").getAsString() : null,
+                    "the labeller is told who the owner is");
             var ids = new HashSet<String>();
-            for (var e : JsonParser.parseString(Files.readString(file)).getAsJsonObject().getAsJsonArray("cases")) {
+            for (var e : sheet.getAsJsonArray("cases")) {
                 var o = e.getAsJsonObject();
                 assertEquals(Set.of("id", "text"), o.keySet());
                 ids.add(o.get("id").getAsString());

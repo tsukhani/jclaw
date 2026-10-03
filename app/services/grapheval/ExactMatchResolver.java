@@ -1,4 +1,4 @@
-package services.graphspike;
+package services.grapheval;
 
 import org.jspecify.annotations.Nullable;
 

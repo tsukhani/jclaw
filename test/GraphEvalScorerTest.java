@@ -1,18 +1,18 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.graphspike.ExtractionPipeline;
-import services.graphspike.ExtractionPipeline.CaseRun;
-import services.graphspike.ExtractionPipeline.Decision;
-import services.graphspike.GraphCases.Case;
-import services.graphspike.GraphCases.Entity;
-import services.graphspike.GraphCases.Relation;
-import services.graphspike.GraphSpikeScorer;
-import services.graphspike.GraphSpikeScorer.WrongRecord;
+import services.grapheval.ExtractionPipeline;
+import services.grapheval.ExtractionPipeline.CaseRun;
+import services.grapheval.ExtractionPipeline.Decision;
+import services.grapheval.GraphCases.Case;
+import services.grapheval.GraphCases.Entity;
+import services.grapheval.GraphCases.Relation;
+import services.grapheval.GraphEvalScorer;
+import services.grapheval.GraphEvalScorer.WrongRecord;
 
 import java.util.List;
 
 /** JCLAW-1356, JCLAW-1357: the strict end-to-end scorer against the spec's I/O matrix. Pure, so no fixtures. */
-class GraphSpikeScorerTest extends UnitTest {
+class GraphEvalScorerTest extends UnitTest {
 
     private static final Case KESTREL = new Case("c1", List.of("plain"),
             "The user works at Harborlight Analytics, which runs Kestrel CI, the team's deployment platform.",
@@ -53,8 +53,8 @@ class GraphSpikeScorerTest extends UnitTest {
         return new Decision(ExtractionPipeline.RELATION, from + " -> " + to, from, to, type, 0.9, false, null);
     }
 
-    private static GraphSpikeScorer.Scored score(Case c, Decision... decisions) {
-        return GraphSpikeScorer.score(List.of(c), List.of(new CaseRun(c.id(), List.of(), 0, List.of(decisions))), 0.5);
+    private static GraphEvalScorer.Scored score(Case c, Decision... decisions) {
+        return GraphEvalScorer.score(List.of(c), List.of(new CaseRun(c.id(), List.of(), 0, List.of(decisions))), 0.5);
     }
 
     @Test
@@ -85,7 +85,7 @@ class GraphSpikeScorerTest extends UnitTest {
         assertEquals(3, s.right());
         assertEquals(3, s.gold(), "the named owner is gold");
         assertEquals(0, s.ruleWritten());
-        assertEquals(GraphSpikeScorer.TYPE, score(c, term("Avery Lin", "Organization")).wrong().getFirst().kind());
+        assertEquals(GraphEvalScorer.TYPE, score(c, term("Avery Lin", "Organization")).wrong().getFirst().kind());
         var untyped = score(c, term("Harborlight Analytics", "Organization")).point();
         assertEquals(1, untyped.right());
         assertEquals(1.0 / 3, untyped.recall(), "an untyped owner is a recall miss");
@@ -122,7 +122,7 @@ class GraphSpikeScorerTest extends UnitTest {
         var s = score(MERIDIAN, term("Meridian", "Project"));
         assertEquals(0, s.point().right());
         assertEquals(1, s.point().wrongMatch());
-        assertEquals(List.of(new WrongRecord("c2", "term:Meridian:Project", GraphSpikeScorer.MATCH)), s.wrong());
+        assertEquals(List.of(new WrongRecord("c2", "term:Meridian:Project", GraphEvalScorer.MATCH)), s.wrong());
     }
 
     @Test
@@ -137,7 +137,7 @@ class GraphSpikeScorerTest extends UnitTest {
         var s = score(KESTREL, term("Kestrel CI", "System"), term("the team's deployment platform", "System"));
         assertEquals(1, s.point().right());
         assertEquals(1, s.point().wrongDuplicate());
-        assertEquals(GraphSpikeScorer.DUPLICATE, s.wrong().getFirst().kind());
+        assertEquals(GraphEvalScorer.DUPLICATE, s.wrong().getFirst().kind());
     }
 
     @Test
@@ -181,8 +181,8 @@ class GraphSpikeScorerTest extends UnitTest {
     void theGridDropsDecisionsBelowEachThreshold() {
         var run = new CaseRun("c1", List.of(), 0, List.of(term("Kestrel CI", "System", 0.92),
                 term("Harborlight Analytics", "Organization", 0.6)));
-        var grid = GraphSpikeScorer.grid(List.of(KESTREL), List.of(run));
-        assertEquals(GraphSpikeScorer.THRESHOLDS.size(), grid.size());
+        var grid = GraphEvalScorer.grid(List.of(KESTREL), List.of(run));
+        assertEquals(GraphEvalScorer.THRESHOLDS.size(), grid.size());
         assertEquals(0, grid.getFirst().written(), "0.95");
         assertEquals(1, grid.get(1).written(), "0.90");
         assertEquals(2, grid.getLast().written(), "0.50");
@@ -199,8 +199,8 @@ class GraphSpikeScorerTest extends UnitTest {
 
     @Test
     void theUnionKeepsOneRecordPerCaseAndKey() {
-        var a = new WrongRecord("c1", "term:x:System", GraphSpikeScorer.MATCH);
-        var b = new WrongRecord("c1", "term:y:System", GraphSpikeScorer.MATCH);
-        assertEquals(List.of(a, b), GraphSpikeScorer.union(List.of(List.of(a), List.of(a, b))));
+        var a = new WrongRecord("c1", "term:x:System", GraphEvalScorer.MATCH);
+        var b = new WrongRecord("c1", "term:y:System", GraphEvalScorer.MATCH);
+        assertEquals(List.of(a, b), GraphEvalScorer.union(List.of(List.of(a), List.of(a, b))));
     }
 }

@@ -184,6 +184,29 @@ class OntologySchemaTest extends UnitTest {
     }
 
     @Test
+    void theFingerprintMovesWithWhatExtractionAsksAndNothingElse() throws IOException {
+        var seed = seedText();
+        var fingerprint = OntologySchema.parse(seed).fingerprint();
+        assertTrue(fingerprint.matches("v2@[0-9a-f]{12}"), fingerprint);
+        assertEquals(fingerprint, OntologySchema.seed().fingerprint());
+
+        var covers = seed.replace("covers: \"The subject a view or interest is about\"", "covers: \"A subject\"");
+        var endpoints = seed.replace("\"Artifact -> Project\", \"Place -> Place\"]", "\"Artifact -> Project\"]");
+        var version = seed.replace("version: 2", "version: 3");
+        for (var edited : List.of(covers, endpoints, version)) {
+            assertNotEquals(seed, edited);
+            assertNotEquals(fingerprint, OntologySchema.parse(edited).fingerprint());
+        }
+
+        var standard = seed.replace("\"schema:SoftwareApplication\"", "\"schema:Product\"");
+        var comment = seed.replace("# JClaw seed ontology", "# The JClaw seed ontology");
+        for (var edited : List.of(standard, comment)) {
+            assertNotEquals(seed, edited);
+            assertEquals(fingerprint, OntologySchema.parse(edited).fingerprint(), "no question asks with it");
+        }
+    }
+
+    @Test
     void diffOfASchemaWithItselfIsEmpty() {
         var seed = OntologySchema.seed();
         assertEquals(List.of(), OntologySchema.diff(seed, seed));

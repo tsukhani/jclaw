@@ -1,13 +1,13 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
-import services.graphspike.ExtractionPipeline;
-import services.graphspike.ExtractionPipeline.Decision;
-import services.graphspike.ExtractionPipeline.Overlap;
-import services.graphspike.GraphCases.Case;
-import services.graphspike.GraphCases.Entity;
-import services.graphspike.GraphCases.Relation;
-import services.graphspike.StageScorer;
-import services.graphspike.StageScorer.StageRun;
+import services.grapheval.ExtractionPipeline;
+import services.grapheval.ExtractionPipeline.Decision;
+import services.grapheval.ExtractionPipeline.Overlap;
+import services.grapheval.GraphCases.Case;
+import services.grapheval.GraphCases.Entity;
+import services.grapheval.GraphCases.Relation;
+import services.grapheval.StageScorer;
+import services.grapheval.StageScorer.StageRun;
 
 import java.util.List;
 

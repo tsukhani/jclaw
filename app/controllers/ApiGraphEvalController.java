@@ -9,15 +9,16 @@ import play.db.jpa.NoTransaction;
 import play.mvc.Before;
 import play.mvc.Controller;
 import services.Tx;
+import services.WorkspaceFiles;
 import services.decision.JevApi;
 import services.decision.OllamaDecision;
-import services.graphspike.Agreement;
-import services.graphspike.Certifier;
-import services.graphspike.ExtractionPipeline.Decider;
-import services.graphspike.GraphCases;
-import services.graphspike.GraphSpikeHarness;
-import services.graphspike.GraphSpikeHarness.DecisionModel;
-import services.graphspike.HeldOut;
+import services.grapheval.Agreement;
+import services.grapheval.Certifier;
+import services.grapheval.ExtractionPipeline.Decider;
+import services.grapheval.GraphCases;
+import services.grapheval.GraphEvalHarness;
+import services.grapheval.GraphEvalHarness.DecisionModel;
+import services.grapheval.HeldOut;
 import utils.ApiResponses;
 
 import java.io.IOException;
@@ -34,7 +35,7 @@ import static utils.GsonHolder.GSON;
  * over the operator's held-out set (JCLAW-1344, JCLAW-1356). An endpoint, like {@link ApiScrapeTestController},
  * because the decision provider it measures exists only inside a booted app.
  */
-public class ApiGraphSpikeController extends Controller {
+public class ApiGraphEvalController extends Controller {
 
     private static final int MAX_CONCURRENCY = 4;
     private static final int DEFAULT_CONCURRENCY = 2;
@@ -51,21 +52,21 @@ public class ApiGraphSpikeController extends Controller {
     }
 
     /**
-     * {@code POST /api/graph/spike} with {@code {agent, decisionModels?, set?: "cases"|"heldout", runs?,
+     * {@code POST /api/graph/eval} with {@code {agent, decisionModels?, set?: "cases"|"heldout", runs?,
      * recallFloor?, concurrency?, timeoutSeconds?}}. Model calls run outside any transaction, so each DB step opens
      * its own.
      */
     @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "measurement harness -- loopback plus X-Loadtest-Auth; spends model calls and writes then deletes an agent's memories")
-    public static void spike() {
+    public static void run() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) throw invalid("A JSON body is required");
         if (body.has("proposers")) throw invalid("proposers are gone: candidates come from fixed rules (JCLAW-1356)");
         if (body.has("threshold")) throw invalid("threshold is gone: the certification walk chooses it");
         var set = body.has("set") ? string(body, "set") : "cases";
         if (!set.equals("cases") && !set.equals("heldout")) throw invalid("set must be 'cases' or 'heldout'");
-        int runs = readInt(body, "runs", GraphSpikeHarness.DEFAULT_RUNS);
+        int runs = readInt(body, "runs", GraphEvalHarness.DEFAULT_RUNS);
         if (runs < 1 || runs > MAX_RUNS) throw invalid("runs must be between 1 and " + MAX_RUNS);
         double recallFloor = Certifier.DEFAULT_RECALL_FLOOR;
         if (body.has("recallFloor")) {
@@ -91,14 +92,17 @@ public class ApiGraphSpikeController extends Controller {
 
         if (set.equals("heldout")) {
             var file = HeldOut.defaultPath();
-            if (!Files.exists(file)) throw invalid("no held-out file; run graphspike heldout-sample first");
+            if (!Files.exists(file)) throw invalid("no held-out file; run grapheval heldout-sample first");
             HeldOut.Loaded loaded;
+            String ownerName;
             try {
                 loaded = HeldOut.load(file, schema);
+                var agentName = HeldOut.agentName(loaded);
+                ownerName = agentName == null ? null : WorkspaceFiles.ownerName(agentName);
             } catch (IOException | RuntimeException e) {
                 throw invalid("invalid held-out set: " + e.getMessage());
             }
-            renderJSON(GSON.toJson(GraphSpikeHarness.runHeldOut(loaded, schema, models, runs, recallFloor,
+            renderJSON(GSON.toJson(GraphEvalHarness.runHeldOut(loaded, ownerName, schema, models, runs, recallFloor,
                     concurrency)));
             return;
         }
@@ -121,17 +125,23 @@ public class ApiGraphSpikeController extends Controller {
         } catch (IOException | RuntimeException e) {
             throw invalid("invalid second labels or adjudications: " + e.getMessage());
         }
-        renderJSON(GSON.toJson(GraphSpikeHarness.run(agentId, cases, ownerName, schema, models, runs, recallFloor, concurrency,
+        renderJSON(GSON.toJson(GraphEvalHarness.run(agentId, cases, ownerName, schema, models, runs, recallFloor, concurrency,
                 secondLabels, adjudications)));
     }
 
-    /** {@code POST /api/graph/spike/blind-sheet}: writes the blind subset's ids and text for a second labeller. */
+    /** {@code POST /api/graph/eval/blind-sheet}: writes the blind subset's ids, text and owner for a second labeller. */
     @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "measurement harness -- loopback plus X-Loadtest-Auth; writes a file under data/graph-eval")
     public static void blindSheet() {
-        var cases = cases(schema());
-        var sheet = Agreement.blindSheet(cases);
+        var schema = schema();
+        JsonObject sheet;
+        try {
+            var json = Files.readString(appPath(GraphCases.DEFAULT_PATH));
+            sheet = Agreement.blindSheet(GraphCases.parse(json, schema), GraphCases.userMd(json));
+        } catch (IOException | RuntimeException e) {
+            throw invalid("invalid case set: " + e.getMessage());
+        }
         var file = appPath(HeldOut.DIR).resolve(BLIND_SHEET);
         try {
             Files.createDirectories(file.getParent());
@@ -145,7 +155,7 @@ public class ApiGraphSpikeController extends Controller {
         renderJSON(GSON.toJson(out));
     }
 
-    /** {@code POST /api/graph/spike/heldout/sample} with {@code {agent, count, seed?}}: reads, never writes, memories. */
+    /** {@code POST /api/graph/eval/heldout/sample} with {@code {agent, count, seed?}}: reads, never writes, memories. */
     @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "measurement harness -- loopback plus X-Loadtest-Auth; reads an agent's memories into data/graph-eval")

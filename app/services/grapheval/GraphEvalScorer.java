@@ -1,8 +1,8 @@
-package services.graphspike;
+package services.grapheval;
 
 import org.jspecify.annotations.Nullable;
-import services.graphspike.ExtractionPipeline.CaseRun;
-import services.graphspike.GraphCases.Case;
+import services.grapheval.ExtractionPipeline.CaseRun;
+import services.grapheval.GraphCases.Case;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -19,7 +19,7 @@ import java.util.Set;
  * in {@code ruleWritten}; its span still stands as a relation endpoint. An owner mentioned by name is decided and
  * counted like any other term. Pure: no I/O, no clock.
  */
-public final class GraphSpikeScorer {
+public final class GraphEvalScorer {
 
     /** Relations the labels may give in either direction. */
     public static final Set<String> SYMMETRIC = Set.of("same_as", "family_of");
@@ -31,7 +31,7 @@ public final class GraphSpikeScorer {
     public static final String DUPLICATE = "duplicate";
     public static final String RELATION = "relation";
 
-    private GraphSpikeScorer() {}
+    private GraphEvalScorer() {}
 
     /**
      * One wrong record. {@code record} is the adjudication key, {@code term:<span>:<type>} or

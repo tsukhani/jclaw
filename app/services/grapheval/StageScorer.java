@@ -1,11 +1,11 @@
-package services.graphspike;
+package services.grapheval;
 
 import org.jspecify.annotations.Nullable;
-import services.graphspike.ExactMatchResolver.Mention;
-import services.graphspike.ExtractionPipeline.Decision;
-import services.graphspike.ExtractionPipeline.Overlap;
-import services.graphspike.GraphCases.Case;
-import services.graphspike.GraphCases.Entity;
+import services.grapheval.ExactMatchResolver.Mention;
+import services.grapheval.ExtractionPipeline.Decision;
+import services.grapheval.ExtractionPipeline.Overlap;
+import services.grapheval.GraphCases.Case;
+import services.grapheval.GraphCases.Entity;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -127,7 +127,7 @@ public final class StageScorer {
                 boolean yes = !d.failed() && d.confidence() >= HALF;
                 if (gold != null) {
                     relationTotal++;
-                    boolean directed = forward != null || GraphSpikeScorer.SYMMETRIC.contains(gold.type());
+                    boolean directed = forward != null || GraphEvalScorer.SYMMETRIC.contains(gold.type());
                     if (yes && directed && gold.type().equals(d.choice())) relationRight++;
                 } else {
                     noneTotal++;
