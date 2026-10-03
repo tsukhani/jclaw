@@ -198,6 +198,44 @@ class MemoryAutoCaptureTest extends UnitTest {
     }
 
     @Test
+    void theExtractorIsToldTheOwnersNameOnceUserMdNamesThem() {
+        var name = "agent-named-owner";
+        services.WorkspaceFiles.resetWorkspace(name);
+        services.WorkspaceFiles.writeWorkspaceFile(name, "USER.md", "# User Information\n\nName: Ada Lovelace\n");
+        var seen = new java.util.concurrent.atomic.AtomicReference<java.util.List<llm.LlmTypes.ChatMessage>>();
+        MemoryAutoCapture.Extractor extractor = msgs -> {
+            seen.set(java.util.List.copyOf(msgs));
+            return "{\"memories\":[]}";
+        };
+        MemoryAutoCapture.capture(agentId(name), name, "I work at Acme Corp on widgets", "Noted.", extractor, null,
+                freshBreaker(), memory.MemoryProvenance.extractor("m", models.MemoryAuthorType.HUMAN_TURN));
+
+        var system = String.valueOf(seen.get().getFirst().content());
+        assertTrue(system.startsWith("You extract durable, reusable memories"), "the instructions come first, the directive follows them");
+        assertTrue(system.contains("is Ada Lovelace, the owner of this agent"), system);
+        assertEquals(4, seen.get().size(), "still one system message, not a second one");
+    }
+
+    @Test
+    void aGuestsTurnIsNeverWrittenUnderTheOwnersName() {
+        var name = "agent-guest-turn";
+        services.WorkspaceFiles.resetWorkspace(name);
+        services.WorkspaceFiles.writeWorkspaceFile(name, "USER.md", "# User Information\n\nName: Ada Lovelace\n");
+        var seen = new java.util.concurrent.atomic.AtomicReference<java.util.List<llm.LlmTypes.ChatMessage>>();
+        MemoryAutoCapture.Extractor extractor = msgs -> {
+            seen.set(java.util.List.copyOf(msgs));
+            return "{\"memories\":[]}";
+        };
+        MemoryAutoCapture.capture(agentId(name), name, "[Priya (id 3)]: I work at Acme Corp on widgets", "Noted.",
+                extractor, null, freshBreaker(), memory.MemoryProvenance.extractor("m", models.MemoryAuthorType.GUEST_TURN));
+
+        var system = String.valueOf(seen.get().getFirst().content());
+        assertTrue(system.contains("a guest, not the owner"), system);
+        assertTrue(system.contains("\"Priya\""), system);
+        assertFalse(system.contains("Ada Lovelace"), "the owner's name must not reach a guest's capture");
+    }
+
+    @Test
     void captureSkipsTrivialTurnViaGateWithoutCallingExtractor() {
         MemoryAutoCapture.Extractor extractor = msgs -> {
             throw new AssertionError("extractor must not run for a gated turn");

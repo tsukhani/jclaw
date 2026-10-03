@@ -24,6 +24,7 @@ import services.EventLogger;
 import services.LoadTestRunner;
 import services.SessionCompactor;
 import services.Tx;
+import services.WorkspaceFiles;
 import utils.CircuitBreaker;
 import utils.CircuitBreakers;
 
@@ -153,6 +154,11 @@ public final class MemoryAutoCapture {
 
     /** One lock per agent id (JCLAW-965). Bounded by the agent count, so never reaped. */
     private static final ConcurrentMap<String, ReentrantLock> CAPTURE_LOCKS = new ConcurrentHashMap<>();
+
+    /** The lock capture holds for an agent's whole run; anything else rewriting that agent's memories takes it too. */
+    static ReentrantLock captureLock(String agentKey) {
+        return CAPTURE_LOCKS.computeIfAbsent(agentKey, _ -> new ReentrantLock());
+    }
 
     /** Long enough to outlast a normal capture, short enough that a stuck one cannot
      *  block every later turn for this agent. Configurable so a test can drive the
@@ -468,8 +474,9 @@ public final class MemoryAutoCapture {
 
         String raw;
         try {
+            var subject = MemorySubject.directive(WorkspaceFiles.ownerName(agentName), provenance.authorType(), userMessage);
             var messages = List.<ChatMessage>of(
-                    ChatMessage.system(EXTRACTION_INSTRUCTIONS),
+                    ChatMessage.system(subject == null ? EXTRACTION_INSTRUCTIONS : EXTRACTION_INSTRUCTIONS + "\n" + subject),
                     ChatMessage.user(userMessage.strip()),
                     ChatMessage.assistant(assistantResponse.strip()),
                     ChatMessage.user(EXTRACTION_REQUEST));
@@ -537,7 +544,7 @@ public final class MemoryAutoCapture {
         // non-unique indexes, so the DB cannot reject the second write either. The
         // consolidation judge does not rescue it: identical rows are not "same subject,
         // changed content". Serialize per agent across the whole window.
-        var lock = CAPTURE_LOCKS.computeIfAbsent(agentKey, _ -> new ReentrantLock());
+        var lock = captureLock(agentKey);
         boolean held;
         try {
             held = lock.tryLock(captureLockWaitSeconds(), TimeUnit.SECONDS);

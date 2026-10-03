@@ -72,8 +72,67 @@ class WorkspaceScaffoldTest extends UnitTest {
         var user = read(Agent.MAIN_AGENT_NAME, "USER.md");
         assertTrue(user.contains("Add information about the user here"),
                 "the default agent's USER.md must ship as the blank template");
-        assertFalse(user.toLowerCase().contains("name:"),
-                "no populated user details may ship in the template; got: " + user);
+        assertTrue(user.contains("\nName:\n"),
+                "the template carries an empty Name line for the bootstrap to fill, and no populated details; got: " + user);
+    }
+
+    @Test
+    void theBootstrapAsksForTheNameOnlyWhileItIsMissing() throws Exception {
+        WorkspaceFiles.resetWorkspace(Agent.MAIN_AGENT_NAME);
+        var bootstrap = read(Agent.MAIN_AGENT_NAME, "BOOTSTRAP.md");
+        assertTrue(bootstrap.contains("If the Name line in USER.md is empty"), bootstrap);
+        assertTrue(bootstrap.contains("never in a group chat"), "only the owner may supply the name; got: " + bootstrap);
+    }
+
+    @Test
+    void theOwnerNameIsReadFromTheNameLineAboveTheFirstSection() {
+        var name = "owner-name-probe";
+        WorkspaceFiles.resetWorkspace(name);
+        WorkspaceFiles.writeWorkspaceFile(name, "USER.md", "# User Information\n\nName: **Ada Lovelace**\n\n## Kids\n\n- Name: Theo\n");
+        assertEquals("Ada Lovelace", WorkspaceFiles.ownerName(name));
+
+        WorkspaceFiles.writeWorkspaceFile(name, "USER.md", "# User Information\n\nName:\n\n## Kids\n\n- Name: Theo\n");
+        assertNull(WorkspaceFiles.ownerName(name), "a child's name in a later section is never the owner's");
+
+        WorkspaceFiles.writeWorkspaceFile(name, "USER.md", "# User Information\n\n<!-- Name: Example -->\nUsername: ada\n");
+        assertNull(WorkspaceFiles.ownerName(name), "neither a comment nor a Username line names the owner");
+        assertNull(WorkspaceFiles.ownerName("no-such-agent-workspace"));
+    }
+
+    @Test
+    void anOlderWorkspaceGainsTheNameLineAndTheBootstrapStepOnce() throws Exception {
+        var name = "owner-name-upgrade";
+        WorkspaceFiles.resetWorkspace(name);
+        WorkspaceFiles.writeWorkspaceFile(name, "USER.md", "# User Information\n\n## Movie Preferences\n\n- Likes sci-fi\n");
+        WorkspaceFiles.writeWorkspaceFile(name, "BOOTSTRAP.md", """
+                # Bootstrap
+
+                <!-- Priming / initialization context the agent should see before task
+                     instructions in AGENT.md. Examples: preconditions, environment
+                     assumptions, warm-up context. Leave blank to skip. -->
+                """);
+
+        WorkspaceFiles.addOwnerNamePrompts(name);
+        assertEquals("# User Information\n\nName:\n\n## Movie Preferences\n\n- Likes sci-fi\n", read(name, "USER.md"));
+        assertEquals(WorkspaceFiles.BOOTSTRAP_TEMPLATE, read(name, "BOOTSTRAP.md"), "an untouched template is replaced whole");
+
+        WorkspaceFiles.addOwnerNamePrompts(name);
+        assertEquals("# User Information\n\nName:\n\n## Movie Preferences\n\n- Likes sci-fi\n", read(name, "USER.md"), "a second run changes nothing");
+        assertEquals(WorkspaceFiles.BOOTSTRAP_TEMPLATE, read(name, "BOOTSTRAP.md"));
+    }
+
+    @Test
+    void anEditedBootstrapKeepsItsTextAndAFilledNameIsLeftAlone() throws Exception {
+        var name = "owner-name-edited";
+        WorkspaceFiles.resetWorkspace(name);
+        WorkspaceFiles.writeWorkspaceFile(name, "USER.md", "# User Information\n\nName: Ada\n");
+        WorkspaceFiles.writeWorkspaceFile(name, "BOOTSTRAP.md", "# Bootstrap\n\nCheck the build is green first.\n");
+
+        WorkspaceFiles.addOwnerNamePrompts(name);
+        assertEquals("# User Information\n\nName: Ada\n", read(name, "USER.md"));
+        var bootstrap = read(name, "BOOTSTRAP.md");
+        assertTrue(bootstrap.startsWith("# Bootstrap\n\nIf the Name line in USER.md is empty"), bootstrap);
+        assertTrue(bootstrap.endsWith("Check the build is green first.\n"), "the operator's own text survives; got: " + bootstrap);
     }
 
     @Test

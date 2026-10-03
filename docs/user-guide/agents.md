@@ -72,8 +72,8 @@ A small workspace of named markdown files the platform reads into every turn's s
 |-------------------|---------------------------------------------------------------------------|
 | `SOUL.md`         | Long-running identity / values material — the "who is this agent" bedrock. |
 | `IDENTITY.md`     | Self-description, voice, mannerisms.                                       |
-| `USER.md`         | What the agent knows about *you*, the operator.                             |
-| `BOOTSTRAP.md`    | First-run scaffolding the agent re-reads at the start of every fresh conversation. |
+| `USER.md`         | What the agent knows about *you*, the operator. Its `Name:` line is how the agent and its memories refer to you. |
+| `BOOTSTRAP.md`    | First-run scaffolding the agent re-reads at the start of every fresh conversation. Until `USER.md` has your name, it asks for it once, in a direct chat. |
 | `AGENT.md`        | Project / repo / workspace notes you want the agent to carry into every turn. |
 
 These files are read on every turn when the system prompt is assembled, through a 30-second cache that is invalidated the moment you save, so an edit is picked up on the agent's next turn without a conversation reset or a restart.

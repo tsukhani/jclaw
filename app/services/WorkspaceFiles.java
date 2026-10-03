@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
@@ -507,6 +508,92 @@ public final class WorkspaceFiles {
             *I'm Clawdia. Malaysian at heart, here to support, care, and get things done lah!* 🪷🇲🇾
             """;
 
+    // The Name line is how the agent, and the memories it captures, refer to the person it works for.
+    static final String USER_TEMPLATE = """
+            # User Information
+
+            Name:
+
+            <!-- Add information about the user here. The agent will use this context. -->
+            """;
+
+    // The marker that says a BOOTSTRAP.md already carries the step below.
+    private static final String NAME_STEP_MARKER = "If the Name line in USER.md is empty";
+
+    static final String NAME_STEP = NAME_STEP_MARKER + """
+            , you do not yet know the name of the person you work for. In a direct conversation \
+            with them, never in a group chat, ask once what you should call them, and write it on that \
+            line of USER.md (for example "Name: Ada Lovelace"). If they would rather not say, leave it \
+            empty and carry on.
+            """;
+
+    public static final String BOOTSTRAP_TEMPLATE = "# Bootstrap\n\n" + NAME_STEP + """
+
+            <!-- Priming / initialization context the agent should see before task
+                 instructions in AGENT.md. Examples: preconditions, environment
+                 assumptions, warm-up context. -->
+            """;
+
+    // The template before the name step, recognised so an untouched copy is replaced whole.
+    private static final String PRE_NAME_BOOTSTRAP_TEMPLATE = """
+            # Bootstrap
+
+            <!-- Priming / initialization context the agent should see before task
+                 instructions in AGENT.md. Examples: preconditions, environment
+                 assumptions, warm-up context. Leave blank to skip. -->
+            """;
+
+    // Only the part above the first "##" heading is read, so a "Name:" in a later section
+    // (a child's, a contact's) is never taken for the owner's.
+    private static final Pattern NAME_LINE =
+            Pattern.compile("(?im)^[ \\t]*(?:[-*][ \\t]+)?[*_]*name[*_]*[ \\t]*:[ \\t]*(.*)$");
+
+    /** The owner's name from the agent's USER.md, or null when the file is missing or its Name line is empty. */
+    public static @Nullable String ownerName(String agentName) {
+        if (!Files.isRegularFile(workspacePath(agentName).resolve("USER.md"))) return null;
+        var text = readWorkspaceFile(agentName, "USER.md");
+        if (text == null) return null;
+        var m = NAME_LINE.matcher(headerOf(text));
+        if (!m.find()) return null;
+        var name = m.group(1).strip().replaceAll("^[*_]+|[*_]+$", "").strip();
+        return name.isEmpty() || name.startsWith("<") ? null : name;
+    }
+
+    private static String headerOf(String text) {
+        var bare = text.replaceAll("(?s)<!--.*?-->", "");
+        var section = Pattern.compile("(?m)^##").matcher(bare);
+        return section.find() ? bare.substring(0, section.start()) : bare;
+    }
+
+    /**
+     * Brings a workspace created before USER.md had a Name line up to date: adds an empty Name line
+     * to USER.md, and the ask-for-the-name step to BOOTSTRAP.md, each only when it is missing. An
+     * untouched BOOTSTRAP.md template is replaced whole; an edited one keeps its text. Idempotent.
+     */
+    public static void addOwnerNamePrompts(String agentName) {
+        var dir = workspacePath(agentName);
+        if (!Files.isDirectory(dir)) return;
+        var user = Files.isRegularFile(dir.resolve("USER.md")) ? readWorkspaceFile(agentName, "USER.md") : null;
+        if (user == null) {
+            writeWorkspaceFile(agentName, "USER.md", USER_TEMPLATE);
+        } else if (!NAME_LINE.matcher(headerOf(user)).find()) {
+            writeWorkspaceFile(agentName, "USER.md", afterTitle(user, "Name:\n"));
+        }
+        var bootstrap = Files.isRegularFile(dir.resolve("BOOTSTRAP.md")) ? readWorkspaceFile(agentName, "BOOTSTRAP.md") : null;
+        if (bootstrap == null || bootstrap.strip().equals(PRE_NAME_BOOTSTRAP_TEMPLATE.strip())) {
+            writeWorkspaceFile(agentName, "BOOTSTRAP.md", BOOTSTRAP_TEMPLATE);
+        } else if (!bootstrap.contains(NAME_STEP_MARKER)) {
+            writeWorkspaceFile(agentName, "BOOTSTRAP.md", afterTitle(bootstrap, NAME_STEP));
+        }
+    }
+
+    // Inserts a paragraph after a leading "# " title, or at the top when there is none.
+    private static String afterTitle(String text, String paragraph) {
+        var title = Pattern.compile("\\A\\s*#[^#\\n][^\\n]*\\n").matcher(text);
+        if (!title.find()) return paragraph + "\n" + text;
+        return text.substring(0, title.end()) + "\n" + paragraph + text.substring(title.end());
+    }
+
     private static void writeWorkspaceFiles(String agentName, boolean overwrite) {
         var dir = workspacePath(agentName);
         try {
@@ -539,19 +626,9 @@ public final class WorkspaceFiles {
                     Name: %s
                     """.formatted(agentName), overwrite);
 
-            writeFile(dir.resolve("USER.md"), """
-                    # User Information
+            writeFile(dir.resolve("USER.md"), USER_TEMPLATE, overwrite);
 
-                    <!-- Add information about the user here. The agent will use this context. -->
-                    """, overwrite);
-
-            writeFile(dir.resolve("BOOTSTRAP.md"), """
-                    # Bootstrap
-
-                    <!-- Priming / initialization context the agent should see before task
-                         instructions in AGENT.md. Examples: preconditions, environment
-                         assumptions, warm-up context. Leave blank to skip. -->
-                    """, overwrite);
+            writeFile(dir.resolve("BOOTSTRAP.md"), BOOTSTRAP_TEMPLATE, overwrite);
 
             writeFile(dir.resolve("AGENT.md"), """
                     # Agent Instructions
@@ -563,6 +640,9 @@ public final class WorkspaceFiles {
                     Replace this file with instructions specific to what you want this agent to
                     do — its job, its domain, and how it should behave.
                     """, overwrite);
+
+            // A reset rewrites these on disk; the prompt must not keep serving the cached copies.
+            for (var file : PROTECTED_ROOT_FILES) fileCache.invalidate(agentName + "/" + file);
 
         } catch (IOException e) {
             EventLogger.error(LOG_CATEGORY, "Failed to create workspace for agent %s: %s"
