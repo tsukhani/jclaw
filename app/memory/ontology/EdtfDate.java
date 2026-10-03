@@ -122,11 +122,11 @@ public record EdtfDate(int year, Precision precision, int month, int day, int co
         };
     }
 
-    /** ±1 year, ±1 month, ±3 days (a week), ±3 months for a season or quarter. */
+    /** One unit of the precision on each side; a season's or quarter's unit is three months. */
     private int widening() {
         return switch (precision) {
-            case YEAR, MONTH -> 1;
-            case DAY, SEASON, QUARTER -> 3;
+            case YEAR, MONTH, DAY -> 1;
+            case SEASON, QUARTER -> 3;
         };
     }
 

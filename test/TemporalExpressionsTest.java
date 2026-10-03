@@ -97,16 +97,23 @@ class TemporalExpressionsTest extends UnitTest {
         assertEquals("2026-06", read("last June"));
         assertEquals("2025-06", read("last June", LocalDate.of(2026, 6, 15)));
         assertEquals("2027-06", read("next June"));
-        assertEquals("2026-06", read("in June"));
+        assertEquals("2026-06,2027-06", read("in June"));
+        assertEquals("2026-10", read("in October"), "the anchor's own month has one reading");
+        assertEquals("2025-11,2026-11", read("by November"), "the latest by the anchor, then the next");
+        assertEquals("2026-06,2027-06", read("in early June"));
         assertEquals("2026-06", read("June 2026"));
         assertEquals("2019-05", read("May of 2019"));
     }
 
     @Test
     void days() {
-        assertEquals("2026-06-05", read("June 5"));
-        assertEquals("2026-06-05", read("5 June"));
-        assertEquals("2026-06-05", read("the 5th of June"));
+        assertEquals("2026-06-05,2027-06-05", read("June 5"));
+        assertEquals("2026-06-05,2027-06-05", read("5 June"));
+        assertEquals("2026-06-05,2027-06-05", read("the 5th of June"));
+        assertEquals("2025-12-12,2026-12-12", read("12 December"));
+        assertEquals("2026-10-03", read("October 3"), "the anchor's own day has one reading");
+        assertEquals("2025-10-04,2026-10-04", read("October 4"), "a day after the anchor is still ahead this year");
+        assertEquals("2026-10-02,2027-10-02", read("October 2"));
         assertEquals("2026-06-05", read("June 5, 2026"));
         assertEquals("2026-06-05", read("5 June 2026"));
         assertEquals("2026-02-15", read("2026-02-15"));
@@ -120,7 +127,9 @@ class TemporalExpressionsTest extends UnitTest {
         assertEquals("2026-22", read("last summer"));
         assertEquals("2025-22", read("last summer", LocalDate.of(2026, 7, 15)));
         assertEquals("2026-24", read("next winter"));
-        assertEquals("2026-21", read("in the spring"));
+        assertEquals("2026-21,2027-21", read("in the spring"));
+        assertEquals("2026-23", read("in the autumn"), "the season holding the anchor has one reading");
+        assertEquals("2025-24,2026-24", read("before winter"));
         assertEquals("2025-23", read("autumn 2025"));
         assertEquals("2024-23", read("fall of 2024"));
     }
@@ -158,6 +167,8 @@ class TemporalExpressionsTest extends UnitTest {
         assertEquals("2020-03/2021-06", read("between March 2020 and June 2021"));
         assertEquals("2019/2021", read("2019-2021"));
         assertEquals("2016/2018", read("2016–2018"));
+        assertEquals("2027-06-12/2027-06-14", read("12–14 June 2027"));
+        assertEquals("2027-06-12/2027-06-14", read("12-14 June 2027"));
     }
 
     @Test
@@ -210,10 +221,8 @@ class TemporalExpressionsTest extends UnitTest {
     @Test
     void anImpossibleDateNeverThrows() {
         assertEquals(List.of("June"), found("Met on June 31."));
-        assertEquals(List.of("2026"), found("2026-13-45"));
-        var leap = TemporalExpressions.find("February 29", ANCHOR);
-        assertEquals(List.of("February"), leap.found().stream().map(DateSpan::span).toList());
-        assertEquals(List.of(), leap.refused());
+        assertEquals(List.of(), found("2026-13-45"));
+        assertEquals("2024-02-29,2028-02-29", read("February 29"));
     }
 
     @Test
@@ -223,6 +232,13 @@ class TemporalExpressionsTest extends UnitTest {
         assertEquals(List.of("recently", "soon", "the 1990s"),
                 refused("She moved recently, leaves soon and grew up in the 1990s.", Reason.VAGUE));
         assertEquals(List.of("Two weeks before"), refused("Two weeks before the offsite.", Reason.EVENT_RELATIVE));
+    }
+
+    @Test
+    void aBareMonthNeedsAnOpener() {
+        assertEquals(List.of(), found("April Jones and June Park joined."));
+        assertEquals(List.of("June"), found("Since June, Avery runs."));
+        assertEquals(List.of("June"), found("the June offsite"));
     }
 
     @Test
@@ -242,7 +258,12 @@ class TemporalExpressionsTest extends UnitTest {
 
     @Test
     void aYearBesidePunctuationIsStillAYear() {
-        assertEquals(List.of("2019", "2019"), found("Founded in 2019. Its logo (2019) hangs there."));
+        assertEquals(List.of("2019", "2019", "2019"), found("Founded in 2019. Its logo (2019) hangs there, 2019's."));
+    }
+
+    @Test
+    void aYearTouchingALetterHyphenUnderscoreOrDotIsNoYear() {
+        assertEquals(List.of(), found("build-2019, 2019-build, v_2019, 2019_x, 1.2019, 2019.5, x2019, 2019x"));
     }
 
     @Test
@@ -299,6 +320,11 @@ class TemporalExpressionsTest extends UnitTest {
         assertEquals(List.of("doesn't"), TemporalExpressions.negationCues("Avery Lin doesn't drive."));
         assertEquals(List.of("never"), TemporalExpressions.negationCues("Jonah has never been to Lisbon."));
         assertEquals(List.of("not", "without"), TemporalExpressions.negationCues("Not a fan, without doubt."));
+        assertEquals(List.of(), TemporalExpressions.negationCues("No more late shifts, and not since March."));
+        assertEquals(List.of("refused to", "instead of", "rather than"),
+                TemporalExpressions.negationCues("Refused to fly, took the train instead of a car rather than a bus."));
+        assertEquals(List.of(), TemporalExpressions.negationCues("Avery used to drive and nothing changed."),
+                "only the tabled cues");
     }
 
     @Test
@@ -316,9 +342,18 @@ class TemporalExpressionsTest extends UnitTest {
         var plain = TemporalExpressions.valence("Avery Lin doesn't like Kale.").orElseThrow();
         assertEquals(Polarity.UNFAVORABLE, plain.polarity());
         assertFalse(plain.ending());
-        var hate = TemporalExpressions.valence("The user no longer hates jazz.").orElseThrow();
-        assertEquals(Polarity.UNFAVORABLE, hate.polarity());
-        assertTrue(hate.ending());
+        var dropped = TemporalExpressions.valence("The user no longer likes jazz.").orElseThrow();
+        assertEquals(Polarity.FAVORABLE, dropped.polarity());
+        assertTrue(dropped.ending());
+        for (var unfavorable : List.of("Hates jazz.", "Dislikes jazz.", "Can't stand jazz.", "Cannot stand jazz.",
+                "Has never liked jazz.", "Does not like jazz.")) {
+            var v = TemporalExpressions.valence(unfavorable).orElseThrow();
+            assertEquals(Polarity.UNFAVORABLE, v.polarity(), unfavorable);
+            assertFalse(v.ending(), unfavorable);
+        }
+        assertTrue(TemporalExpressions.valence("It looks like rain.").isEmpty(), "a preposition is no stance");
+        assertEquals(Polarity.FAVORABLE,
+                TemporalExpressions.valence("Is interested in jazz.").orElseThrow().polarity());
         assertEquals(Polarity.FAVORABLE, TemporalExpressions.valence("Loves bouldering.").orElseThrow().polarity());
         assertTrue(TemporalExpressions.valence("Lives in Ashgrove.").isEmpty());
     }
@@ -340,7 +375,7 @@ class TemporalExpressionsTest extends UnitTest {
     private static final String PINNED_PROBES = """
             FINDER @2026-10-31
             Avery Lin has a standing call with Mateo Castillo every Sunday evening to plan the Thornbury Marathon in April.
-              + [105,110) "April" phrase="in April" MONTH relative [2026-04]
+              + [105,110) "April" phrase="in April" MONTH relative [2026-04, 2027-04]
               - [56,62) "Sunday" RECURRING
             Is renewing the Larkspur Inn booking for the Marrow Bay Retreat, which Harborlight Analytics is holding there this June.
               + [110,119) "this June" phrase="this June" MONTH relative [2026-06]
@@ -404,14 +439,14 @@ class TemporalExpressionsTest extends UnitTest {
               + [28,40) "June 5, 2026" phrase="on June 5, 2026" DAY absolute [2026-06-05]
               + [54,72) "12th of March 2027" phrase="on 12th of March 2027" DAY absolute [2027-03-12]
             Avery Lin met Dana on March 3.
-              + [22,29) "March 3" phrase="on March 3" DAY relative [2026-03-03]
+              + [22,29) "March 3" phrase="on March 3" DAY relative [2026-03-03, 2027-03-03]
             The user lived in Porto from 2015 to 2019 and in Lisbon between March 2020 and June 2021.
               + [29,41) "2015 to 2019" phrase="from 2015 to 2019" RANGE absolute [2015/2019]
               + [64,88) "March 2020 and June 2021" phrase="between March 2020 and June 2021" RANGE absolute [2020-03/2021-06]
             The lease ran 2016–2018.
-              + [14,23) "2016–2018" phrase="2016–2018" RANGE absolute [2016/2018]
+              + [14,23) "2016–2018" phrase="The lease ran 2016–2018" RANGE absolute [2016/2018]
             The clinic opened 3 years ago and moved two months ago.
-              + [18,29) "3 years ago" phrase="3 years ago" YEAR relative [2023~]
+              + [18,29) "3 years ago" phrase="The clinic opened 3 years ago" YEAR relative [2023~]
               + [40,54) "two months ago" phrase="two months ago" MONTH relative [2026-08~]
             The roof was fixed 10 days ago and inspected yesterday.
               + [19,30) "10 days ago" phrase="10 days ago" DAY relative [2026-10-21]
@@ -421,7 +456,7 @@ class TemporalExpressionsTest extends UnitTest {
             Avery Lin has lived in Ashgrove for 6 months.
               + [36,44) "6 months" phrase="for 6 months" DURATION relative [2026-04~] P6M
             The house was renovated in the spring and painted last summer.
-              + [31,37) "spring" phrase="in the spring" SEASON relative [2026-21]
+              + [31,37) "spring" phrase="the spring" SEASON relative [2026-21, 2027-21]
               + [50,61) "last summer" phrase="last summer" SEASON relative [2026-22]
             The user grew up in the 1990s.
               - [20,29) "the 1990s" VAGUE
@@ -431,7 +466,7 @@ class TemporalExpressionsTest extends UnitTest {
             The user's anniversary is on 2026-02-15.
               + [29,39) "2026-02-15" phrase="on 2026-02-15" DAY absolute [2026-02-15]
             The board meets each spring and every year in April.
-              + [46,51) "April" phrase="in April" MONTH relative [2026-04]
+              + [46,51) "April" phrase="in April" MONTH relative [2026-04, 2027-04]
               - [16,27) "each spring" RECURRING
               - [32,42) "every year" RECURRING
             The festival is this winter, next to the Larkspur Inn.
@@ -464,9 +499,10 @@ class TemporalExpressionsTest extends UnitTest {
             this June | 2026-06 | 2026-06 | 2028-06
             last June | 2026-06 | 2026-06 | 2027-06
             next June | 2027-06 | 2027-06 | 2028-06
-            in June | 2026-06 | 2026-06 | 2028-06
-            June 5 | 2026-06-05 | 2026-06-05 | 2028-06-05
-            5 June | 2026-06-05 | 2026-06-05 | 2028-06-05
+            in June | 2026-06,2027-06 | 2026-06,2027-06 | 2027-06,2028-06
+            June 5 | 2026-06-05,2027-06-05 | 2026-06-05,2027-06-05 | 2027-06-05,2028-06-05
+            5 June | 2026-06-05,2027-06-05 | 2026-06-05,2027-06-05 | 2027-06-05,2028-06-05
+            12 December | 2025-12-12,2026-12-12 | 2026-12-12,2027-12-12 | 2027-12-12,2028-12-12
             June 2026 | 2026-06 | 2026-06 | 2026-06
             June 5, 2026 | 2026-06-05 | 2026-06-05 | 2026-06-05
             5 June 2026 | 2026-06-05 | 2026-06-05 | 2026-06-05
@@ -475,7 +511,7 @@ class TemporalExpressionsTest extends UnitTest {
             this winter | 2026-24 | 2026-24 | 2027-24
             last summer | 2026-22 | 2026-22 | 2027-22
             next winter | 2026-24 | 2027-24 | 2028-24
-            in the spring | 2026-21 | 2026-21 | 2028-21
+            in the spring | 2026-21,2027-21 | 2026-21,2027-21 | 2027-21,2028-21
             autumn 2025 | 2025-23 | 2025-23 | 2025-23
             fall of 2024 | 2024-23 | 2024-23 | 2024-23
             3 years ago | 2023~ | 2023~ | 2025~
@@ -493,6 +529,7 @@ class TemporalExpressionsTest extends UnitTest {
             in 2019 | 2019 | 2019 | 2019
             since 2019 | 2019 | 2019 | 2019
             from 2019 to 2021 | 2019/2021 | 2019/2021 | 2019/2021
+            12–14 June 2027 | 2027-06-12/2027-06-14 | 2027-06-12/2027-06-14 | 2027-06-12/2027-06-14
             between March 2020 and June 2021 | 2020-03/2021-06 | 2020-03/2021-06 | 2020-03/2021-06
             2019-2021 | 2019/2021 | 2019/2021 | 2019/2021
             """;

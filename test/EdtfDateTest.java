@@ -58,7 +58,7 @@ class EdtfDateTest extends UnitTest {
     void approximationWidensByThePrecision() {
         assertSpan("2025~", "2024-01-01", "2027-01-01");
         assertSpan("2026-08~", "2026-07-01", "2026-10-01");
-        assertSpan("2026-10-10~", "2026-10-07", "2026-10-14");
+        assertSpan("2026-10-10~", "2026-10-09", "2026-10-12");
         assertSpan("2026-21~", "2025-12-01", "2026-09-01");
         assertSpan("2027-35~", "2027-04-01", "2028-01-01");
     }

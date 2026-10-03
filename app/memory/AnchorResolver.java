@@ -96,7 +96,7 @@ public final class AnchorResolver {
                 Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE);
     }
 
-    /** Reads the memory, message and derivation tables; anchors are app-zone days. */
+    /** Reads the memory, message and derivation tables; an anchor is the app-zone day of the source message, else of the memory. */
     public static final class JpaLookup implements Lookup {
 
         @Override
@@ -108,18 +108,22 @@ public final class AnchorResolver {
             Memory m = Memory.findById(memoryId);
             if (m == null) return null;
             String sourceText = null;
+            var anchor = day(m.createdAt);
             if (m.sourceMessageId != null) {
                 Message source = Message.findById(m.sourceMessageId);
-                if (source != null) sourceText = source.content;
+                if (source != null) {
+                    sourceText = source.content;
+                    anchor = day(source.createdAt);
+                }
             }
             var predecessors = new ArrayList<Predecessor>();
             List<Memory> superseded = Memory.find("agent = ?1 AND supersededById = ?2", m.agent, m.id).fetch();
             for (var s : superseded) predecessors.add(new MemoryPred(s.id, s.createdAt));
             List<MemoryDerivation> inputs = MemoryDerivation.find("derivedMemory = ?1", m).fetch();
             for (var d : inputs) {
-                Memory input = d.inputMemoryId != null ? Memory.findById(d.inputMemoryId) : null;
-                if (input != null) {
-                    predecessors.add(new MemoryPred(input.id, input.createdAt));
+                if (d.inputMemoryId != null) {
+                    Memory input = Memory.findById(d.inputMemoryId);
+                    if (input != null) predecessors.add(new MemoryPred(input.id, input.createdAt));
                     continue;
                 }
                 Message message = d.inputMessageId != null ? Message.findById(d.inputMessageId) : null;
@@ -128,7 +132,7 @@ public final class AnchorResolver {
                             message.content == null ? "" : message.content, day(message.createdAt)));
                 }
             }
-            return new Node(m.text, day(m.createdAt), sourceText, m.derived, List.copyOf(predecessors));
+            return new Node(m.text, anchor, sourceText, m.derived, List.copyOf(predecessors));
         }
 
         private static LocalDate day(Instant at) {

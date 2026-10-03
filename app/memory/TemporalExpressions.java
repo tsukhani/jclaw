@@ -16,6 +16,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.IntFunction;
 import java.util.regex.MatchResult;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -40,13 +41,13 @@ public final class TemporalExpressions {
     private static final String MONTHS =
             String.join("|", MONTH_NAMES) + "|" + String.join("|", MONTH_ABBREVIATIONS);
 
-    /** The graph finder's month alternation: capitalised only, so "you may march on" names no month. */
-    private static final String MONTHS_CAPITALISED = String.join("|",
+    /** The graph finder's month alternation: capitalized only, so "you may march on" names no month. */
+    private static final String MONTHS_CAPITALIZED = String.join("|",
             java.util.stream.Stream.concat(MONTH_NAMES.stream(), MONTH_ABBREVIATIONS.stream())
                     .map(m -> Character.toUpperCase(m.charAt(0)) + m.substring(1)).toList());
 
     /** A bare month stands alone only by its full name: "Jan" is as often a person. */
-    private static final String FULL_MONTHS_CAPITALISED = String.join("|",
+    private static final String FULL_MONTHS_CAPITALIZED = String.join("|",
             MONTH_NAMES.stream().map(m -> Character.toUpperCase(m.charAt(0)) + m.substring(1)).toList());
 
     /**
@@ -149,7 +150,10 @@ public final class TemporalExpressions {
     private static final String SEASON = "(spring|summer|autumn|fall|winter)";
     private static final String DEICTIC = "(this|last|next|coming)";
     private static final String YEAR = "((?:19|20)\\d{2})";
-    private static final String RANGE_END = "(?:(?:" + MONTHS_CAPITALISED + ")\\s+(?:of\\s+)?)?(?:19|20)\\d{2}";
+    private static final String RANGE_END = "(?:(?:" + MONTHS_CAPITALIZED + ")\\s+(?:of\\s+)?)?(?:19|20)\\d{2}";
+    /** Words after which a bare month or season names one; "the last June" is refused before this rule sees it. */
+    private static final String YEARLESS_OPENERS =
+            "in|on|since|until|by|from|before|after|the|early|late|mid|every|each|per";
     private static final String WEEKDAYS = "monday|tuesday|wednesday|thursday|friday|saturday|sunday";
 
     private static final Map<String, Integer> NUMBER_WORDS = Map.ofEntries(Map.entry("a", 1), Map.entry("an", 1),
@@ -158,9 +162,9 @@ public final class TemporalExpressions {
             Map.entry("nine", 9), Map.entry("ten", 10), Map.entry("eleven", 11), Map.entry("twelve", 12));
 
     /** Words that open a date phrase; the phrase runs from the nearest one before the span. */
-    private static final Set<String> PHRASE_OPENERS = orderedSet("in", "on", "at", "during", "since", "until",
-            "till", "by", "from", "through", "throughout", "over", "before", "after", "around", "for", "every",
-            "each", "per", "this", "last", "next", "between");
+    private static final Set<String> PHRASE_OPENERS = orderedSet("in", "on", "at", "by", "since", "until", "from",
+            "before", "after", "during", "this", "last", "next", "every", "each", "per", "the", "early", "late", "mid", "for", "between", "through", "throughout", "over",
+            "around", "till");
     private static final Set<String> RECURRENCE_WORDS = orderedSet("every", "each", "per");
     private static final int PHRASE_LOOKBACK = 3;
     private static final Pattern WORD = Pattern.compile("\\p{L}+");
@@ -184,30 +188,33 @@ public final class TemporalExpressions {
             rule("\\b(?i:between)\\s+((" + RANGE_END + ")\\s+(?i:and)\\s+(" + RANGE_END + "))\\b", 1,
                     TemporalExpressions::range),
             rule("\\b(((?:19|20)\\d{2})\\s*[\u2013-]\\s*((?:19|20)\\d{2}))\\b", 1, TemporalExpressions::range),
-            rule("\\b(" + MONTHS_CAPITALISED + ")\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,\\s*|\\s+)" + YEAR + "\\b", 0,
+            rule("\\b(\\d{1,2})\\s*[\u2013-]\\s*(\\d{1,2})\\s+(" + MONTHS_CAPITALIZED + ")\\.?,?\\s+" + YEAR + "\\b", 0,
+                    TemporalExpressions::dayRange),
+            rule("\\b(" + MONTHS_CAPITALIZED + ")\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,\\s*|\\s+)" + YEAR + "\\b", 0,
                     (m, t, a) -> absolute(Kind.DAY, EdtfDate.ofDay(LocalDate.of(Integer.parseInt(m.group(3)),
                             month(m.group(1)), Integer.parseInt(m.group(2))), false))),
-            rule("\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(" + MONTHS_CAPITALISED + ")\\.?,?\\s+" + YEAR + "\\b",
+            rule("\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(" + MONTHS_CAPITALIZED + ")\\.?,?\\s+" + YEAR + "\\b",
                     0, (m, t, a) -> absolute(Kind.DAY, EdtfDate.ofDay(LocalDate.of(Integer.parseInt(m.group(3)),
                             month(m.group(2)), Integer.parseInt(m.group(1))), false))),
-            rule("\\b(" + MONTHS_CAPITALISED + ")\\s+(?:of\\s+)?" + YEAR + "\\b", 0, (m, t, a) -> absolute(
+            rule("\\b(" + MONTHS_CAPITALIZED + ")\\s+(?:of\\s+)?" + YEAR + "\\b", 0, (m, t, a) -> absolute(
                     Kind.MONTH, EdtfDate.ofMonth(YearMonth.of(Integer.parseInt(m.group(2)), month(m.group(1))),
                             false))),
-            rule("\\b(" + MONTHS_CAPITALISED + ")\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?![:\\d])", 0,
-                    (m, t, a) -> relative(Kind.DAY, EdtfDate.ofDay(
-                            LocalDate.of(a.getYear(), month(m.group(1)), Integer.parseInt(m.group(2))), false))),
-            rule("\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(" + MONTHS_CAPITALISED + ")\\b", 0,
-                    (m, t, a) -> relative(Kind.DAY, EdtfDate.ofDay(
-                            LocalDate.of(a.getYear(), month(m.group(2)), Integer.parseInt(m.group(1))), false))),
-            rule("\\b(?i:" + DEICTIC + ")\\s+(" + MONTHS_CAPITALISED + ")\\b", 0, TemporalExpressions::deicticMonth),
-            rule("\\b(" + FULL_MONTHS_CAPITALISED + ")\\b", 0, (m, t, a) -> relative(Kind.MONTH,
-                    EdtfDate.ofMonth(YearMonth.of(a.getYear(), month(m.group(1))), false))),
+            rule("\\b(" + MONTHS_CAPITALIZED + ")\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?![:\\d])", 0,
+                    (m, t, a) -> yearless(Kind.DAY, a, y -> EdtfDate.ofDay(
+                            LocalDate.of(y, month(m.group(1)), Integer.parseInt(m.group(2))), false))),
+            rule("\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(" + MONTHS_CAPITALIZED + ")\\b", 0,
+                    (m, t, a) -> yearless(Kind.DAY, a, y -> EdtfDate.ofDay(
+                            LocalDate.of(y, month(m.group(2)), Integer.parseInt(m.group(1))), false))),
+            rule("\\b(?i:" + DEICTIC + ")\\s+(" + MONTHS_CAPITALIZED + ")\\b", 0, TemporalExpressions::deicticMonth),
+            rule("(?<=\\b(?i:" + YEARLESS_OPENERS + ")[\\s-]{1,3})(" + FULL_MONTHS_CAPITALIZED + ")\\b", 0,
+                    (m, t, a) -> yearless(Kind.MONTH, a, y -> EdtfDate.ofMonth(YearMonth.of(y, month(m.group(1))),
+                            false))),
             rule("(?i)\\b" + SEASON + "\\s+(?:of\\s+)?" + YEAR + "\\b", 0, (m, t, a) -> absolute(Kind.SEASON,
                     EdtfDate.ofSeason(Integer.parseInt(m.group(2)), season(m.group(1))))),
             rule("(?i)\\b" + DEICTIC + "\\s+" + SEASON + "\\b", 0, TemporalExpressions::deicticSeason),
-            rule("(?i)\\b(?:in|during|by|until|over|through|throughout)\\s+(?:the\\s+)?"
-                    + "(spring|summer|autumn|winter)\\b(?!\\s+(?:of\\s+)?(?:19|20)\\d{2}\\b)", 1, (m, t, a) -> relative(Kind.SEASON,
-                            seasonInstance("this", season(m.group(1)), a))),
+            rule("(?i)(?<=\\b(?:" + YEARLESS_OPENERS + "|during|over|through|throughout)[\\s-]{1,3})"
+                    + "(spring|summer|autumn|winter)\\b(?!\\s+(?:of\\s+)?(?:19|20)\\d{2}\\b)", 0,
+                    (m, t, a) -> yearless(Kind.SEASON, a, y -> EdtfDate.ofSeason(y, season(m.group(1))))),
             rule("\\bQ([1-4])\\s+(?:of\\s+)?" + YEAR + "\\b", 0, (m, t, a) -> absolute(Kind.QUARTER,
                     EdtfDate.ofQuarter(Integer.parseInt(m.group(2)), Integer.parseInt(m.group(1))))),
             rule("(?i)\\b(?:the\\s+)?(first|second|third|fourth|1st|2nd|3rd|4th)\\s+quarter\\s+of\\s+" + YEAR + "\\b",
@@ -223,7 +230,7 @@ public final class TemporalExpressions {
             rule("(?i)\\bin\\s+" + NUMBER + "\\s+" + UNIT + "\\b", 0, (m, t, a) -> offset(m, a, 1)),
             rule("(?i)\\bfor\\s+(?:the\\s+(?:past|last)\\s+)?(" + NUMBER + "\\s+" + UNIT + ")\\b", 1,
                     TemporalExpressions::duration),
-            rule("\\b" + YEAR + "\\b", 0, TemporalExpressions::year),
+            rule("(?<!\\d)" + YEAR + "(?!\\d)", 0, TemporalExpressions::year),
             rule("(?i)\\b(?:" + NUMBER + "|the|a few|several)\\s+(?:day|week|month|year|night|morning)s?\\s+"
                     + "(?:before|after|prior\\s+to)\\b(?!\\s+(?:tomorrow|yesterday|today)\\b)", 0,
                     refuse(Reason.EVENT_RELATIVE)),
@@ -302,7 +309,7 @@ public final class TemporalExpressions {
         return new Result(List.copyOf(found), List.copyOf(refused));
     }
 
-    /** The offsets {@link #find} reports as found, taken at a fixed leap-year anchor so "February 29" is a day. */
+    /** The offsets {@link #find} reports as found; offsets never depend on the anchor, so any fixed one serves. */
     public static List<Range> claimedSpans(String text) {
         return find(text, CLAIM_ANCHOR).found().stream().map(d -> new Range(d.start(), d.end())).toList();
     }
@@ -336,6 +343,40 @@ public final class TemporalExpressions {
         return new Reading(Kind.RANGE, false, List.of(interval), null);
     }
 
+    private static Outcome dayRange(MatchResult m, String text, LocalDate anchor) {
+        var month = YearMonth.of(Integer.parseInt(m.group(4)), month(m.group(3)));
+        var from = EdtfDate.ofDay(month.atDay(Integer.parseInt(m.group(1))), false);
+        var to = EdtfDate.ofDay(month.atDay(Integer.parseInt(m.group(2))), false);
+        var interval = EdtfInterval.between(new EdtfInterval.Point(from), new EdtfInterval.Point(to));
+        return new Reading(Kind.RANGE, false, List.of(interval), null);
+    }
+
+    /**
+     * A date stated without its year: the latest instance begun by the anchor and, unless that one still holds the
+     * anchor, the earliest after it. A year with no such date (February 29) is skipped.
+     */
+    private static Outcome yearless(Kind kind, LocalDate anchor, IntFunction<EdtfDate> inYear) {
+        @Nullable EdtfDate before = null;
+        for (int y = anchor.getYear() + 1; before == null && y >= anchor.getYear() - 8; y--) {
+            var date = tryYear(inYear, y);
+            if (date != null && !date.lo().isAfter(anchor)) before = date;
+        }
+        if (before == null) throw new IllegalArgumentException("no such date");
+        if (before.hi().isAfter(anchor)) return relative(kind, before);
+        @Nullable EdtfDate after = null;
+        for (int y = before.year() + 1; after == null && y <= before.year() + 8; y++) after = tryYear(inYear, y);
+        if (after == null) throw new IllegalArgumentException("no such date");
+        return new Reading(kind, true, List.of(EdtfInterval.of(before), EdtfInterval.of(after)), null);
+    }
+
+    private static @Nullable EdtfDate tryYear(IntFunction<EdtfDate> inYear, int year) {
+        try {
+            return inYear.apply(year);
+        } catch (java.time.DateTimeException | IllegalArgumentException e) {
+            return null;
+        }
+    }
+
     private static EdtfDate rangeEnd(String side) {
         var parts = side.trim().split("\\s+");
         int year = Integer.parseInt(parts[parts.length - 1]);
@@ -345,7 +386,22 @@ public final class TemporalExpressions {
 
     private static @Nullable Outcome year(MatchResult m, String text, LocalDate anchor) {
         if (afterCurrencyOrHash(text, m.start())) return new Refusal(Reason.LITERAL);
+        if (joined(text, m.start(), m.end())) return null;
         return absolute(Kind.YEAR, EdtfDate.ofYear(Integer.parseInt(m.group(1)), false));
+    }
+
+    /** Touching a letter, '-', '_' or a '.' inside a token: a version, identifier or decimal, never a year. */
+    private static boolean joined(String text, int start, int end) {
+        if (start > 0) {
+            char c = text.charAt(start - 1);
+            if (Character.isLetter(c) || c == '-' || c == '_' || c == '.') return true;
+        }
+        if (end < text.length()) {
+            char c = text.charAt(end);
+            if (Character.isLetter(c) || c == '-' || c == '_') return true;
+            if (c == '.' && end + 1 < text.length() && Character.isLetterOrDigit(text.charAt(end + 1))) return true;
+        }
+        return false;
     }
 
     private static boolean afterCurrencyOrHash(String text, int start) {
@@ -564,16 +620,16 @@ public final class TemporalExpressions {
 
     /** A state that held and stopped; read before negation, so "hasn't used X since 2024" negates nothing. */
     public static final List<Pattern> ENDING_PATTERNS = List.of(
-            Pattern.compile("(?i)\\b(?:has|have|had)(?:n['\u2019]t|\\s+not)\\b[^.;!?]*?\\bsince\\b"),
-            Pattern.compile("(?i)\\b" + NEG + "\\b[^.;!?]*?\\b(?:anymore|any\\s+more|any\\s+longer)\\b"),
             Pattern.compile("(?i)\\bno\\s+longer\\b"),
-            Pattern.compile("(?i)\\b(?:stopped|quit|gave\\s+up|ceased)\\b"),
-            Pattern.compile("(?i)\\bused\\s+to\\b"),
-            Pattern.compile("(?i)\\b(?:formerly|previously)\\b"));
+            Pattern.compile("(?i)\\bno\\s+more\\b"),
+            Pattern.compile("(?i)\\b" + NEG + "\\b[^.;!?]*?\\b(?:anymore|any\\s+more|any\\s+longer)\\b"),
+            Pattern.compile("(?i)\\b(?:has|have|had)(?:n['\u2019]t|\\s+not)\\b[^.;!?]*?\\bsince\\b"),
+            Pattern.compile("(?i)\\bnot\\s+since\\b"),
+            Pattern.compile("(?i)\\b(?:stopped|quit|gave\\s+up)\\b"));
 
     /** Negation words; any word ending in n't is a cue too. */
-    public static final List<String> NEGATION_CUES =
-            List.of("not", "n't", "never", "no", "none", "nobody", "nothing", "neither", "nor", "without");
+    public static final List<String> NEGATION_CUES = List.of("not", "n't", "never", "no", "none", "neither", "nor",
+            "without", "refuses to", "refused to", "instead of", "rather than");
 
     /** A perfect-tense never: the negation holds from the start of time up to the anchor. */
     public static final List<String> PERFECT_NEVER =
@@ -601,22 +657,15 @@ public final class TemporalExpressions {
     public record Valence(Polarity polarity, boolean ending, int start, int end) {}
 
     public static final List<Frame> FAVORABLE_FRAMES = List.of(
-            new Frame(Pattern.compile("(?i)\\b" + NEG + "\\s+(?:like|love|enjoy|prefer)\\b[^.;!?]*?"
-                    + "\\b(?:anymore|any\\s+more|any\\s+longer)\\b"), true),
-            new Frame(Pattern.compile("(?i)\\bno\\s+longer\\s+(?:likes?|loves?|enjoys?|prefers?)\\b"), true),
-            new Frame(Pattern.compile("(?i)\\b(?:stopped|quit)\\s+(?:liking|loving|enjoying)\\b"), true),
-            new Frame(Pattern.compile("(?i)\\bused\\s+to\\s+(?:like|love|enjoy|prefer)\\b"), true),
-            new Frame(Pattern.compile("(?i)\\b(?:likes?|loves?|enjoys?|prefers?|is\\s+(?:a\\s+)?fan\\s+of"
-                    + "|is\\s+interested\\s+in|is\\s+into)\\b"), false));
+            new Frame(Pattern.compile("(?i)\\b" + NEG + "\\s+like\\b[^.;!?]*?\\b(?:anymore|any\\s+more|any\\s+longer)\\b"),
+                    true),
+            new Frame(Pattern.compile("(?i)\\bno\\s+longer\\s+likes\\b"), true),
+            new Frame(Pattern.compile("(?i)\\b(?:prefers|likes|loves|enjoys|is\\s+interested\\s+in)\\b"), false));
 
     public static final List<Frame> UNFAVORABLE_FRAMES = List.of(
-            new Frame(Pattern.compile("(?i)\\bno\\s+longer\\s+(?:dislikes?|hates?)\\b"), true),
-            new Frame(Pattern.compile("(?i)\\bused\\s+to\\s+(?:dislike|hate)\\b"), true),
-            new Frame(Pattern.compile("(?i)\\b(?:stopped|quit)\\s+(?:disliking|hating)\\b"), true),
-            new Frame(Pattern.compile("(?i)\\b(?:dislikes?|hates?|detests?|can['\u2019]t\\s+stand|avoids?)\\b"),
+            new Frame(Pattern.compile("(?i)\\b(?:dislikes|hates|can['\u2019]t\\s+stand|cannot\\s+stand|never\\s+liked)\\b"),
                     false),
-            new Frame(Pattern.compile("(?i)\\b" + NEG + "\\s+(?:like|love|enjoy)\\b"), false),
-            new Frame(Pattern.compile("(?i)\\b(?:is\\s+not|isn['\u2019]t)\\s+a\\s+fan\\s+of\\b"), false));
+            new Frame(Pattern.compile("(?i)\\b" + NEG + "\\s+like\\b"), false));
 
     /** The negation cues in {@code text} in order, lower-cased, after every ending pattern's match is removed. */
     public static List<String> negationCues(String text) {
@@ -634,12 +683,11 @@ public final class TemporalExpressions {
     }
 
     /**
-     * The first frame that matches: favorable endings, then unfavorable endings, unfavorable stances and favorable
-     * stances — so "doesn't like X anymore" is a favorable ending, never an unfavorable stance.
+     * The first frame that matches: favorable endings, then unfavorable stances, then favorable stances — so "doesn't
+     * like X anymore" is a favorable ending, never an unfavorable stance.
      */
     public static Optional<Valence> valence(String text) {
         return firstFrame(text, FAVORABLE_FRAMES, Polarity.FAVORABLE, true)
-                .or(() -> firstFrame(text, UNFAVORABLE_FRAMES, Polarity.UNFAVORABLE, true))
                 .or(() -> firstFrame(text, UNFAVORABLE_FRAMES, Polarity.UNFAVORABLE, false))
                 .or(() -> firstFrame(text, FAVORABLE_FRAMES, Polarity.FAVORABLE, false));
     }
@@ -664,11 +712,11 @@ public final class TemporalExpressions {
             "last night", "this morning", "this week", "last week", "next week", "this month", "last month",
             "next month", "this year", "last year", "next year", "this quarter", "last quarter", "next quarter", "Q3",
             "Q3 2027", "the third quarter of 2027", "this June", "last June", "next June", "in June", "June 5",
-            "5 June", "June 2026", "June 5, 2026", "5 June 2026", "2026-02-15", "this spring", "this winter",
+            "5 June", "12 December", "June 2026", "June 5, 2026", "5 June 2026", "2026-02-15", "this spring", "this winter",
             "last summer", "next winter", "in the spring", "autumn 2025", "fall of 2024", "3 years ago", "a year ago",
             "two months ago", "3 weeks ago", "10 days ago", "a decade ago", "in 2 years", "in three days",
             "for three years", "for 6 months", "for two weeks", "for 10 days", "in 2019", "since 2019",
-            "from 2019 to 2021", "between March 2020 and June 2021", "2019-2021");
+            "from 2019 to 2021", "12\u201314 June 2027", "between March 2020 and June 2021", "2019-2021");
 
     /** Sentences covering every finder rule, refusal and guard. */
     public static final List<String> FINDER_PROBES = List.of(

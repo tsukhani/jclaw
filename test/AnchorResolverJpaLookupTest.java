@@ -88,6 +88,7 @@ class AnchorResolverJpaLookupTest extends UnitTest {
             derivation(memory, input.id, null);
             derivation(memory, null, message.id);
             derivation(memory, 999_999_999L, 999_999_998L);
+            derivation(memory, 999_999_997L, message.id);
             return new Seeded(memory.id, message.id, superseded.id, input.id, foreign.id);
         });
     }
@@ -118,9 +119,10 @@ class AnchorResolverJpaLookupTest extends UnitTest {
         var node = lookup.node(seeded.memory()).orElseThrow();
         assertEquals("The user moved to Porto last year.", node.text());
         assertEquals("We moved to Porto last year.", node.sourceText());
-        assertEquals(day(WRITTEN), node.anchor());
+        assertEquals(day(SENT), node.anchor(), "the source message's day, not the memory's");
         assertTrue(node.derived());
         assertTrue(lookup.node(-1).isEmpty());
+        assertEquals(day(SUPERSEDED), lookup.node(seeded.superseded()).orElseThrow().anchor(), "no source message");
     }
 
     @Test
@@ -140,7 +142,7 @@ class AnchorResolverJpaLookupTest extends UnitTest {
     }
 
     @Test
-    void aDerivationFromAMessageIsAMessagePredecessorAndAnUnresolvableOneIsSkipped() {
+    void aDerivationFromAMessageIsAMessagePredecessorAndADanglingOneIsSkipped() {
         var seeded = seed();
         var predecessors = lookup.node(seeded.memory()).orElseThrow().predecessors();
         assertTrue(predecessors.contains(new MessagePred(seeded.message(), SENT, "We moved to Porto last year.",
@@ -152,7 +154,7 @@ class AnchorResolverJpaLookupTest extends UnitTest {
     void theResolverRunsOverTheRows() {
         var seeded = seed();
         var resolver = new AnchorResolver(lookup);
-        assertEquals(List.of(day(WRITTEN)), resolver.base(seeded.memory(), "last year").stream().toList());
+        assertEquals(List.of(day(SENT)), resolver.base(seeded.memory(), "last year").stream().toList());
     }
 
     private static <T> T commitInFreshTx(Supplier<T> block) {
