@@ -4032,7 +4032,7 @@ PYBODY
     if [[ "$sub" == "run" ]]; then
         # An accepted run streams one JSON line per progress event and the report last (JCLAW-1359). The reader
         # prints the events, writes every other line - the report, or a refusal's body - to $tmp, and exits
-        # non-zero on an error event or a stream that ends without a report.
+        # 3 on an error event or 4 on a stream that ends without a report.
         local reader headers streamed=0
         read -r -d '' reader <<'PYSTREAM' || true
 import json, sys
@@ -4062,7 +4062,6 @@ if failure is not None:
     print("Error: grapheval run failed: %s" % failure)
     sys.exit(3)
 if not report:
-    print("Error: grapheval run ended without a report")
     sys.exit(4)
 PYSTREAM
         headers=$(mktemp)
@@ -4071,11 +4070,15 @@ PYSTREAM
             -H "Content-Type: application/json" \
             -X POST --data "$body" \
             "http://localhost:$BACKEND_PORT$path" | python3 -u -c "$reader" "$tmp" || streamed=$?
-        status=$(awk '/^HTTP/ {s = $2} END {print s}' "$headers")
+        status=$(awk '/^HTTP/ {s = $2} END {print (s == "" ? "000" : s)}' "$headers")
         rm -f "$headers"
         if [[ "$status" == "200" && "$streamed" != "0" ]]; then
-            # 3 and 4 are the reader's own exits, which name the failure; anything else is curl's.
-            [[ "$streamed" == "3" || "$streamed" == "4" ]] || echo "Error: grapheval run stream broke (curl exit $streamed)"
+            # 3 is the reader's error event, already printed; 4 is its empty stream; anything else is curl's.
+            case "$streamed" in
+                3) ;;
+                4) echo "Error: grapheval run ended without a report" ;;
+                *) echo "Error: grapheval run stream broke (curl exit $streamed)" ;;
+            esac
             rm -f "$tmp"
             exit 1
         fi
