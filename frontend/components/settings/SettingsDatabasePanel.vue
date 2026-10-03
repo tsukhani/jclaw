@@ -170,7 +170,7 @@ async function restoreBackup(b: BackupInfo) {
   const ok = await confirm({
     title: 'Restore this backup',
     message: `Replace the database with the backup from ${when(b.createdAt)} (${b.id}). Everything written since then is lost. `
-      + 'The current file is kept as jclaw.mv.db.pre-restore until the next backup. JClaw restarts; this page reconnects on its own.',
+      + 'The current file and graph are kept as jclaw.mv.db.pre-restore and memory-graph.pre-restore until the next backup. JClaw restarts; this page reconnects on its own.',
     confirmText: 'Restore',
     variant: 'danger',
   })
