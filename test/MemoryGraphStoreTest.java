@@ -1,6 +1,8 @@
 import memory.graph.GraphCodec;
 import memory.graph.GraphStore;
 import memory.graph.GraphStore.GraphRefusedException;
+import memory.graph.GraphWithdrawal.LineageDecision;
+import memory.graph.GraphWithdrawal.Retirement;
 import memory.ontology.EdtfInterval;
 import memory.ontology.OntologyRecord;
 import memory.ontology.OntologyRecord.Constraint;
@@ -479,6 +481,47 @@ class MemoryGraphStoreTest extends UnitTest {
         assertEquals(Set.of(), store.withdraw(AGENT, Set.of(1L)));
         assertEquals(Set.of(), store.withdrawAllMemoryEvidence(AGENT));
         store.deleteAgent(AGENT);
+        assertFalse(Files.exists(store.root()));
+    }
+
+    @Test
+    void retireAndRecordLineageTwiceWriteNothingTheSecondTime() throws Exception {
+        store.write(AGENT, fullSet());
+        var retirement = new Retirement(Instant.parse("2026-10-01T00:00:00Z"), "memory:2");
+
+        var first = store.retire(AGENT, Map.of(1L, retirement));
+        assertEquals(1, first.evidenceRetired());
+        var retired = snapshot();
+        store.failAfterFilesForTest(1);
+        try {
+            var again = store.retire(AGENT, Map.of(1L, retirement));
+            assertEquals(0, again.evidenceRetired());
+            assertEquals(0, again.lineageCleared());
+        } finally {
+            store.failAfterFilesForTest(-1);
+        }
+        assertEquals(retired, snapshot());
+
+        var decision = new LineageDecision(Lineage.UPDATE, LocalDate.parse("2026-10-01"), retirement);
+        assertTrue(store.recordLineage(AGENT, Map.of(1L, decision)));
+        var lineaged = snapshot();
+        var e1 = (Evidence) store.read(AGENT).stream().filter(r -> r.id().equals("e1")).findFirst().orElseThrow();
+        assertEquals(Lineage.UPDATE, e1.lineage());
+        store.failAfterFilesForTest(1);
+        try {
+            assertFalse(store.recordLineage(AGENT, Map.of(1L, decision)));
+            assertEquals(0, store.retire(AGENT, Map.of(1L, retirement)).evidenceRetired());
+        } finally {
+            store.failAfterFilesForTest(-1);
+        }
+        assertEquals(lineaged, snapshot());
+    }
+
+    @Test
+    void aRetireOrLineageOnAnAgentWithNoGraphCreatesNothing() throws Exception {
+        var retirement = new Retirement(Instant.parse("2026-10-01T00:00:00Z"), "memory:2");
+        assertEquals(0, store.retire(AGENT, Map.of(1L, retirement)).evidenceRetired());
+        assertFalse(store.recordLineage(AGENT, Map.of(1L, new LineageDecision(Lineage.RESTATEMENT, null, retirement))));
         assertFalse(Files.exists(store.root()));
     }
 

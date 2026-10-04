@@ -2,8 +2,11 @@ import memory.JpaMemoryStore;
 import memory.graph.GraphLifecycle;
 import memory.graph.GraphStore;
 import memory.graph.GraphWithdrawal;
+import memory.graph.GraphWithdrawal.LineageDecision;
+import memory.graph.GraphWithdrawal.Retirement;
 import memory.ontology.OntologyRecord;
 import memory.ontology.OntologyRecord.Evidence;
+import memory.ontology.OntologyRecord.Lineage;
 import memory.ontology.OntologyRecord.Meta;
 import memory.ontology.OntologyRecord.Relation;
 import memory.ontology.OntologyRecord.Term;
@@ -18,9 +21,12 @@ import services.Tx;
 
 import java.nio.file.Files;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -118,16 +124,139 @@ class MemoryGraphLifecycleTest extends UnitTest {
         assertFirstWithdrawn(f);
     }
 
+    private static void supersede(long memoryId, long by) throws Exception {
+        try (var _ = LuceneTestSync.closedLease()) {
+            commitInFreshTx(() -> {
+                Memory.<Memory>findById(memoryId).supersede(by);
+                return null;
+            });
+        }
+    }
+
+    private static Instant supersededAt(long memoryId) {
+        return commitInFreshTx(() -> Memory.<Memory>findById(memoryId).supersededAt);
+    }
+
+    private static Retirement rowRetirement(long memoryId) {
+        return commitInFreshTx(() -> {
+            Memory m = Memory.findById(memoryId);
+            return Retirement.of(m.supersededAt, m.supersededById);
+        });
+    }
+
+    private static Evidence evidence(long agentId, String id) throws Exception {
+        return (Evidence) GraphStore.get().read(agentId).stream().filter(r -> r.id().equals(id)).findFirst()
+                .orElseThrow();
+    }
+
+    private static Map<String, String> files(long agentId) throws Exception {
+        var out = new TreeMap<String, String>();
+        try (var list = Files.list(GraphStore.get().agentDir(agentId))) {
+            for (var file : list.toList()) out.put(file.getFileName().toString(), Files.readString(file));
+        }
+        return out;
+    }
+
     @Test
-    void supersedeWithdrawsOnceCommitted() throws Exception {
+    void supersedeRetiresOnceCommitted() throws Exception {
+        var f = seed();
+        supersede(f.first(), f.second());
+
+        assertEquals(Set.of("eA", "eB", "T", "O", "R"), ids(f.agentId()));
+        var eA = evidence(f.agentId(), "eA");
+        assertNotNull(eA.retiredAt());
+        assertEquals(supersededAt(f.first()), eA.retiredAt());
+        assertEquals(GraphStore.memorySource(f.second()), eA.retiredBy());
+        assertNull(evidence(f.agentId(), "eB").retiredAt());
+    }
+
+    @Test
+    void supersedeAndDeleteInOneTransactionWithdraws() throws Exception {
         var f = seed();
         try (var _ = LuceneTestSync.closedLease()) {
             commitInFreshTx(() -> {
-                Memory.<Memory>findById(f.first()).supersede(f.second());
+                Memory m = Memory.findById(f.first());
+                m.supersede(f.second());
+                m.deleteWithLineage();
                 return null;
             });
         }
         assertFirstWithdrawn(f);
+    }
+
+    @Test
+    void theHookAndReconcileWriteIdenticalBytes() throws Exception {
+        var f = seed();
+        supersede(f.first(), f.second());
+        var byHook = files(f.agentId());
+
+        GraphStore.get().write(f.agentId(), graph(f));
+        assertNotEquals(byHook, files(f.agentId()));
+        GraphLifecycle.reconcile();
+
+        assertEquals(byHook, files(f.agentId()));
+    }
+
+    @Test
+    void deletingTheSuccessorClearsLineageOnReconcile() throws Exception {
+        var f = seed();
+        supersede(f.first(), f.second());
+        var retiredAt = supersededAt(f.first());
+        assertTrue(GraphStore.get().recordLineage(f.agentId(), Map.of(f.first(),
+                new LineageDecision(Lineage.UPDATE, LocalDate.parse("2026-10-01"), rowRetirement(f.first())))));
+        assertEquals(Lineage.UPDATE, evidence(f.agentId(), "eA").lineage());
+        try (var _ = LuceneTestSync.closedLease()) {
+            commitInFreshTx(() -> {
+                Memory.<Memory>findById(f.second()).deleteWithLineage();
+                return null;
+            });
+        }
+        assertFalse(ids(f.agentId()).contains("eB"));
+
+        GraphLifecycle.reconcile();
+
+        var eA = evidence(f.agentId(), "eA");
+        assertEquals(retiredAt, eA.retiredAt());
+        assertNull(eA.retiredBy());
+        assertNull(eA.lineage());
+        assertNull(eA.changedBy());
+    }
+
+    @Test
+    void aSecondSupersessionKeepsTheFirstLineage() throws Exception {
+        var f = seed();
+        long third;
+        try (var _ = LuceneTestSync.closedLease()) {
+            third = commitInFreshTx(() -> memory(Agent.findById(f.agentId()), "Ada works at Initech").id);
+        }
+        supersede(f.first(), f.second());
+        GraphStore.get().recordLineage(f.agentId(), Map.of(f.first(),
+                new LineageDecision(Lineage.UPDATE, LocalDate.parse("2026-10-01"), rowRetirement(f.first()))));
+        supersede(f.second(), third);
+        GraphStore.get().recordLineage(f.agentId(), Map.of(f.second(),
+                new LineageDecision(Lineage.CORRECTION, null, rowRetirement(f.second()))));
+        var before = evidence(f.agentId(), "eA");
+
+        GraphLifecycle.reconcile();
+
+        assertEquals(before, evidence(f.agentId(), "eA"));
+        assertEquals(GraphStore.memorySource(f.second()), before.retiredBy());
+        assertEquals(Lineage.UPDATE, before.lineage());
+        assertEquals(LocalDate.parse("2026-10-01"), before.changedBy());
+        assertEquals(Lineage.CORRECTION, evidence(f.agentId(), "eB").lineage());
+    }
+
+    @Test
+    void claimFreeEvidenceTakesAnUpdateLineage() throws Exception {
+        var f = seed();
+        supersede(f.first(), f.second());
+
+        assertTrue(GraphStore.get().recordLineage(f.agentId(), Map.of(f.first(),
+                new LineageDecision(Lineage.UPDATE, LocalDate.parse("2026-01-01"), rowRetirement(f.first())))));
+
+        var eA = evidence(f.agentId(), "eA");
+        assertEquals(Lineage.UPDATE, eA.lineage());
+        assertEquals(LocalDate.parse("2026-01-01"), eA.changedBy());
     }
 
     @Test
@@ -192,17 +321,21 @@ class MemoryGraphLifecycleTest extends UnitTest {
     }
 
     @Test
-    void reconcileWithdrawsAMemorySupersededWithNoHookFiring() throws Exception {
+    void reconcileRetiresAMemorySupersededWithNoHookFiring() throws Exception {
         var f = seed();
         try (var _ = LuceneTestSync.closedLease()) {
             commitInFreshTx(() -> JPA.em().createQuery("UPDATE Memory m SET m.supersededAt = :at WHERE m.id = :id")
                     .setParameter("at", Instant.parse("2026-10-01T00:00:00Z"))
                     .setParameter("id", f.first()).executeUpdate());
         }
+        assertNull(evidence(f.agentId(), "eA").retiredAt(), "no hook ran");
 
         GraphLifecycle.reconcile();
 
-        assertFirstWithdrawn(f);
+        assertEquals(Set.of("eA", "eB", "T", "O", "R"), ids(f.agentId()));
+        var eA = evidence(f.agentId(), "eA");
+        assertEquals(Instant.parse("2026-10-01T00:00:00Z"), eA.retiredAt());
+        assertNull(eA.retiredBy());
     }
 
     @Test

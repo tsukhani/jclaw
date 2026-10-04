@@ -1,5 +1,6 @@
 package memory.graph;
 
+import memory.graph.GraphWithdrawal.Retirement;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
@@ -7,10 +8,14 @@ import services.EventLogger;
 import services.Tx;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Keeps each agent's graph from outliving the memories and the agent it rests on. The hooks
@@ -25,9 +30,12 @@ public final class GraphLifecycle {
      * @param agents          agent directories examined
      * @param recovered       interrupted swaps repaired
      * @param orphansDeleted  directories removed because their agent row is gone
-     * @param recordsRemoved  records withdrawn because their memory is gone, superseded or another agent's
+     * @param recordsRemoved  records withdrawn because their memory is gone or another agent's
+     * @param evidenceRetired Evidence whose retirement was set, changed or cleared from its row
+     * @param lineageCleared  Evidence whose lineage was cleared because its retiredBy changed
      */
-    public record ReconcileResult(int agents, int recovered, int orphansDeleted, int recordsRemoved) {}
+    public record ReconcileResult(int agents, int recovered, int orphansDeleted, int recordsRemoved,
+            int evidenceRetired, int lineageCleared) {}
 
     @FunctionalInterface
     private interface GraphAction {
@@ -39,6 +47,36 @@ public final class GraphLifecycle {
     public static void withdrawAfterCommit(long agentId, long memoryId) {
         Tx.afterCommit(() -> guarded(agentId, "withdraw memory " + memoryId,
                 () -> GraphStore.get().withdraw(agentId, Set.of(memoryId))));
+    }
+
+    /** Once the supersession commits, stamp the memory's Evidence with the committed row's values. */
+    public static void retireAfterCommit(long agentId, long memoryId) {
+        Tx.afterCommit(() -> guarded(agentId, "retire memory " + memoryId, () -> {
+            var retirement = committedRetirement(agentId, memoryId);
+            if (retirement == null || retirement.at() == null) return;
+            GraphStore.get().retire(agentId, Map.of(memoryId, retirement));
+        }));
+    }
+
+    /**
+     * The row as committed, read on a fresh thread: the committing thread still has its JPA
+     * context bound, so a {@code Tx.run} there would read the completed session's entity.
+     */
+    private static @Nullable Retirement committedRetirement(long agentId, long memoryId) throws Exception {
+        var ref = new AtomicReference<@Nullable Retirement>();
+        var err = new AtomicReference<@Nullable Throwable>();
+        var reader = Thread.ofVirtual().start(() -> {
+            try {
+                ref.set(rowBatch(agentId, List.of(memoryId)).get(memoryId));
+            } catch (Throwable t) {
+                err.set(t);
+            }
+        });
+        reader.join();
+        var failure = err.get();
+        if (failure instanceof Exception e) throw e;
+        if (failure != null) throw new IllegalStateException(failure);
+        return ref.get();
     }
 
     public static void withdrawAllAfterCommit(long agentId) {
@@ -63,12 +101,17 @@ public final class GraphLifecycle {
         return reconcile(GraphStore.get());
     }
 
-    /** Recover, drop orphaned agents, and withdraw every memory source that no longer backs a live row. */
+    /**
+     * Recover, drop orphaned agents, withdraw every memory source with no row of this agent's,
+     * and sync each remaining source's retirement from its row.
+     */
     public static ReconcileResult reconcile(GraphStore store) throws IOException {
         int agents = 0;
         int recovered = 0;
         int orphans = 0;
         int removed = 0;
+        int retired = 0;
+        int cleared = 0;
         for (var agentId : store.agentIds()) {
             agents++;
             try {
@@ -84,17 +127,23 @@ public final class GraphLifecycle {
                     if (memoryId != null) referenced.add(memoryId);
                 }
                 if (referenced.isEmpty()) continue;
-                var live = liveMemoryIds(agentId, referenced);
+                var rows = rows(agentId, referenced);
                 var stale = new TreeSet<>(referenced);
-                stale.removeAll(live);
+                stale.removeAll(rows.keySet());
+                // Withdraw first, so a refused retire cannot block a withdrawal.
                 if (!stale.isEmpty()) removed += store.withdraw(agentId, stale).size();
+                if (!rows.isEmpty()) {
+                    var stamped = store.retire(agentId, rows);
+                    retired += stamped.evidenceRetired();
+                    cleared += stamped.lineageCleared();
+                }
             } catch (IOException | RuntimeException e) {
                 // One unreadable graph must not keep every later agent from being repaired.
                 EventLogger.warn(CATEGORY, String.valueOf(agentId), null,
                         "Memory graph reconcile failed: %s".formatted(e.getMessage()));
             }
         }
-        return new ReconcileResult(agents, recovered, orphans, removed);
+        return new ReconcileResult(agents, recovered, orphans, removed, retired, cleared);
     }
 
     private static @Nullable Long memoryId(@Nullable String source) {
@@ -108,27 +157,33 @@ public final class GraphLifecycle {
         }
     }
 
-    private static Set<Long> liveMemoryIds(long agentId, Set<Long> ids) {
-        var live = new TreeSet<Long>();
+    /** Each id's retirement from its row, for the rows that exist and belong to the agent. */
+    private static Map<Long, Retirement> rows(long agentId, Set<Long> ids) {
+        var rows = new TreeMap<Long, Retirement>();
         var batch = new ArrayList<Long>();
         for (var id : ids) {
             batch.add(id);
             if (batch.size() == 500) {
-                live.addAll(liveBatch(agentId, batch));
+                rows.putAll(rowBatch(agentId, batch));
                 batch.clear();
             }
         }
-        if (!batch.isEmpty()) live.addAll(liveBatch(agentId, batch));
-        return live;
+        if (!batch.isEmpty()) rows.putAll(rowBatch(agentId, batch));
+        return rows;
     }
 
-    private static List<Long> liveBatch(long agentId, List<Long> ids) {
+    private static Map<Long, Retirement> rowBatch(long agentId, List<Long> ids) {
         var copy = List.copyOf(ids);
-        return Tx.run(() -> JPA.em().createQuery(
-                        "SELECT m.id FROM Memory m WHERE m.id IN :ids AND m.agent.id = :agent "
-                                + "AND m.supersededAt IS NULL", Long.class)
+        var result = Tx.run(() -> JPA.em().createQuery(
+                        "SELECT m.id, m.supersededAt, m.supersededById FROM Memory m "
+                                + "WHERE m.id IN :ids AND m.agent.id = :agent", Object[].class)
                 .setParameter("ids", copy)
                 .setParameter("agent", agentId)
                 .getResultList());
+        var rows = new TreeMap<Long, Retirement>();
+        for (var row : result) {
+            rows.put((Long) row[0], Retirement.of((@Nullable Instant) row[1], (@Nullable Long) row[2]));
+        }
+        return rows;
     }
 }

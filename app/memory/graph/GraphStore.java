@@ -191,6 +191,32 @@ public final class GraphStore {
         });
     }
 
+    /** Retire each memory's Evidence as given; writes only when a stamp changes something. */
+    public GraphWithdrawal.Stamped retire(long agentId, Map<Long, GraphWithdrawal.Retirement> byMemoryId)
+            throws IOException {
+        var bySource = new TreeMap<String, GraphWithdrawal.Retirement>();
+        byMemoryId.forEach((id, r) -> bySource.put(memorySource(id), r));
+        return locked(agentId, () -> {
+            if (!hasGraph(agentId) || bySource.isEmpty()) return new GraphWithdrawal.Stamped(List.of(), 0, 0);
+            var stamped = GraphWithdrawal.retire(readLocked(agentId), bySource);
+            if (stamped.evidenceRetired() > 0) writeLocked(agentId, stamped.records());
+            return stamped;
+        });
+    }
+
+    /** Retire each predecessor and stamp its lineage; returns true when anything was written. */
+    public boolean recordLineage(long agentId, Map<Long, GraphWithdrawal.LineageDecision> byPredecessorMemoryId)
+            throws IOException {
+        var bySource = new TreeMap<String, GraphWithdrawal.LineageDecision>();
+        byPredecessorMemoryId.forEach((id, d) -> bySource.put(memorySource(id), d));
+        return locked(agentId, () -> {
+            if (!hasGraph(agentId) || bySource.isEmpty()) return false;
+            var lineaged = GraphWithdrawal.recordLineage(readLocked(agentId), bySource);
+            if (lineaged.changed()) writeLocked(agentId, lineaged.records());
+            return lineaged.changed();
+        });
+    }
+
     public static String memorySource(long memoryId) {
         return MEMORY_SOURCE_PREFIX + memoryId;
     }

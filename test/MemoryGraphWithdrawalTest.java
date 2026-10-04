@@ -1,19 +1,28 @@
 import memory.graph.GraphWithdrawal;
+import memory.graph.GraphWithdrawal.LineageDecision;
+import memory.graph.GraphWithdrawal.Retirement;
+import memory.ontology.EdtfInterval;
 import memory.ontology.OntologyRecord;
 import memory.ontology.OntologyRecord.Constraint;
 import memory.ontology.OntologyRecord.Evidence;
+import memory.ontology.OntologyRecord.Lineage;
 import memory.ontology.OntologyRecord.Mapping;
 import memory.ontology.OntologyRecord.Meta;
 import memory.ontology.OntologyRecord.Relation;
+import memory.ontology.OntologyRecord.Status;
 import memory.ontology.OntologyRecord.Term;
 import memory.ontology.OntologyRecord.Tier;
 import memory.ontology.OntologySchema;
 import memory.ontology.OntologyValidator;
+import models.MemoryAuthorType;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 class MemoryGraphWithdrawalTest extends UnitTest {
@@ -117,5 +126,145 @@ class MemoryGraphWithdrawalTest extends UnitTest {
         var result = GraphWithdrawal.withdraw(graph, Set.of("memory:99", "memory:"));
         assertEquals(Set.of(), result.removedIds());
         assertEquals(graph, result.survivors());
+    }
+
+    // ---- retirement and lineage ----
+
+    private static final Instant AT = Instant.parse("2026-10-01T00:00:00Z");
+    private static final Instant LATER = Instant.parse("2026-10-02T00:00:00Z");
+
+    private static Evidence ev(List<OntologyRecord> records, String id) {
+        return (Evidence) byId(records, id);
+    }
+
+    private static Evidence stamped(String id, String source, Instant at, String by, Lineage lineage,
+            LocalDate changedBy) {
+        return new Evidence(meta(id), source, null, null, null, null, null, at, by, lineage, changedBy, null, null,
+                null, null, null);
+    }
+
+    /** A claim on R anchored at 2026-03-01. */
+    private static Evidence claim(String id, String source) {
+        return new Evidence(meta(id), source, "R", MemoryAuthorType.HUMAN_TURN, null, null,
+                Instant.parse("2026-03-01T09:00:00Z"), null, null, null, null, LocalDate.parse("2026-03-01"),
+                Status.HOLDS, EdtfInterval.parse("2026-03-01/.."), null, null);
+    }
+
+    @Test
+    void retireSetsChangesAndClearsTheStampOnEveryEvidenceOfTheSourceOnly() {
+        var graph = graph();
+
+        var set = GraphWithdrawal.retire(graph, Map.of("memory:5", new Retirement(AT, "memory:9")));
+        assertEquals(1, set.evidenceRetired());
+        assertEquals(0, set.lineageCleared());
+        assertEquals(AT, ev(set.records(), "e5").retiredAt());
+        assertEquals("memory:9", ev(set.records(), "e5").retiredBy());
+        assertNull(ev(set.records(), "e50").retiredAt(), "memory:50 is not memory:5");
+        assertEquals(ids(graph), ids(set.records()), "nothing is removed");
+        for (var r : set.records()) {
+            if (!r.id().equals("e5")) assertEquals(byId(graph, r.id()), r, r.id());
+        }
+        assertEquals(graph.stream().map(OntologyRecord::id).toList(),
+                set.records().stream().map(OntologyRecord::id).toList(), "record order is kept");
+        assertValid(set.records());
+
+        var changed = GraphWithdrawal.retire(set.records(), Map.of("memory:5", new Retirement(LATER, "memory:10")));
+        assertEquals(1, changed.evidenceRetired());
+        assertEquals(LATER, ev(changed.records(), "e5").retiredAt());
+        assertEquals("memory:10", ev(changed.records(), "e5").retiredBy());
+        assertValid(changed.records());
+
+        var cleared = GraphWithdrawal.retire(changed.records(), Map.of("memory:5", Retirement.CLEARED));
+        assertEquals(1, cleared.evidenceRetired());
+        assertEquals(graph, cleared.records());
+    }
+
+    @Test
+    void anIdenticalStampReturnsEqualRecordsAndZeroCounts() {
+        var once = GraphWithdrawal.retire(graph(), Map.of("memory:5", new Retirement(AT, "memory:9"))).records();
+
+        var again = GraphWithdrawal.retire(once, Map.of("memory:5", new Retirement(AT, "memory:9")));
+
+        assertEquals(once, again.records());
+        assertEquals(0, again.evidenceRetired());
+        assertEquals(0, again.lineageCleared());
+        var lineaged = GraphWithdrawal.recordLineage(once, Map.of("memory:5",
+                new LineageDecision(Lineage.UPDATE, LocalDate.parse("2026-10-01"), new Retirement(AT, "memory:9"))));
+        assertTrue(lineaged.changed());
+        assertFalse(GraphWithdrawal.recordLineage(lineaged.records(), Map.of("memory:5",
+                new LineageDecision(Lineage.UPDATE, LocalDate.parse("2026-10-01"), new Retirement(AT, "memory:9"))))
+                .changed());
+    }
+
+    @Test
+    void lineageIsClearedWhenRetiredByChangesOrClearsAndKeptWhenOnlyRetiredAtChanges() {
+        var e = stamped("e5", "memory:5", AT, "memory:9", Lineage.UPDATE, LocalDate.parse("2026-10-01"));
+        var graph = List.<OntologyRecord>of(e);
+
+        var atOnly = GraphWithdrawal.retire(graph, Map.of("memory:5", new Retirement(LATER, "memory:9")));
+        assertEquals(1, atOnly.evidenceRetired());
+        assertEquals(0, atOnly.lineageCleared());
+        assertEquals(Lineage.UPDATE, ev(atOnly.records(), "e5").lineage());
+        assertEquals(LocalDate.parse("2026-10-01"), ev(atOnly.records(), "e5").changedBy());
+
+        var byChanged = GraphWithdrawal.retire(graph, Map.of("memory:5", new Retirement(AT, "memory:10")));
+        assertEquals(1, byChanged.lineageCleared());
+        assertNull(ev(byChanged.records(), "e5").lineage());
+        assertNull(ev(byChanged.records(), "e5").changedBy());
+
+        var byGone = GraphWithdrawal.retire(graph, Map.of("memory:5", new Retirement(AT, null)));
+        assertEquals(1, byGone.evidenceRetired());
+        assertEquals(1, byGone.lineageCleared());
+        assertEquals(AT, ev(byGone.records(), "e5").retiredAt());
+        assertNull(ev(byGone.records(), "e5").retiredBy());
+        assertNull(ev(byGone.records(), "e5").lineage());
+        assertNull(ev(byGone.records(), "e5").changedBy());
+        assertValid(byGone.records());
+
+        var unsuperseded = GraphWithdrawal.retire(graph, Map.of("memory:5", Retirement.CLEARED));
+        assertEquals(List.of(new Evidence(meta("e5"), "memory:5", null)), unsuperseded.records());
+        assertEquals(1, unsuperseded.lineageCleared());
+    }
+
+    @Test
+    void anUpdateBeforeAClaimsAnchorWritesNoLineageOnThatClaim() {
+        var graph = List.<OntologyRecord>of(
+                new Term(meta("T"), "Person", "Ada", List.of(), List.of("e5")),
+                new Term(meta("O"), "Organization", "Acme", List.of(), List.of("e5")),
+                new Relation(meta("R"), "works_at", "T", "O", List.of("e5", "c5")),
+                evidence("e5", "memory:5"),
+                claim("c5", "memory:5"));
+        var retirement = new Retirement(AT, "memory:9");
+
+        var before = GraphWithdrawal.recordLineage(graph, Map.of("memory:5",
+                new LineageDecision(Lineage.UPDATE, LocalDate.parse("2026-02-28"), retirement))).records();
+        assertEquals(AT, ev(before, "c5").retiredAt(), "the claim is still retired");
+        assertNull(ev(before, "c5").lineage());
+        assertNull(ev(before, "c5").changedBy());
+        assertEquals(Lineage.UPDATE, ev(before, "e5").lineage(), "claim-free Evidence takes the lineage");
+        assertEquals(LocalDate.parse("2026-02-28"), ev(before, "e5").changedBy());
+        assertValid(before);
+
+        for (var day : List.of("2026-03-01", "2026-03-02")) {
+            var on = GraphWithdrawal.recordLineage(graph, Map.of("memory:5",
+                    new LineageDecision(Lineage.UPDATE, LocalDate.parse(day), retirement))).records();
+            assertEquals(Lineage.UPDATE, ev(on, "c5").lineage(), day);
+            assertEquals(LocalDate.parse(day), ev(on, "c5").changedBy(), day);
+            assertValid(on);
+        }
+    }
+
+    @Test
+    void restatementAndCorrectionWriteNoChangedBy() {
+        for (var lineage : List.of(Lineage.RESTATEMENT, Lineage.CORRECTION)) {
+            var out = GraphWithdrawal.recordLineage(graph(), Map.of("memory:5",
+                    new LineageDecision(lineage, LocalDate.parse("2026-10-01"), new Retirement(AT, "memory:9"))));
+            assertTrue(out.changed());
+            assertEquals(lineage, ev(out.records(), "e5").lineage());
+            assertNull(ev(out.records(), "e5").changedBy());
+            assertEquals(byId(graph(), "T"), byId(out.records(), "T"), "other families are untouched");
+            assertEquals(byId(graph(), "mO"), byId(out.records(), "mO"));
+            assertValid(out.records());
+        }
     }
 }
