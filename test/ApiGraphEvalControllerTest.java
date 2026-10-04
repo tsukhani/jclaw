@@ -12,6 +12,7 @@ import services.grapheval.HeldOut;
 import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -170,7 +171,12 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
     void secondLabelsThatPredateV3AreNo400ButBadAdjudicationsStillAre() throws Exception {
         var second = Play.applicationPath.toPath().resolve(GraphCases.SECOND_LABELS_PATH);
         var e = assertThrows(IllegalArgumentException.class, () -> GraphCases.load(second, OntologySchema.seed()));
-        assertNotNull(e.getMessage(), "the committed second labels predate v3");
+        var loaded = GraphCases.loadSecondLabels(second, OntologySchema.seed());
+        assertEquals(List.of(), loaded.cases());
+        assertEquals(Agreement.Result.PREDATES_V3 + e.getMessage(), loaded.reason());
+        var absent = GraphCases.loadSecondLabels(second.resolveSibling("no-such-second-labels.json"),
+                OntologySchema.seed());
+        assertEquals(new GraphCases.SecondLabels(List.of(), null), absent, "no file is no reason");
         var verdicts = Play.applicationPath.toPath().resolve(GraphCases.ADJUDICATIONS_PATH);
         var saved = Files.exists(verdicts) ? Files.readString(verdicts) : null;
         try {

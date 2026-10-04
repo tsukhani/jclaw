@@ -195,6 +195,19 @@ public final class GraphCases {
         return parse(Files.readString(path), schema);
     }
 
+    /** Second labels; {@code reason} is set, and {@code cases} empty, when the file does not parse under v3. */
+    public record SecondLabels(List<Case> cases, @Nullable String reason) {}
+
+    /** The second labels at {@code path}, none when the file is absent. */
+    public static SecondLabels loadSecondLabels(Path path, OntologySchema schema) throws IOException {
+        if (!Files.exists(path)) return new SecondLabels(List.of(), null);
+        try {
+            return new SecondLabels(load(path, schema), null);
+        } catch (IllegalArgumentException e) {
+            return new SecondLabels(List.of(), Agreement.Result.predatesV3(String.valueOf(e.getMessage())).reason());
+        }
+    }
+
     /**
      * The cases in {@code json}, in file order.
      *

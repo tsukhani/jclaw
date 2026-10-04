@@ -133,14 +133,9 @@ public class ApiGraphEvalController extends Controller {
         } catch (IOException | RuntimeException e) {
             throw invalid("invalid case set: " + e.getMessage());
         }
-        List<GraphCases.Case> secondLabels;
-        String secondLabelsReason = null;
+        GraphCases.SecondLabels second;
         try {
-            var second = appPath(GraphCases.SECOND_LABELS_PATH);
-            secondLabels = Files.exists(second) ? GraphCases.load(second, schema) : List.of();
-        } catch (IllegalArgumentException e) {
-            secondLabels = List.of();
-            secondLabelsReason = Agreement.Result.predatesV3(String.valueOf(e.getMessage())).reason();
+            second = GraphCases.loadSecondLabels(appPath(GraphCases.SECOND_LABELS_PATH), schema);
         } catch (IOException | RuntimeException e) {
             throw invalid("invalid second labels: " + e.getMessage());
         }
@@ -151,10 +146,8 @@ public class ApiGraphEvalController extends Controller {
         } catch (IOException | RuntimeException e) {
             throw invalid("invalid adjudications: " + e.getMessage());
         }
-        var second = secondLabels;
-        var reason = secondLabelsReason;
         stream(progress -> GraphEvalHarness.run(agentId, cases, ownerName, schema, models, runs, floor, concurrency,
-                second, adjudications, progress, filter, reason), false);
+                second.cases(), adjudications, progress, filter, second.reason()), false);
     }
 
     /**
