@@ -265,6 +265,12 @@ class StatementsTest extends UnitTest {
         noTime.relations().forEach(c -> assertNull(c.valid(), c.toString()));
         Statements.at(gala(Map.of()), 0.80, new Classes(0.8, null, 0.8, 0.8)).terms()
                 .forEach(t -> assertNull(t.occurs(), t.toString()));
+        var neverTypes = Map.of("Avery Lin", "Person", "Osprey Dashboard", "System");
+        var never = run("Avery Lin has never used Osprey Dashboard.", choices(neverTypes, Map.of()),
+                confidences(neverTypes, Map.of("not Avery Lin uses Osprey Dashboard", 0.9)));
+        var neverNoTime = Statements.at(never, 0.80, new Classes(0.8, null, 0.8, 0.8)).denials();
+        assertEquals(1, neverNoTime.size(), neverNoTime::toString);
+        assertNull(neverNoTime.getFirst().valid(), "a denial's never scope is time too");
 
         var noNegation = Statements.at(doesNotUse(Map.of(), Map.of()), 0.80, new Classes(0.8, 0.8, null, 0.8));
         assertTrue(noNegation.denials().isEmpty());

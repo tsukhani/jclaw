@@ -139,7 +139,7 @@ public final class Statements {
                     continue;
                 }
                 var fromType = types.get(from);
-                EdtfInterval valid = fromType != null && schema.validAllowed(type, fromType)
+                EdtfInterval valid = timeAt != null && fromType != null && schema.validAllowed(type, fromType)
                         && perfectNever(run, from, to)
                         ? EdtfInterval.between(EdtfInterval.OPEN,
                                 new EdtfInterval.Point(EdtfDate.ofDay(run.anchor(), false)))
