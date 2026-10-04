@@ -845,6 +845,27 @@ class ConversationQueueTest extends UnitTest {
         assertFalse(ConversationQueue.commitIfOwner(convId, gen, flag, () -> {}), "later writes drop");
     }
 
+    @Test
+    void stoppingAChannelTurnLeavesTheNextTurnUncancelled() {
+        long convId = 13006L;
+        var first = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("warm", "telegram", "peer", agent), null);
+        ConversationQueue.releaseOwnership(convId, first);
+
+        // A channel turn's own flag is the conversation's, as ChannelInboundDispatcher passes it.
+        var stoppedFlag = ConversationQueue.cancellationFlag(convId);
+        ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "telegram", "peer", agent), stoppedFlag);
+        assertTrue(ConversationQueue.stop(convId));
+
+        var nextFlag = ConversationQueue.cancellationFlag(convId);
+        assertFalse(nextFlag.get(), "the next channel turn must not start cancelled");
+        var gen = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("B", "telegram", "peer", agent), nextFlag);
+        assertTrue(ConversationQueue.commitIfOwner(convId, gen, nextFlag, () -> {}), "the next turn's rows land");
+        assertTrue(stoppedFlag.get(), "the stopped turn stays stopped");
+        ConversationQueue.releaseOwnership(convId, gen);
+    }
+
     // ── JCLAW-1385: every cancel site runs the turn's registered actions ──
 
     @Test

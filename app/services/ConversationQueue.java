@@ -47,8 +47,8 @@ public class ConversationQueue {
         final ArrayDeque<QueuedMessage> pending = new ArrayDeque<>();
         boolean processing = false; // all reads/writes guarded by synchronized(this)
         @Nullable String mode = QUEUE;
-        /** Signals in-flight processing to cancel. Set by interrupt mode, cleared on drain. */
-        final AtomicBoolean cancelled = new AtomicBoolean(false);
+        /** Signals in-flight processing to cancel. Set by interrupt mode, cleared on drain, replaced by {@link #stop}. */
+        volatile AtomicBoolean cancelled = new AtomicBoolean(false);
         /** Renewed on every acquire and every {@link #stop}; a release carrying another value is a no-op. */
         long generation = 0;
         /** The current owner's own cancel flag, flipped by {@link #stop}; null when the owner registered none. */
@@ -111,6 +111,7 @@ public class ConversationQueue {
         // log below — never hold the ingress lock across that I/O.
         boolean interrupted;
         boolean droppedOverflow = false;
+        AtomicBoolean interruptedFlag = state.cancelled;
         synchronized (state) {
             state.mode = mode;
             state.lastActivityMs = System.currentTimeMillis();
@@ -126,7 +127,8 @@ public class ConversationQueue {
             if (interrupted) {
                 // Signal the in-flight processor to cancel, then queue this message
                 // so drain() will pick it up after the current run finishes.
-                state.cancelled.set(true);
+                interruptedFlag = state.cancelled;
+                interruptedFlag.set(true);
                 state.pending.clear();
                 state.pending.addLast(message);
             } else {
@@ -140,7 +142,7 @@ public class ConversationQueue {
         }
 
         if (interrupted) {
-            TurnCancellation.cancel(state.cancelled);
+            TurnCancellation.cancel(interruptedFlag);
             EventLogger.info(QUEUE, message.agent().name, message.channelType(),
                     "Interrupt mode: signalled cancellation for conversation %d, queued new message"
                             .formatted(conversationId));
@@ -188,6 +190,8 @@ public class ConversationQueue {
             stopped = state.ownerCancel;
             if (!state.processing || stopped == null) return false;
             stopped.set(true);
+            // A channel turn's flag is the conversation's, and the stale drain never clears it: renew it.
+            if (stopped == state.cancelled) state.cancelled = new AtomicBoolean(false);
             state.pending.clear();
             state.generation = GENERATIONS.incrementAndGet();
             state.finishProcessing();
@@ -220,10 +224,12 @@ public class ConversationQueue {
     public static void cancelTurn(Long conversationId) {
         var state = queues.get(conversationId);
         if (state == null) return;
+        AtomicBoolean flag;
         synchronized (state) {
-            state.cancelled.set(true);
+            flag = state.cancelled;
+            flag.set(true);
         }
-        TurnCancellation.cancel(state.cancelled);
+        TurnCancellation.cancel(flag);
     }
 
     /**
