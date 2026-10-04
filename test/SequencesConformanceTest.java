@@ -12,6 +12,7 @@ import services.grapheval.Sequences;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.HashSet;
+import java.util.List;
 import java.util.function.Consumer;
 
 /** JCLAW-1367: the committed sequence set parses with no model, and every break of its rules is refused by name. */
@@ -198,6 +199,36 @@ class SequencesConformanceTest extends UnitTest {
         refused(d -> probe(d).remove("after"), "c1", "probe #0", "exactly one");
         refused(d -> probe(d).addProperty("truth", "MAYBE"), "c1", "probe #0", "MAYBE");
         refused(d -> probe(d).addProperty("type", "located_in"), "c1", "probe #0", "located_in");
+    }
+
+    @Test
+    void aDerivedMemoryParsesBesideTheExplicitTurnAuthors() {
+        var derived = base();
+        memory(derived, 1).addProperty("authorType", "consolidation_derived");
+        var from = new JsonArray();
+        from.add("m1");
+        memory(derived, 1).add("derivedFrom", from);
+        var memory = parse(derived).chains().getFirst().memories().get(1);
+        assertEquals(MemoryAuthorType.CONSOLIDATION_DERIVED, memory.authorType());
+        assertEquals(List.of("m1"), memory.derivedFrom());
+
+        var human = base();
+        memory(human, 1).addProperty("authorType", "human_turn");
+        assertEquals(MemoryAuthorType.HUMAN_TURN, parse(human).chains().getFirst().memories().get(1).authorType());
+        var guest = base();
+        memory(guest, 1).addProperty("authorType", "guest_turn");
+        assertEquals(MemoryAuthorType.GUEST_TURN, parse(guest).chains().getFirst().memories().get(1).authorType());
+        assertEquals(MemoryAuthorType.HUMAN_TURN, parse(base()).chains().getFirst().memories().get(1).authorType());
+    }
+
+    @Test
+    void aDerivedMemoryWithNoSourceOrAnUnsupportedAuthorIsRefused() {
+        refused(d -> memory(d, 1).addProperty("authorType", "consolidation_derived"), "c1", "m2", "derivedFrom");
+        refused(d -> {
+            memory(d, 1).addProperty("authorType", "consolidation_derived");
+            memory(d, 1).add("derivedFrom", new JsonArray());
+        }, "c1", "m2", "derivedFrom");
+        refused(d -> memory(d, 1).addProperty("authorType", "agent_synthesized"), "c1", "m2", "agent_synthesized");
     }
 
     @Test
