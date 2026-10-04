@@ -397,8 +397,8 @@ public class ApiChatController extends Controller {
      * SSE plumbing — chunked headers, framing, heartbeats, and disconnect
      * detection — lives in the play1 fork's {@link SseStream} (PF-16). The
      * {@code cancelled} flag is bridged from {@code sse.onClose} so SSE
-     * disconnect and {@code /stop} (which flips the same flag via
-     * {@link services.ConversationQueue}) reach AgentRunner through one signal.
+     * disconnect and {@code POST /api/conversations/{id}/stop} (which flips the same
+     * flag via {@link services.ConversationQueue#stop}) reach AgentRunner through one signal.
      *
      * <p>JCLAW-199: {@code @NoTransaction} opts out of Play 1.x's per-request
      * JPA transaction wrapper. Without this, the framework's TransactionalFilter
@@ -442,9 +442,9 @@ public class ApiChatController extends Controller {
         });
 
         // Bridge SSE close (heartbeat-write fail, explicit close, or the inactivity
-        // timeout) into the AgentRunner cancellation flag. /stop also flips this flag
-        // via ConversationQueue, so AgentRunner sees one unified signal regardless of
-        // source; the log line here is what tells the sources apart.
+        // timeout) into the AgentRunner cancellation flag. POST /api/conversations/{id}/stop
+        // also flips this flag via ConversationQueue.stop, so AgentRunner sees one unified
+        // signal regardless of source; the log line here is what tells the sources apart.
         var cancelled = new AtomicBoolean(false);
         sse.onClose(() -> {
             idle.cancel();
@@ -592,7 +592,7 @@ public class ApiChatController extends Controller {
                     // coalescing is disabled (buffers stay empty).
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
-                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get());
+                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), cbRef.get());
                     close.finished().set(true);
                     sse.send(Map.of("type", "complete", KEY_CONTENT, content));
                     sse.close();
@@ -600,7 +600,7 @@ public class ApiChatController extends Controller {
                 error -> {
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
-                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get());
+                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), cbRef.get());
                     close.finished().set(true);
                     // JCLAW-1133: the raw throwable text goes only to the EventLogger line below.
                     sse.send(webErrorFrame(error));
@@ -614,7 +614,7 @@ public class ApiChatController extends Controller {
                 // It still fires on the SSE-close path (where onComplete/onError do
                 // not), so JCLAW-661 uses it to drop the coding-run bridge for a
                 // tab that closed mid-turn.
-                () -> SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get())
+                () -> SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), cbRef.get())
         );
         cbRef.set(callbacks);
         return callbacks;

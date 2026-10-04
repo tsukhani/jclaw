@@ -168,9 +168,24 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     flushStreamRender,
   } = useStreamMarkdownRender(streamContent, streamReasoning, selectedAgentId, messages)
 
+  const { mutate } = useApiMutation()
+  // GH-12: the in-flight stop POST; a send waits for it so the backend has released the turn.
+  let pendingStop: Promise<unknown> | null = null
+  // GH-12: the conversation the open stream runs in; the on-screen one can change mid-stream.
+  let streamConvoId: number | null = null
+
   function stopStreaming() {
     if (!streaming.value) return
     abortController.value?.abort()
+    const convoId = streamConvoId
+    if (convoId != null) {
+      // mutate never rejects, so a failed stop cannot block the next send.
+      const stop: Promise<unknown> = mutate(`/api/conversations/${convoId}/stop`, { method: 'POST' })
+        .finally(() => {
+          if (pendingStop === stop) pendingStop = null
+        })
+      pendingStop = stop
+    }
     streaming.value = false
     streamStatus.value = ''
     focusInput()
@@ -229,6 +244,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
 
   function handleStreamInitEvent(ctx: StreamContext, event: { conversationId?: number, thinkingMode?: string }) {
     if (!event.conversationId) return
+    streamConvoId = event.conversationId
     handleInitConversationSwap(ctx, event.conversationId)
     selectedConvoId.value = event.conversationId
     if (event.thinkingMode) {
@@ -488,6 +504,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     const pending = attachedFiles.value.slice()
     const uploaded = await uploadOrReportAttachError()
     if (uploaded === null) return
+    if (pendingStop) await pendingStop
 
     // JCLAW-25: message.content is the user's raw text. Attachment metadata
     // rides in the `attachments` field; the backend persists chat_message_attachment
@@ -520,6 +537,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       assistantIdx: messages.value.length,
       sentConversationId: selectedConvoId.value,
     }
+    streamConvoId = ctx.sentConversationId
 
     // Add placeholder for streaming response
     const assistantKey = crypto.randomUUID()

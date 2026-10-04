@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Per-conversation message queue that serializes agent processing.
@@ -25,6 +26,8 @@ public class ConversationQueue {
 
     private static final ConcurrentHashMap<Long, QueueState> queues = new ConcurrentHashMap<>();
     private static final int MAX_QUEUE_SIZE = 20;
+    // Process-wide so a state evicted and recreated under a still-running stopped turn never reissues its generation.
+    private static final AtomicLong GENERATIONS = new AtomicLong();
 
     /**
      * @param skipUserAppend JCLAW-273: this message's content is already a persisted
@@ -45,6 +48,10 @@ public class ConversationQueue {
         @Nullable String mode = QUEUE;
         /** Signals in-flight processing to cancel. Set by interrupt mode, cleared on drain. */
         final AtomicBoolean cancelled = new AtomicBoolean(false);
+        /** Renewed on every acquire and every {@link #stop}; a release carrying another value is a no-op. */
+        long generation = 0;
+        /** The current owner's own cancel flag, flipped by {@link #stop}; null when the owner registered none. */
+        @Nullable AtomicBoolean ownerCancel;
         /**
          * Wall-clock ms of the last activity that touched this state (tryAcquire / drain /
          * releaseOwnership). Used by {@link #evictIdle} to skip recently-active entries.
@@ -56,12 +63,16 @@ public class ConversationQueue {
 
         synchronized void finishProcessing() {
             processing = false;
+            ownerCancel = null;
         }
 
         synchronized boolean isProcessing() {
             return processing;
         }
     }
+
+    /** Returned by {@link #tryAcquireOwnership} when the message was queued instead of acquiring. */
+    public static final long NOT_ACQUIRED = -1L;
 
     /**
      * Try to acquire the conversation for processing.
@@ -74,6 +85,18 @@ public class ConversationQueue {
      *         per the agent's queue mode
      */
     public static boolean tryAcquire(Long conversationId, QueuedMessage message) {
+        return tryAcquireOwnership(conversationId, message, null) != NOT_ACQUIRED;
+    }
+
+    /**
+     * {@link #tryAcquire} that returns the ownership generation the caller must pass to
+     * {@link #drain(Long, long)} / {@link #releaseOwnership(Long, long)}.
+     *
+     * @param ownerCancel the turn's own cancel flag, which {@link #stop} flips; may be null
+     * @return the acquired generation (non-negative), or {@link #NOT_ACQUIRED} when queued
+     */
+    public static long tryAcquireOwnership(Long conversationId, QueuedMessage message,
+                                           @Nullable AtomicBoolean ownerCancel) {
         var state = queues.computeIfAbsent(conversationId, _ -> new QueueState());
 
         // Read config BEFORE entering the synchronized block — ConfigService.get()
@@ -93,7 +116,9 @@ public class ConversationQueue {
 
             if (!state.processing) {
                 state.processing = true;
-                return true;
+                state.ownerCancel = ownerCancel;
+                state.generation = GENERATIONS.incrementAndGet();
+                return state.generation;
             }
 
             interrupted = "interrupt".equals(mode);
@@ -117,7 +142,7 @@ public class ConversationQueue {
             EventLogger.info(QUEUE, message.agent().name, message.channelType(),
                     "Interrupt mode: signalled cancellation for conversation %d, queued new message"
                             .formatted(conversationId));
-            return false;
+            return NOT_ACQUIRED;
         }
 
         if (droppedOverflow) {
@@ -129,7 +154,41 @@ public class ConversationQueue {
                 "Message queued for conversation %d (position: %d)"
                         .formatted(conversationId, getQueueSize(conversationId)));
 
-        return false;
+        return NOT_ACQUIRED;
+    }
+
+    /**
+     * The current ownership generation, for an owned-queue caller that was handed ownership
+     * without its generation (the public 3-arg {@code AgentRunner.runWithOwnedQueue}).
+     */
+    public static long currentGeneration(Long conversationId) {
+        var state = queues.get(conversationId);
+        if (state == null) return 0;
+        synchronized (state) {
+            return state.generation;
+        }
+    }
+
+    /**
+     * Operator stop (GH-12): cancel the in-flight turn through its own cancel flag, drop pending
+     * messages, and release ownership now, so the next send acquires instead of queueing. The
+     * stopped turn's later release carries a stale generation and is a no-op.
+     *
+     * @return {@code true} when a turn that registered a cancel flag owned the conversation and was
+     *         stopped; {@code false}, changing nothing, otherwise
+     */
+    public static boolean stop(Long conversationId) {
+        var state = queues.get(conversationId);
+        if (state == null) return false;
+        synchronized (state) {
+            // An owner with no flag of its own (a drained or sync run) could not be told to stop.
+            if (!state.processing || state.ownerCancel == null) return false;
+            state.ownerCancel.set(true);
+            state.pending.clear();
+            state.generation = GENERATIONS.incrementAndGet();
+            state.finishProcessing();
+            return true;
+        }
     }
 
     /**
@@ -171,14 +230,17 @@ public class ConversationQueue {
      * mode, returns just the next message.
      *
      * @param conversationId the conversation being drained
+     * @param generation     the generation the caller acquired with; a stale one
+     *                       (the conversation was {@link #stop}ped since) changes nothing
      * @return the next message(s) to process, or an empty list when the
      *         queue is empty (in which case ownership is released)
      */
-    public static List<QueuedMessage> drain(Long conversationId) {
+    public static List<QueuedMessage> drain(Long conversationId, long generation) {
         var state = queues.get(conversationId);
         if (state == null) return List.of();
 
         synchronized (state) {
+            if (state.generation != generation) return List.of();
             state.cancelled.set(false);
             state.lastActivityMs = System.currentTimeMillis();
 
@@ -189,10 +251,12 @@ public class ConversationQueue {
                 return List.of();
             }
 
+            // Ownership transfers to the caller — processing stays true — and a drained
+            // run registers no cancel flag of its own.
+            state.ownerCancel = null;
             if ("collect".equals(state.mode)) {
                 var all = new ArrayList<>(state.pending);
                 state.pending.clear();
-                // Ownership transfers to the caller — processing stays true.
                 return all;
             }
 
@@ -218,13 +282,24 @@ public class ConversationQueue {
      * flips back to false even when the run throws an exception that
      * short-circuits the normal re-drain.
      */
-    public static void releaseOwnership(Long conversationId) {
+    public static void releaseOwnership(Long conversationId, long generation) {
         var state = queues.get(conversationId);
         if (state == null) return;
         synchronized (state) {
+            if (state.generation != generation) return;
             state.lastActivityMs = System.currentTimeMillis();
             state.finishProcessing();
         }
+    }
+
+    /** Unfenced {@link #drain(Long, long)} against the current generation; tests only. */
+    public static List<QueuedMessage> drain(Long conversationId) {
+        return drain(conversationId, currentGeneration(conversationId));
+    }
+
+    /** Unfenced {@link #releaseOwnership(Long, long)} against the current generation; tests only. */
+    public static void releaseOwnership(Long conversationId) {
+        releaseOwnership(conversationId, currentGeneration(conversationId));
     }
 
     /**

@@ -45,10 +45,15 @@ final class SubagentChatBridge {
         CHAT_CALLBACKS.put(conversationId, cb);
     }
 
-    /** JCLAW-661: drop the chat-turn callbacks for a conversation (turn closed). */
-    static void unregisterChatCallbacks(@Nullable Long conversationId) {
-        if (conversationId == null) return;
-        CHAT_CALLBACKS.remove(conversationId);
+    /** JCLAW-661: drop the chat-turn callbacks for a conversation (turn closed). Only
+     *  {@code cb}'s own entry goes: a stopped turn closes after the next turn registered (GH-12). */
+    static void unregisterChatCallbacks(@Nullable Long conversationId, AgentRunner.@Nullable StreamingCallbacks cb) {
+        if (conversationId == null || cb == null) return;
+        CHAT_CALLBACKS.computeIfPresent(conversationId, (_, registered) -> registered == cb ? null : registered);
+    }
+
+    static AgentRunner.@Nullable StreamingCallbacks chatCallbacks(Long conversationId) {
+        return CHAT_CALLBACKS.get(conversationId);
     }
 
     /** JCLAW-661: the live streaming callbacks bound to {@code runId}, or null when

@@ -386,6 +386,13 @@ class AgentRunnerSubagentTest extends UnitTest {
         assertNotNull(result);
         assertEquals("Resumed reply after child finished.", result.response(),
                 "runYieldResume must surface the post-resume assistant reply");
+        // The resume acquired the queue itself and must release it with that generation.
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (services.ConversationQueue.isBusy(parentConv.id) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+        assertFalse(services.ConversationQueue.isBusy(parentConv.id),
+                "runYieldResume must release the queue it acquired");
 
         // The announce row must not have been duplicated — only ONE extra
         // row exists after the resume (the new assistant reply), bringing

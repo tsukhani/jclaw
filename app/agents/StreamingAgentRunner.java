@@ -73,6 +73,8 @@ final class StreamingAgentRunner {
         // itself; the wrap is what makes the turn a child of the HTTP server span.
         Thread.ofVirtual().name("agent-stream").start(Context.current().wrap(() -> {
             final Long[] conversationIdRef = {null};
+            // GH-12: the queue generation acquired with, so a release after an operator stop is a no-op.
+            final long[] generationRef = {0};
             // queueReleased is shared between the wrapper's terminal
             // callbacks (which do the early release before cb.onComplete
             // flushes the SSE terminal) and this finally block (which does
@@ -83,7 +85,7 @@ final class StreamingAgentRunner {
             final var queueReleased = new AtomicBoolean(false);
             var trace = LatencyTrace.forTurn(channelType, acceptedAtNs);
             trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
-            var tracedCb = wrapCallbacksWithTrace(cb, trace, conversationIdRef, queueReleased);
+            var tracedCb = wrapCallbacksWithTrace(cb, trace, conversationIdRef, generationRef, queueReleased);
             // JCLAW-882: bind the turn to this virtual thread so every provider
             // dispatch on it — round 1, each tool-loop continuation, the empty-
             // continuation retry, any prologue compaction call — counts against
@@ -91,7 +93,8 @@ final class StreamingAgentRunner {
             try (var _ = LatencyTrace.bind(trace)) {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
                 var conversationOpt = resolveConversationAndAcquireQueue(
-                        agent, conversationId, channelType, peerId, userMessage, tracedCb, attachments);
+                        agent, conversationId, channelType, peerId, userMessage, tracedCb, attachments,
+                        isCancelled, generationRef);
                 if (conversationOpt.isEmpty()) return; // queued, not-found, or error — already handled
                 var conversation = conversationOpt.get();
                 conversationIdRef[0] = conversation.id;
@@ -119,7 +122,7 @@ final class StreamingAgentRunner {
                 // releaseQueueOnce no-ops here. The block only fires for
                 // exception paths that returned without invoking any
                 // terminal callback.
-                QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, queueReleased);
+                QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
             }
         }));
     }
@@ -154,6 +157,7 @@ final class StreamingAgentRunner {
      */
     private static AgentRunner.StreamingCallbacks wrapCallbacksWithTrace(AgentRunner.StreamingCallbacks cb, LatencyTrace trace,
                                                               Long[] conversationIdRef,
+                                                              long[] generationRef,
                                                               AtomicBoolean queueReleased) {
         var firstTokenSeen = new AtomicBoolean(false);
         return new AgentRunner.StreamingCallbacks(
@@ -178,17 +182,17 @@ final class StreamingAgentRunner {
                     cb.onToolCall().accept(toolCall);
                 },
                 content -> {
-                    QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, queueReleased);
+                    QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
                     try { cb.onComplete().accept(content); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
                 error -> {
-                    QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, queueReleased);
+                    QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
                     try { cb.onError().accept(error); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
                 () -> {
-                    QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, queueReleased);
+                    QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
                     try { cb.onCancel().run(); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 }
@@ -199,12 +203,16 @@ final class StreamingAgentRunner {
      * Phase 1 of streaming: resolve or create conversation, acquire the
      * conversation queue, and persist the user message. Returns the conversation
      * or {@link Optional#empty()} if the request was queued, not found, or
-     * errored (in which case callbacks have already been invoked).
+     * errored (in which case callbacks have already been invoked). On acquire,
+     * {@code isCancelled} is registered as the owner's flag for an operator stop and
+     * the acquired generation is written to {@code generationRef[0]}.
      */
+    @SuppressWarnings("java:S107") // the acquire needs the turn's cancel flag and a slot for its generation
     private static Optional<Conversation> resolveConversationAndAcquireQueue(
             Agent agent, @Nullable Long conversationId, String channelType, String peerId,
             String userMessage, AgentRunner.StreamingCallbacks cb,
-            @Nullable List<AttachmentService.Input> attachments) {
+            @Nullable List<AttachmentService.Input> attachments,
+            AtomicBoolean isCancelled, long[] generationRef) {
 
         Conversation conversation = Tx.run(() -> {
             if (conversationId != null) {
@@ -223,11 +231,13 @@ final class StreamingAgentRunner {
 
         var queueMsg = new ConversationQueue.QueuedMessage(
                 userMessage, channelType, peerId, agent);
-        if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
+        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, isCancelled);
+        if (generation == ConversationQueue.NOT_ACQUIRED) {
             cb.onInit().accept(conversation);
             cb.onComplete().accept(AgentRunner.QUEUED_MESSAGE_RESPONSE);
             return Optional.empty();
         }
+        generationRef[0] = generation;
 
         // JCLAW-21: route the user-message persist through ConversationSink.
         // Local sink construction here keeps this method's signature

@@ -146,6 +146,8 @@ public class ApiConversationsController extends Controller {
 
     public record QueueStatusResponse(boolean busy, int queueSize) {}
 
+    public record StopTurnResponse(boolean stopped) {}
+
     public record StatusResponse(String status) {}
 
     public record DeletedCountResponse(int deleted) {}
@@ -472,6 +474,29 @@ public class ApiConversationsController extends Controller {
         var busy = ConversationQueue.isBusy(id);
         var queueSize = ConversationQueue.getQueueSize(id);
         renderJSON(gson.toJson(new QueueStatusResponse(busy, queueSize)));
+    }
+
+    /**
+     * POST /api/conversations/{id}/stop — the web chat's Stop button (GH-12). Cancels the
+     * in-flight turn and releases the conversation at once, so the next send starts a fresh
+     * run instead of being queued behind a turn that only notices the dropped SSE later.
+     * Web only: a channel turn's cancel flag is shared with the conversation's next turn.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StopTurnResponse.class)))
+    @Operation(summary = "Stop the web chat turn running in a conversation and release it")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "the operator's chat Stop button")
+    public static void stopTurn(Long id) {
+        var conversation = requireConversation(id);
+        if (!"web".equals(conversation.channelType)) {
+            badRequest();
+        }
+        var pending = ConversationQueue.getQueueSize(id);
+        var stopped = ConversationQueue.stop(id);
+        if (stopped) {
+            EventLogger.info("queue", conversation.agent.name, conversation.channelType,
+                    "Stopped the turn in conversation %d, dropped %d pending message(s)".formatted(id, pending));
+        }
+        renderJSON(gson.toJson(new StopTurnResponse(stopped)));
     }
 
     /**

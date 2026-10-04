@@ -53,12 +53,12 @@ public final class QueueDrainOrchestrator {
      * populate it after the wrapper that owns it has been constructed;
      * a {@code null} entry means the queue acquire never succeeded (e.g.
      * the queued-canned-response short-circuit) and the call is a safe
-     * no-op.
+     * no-op. {@code generationRef} holds the generation the acquire returned.
      */
-    static void releaseQueueOnce(Long[] conversationIdRef, AtomicBoolean queueReleased) {
+    static void releaseQueueOnce(Long[] conversationIdRef, long[] generationRef, AtomicBoolean queueReleased) {
         if (conversationIdRef[0] == null) return;
         if (!queueReleased.compareAndSet(false, true)) return;
-        processQueueDrain(conversationIdRef[0]);
+        processQueueDrain(conversationIdRef[0], generationRef[0]);
     }
 
     /**
@@ -77,15 +77,18 @@ public final class QueueDrainOrchestrator {
      * {@link #releaseQueueOnce}). Failures are logged but never
      * propagated — the primary request must not fail because a queued
      * message's re-processing fails.
+     *
+     * <p>{@code generation} is the one the caller acquired with; after an operator
+     * {@link ConversationQueue#stop} it is stale and this call changes nothing (GH-12).
      */
-    static void processQueueDrain(Long conversationId) {
+    static void processQueueDrain(Long conversationId, long generation) {
         // JCLAW-117: drain() now keeps processing=true when it returns a
         // non-empty list — ownership transfers to this call. The virtual
         // thread below must either re-drain on success (runAfterAcquire's
         // finally will re-invoke processQueueDrain, and a later empty drain
         // releases) or explicitly releaseOwnership on early-exit paths
         // (findById returned null, or run threw before finally could fire).
-        var drained = ConversationQueue.drain(conversationId);
+        var drained = ConversationQueue.drain(conversationId, generation);
         if (drained.isEmpty()) return;
 
         startDrainThread(() -> {
@@ -101,14 +104,14 @@ public final class QueueDrainOrchestrator {
             try {
                 var conversation = Tx.run(() -> ConversationService.findById(conversationId));
                 if (conversation == null) {
-                    ConversationQueue.releaseOwnership(conversationId);
+                    ConversationQueue.releaseOwnership(conversationId, generation);
                     return;
                 }
                 runStarted = true;
                 // JCLAW-117: queue ownership was transferred to us by drain()
                 // above — use the owned-queue variant to avoid re-acquire.
                 var result = AgentRunner.runWithOwnedQueue(msg.agent(), conversation, combined,
-                        skipUserAppend);
+                        skipUserAppend, generation);
                 AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
             } catch (Exception e) {
                 EventLogger.error("queue", msg.agent().name, msg.channelType(),
@@ -118,7 +121,7 @@ public final class QueueDrainOrchestrator {
                     // If runWithOwnedQueue started and threw, its own finally ran
                     // processQueueDrain which will observe pending and release
                     // ownership correctly on the empty path.
-                    ConversationQueue.releaseOwnership(conversationId);
+                    ConversationQueue.releaseOwnership(conversationId, generation);
                 }
             }
         });

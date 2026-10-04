@@ -302,6 +302,14 @@ class AgentRunnerCoreTest extends UnitTest {
 
         llmGate.countDown();
         t1.join(10_000);
+
+        // The queued message drains and both turns release with the generations they held.
+        long deadline = System.currentTimeMillis() + 30_000;
+        while (services.ConversationQueue.isBusy(convoId) && System.currentTimeMillis() < deadline) {
+            Thread.sleep(50);
+        }
+        assertFalse(services.ConversationQueue.isBusy(convoId),
+                "the queue must be released once the first and drained turns finish");
     }
 
     @Test

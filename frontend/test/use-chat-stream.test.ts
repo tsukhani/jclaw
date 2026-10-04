@@ -23,6 +23,34 @@ function streamWith(frames: string[]) {
   })
 }
 
+// The first stream announces conversationId (when given) and stays open until its request is
+// aborted, as a turn does while the user decides to Stop; later sends answer with laterFrames.
+function streamOpenThen(conversationId: number | null, laterFrames: string[] = []) {
+  let calls = 0
+  return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+    if (!String(input ?? '').includes('/api/chat/stream')) {
+      return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
+    }
+    const encoder = new TextEncoder()
+    const first = calls++ === 0
+    const signal = (init as RequestInit | undefined)?.signal
+    const body = new ReadableStream({
+      start(controller) {
+        if (first) {
+          if (conversationId !== null) {
+            controller.enqueue(encoder.encode(`data: {"type":"init","conversationId":${conversationId}}\n`))
+          }
+          signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')))
+          return
+        }
+        for (const f of laterFrames) controller.enqueue(encoder.encode(f))
+        controller.close()
+      },
+    })
+    return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+  })
+}
+
 beforeEach(() => {
   registerEndpoint('/api/conversations/42/queue', () => ({ busy: false }))
 })
@@ -245,6 +273,100 @@ describe('useChatStream', () => {
       const { api } = await mountStream(deps)
       api.stopStreaming()
       expect(deps.focusInput).not.toHaveBeenCalled()
+    })
+
+    it('posts the stop endpoint of the conversation the stream runs in', async () => {
+      const stopped = vi.fn(() => ({ stopped: true }))
+      registerEndpoint('/api/conversations/42/stop', { method: 'POST', handler: stopped })
+      streamOpenThen(42)
+      const deps = makeDeps({ selectedConvoId: ref<number | null>(42), input: ref('long task') })
+      const { api } = await mountStream(deps)
+      void api.sendMessage()
+      await flushPromises()
+      api.stopStreaming()
+      await flushPromises()
+      expect(stopped).toHaveBeenCalledTimes(1)
+    })
+
+    it('stops the streaming conversation after the user switched to another one', async () => {
+      const streamed = vi.fn(() => ({ stopped: true }))
+      const onScreen = vi.fn(() => ({ stopped: false }))
+      registerEndpoint('/api/conversations/42/stop', { method: 'POST', handler: streamed })
+      registerEndpoint('/api/conversations/7/stop', { method: 'POST', handler: onScreen })
+      streamOpenThen(42)
+      const deps = makeDeps({ selectedConvoId: ref<number | null>(42), input: ref('long task') })
+      const { api } = await mountStream(deps)
+      void api.sendMessage()
+      await flushPromises()
+      deps.selectedConvoId.value = 7
+      api.stopStreaming()
+      await flushPromises()
+      expect(streamed).toHaveBeenCalledTimes(1)
+      expect(onScreen).not.toHaveBeenCalled()
+    })
+
+    it('posts nothing before the stream knows its conversation', async () => {
+      const stopped = vi.fn(() => ({ stopped: true }))
+      registerEndpoint('/api/conversations/null/stop', { method: 'POST', handler: stopped })
+      registerEndpoint('/api/conversations/undefined/stop', { method: 'POST', handler: stopped })
+      streamOpenThen(null)
+      const deps = makeDeps({ selectedConvoId: ref<number | null>(null), input: ref('first message') })
+      const { api } = await mountStream(deps)
+      void api.sendMessage()
+      await flushPromises()
+      api.stopStreaming()
+      await flushPromises()
+      expect(stopped).not.toHaveBeenCalled()
+    })
+
+    it('makes a send after Stop wait for the stop to finish', async () => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      registerEndpoint('/api/conversations/42/stop', {
+        method: 'POST',
+        handler: async () => {
+          await gate
+          return { stopped: true }
+        },
+      })
+      const fetchSpy = streamOpenThen(42, ['data: {"type":"complete","content":"fresh"}\n'])
+      const deps = makeDeps({ selectedConvoId: ref<number | null>(42), input: ref('long task') })
+      const { api } = await mountStream(deps)
+      void api.sendMessage()
+      await flushPromises()
+      api.stopStreaming()
+      deps.input.value = 'next'
+      const sent = api.sendMessage()
+      await flushPromises()
+      const streamCalls = () => fetchSpy.mock.calls.filter(c => String(c[0]).includes('/api/chat/stream'))
+      expect(streamCalls()).toHaveLength(1)
+      release()
+      await sent
+      await flushPromises()
+      expect(streamCalls()).toHaveLength(2)
+    })
+
+    it('still sends when the stop POST fails', async () => {
+      registerEndpoint('/api/conversations/42/stop', {
+        method: 'POST',
+        handler: () => {
+          throw new Error('boom')
+        },
+      })
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const fetchSpy = streamOpenThen(42, ['data: {"type":"complete","content":"fresh"}\n'])
+      const deps = makeDeps({ selectedConvoId: ref<number | null>(42), input: ref('long task') })
+      const { api } = await mountStream(deps)
+      void api.sendMessage()
+      await flushPromises()
+      api.stopStreaming()
+      deps.input.value = 'next'
+      await api.sendMessage()
+      await flushPromises()
+      expect(fetchSpy.mock.calls.filter(c => String(c[0]).includes('/api/chat/stream'))).toHaveLength(2)
+      expect(deps.messages.value.at(-1)!.content).toBe('fresh')
     })
   })
 })
