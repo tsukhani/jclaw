@@ -702,6 +702,35 @@ class CapabilityRulesTest extends UnitTest {
         assertTrue(unlisted.isEmpty(), unlisted + " binds a ScopedValue for a test but is not in TEST_SEAMS");
     }
 
+    // ===== Graph store reads =====
+
+    private static final String GRAPH_STORE = "memory.graph.GraphStore";
+    private static final Set<String> GRAPH_STORE_METHODS = Set.of("read", "update", "index");
+    private static final DescribedPredicate<JavaAccess<?>> GRAPH_STORE_READ = DescribedPredicate.describe(
+            "a call or method reference to GraphStore's records",
+            access -> access.getTargetOwner().getName().equals(GRAPH_STORE)
+                    && GRAPH_STORE_METHODS.contains(access.getTarget().getName()));
+
+    /** A raw record set reads former, denied, retracted and guest claims as current facts; GraphView combines them. */
+    @Test
+    void onlyTheGraphPackagesReadGraphStoreRecords() {
+        var missing = new TreeSet<String>();
+        GRAPH_STORE_METHODS.stream()
+                .filter(method -> !APP_CLASSES.contain(GRAPH_STORE) || APP_CLASSES.get(GRAPH_STORE).getMethods()
+                        .stream().noneMatch(m -> m.getName().equals(method)))
+                .forEach(method -> missing.add(GRAPH_STORE + "." + method));
+        assertTrue(missing.isEmpty(), missing + " is gone, so this rule would pass while guarding nothing");
+        // The allowed callers prove the predicate still matches something.
+        assertFloor(sourceFilesAccessing(GRAPH_STORE_READ, c -> true), 1, "GraphStore read/update/index callers");
+
+        ArchRule rule = noClasses()
+                .that().resideOutsideOfPackages("memory.graph..", "services.grapheval..")
+                .should().accessTargetWhere(GRAPH_STORE_READ)
+                .because("a Relation's claims are combined by memory.graph.GraphView; reading the raw records "
+                        + "takes a former, denied, retracted or guest claim for a current fact (JCLAW-1364)");
+        rule.check(APP_CLASSES);
+    }
+
     // ===== Shared machinery =====
 
     /**
