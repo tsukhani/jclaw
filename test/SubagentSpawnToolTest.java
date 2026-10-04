@@ -1505,6 +1505,41 @@ class SubagentSpawnToolTest extends UnitTest {
         assertTrue(((Message) stamped.getLast()).content.startsWith("Subagent completed"),
                 "last stamped message must be the boundary-end marker, got: "
                         + ((Message) stamped.getLast()).content);
+        assertChildReplyStamped(stamped);
+    }
+
+    @Test
+    void inlineModeReplyLandsWhenTheParentOwnsItsConversation() throws Exception {
+        startLlmServer(simpleResponse("Subagent reply: inline."));
+        configureProvider();
+
+        var parent = createAgent("p-inline-owned", "spawn-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-inline-owned");
+        commitAndReopen();
+
+        var gen = services.ConversationQueue.tryAcquireOwnership(parentConv.id,
+                new services.ConversationQueue.QueuedMessage("go", "web", "u-inline-owned", parent), null);
+        assertNotEquals(services.ConversationQueue.NOT_ACQUIRED, gen);
+        try {
+            var reply = invokeOnVirtualThread(parent.id,
+                    "{\"task\":\"do inline work\",\"label\":\"inline-task\",\"mode\":\"inline\"}");
+            var parsed = JsonParser.parseString(reply).getAsJsonObject();
+            assertEquals("COMPLETED", parsed.get("status").getAsString(), reply);
+
+            JPA.em().clear();
+            var runId = Long.parseLong(parsed.get("run_id").getAsString());
+            assertChildReplyStamped(Message.find("conversation = ?1 AND subagentRunId = ?2 ORDER BY createdAt ASC",
+                    Conversation.findById(parentConv.id), runId).fetch());
+        } finally {
+            services.ConversationQueue.releaseOwnership(parentConv.id, gen);
+        }
+    }
+
+    private static void assertChildReplyStamped(java.util.List<?> stamped) {
+        assertTrue(stamped.stream().map(Message.class::cast).anyMatch(m ->
+                        MessageRole.ASSISTANT.value.equals(m.role) && m.content != null
+                                && m.content.contains("Subagent reply: inline.")),
+                "the child's reply row lands stamped in the parent conversation");
     }
 
     @Test

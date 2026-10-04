@@ -376,7 +376,7 @@ public final class ParallelToolExecutor {
                                           @Nullable List<String> imageCollector, AgentExecutionSink sink) {
         var frames = new ArrayList<AgentRunner.ToolCallEvent>();
         var frameSink = onToolCall != null ? frames : null;
-        sink.commit(() -> {
+        boolean committed = sink.commit(() -> {
             for (int i = 0; i < toolCalls.size(); i++) {
                 var result = results[i];
                 if (result == null) continue; // skipped due to cancellation
@@ -386,8 +386,8 @@ public final class ParallelToolExecutor {
         // JCLAW-170: surface the completed calls to the SSE stream so the
         // chat UI can render a per-call row with the structured result
         // payload (search-result chips, favicons). Fired post-commit so
-        // a reload mid-turn would still see the same rows.
-        if (onToolCall != null) frames.forEach(onToolCall);
+        // a reload mid-turn would still see the same rows; a dropped round gets none.
+        if (onToolCall != null && committed) frames.forEach(onToolCall);
     }
 
     /**

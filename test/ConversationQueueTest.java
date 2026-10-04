@@ -844,4 +844,62 @@ class ConversationQueueTest extends UnitTest {
         assertTrue(stopped.get(10, TimeUnit.SECONDS), "and stop returns true once it has");
         assertFalse(ConversationQueue.commitIfOwner(convId, gen, flag, () -> {}), "later writes drop");
     }
+
+    // ── JCLAW-1385: every cancel site runs the turn's registered actions ──
+
+    @Test
+    void stopRunsTheOwnersRegisteredCancelActions() throws Exception {
+        long convId = 14001L;
+        var flag = new AtomicBoolean(false);
+        ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), flag);
+        var ran = new CountDownLatch(1);
+        try (var _ = agents.TurnCancellation.register(flag, ran::countDown)) {
+            assertTrue(ConversationQueue.stop(convId));
+            assertTrue(ran.await(5, TimeUnit.SECONDS), "stop ran the turn's cancel action");
+        }
+    }
+
+    @Test
+    void cancelTurnRunsActionsRegisteredOnTheConversationFlag() throws Exception {
+        long convId = 14002L;
+        var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+        var ran = new CountDownLatch(1);
+        try (var _ = agents.TurnCancellation.register(ConversationQueue.cancellationFlag(convId), ran::countDown)) {
+            ConversationQueue.cancelTurn(convId);
+            assertTrue(ran.await(5, TimeUnit.SECONDS), "/stop ran the turn's cancel action");
+        }
+        ConversationQueue.releaseOwnership(convId, gen);
+    }
+
+    @Test
+    void anInterruptModeArrivalRunsActionsRegisteredOnTheConversationFlag() throws Exception {
+        long convId = 14003L;
+        services.ConfigService.set("agent.queue-test-agent.queue.mode", "interrupt");
+        var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), null);
+        var ran = new CountDownLatch(1);
+        try (var _ = agents.TurnCancellation.register(ConversationQueue.cancellationFlag(convId), ran::countDown)) {
+            assertEquals(ConversationQueue.NOT_ACQUIRED, ConversationQueue.tryAcquireOwnership(convId,
+                    new QueuedMessage("B", "web", "admin", agent), null));
+            assertTrue(ran.await(5, TimeUnit.SECONDS), "the interrupting arrival ran the turn's cancel action");
+        }
+        ConversationQueue.releaseOwnership(convId, gen);
+    }
+
+    @Test
+    void aFencedSinkKeepsDiscardingAfterOneRefusedCommit() {
+        var conv = services.ConversationService.create(agent, "web", "sticky");
+        var flag = new AtomicBoolean(true);
+        var gen = ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "web", "admin", agent), flag);
+        var sink = new agents.ConversationSink(conv, gen, flag);
+
+        assertFalse(sink.commit(() -> sink.appendUserMessage("refused", null)));
+        flag.set(false);
+        assertTrue(ConversationQueue.commitIfOwner(conv.id, gen, flag, () -> {}), "ownership would allow it now");
+        assertFalse(sink.commit(() -> sink.appendAssistantMessage("still dropped", null, null, null, false)),
+                "discard mode is sticky");
+
+        assertEquals(2, sink.droppedRows());
+        assertEquals(0L, models.Message.count("conversation.id = ?1", conv.id));
+        ConversationQueue.releaseOwnership(conv.id, gen);
+    }
 }
