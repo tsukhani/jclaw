@@ -32,7 +32,7 @@ public final class GraphLifecycle {
      * @param orphansDeleted  directories removed because their agent row is gone
      * @param recordsRemoved  records withdrawn because their memory is gone or another agent's
      * @param evidenceRetired Evidence whose retirement was set, changed or cleared from its row
-     * @param lineageCleared  Evidence whose lineage was cleared because its retiredBy changed
+     * @param lineageCleared  Evidence whose lineage was cleared because its retiredBy changed or cleared
      */
     public record ReconcileResult(int agents, int recovered, int orphansDeleted, int recordsRemoved,
             int evidenceRetired, int lineageCleared) {}

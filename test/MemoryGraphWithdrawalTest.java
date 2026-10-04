@@ -255,6 +255,18 @@ class MemoryGraphWithdrawalTest extends UnitTest {
     }
 
     @Test
+    void aDecisionNamingNoSuccessorWritesNoLineage() {
+        for (var retirement : List.of(new Retirement(AT, null), Retirement.CLEARED)) {
+            var out = GraphWithdrawal.recordLineage(graph(), Map.of("memory:5",
+                    new LineageDecision(Lineage.UPDATE, LocalDate.parse("2026-10-01"), retirement)));
+            assertEquals(retirement.at(), ev(out.records(), "e5").retiredAt());
+            assertNull(ev(out.records(), "e5").lineage(), String.valueOf(retirement));
+            assertNull(ev(out.records(), "e5").changedBy(), String.valueOf(retirement));
+            assertValid(out.records());
+        }
+    }
+
+    @Test
     void restatementAndCorrectionWriteNoChangedBy() {
         for (var lineage : List.of(Lineage.RESTATEMENT, Lineage.CORRECTION)) {
             var out = GraphWithdrawal.recordLineage(graph(), Map.of("memory:5",

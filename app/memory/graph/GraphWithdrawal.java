@@ -120,7 +120,7 @@ public final class GraphWithdrawal {
     /**
      * Retire each predecessor source as its decision says, then stamp the lineage on every one
      * of its Evidence. An UPDATE dated before a claim's anchor did not change that claim, so the
-     * claim takes no lineage.
+     * claim takes no lineage; nor does Evidence the decision leaves naming no successor.
      */
     public static Lineaged recordLineage(Collection<? extends OntologyRecord> records,
             Map<String, LineageDecision> bySource) {
@@ -142,7 +142,7 @@ public final class GraphWithdrawal {
             var changedBy = update ? d.changedBy() : null;
             var anchor = e.anchor();
             var beforeAnchor = changedBy != null && anchor != null && changedBy.isBefore(anchor);
-            out.add(beforeAnchor
+            out.add(beforeAnchor || e.retiredBy() == null
                     ? stamp(e, e.retiredAt(), e.retiredBy(), null, null)
                     : stamp(e, e.retiredAt(), e.retiredBy(), d.lineage(), changedBy));
         }
