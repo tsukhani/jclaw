@@ -286,6 +286,25 @@ class StatementsTest extends UnitTest {
     }
 
     @Test
+    void aPerfectNeverInAnotherSentenceDoesNotScopeTheDenial() {
+        var text = "Jonah has never flown. Avery Lin doesn't use Osprey Dashboard.";
+        var types = Map.of("Jonah", "Person", "Avery Lin", "Person", "Osprey Dashboard", "System");
+        var run = run(text, choices(types, Map.of()),
+                confidences(types, Map.of("not Avery Lin uses Osprey Dashboard", 0.9)));
+        var denials = Statements.at(run, 0.80, AT_80).denials();
+        assertEquals(1, denials.size(), denials::toString);
+        assertEquals(List.of(OWNER, "Osprey Dashboard"), List.of(denials.getFirst().from(), denials.getFirst().to()));
+        assertNull(denials.getFirst().valid(), "the nearest cue in its sentence is doesn't");
+    }
+
+    @Test
+    void aDenialNeverWritesAboveItsWeakerEndpoint() {
+        var denial = Statements.at(doesNotUse(Map.of(), Map.of("Avery Lin", 0.85,
+                "not Avery Lin uses Osprey Dashboard", 0.95)), 0.80, AT_80).denials().getFirst();
+        assertEquals(0.85, denial.confidence(), 1e-9);
+    }
+
+    @Test
     void aNegationWritesAtItsClassThresholdAndNotBelow() {
         assertEquals(1, Statements.at(doesNotUse(Map.of(), Map.of("not Avery Lin uses Osprey Dashboard", 0.80)),
                 0.80, AT_80).denials().size());

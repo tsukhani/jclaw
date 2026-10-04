@@ -9,6 +9,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 
 /**
  * How a run's memory relates to each predecessor it supersedes, at base threshold {@code t} (JCLAW-1365). A
@@ -40,7 +41,7 @@ public final class Lineage {
             OntologyRecord.Lineage lineage = null;
             if (threshold != null && d.writes(threshold)) {
                 lineage = OntologyRecord.Lineage.valueOf(
-                        java.util.Objects.requireNonNull(d.choice()).toUpperCase(Locale.ROOT));
+                        Objects.requireNonNull(d.choice()).toUpperCase(Locale.ROOT));
             }
             // An update cannot change a memory before that memory was written.
             if (lineage == OntologyRecord.Lineage.UPDATE && p.anchor() != null && run.anchor().isBefore(p.anchor())) {

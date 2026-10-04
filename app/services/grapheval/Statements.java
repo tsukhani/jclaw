@@ -1,6 +1,8 @@
 package services.grapheval;
 
 import memory.TemporalExpressions.DateSpan;
+import memory.TemporalExpressions.Kind;
+import memory.TemporalExpressions.NegationCue;
 import memory.ontology.EdtfDate;
 import memory.ontology.EdtfInterval;
 import memory.ontology.OntologyRecord;
@@ -13,6 +15,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
@@ -89,7 +92,7 @@ public final class Statements {
 
         var terms = new ArrayList<Term>();
         for (var d : records.terms()) {
-            var type = java.util.Objects.requireNonNull(d.choice());
+            var type = Objects.requireNonNull(d.choice());
             var occurs = timeAt == null ? null : occurs(run, d.subject(), timeAt, conflict);
             terms.add(new Term(d.subject(), type, d.confidence(), occurs));
         }
@@ -98,9 +101,9 @@ public final class Statements {
         var positives = new ArrayList<Claim>();
         for (var d : records.relations()) {
             if (vetoed.contains(d)) continue;
-            var from = java.util.Objects.requireNonNull(d.from());
-            var to = java.util.Objects.requireNonNull(d.to());
-            var type = java.util.Objects.requireNonNull(d.choice());
+            var from = Objects.requireNonNull(d.from());
+            var to = Objects.requireNonNull(d.to());
+            var type = Objects.requireNonNull(d.choice());
             var fromType = types.get(from);
             if (fromType == null) continue;
             OntologyRecord.Status status;
@@ -123,9 +126,9 @@ public final class Statements {
         if (negationAt != null) {
             for (var d : run.stage(ExtractionPipeline.NEGATION)) {
                 if (!d.writes(negationAt)) continue;
-                var from = java.util.Objects.requireNonNull(d.from());
-                var to = java.util.Objects.requireNonNull(d.to());
-                var type = java.util.Objects.requireNonNull(d.choice());
+                var from = Objects.requireNonNull(d.from());
+                var to = Objects.requireNonNull(d.to());
+                var type = Objects.requireNonNull(d.choice());
                 var positive = positives.stream().filter(p -> p.type().equals(type) && (p.from().equals(from)
                         && p.to().equals(to) || schema.symmetric(type) && p.from().equals(to) && p.to().equals(from)))
                         .findFirst();
@@ -141,7 +144,8 @@ public final class Statements {
                         ? EdtfInterval.between(EdtfInterval.OPEN,
                                 new EdtfInterval.Point(EdtfDate.ofDay(run.anchor(), false)))
                         : null;
-                denials.add(new Claim(from, type, to, OntologyRecord.Status.DENIED, valid, null, d.confidence()));
+                denials.add(new Claim(from, type, to, OntologyRecord.Status.DENIED, valid, null,
+                        Math.min(d.confidence(), d.floor())));
             }
         }
         return new Outcome(false, terms, positives, denials, conflict[0]);
@@ -203,9 +207,9 @@ public final class Statements {
             if (confidence < threshold) continue;
             var interval = reading.interval();
             var kind = run.dates().stream().filter(x -> x.span().equals(span)).findFirst().orElseThrow().kind();
-            switch (java.util.Objects.requireNonNull(d.choice())) {
+            switch (Objects.requireNonNull(d.choice())) {
                 case ExtractionPipeline.FROM -> {
-                    if (kind == memory.TemporalExpressions.Kind.DURATION && status == OntologyRecord.Status.ENDED) {
+                    if (kind == Kind.DURATION && status == OntologyRecord.Status.ENDED) {
                         // "for N years" counts back from the anchor, which an ended relation no longer reaches.
                         conflict[0]++;
                         continue;
@@ -287,7 +291,7 @@ public final class Statements {
                 break;
             }
         }
-        memory.TemporalExpressions.NegationCue nearest = null;
+        NegationCue nearest = null;
         int best = Integer.MAX_VALUE;
         for (var cue : run.cues()) {
             if (cue.start() < sentenceStart || cue.end() > sentenceEnd) continue;

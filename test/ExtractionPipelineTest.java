@@ -988,8 +988,8 @@ class ExtractionPipelineTest extends UnitTest {
         assertEquals(Set.of("The user plans a kickoff.", "The user plans the Meridian launch.",
                 "The user dropped the kickoff."), earlier);
         requests.stream().filter(r -> r.getAsJsonObject("state").has("earlier"))
-                .forEach(r -> assertEquals(Set.of("l0"), Set.copyOf(r.getAsJsonObject("questions").keySet()
-                        .stream().map(k -> "l0").toList()), "a lineage request carries lineage alone"));
+                .forEach(r -> r.getAsJsonObject("questions").keySet()
+                        .forEach(k -> assertTrue(k.startsWith("l"), "a lineage request carries lineage alone: " + k)));
         var decisions = stage(run, ExtractionPipeline.LINEAGE);
         assertEquals(List.of("m9 <- m1", "m9 <- m2", "m9 <- m3"), decisions.stream().map(Decision::subject).toList());
         assertEquals(ExtractionPipeline.CORRECTION, decisions.getLast().choice());
@@ -1162,6 +1162,29 @@ class ExtractionPipelineTest extends UnitTest {
         var questions = ExtractionPipeline.fingerprintQuestions(SCHEMA);
         var lexicons = ExtractionPipeline.fingerprintLexicons();
         var probes = TemporalExpressions.renderProbes();
+        var owner = new ExtractionPipeline.Voice("O", false);
+        var guest = new ExtractionPipeline.Voice("O", true);
+        var ownerless = new ExtractionPipeline.Voice(null, false);
+        var pair = "works_at Person Organization ";
+        for (var expected : List.of(
+                ExtractionPipeline.negationQuestion(SCHEMA, "works_at", "X", "Y"),
+                ExtractionPipeline.statusQuestion(SCHEMA, "works_at", "X", "Y", owner),
+                ExtractionPipeline.statusQuestion(SCHEMA, "works_at", "X", "Y", guest),
+                ExtractionPipeline.statusQuestion(SCHEMA, "works_at", "X", "Y", ownerless),
+                ExtractionPipeline.slotQuestion(SCHEMA, "works_at", "X", "Y", TemporalExpressions.Kind.DAY, "D"),
+                ExtractionPipeline.slotQuestion(SCHEMA, "works_at", "X", "Y", TemporalExpressions.Kind.DURATION, "D"),
+                ExtractionPipeline.slotQuestion(SCHEMA, "works_at", "X", "Y", TemporalExpressions.Kind.RANGE, "D"),
+                ExtractionPipeline.relationQuestion(SCHEMA, "works_at", "Person", "X", "Y", guest),
+                ExtractionPipeline.relationQuestion(SCHEMA, "works_at", "Person", "X", "Y", ownerless))) {
+            assertTrue(questions.contains(pair + expected), expected::toString);
+        }
+        assertNotEquals(ExtractionPipeline.statusQuestion(SCHEMA, "works_at", "X", "Y", owner).toString(),
+                ExtractionPipeline.statusQuestion(SCHEMA, "works_at", "X", "Y", ownerless).toString());
+        for (var family : List.of("ending", "negation", "never", "favorable", "unfavorable", "adverb", "auxiliary",
+                "ending-word", "like", "clause")) {
+            assertTrue(lexicons.stream().anyMatch(l -> l.startsWith(family + " ")), family);
+        }
+        assertTrue(lexicons.contains("auxiliary does"));
         assertEquals(fingerprint, ExtractionPipeline.fingerprint(questions, lexicons, probes));
         var swapped = new ArrayList<>(questions);
         swapped.set(swapped.size() - 1, swapped.getLast().replace("neither", "none"));

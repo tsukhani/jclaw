@@ -186,7 +186,8 @@ public final class GraphEvalHarness {
             reports.add(new ModelReport(m.name(), data.stream().map(RunData::report).toList(), spot, certification,
                     listedAt, wrong));
         }
-        return new Report("cases", schema.fingerprint(), ExtractionPipeline.fingerprint(schema), pairFilter, cases.size(), runs, recallFloor, agreement, reports, integrity);
+        return new Report("cases", schema.fingerprint(), ExtractionPipeline.fingerprint(schema), pairFilter,
+                cases.size(), runs, recallFloor, agreement, reports, integrity);
     }
 
     /**

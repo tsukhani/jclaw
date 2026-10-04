@@ -41,10 +41,10 @@ public final class CandidateGenerator {
     /** Words that may stand between a frame's subject and its verb, beside auxiliaries and negation. */
     public static final List<String> FRAME_ADVERBS = List.of("really", "still", "truly", "genuinely", "actually",
             "absolutely", "also", "just", "always", "definitely", "especially", "particularly", "simply");
-    private static final Set<String> FRAME_AUXILIARIES = Set.of("does", "do", "did", "is", "was", "has", "have", "had",
+    static final Set<String> FRAME_AUXILIARIES = Set.of("does", "do", "did", "is", "was", "has", "have", "had",
             "will", "would", "not", "never");
-    private static final Pattern ENDING_WORD = Pattern.compile("(?i)(?:anymore|any\\s+more|any\\s+longer)$");
-    private static final Pattern LIKE = Pattern.compile("(?i)\\blike\\b");
+    static final Pattern ENDING_WORD = Pattern.compile("(?i)(?:anymore|any\\s+more|any\\s+longer)$");
+    static final Pattern LIKE = Pattern.compile("(?i)\\blike\\b");
     private static final Pattern WORD = Pattern.compile("[\\w'\u2019]+");
     private static final Pattern PREFERENCE_END = Pattern.compile("[,;:!?]|\\.(?=\\s|$)|\\s(?:over|because|when|than)\\b");
     /** Topic frames: the view in "thinks that X", and both sides of "X is a kind of Y" or "considers X a kind of Y". */

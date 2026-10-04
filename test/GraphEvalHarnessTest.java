@@ -354,6 +354,37 @@ class GraphEvalHarnessTest extends UnitTest {
                 Certifier.DEFAULT_RECALL_FLOOR, 1, second, List.of());
     }
 
+    private int relationQuestions(List<Case> cases, boolean pairFilter, List<GraphEvalHarness.Report> reports) {
+        var golden = gold(cases);
+        var asked = new AtomicInteger();
+        Decider counting = request -> {
+            request.getAsJsonObject("questions").keySet().forEach(k -> {
+                if (k.startsWith("r")) asked.incrementAndGet();
+            });
+            return golden.decide(request);
+        };
+        reports.add(GraphEvalHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", counting)),
+                1, Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), List.of(), EvalProgress.none(), pairFilter));
+        return asked.get();
+    }
+
+    @Test
+    void thePairFilterAsksFewerEndToEndRelationQuestionsAndIsStamped() throws Exception {
+        var clause = Pattern.compile(ExtractionPipeline.CLAUSE_BOUNDARY);
+        var spanning = committed().stream().filter(c -> clause.matcher(c.text()).results()
+                .anyMatch(m -> m.end() < c.text().strip().length() - 1)).limit(3).toList();
+        assertFalse(spanning.isEmpty(), "the committed set has a memory of two clauses");
+        var reports = new ArrayList<GraphEvalHarness.Report>();
+        int unfiltered = relationQuestions(spanning, false, reports);
+        int filtered = relationQuestions(spanning, true, reports);
+        // The gold-fed relate stage is unfiltered by design, so the whole difference is the end-to-end run's.
+        assertTrue(filtered < unfiltered, filtered + " vs " + unfiltered);
+        var report = reports.getLast();
+        assertTrue(report.pairFilter());
+        assertFalse(reports.getFirst().pairFilter());
+        assertEquals(ExtractionPipeline.fingerprint(SCHEMA), report.extraction());
+    }
+
     @Test
     void aSingleRunIsSpotCheckedAndCertifiesWhenEveryAnswerRepeats() throws Exception {
         var cases = committed();

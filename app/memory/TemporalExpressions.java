@@ -669,12 +669,8 @@ public final class TemporalExpressions {
 
     /** The negation cues in {@code text} in order, lower-cased, after every ending pattern's match is removed. */
     public static List<String> negationCues(String text) {
-        var remaining = text;
-        for (var ending : ENDING_PATTERNS) remaining = ending.matcher(remaining).replaceAll(" ");
-        var cues = new ArrayList<String>();
-        var m = NEGATION.matcher(remaining);
-        while (m.find()) cues.add(m.group().toLowerCase(Locale.ROOT));
-        return List.copyOf(cues);
+        return negationCueRanges(text).stream().map(c -> text.substring(c.start(), c.end()).toLowerCase(Locale.ROOT))
+                .toList();
     }
 
     /** A negation cue at {@code [start, end)}; {@code perfectNever} when it is the never of "has never" or kin. */

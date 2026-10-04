@@ -73,8 +73,8 @@ public final class ExtractionPipeline {
     public static final String OPERATOR_TYPE = "Person";
     public static final String EXCEEDS_CONTEXT = "exceeds context";
     public static final int OLLAMA_ATTEMPTS = 3;
-    /** The lowest threshold a relation can write at (GraphEvalScorer.THRESHOLDS); below it nothing is qualified. */
-    public static final double KEPT = 0.50;
+    /** The lowest threshold a relation can write at; below it nothing is qualified. */
+    public static final double KEPT = Collections.min(GraphEvalScorer.THRESHOLDS);
     /** Until JCLAW-1366 gives cases their own, every case is read at this anchor. */
     public static final LocalDate DEFAULT_ANCHOR = LocalDate.of(2026, 2, 15);
     /** Where the pair filter splits a memory into clauses. */
@@ -1191,7 +1191,7 @@ public final class ExtractionPipeline {
         out.add(tenseQuestion("D").toString());
         out.add(occursQuestion("E", "D").toString());
         out.add(lineageQuestion().toString());
-        var voices = List.of(new Voice("O", false), new Voice("O", true));
+        var voices = List.of(new Voice("O", false), new Voice("O", true), new Voice(null, false));
         for (var relation : schema.relations().keySet()) {
             for (var from : schema.termTypes().keySet()) {
                 for (var to : schema.termTypes().keySet()) {
@@ -1229,6 +1229,9 @@ public final class ExtractionPipeline {
         TemporalExpressions.UNFAVORABLE_FRAMES
                 .forEach(f -> out.add("unfavorable " + f.ending() + " " + f.pattern().pattern()));
         CandidateGenerator.FRAME_ADVERBS.forEach(a -> out.add("adverb " + a));
+        CandidateGenerator.FRAME_AUXILIARIES.stream().sorted().forEach(a -> out.add("auxiliary " + a));
+        out.add("ending-word " + CandidateGenerator.ENDING_WORD.pattern());
+        out.add("like " + CandidateGenerator.LIKE.pattern());
         out.add("clause " + CLAUSE_BOUNDARY);
         return out;
     }

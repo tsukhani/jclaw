@@ -86,8 +86,8 @@ Decision-only: code finds every candidate and the decision model only chooses
    the memory denies a relation whose statuses include `denied`; each date with two readings
    (a year-less month) is asked `past` or `upcoming`, in the type request; each Event and
    date is asked whether the Event happens then. Negation and occurs ride the relate request.
-7. **Qualify.** Each relation kept at 0.50 is asked its status (`holds`, `ended`, `denied`,
-   `unstated`, as the schema allows) and, per date, which bound it marks (`from`, `to`,
+7. **Qualify.** Each relation kept at 0.50 whose statuses include `ended` is asked its
+   status (`holds`, `ended` or `unstated`) and, per date, which bound it marks (`from`, `to`,
    `during` or `neither`, as the date's kind allows), in a fourth request.
 8. **Lineage.** Each predecessor the memory may supersede gets its own request, sent beside
    the overlap request: `restatement`, `update` or `correction`; an unwritten one reads as
