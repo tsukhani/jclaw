@@ -79,10 +79,10 @@ class GraphEvalHarnessTest extends UnitTest {
         }
     }
 
-    /** The {@code noul} question's relation, matched against each sentence over its two quoted spans. */
+    /** The {@code noul} question's relation, matched against each schema gloss over its two quoted spans. */
     private static String relationOf(String rules, String from, String to) {
-        for (var relation : ExtractionPipeline.SENTENCES.keySet()) {
-            if (rules.contains(ExtractionPipeline.sentence(relation, from, to))) return relation;
+        for (var relation : SCHEMA.relations().keySet()) {
+            if (rules.contains(ExtractionPipeline.gloss(SCHEMA, relation, from, to))) return relation;
         }
         throw new AssertionError("no relation sentence in " + rules);
     }
@@ -102,6 +102,13 @@ class GraphEvalHarnessTest extends UnitTest {
                 var question = q.getValue().getAsJsonObject();
                 var rules = question.getAsJsonObject("instructions").get("rules").getAsString();
                 var spans = QUOTED.matcher(rules).results().map(m -> m.group(1)).toList();
+                if (q.getKey().startsWith("n") || q.getKey().startsWith("e")) {
+                    var noul = new JsonObject();
+                    noul.addProperty("type", "noul");
+                    noul.addProperty("noul", 0.01);
+                    answers.add(q.getKey(), noul);
+                    continue;
+                }
                 if (q.getKey().startsWith("r")) {
                     var from = c.entityAt(spans.get(0));
                     var to = c.entityAt(spans.get(1));
@@ -124,6 +131,12 @@ class GraphEvalHarnessTest extends UnitTest {
                 } else if (q.getKey().startsWith("m")) {
                     var e = c.entityAt(spans.getFirst());
                     choice = e != null && spans.getFirst().equals(e.mention()) ? e.type() : ExtractionPipeline.NOT_AN_ENTITY;
+                } else if (q.getKey().startsWith("t")) {
+                    choice = ExtractionPipeline.PAST;
+                } else if (q.getKey().startsWith("s")) {
+                    choice = ExtractionPipeline.HOLDS;
+                } else if (q.getKey().startsWith("d")) {
+                    choice = ExtractionPipeline.NEITHER;
                 } else {
                     throw new AssertionError("unexpected question " + q.getKey());
                 }
@@ -252,6 +265,8 @@ class GraphEvalHarnessTest extends UnitTest {
         assertTrue(stored.get(), "every case is a stored memory while the decisions run");
         assertEquals(List.of(), Tx.run(() -> Memory.findByAgent(agentId)), "every case memory deleted afterwards");
         assertEquals(SCHEMA.fingerprint(), report.schema(), "the report names the schema it certified under");
+        assertEquals(ExtractionPipeline.fingerprint(SCHEMA), report.extraction(), "and the extraction it asked with");
+        assertFalse(report.pairFilter());
         var integrity = report.memoryIntegrity();
         assertEquals(cases.size(), integrity.checked());
         assertEquals(cases.size(), integrity.unchanged());
@@ -337,6 +352,37 @@ class GraphEvalHarnessTest extends UnitTest {
         var second = cases.stream().filter(c -> blind.contains(c.id())).toList();
         return GraphEvalHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", decider)), 1,
                 Certifier.DEFAULT_RECALL_FLOOR, 1, second, List.of());
+    }
+
+    private int relationQuestions(List<Case> cases, boolean pairFilter, List<GraphEvalHarness.Report> reports) {
+        var golden = gold(cases);
+        var asked = new AtomicInteger();
+        Decider counting = request -> {
+            request.getAsJsonObject("questions").keySet().forEach(k -> {
+                if (k.startsWith("r")) asked.incrementAndGet();
+            });
+            return golden.decide(request);
+        };
+        reports.add(GraphEvalHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", counting)),
+                1, Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), List.of(), EvalProgress.none(), pairFilter));
+        return asked.get();
+    }
+
+    @Test
+    void thePairFilterAsksFewerEndToEndRelationQuestionsAndIsStamped() throws Exception {
+        var clause = Pattern.compile(ExtractionPipeline.CLAUSE_BOUNDARY);
+        var spanning = committed().stream().filter(c -> clause.matcher(c.text()).results()
+                .anyMatch(m -> m.end() < c.text().strip().length() - 1)).limit(3).toList();
+        assertFalse(spanning.isEmpty(), "the committed set has a memory of two clauses");
+        var reports = new ArrayList<GraphEvalHarness.Report>();
+        int unfiltered = relationQuestions(spanning, false, reports);
+        int filtered = relationQuestions(spanning, true, reports);
+        // The gold-fed relate stage is unfiltered by design, so the whole difference is the end-to-end run's.
+        assertTrue(filtered < unfiltered, filtered + " vs " + unfiltered);
+        var report = reports.getLast();
+        assertTrue(report.pairFilter());
+        assertFalse(reports.getFirst().pairFilter());
+        assertEquals(ExtractionPipeline.fingerprint(SCHEMA), report.extraction());
     }
 
     @Test

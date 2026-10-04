@@ -61,7 +61,7 @@ public class ApiGraphEvalController extends Controller {
 
     /**
      * {@code POST /api/graph/eval} with {@code {agent, decisionModels?, set?: "cases"|"heldout", runs?,
-     * recallFloor?, concurrency?, timeoutSeconds?}}. Model calls run outside any transaction, so each DB step opens
+     * recallFloor?, concurrency?, timeoutSeconds?, pairFilter?}}. Model calls run outside any transaction, so each DB step opens
      * its own. A refused request is a 400; an accepted one is {@linkplain #stream streamed}.
      */
     @NoTransaction
@@ -86,6 +86,15 @@ public class ApiGraphEvalController extends Controller {
             if (!(recallFloor >= 0 && recallFloor <= 1)) throw invalid("recallFloor must be in [0, 1]");
         }
         double floor = recallFloor;
+        boolean pairFilter = false;
+        if (body.has("pairFilter")) {
+            var raw = body.get("pairFilter");
+            if (!raw.isJsonPrimitive() || !raw.getAsJsonPrimitive().isBoolean()) {
+                throw invalid("pairFilter must be a boolean");
+            }
+            pairFilter = raw.getAsBoolean();
+        }
+        boolean filter = pairFilter;
         int timeoutSeconds = Math.clamp(readInt(body, "timeoutSeconds", DEFAULT_TIMEOUT_SECONDS), 1, MAX_TIMEOUT_SECONDS);
         int concurrency = Math.clamp(readInt(body, "concurrency", DEFAULT_CONCURRENCY), 1, MAX_CONCURRENCY);
         var modelNames = body.has("decisionModels") ? strings(body, "decisionModels") : OllamaDecision.selectedModels();
@@ -112,7 +121,7 @@ public class ApiGraphEvalController extends Controller {
                 throw invalid("invalid held-out set: " + e.getMessage());
             }
             stream(progress -> GraphEvalHarness.runHeldOut(loaded, ownerName, schema, models, runs, floor,
-                    concurrency, progress), true);
+                    concurrency, progress, filter), true);
             return;
         }
 
@@ -135,7 +144,7 @@ public class ApiGraphEvalController extends Controller {
             throw invalid("invalid second labels or adjudications: " + e.getMessage());
         }
         stream(progress -> GraphEvalHarness.run(agentId, cases, ownerName, schema, models, runs, floor, concurrency,
-                secondLabels, adjudications, progress), false);
+                secondLabels, adjudications, progress, filter), false);
     }
 
     /**

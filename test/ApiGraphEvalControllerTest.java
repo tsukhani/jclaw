@@ -120,6 +120,12 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
     }
 
     @Test
+    void aPairFilterThatIsNotABooleanIs400() {
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"pairFilter\":\"yes\"}", "pairFilter must be a boolean");
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"pairFilter\":1}", "pairFilter must be a boolean");
+    }
+
+    @Test
     void aSampleCountOutOfRangeIs400() {
         seedAgent();
         var response = POST(authed(), "/api/graph/eval/heldout/sample", "application/json",

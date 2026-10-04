@@ -663,8 +663,8 @@ class OntologySchemaTest extends UnitTest {
     void theSeedOwnsTheGlossesAndSymmetryTheEvalCodeStillHolds() {
         var seed = OntologySchema.seed();
         assertEquals(GraphEvalScorer.SYMMETRIC, seed.symmetricSet());
-        assertEquals(ExtractionPipeline.SENTENCES.keySet(), seed.relations().keySet());
-        seed.relations().forEach((name, r) -> assertEquals(ExtractionPipeline.SENTENCES.get(name), r.reads(), name));
+        seed.relations().forEach((name, r) -> assertEquals(r.reads().replace("X", "\"X\"").replace("Y", "\"Y\""),
+                ExtractionPipeline.gloss(seed, name, "X", "Y"), name));
     }
 
     @Test

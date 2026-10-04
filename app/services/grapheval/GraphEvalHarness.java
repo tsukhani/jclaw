@@ -77,16 +77,19 @@ public final class GraphEvalHarness {
 
     /**
      * The committed set's whole result. It carries no timings, so a rerun with the same answers is identical.
-     * {@code schema} is the seed's {@link OntologySchema#fingerprint()}: a certificate is void under any other.
+     * {@code schema} is the seed's {@link OntologySchema#fingerprint()} and {@code extraction} the questions'
+     * {@link ExtractionPipeline#fingerprint(OntologySchema)}: a certificate is void under any other.
      */
-    public record Report(String set, String schema, int cases, int runs, double recallFloor,
+    public record Report(String set, String schema, String extraction, boolean pairFilter, int cases, int runs,
+                         double recallFloor,
                          Agreement.Result agreement, List<ModelReport> models, MemoryIntegrity memoryIntegrity) {}
 
     /** One model over the held-out set; the walk is information only, since only the committed set certifies. */
     public record HeldOutModel(String model, List<RunReport> runs, Combined walk) {}
 
     /** The held-out set's result: aggregate counts only, never an id, a text or a span. */
-    public record HeldOutReport(String set, String schema, int cases, int unlabelled, int runs, double recallFloor,
+    public record HeldOutReport(String set, String schema, String extraction, boolean pairFilter, int cases,
+                                int unlabelled, int runs, double recallFloor,
                                 List<HeldOutModel> models, HeldOutIntegrity memoryIntegrity) {}
 
     /** The columns a decision must never touch. */
@@ -113,6 +116,15 @@ public final class GraphEvalHarness {
     public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,
                              List<DecisionModel> models, int runs, double recallFloor, int concurrency,
                              List<Case> secondLabels, List<Adjudication> adjudications, EvalProgress progress) {
+        return run(agentId, cases, ownerName, schema, models, runs, recallFloor, concurrency, secondLabels,
+                adjudications, progress, false);
+    }
+
+    /** {@link #run} with the extraction pair filter (JCLAW-1380) on or off. */
+    public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,
+                             List<DecisionModel> models, int runs, double recallFloor, int concurrency,
+                             List<Case> secondLabels, List<Adjudication> adjudications, EvalProgress progress,
+                             boolean pairFilter) {
         var store = MemoryStoreFactory.get();
         var provenance = new MemoryProvenance(null, null, MemoryProvenance.process(CATEGORY),
                 MemoryAuthorType.AGENT_SYNTHESIZED, List.of());
@@ -129,12 +141,14 @@ public final class GraphEvalHarness {
             before = snapshot(memoryIds);
             var known = new ArrayList<>(knownNames(agentId));
             if (ownerName != null) known.add(ownerName);
-            measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName, progress);
+            measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName, progress,
+                    pairFilter);
             if (runs == 1) {
                 for (var m : models) {
                     var data = measured.getOrDefault(m.name(), List.of());
                     if (!data.isEmpty()) {
-                        spotChecks.put(m.name(), spotCheck(cases, schema, m, data.getFirst().e2e(), known, concurrency));
+                        spotChecks.put(m.name(), spotCheck(cases, schema, m, data.getFirst().e2e(), known,
+                                ownerName, pairFilter, concurrency));
                     }
                 }
             }
@@ -172,7 +186,8 @@ public final class GraphEvalHarness {
             reports.add(new ModelReport(m.name(), data.stream().map(RunData::report).toList(), spot, certification,
                     listedAt, wrong));
         }
-        return new Report("cases", schema.fingerprint(), cases.size(), runs, recallFloor, agreement, reports, integrity);
+        return new Report("cases", schema.fingerprint(), ExtractionPipeline.fingerprint(schema), pairFilter,
+                cases.size(), runs, recallFloor, agreement, reports, integrity);
     }
 
     /**
@@ -188,12 +203,20 @@ public final class GraphEvalHarness {
     public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, @Nullable String ownerName, OntologySchema schema,
                                            List<DecisionModel> models, int runs, double recallFloor, int concurrency,
                                            EvalProgress progress) {
+        return runHeldOut(loaded, ownerName, schema, models, runs, recallFloor, concurrency, progress, false);
+    }
+
+    /** {@link #runHeldOut} with the extraction pair filter (JCLAW-1380) on or off. */
+    public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, @Nullable String ownerName, OntologySchema schema,
+                                           List<DecisionModel> models, int runs, double recallFloor, int concurrency,
+                                           EvalProgress progress, boolean pairFilter) {
         var cases = loaded.cases().stream().map(HeldOut.HeldCase::labels).toList();
         var memoryIds = new LinkedHashMap<String, String>();
         loaded.cases().forEach(h -> memoryIds.put(h.labels().id(), String.valueOf(h.memoryId())));
         var before = snapshot(memoryIds);
         var known = ownerName == null ? List.<String>of() : List.of(ownerName);
-        var measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName, progress);
+        var measured = measure(cases, schema, models, runs, recallFloor, concurrency, known, ownerName, progress,
+                pairFilter);
         var after = snapshot(memoryIds);
         int unchanged = 0;
         int present = 0;
@@ -209,7 +232,8 @@ public final class GraphEvalHarness {
             reports.add(new HeldOutModel(m.name(), runReports,
                     Certifier.combine(runReports.stream().map(RunReport::walk).toList())));
         }
-        return new HeldOutReport("heldout", schema.fingerprint(), cases.size(), loaded.unlabelled(), runs, recallFloor,
+        return new HeldOutReport("heldout", schema.fingerprint(), ExtractionPipeline.fingerprint(schema), pairFilter,
+                cases.size(), loaded.unlabelled(), runs, recallFloor,
                 reports, new HeldOutIntegrity(before.size(), unchanged, present));
     }
 
@@ -217,7 +241,8 @@ public final class GraphEvalHarness {
     private static Map<String, List<RunData>> measure(List<Case> cases, OntologySchema schema,
                                                       List<DecisionModel> models, int runs, double recallFloor,
                                                       int concurrency, List<String> knownNames,
-                                                      @Nullable String ownerName, EvalProgress progress) {
+                                                      @Nullable String ownerName, EvalProgress progress,
+                                                      boolean pairFilter) {
         progress.plan(models.stream().map(DecisionModel::name).toList(), runs, cases.size());
         var tasks = new ArrayList<Callable<CaseResult>>();
         int pass = 0;
@@ -227,7 +252,7 @@ public final class GraphEvalHarness {
                 for (var c : cases) {
                     tasks.add(() -> {
                         progress.caseStarted(p);
-                        var result = askCase(schema, c, m, knownNames);
+                        var result = askCase(schema, c, m, knownNames, inputs(c, ownerName, pairFilter));
                         progress.caseFinished(p, failures(result));
                         return result;
                     });
@@ -256,13 +281,15 @@ public final class GraphEvalHarness {
      * {@code first}, the run's own: a different answer, a failure, or a decision only one of the two made.
      */
     private static SpotCheck spotCheck(List<Case> cases, OntologySchema schema, DecisionModel m, List<CaseRun> first,
-                                       List<String> knownNames, int concurrency) {
+                                       List<String> knownNames, @Nullable String ownerName, boolean pairFilter,
+                                       int concurrency) {
         var sample = new ArrayList<Case>();
         for (int i = 0; i < cases.size(); i += SPOT_CHECK_STRIDE) sample.add(cases.get(i));
         var tasks = new ArrayList<Callable<CaseRun>>();
         for (var c : sample) {
             tasks.add(() -> ExtractionPipeline.run(schema, c.id(), c.text(),
-                    CandidateGenerator.generate(c.text(), knownNames), m.name(), m.decider()));
+                    CandidateGenerator.generate(c.text(), knownNames), m.name(), m.decider(),
+                    inputs(c, ownerName, pairFilter)));
         }
         var byId = new HashMap<String, CaseRun>();
         first.forEach(r -> byId.put(r.caseId(), r));
@@ -306,15 +333,22 @@ public final class GraphEvalHarness {
      * The overlap stage over generated candidates, the gold-fed typing and relation stages, then the end-to-end
      * pipeline from generated candidates.
      */
-    private static CaseResult askCase(OntologySchema schema, Case c, DecisionModel m, List<String> knownNames) {
+    private static CaseResult askCase(OntologySchema schema, Case c, DecisionModel m, List<String> knownNames,
+                                      ExtractionPipeline.Inputs inputs) {
         var candidates = CandidateGenerator.generate(c.text(), knownNames);
         var overlap = ExtractionPipeline.settle(c.text(),
                 candidates.stream().filter(k -> !k.operator()).toList(), m.name(), m.decider());
         var typing = ExtractionPipeline.type(schema, c.text(), StageScorer.typingSpans(c), m.name(), m.decider());
         var relations = ExtractionPipeline.relate(schema, c.text(), StageScorer.relationTerms(c), m.name(),
                 m.decider());
-        var e2e = ExtractionPipeline.run(schema, c.id(), c.text(), candidates, m.name(), m.decider());
+        var e2e = ExtractionPipeline.run(schema, c.id(), c.text(), candidates, m.name(), m.decider(), inputs);
         return new CaseResult(new StageRun(c.id(), overlap, typing, relations.decisions()), e2e);
+    }
+
+    /** A case's run inputs: a human turn at the default anchor with no predecessors, until JCLAW-1366. */
+    private static ExtractionPipeline.Inputs inputs(Case c, @Nullable String ownerName, boolean pairFilter) {
+        return ExtractionPipeline.Inputs.of(c.text(), ownerName, MemoryAuthorType.HUMAN_TURN,
+                ExtractionPipeline.DEFAULT_ANCHOR, List.of(), pairFilter);
     }
 
     /** Runs {@code tasks} on at most {@code concurrency} threads, returning results in task order. */
