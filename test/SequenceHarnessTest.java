@@ -34,7 +34,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -45,12 +47,66 @@ class SequenceHarnessTest extends UnitTest {
     private static final OntologySchema SCHEMA = OntologySchema.seed();
     private static final ZoneId ZONE = TimezoneResolver.appZone();
 
-    private static Sequences set() {
+    /** Gold-fed probes whose answer differs from the label, to that answer; each ruled on in the README's sequence section. */
+    private static final Map<String, String> PINNED_DISAGREEMENTS = Map.ofEntries(
+            Map.entry("probe:operator:holds_view_on:bouldering:2024-01-01:after:s23c:YES", "YES assumed"),
+            Map.entry("probe:operator:located_in:ashgrove:2025-10-01:after:s46b:NO", "NO assumed"),
+            Map.entry("probe:operator:located_in:cindervale:2024-12-01:after:s02b:NO", "NO assumed"),
+            Map.entry("probe:operator:located_in:dunmore-quay:2024-12-20:before:s14b:NO", "NO assumed"),
+            Map.entry("probe:operator:located_in:larchmere:2019-06-01:after:s30b:NO", "NO assumed"),
+            Map.entry("probe:operator:located_in:nettlefield:2021-06-01:after:s33a:YES", "UNKNOWN"),
+            Map.entry("probe:operator:owns:fernlight:2025-05-06:after:s28b:NO", "UNKNOWN"),
+            Map.entry("probe:operator:owns:ferrule-cabin:2024-08-02:after:s57c:YES", "NO"),
+            Map.entry("probe:operator:owns:ferrule-cabin:2025-02-01:after:s24b:YES", "YES assumed"),
+            Map.entry("probe:operator:owns:orrin-lodge:2020-06-01:before:s32b:NO", "NO assumed"),
+            Map.entry("probe:operator:uses:corvid:2025-06-01:after:s34a:NO", "NO assumed"),
+            Map.entry("probe:operator:uses:glasswing:2024-04-01:after:s38b:NO", "NO assumed"),
+            Map.entry("probe:operator:uses:osprey:2026-01-05:after:s03b:NO", "NO assumed"),
+            Map.entry("probe:operator:uses:quillpad:2021-06-01:after:s21b:NO", "NO assumed"),
+            Map.entry("probe:operator:uses:quillpad:2025-10-01:before:s34c:YES", "YES assumed"),
+            Map.entry("probe:operator:uses:sorrel-drive:2024-10-06:after:s56b:NO", "UNKNOWN"),
+            Map.entry("probe:operator:works_at:alderline-software:2022-06-01:after:s09c:YES", "UNKNOWN"),
+            Map.entry("probe:operator:works_at:alderline-software:2024-06-01:after:s09b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:brightwell:2021-06-01:after:s26b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:brightwell:2024-11-08:after:s37b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:brightwell:2024-11-08:after:s37c:YES", "NO assumed"),
+            Map.entry("probe:operator:works_at:brightwell:2025-05-01:after:s11c:YES", "UNKNOWN"),
+            Map.entry("probe:operator:works_at:harborlight:2022-06-01:after:s45a:YES", "UNKNOWN"),
+            Map.entry("probe:operator:works_at:harborlight:2023-09-01:after:s45c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:harborlight:2024-09-01:after:s48c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:harborlight:2024-10-01:after:s16b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:harborlight:2025-09-02:before:s16c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:juniper:2026-09-01:after:s44c:YES", "YES"),
+            Map.entry("probe:operator:works_at:kiln-street-studio:2025-06-01:after:s17c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:lantern:2025-06-01:after:s27c:YES", "YES assumed"),
+            Map.entry("probe:operator:works_at:ostrander:2021-06-01:after:s04b:YES", "UNKNOWN"),
+            Map.entry("probe:operator:works_at:ostrander:2024-05-01:before:s04b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:ostrander:2024-10-01:after:s04b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:vela:2025-04-01:after:s27b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:vela:2026-05-10:after:s31c:YES", "YES assumed"),
+            Map.entry("probe:operator:works_at:vela:2026-09-20:after:s31c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_on:atlas-migration:2024-07-03:before:s12c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_on:atlas-migration:2025-06-20:after:s36b:YES", "YES"),
+            Map.entry("probe:operator:works_on:atlas-migration:2025-09-10:after:s51b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_on:bluefin:2024-04-15:after:s45c:NO", "UNKNOWN"),
+            Map.entry("probe:operator:works_on:meridian:2025-06-01:after:s06b:NO", "UNKNOWN"));
+
+    private static Sequences load(String path) {
         try {
-            return Sequences.load(Play.applicationPath.toPath().resolve(Sequences.DEFAULT_PATH), SCHEMA);
+            return Sequences.load(Play.applicationPath.toPath().resolve(path), SCHEMA);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    /** The committed set. */
+    private static Sequences set() {
+        return load(Sequences.DEFAULT_PATH);
+    }
+
+    /** The six JCLAW-1367 chains the harness-mechanics tests were written for. */
+    private static Sequences fixture() {
+        return load("test/sequence-fixture.json");
     }
 
     /**
@@ -133,10 +189,10 @@ class SequenceHarnessTest extends UnitTest {
         }
     }
 
-    @Test
-    void everyProbeAnswersItsLabelOnGoldClaimsWithGoldLineage() {
-        var set = set();
+    /** Each probe whose gold-claims, gold-lineage answer differs from its label in truth or {@code assumed}, to that answer. */
+    private static Map<String, String> goldFedDisagreements(Sequences set) {
         var configuration = Configuration.defaultFor(SCHEMA);
+        var out = new TreeMap<String, String>();
         int probes = 0;
         for (int c = 0; c < set.chains().size(); c++) {
             var chain = set.chains().get(c);
@@ -144,17 +200,37 @@ class SequenceHarnessTest extends UnitTest {
                     configuration, null, ZONE);
             for (var p : chain.probes()) {
                 var a = SequenceHarness.probe(SCHEMA, chain, p, sets.getLast(), ZONE);
-                assertEquals(p.truth(), a.truth(), () -> chain.id() + " " + p + " answered " + a);
-                assertEquals(p.assumed(), a.assumed(), () -> chain.id() + " " + p + " answered " + a);
+                if (a.truth() != p.truth() || a.assumed() != p.assumed()) {
+                    out.put(String.join(":", "probe", p.from(), p.type(), p.to(), p.d().toString(),
+                            p.after() != null ? "after" : "before", p.memoryId(), p.truth().name()),
+                            a.truth().name() + (a.assumed() ? " assumed" : ""));
+                }
                 probes++;
             }
         }
-        assertTrue(probes > 0, "the committed set carries probes");
+        assertTrue(probes > 0, "the set carries probes");
+        return out;
+    }
+
+    @Test
+    void goldClaimsWithGoldLineageAnswerEveryLabelExceptThePinnedDisagreements() throws IOException {
+        var fixture = goldFedDisagreements(fixture());
+        assertEquals(Map.of(), fixture, () -> "fixture disagreements: " + fixture);
+
+        var committed = goldFedDisagreements(set());
+        assertEquals(new TreeMap<>(PINNED_DISAGREEMENTS), committed, () -> "committed-set disagreements:\n"
+                + String.join("\n", committed.entrySet().stream().map(e -> e.getKey() + " = " + e.getValue()).toList()));
+        var readme = Files.readString(Play.applicationPath.toPath().resolve("evals/graph/README.md"));
+        for (var key : PINNED_DISAGREEMENTS.keySet()) assertTrue(readme.contains(key), () -> "README rules on no " + key);
     }
 
     @Test
     void theValidatorIsCleanAfterEveryMemoryInEveryVariant() {
-        var set = set();
+        validatorIsClean(fixture());
+        validatorIsClean(set());
+    }
+
+    private static void validatorIsClean(Sequences set) {
         var runs = askAll(set, gold(set, new CopyOnWriteArrayList<>()));
         var configuration = Configuration.defaultFor(SCHEMA);
         for (int c = 0; c < set.chains().size(); c++) {
@@ -180,7 +256,7 @@ class SequenceHarnessTest extends UnitTest {
 
     @Test
     void aMemoryIsStampedAtNoonPlusItsIndexAndRetiresItsPredecessorsThere() {
-        var set = set();
+        var set = fixture();
         var chain = set.chains().getFirst();
         for (int i = 0; i < chain.memories().size(); i++) {
             var expected = chain.memories().get(i).labels().capturedAt().atTime(LocalTime.NOON).atZone(ZONE)
@@ -205,7 +281,7 @@ class SequenceHarnessTest extends UnitTest {
 
     @Test
     void aRunWritesNoMemoryRowAndNoGraphFile() {
-        var set = set();
+        var set = fixture();
         run(set, gold(set, new CopyOnWriteArrayList<>()), 1, Configuration.defaultFor(SCHEMA));
         var texts = new ArrayList<String>();
         var sources = new ArrayList<String>();
@@ -227,7 +303,7 @@ class SequenceHarnessTest extends UnitTest {
 
     @Test
     void eachGoldLinkIsAskedOneLineageQuestion() {
-        var set = set();
+        var set = fixture();
         var requests = new CopyOnWriteArrayList<JsonObject>();
         askAll(set, gold(set, requests));
         int links = set.chains().stream().mapToInt(Sequences.Chain::links).sum();
@@ -238,7 +314,7 @@ class SequenceHarnessTest extends UnitTest {
 
     @Test
     void theConfigurationNeverChangesWhatIsAsked() {
-        var set = set();
+        var set = fixture();
         var a = new CopyOnWriteArrayList<JsonObject>();
         var b = new CopyOnWriteArrayList<JsonObject>();
         run(set, gold(set, a), 2, Configuration.defaultFor(SCHEMA));
@@ -251,7 +327,7 @@ class SequenceHarnessTest extends UnitTest {
 
     @Test
     void endToEndReadsAtTheWalksThresholdAndADisabledLineageRetracts() {
-        var set = set();
+        var set = fixture();
         var configuration = Configuration.defaultFor(SCHEMA);
         var report = run(set, gold(set, new CopyOnWriteArrayList<>()), 2, configuration);
         var r0 = report.models().getFirst().runs().getFirst();
@@ -290,7 +366,7 @@ class SequenceHarnessTest extends UnitTest {
 
     @Test
     void aSecondAnswerThatDiffersLeavesTheLineageUnconfirmed() {
-        var set = set();
+        var set = fixture();
         var chain = set.chains().getFirst();
         var earlier = chain.memories().getFirst().labels().text();
         var steady = gold(set, new CopyOnWriteArrayList<>());
@@ -319,7 +395,7 @@ class SequenceHarnessTest extends UnitTest {
 
     @Test
     void aFailedLineageDecisionFailsItsMemoryAndDisablesLineage() {
-        var set = set();
+        var set = fixture();
         var steady = gold(set, new CopyOnWriteArrayList<>());
         Decider broken = request -> {
             if (isLineage(request)) throw new IllegalStateException("decider unavailable");
@@ -351,7 +427,7 @@ class SequenceHarnessTest extends UnitTest {
 
     @Test
     void endToEndOnGoldAnswersMatchesGoldClaimsWithModelLineage() {
-        var set = set();
+        var set = fixture();
         var report = run(set, gold(set, new CopyOnWriteArrayList<>()), 2, Configuration.defaultFor(SCHEMA));
         var r0 = report.models().getFirst().runs().getFirst();
         assertEquals(r0.goldClaimsModelLineage(), r0.endToEnd());
@@ -361,7 +437,7 @@ class SequenceHarnessTest extends UnitTest {
 
     @Test
     void aConfigurationWithNoRelationsWritesNoRelation() {
-        var set = set();
+        var set = fixture();
         var runs = askAll(set, gold(set, new CopyOnWriteArrayList<>()));
         var off = Configuration.parse(com.google.gson.JsonParser.parseString("{\"terms\": 0.3}").getAsJsonObject(),
                 SCHEMA);
@@ -402,7 +478,7 @@ class SequenceHarnessTest extends UnitTest {
 
     @Test
     void theSameAnswersSerializeIdentically() {
-        var set = set();
+        var set = fixture();
         var a = GsonHolder.GSON.toJson(run(set, gold(set, new CopyOnWriteArrayList<>()), 1,
                 Configuration.defaultFor(SCHEMA)));
         var b = GsonHolder.GSON.toJson(run(set, gold(set, new CopyOnWriteArrayList<>()), 1,

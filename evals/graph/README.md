@@ -1,4 +1,4 @@
-# Graph-extraction cases (JCLAW-1356, JCLAW-1358, JCLAW-1366, JCLAW-1367)
+# Graph-extraction cases (JCLAW-1356, JCLAW-1358, JCLAW-1366, JCLAW-1367, JCLAW-1379)
 
 `cases.json` is the labelled set that certifies a local Ollama decision model for graph
 extraction (`POST /api/graph/eval`, `./jclaw.sh grapheval run`). It is not an
@@ -374,7 +374,7 @@ failure's message are held to the same rule.
 
 ## Sequences
 
-`sequences.json` (JCLAW-1367) measures supersession: whether the decision model's lineage
+`sequences.json` (JCLAW-1367, JCLAW-1379) measures supersession: whether the decision model's lineage
 choice is right, and whether `GraphView` then answers "did this hold at date D, as the sources
 said at instant s" the way a person reading the memories would. It needs no agent and writes
 nothing — no Memory row, no graph file.
@@ -395,7 +395,7 @@ read back from `GraphView`.
 | memory | `supersedes` | `{earlierId: "update" \| "restatement" \| "correction"}`, the gold lineage of each link |
 | memory | `derivedFrom` | Earlier memory ids the text was derived from |
 | memory | `message` | The source turn's text, when it differs from the memory's |
-| memory | `authorType` | `human_turn` (default) or `guest_turn`; every memory of a `guest-about-owner` chain is `guest_turn`, and its relations reaching the operator are `unasserted` |
+| memory | `authorType` | `human_turn` (default), `guest_turn` or `consolidation_derived` (read in the owner's voice; needs a non-empty `derivedFrom`); every memory of a `guest-about-owner` chain is `guest_turn`, and its relations reaching the operator are `unasserted` |
 | probe | `from`, `type`, `to` | Entity ids labelled in the chain, a relation the schema allows between their types |
 | probe | `d` | The valid date asked about |
 | probe | `after` \| `before` | Exactly one: the memory the probe is read just after or just before |
@@ -417,7 +417,8 @@ first 12 hex of a SHA-256 over the document with its keys sorted.
 3. **Replay.** The record sets are rebuilt in memory, memory by memory, for three variants:
    - `endToEnd` — the model's claims at the configuration, and its lineage at the run's own walk threshold;
    - `goldClaimsModelLineage` — the labelled claims, with the model's lineage;
-   - `goldClaimsGoldLineage` — the labelled claims and lineage; every probe answers its label here.
+   - `goldClaimsGoldLineage` — the labelled claims and lineage; every probe answers its label here
+     except the pinned disagreements under [The committed set](#the-committed-set).
 
    With no lineage threshold a superseded claim is a retraction. A memory with any failed
    decision adds no records and no lineage, though its predecessors are still retired.
@@ -459,9 +460,152 @@ probes whose `assumed` matches. Below 250 definite labels the end-to-end result 
 from there it is `failed` when the 95% upper bound exceeds 5%, else `passed` — `reported` if
 the run had a failed decision.
 
-The committed set is a fixture scaffold below both gates: lineage needs n ≥ 29 to be evaluable
-and the timeline 250 definite labels, so today lineage is always disabled and both
-model-lineage variants read every supersession as a retraction.
+The committed set clears the lineage floor but neither gate. Its 90 links give n = 90 lineage
+decisions per run, so lineage is evaluable but ungated below 250. Its 192 definite probe labels
+leave the timeline `reported` below 250.
+
+### The committed set
+
+`sequences.json` (JCLAW-1379) holds 60 chains (30 of two memories, 30 of three) and 150
+memories, at a mean of 18.9 words per text. Its 90 links are 40 `update`, 25 `restatement` and
+25 `correction`. Its 240 probes are 118 YES, 74 NO and 48 UNKNOWN: 192 are definite, 41 are
+`assumed`, and 72 are read `before` a memory. Six chains are `guest-about-owner`; three memories
+are `consolidation_derived`. The six JCLAW-1367 chains the harness-mechanics tests rely on moved
+to `test/sequence-fixture.json`.
+
+| Shape | Chains |
+| --- | --- |
+| Move | s01, s02, s14, s20, s33, s46 |
+| Ended then restated | s03, s04, s15 |
+| Denial then reassertion | s10, s18, s19, s50 |
+| Rejoin | s16, s17, s45, s48 |
+| Scheduled start | s27, s31, s40, s55 |
+| Dates carried into a derived memory | s34, s44, s51 |
+| Guest about the owner | s35, s39, s43, s47, s49, s54 |
+
+**How it was written and labelled.** Every model came from the Anthropic family, since no
+other family was available in the build sandbox. None was tev1, nimble or clef-flash.
+- **Writing.** Four writer subagents on Claude Opus wrote the texts, entities, relations,
+  dates, links and probe questions, each over a disjoint range of chain ids.
+- **Labelling.** Three blind labellers worked from a sheet holding only each memory's id,
+  `capturedAt`, author type and text, each link without its lineage, and each probe without
+  its truth, plus GUIDE v3, the seed schema and the probe rules. The labellers were A on Claude
+  Opus, B on Claude Sonnet and C on Claude Fable; each labelled both halves of the sheet.
+- **Reconciling.** One reconciler on Claude Opus merged their answers from the same inputs,
+  never seeing the writers' drafts.
+
+Writer-drafted lineage and truth never reached the file. All three labellers agreed on all 90
+lineages and on 230 of the 240 probes. The reconciler decided the other 10 under the probe
+rules: s04#3, s10#3, s21#3, s23#0, s26#3, s30#3, s38#2, s44#3, s46#0 and s53#0. No label
+changed after reconciliation.
+
+Three texts were edited after labelling without changing their meaning:
+- s07b gained commas around "since a bad chill last November";
+- s53c gained commas around "after a shoulder injury in January";
+- s41c's "much prefers rowing instead" became "now much prefers rowing".
+
+The end-to-end candidate generator reads a preference object up to the next punctuation mark.
+Unpunctuated, the object ran into the trailing clause and matched no labelled mention, so even
+a gold decider wrote no relation and the validator check failed.
+
+**Gold-fed disagreements.** With gold claims and gold lineage, `GraphView` answers 41 probes
+differently from their labels. `SequenceHarnessTest` pins exactly these keys, each with the
+answer `GraphView` gives. Every label stands: each answer follows the probe rules from the
+texts, and none is changed to match `GraphView`.
+
+*Stated NO marked assumed.* The text itself states the end, the start or the refusal. The probe
+rules settle the NO without assuming ("a former home or employer is NO now", "a scheduled start
+is NO before it begins", a stated start bounds the relation). `GraphView` marks every NO outside
+a stated interval as assumed.
+
+- `probe:operator:located_in:ashgrove:2025-10-01:after:s46b:NO`
+- `probe:operator:located_in:cindervale:2024-12-01:after:s02b:NO`
+- `probe:operator:located_in:dunmore-quay:2024-12-20:before:s14b:NO`
+- `probe:operator:located_in:larchmere:2019-06-01:after:s30b:NO`
+- `probe:operator:owns:orrin-lodge:2020-06-01:before:s32b:NO`
+- `probe:operator:uses:corvid:2025-06-01:after:s34a:NO`
+- `probe:operator:uses:glasswing:2024-04-01:after:s38b:NO`
+- `probe:operator:uses:osprey:2026-01-05:after:s03b:NO`
+- `probe:operator:uses:quillpad:2021-06-01:after:s21b:NO`
+- `probe:operator:works_at:alderline-software:2024-06-01:after:s09b:NO`
+- `probe:operator:works_at:brightwell:2021-06-01:after:s26b:NO`
+- `probe:operator:works_at:brightwell:2024-11-08:after:s37b:NO`
+- `probe:operator:works_at:harborlight:2023-09-01:after:s45c:NO`
+- `probe:operator:works_at:harborlight:2024-09-01:after:s48c:NO`
+- `probe:operator:works_at:harborlight:2024-10-01:after:s16b:NO`
+- `probe:operator:works_at:harborlight:2025-09-02:before:s16c:NO`
+- `probe:operator:works_at:kiln-street-studio:2025-06-01:after:s17c:NO`
+- `probe:operator:works_at:ostrander:2024-05-01:before:s04b:NO`
+- `probe:operator:works_at:ostrander:2024-10-01:after:s04b:NO`
+- `probe:operator:works_at:vela:2025-04-01:after:s27b:NO`
+- `probe:operator:works_at:vela:2026-09-20:after:s31c:NO`
+- `probe:operator:works_on:atlas-migration:2024-07-03:before:s12c:NO`
+- `probe:operator:works_on:atlas-migration:2025-09-10:after:s51b:NO`
+
+*Stated YES marked assumed.* A stated start and a stated end, or an earlier statement and a
+later "still", bracket `d`. `GraphView` marks the YES as assumed because the update superseded
+the earlier holding and the later memory carries no start.
+
+- `probe:operator:holds_view_on:bouldering:2024-01-01:after:s23c:YES`
+- `probe:operator:owns:ferrule-cabin:2025-02-01:after:s24b:YES`
+- `probe:operator:uses:quillpad:2025-10-01:before:s34c:YES`
+- `probe:operator:works_at:lantern:2025-06-01:after:s27c:YES`
+- `probe:operator:works_at:vela:2026-05-10:after:s31c:YES`
+
+*Assumed YES read as stated.*
+- `probe:operator:works_at:juniper:2026-09-01:after:s44c:YES` — under the derived-memory rule,
+  s44c's "now" is carried from s44b and resolves to 2026-07-14, so the YES at 2026-09-01 rests on
+  the consulting continuing. `GraphView` reads the derived memory's holding from its own stamp.
+- `probe:operator:works_on:atlas-migration:2025-06-20:after:s36b:YES` — s36b states only that the
+  January work was for the Atlas Migration, so the YES at its capture rests on the work
+  continuing. The claim's open `2025-01/..` reads to `GraphView` as stated.
+
+*An ended duration has no start.* "Left … after four years" places `d` inside the job.
+GUIDE rule 13 gives an ended relation's duration no bound, so the graph has no start and
+answers UNKNOWN.
+
+- `probe:operator:works_at:ostrander:2021-06-01:after:s04b:YES`
+- `probe:operator:works_at:harborlight:2022-06-01:after:s45a:YES`
+
+*An approximate start.* "For three years" and "for two years" give an approximate start
+(`2020~`, `2021~`) by GUIDE rule 13, and `d` falls after that whole year. `GraphView` still
+answers UNKNOWN; that it does so because the start is approximate is inferred, not traced.
+
+- `probe:operator:located_in:nettlefield:2021-06-01:after:s33a:YES`
+- `probe:operator:works_at:alderline-software:2022-06-01:after:s09c:YES`
+
+*A correcting denial covers the past.* A correction says the earlier memory was wrong when it
+was written, so its denial answers NO before the correcting memory too ("a denial is NO").
+None of these is a perfect "has never", so by GUIDE rule 13 the denial carries no `valid`, and
+`GraphView` answers UNKNOWN before its stamp.
+
+- `probe:operator:owns:fernlight:2025-05-06:after:s28b:NO`
+- `probe:operator:uses:sorrel-drive:2024-10-06:after:s56b:NO`
+- `probe:operator:works_on:bluefin:2024-04-15:after:s45c:NO`
+- `probe:operator:works_on:meridian:2025-06-01:after:s06b:NO`
+
+*A corrected update.* The correction withdraws the update's "left" or "sold" ("after a
+correction it no longer counts"), and the later text says the relation still holds. `GraphView`
+keeps the update's end on the earlier holding and answers NO.
+
+- `probe:operator:owns:ferrule-cabin:2024-08-02:after:s57c:YES`
+- `probe:operator:works_at:brightwell:2024-11-08:after:s37c:YES`
+
+*Restated "still" without a start.* s11b corrected the office, and s11c says Avery Lin "still"
+works at Brightwell Labs, which covers May. `GraphView` has only s11c's holding, with no start,
+and answers UNKNOWN before its stamp.
+
+- `probe:operator:works_at:brightwell:2025-05-01:after:s11c:YES`
+
+**Operator spot-check.** `sequence-label-checks.json` holds 30 lineage records
+(`lineage:<later>:<earlier>:<lineage>`) and 40 probe records (keyed like the disagreements
+above, but drawn from every probe), each with verdict `pending`.
+- **Sampling rule.** Within each kind, sort every record in `sequences.json` ascending by the
+  SHA-256 hex of `"11:" + record` (the seed, a colon, the record) and take the first k.
+- **Judging.** The operator replaces each `pending` with `agree` or `disagree`, or redraws at
+  another size by the same rule.
+- **Rates.** The two disagreement rates are reported apart, each as disagree over checked:
+  lineage over the lineage records and probes over the probe records.
 
 ### Report
 

@@ -1,6 +1,7 @@
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import memory.graph.GraphView;
 import memory.ontology.OntologySchema;
 import models.MemoryAuthorType;
 import org.junit.jupiter.api.Test;
@@ -10,8 +11,17 @@ import services.grapheval.GraphCases;
 import services.grapheval.Sequences;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
 import java.util.function.Consumer;
 
 /** JCLAW-1367: the committed sequence set parses with no model, and every break of its rules is refused by name. */
@@ -96,6 +106,87 @@ class SequencesConformanceTest extends UnitTest {
             for (var p : chain.probes()) assertTrue(chain.indexOf(p.memoryId()) >= 0, p::toString);
         }
         assertTrue(tags.containsAll(Sequences.CHAIN_TAGS), tags::toString);
+    }
+
+    private static Sequences committed() throws IOException {
+        return Sequences.load(Path.of(Play.applicationPath.getAbsolutePath(), Sequences.DEFAULT_PATH), SCHEMA);
+    }
+
+    @Test
+    void theCommittedSetHasTheCompositionTheReadmeStates() throws IOException {
+        var set = committed();
+        var memories = set.chains().stream().flatMap(c -> c.memories().stream()).toList();
+        var probes = set.chains().stream().flatMap(c -> c.probes().stream()).toList();
+        assertEquals(60, set.chains().size());
+        assertEquals(150, memories.size());
+        assertEquals(30, set.chains().stream().filter(c -> c.memories().size() == 3).count());
+        for (var lineage : List.of("update:40", "restatement:25", "correction:25")) {
+            var parts = lineage.split(":");
+            assertEquals(Long.parseLong(parts[1]), memories.stream().flatMap(m -> m.supersedes().values().stream())
+                    .filter(l -> l.name().toLowerCase(Locale.ROOT).equals(parts[0])).count(), parts[0]);
+        }
+        assertEquals(240, probes.size());
+        assertEquals(118, probes.stream().filter(p -> p.truth() == GraphView.Truth.YES).count());
+        assertEquals(74, probes.stream().filter(p -> p.truth() == GraphView.Truth.NO).count());
+        assertEquals(41, probes.stream().filter(Sequences.Probe::assumed).count());
+        assertEquals(72, probes.stream().filter(p -> p.before() != null).count());
+        assertEquals(6, set.chains().stream().filter(c -> c.tags().contains(GraphCases.GUEST_ABOUT_OWNER)).count());
+        assertEquals(3, memories.stream().filter(m -> m.authorType() == MemoryAuthorType.CONSOLIDATION_DERIVED).count());
+    }
+
+    /** {@code lineage:<later>:<earlier>:<lineage>} for each link, in file order. */
+    private static List<String> lineageRecords(Sequences set) {
+        var out = new ArrayList<String>();
+        for (var chain : set.chains()) {
+            for (var m : chain.memories()) {
+                m.supersedes().forEach((earlier, l) -> out.add(String.join(":", "lineage", m.id(), earlier,
+                        l.name().toLowerCase(Locale.ROOT))));
+            }
+        }
+        return out;
+    }
+
+    /** {@code probe:<from>:<type>:<to>:<d>:after|before:<memory>:<truth>} for each probe, in file order. */
+    private static List<String> probeRecords(Sequences set) {
+        return set.chains().stream().flatMap(c -> c.probes().stream()).map(p -> String.join(":", "probe", p.from(),
+                p.type(), p.to(), p.d().toString(), p.after() != null ? "after" : "before", p.memoryId(),
+                p.truth().name())).toList();
+    }
+
+    /** The first {@code k} records by the SHA-256 hex of {@code seed + ":" + record}. */
+    private static List<String> sample(List<String> records, int seed, long k) {
+        return records.stream().sorted(Comparator.comparing(r -> sha256(seed + ":" + r))).limit(k).toList();
+    }
+
+    private static String sha256(String s) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(s.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Test
+    void theSpotCheckIsTheSeededSampleOfTheCommittedLabels() throws IOException {
+        var checks = JsonParser.parseString(Files.readString(Path.of(Play.applicationPath.getAbsolutePath(),
+                "evals/graph/sequence-label-checks.json"))).getAsJsonObject();
+        assertEquals("v3", checks.get("guide").getAsString());
+        int seed = checks.get("seed").getAsInt();
+        var records = new ArrayList<String>();
+        for (var e : checks.getAsJsonArray("checks")) {
+            var check = e.getAsJsonObject();
+            var record = check.get("record").getAsString();
+            records.add(record);
+            var chain = check.get("chain").getAsString();
+            assertTrue(record.contains(":" + chain), () -> record + " is not in chain " + chain);
+            assertTrue(List.of("pending", "agree", "disagree").contains(check.get("verdict").getAsString()), record);
+        }
+        var set = committed();
+        long lineages = records.stream().filter(r -> r.startsWith("lineage:")).count();
+        long probes = records.stream().filter(r -> r.startsWith("probe:")).count();
+        var expected = new ArrayList<>(sample(lineageRecords(set), seed, lineages));
+        expected.addAll(sample(probeRecords(set), seed, probes));
+        assertEquals(expected, records, "the checks are not the seed's sample of the committed labels");
     }
 
     @Test
@@ -198,6 +289,36 @@ class SequencesConformanceTest extends UnitTest {
         refused(d -> probe(d).remove("after"), "c1", "probe #0", "exactly one");
         refused(d -> probe(d).addProperty("truth", "MAYBE"), "c1", "probe #0", "MAYBE");
         refused(d -> probe(d).addProperty("type", "located_in"), "c1", "probe #0", "located_in");
+    }
+
+    @Test
+    void aDerivedMemoryParsesBesideTheExplicitTurnAuthors() {
+        var derived = base();
+        memory(derived, 1).addProperty("authorType", "consolidation_derived");
+        var from = new JsonArray();
+        from.add("m1");
+        memory(derived, 1).add("derivedFrom", from);
+        var memory = parse(derived).chains().getFirst().memories().get(1);
+        assertEquals(MemoryAuthorType.CONSOLIDATION_DERIVED, memory.authorType());
+        assertEquals(List.of("m1"), memory.derivedFrom());
+
+        var human = base();
+        memory(human, 1).addProperty("authorType", "human_turn");
+        assertEquals(MemoryAuthorType.HUMAN_TURN, parse(human).chains().getFirst().memories().get(1).authorType());
+        var guest = base();
+        memory(guest, 1).addProperty("authorType", "guest_turn");
+        assertEquals(MemoryAuthorType.GUEST_TURN, parse(guest).chains().getFirst().memories().get(1).authorType());
+        assertEquals(MemoryAuthorType.HUMAN_TURN, parse(base()).chains().getFirst().memories().get(1).authorType());
+    }
+
+    @Test
+    void aDerivedMemoryWithNoSourceOrAnUnsupportedAuthorIsRefused() {
+        refused(d -> memory(d, 1).addProperty("authorType", "consolidation_derived"), "c1", "m2", "derivedFrom");
+        refused(d -> {
+            memory(d, 1).addProperty("authorType", "consolidation_derived");
+            memory(d, 1).add("derivedFrom", new JsonArray());
+        }, "c1", "m2", "derivedFrom");
+        refused(d -> memory(d, 1).addProperty("authorType", "agent_synthesized"), "c1", "m2", "agent_synthesized");
     }
 
     @Test

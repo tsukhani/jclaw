@@ -199,9 +199,14 @@ public record Sequences(@Nullable String ownerName, String userMd, List<Chain> c
                 authorType = switch (raw) {
                     case "human_turn" -> MemoryAuthorType.HUMAN_TURN;
                     case "guest_turn" -> MemoryAuthorType.GUEST_TURN;
+                    case "consolidation_derived" -> MemoryAuthorType.CONSOLIDATION_DERIVED;
                     default -> throw new IllegalArgumentException(where + ": authorType '" + raw
-                            + "' is neither human_turn nor guest_turn");
+                            + "' is not human_turn, guest_turn or consolidation_derived");
                 };
+            }
+            if (authorType == MemoryAuthorType.CONSOLIDATION_DERIVED && derivedFrom.isEmpty()) {
+                throw new IllegalArgumentException(where + ": a consolidation_derived memory names its sources in"
+                        + " derivedFrom");
             }
             if (aboutOwner) {
                 if (authorType != MemoryAuthorType.GUEST_TURN) {

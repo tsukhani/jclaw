@@ -1,125 +1,8861 @@
-{"userMd": "Name: Avery Lin",
+{
+ "userMd": "Name: Avery Lin",
  "chains": [
-  {"id": "s01", "tags": ["update", "restatement"],
+  {
+   "id": "s01",
+   "tags": [
+    "update"
+   ],
    "memories": [
-    {"id": "s01a", "capturedAt": "2025-11-02",
-     "text": "Avery Lin uses Kestrel CI for every release build.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "kestrel-ci", "mention": "Kestrel CI", "type": "System"}],
-     "relations": [{"from": "operator", "type": "uses", "to": "kestrel-ci", "status": "holds"}],
-     "dates": []},
-    {"id": "s01b", "capturedAt": "2026-10-03", "supersedes": {"s01a": "update"},
-     "text": "Avery Lin no longer uses Kestrel CI since the March migration.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "kestrel-ci", "mention": "Kestrel CI", "type": "System"}],
-     "relations": [{"from": "operator", "type": "uses", "to": "kestrel-ci", "status": "ended", "valid": "/2026-03"}],
-     "dates": [{"span": "March", "value": "2026-03"}]},
-    {"id": "s01c", "capturedAt": "2026-10-04", "supersedes": {"s01b": "restatement"},
-     "derivedFrom": ["s01a"], "message": "I stopped using Kestrel CI back in March.",
-     "text": "Avery Lin stopped using Kestrel CI in March.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "kestrel-ci", "mention": "Kestrel CI", "type": "System"}],
-     "relations": [{"from": "operator", "type": "uses", "to": "kestrel-ci", "status": "ended", "valid": "/2026-03"}],
-     "dates": [{"span": "March", "value": "2026-03"}]}],
+    {
+     "id": "s01a",
+     "capturedAt": "2024-03-10",
+     "text": "Avery Lin lives in Bramblecote, renting a small flat above a bakery near the old canal basin.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bramblecote",
+       "mention": "Bramblecote",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "bramblecote",
+       "status": "holds"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s01b",
+     "capturedAt": "2025-09-14",
+     "text": "Avery Lin moved from Bramblecote to Port Calloway in July, trading the canal flat for a terrace by the harbour.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bramblecote",
+       "mention": "Bramblecote",
+       "type": "Place"
+      },
+      {
+       "id": "port-calloway",
+       "mention": "Port Calloway",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "bramblecote",
+       "status": "ended",
+       "valid": "/2025-07"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "port-calloway",
+       "status": "holds",
+       "valid": "2025-07/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "July",
+       "value": "2025-07"
+      }
+     ],
+     "supersedes": {
+      "s01a": "update"
+     }
+    }
+   ],
    "probes": [
-    {"from": "operator", "type": "uses", "to": "kestrel-ci", "d": "2025-11-02", "after": "s01b", "truth": "YES"},
-    {"from": "operator", "type": "uses", "to": "kestrel-ci", "d": "2026-01-15", "after": "s01b", "truth": "YES", "assumed": true},
-    {"from": "operator", "type": "uses", "to": "kestrel-ci", "d": "2026-10-03", "after": "s01b", "truth": "NO"},
-    {"from": "operator", "type": "uses", "to": "kestrel-ci", "d": "2025-11-02", "after": "s01c", "truth": "YES"},
-    {"from": "operator", "type": "uses", "to": "kestrel-ci", "d": "2026-04-20", "after": "s01c", "truth": "NO"}]},
-
-  {"id": "s02", "tags": ["restatement"],
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "bramblecote",
+     "d": "2024-03-10",
+     "after": "s01b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "bramblecote",
+     "d": "2025-09-14",
+     "after": "s01b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "port-calloway",
+     "d": "2025-09-14",
+     "before": "s01b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "port-calloway",
+     "d": "2026-02-01",
+     "after": "s01b",
+     "truth": "YES",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s02",
+   "tags": [
+    "update"
+   ],
    "memories": [
-    {"id": "s02a", "capturedAt": "2025-06-10",
-     "text": "Avery Lin uses Larkspur Notes for meeting notes.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "larkspur-notes", "mention": "Larkspur Notes", "type": "System"}],
-     "relations": [{"from": "operator", "type": "uses", "to": "larkspur-notes", "status": "holds"}]},
-    {"id": "s02b", "capturedAt": "2025-09-01", "supersedes": {"s02a": "restatement"},
-     "text": "Avery Lin still takes every meeting's notes in Larkspur Notes.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "larkspur-notes", "mention": "Larkspur Notes", "type": "System"}],
-     "relations": [{"from": "operator", "type": "uses", "to": "larkspur-notes", "status": "holds"}]}],
+    {
+     "id": "s02a",
+     "capturedAt": "2023-05-20",
+     "text": "Avery Lin has lived in Cindervale since 2021, in a narrow house two streets back from the ferry terminal.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "cindervale",
+       "mention": "Cindervale",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "cindervale",
+       "status": "holds",
+       "valid": "2021/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2021",
+       "value": "2021"
+      }
+     ]
+    },
+    {
+     "id": "s02b",
+     "capturedAt": "2024-11-03",
+     "text": "Avery Lin left Cindervale last month after three years and moved into Larchmere House on the far side of the river.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "cindervale",
+       "mention": "Cindervale",
+       "type": "Place"
+      },
+      {
+       "id": "larchmere",
+       "mention": "Larchmere House",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "cindervale",
+       "status": "ended",
+       "valid": "/2024-10"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "larchmere",
+       "status": "holds",
+       "valid": "2024-10/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "last month",
+       "value": "2024-10"
+      },
+      {
+       "span": "three years",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s02a": "update"
+     }
+    }
+   ],
    "probes": [
-    {"from": "operator", "type": "uses", "to": "larkspur-notes", "d": "2025-06-10", "before": "s02b", "truth": "YES"},
-    {"from": "operator", "type": "uses", "to": "larkspur-notes", "d": "2025-09-01", "after": "s02b", "truth": "YES"},
-    {"from": "operator", "type": "uses", "to": "larkspur-notes", "d": "2026-01-10", "after": "s02b", "truth": "YES", "assumed": true}]},
-
-  {"id": "s03", "tags": ["update"],
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "cindervale",
+     "d": "2022-06-01",
+     "after": "s02b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "cindervale",
+     "d": "2024-12-01",
+     "after": "s02b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "larchmere",
+     "d": "2024-11-03",
+     "before": "s02b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "larchmere",
+     "d": "2025-03-01",
+     "after": "s02b",
+     "truth": "YES",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s03",
+   "tags": [
+    "restatement"
+   ],
    "memories": [
-    {"id": "s03a", "capturedAt": "2024-04-05",
-     "text": "Avery Lin lives in Thornbury.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "thornbury", "mention": "Thornbury", "type": "Place"}],
-     "relations": [{"from": "operator", "type": "located_in", "to": "thornbury", "status": "holds"}]},
-    {"id": "s03b", "capturedAt": "2025-08-20", "supersedes": {"s03a": "update"},
-     "text": "Avery Lin moved from Thornbury to Calderwick in July.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "thornbury", "mention": "Thornbury", "type": "Place"},
-                  {"id": "calderwick", "mention": "Calderwick", "type": "Place"}],
-     "relations": [{"from": "operator", "type": "located_in", "to": "thornbury", "status": "ended", "valid": "/2025-07"},
-                   {"from": "operator", "type": "located_in", "to": "calderwick", "status": "holds", "valid": "2025-07/.."}],
-     "dates": [{"span": "July", "value": "2025-07"}]}],
+    {
+     "id": "s03a",
+     "capturedAt": "2025-04-08",
+     "text": "Avery Lin stopped using Osprey Dashboard in February, once the weekly reports could be pulled straight from a spreadsheet.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "osprey",
+       "mention": "Osprey Dashboard",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "osprey",
+       "status": "ended",
+       "valid": "/2025-02"
+      }
+     ],
+     "dates": [
+      {
+       "span": "February",
+       "value": "2025-02"
+      },
+      {
+       "span": "weekly",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s03b",
+     "capturedAt": "2025-08-19",
+     "text": "Avery Lin no longer touches Osprey Dashboard at all, having dropped it back in February for plain spreadsheet exports.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "osprey",
+       "mention": "Osprey Dashboard",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "osprey",
+       "status": "ended",
+       "valid": "/2025-02"
+      }
+     ],
+     "dates": [
+      {
+       "span": "February",
+       "value": "2025-02"
+      }
+     ],
+     "supersedes": {
+      "s03a": "restatement"
+     }
+    }
+   ],
    "probes": [
-    {"from": "operator", "type": "located_in", "to": "thornbury", "d": "2024-04-05", "after": "s03b", "truth": "YES"},
-    {"from": "operator", "type": "located_in", "to": "thornbury", "d": "2025-08-20", "before": "s03b", "truth": "YES", "assumed": true},
-    {"from": "operator", "type": "located_in", "to": "thornbury", "d": "2025-08-20", "after": "s03b", "truth": "NO"},
-    {"from": "operator", "type": "located_in", "to": "calderwick", "d": "2025-08-20", "before": "s03b", "truth": "UNKNOWN"},
-    {"from": "operator", "type": "located_in", "to": "calderwick", "d": "2025-08-20", "after": "s03b", "truth": "YES"}]},
-
-  {"id": "s04", "tags": ["correction"],
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2025-03-15",
+     "before": "s03b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2025-08-19",
+     "after": "s03b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2025-02-10",
+     "after": "s03b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2026-01-05",
+     "after": "s03b",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s04",
+   "tags": [
+    "restatement"
+   ],
    "memories": [
-    {"id": "s04a", "capturedAt": "2025-02-12",
-     "text": "Avery Lin lives in Marrowby.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "marrowby", "mention": "Marrowby", "type": "Place"}],
-     "relations": [{"from": "operator", "type": "located_in", "to": "marrowby", "status": "holds"}]},
-    {"id": "s04b", "capturedAt": "2025-03-01", "supersedes": {"s04a": "correction"},
-     "text": "Avery Lin lives in Fennick Cross and has never lived in Marrowby.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "fennick-cross", "mention": "Fennick Cross", "type": "Place"},
-                  {"id": "marrowby", "mention": "Marrowby", "type": "Place"}],
-     "relations": [{"from": "operator", "type": "located_in", "to": "fennick-cross", "status": "holds"},
-                   {"from": "operator", "type": "located_in", "to": "marrowby", "status": "denied", "valid": "../2025-03-01"}]}],
+    {
+     "id": "s04a",
+     "capturedAt": "2024-02-11",
+     "text": "Avery Lin left Ostrander Freight last year after four years on its route planning desk, mostly scheduling coastal barge runs.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ostrander",
+       "mention": "Ostrander Freight",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "ostrander",
+       "status": "ended",
+       "valid": "/2023"
+      }
+     ],
+     "dates": [
+      {
+       "span": "last year",
+       "value": "2023"
+      },
+      {
+       "span": "four years",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s04b",
+     "capturedAt": "2024-09-30",
+     "text": "Avery Lin no longer works at Ostrander Freight, having quit in 2023 after four years planning its barge routes.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ostrander",
+       "mention": "Ostrander Freight",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "ostrander",
+       "status": "ended",
+       "valid": "/2023"
+      }
+     ],
+     "dates": [
+      {
+       "span": "2023",
+       "value": "2023"
+      },
+      {
+       "span": "four years",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s04a": "restatement"
+     }
+    }
+   ],
    "probes": [
-    {"from": "operator", "type": "located_in", "to": "marrowby", "d": "2025-02-12", "before": "s04b", "truth": "YES"},
-    {"from": "operator", "type": "located_in", "to": "marrowby", "d": "2025-02-12", "after": "s04b", "truth": "NO"},
-    {"from": "operator", "type": "located_in", "to": "fennick-cross", "d": "2025-03-01", "after": "s04b", "truth": "YES"}]},
-
-  {"id": "s05", "tags": ["update"],
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "ostrander",
+     "d": "2024-05-01",
+     "before": "s04b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "ostrander",
+     "d": "2024-10-01",
+     "after": "s04b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "ostrander",
+     "d": "2023-06-01",
+     "after": "s04b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "ostrander",
+     "d": "2021-06-01",
+     "after": "s04b",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s05",
+   "tags": [
+    "correction"
+   ],
    "memories": [
-    {"id": "s05a", "capturedAt": "2025-05-04",
-     "text": "Avery Lin has never used Quillmark.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "quillmark", "mention": "Quillmark", "type": "System"}],
-     "relations": [{"from": "operator", "type": "uses", "to": "quillmark", "status": "denied", "valid": "../2025-05-04"}]},
-    {"id": "s05b", "capturedAt": "2025-11-18", "supersedes": {"s05a": "update"},
-     "text": "Avery Lin started using Quillmark in October.",
-     "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "quillmark", "mention": "Quillmark", "type": "System"}],
-     "relations": [{"from": "operator", "type": "uses", "to": "quillmark", "status": "holds", "valid": "2025-10/.."}],
-     "dates": [{"span": "October", "value": "2025-10"}]}],
+    {
+     "id": "s05a",
+     "capturedAt": "2025-01-14",
+     "text": "Avery Lin keeps the household budget in Beacon Ledger and reconciles it against bank statements each month.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "beacon-ledger",
+       "mention": "Beacon Ledger",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "beacon-ledger",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "each month",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s05b",
+     "capturedAt": "2025-01-20",
+     "text": "Avery Lin has never used Beacon Ledger; the household budget has always been kept in Cairn Sheets instead.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "beacon-ledger",
+       "mention": "Beacon Ledger",
+       "type": "System"
+      },
+      {
+       "id": "cairn-sheets",
+       "mention": "Cairn Sheets",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "beacon-ledger",
+       "status": "denied",
+       "valid": "../2025-01-20"
+      },
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "cairn-sheets",
+       "status": "holds"
+      }
+     ],
+     "dates": [],
+     "supersedes": {
+      "s05a": "correction"
+     }
+    }
+   ],
    "probes": [
-    {"from": "operator", "type": "uses", "to": "quillmark", "d": "2025-04-01", "after": "s05b", "truth": "NO"},
-    {"from": "operator", "type": "uses", "to": "quillmark", "d": "2025-11-18", "before": "s05b", "truth": "NO", "assumed": true},
-    {"from": "operator", "type": "uses", "to": "quillmark", "d": "2025-11-18", "after": "s05b", "truth": "YES"}]},
-
-  {"id": "s06", "tags": ["guest-about-owner", "update"],
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "beacon-ledger",
+     "d": "2025-01-14",
+     "before": "s05b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "beacon-ledger",
+     "d": "2025-01-14",
+     "after": "s05b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "cairn-sheets",
+     "d": "2025-01-20",
+     "after": "s05b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "cairn-sheets",
+     "d": "2025-01-14",
+     "before": "s05b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s06",
+   "tags": [
+    "correction"
+   ],
    "memories": [
-    {"id": "s06a", "capturedAt": "2025-07-07", "authorType": "guest_turn",
-     "text": "Jun Okafor says Avery Lin works at Brindle Labs.",
-     "entities": [{"id": "jun-okafor", "mention": "Jun Okafor", "type": "Person"},
-                  {"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "brindle-labs", "mention": "Brindle Labs", "type": "Organization"}],
-     "relations": [{"from": "operator", "type": "works_at", "to": "brindle-labs", "status": "unasserted"}]},
-    {"id": "s06b", "capturedAt": "2025-09-09", "authorType": "guest_turn", "supersedes": {"s06a": "update"},
-     "text": "Jun Okafor says Avery Lin left Brindle Labs in August.",
-     "entities": [{"id": "jun-okafor", "mention": "Jun Okafor", "type": "Person"},
-                  {"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                  {"id": "brindle-labs", "mention": "Brindle Labs", "type": "Organization"}],
-     "relations": [{"from": "operator", "type": "works_at", "to": "brindle-labs", "status": "unasserted"}],
-     "dates": [{"span": "August", "value": "2025-08"}]}],
+    {
+     "id": "s06a",
+     "capturedAt": "2025-06-02",
+     "text": "Avery Lin joined the Meridian Program in May, drafting its new data retention policy alongside Ines Halloran.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "meridian",
+       "mention": "Meridian Program",
+       "type": "Project"
+      },
+      {
+       "id": "ines",
+       "mention": "Ines Halloran",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds",
+       "valid": "2025-05/.."
+      },
+      {
+       "from": "ines",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "May",
+       "value": "2025-05"
+      }
+     ]
+    },
+    {
+     "id": "s06b",
+     "capturedAt": "2025-06-09",
+     "text": "Avery Lin actually works on Project Bluefin, not the Meridian Program; Ines Halloran is the one drafting Meridian's policy.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bluefin",
+       "mention": "Project Bluefin",
+       "type": "Project"
+      },
+      {
+       "id": "meridian",
+       "mention": "Meridian Program",
+       "type": "Project",
+       "aliases": [
+        "Meridian"
+       ]
+      },
+      {
+       "id": "ines",
+       "mention": "Ines Halloran",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds"
+      },
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "denied"
+      },
+      {
+       "from": "ines",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      }
+     ],
+     "dates": [],
+     "supersedes": {
+      "s06a": "correction"
+     }
+    }
+   ],
    "probes": [
-    {"from": "operator", "type": "works_at", "to": "brindle-labs", "d": "2025-07-07", "after": "s06b", "truth": "UNKNOWN"},
-    {"from": "operator", "type": "works_at", "to": "brindle-labs", "d": "2025-09-09", "after": "s06b", "truth": "UNKNOWN"}]}
- ]}
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "meridian",
+     "d": "2025-06-01",
+     "before": "s06b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "meridian",
+     "d": "2025-06-01",
+     "after": "s06b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2025-06-09",
+     "after": "s06b",
+     "truth": "YES"
+    },
+    {
+     "from": "ines",
+     "type": "works_on",
+     "to": "meridian",
+     "d": "2025-06-09",
+     "after": "s06b",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s07",
+   "tags": [
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s07a",
+     "capturedAt": "2023-07-15",
+     "text": "Avery Lin loves cold-water swimming and keeps a wetsuit and towel in the car for quick dips at Marrow Bay.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "cold-water-swimming",
+       "mention": "cold-water swimming",
+       "type": "Topic"
+      },
+      {
+       "id": "marrow-bay",
+       "mention": "Marrow Bay",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "cold-water-swimming",
+       "status": "holds",
+       "valence": "favorable"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "marrow-bay",
+       "status": "holds",
+       "noise": true
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s07b",
+     "capturedAt": "2026-01-22",
+     "text": "Avery Lin no longer enjoys cold-water swimming, since a bad chill last November, and has sold the wetsuit.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "cold-water-swimming",
+       "mention": "cold-water swimming",
+       "type": "Topic"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "cold-water-swimming",
+       "status": "ended",
+       "valid": "/2025-11",
+       "valence": "favorable"
+      }
+     ],
+     "dates": [
+      {
+       "span": "last November",
+       "value": "2025-11"
+      }
+     ],
+     "supersedes": {
+      "s07a": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "cold-water-swimming",
+     "d": "2023-07-15",
+     "after": "s07b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "cold-water-swimming",
+     "d": "2026-01-22",
+     "after": "s07b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "cold-water-swimming",
+     "d": "2026-01-22",
+     "before": "s07b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "cold-water-swimming",
+     "d": "2025-11-15",
+     "after": "s07b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s08",
+   "tags": [
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s08a",
+     "capturedAt": "2024-06-01",
+     "text": "Avery Lin bought Ferrule Cabin in 2022 and drives up there whenever the city gets too loud to think.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ferrule-cabin",
+       "mention": "Ferrule Cabin",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "ferrule-cabin",
+       "status": "holds",
+       "valid": "2022/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2022",
+       "value": "2022"
+      }
+     ]
+    },
+    {
+     "id": "s08b",
+     "capturedAt": "2025-10-12",
+     "text": "Avery Lin sold Ferrule Cabin to Felix Amari in August and now rents a lakeside room when visiting.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ferrule-cabin",
+       "mention": "Ferrule Cabin",
+       "type": "Place"
+      },
+      {
+       "id": "felix",
+       "mention": "Felix Amari",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "ferrule-cabin",
+       "status": "ended",
+       "valid": "/2025-08"
+      },
+      {
+       "from": "felix",
+       "type": "owns",
+       "to": "ferrule-cabin",
+       "status": "holds",
+       "valid": "2025-08/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "August",
+       "value": "2025-08"
+      }
+     ],
+     "supersedes": {
+      "s08a": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2023-05-01",
+     "after": "s08b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2025-10-12",
+     "after": "s08b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2025-10-12",
+     "before": "s08b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "felix",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2025-10-12",
+     "after": "s08b",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s09",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s09a",
+     "capturedAt": "2023-02-06",
+     "text": "Avery Lin has worked at Alderline Software for two years as a backend developer, mostly on its billing service.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "alderline-software",
+       "mention": "Alderline Software",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "alderline-software",
+       "status": "holds",
+       "valid": "2021~/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "two years",
+       "value": "2021~"
+      }
+     ]
+    },
+    {
+     "id": "s09b",
+     "capturedAt": "2024-04-18",
+     "text": "Avery Lin left Alderline Software in March and started at Vela Design the following week as a platform engineer.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "alderline-software",
+       "mention": "Alderline Software",
+       "type": "Organization"
+      },
+      {
+       "id": "vela",
+       "mention": "Vela Design",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "alderline-software",
+       "status": "ended",
+       "valid": "/2024-03"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "vela",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2024-03"
+      },
+      {
+       "span": "the following week",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s09a": "update"
+     }
+    },
+    {
+     "id": "s09c",
+     "capturedAt": "2024-10-02",
+     "text": "Avery Lin still works at Vela Design as a platform engineer, having left Alderline Software in March.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "vela",
+       "mention": "Vela Design",
+       "type": "Organization"
+      },
+      {
+       "id": "alderline-software",
+       "mention": "Alderline Software",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "vela",
+       "status": "holds"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "alderline-software",
+       "status": "ended",
+       "valid": "/2024-03"
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2024-03"
+      }
+     ],
+     "supersedes": {
+      "s09b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "alderline-software",
+     "d": "2024-01-15",
+     "before": "s09b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "alderline-software",
+     "d": "2024-06-01",
+     "after": "s09b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "vela",
+     "d": "2024-10-02",
+     "after": "s09c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "alderline-software",
+     "d": "2022-06-01",
+     "after": "s09c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s10",
+   "tags": [
+    "correction",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s10a",
+     "capturedAt": "2024-05-05",
+     "text": "Avery Lin has never used Glasswing Pager and still gets every on-call alert as a plain text message.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "glasswing",
+       "mention": "Glasswing Pager",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "glasswing",
+       "status": "denied",
+       "valid": "../2024-05-05"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s10b",
+     "capturedAt": "2024-09-09",
+     "text": "Avery Lin started using Glasswing Pager in August, when the on-call rota switched over from text messages.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "glasswing",
+       "mention": "Glasswing Pager",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "glasswing",
+       "status": "holds",
+       "valid": "2024-08/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "August",
+       "value": "2024-08"
+      }
+     ],
+     "supersedes": {
+      "s10a": "update"
+     }
+    },
+    {
+     "id": "s10c",
+     "capturedAt": "2024-10-15",
+     "text": "Avery Lin has never actually used Glasswing Pager; the August rota switch fell through and alerts still arrive by text.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "glasswing",
+       "mention": "Glasswing Pager",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "glasswing",
+       "status": "denied",
+       "valid": "../2024-10-15"
+      }
+     ],
+     "dates": [
+      {
+       "span": "August",
+       "value": "2024-08"
+      }
+     ],
+     "supersedes": {
+      "s10b": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-04-01",
+     "after": "s10c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-09-09",
+     "after": "s10b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-09-09",
+     "after": "s10c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-09-09",
+     "before": "s10b",
+     "truth": "NO",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s11",
+   "tags": [
+    "correction",
+    "restatement"
+   ],
+   "memories": [
+    {
+     "id": "s11a",
+     "capturedAt": "2025-03-03",
+     "text": "Avery Lin works at Brightwell Labs and works from its office at Hollis Park three days a week.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      },
+      {
+       "id": "hollis-park",
+       "mention": "Hollis Park",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "brightwell",
+       "status": "holds"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "hollis-park",
+       "status": "holds"
+      },
+      {
+       "from": "brightwell",
+       "type": "located_in",
+       "to": "hollis-park",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "three days a week",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s11b",
+     "capturedAt": "2025-03-10",
+     "text": "Avery Lin has never worked from Hollis Park; Brightwell Labs' office is in Ashgrove, where Avery Lin goes three days a week.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "hollis-park",
+       "mention": "Hollis Park",
+       "type": "Place"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "hollis-park",
+       "status": "denied",
+       "valid": "../2025-03-10"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "holds"
+      },
+      {
+       "from": "brightwell",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "three days a week",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s11a": "correction"
+     }
+    },
+    {
+     "id": "s11c",
+     "capturedAt": "2025-07-21",
+     "text": "Avery Lin still works at Brightwell Labs and spends three days a week at its Ashgrove office, never at Hollis Park.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      },
+      {
+       "id": "hollis-park",
+       "mention": "Hollis Park",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "brightwell",
+       "status": "holds"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "holds"
+      },
+      {
+       "from": "brightwell",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "holds"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "hollis-park",
+       "status": "denied"
+      }
+     ],
+     "dates": [
+      {
+       "span": "three days a week",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s11b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "hollis-park",
+     "d": "2025-03-05",
+     "before": "s11b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "hollis-park",
+     "d": "2025-03-05",
+     "after": "s11b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "ashgrove",
+     "d": "2025-07-21",
+     "after": "s11c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "brightwell",
+     "d": "2025-05-01",
+     "after": "s11c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s12",
+   "tags": [
+    "correction",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s12a",
+     "capturedAt": "2024-01-08",
+     "text": "Avery Lin works on the Atlas Migration, moving the old order tables from flat files into Tidewater DB.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "atlas-migration",
+       "mention": "Atlas Migration",
+       "type": "Project"
+      },
+      {
+       "id": "tidewater",
+       "mention": "Tidewater DB",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "holds"
+      },
+      {
+       "from": "atlas-migration",
+       "type": "uses",
+       "to": "tidewater",
+       "status": "holds"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s12b",
+     "capturedAt": "2024-07-02",
+     "text": "Avery Lin finished on the Atlas Migration in June and moved onto Project Bluefin with Tomas Varga.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "atlas-migration",
+       "mention": "Atlas Migration",
+       "type": "Project"
+      },
+      {
+       "id": "bluefin",
+       "mention": "Project Bluefin",
+       "type": "Project"
+      },
+      {
+       "id": "tomas",
+       "mention": "Tomas Varga",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "ended",
+       "valid": "/2024-06"
+      },
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds",
+       "valid": "2024-06/.."
+      },
+      {
+       "from": "tomas",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "June",
+       "value": "2024-06"
+      }
+     ],
+     "supersedes": {
+      "s12a": "update"
+     }
+    },
+    {
+     "id": "s12c",
+     "capturedAt": "2024-07-05",
+     "text": "Avery Lin is still on the Atlas Migration; it was Tomas Varga who left it in June for Project Bluefin.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "atlas-migration",
+       "mention": "Atlas Migration",
+       "type": "Project"
+      },
+      {
+       "id": "tomas",
+       "mention": "Tomas Varga",
+       "type": "Person"
+      },
+      {
+       "id": "bluefin",
+       "mention": "Project Bluefin",
+       "type": "Project"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "holds"
+      },
+      {
+       "from": "tomas",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "ended",
+       "valid": "/2024-06"
+      },
+      {
+       "from": "tomas",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds",
+       "valid": "2024-06/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "June",
+       "value": "2024-06"
+      }
+     ],
+     "supersedes": {
+      "s12b": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "atlas-migration",
+     "d": "2024-07-03",
+     "before": "s12c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "atlas-migration",
+     "d": "2024-07-05",
+     "after": "s12c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2024-07-05",
+     "after": "s12c",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "tomas",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2024-07-05",
+     "after": "s12c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s13",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s13a",
+     "capturedAt": "2023-09-12",
+     "text": "Avery Lin pays for Corvid Notes out of pocket and keeps every recipe and travel plan in it.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "corvid",
+       "mention": "Corvid Notes",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "corvid",
+       "status": "holds"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s13b",
+     "capturedAt": "2024-02-27",
+     "text": "Avery Lin has paid for Corvid Notes personally since 2022, and it still holds every recipe and travel plan.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "corvid",
+       "mention": "Corvid Notes",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "corvid",
+       "status": "holds",
+       "valid": "2022/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2022",
+       "value": "2022"
+      }
+     ],
+     "supersedes": {
+      "s13a": "restatement"
+     }
+    },
+    {
+     "id": "s13c",
+     "capturedAt": "2025-05-16",
+     "text": "Avery Lin cancelled the Corvid Notes subscription in April after exporting every recipe and travel plan to Quillpad.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "corvid",
+       "mention": "Corvid Notes",
+       "type": "System"
+      },
+      {
+       "id": "quillpad",
+       "mention": "Quillpad",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "corvid",
+       "status": "ended",
+       "valid": "/2025-04"
+      },
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "quillpad",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "April",
+       "value": "2025-04"
+      }
+     ],
+     "supersedes": {
+      "s13b": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "corvid",
+     "d": "2022-06-01",
+     "before": "s13b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "corvid",
+     "d": "2022-06-01",
+     "before": "s13c",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "corvid",
+     "d": "2025-05-16",
+     "after": "s13c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "corvid",
+     "d": "2024-02-27",
+     "after": "s13c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s14",
+   "tags": [
+    "correction",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s14a",
+     "capturedAt": "2025-02-02",
+     "text": "Avery Lin moved to Dunmore Quay in January and is renting a flat above the ferry ticket office.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "dunmore-quay",
+       "mention": "Dunmore Quay",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "dunmore-quay",
+       "status": "holds",
+       "valid": "2025-01/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "January",
+       "value": "2025-01"
+      }
+     ]
+    },
+    {
+     "id": "s14b",
+     "capturedAt": "2025-02-09",
+     "text": "Avery Lin actually moved to Dunmore Quay in December; January was only when the lease paperwork finally cleared.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "dunmore-quay",
+       "mention": "Dunmore Quay",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "dunmore-quay",
+       "status": "holds",
+       "valid": "2024-12/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "December",
+       "value": "2024-12"
+      },
+      {
+       "span": "January",
+       "value": "2025-01"
+      }
+     ],
+     "supersedes": {
+      "s14a": "correction"
+     }
+    },
+    {
+     "id": "s14c",
+     "capturedAt": "2026-03-30",
+     "text": "Avery Lin moved out of Dunmore Quay last month and now lives in Eastholm, in a cottage with a workshop for bike repairs.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "dunmore-quay",
+       "mention": "Dunmore Quay",
+       "type": "Place"
+      },
+      {
+       "id": "eastholm",
+       "mention": "Eastholm",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "dunmore-quay",
+       "status": "ended",
+       "valid": "/2026-02"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "eastholm",
+       "status": "holds",
+       "valid": "2026-02/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "last month",
+       "value": "2026-02"
+      }
+     ],
+     "supersedes": {
+      "s14b": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "dunmore-quay",
+     "d": "2024-12-20",
+     "before": "s14b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "dunmore-quay",
+     "d": "2024-12-20",
+     "after": "s14b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "dunmore-quay",
+     "d": "2026-03-30",
+     "after": "s14c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "eastholm",
+     "d": "2026-03-30",
+     "after": "s14c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s15",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s15a",
+     "capturedAt": "2024-08-14",
+     "text": "Avery Lin uses Kestrel Runner to build and test every change to the warehouse scheduling service before review.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "kestrel-runner",
+       "mention": "Kestrel Runner",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "kestrel-runner",
+       "status": "holds"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s15b",
+     "capturedAt": "2025-03-03",
+     "text": "Avery Lin stopped using Kestrel Runner two months ago, once the scheduling service builds moved over to Driftline Build.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "kestrel-runner",
+       "mention": "Kestrel Runner",
+       "type": "System"
+      },
+      {
+       "id": "driftline-build",
+       "mention": "Driftline Build",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "kestrel-runner",
+       "status": "ended",
+       "valid": "/2025-01~"
+      }
+     ],
+     "dates": [
+      {
+       "span": "two months ago",
+       "value": "2025-01~"
+      }
+     ],
+     "supersedes": {
+      "s15a": "update"
+     }
+    },
+    {
+     "id": "s15c",
+     "capturedAt": "2025-09-25",
+     "text": "Avery Lin has not touched Kestrel Runner since January, when the scheduling service builds moved to Driftline Build.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "kestrel-runner",
+       "mention": "Kestrel Runner",
+       "type": "System"
+      },
+      {
+       "id": "driftline-build",
+       "mention": "Driftline Build",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "kestrel-runner",
+       "status": "ended",
+       "valid": "/2025-01"
+      }
+     ],
+     "dates": [
+      {
+       "span": "January",
+       "value": "2025-01"
+      }
+     ],
+     "supersedes": {
+      "s15b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "kestrel-runner",
+     "d": "2024-08-14",
+     "after": "s15c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "kestrel-runner",
+     "d": "2025-03-03",
+     "before": "s15c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "kestrel-runner",
+     "d": "2025-09-25",
+     "after": "s15c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "kestrel-runner",
+     "d": "2024-12-01",
+     "before": "s15b",
+     "truth": "YES",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s16",
+   "tags": [
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s16a",
+     "capturedAt": "2023-03-10",
+     "text": "Avery Lin has worked at Harborlight Analytics since 2020, mostly on billing pipelines for the finance reporting team.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "holds",
+       "valid": "2020/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2020",
+       "value": "2020"
+      }
+     ]
+    },
+    {
+     "id": "s16b",
+     "capturedAt": "2024-06-14",
+     "text": "Avery Lin left Harborlight Analytics in May and now works at Gantry Hollow, a freight software startup based in Port Calloway.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      },
+      {
+       "id": "gantry-hollow",
+       "mention": "Gantry Hollow",
+       "type": "Organization",
+       "aliases": [
+        "freight software startup"
+       ]
+      },
+      {
+       "id": "port-calloway",
+       "mention": "Port Calloway",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "ended",
+       "valid": "/2024-05"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "gantry-hollow",
+       "status": "holds"
+      },
+      {
+       "from": "gantry-hollow",
+       "type": "located_in",
+       "to": "port-calloway",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "May",
+       "value": "2024-05"
+      }
+     ],
+     "supersedes": {
+      "s16a": "update"
+     }
+    },
+    {
+     "id": "s16c",
+     "capturedAt": "2025-09-02",
+     "text": "Avery Lin rejoined Harborlight Analytics in August after a year at Gantry Hollow, returning to the billing pipelines work.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      },
+      {
+       "id": "gantry-hollow",
+       "mention": "Gantry Hollow",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "holds",
+       "valid": "2025-08/.."
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "gantry-hollow",
+       "status": "ended"
+      }
+     ],
+     "dates": [
+      {
+       "span": "August",
+       "value": "2025-08"
+      },
+      {
+       "span": "a year",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s16b": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2022-06-01",
+     "after": "s16c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2024-10-01",
+     "after": "s16b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2025-09-02",
+     "before": "s16c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2025-09-02",
+     "after": "s16c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s17",
+   "tags": [
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s17a",
+     "capturedAt": "2023-05-20",
+     "text": "Avery Lin works Saturday shifts at Kiln Street Studio, a pottery workshop in Ashgrove, and has for three years.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "kiln-street-studio",
+       "mention": "Kiln Street Studio",
+       "type": "Organization",
+       "aliases": [
+        "pottery workshop"
+       ]
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "kiln-street-studio",
+       "status": "holds",
+       "valid": "2020~/.."
+      },
+      {
+       "from": "kiln-street-studio",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "Saturday",
+       "value": null
+      },
+      {
+       "span": "three years",
+       "value": "2020~"
+      }
+     ]
+    },
+    {
+     "id": "s17b",
+     "capturedAt": "2024-02-08",
+     "text": "Avery Lin quit the Saturday shifts at Kiln Street Studio in January to free up weekends for marathon training.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "kiln-street-studio",
+       "mention": "Kiln Street Studio",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "kiln-street-studio",
+       "status": "ended",
+       "valid": "/2024-01"
+      }
+     ],
+     "dates": [
+      {
+       "span": "Saturday",
+       "value": null
+      },
+      {
+       "span": "January",
+       "value": "2024-01"
+      },
+      {
+       "span": "weekends",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s17a": "update"
+     }
+    },
+    {
+     "id": "s17c",
+     "capturedAt": "2026-04-11",
+     "text": "Avery Lin rejoined Kiln Street Studio in March and now teaches its beginner wheel-throwing class every Sunday.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "kiln-street-studio",
+       "mention": "Kiln Street Studio",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "kiln-street-studio",
+       "status": "holds",
+       "valid": "2026-03/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2026-03"
+      },
+      {
+       "span": "every Sunday",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s17b": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "kiln-street-studio",
+     "d": "2022-01-15",
+     "after": "s17c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "kiln-street-studio",
+     "d": "2023-12-01",
+     "after": "s17a",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "kiln-street-studio",
+     "d": "2025-06-01",
+     "after": "s17c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "kiln-street-studio",
+     "d": "2026-04-11",
+     "after": "s17c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s18",
+   "tags": [
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s18a",
+     "capturedAt": "2024-01-22",
+     "text": "Avery Lin has never used Kestrel Runner, preferring to run each test job on an old spare laptop at home.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "kestrel-runner",
+       "mention": "Kestrel Runner",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "kestrel-runner",
+       "status": "denied",
+       "valid": "../2024-01-22"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s18b",
+     "capturedAt": "2025-03-05",
+     "text": "Avery Lin started using Kestrel Runner in February once the old laptop could no longer keep up with test jobs.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "kestrel-runner",
+       "mention": "Kestrel Runner",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "kestrel-runner",
+       "status": "holds",
+       "valid": "2025-02/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "February",
+       "value": "2025-02"
+      }
+     ],
+     "supersedes": {
+      "s18a": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "kestrel-runner",
+     "d": "2023-06-01",
+     "before": "s18b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "kestrel-runner",
+     "d": "2024-09-01",
+     "before": "s18b",
+     "truth": "NO",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "kestrel-runner",
+     "d": "2024-01-10",
+     "after": "s18b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "kestrel-runner",
+     "d": "2025-03-05",
+     "after": "s18b",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s19",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s19a",
+     "capturedAt": "2023-08-14",
+     "text": "Avery Lin has never used Osprey Dashboard and still builds the weekly churn charts by hand in a spreadsheet.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "osprey",
+       "mention": "Osprey Dashboard",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "osprey",
+       "status": "denied",
+       "valid": "../2023-08-14"
+      }
+     ],
+     "dates": [
+      {
+       "span": "weekly",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s19b",
+     "capturedAt": "2024-05-03",
+     "text": "Avery Lin switched to Osprey Dashboard last month and dropped the hand-built spreadsheet charts for churn reporting.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "osprey",
+       "mention": "Osprey Dashboard",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "osprey",
+       "status": "holds",
+       "valid": "2024-04/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "last month",
+       "value": "2024-04"
+      }
+     ],
+     "supersedes": {
+      "s19a": "update"
+     }
+    },
+    {
+     "id": "s19c",
+     "capturedAt": "2024-11-19",
+     "text": "Avery Lin has relied on Osprey Dashboard for churn reporting since April 2024, replacing the old hand-built spreadsheet charts.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "osprey",
+       "mention": "Osprey Dashboard",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "osprey",
+       "status": "holds",
+       "valid": "2024-04/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "April 2024",
+       "value": "2024-04"
+      }
+     ],
+     "supersedes": {
+      "s19b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2023-06-01",
+     "after": "s19c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2024-02-01",
+     "before": "s19b",
+     "truth": "NO",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2024-05-03",
+     "after": "s19b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2024-11-19",
+     "after": "s19c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s20",
+   "tags": [
+    "correction",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s20a",
+     "capturedAt": "2023-02-11",
+     "text": "Avery Lin lives in Ashgrove, renting a small flat above a bakery a short walk from the station.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "holds"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s20b",
+     "capturedAt": "2024-10-07",
+     "text": "Avery Lin moved from Ashgrove to Port Calloway in September, trading the bakery flat for a terraced house by the harbour.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      },
+      {
+       "id": "port-calloway",
+       "mention": "Port Calloway",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "ended",
+       "valid": "/2024-09"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "port-calloway",
+       "status": "holds",
+       "valid": "2024-09/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "September",
+       "value": "2024-09"
+      }
+     ],
+     "supersedes": {
+      "s20a": "update"
+     }
+    },
+    {
+     "id": "s20c",
+     "capturedAt": "2024-10-21",
+     "text": "Avery Lin actually moved from Ashgrove to Marrow Bay in September, not Port Calloway, and has never lived in Port Calloway.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      },
+      {
+       "id": "marrow-bay",
+       "mention": "Marrow Bay",
+       "type": "Place"
+      },
+      {
+       "id": "port-calloway",
+       "mention": "Port Calloway",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "ended",
+       "valid": "/2024-09"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "marrow-bay",
+       "status": "holds",
+       "valid": "2024-09/.."
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "port-calloway",
+       "status": "denied",
+       "valid": "../2024-10-21"
+      }
+     ],
+     "dates": [
+      {
+       "span": "September",
+       "value": "2024-09"
+      }
+     ],
+     "supersedes": {
+      "s20b": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "port-calloway",
+     "d": "2024-10-07",
+     "after": "s20b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "port-calloway",
+     "d": "2024-10-07",
+     "after": "s20c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "marrow-bay",
+     "d": "2024-10-15",
+     "before": "s20c",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "marrow-bay",
+     "d": "2024-10-21",
+     "after": "s20c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s21",
+   "tags": [
+    "restatement"
+   ],
+   "memories": [
+    {
+     "id": "s21a",
+     "capturedAt": "2024-03-18",
+     "text": "Avery Lin sketches every wireframe on a Quillpad and has done so since 2022, mostly during the morning train commute.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "quillpad",
+       "mention": "Quillpad",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "quillpad",
+       "status": "holds",
+       "valid": "2022/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2022",
+       "value": "2022"
+      }
+     ]
+    },
+    {
+     "id": "s21b",
+     "capturedAt": "2025-01-27",
+     "text": "Avery Lin still draws all wireframes on the Quillpad, a habit going back to 2022, usually on the train.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "quillpad",
+       "mention": "Quillpad",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "quillpad",
+       "status": "holds",
+       "valid": "2022/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2022",
+       "value": "2022"
+      }
+     ],
+     "supersedes": {
+      "s21a": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "quillpad",
+     "d": "2023-05-01",
+     "before": "s21b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "quillpad",
+     "d": "2024-12-01",
+     "before": "s21b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "quillpad",
+     "d": "2025-01-27",
+     "after": "s21b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "quillpad",
+     "d": "2021-06-01",
+     "after": "s21b",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s22",
+   "tags": [
+    "correction"
+   ],
+   "memories": [
+    {
+     "id": "s22a",
+     "capturedAt": "2024-07-09",
+     "text": "Avery Lin works on the Atlas Migration and is rewriting its cutover scripts together with a colleague, Dana Reyes.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "atlas-migration",
+       "mention": "Atlas Migration",
+       "type": "Project"
+      },
+      {
+       "id": "dana",
+       "mention": "Dana Reyes",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "holds"
+      },
+      {
+       "from": "dana",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "holds"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s22b",
+     "capturedAt": "2024-07-23",
+     "text": "Avery Lin has never worked on the Atlas Migration, which Dana Reyes runs alone; Avery Lin is on Project Bluefin.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "atlas-migration",
+       "mention": "Atlas Migration",
+       "type": "Project"
+      },
+      {
+       "id": "dana",
+       "mention": "Dana Reyes",
+       "type": "Person"
+      },
+      {
+       "id": "bluefin",
+       "mention": "Project Bluefin",
+       "type": "Project"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "denied",
+       "valid": "../2024-07-23"
+      },
+      {
+       "from": "dana",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "holds"
+      },
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds"
+      }
+     ],
+     "dates": [],
+     "supersedes": {
+      "s22a": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "atlas-migration",
+     "d": "2024-07-15",
+     "before": "s22b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "atlas-migration",
+     "d": "2024-07-15",
+     "after": "s22b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2024-07-23",
+     "after": "s22b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2024-07-15",
+     "before": "s22b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s23",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s23a",
+     "capturedAt": "2023-09-04",
+     "text": "Avery Lin loves bouldering and spends most Sunday mornings working through the overhang problems at Hollis Park.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bouldering",
+       "mention": "bouldering",
+       "type": "Topic"
+      },
+      {
+       "id": "hollis-park",
+       "mention": "Hollis Park",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "bouldering",
+       "status": "holds",
+       "valence": "favorable"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "hollis-park",
+       "status": "holds",
+       "noise": true
+      }
+     ],
+     "dates": [
+      {
+       "span": "Sunday mornings",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s23b",
+     "capturedAt": "2024-02-26",
+     "text": "Avery Lin is still keen on bouldering and climbs the Hollis Park overhangs almost every Sunday morning with a few friends.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bouldering",
+       "mention": "bouldering",
+       "type": "Topic"
+      },
+      {
+       "id": "hollis-park",
+       "mention": "Hollis Park",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "bouldering",
+       "status": "holds",
+       "valence": "favorable"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "hollis-park",
+       "status": "holds",
+       "noise": true
+      }
+     ],
+     "dates": [
+      {
+       "span": "every Sunday morning",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s23a": "restatement"
+     }
+    },
+    {
+     "id": "s23c",
+     "capturedAt": "2025-11-30",
+     "text": "Avery Lin no longer enjoys bouldering after a shoulder injury in June and has switched to lap swimming at a local pool instead.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bouldering",
+       "mention": "bouldering",
+       "type": "Topic"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "bouldering",
+       "status": "ended",
+       "valence": "favorable"
+      }
+     ],
+     "dates": [
+      {
+       "span": "June",
+       "value": "2025-06"
+      }
+     ],
+     "supersedes": {
+      "s23b": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "bouldering",
+     "d": "2024-01-01",
+     "after": "s23c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "bouldering",
+     "d": "2025-01-01",
+     "after": "s23b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "bouldering",
+     "d": "2025-11-30",
+     "after": "s23c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "bouldering",
+     "d": "2023-09-04",
+     "before": "s23b",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s24",
+   "tags": [
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s24a",
+     "capturedAt": "2024-04-12",
+     "text": "Avery Lin has owned Ferrule Cabin since 2021 and rents it to hiking groups whenever the family is not using it.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ferrule-cabin",
+       "mention": "Ferrule Cabin",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "ferrule-cabin",
+       "status": "holds",
+       "valid": "2021/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2021",
+       "value": "2021"
+      }
+     ]
+    },
+    {
+     "id": "s24b",
+     "capturedAt": "2025-08-30",
+     "text": "Avery Lin sold Ferrule Cabin in July, ending four years of letting it to hiking groups each season.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ferrule-cabin",
+       "mention": "Ferrule Cabin",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "ferrule-cabin",
+       "status": "ended",
+       "valid": "/2025-07"
+      }
+     ],
+     "dates": [
+      {
+       "span": "July",
+       "value": "2025-07"
+      },
+      {
+       "span": "four years",
+       "value": null
+      },
+      {
+       "span": "each season",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s24a": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2023-01-01",
+     "after": "s24b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2025-08-30",
+     "before": "s24b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2025-08-30",
+     "after": "s24b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2025-02-01",
+     "after": "s24b",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s25",
+   "tags": [
+    "correction",
+    "restatement"
+   ],
+   "memories": [
+    {
+     "id": "s25a",
+     "capturedAt": "2024-09-02",
+     "text": "Avery Lin uses Glasswing Pager for weekend on-call alerts and keeps its app pinned on the home screen.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "glasswing",
+       "mention": "Glasswing Pager",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "glasswing",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "weekend",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s25b",
+     "capturedAt": "2024-09-16",
+     "text": "Avery Lin has never used Glasswing Pager; the weekend on-call alerts actually arrive through Halyard Alerts on Avery Lin's phone.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "glasswing",
+       "mention": "Glasswing Pager",
+       "type": "System"
+      },
+      {
+       "id": "halyard-alerts",
+       "mention": "Halyard Alerts",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "glasswing",
+       "status": "denied",
+       "valid": "../2024-09-16"
+      },
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "halyard-alerts",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "weekend",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s25a": "correction"
+     }
+    },
+    {
+     "id": "s25c",
+     "capturedAt": "2025-04-03",
+     "text": "Avery Lin receives every weekend on-call alert through Halyard Alerts and has never used Glasswing Pager for any of them.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "halyard-alerts",
+       "mention": "Halyard Alerts",
+       "type": "System"
+      },
+      {
+       "id": "glasswing",
+       "mention": "Glasswing Pager",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "halyard-alerts",
+       "status": "holds"
+      },
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "glasswing",
+       "status": "denied",
+       "valid": "../2025-04-03"
+      }
+     ],
+     "dates": [
+      {
+       "span": "every weekend",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s25b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-09-02",
+     "before": "s25b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-09-02",
+     "after": "s25b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "halyard-alerts",
+     "d": "2024-09-10",
+     "before": "s25b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "halyard-alerts",
+     "d": "2025-04-03",
+     "after": "s25c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s26",
+   "tags": [
+    "restatement"
+   ],
+   "memories": [
+    {
+     "id": "s26a",
+     "capturedAt": "2023-01-16",
+     "text": "Avery Lin has worked at Brightwell Labs since 2022 as a research analyst in its battery chemistry group.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "brightwell",
+       "status": "holds",
+       "valid": "2022/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2022",
+       "value": "2022"
+      }
+     ]
+    },
+    {
+     "id": "s26b",
+     "capturedAt": "2023-06-28",
+     "text": "Avery Lin is a research analyst at Brightwell Labs, a job held since 2022 in the battery chemistry group.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "brightwell",
+       "status": "holds",
+       "valid": "2022/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2022",
+       "value": "2022"
+      }
+     ],
+     "supersedes": {
+      "s26a": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "brightwell",
+     "d": "2022-03-01",
+     "after": "s26b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "brightwell",
+     "d": "2023-03-01",
+     "before": "s26b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "brightwell",
+     "d": "2023-06-28",
+     "after": "s26b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "brightwell",
+     "d": "2021-06-01",
+     "after": "s26b",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s27",
+   "tags": [
+    "correction",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s27a",
+     "capturedAt": "2025-01-20",
+     "text": "Avery Lin signed an offer from Vela Design and starts there in March as its first in-house motion designer.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "vela",
+       "mention": "Vela Design",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "vela",
+       "status": "holds",
+       "valid": "2025-03/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2025-03"
+      }
+     ]
+    },
+    {
+     "id": "s27b",
+     "capturedAt": "2025-02-03",
+     "text": "Avery Lin's March start is with Lantern Group, not Vela Design, which made an offer that Avery Lin turned down.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "lantern",
+       "mention": "Lantern Group",
+       "type": "Organization"
+      },
+      {
+       "id": "vela",
+       "mention": "Vela Design",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "lantern",
+       "status": "holds",
+       "valid": "2025-03/.."
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "vela",
+       "status": "denied"
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2025-03"
+      }
+     ],
+     "supersedes": {
+      "s27a": "correction"
+     }
+    },
+    {
+     "id": "s27c",
+     "capturedAt": "2026-01-12",
+     "text": "Avery Lin left Lantern Group in December after nine months there and is now freelancing from Ashgrove.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "lantern",
+       "mention": "Lantern Group",
+       "type": "Organization"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "lantern",
+       "status": "ended",
+       "valid": "/2025-12"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "December",
+       "value": "2025-12"
+      },
+      {
+       "span": "nine months",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s27b": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "vela",
+     "d": "2025-04-01",
+     "before": "s27b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "vela",
+     "d": "2025-04-01",
+     "after": "s27b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "lantern",
+     "d": "2025-02-10",
+     "after": "s27b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "lantern",
+     "d": "2025-06-01",
+     "after": "s27c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s28",
+   "tags": [
+    "correction"
+   ],
+   "memories": [
+    {
+     "id": "s28a",
+     "capturedAt": "2025-05-06",
+     "text": "Avery Lin owns a Fernlight Router, bought last year, and keeps it in the hallway beside the bookshelf.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "fernlight",
+       "mention": "Fernlight Router",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "fernlight",
+       "status": "holds",
+       "valid": "2024/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "last year",
+       "value": "2024"
+      }
+     ]
+    },
+    {
+     "id": "s28b",
+     "capturedAt": "2025-05-19",
+     "text": "Avery Lin does not own the Fernlight Router; Priya Nandakumar bought it last year and only lends Avery Lin the admin login.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "fernlight",
+       "mention": "Fernlight Router",
+       "type": "System"
+      },
+      {
+       "id": "priya",
+       "mention": "Priya Nandakumar",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "fernlight",
+       "status": "denied"
+      },
+      {
+       "from": "priya",
+       "type": "owns",
+       "to": "fernlight",
+       "status": "holds",
+       "valid": "2024/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "last year",
+       "value": "2024"
+      }
+     ],
+     "supersedes": {
+      "s28a": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "fernlight",
+     "d": "2025-05-06",
+     "before": "s28b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "fernlight",
+     "d": "2025-05-06",
+     "after": "s28b",
+     "truth": "NO"
+    },
+    {
+     "from": "priya",
+     "type": "owns",
+     "to": "fernlight",
+     "d": "2025-05-19",
+     "after": "s28b",
+     "truth": "YES"
+    },
+    {
+     "from": "priya",
+     "type": "owns",
+     "to": "fernlight",
+     "d": "2025-05-10",
+     "before": "s28b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s29",
+   "tags": [
+    "correction",
+    "restatement"
+   ],
+   "memories": [
+    {
+     "id": "s29a",
+     "capturedAt": "2024-02-14",
+     "text": "Avery Lin works on the Meridian Program alongside Ines Halloran, drafting its research roadmap for the spring review.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "meridian",
+       "mention": "Meridian Program",
+       "type": "Project"
+      },
+      {
+       "id": "ines",
+       "mention": "Ines Halloran",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      },
+      {
+       "from": "ines",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "spring",
+       "value": "2024-21"
+      }
+     ]
+    },
+    {
+     "id": "s29b",
+     "capturedAt": "2024-03-01",
+     "text": "Avery Lin and Ines Halloran are both on the Meridian Program, where Avery Lin is writing the research roadmap.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ines",
+       "mention": "Ines Halloran",
+       "type": "Person"
+      },
+      {
+       "id": "meridian",
+       "mention": "Meridian Program",
+       "type": "Project"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      },
+      {
+       "from": "ines",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      }
+     ],
+     "dates": [],
+     "supersedes": {
+      "s29a": "restatement"
+     }
+    },
+    {
+     "id": "s29c",
+     "capturedAt": "2024-03-20",
+     "text": "Avery Lin works on the Meridian Program with Felix Amari, not Ines Halloran, who has never been part of it.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "meridian",
+       "mention": "Meridian Program",
+       "type": "Project"
+      },
+      {
+       "id": "felix",
+       "mention": "Felix Amari",
+       "type": "Person"
+      },
+      {
+       "id": "ines",
+       "mention": "Ines Halloran",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      },
+      {
+       "from": "felix",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      },
+      {
+       "from": "ines",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "denied",
+       "valid": "../2024-03-20"
+      }
+     ],
+     "dates": [],
+     "supersedes": {
+      "s29b": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "ines",
+     "type": "works_on",
+     "to": "meridian",
+     "d": "2024-03-01",
+     "after": "s29b",
+     "truth": "YES"
+    },
+    {
+     "from": "ines",
+     "type": "works_on",
+     "to": "meridian",
+     "d": "2024-03-01",
+     "after": "s29c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "meridian",
+     "d": "2024-03-20",
+     "after": "s29c",
+     "truth": "YES"
+    },
+    {
+     "from": "felix",
+     "type": "works_on",
+     "to": "meridian",
+     "d": "2024-03-10",
+     "before": "s29c",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s30",
+   "tags": [
+    "restatement"
+   ],
+   "memories": [
+    {
+     "id": "s30a",
+     "capturedAt": "2026-03-08",
+     "text": "Avery Lin has lived at Larchmere House in Ashgrove for five years and works from its back bedroom most days.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "larchmere",
+       "mention": "Larchmere House",
+       "type": "Place"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "larchmere",
+       "status": "holds",
+       "valid": "2021~/.."
+      },
+      {
+       "from": "larchmere",
+       "type": "part_of",
+       "to": "ashgrove",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "five years",
+       "value": "2021~"
+      }
+     ]
+    },
+    {
+     "id": "s30b",
+     "capturedAt": "2026-09-14",
+     "text": "Avery Lin still lives at Larchmere House in Ashgrove, home since 2021, and still works from the back bedroom.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "larchmere",
+       "mention": "Larchmere House",
+       "type": "Place"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "larchmere",
+       "status": "holds",
+       "valid": "2021/.."
+      },
+      {
+       "from": "larchmere",
+       "type": "part_of",
+       "to": "ashgrove",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "2021",
+       "value": "2021"
+      }
+     ],
+     "supersedes": {
+      "s30a": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "larchmere",
+     "d": "2023-06-01",
+     "before": "s30b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "larchmere",
+     "d": "2026-06-01",
+     "before": "s30b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "larchmere",
+     "d": "2026-09-14",
+     "after": "s30b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "larchmere",
+     "d": "2019-06-01",
+     "after": "s30b",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s31",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s31a",
+     "capturedAt": "2025-12-10",
+     "text": "Avery Lin signed a contract with Vela Design last month and starts work there in March as a senior research analyst.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "vela",
+       "mention": "Vela Design",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "vela",
+       "status": "holds",
+       "valid": "2026-03/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "last month",
+       "value": "2025-11"
+      },
+      {
+       "span": "March",
+       "value": "2026-03"
+      }
+     ]
+    },
+    {
+     "id": "s31b",
+     "capturedAt": "2026-04-14",
+     "text": "Avery Lin started as a senior research analyst at Vela Design in March, as planned, working from its Marrow Bay studio.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "vela",
+       "mention": "Vela Design",
+       "type": "Organization"
+      },
+      {
+       "id": "marrow-bay",
+       "mention": "Marrow Bay",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "vela",
+       "status": "holds",
+       "valid": "2026-03/.."
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "marrow-bay",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2026-03"
+      }
+     ],
+     "supersedes": {
+      "s31a": "restatement"
+     }
+    },
+    {
+     "id": "s31c",
+     "capturedAt": "2026-09-02",
+     "text": "Avery Lin left Vela Design in August and now freelances from home in Ashgrove for a few clients.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "vela",
+       "mention": "Vela Design",
+       "type": "Organization"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "vela",
+       "status": "ended",
+       "valid": "/2026-08"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "August",
+       "value": "2026-08"
+      }
+     ],
+     "supersedes": {
+      "s31b": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "vela",
+     "d": "2026-01-15",
+     "after": "s31a",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "vela",
+     "d": "2026-06-01",
+     "before": "s31c",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "vela",
+     "d": "2026-05-10",
+     "after": "s31c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "vela",
+     "d": "2026-09-20",
+     "after": "s31c",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s32",
+   "tags": [
+    "correction"
+   ],
+   "memories": [
+    {
+     "id": "s32a",
+     "capturedAt": "2024-03-08",
+     "text": "Avery Lin bought Orrin Lodge, a stone cottage near Marrow Bay, in 2021 and rents it out each summer.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "orrin-lodge",
+       "mention": "Orrin Lodge",
+       "type": "Place"
+      },
+      {
+       "id": "marrow-bay",
+       "mention": "Marrow Bay",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "orrin-lodge",
+       "status": "holds",
+       "valid": "2021/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2021",
+       "value": "2021"
+      },
+      {
+       "span": "each summer",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s32b",
+     "capturedAt": "2024-03-20",
+     "text": "Avery Lin actually bought Orrin Lodge in 2019, not 2021, and has let it to summer visitors ever since.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "orrin-lodge",
+       "mention": "Orrin Lodge",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "orrin-lodge",
+       "status": "holds",
+       "valid": "2019/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2019",
+       "value": "2019"
+      },
+      {
+       "span": "2021",
+       "value": "2021"
+      }
+     ],
+     "supersedes": {
+      "s32a": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "orrin-lodge",
+     "d": "2020-06-01",
+     "before": "s32b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "orrin-lodge",
+     "d": "2020-06-01",
+     "after": "s32b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "orrin-lodge",
+     "d": "2022-07-01",
+     "before": "s32b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "orrin-lodge",
+     "d": "2025-01-10",
+     "after": "s32b",
+     "truth": "YES",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s33",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s33a",
+     "capturedAt": "2023-05-12",
+     "text": "Avery Lin rents a flat in Nettlefield, a quiet village north of Ashgrove, and has lived there for three years.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "nettlefield",
+       "mention": "Nettlefield",
+       "type": "Place"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "nettlefield",
+       "status": "holds",
+       "valid": "2020~/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "for three years",
+       "value": "2020~"
+      }
+     ]
+    },
+    {
+     "id": "s33b",
+     "capturedAt": "2024-10-02",
+     "text": "Avery Lin moved from Nettlefield to Port Calloway in September to shorten the daily commute to the office.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "nettlefield",
+       "mention": "Nettlefield",
+       "type": "Place"
+      },
+      {
+       "id": "port-calloway",
+       "mention": "Port Calloway",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "nettlefield",
+       "status": "ended",
+       "valid": "/2024-09"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "port-calloway",
+       "status": "holds",
+       "valid": "2024-09/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "September",
+       "value": "2024-09"
+      }
+     ],
+     "supersedes": {
+      "s33a": "update"
+     }
+    },
+    {
+     "id": "s33c",
+     "capturedAt": "2025-02-18",
+     "text": "Avery Lin left Nettlefield last September and has lived in a harbour flat in Port Calloway ever since.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "nettlefield",
+       "mention": "Nettlefield",
+       "type": "Place"
+      },
+      {
+       "id": "port-calloway",
+       "mention": "Port Calloway",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "nettlefield",
+       "status": "ended",
+       "valid": "/2024-09"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "port-calloway",
+       "status": "holds",
+       "valid": "2024-09/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "last September",
+       "value": "2024-09"
+      }
+     ],
+     "supersedes": {
+      "s33b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "nettlefield",
+     "d": "2021-06-01",
+     "after": "s33a",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "nettlefield",
+     "d": "2024-06-01",
+     "before": "s33b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "nettlefield",
+     "d": "2024-12-01",
+     "after": "s33c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "port-calloway",
+     "d": "2025-01-15",
+     "after": "s33b",
+     "truth": "YES",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s34",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s34a",
+     "capturedAt": "2025-03-04",
+     "text": "Avery Lin switched from Corvid Notes to Quillpad last year for drafting client reports and weekly project summaries.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "corvid",
+       "mention": "Corvid Notes",
+       "type": "System"
+      },
+      {
+       "id": "quillpad",
+       "mention": "Quillpad",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "corvid",
+       "status": "ended",
+       "valid": "/2024"
+      },
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "quillpad",
+       "status": "holds",
+       "valid": "2024/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "last year",
+       "value": "2024"
+      }
+     ]
+    },
+    {
+     "id": "s34b",
+     "capturedAt": "2025-12-01",
+     "text": "Avery Lin stopped using Quillpad in November and now drafts every client report in Ravelin Docs instead.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "quillpad",
+       "mention": "Quillpad",
+       "type": "System"
+      },
+      {
+       "id": "ravelin-docs",
+       "mention": "Ravelin Docs",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "quillpad",
+       "status": "ended",
+       "valid": "/2025-11"
+      },
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "ravelin-docs",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "November",
+       "value": "2025-11"
+      }
+     ],
+     "supersedes": {
+      "s34a": "update"
+     }
+    },
+    {
+     "id": "s34c",
+     "capturedAt": "2026-01-20",
+     "text": "Avery Lin switched from Corvid Notes to Quillpad last year, then moved every client report from Quillpad to Ravelin Docs in November.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "corvid",
+       "mention": "Corvid Notes",
+       "type": "System"
+      },
+      {
+       "id": "quillpad",
+       "mention": "Quillpad",
+       "type": "System"
+      },
+      {
+       "id": "ravelin-docs",
+       "mention": "Ravelin Docs",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "corvid",
+       "status": "ended",
+       "valid": "/2024"
+      },
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "quillpad",
+       "status": "ended",
+       "valid": "2024/2025-11"
+      },
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "ravelin-docs",
+       "status": "holds",
+       "valid": "2025-11/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "last year",
+       "value": "2024"
+      },
+      {
+       "span": "November",
+       "value": "2025-11"
+      }
+     ],
+     "authorType": "consolidation_derived",
+     "derivedFrom": [
+      "s34a",
+      "s34b"
+     ],
+     "supersedes": {
+      "s34b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "quillpad",
+     "d": "2025-02-01",
+     "after": "s34a",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "quillpad",
+     "d": "2025-10-01",
+     "before": "s34c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "corvid",
+     "d": "2025-06-01",
+     "after": "s34a",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "quillpad",
+     "d": "2025-12-15",
+     "after": "s34c",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s35",
+   "tags": [
+    "update",
+    "guest-about-owner"
+   ],
+   "memories": [
+    {
+     "id": "s35a",
+     "capturedAt": "2024-02-10",
+     "text": "Jonah Pell says Avery Lin still lives in Nettlefield and walks the dog along the river most evenings.",
+     "entities": [
+      {
+       "id": "jonah-pell",
+       "mention": "Jonah Pell",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "nettlefield",
+       "mention": "Nettlefield",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "nettlefield",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [
+      {
+       "span": "most evenings",
+       "value": null
+      }
+     ],
+     "authorType": "guest_turn"
+    },
+    {
+     "id": "s35b",
+     "capturedAt": "2025-03-01",
+     "text": "Jonah Pell says Avery Lin gave up the Nettlefield flat last autumn and moved to Port Calloway.",
+     "entities": [
+      {
+       "id": "jonah-pell",
+       "mention": "Jonah Pell",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "nettlefield",
+       "mention": "Nettlefield",
+       "type": "Place"
+      },
+      {
+       "id": "port-calloway",
+       "mention": "Port Calloway",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "nettlefield",
+       "status": "unasserted"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "port-calloway",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [
+      {
+       "span": "last autumn",
+       "value": "2024-23"
+      }
+     ],
+     "supersedes": {
+      "s35a": "update"
+     },
+     "authorType": "guest_turn"
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "nettlefield",
+     "d": "2024-02-10",
+     "after": "s35a",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "nettlefield",
+     "d": "2025-03-01",
+     "before": "s35b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "port-calloway",
+     "d": "2025-03-01",
+     "after": "s35b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "nettlefield",
+     "d": "2023-06-01",
+     "after": "s35b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s36",
+   "tags": [
+    "correction"
+   ],
+   "memories": [
+    {
+     "id": "s36a",
+     "capturedAt": "2025-06-03",
+     "text": "Avery Lin has worked on Project Bluefin with Tomas Varga since January, mostly on the billing pipeline.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bluefin",
+       "mention": "Project Bluefin",
+       "type": "Project"
+      },
+      {
+       "id": "tomas",
+       "mention": "Tomas Varga",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds",
+       "valid": "2025-01/.."
+      },
+      {
+       "from": "tomas",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "January",
+       "value": "2025-01"
+      }
+     ]
+    },
+    {
+     "id": "s36b",
+     "capturedAt": "2025-06-20",
+     "text": "Avery Lin has never worked on Project Bluefin; the January billing work was for the Atlas Migration alongside Tomas Varga.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bluefin",
+       "mention": "Project Bluefin",
+       "type": "Project"
+      },
+      {
+       "id": "atlas-migration",
+       "mention": "Atlas Migration",
+       "type": "Project"
+      },
+      {
+       "id": "tomas",
+       "mention": "Tomas Varga",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "denied",
+       "valid": "../2025-06-20"
+      },
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "holds",
+       "valid": "2025-01/.."
+      },
+      {
+       "from": "tomas",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "January",
+       "value": "2025-01"
+      }
+     ],
+     "supersedes": {
+      "s36a": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2025-03-01",
+     "before": "s36b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2025-03-01",
+     "after": "s36b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "atlas-migration",
+     "d": "2025-03-01",
+     "before": "s36b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "atlas-migration",
+     "d": "2025-06-20",
+     "after": "s36b",
+     "truth": "YES",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s37",
+   "tags": [
+    "correction",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s37a",
+     "capturedAt": "2023-09-14",
+     "text": "Avery Lin joined Brightwell Labs as a research engineer in August and works on the Meridian Program there.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      },
+      {
+       "id": "meridian",
+       "mention": "Meridian Program",
+       "type": "Project"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "brightwell",
+       "status": "holds",
+       "valid": "2023-08/.."
+      },
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "August",
+       "value": "2023-08"
+      }
+     ]
+    },
+    {
+     "id": "s37b",
+     "capturedAt": "2024-11-05",
+     "text": "Avery Lin left Brightwell Labs in October and joined Ostrander Freight as a data lead the following week.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      },
+      {
+       "id": "ostrander",
+       "mention": "Ostrander Freight",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "brightwell",
+       "status": "ended",
+       "valid": "/2024-10"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "ostrander",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "October",
+       "value": "2024-10"
+      },
+      {
+       "span": "the following week",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s37a": "update"
+     }
+    },
+    {
+     "id": "s37c",
+     "capturedAt": "2024-11-12",
+     "text": "Avery Lin never left Brightwell Labs and has never worked at Ostrander Freight, whose October job offer was declined.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      },
+      {
+       "id": "ostrander",
+       "mention": "Ostrander Freight",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "brightwell",
+       "status": "holds"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "ostrander",
+       "status": "denied",
+       "valid": "../2024-11-12"
+      }
+     ],
+     "dates": [
+      {
+       "span": "October",
+       "value": "2024-10"
+      }
+     ],
+     "supersedes": {
+      "s37b": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "brightwell",
+     "d": "2024-06-01",
+     "after": "s37a",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "brightwell",
+     "d": "2024-11-08",
+     "after": "s37b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "brightwell",
+     "d": "2024-11-08",
+     "after": "s37c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "ostrander",
+     "d": "2024-11-08",
+     "after": "s37c",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s38",
+   "tags": [
+    "correction"
+   ],
+   "memories": [
+    {
+     "id": "s38a",
+     "capturedAt": "2024-07-22",
+     "text": "Avery Lin has relied on Glasswing Pager for every on-call alert since March and keeps it muted only on weekends.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "glasswing",
+       "mention": "Glasswing Pager",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "glasswing",
+       "status": "holds",
+       "valid": "2024-03/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2024-03"
+      },
+      {
+       "span": "weekends",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s38b",
+     "capturedAt": "2024-08-05",
+     "text": "Avery Lin first used Glasswing Pager for on-call alerts in May; the earlier note saying March was mistaken.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "glasswing",
+       "mention": "Glasswing Pager",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "glasswing",
+       "status": "holds",
+       "valid": "2024-05/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "May",
+       "value": "2024-05"
+      },
+      {
+       "span": "March",
+       "value": "2024-03"
+      }
+     ],
+     "supersedes": {
+      "s38a": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-04-01",
+     "before": "s38b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-04-01",
+     "after": "s38b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-06-15",
+     "after": "s38b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2025-03-01",
+     "after": "s38b",
+     "truth": "YES",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s39",
+   "tags": [
+    "correction",
+    "update",
+    "guest-about-owner"
+   ],
+   "memories": [
+    {
+     "id": "s39a",
+     "capturedAt": "2023-10-01",
+     "text": "Marisol says Avery Lin started at Brightwell Labs in August and spends most days on the Meridian Program.",
+     "entities": [
+      {
+       "id": "marisol",
+       "mention": "Marisol",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      },
+      {
+       "id": "meridian",
+       "mention": "Meridian Program",
+       "type": "Project"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "brightwell",
+       "status": "unasserted"
+      },
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [
+      {
+       "span": "August",
+       "value": "2023-08"
+      }
+     ],
+     "authorType": "guest_turn"
+    },
+    {
+     "id": "s39b",
+     "capturedAt": "2024-11-07",
+     "text": "Marisol heard Avery Lin quit Brightwell Labs last month to take a data role at Ostrander Freight.",
+     "entities": [
+      {
+       "id": "marisol",
+       "mention": "Marisol",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      },
+      {
+       "id": "ostrander",
+       "mention": "Ostrander Freight",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "brightwell",
+       "status": "unasserted"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "ostrander",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [
+      {
+       "span": "last month",
+       "value": "2024-10"
+      }
+     ],
+     "supersedes": {
+      "s39a": "update"
+     },
+     "authorType": "guest_turn"
+    },
+    {
+     "id": "s39c",
+     "capturedAt": "2024-11-20",
+     "text": "Marisol now says she was wrong and Avery Lin never quit Brightwell Labs or joined Ostrander Freight at all.",
+     "entities": [
+      {
+       "id": "marisol",
+       "mention": "Marisol",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      },
+      {
+       "id": "ostrander",
+       "mention": "Ostrander Freight",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "brightwell",
+       "status": "unasserted"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "ostrander",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [],
+     "supersedes": {
+      "s39b": "correction"
+     },
+     "authorType": "guest_turn"
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "brightwell",
+     "d": "2024-01-01",
+     "after": "s39a",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "meridian",
+     "d": "2023-10-01",
+     "after": "s39a",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "ostrander",
+     "d": "2024-11-10",
+     "before": "s39c",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "brightwell",
+     "d": "2024-11-10",
+     "after": "s39c",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s40",
+   "tags": [
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s40a",
+     "capturedAt": "2026-05-11",
+     "text": "Avery Lin signed the lease on a loft at Quarry Mill in Hollis Park and moves in on 1 July.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "quarry-mill",
+       "mention": "Quarry Mill",
+       "type": "Place"
+      },
+      {
+       "id": "hollis-park",
+       "mention": "Hollis Park",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "quarry-mill",
+       "status": "holds",
+       "valid": "2026-07-01/.."
+      },
+      {
+       "from": "quarry-mill",
+       "type": "part_of",
+       "to": "hollis-park",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "1 July",
+       "value": "2026-07-01"
+      }
+     ]
+    },
+    {
+     "id": "s40b",
+     "capturedAt": "2026-10-01",
+     "text": "Avery Lin moved into Quarry Mill on 1 July but left in September for a cheaper flat in Ashgrove.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "quarry-mill",
+       "mention": "Quarry Mill",
+       "type": "Place"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "quarry-mill",
+       "status": "ended",
+       "valid": "2026-07-01/2026-09"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "1 July",
+       "value": "2026-07-01"
+      },
+      {
+       "span": "September",
+       "value": "2026-09"
+      }
+     ],
+     "supersedes": {
+      "s40a": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "quarry-mill",
+     "d": "2026-06-15",
+     "after": "s40a",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "quarry-mill",
+     "d": "2026-08-01",
+     "before": "s40b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "quarry-mill",
+     "d": "2026-08-01",
+     "after": "s40b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "quarry-mill",
+     "d": "2026-10-01",
+     "after": "s40b",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s41",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s41a",
+     "capturedAt": "2023-07-04",
+     "text": "Avery Lin loves open-water swimming and swims across Marrow Bay with Felix Amari every Sunday in summer.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "open-water-swimming",
+       "mention": "open-water swimming",
+       "type": "Topic"
+      },
+      {
+       "id": "marrow-bay",
+       "mention": "Marrow Bay",
+       "type": "Place"
+      },
+      {
+       "id": "felix",
+       "mention": "Felix Amari",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "open-water-swimming",
+       "status": "holds",
+       "valence": "favorable"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "marrow-bay",
+       "status": "holds",
+       "noise": true
+      }
+     ],
+     "dates": [
+      {
+       "span": "every Sunday",
+       "value": null
+      },
+      {
+       "span": "summer",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s41b",
+     "capturedAt": "2025-04-09",
+     "text": "Avery Lin no longer enjoys open-water swimming after a cold-water injury last winter and now prefers rowing.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "open-water-swimming",
+       "mention": "open-water swimming",
+       "type": "Topic"
+      },
+      {
+       "id": "rowing",
+       "mention": "rowing",
+       "type": "Topic"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "open-water-swimming",
+       "status": "ended",
+       "valence": "favorable"
+      },
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "rowing",
+       "status": "holds",
+       "valence": "favorable"
+      }
+     ],
+     "dates": [
+      {
+       "span": "last winter",
+       "value": "2024-24"
+      }
+     ],
+     "supersedes": {
+      "s41a": "update"
+     }
+    },
+    {
+     "id": "s41c",
+     "capturedAt": "2025-09-15",
+     "text": "Since injuring a shoulder in cold water, Avery Lin has stopped enjoying open-water swimming and now much prefers rowing.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "open-water-swimming",
+       "mention": "open-water swimming",
+       "type": "Topic"
+      },
+      {
+       "id": "rowing",
+       "mention": "rowing",
+       "type": "Topic"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "open-water-swimming",
+       "status": "ended",
+       "valence": "favorable"
+      },
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "rowing",
+       "status": "holds",
+       "valence": "favorable"
+      }
+     ],
+     "dates": [],
+     "supersedes": {
+      "s41b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "open-water-swimming",
+     "d": "2024-06-01",
+     "after": "s41a",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "rowing",
+     "d": "2023-07-04",
+     "before": "s41b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "open-water-swimming",
+     "d": "2023-07-04",
+     "after": "s41c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "open-water-swimming",
+     "d": "2025-09-15",
+     "after": "s41c",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s42",
+   "tags": [
+    "correction"
+   ],
+   "memories": [
+    {
+     "id": "s42a",
+     "capturedAt": "2024-01-15",
+     "text": "Avery Lin bought the Pellucid NAS in 2022 and keeps every family photo archive on it in the hallway cupboard.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "pellucid-nas",
+       "mention": "Pellucid NAS",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "pellucid-nas",
+       "status": "holds",
+       "valid": "2022/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2022",
+       "value": "2022"
+      }
+     ]
+    },
+    {
+     "id": "s42b",
+     "capturedAt": "2024-02-02",
+     "text": "Avery Lin has never owned the Pellucid NAS; Mateo Castillo bought it in 2022 and lets Avery Lin store photos there.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "pellucid-nas",
+       "mention": "Pellucid NAS",
+       "type": "System"
+      },
+      {
+       "id": "mateo",
+       "mention": "Mateo Castillo",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "pellucid-nas",
+       "status": "denied",
+       "valid": "../2024-02-02"
+      },
+      {
+       "from": "mateo",
+       "type": "owns",
+       "to": "pellucid-nas",
+       "status": "holds",
+       "valid": "2022/.."
+      },
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "pellucid-nas",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "2022",
+       "value": "2022"
+      }
+     ],
+     "supersedes": {
+      "s42a": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "pellucid-nas",
+     "d": "2023-05-01",
+     "before": "s42b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "pellucid-nas",
+     "d": "2023-05-01",
+     "after": "s42b",
+     "truth": "NO"
+    },
+    {
+     "from": "mateo",
+     "type": "owns",
+     "to": "pellucid-nas",
+     "d": "2023-05-01",
+     "before": "s42b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "mateo",
+     "type": "owns",
+     "to": "pellucid-nas",
+     "d": "2023-05-01",
+     "after": "s42b",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s43",
+   "tags": [
+    "restatement",
+    "guest-about-owner"
+   ],
+   "memories": [
+    {
+     "id": "s43a",
+     "capturedAt": "2024-08-30",
+     "text": "Petra Mollan says Avery Lin has answered on-call alerts in Glasswing Pager since March, even while on holiday.",
+     "entities": [
+      {
+       "id": "petra-mollan",
+       "mention": "Petra Mollan",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "glasswing",
+       "mention": "Glasswing Pager",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "glasswing",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2024-03"
+      }
+     ],
+     "authorType": "guest_turn"
+    },
+    {
+     "id": "s43b",
+     "capturedAt": "2025-02-14",
+     "text": "Petra Mollan repeats that Avery Lin still handles every Glasswing Pager alert and has done so since March 2024.",
+     "entities": [
+      {
+       "id": "petra-mollan",
+       "mention": "Petra Mollan",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "glasswing",
+       "mention": "Glasswing Pager",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "glasswing",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [
+      {
+       "span": "March 2024",
+       "value": "2024-03"
+      }
+     ],
+     "supersedes": {
+      "s43a": "restatement"
+     },
+     "authorType": "guest_turn"
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-05-01",
+     "after": "s43a",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2024-12-01",
+     "before": "s43b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2025-02-14",
+     "after": "s43b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "glasswing",
+     "d": "2023-01-01",
+     "after": "s43b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s44",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s44a",
+     "capturedAt": "2025-11-10",
+     "text": "Avery Lin joined Saltmarsh Credit Union as a risk analyst last year after six years at Lantern Group.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "saltmarsh",
+       "mention": "Saltmarsh Credit Union",
+       "type": "Organization"
+      },
+      {
+       "id": "lantern",
+       "mention": "Lantern Group",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "saltmarsh",
+       "status": "holds",
+       "valid": "2024/.."
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "lantern",
+       "status": "ended"
+      }
+     ],
+     "dates": [
+      {
+       "span": "last year",
+       "value": "2024"
+      },
+      {
+       "span": "six years",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s44b",
+     "capturedAt": "2026-07-14",
+     "text": "Avery Lin left Saltmarsh Credit Union in June and is now consulting for Juniper Clinic on patient data.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "saltmarsh",
+       "mention": "Saltmarsh Credit Union",
+       "type": "Organization"
+      },
+      {
+       "id": "juniper",
+       "mention": "Juniper Clinic",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "saltmarsh",
+       "status": "ended",
+       "valid": "/2026-06"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "juniper",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "June",
+       "value": "2026-06"
+      }
+     ],
+     "supersedes": {
+      "s44a": "update"
+     }
+    },
+    {
+     "id": "s44c",
+     "capturedAt": "2026-09-01",
+     "text": "Avery Lin worked at Saltmarsh Credit Union from last year until June and now consults for Juniper Clinic on patient data.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "saltmarsh",
+       "mention": "Saltmarsh Credit Union",
+       "type": "Organization"
+      },
+      {
+       "id": "juniper",
+       "mention": "Juniper Clinic",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "saltmarsh",
+       "status": "ended",
+       "valid": "2024/2026-06"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "juniper",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "last year",
+       "value": "2024"
+      },
+      {
+       "span": "June",
+       "value": "2026-06"
+      }
+     ],
+     "authorType": "consolidation_derived",
+     "derivedFrom": [
+      "s44a",
+      "s44b"
+     ],
+     "supersedes": {
+      "s44b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "saltmarsh",
+     "d": "2025-06-01",
+     "after": "s44a",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "saltmarsh",
+     "d": "2026-03-01",
+     "after": "s44a",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "saltmarsh",
+     "d": "2026-08-01",
+     "after": "s44c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "juniper",
+     "d": "2026-09-01",
+     "after": "s44c",
+     "truth": "YES",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s45",
+   "tags": [
+    "correction",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s45a",
+     "capturedAt": "2023-02-20",
+     "text": "Avery Lin left Harborlight Analytics in January after four years there and is taking a long break at Larchmere House.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      },
+      {
+       "id": "larchmere",
+       "mention": "Larchmere House",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "ended",
+       "valid": "/2023-01"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "larchmere",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "January",
+       "value": "2023-01"
+      },
+      {
+       "span": "four years",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s45b",
+     "capturedAt": "2024-04-08",
+     "text": "Avery Lin rejoined Harborlight Analytics in March as a staff engineer and works on Project Bluefin with Dana Reyes.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      },
+      {
+       "id": "bluefin",
+       "mention": "Project Bluefin",
+       "type": "Project"
+      },
+      {
+       "id": "dana",
+       "mention": "Dana Reyes",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "holds",
+       "valid": "2024-03/.."
+      },
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds"
+      },
+      {
+       "from": "dana",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2024-03"
+      }
+     ],
+     "supersedes": {
+      "s45a": "update"
+     }
+    },
+    {
+     "id": "s45c",
+     "capturedAt": "2024-04-22",
+     "text": "Avery Lin rejoined Harborlight Analytics in April, not March, and works on the Meridian Program rather than Project Bluefin.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      },
+      {
+       "id": "meridian",
+       "mention": "Meridian Program",
+       "type": "Project"
+      },
+      {
+       "id": "bluefin",
+       "mention": "Project Bluefin",
+       "type": "Project"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "holds",
+       "valid": "2024-04/.."
+      },
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      },
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "denied"
+      }
+     ],
+     "dates": [
+      {
+       "span": "April",
+       "value": "2024-04"
+      },
+      {
+       "span": "March",
+       "value": "2024-03"
+      }
+     ],
+     "supersedes": {
+      "s45b": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2022-06-01",
+     "after": "s45a",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2024-04-08",
+     "before": "s45c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2023-09-01",
+     "after": "s45c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2024-04-15",
+     "after": "s45c",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s46",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s46a",
+     "capturedAt": "2024-03-12",
+     "text": "Avery Lin has lived in Ashgrove since 2019, renting a narrow flat above a bakery near the river.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "holds",
+       "valid": "2019/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2019",
+       "value": "2019"
+      }
+     ]
+    },
+    {
+     "id": "s46b",
+     "capturedAt": "2025-09-05",
+     "text": "Avery Lin moved from Ashgrove to Port Calloway in August to be closer to the harbour and the ferry.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      },
+      {
+       "id": "port-calloway",
+       "mention": "Port Calloway",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "ended",
+       "valid": "/2025-08"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "port-calloway",
+       "status": "holds",
+       "valid": "2025-08/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "August",
+       "value": "2025-08"
+      }
+     ],
+     "supersedes": {
+      "s46a": "update"
+     }
+    },
+    {
+     "id": "s46c",
+     "capturedAt": "2025-11-20",
+     "text": "Since August Avery Lin has lived in Port Calloway, having left the Ashgrove flat that had been home from 2019.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "port-calloway",
+       "mention": "Port Calloway",
+       "type": "Place"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "port-calloway",
+       "status": "holds",
+       "valid": "2025-08/.."
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "ended",
+       "valid": "2019/"
+      }
+     ],
+     "dates": [
+      {
+       "span": "August",
+       "value": "2025-08"
+      },
+      {
+       "span": "2019",
+       "value": "2019"
+      }
+     ],
+     "supersedes": {
+      "s46b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "ashgrove",
+     "d": "2024-06-01",
+     "after": "s46a",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "ashgrove",
+     "d": "2025-07-01",
+     "before": "s46b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "ashgrove",
+     "d": "2025-10-01",
+     "after": "s46b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "port-calloway",
+     "d": "2025-12-01",
+     "after": "s46c",
+     "truth": "YES",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s47",
+   "tags": [
+    "update",
+    "guest-about-owner"
+   ],
+   "memories": [
+    {
+     "id": "s47a",
+     "capturedAt": "2025-06-14",
+     "text": "Marisol says Avery Lin still rents a flat in Ashgrove and walks the river path after work.",
+     "entities": [
+      {
+       "id": "marisol",
+       "mention": "Marisol",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [],
+     "authorType": "guest_turn"
+    },
+    {
+     "id": "s47b",
+     "capturedAt": "2025-10-02",
+     "text": "Marisol now says Avery Lin has left Ashgrove and moved to Port Calloway, somewhere near the ferry terminal.",
+     "entities": [
+      {
+       "id": "marisol",
+       "mention": "Marisol",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ashgrove",
+       "mention": "Ashgrove",
+       "type": "Place"
+      },
+      {
+       "id": "port-calloway",
+       "mention": "Port Calloway",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "ashgrove",
+       "status": "unasserted"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "port-calloway",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [],
+     "authorType": "guest_turn",
+     "supersedes": {
+      "s47a": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "ashgrove",
+     "d": "2025-06-14",
+     "after": "s47a",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "ashgrove",
+     "d": "2025-08-01",
+     "before": "s47b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "port-calloway",
+     "d": "2025-10-02",
+     "after": "s47b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "located_in",
+     "to": "ashgrove",
+     "d": "2025-10-02",
+     "after": "s47b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s48",
+   "tags": [
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s48a",
+     "capturedAt": "2023-04-18",
+     "text": "Avery Lin has worked at Harborlight Analytics since 2021, building the weekly freight forecasts for its logistics clients.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "holds",
+       "valid": "2021/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2021",
+       "value": "2021"
+      }
+     ]
+    },
+    {
+     "id": "s48b",
+     "capturedAt": "2024-05-09",
+     "text": "Avery Lin left Harborlight Analytics in March to spend a year travelling before looking for another analytics job.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "ended",
+       "valid": "/2024-03"
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2024-03"
+      }
+     ],
+     "supersedes": {
+      "s48a": "update"
+     }
+    },
+    {
+     "id": "s48c",
+     "capturedAt": "2025-03-03",
+     "text": "Avery Lin rejoined Harborlight Analytics in February, returning to the freight forecasting team after a long trip abroad.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "holds",
+       "valid": "2025-02/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "February",
+       "value": "2025-02"
+      }
+     ],
+     "supersedes": {
+      "s48b": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2022-06-01",
+     "after": "s48a",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2024-01-10",
+     "before": "s48b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2024-05-01",
+     "after": "s48b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2024-09-01",
+     "after": "s48c",
+     "truth": "NO"
+    }
+   ]
+  },
+  {
+   "id": "s49",
+   "tags": [
+    "correction",
+    "guest-about-owner"
+   ],
+   "memories": [
+    {
+     "id": "s49a",
+     "capturedAt": "2024-06-20",
+     "text": "Jonah Pell says Avery Lin quit Harborlight Analytics this spring and now consults part-time for Ostrander Freight.",
+     "entities": [
+      {
+       "id": "jonah-pell",
+       "mention": "Jonah Pell",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      },
+      {
+       "id": "ostrander",
+       "mention": "Ostrander Freight",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "unasserted"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "ostrander",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [
+      {
+       "span": "this spring",
+       "value": "2024-21"
+      }
+     ],
+     "authorType": "guest_turn"
+    },
+    {
+     "id": "s49b",
+     "capturedAt": "2024-07-02",
+     "text": "Jonah Pell says he got it wrong: Avery Lin took leave from Harborlight Analytics and never consulted for Ostrander Freight.",
+     "entities": [
+      {
+       "id": "jonah-pell",
+       "mention": "Jonah Pell",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "harborlight",
+       "mention": "Harborlight Analytics",
+       "type": "Organization"
+      },
+      {
+       "id": "ostrander",
+       "mention": "Ostrander Freight",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "harborlight",
+       "status": "unasserted"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "ostrander",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [],
+     "authorType": "guest_turn",
+     "supersedes": {
+      "s49a": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2024-06-01",
+     "after": "s49a",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "ostrander",
+     "d": "2024-06-20",
+     "before": "s49b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "ostrander",
+     "d": "2024-07-02",
+     "after": "s49b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "harborlight",
+     "d": "2024-07-02",
+     "after": "s49b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s50",
+   "tags": [
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s50a",
+     "capturedAt": "2025-01-22",
+     "text": "Avery Lin has never used Osprey Dashboard and still reads the shipping figures from a weekly spreadsheet export.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "osprey",
+       "mention": "Osprey Dashboard",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "osprey",
+       "status": "denied",
+       "valid": "../2025-01-22"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s50b",
+     "capturedAt": "2025-07-08",
+     "text": "Avery Lin started using Osprey Dashboard in May and now checks the shipping figures there before the morning standup.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "osprey",
+       "mention": "Osprey Dashboard",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "osprey",
+       "status": "holds",
+       "valid": "2025-05/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "May",
+       "value": "2025-05"
+      }
+     ],
+     "supersedes": {
+      "s50a": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2024-12-01",
+     "after": "s50b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2025-04-01",
+     "before": "s50b",
+     "truth": "NO",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2025-06-15",
+     "after": "s50b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2025-08-01",
+     "after": "s50b",
+     "truth": "YES",
+     "assumed": true
+    }
+   ]
+  },
+  {
+   "id": "s51",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s51a",
+     "capturedAt": "2024-11-15",
+     "text": "Avery Lin joined the Atlas Migration last year and reviews its cutover checklist on Friday afternoons before each release.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "atlas-migration",
+       "mention": "Atlas Migration",
+       "type": "Project"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "holds",
+       "valid": "2023/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "last year",
+       "value": "2023"
+      },
+      {
+       "span": "Friday afternoons",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s51b",
+     "capturedAt": "2025-09-02",
+     "text": "Avery Lin stopped working on the Atlas Migration in August, once the final cutover had finished without a rollback.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "atlas-migration",
+       "mention": "Atlas Migration",
+       "type": "Project"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "ended",
+       "valid": "/2025-08"
+      }
+     ],
+     "dates": [
+      {
+       "span": "August",
+       "value": "2025-08"
+      }
+     ],
+     "supersedes": {
+      "s51a": "update"
+     }
+    },
+    {
+     "id": "s51c",
+     "capturedAt": "2025-09-20",
+     "text": "Avery Lin worked on the Atlas Migration from last year until August, when the final cutover finished without a rollback.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "atlas-migration",
+       "mention": "Atlas Migration",
+       "type": "Project"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "atlas-migration",
+       "status": "ended",
+       "valid": "2023/2025-08"
+      }
+     ],
+     "dates": [
+      {
+       "span": "last year",
+       "value": "2023"
+      },
+      {
+       "span": "August",
+       "value": "2025-08"
+      }
+     ],
+     "authorType": "consolidation_derived",
+     "derivedFrom": [
+      "s51a",
+      "s51b"
+     ],
+     "supersedes": {
+      "s51b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "atlas-migration",
+     "d": "2024-05-01",
+     "after": "s51c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "atlas-migration",
+     "d": "2025-06-01",
+     "before": "s51b",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "atlas-migration",
+     "d": "2025-09-10",
+     "after": "s51b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "atlas-migration",
+     "d": "2023-06-15",
+     "after": "s51a",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s52",
+   "tags": [
+    "correction"
+   ],
+   "memories": [
+    {
+     "id": "s52a",
+     "capturedAt": "2023-09-04",
+     "text": "Avery Lin has worked at Vela Design since June 2023, drawing packaging illustrations for its bakery and coffee clients.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "vela",
+       "mention": "Vela Design",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "vela",
+       "status": "holds",
+       "valid": "2023-06/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "June 2023",
+       "value": "2023-06"
+      }
+     ]
+    },
+    {
+     "id": "s52b",
+     "capturedAt": "2023-09-30",
+     "text": "Avery Lin has never worked at Vela Design and has drawn packaging illustrations for Lantern Group since June 2023.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "vela",
+       "mention": "Vela Design",
+       "type": "Organization"
+      },
+      {
+       "id": "lantern",
+       "mention": "Lantern Group",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "vela",
+       "status": "denied",
+       "valid": "../2023-09-30"
+      },
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "lantern",
+       "status": "holds",
+       "valid": "2023-06/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "June 2023",
+       "value": "2023-06"
+      }
+     ],
+     "supersedes": {
+      "s52a": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "vela",
+     "d": "2023-08-01",
+     "before": "s52b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "vela",
+     "d": "2023-08-01",
+     "after": "s52b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "lantern",
+     "d": "2023-08-01",
+     "after": "s52b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "lantern",
+     "d": "2023-08-01",
+     "before": "s52b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s53",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s53a",
+     "capturedAt": "2024-01-08",
+     "text": "Avery Lin loves bouldering and spends Saturday mornings on the steep overhangs at Hollis Park, usually before breakfast.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bouldering",
+       "mention": "bouldering",
+       "type": "Topic"
+      },
+      {
+       "id": "hollis-park",
+       "mention": "Hollis Park",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "bouldering",
+       "status": "holds",
+       "valence": "favorable"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "hollis-park",
+       "status": "holds",
+       "noise": true
+      }
+     ],
+     "dates": [
+      {
+       "span": "Saturday mornings",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s53b",
+     "capturedAt": "2024-07-22",
+     "text": "Avery Lin still enjoys bouldering a great deal and keeps climbing at Hollis Park every Saturday morning.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bouldering",
+       "mention": "bouldering",
+       "type": "Topic"
+      },
+      {
+       "id": "hollis-park",
+       "mention": "Hollis Park",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "bouldering",
+       "status": "holds",
+       "valence": "favorable"
+      },
+      {
+       "from": "operator",
+       "type": "located_in",
+       "to": "hollis-park",
+       "status": "holds",
+       "noise": true
+      }
+     ],
+     "dates": [
+      {
+       "span": "every Saturday morning",
+       "value": null
+      }
+     ],
+     "supersedes": {
+      "s53a": "restatement"
+     }
+    },
+    {
+     "id": "s53c",
+     "capturedAt": "2025-04-02",
+     "text": "Avery Lin no longer enjoys bouldering, after a shoulder injury in January, and has switched to swimming laps instead.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bouldering",
+       "mention": "bouldering",
+       "type": "Topic"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "holds_view_on",
+       "to": "bouldering",
+       "status": "ended",
+       "valence": "favorable"
+      }
+     ],
+     "dates": [
+      {
+       "span": "January",
+       "value": "2025-01"
+      }
+     ],
+     "supersedes": {
+      "s53b": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "bouldering",
+     "d": "2024-03-01",
+     "after": "s53a",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "bouldering",
+     "d": "2024-07-22",
+     "before": "s53c",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "bouldering",
+     "d": "2025-04-02",
+     "after": "s53c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "holds_view_on",
+     "to": "bouldering",
+     "d": "2024-07-22",
+     "after": "s53c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s54",
+   "tags": [
+    "restatement",
+    "guest-about-owner"
+   ],
+   "memories": [
+    {
+     "id": "s54a",
+     "capturedAt": "2025-08-11",
+     "text": "Ulla Strand says Avery Lin checks Osprey Dashboard first thing each morning for the overnight shipping figures.",
+     "entities": [
+      {
+       "id": "ulla-strand",
+       "mention": "Ulla Strand",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "osprey",
+       "mention": "Osprey Dashboard",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "osprey",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [
+      {
+       "span": "each morning",
+       "value": null
+      }
+     ],
+     "authorType": "guest_turn"
+    },
+    {
+     "id": "s54b",
+     "capturedAt": "2025-08-25",
+     "text": "Ulla Strand repeats that Avery Lin relies on Osprey Dashboard for the overnight shipping numbers before anything else.",
+     "entities": [
+      {
+       "id": "ulla-strand",
+       "mention": "Ulla Strand",
+       "type": "Person"
+      },
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "osprey",
+       "mention": "Osprey Dashboard",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "osprey",
+       "status": "unasserted"
+      }
+     ],
+     "dates": [],
+     "authorType": "guest_turn",
+     "supersedes": {
+      "s54a": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2025-08-11",
+     "after": "s54a",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2025-08-20",
+     "before": "s54b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2025-08-25",
+     "after": "s54b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "osprey",
+     "d": "2025-01-01",
+     "after": "s54b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s55",
+   "tags": [
+    "correction",
+    "restatement"
+   ],
+   "memories": [
+    {
+     "id": "s55a",
+     "capturedAt": "2025-01-20",
+     "text": "Avery Lin starts at Saltmarsh Credit Union in March, after accepting its offer to join the small-business lending team.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "saltmarsh",
+       "mention": "Saltmarsh Credit Union",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "saltmarsh",
+       "status": "holds",
+       "valid": "2025-03/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "March",
+       "value": "2025-03"
+      }
+     ]
+    },
+    {
+     "id": "s55b",
+     "capturedAt": "2025-02-03",
+     "text": "Avery Lin's first day at Saltmarsh Credit Union is in April, not March; the earlier start month was noted wrongly.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "saltmarsh",
+       "mention": "Saltmarsh Credit Union",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "saltmarsh",
+       "status": "holds",
+       "valid": "2025-04/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "April",
+       "value": "2025-04"
+      },
+      {
+       "span": "March",
+       "value": "2025-03"
+      }
+     ],
+     "supersedes": {
+      "s55a": "correction"
+     }
+    },
+    {
+     "id": "s55c",
+     "capturedAt": "2025-06-10",
+     "text": "Avery Lin has worked at Saltmarsh Credit Union since April, reviewing loan files for the small-business lending team.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "saltmarsh",
+       "mention": "Saltmarsh Credit Union",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_at",
+       "to": "saltmarsh",
+       "status": "holds",
+       "valid": "2025-04/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "April",
+       "value": "2025-04"
+      }
+     ],
+     "supersedes": {
+      "s55b": "restatement"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "saltmarsh",
+     "d": "2025-05-01",
+     "after": "s55a",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "saltmarsh",
+     "d": "2025-03-15",
+     "before": "s55b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "saltmarsh",
+     "d": "2025-03-15",
+     "after": "s55b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_at",
+     "to": "saltmarsh",
+     "d": "2025-06-10",
+     "after": "s55c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s56",
+   "tags": [
+    "correction"
+   ],
+   "memories": [
+    {
+     "id": "s56a",
+     "capturedAt": "2024-10-06",
+     "text": "Avery Lin backs up the whole family photo library to Sorrel Drive every Sunday night from the study laptop.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "sorrel-drive",
+       "mention": "Sorrel Drive",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "sorrel-drive",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "every Sunday night",
+       "value": null
+      }
+     ]
+    },
+    {
+     "id": "s56b",
+     "capturedAt": "2024-10-20",
+     "text": "Avery Lin actually backs up the family photo library to Quillpad and does not use Sorrel Drive at all.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "quillpad",
+       "mention": "Quillpad",
+       "type": "System"
+      },
+      {
+       "id": "sorrel-drive",
+       "mention": "Sorrel Drive",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "quillpad",
+       "status": "holds"
+      },
+      {
+       "from": "operator",
+       "type": "uses",
+       "to": "sorrel-drive",
+       "status": "denied"
+      }
+     ],
+     "dates": [],
+     "supersedes": {
+      "s56a": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "sorrel-drive",
+     "d": "2024-10-06",
+     "before": "s56b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "sorrel-drive",
+     "d": "2024-10-06",
+     "after": "s56b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "quillpad",
+     "d": "2024-10-20",
+     "after": "s56b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "uses",
+     "to": "quillpad",
+     "d": "2024-10-06",
+     "before": "s56b",
+     "truth": "UNKNOWN"
+    }
+   ]
+  },
+  {
+   "id": "s57",
+   "tags": [
+    "correction",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s57a",
+     "capturedAt": "2023-05-14",
+     "text": "Avery Lin bought Ferrule Cabin in April 2023 and is slowly repairing its old timber porch by hand.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ferrule-cabin",
+       "mention": "Ferrule Cabin",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "ferrule-cabin",
+       "status": "holds",
+       "valid": "2023-04/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "April 2023",
+       "value": "2023-04"
+      }
+     ]
+    },
+    {
+     "id": "s57b",
+     "capturedAt": "2024-08-02",
+     "text": "Avery Lin sold Ferrule Cabin to Tomas Varga in July, keeping only the canoe that was stored in its shed.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ferrule-cabin",
+       "mention": "Ferrule Cabin",
+       "type": "Place"
+      },
+      {
+       "id": "tomas",
+       "mention": "Tomas Varga",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "ferrule-cabin",
+       "status": "ended",
+       "valid": "/2024-07"
+      },
+      {
+       "from": "tomas",
+       "type": "owns",
+       "to": "ferrule-cabin",
+       "status": "holds",
+       "valid": "2024-07/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "July",
+       "value": "2024-07"
+      }
+     ],
+     "supersedes": {
+      "s57a": "update"
+     }
+    },
+    {
+     "id": "s57c",
+     "capturedAt": "2024-09-15",
+     "text": "Avery Lin still owns Ferrule Cabin, because the July sale to Tomas Varga fell through before the paperwork closed.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "ferrule-cabin",
+       "mention": "Ferrule Cabin",
+       "type": "Place"
+      },
+      {
+       "id": "tomas",
+       "mention": "Tomas Varga",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "ferrule-cabin",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "July",
+       "value": "2024-07"
+      }
+     ],
+     "supersedes": {
+      "s57b": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2024-01-01",
+     "after": "s57a",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2024-08-02",
+     "before": "s57c",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2024-08-02",
+     "after": "s57c",
+     "truth": "YES"
+    },
+    {
+     "from": "tomas",
+     "type": "owns",
+     "to": "ferrule-cabin",
+     "d": "2024-08-02",
+     "after": "s57b",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s58",
+   "tags": [
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s58a",
+     "capturedAt": "2025-11-03",
+     "text": "Avery Lin works on Project Bluefin with Tomas Varga, mostly on the billing export and its reconciliation job.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bluefin",
+       "mention": "Project Bluefin",
+       "type": "Project"
+      },
+      {
+       "id": "tomas",
+       "mention": "Tomas Varga",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds"
+      },
+      {
+       "from": "tomas",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "holds"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s58b",
+     "capturedAt": "2026-05-20",
+     "text": "Avery Lin moved off Project Bluefin two months ago and now works on the Meridian Program with Ines Halloran.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "bluefin",
+       "mention": "Project Bluefin",
+       "type": "Project"
+      },
+      {
+       "id": "meridian",
+       "mention": "Meridian Program",
+       "type": "Project"
+      },
+      {
+       "id": "ines",
+       "mention": "Ines Halloran",
+       "type": "Person"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "bluefin",
+       "status": "ended",
+       "valid": "/2026-03~"
+      },
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds",
+       "valid": "2026-03~/.."
+      },
+      {
+       "from": "ines",
+       "type": "works_on",
+       "to": "meridian",
+       "status": "holds"
+      }
+     ],
+     "dates": [
+      {
+       "span": "two months ago",
+       "value": "2026-03~"
+      }
+     ],
+     "supersedes": {
+      "s58a": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2026-01-15",
+     "after": "s58a",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "bluefin",
+     "d": "2026-05-01",
+     "after": "s58b",
+     "truth": "NO"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "meridian",
+     "d": "2026-05-20",
+     "before": "s58b",
+     "truth": "UNKNOWN"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "meridian",
+     "d": "2026-05-20",
+     "after": "s58b",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s59",
+   "tags": [
+    "restatement",
+    "update"
+   ],
+   "memories": [
+    {
+     "id": "s59a",
+     "capturedAt": "2024-02-11",
+     "text": "Avery Lin has owned a Fernlight Router for three years and still runs the whole home network through it.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "fernlight",
+       "mention": "Fernlight Router",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "fernlight",
+       "status": "holds",
+       "valid": "2021~/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "for three years",
+       "value": "2021~"
+      }
+     ]
+    },
+    {
+     "id": "s59b",
+     "capturedAt": "2024-06-01",
+     "text": "Avery Lin bought the Fernlight Router back in 2021 and still owns it, with every home device connected through it.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "fernlight",
+       "mention": "Fernlight Router",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "fernlight",
+       "status": "holds",
+       "valid": "2021/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "2021",
+       "value": "2021"
+      }
+     ],
+     "supersedes": {
+      "s59a": "restatement"
+     }
+    },
+    {
+     "id": "s59c",
+     "capturedAt": "2025-03-14",
+     "text": "Avery Lin gave the Fernlight Router to Wren Castillo in February and replaced it with a new Sable Mesh system.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "fernlight",
+       "mention": "Fernlight Router",
+       "type": "System"
+      },
+      {
+       "id": "wren",
+       "mention": "Wren Castillo",
+       "type": "Person"
+      },
+      {
+       "id": "sable-mesh",
+       "mention": "Sable Mesh",
+       "type": "System"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "fernlight",
+       "status": "ended",
+       "valid": "/2025-02"
+      },
+      {
+       "from": "wren",
+       "type": "owns",
+       "to": "fernlight",
+       "status": "holds",
+       "valid": "2025-02/.."
+      },
+      {
+       "from": "operator",
+       "type": "owns",
+       "to": "sable-mesh",
+       "status": "holds",
+       "valid": "2025-02/.."
+      }
+     ],
+     "dates": [
+      {
+       "span": "February",
+       "value": "2025-02"
+      }
+     ],
+     "supersedes": {
+      "s59b": "update"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "fernlight",
+     "d": "2022-06-01",
+     "after": "s59b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "fernlight",
+     "d": "2024-12-01",
+     "before": "s59c",
+     "truth": "YES",
+     "assumed": true
+    },
+    {
+     "from": "operator",
+     "type": "owns",
+     "to": "fernlight",
+     "d": "2025-03-14",
+     "after": "s59c",
+     "truth": "NO"
+    },
+    {
+     "from": "wren",
+     "type": "owns",
+     "to": "fernlight",
+     "d": "2025-03-14",
+     "after": "s59c",
+     "truth": "YES"
+    }
+   ]
+  },
+  {
+   "id": "s60",
+   "tags": [
+    "correction"
+   ],
+   "memories": [
+    {
+     "id": "s60a",
+     "capturedAt": "2025-10-01",
+     "text": "Avery Lin works on the Tern Survey, a coastal bird count that Brightwell Labs runs from Marrow Bay.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "tern-survey",
+       "mention": "Tern Survey",
+       "type": "Project",
+       "aliases": [
+        "a coastal bird count"
+       ]
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      },
+      {
+       "id": "marrow-bay",
+       "mention": "Marrow Bay",
+       "type": "Place"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "tern-survey",
+       "status": "holds"
+      },
+      {
+       "from": "brightwell",
+       "type": "works_on",
+       "to": "tern-survey",
+       "status": "holds"
+      },
+      {
+       "from": "brightwell",
+       "type": "located_in",
+       "to": "marrow-bay",
+       "status": "holds"
+      }
+     ],
+     "dates": []
+    },
+    {
+     "id": "s60b",
+     "capturedAt": "2025-10-12",
+     "text": "Avery Lin has never worked on the Tern Survey and only proofread one report that Brightwell Labs published about it.",
+     "entities": [
+      {
+       "id": "operator",
+       "mention": "Avery Lin",
+       "type": "Person"
+      },
+      {
+       "id": "tern-survey",
+       "mention": "Tern Survey",
+       "type": "Project"
+      },
+      {
+       "id": "brightwell",
+       "mention": "Brightwell Labs",
+       "type": "Organization"
+      }
+     ],
+     "relations": [
+      {
+       "from": "operator",
+       "type": "works_on",
+       "to": "tern-survey",
+       "status": "denied",
+       "valid": "../2025-10-12"
+      }
+     ],
+     "dates": [],
+     "supersedes": {
+      "s60a": "correction"
+     }
+    }
+   ],
+   "probes": [
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "tern-survey",
+     "d": "2025-10-01",
+     "before": "s60b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "tern-survey",
+     "d": "2025-10-01",
+     "after": "s60b",
+     "truth": "NO"
+    },
+    {
+     "from": "brightwell",
+     "type": "located_in",
+     "to": "marrow-bay",
+     "d": "2025-10-01",
+     "before": "s60b",
+     "truth": "YES"
+    },
+    {
+     "from": "operator",
+     "type": "works_on",
+     "to": "tern-survey",
+     "d": "2025-09-01",
+     "after": "s60b",
+     "truth": "NO"
+    }
+   ]
+  }
+ ]
+}
