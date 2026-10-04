@@ -32,7 +32,7 @@ Recent history on this branch:
 
 # COMMIT
 
-Commit on this branch following AGENTS.md's commit conventions, with the ticket key in the subject. When the ticket asks for a decision to be made or recorded, make it and write it in the commit body as a line starting `Decision:`; the harness records it on the ticket.
+Commit on this branch following AGENTS.md's commit conventions, with the ticket key in the subject. When the ticket asks for a decision to be made or recorded, make it and write it in the commit body as a line starting `Decision:`; the harness records it on the ticket. When the ticket asks you to verify something beyond the tests you commit (a check that a test fails against broken code, a measurement, a command's output), write each check and its result in the commit body: the reviewer and the brief see only the diff and the commit messages, so a check recorded nowhere else counts as not done.
 
 Do not push. Do not call Jira, GitHub or any other tracker. Do not contact anything on `host.docker.internal`.
 
