@@ -411,12 +411,13 @@ class GraphEvalHarnessTest extends UnitTest {
     }
 
     @Test
-    void theCommittedSetHasNoTrapSetAndSoCertifiesNothing() throws Exception {
+    void theCommittedTrapSetIsTooSmallToCertifyAlone() throws Exception {
         var cases = committed();
         var model = run(cases, gold(cases)).models().getFirst();
         for (var run : model.runs()) {
             assertNull(run.walk().threshold());
-            assertTrue(String.valueOf(run.walk().failure()).contains("(0 violations of 0)"), run.walk().failure());
+            // 9 ended, 1 denied and 7 unasserted labels (JCLAW-1373): even zero violations of 17 bounds above 0.05.
+            assertTrue(String.valueOf(run.walk().failure()).contains("(0 violations of 17)"), run.walk().failure());
         }
         assertNull(model.certification().threshold());
     }
