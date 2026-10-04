@@ -370,9 +370,4 @@ public final class GraphEvalScorer {
         }
         return List.copyOf(out.values());
     }
-
-    /** {@code wrong} keeping only the records of kinds in {@code kinds}. */
-    public static List<WrongRecord> ofKinds(List<WrongRecord> wrong, Set<String> kinds) {
-        return wrong.stream().filter(w -> kinds.contains(w.kind())).toList();
-    }
 }

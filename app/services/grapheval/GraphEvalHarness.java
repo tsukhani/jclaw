@@ -38,12 +38,15 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.function.DoubleFunction;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
 /**
@@ -340,7 +343,7 @@ public final class GraphEvalHarness {
      * One run's class walks at the base threshold {@link ExtractionPipeline#KEPT}: status, then time with status at
      * its walked threshold, then negation with both.
      */
-    static List<ClassWalk> classWalks(List<Case> cases, List<CaseRun> e2e, java.util.Set<String> symmetric) {
+    static List<ClassWalk> classWalks(List<Case> cases, List<CaseRun> e2e, Set<String> symmetric) {
         var status = classWalk(GraphEvalScorer.STATUS, cases, e2e, symmetric,
                 t -> new Statements.Classes(t, null, null, null), GraphEvalScorer.Point::status);
         var time = classWalk(GraphEvalScorer.TIME, cases, e2e, symmetric,
@@ -351,9 +354,9 @@ public final class GraphEvalHarness {
         return List.of(status, time, negation);
     }
 
-    private static ClassWalk classWalk(String name, List<Case> cases, List<CaseRun> e2e, java.util.Set<String> symmetric,
-                                       java.util.function.DoubleFunction<Statements.Classes> at,
-                                       java.util.function.Function<Point, GraphEvalScorer.ClassTally> tally) {
+    private static ClassWalk classWalk(String name, List<Case> cases, List<CaseRun> e2e, Set<String> symmetric,
+                                       DoubleFunction<Statements.Classes> at,
+                                       Function<Point, GraphEvalScorer.ClassTally> tally) {
         var steps = new ArrayList<ClassStep>();
         for (var t : GraphEvalScorer.THRESHOLDS) {
             var c = tally.apply(GraphEvalScorer.score(cases, e2e, symmetric, ExtractionPipeline.KEPT, at.apply(t))
@@ -399,7 +402,7 @@ public final class GraphEvalHarness {
     }
 
     /** One run's counts at base threshold {@code t} and {@code config}. Counts only: no id, text or span. */
-    private static Counts counts(List<Case> cases, RunData d, java.util.Set<String> symmetric, double t,
+    private static Counts counts(List<Case> cases, RunData d, Set<String> symmetric, double t,
                                  Statements.Classes config, List<ClassWalk> walks) {
         var point = GraphEvalScorer.score(cases, d.e2e(), symmetric, t, config).point();
         var questions = new TreeMap<String, Integer>();
@@ -415,7 +418,8 @@ public final class GraphEvalHarness {
             var tally = switch (w.name()) {
                 case GraphEvalScorer.STATUS -> point.status();
                 case GraphEvalScorer.TIME -> point.time();
-                default -> point.negation();
+                case GraphEvalScorer.NEGATIVE -> point.negation();
+                default -> throw new IllegalStateException("no tally for class " + w.name());
             };
             classes.add(new ClassAt(w.name(), w.state(), tally.n(), tally.wrong(),
                     Certifier.upperBound(tally.wrong(), tally.n())));
@@ -448,7 +452,7 @@ public final class GraphEvalHarness {
      * The base wrong share reweighted over {@link #STRATA} and the rest: a case counts in the first stratum tag it
      * carries; a stratum with no cases, or nothing written, drops out and the other weights are rescaled.
      */
-    static @Nullable Double reweighted(List<Case> cases, List<CaseRun> e2e, java.util.Set<String> symmetric, double t,
+    static @Nullable Double reweighted(List<Case> cases, List<CaseRun> e2e, Set<String> symmetric, double t,
                                        Statements.Classes config) {
         var groups = new ArrayList<List<Case>>();
         for (int i = 0; i <= STRATA.size(); i++) groups.add(new ArrayList<>());

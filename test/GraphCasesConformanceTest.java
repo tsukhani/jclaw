@@ -413,6 +413,9 @@ class GraphCasesConformanceTest extends UnitTest {
         }, "takes no 'valid'");
         assertEquals("2019/..", parsed("c001", first -> relation(first, 0).addProperty("valid", "2019/.."))
                 .relations().getFirst().valid());
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> parseEdited("c011", c -> relation(c, 0).addProperty("valid", "2019/..")));
+        assertTrue(e.getMessage().endsWith("takes no 'valid'"), "a holds from an Event: " + e.getMessage());
     }
 
     @Test
@@ -450,6 +453,11 @@ class GraphCasesConformanceTest extends UnitTest {
         assertRefused(first -> entity(first, 1).addProperty("occurs", "2026"), "only an Event occurs");
         assertEquals("2027-10", parsed("c011", c -> entity(c, 2).addProperty("occurs", "2027-10"))
                 .entity("quillon").occurs(), "an occurs the text does not support still parses");
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> parseEdited("c011", c -> entity(c, 2).addProperty("occurs", "2027/..")));
+        assertTrue(e.getMessage().endsWith("'occurs' is a date or a closed interval"), e.getMessage());
+        assertEquals("2027-10/2027-11", parsed("c011", c -> entity(c, 2).addProperty("occurs", "2027-10/2027-11"))
+                .entity("quillon").occurs(), "a closed interval of two dates parses");
     }
 
     @Test

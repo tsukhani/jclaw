@@ -142,14 +142,14 @@ public final class Agreement {
             matchedEntities += match.size();
 
             var gold = new HashMap<List<String>, Relation>();
-            a.relations().forEach(r -> gold.putIfAbsent(key(r.from(), r.type(), r.to(), symmetric), r));
+            a.relations().forEach(r -> gold.putIfAbsent(key(r.from(), r.type(), r.to(), r.denied(), symmetric), r));
             firstRelations += gold.size();
             var seen = new HashSet<List<String>>();
             for (var r : b.relations()) {
                 var from = match.get(r.from());
                 var to = match.get(r.to());
                 var k = from == null || to == null ? List.of(r.from(), r.type(), r.to(), "unmatched")
-                        : key(from, r.type(), to, symmetric);
+                        : key(from, r.type(), to, r.denied(), symmetric);
                 if (!seen.add(k)) continue;
                 secondRelations++;
                 var f = gold.get(k);
@@ -201,9 +201,11 @@ public final class Agreement {
                 || (firstMention != null && second.answersTo(firstMention));
     }
 
-    private static List<String> key(String from, String type, String to, Set<String> symmetric) {
-        if (symmetric.contains(type) && from.compareTo(to) > 0) return List.of(to, type, from);
-        return List.of(from, type, to);
+    /** A positive and a denial of one type on one pair are distinct items. */
+    private static List<String> key(String from, String type, String to, boolean denied, Set<String> symmetric) {
+        var polarity = denied ? GraphCases.DENIED : "positive";
+        if (symmetric.contains(type) && from.compareTo(to) > 0) return List.of(to, type, from, polarity);
+        return List.of(from, type, to, polarity);
     }
 
     private static @Nullable Double f1(int matched, int first, int second) {

@@ -155,6 +155,25 @@ class AgreementTest extends UnitTest {
     }
 
     @Test
+    void aPositiveAndADenialOfOneTypeOnOnePairAreTwoItems() {
+        var text = "The user used Kestrel CI until 2019, does not use it now, and works at Harborlight Analytics.";
+        var entities = List.of(Entity.of("operator", "The user", "Person"),
+                Entity.of("kestrel", "Kestrel CI", "System"),
+                Entity.of("harborlight", "Harborlight Analytics", "Organization"));
+        var ended = new Relation("operator", "uses", "kestrel", GraphCases.ENDED, null, null, false);
+        var denied = new Relation("operator", "uses", "kestrel", GraphCases.DENIED, null, null, false);
+        var both = new Case("x", List.of("plain"), text, entities, List.of(ended, denied), List.of());
+        var same = Agreement.compare(List.of(both), List.of(both), SYMMETRIC);
+        assertEquals(1.0, same.relationF1());
+        assertEquals(1.0, same.statusKappa());
+
+        var first = new Case("x", List.of("plain"), text, entities,
+                List.of(ended, denied, Relation.of("operator", "works_at", "harborlight")), List.of());
+        var missed = Agreement.compare(List.of(first), List.of(both), SYMMETRIC);
+        assertEquals(2.0 * 2 / (3 + 2), missed.relationF1(), 1e-9, "both uses triples count on each side");
+    }
+
+    @Test
     void secondLabelsThatPredateV3GiveAnIncompleteResultWithTheReason() {
         var r = Agreement.Result.predatesV3("relation 0: missing status");
         assertFalse(r.complete());

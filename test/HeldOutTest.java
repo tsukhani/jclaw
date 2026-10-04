@@ -3,6 +3,7 @@ import com.google.gson.JsonParser;
 import memory.MemoryStoreFactory;
 import memory.ontology.OntologySchema;
 import models.Memory;
+import models.MemoryAuthorType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -154,7 +155,12 @@ class HeldOutTest extends UnitTest {
         }
         cases.set(1, labelled);
         Files.writeString(file, root.toString());
-        assertEquals(1, HeldOut.load(file, OntologySchema.seed()).cases().size(), "the case as sampled loads");
+        var loaded = HeldOut.load(file, OntologySchema.seed()).cases();
+        assertEquals(1, loaded.size(), "the case as sampled loads");
+        assertNull(loaded.getFirst().authorType(), "unattributed loads as no author type");
+        labelled.addProperty("authorType", "guest_turn");
+        Files.writeString(file, root.toString());
+        assertEquals(MemoryAuthorType.GUEST_TURN, HeldOut.load(file, OntologySchema.seed()).cases().getFirst().authorType());
     }
 
     @Test

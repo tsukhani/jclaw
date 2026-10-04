@@ -13,6 +13,8 @@ models selected in Settings. A hosted model such as `jev-latest` is refused with
 The set is format v3. Every level is strict: a key not listed here is refused, at the root as
 `graph cases: unknown key '<k>'` and below it as `case <id>: unknown key '<k>'`.
 
+An illustrative case, not one in the committed set:
+
 ```json
 {"userMd": "Name: Avery Lin", "capturedAt": "2026-02-15",
  "cases": [
@@ -261,8 +263,9 @@ The walk runs from 0.95 down and stops at the first threshold that fails; `t*` i
 reached. So a model whose recall at 0.95 is under the floor certifies at nothing, by design.
 
 Every model carries a `certificate`: `t*`, each class's threshold, state, n, k and bound, and
-the `schema` and `extraction` stamps. `Certifier.check` voids it when either stamp differs
-from the running one (`schema stamp v3@… differs from running v3@…`).
+the `schema` and `extraction` stamps. The run itself checks neither: a consumer of the
+certificate calls `Certifier.check`, which voids it when either stamp differs from the running
+one (`schema stamp v3@… differs from running v3@…`).
 
 A run with any failed decision (a timeout, a request too large for the model's context)
 certifies nowhere: what it would have written is unknown. Every report stamps `extraction: x@…`
@@ -304,8 +307,9 @@ coverage (gold timeable relations written with a status), date-finder recall, no
 valence accuracy, the noise rate, the rule-written records left out, and, as information, the
 base wrong share reweighted by stratum (`negated` 11.5%, `unasserted` 10.7%, `dated` 11%, the
 rest 66.8%, each case in the first it carries; an empty stratum drops out and the rest are
-rescaled). The held-out report adds cue recall (gold denials whose memory has a negation
-cue), the time error and the valence error, as information.
+rescaled), the time error and the valence error. Every report also carries cue recall, a
+property of the labels rather than the run: the share of gold denials whose memory has a
+negation cue.
 
 ## Second labels and adjudications
 

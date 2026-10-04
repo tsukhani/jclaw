@@ -4,6 +4,7 @@ import memory.TemporalExpressions;
 import memory.ontology.EdtfInterval;
 import memory.ontology.OntologySchema;
 import models.Memory;
+import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,7 +32,9 @@ import services.grapheval.StageScorer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -389,7 +392,19 @@ class GraphEvalHarnessTest extends UnitTest {
             }
             var bottom = run.grid().getLast();
             assertEquals(0, bottom.wrong(), bottom.toString());
+            assertTrue(bottom.status().n() > 0, "the grid writes status values: " + bottom.status());
+            assertEquals(1.0, s.status().rate(), "status " + s.status());
+            assertEquals(0.0, s.vetoRate().rate(), "veto " + s.vetoRate());
+            var status = run.classWalks().getFirst();
+            assertEquals(GraphEvalScorer.STATUS, status.name());
+            assertNotEquals(Certifier.DISABLED, status.state(), status.toString());
+            assertNotNull(status.threshold(), status.toString());
+            assertEquals(0, status.k(), status.toString());
         }
+        var certificate = model.certificate();
+        assertEquals(SCHEMA.fingerprint(), certificate.schema());
+        assertEquals(ExtractionPipeline.fingerprint(SCHEMA), certificate.extraction());
+        assertNotNull(certificate.classes().getFirst().threshold(), certificate.toString());
         assertEquals(Certifier.PENDING_AGREEMENT, model.certification().status(), model.certification().reasons().toString());
         assertEquals(0.50, model.certification().threshold());
         assertFalse(report.agreement().complete());
@@ -422,6 +437,42 @@ class GraphEvalHarnessTest extends UnitTest {
         assertEquals(Agreement.Result.PREDATES_V3 + "case s1: relation has no 'status'", report.agreement().reason());
         var certification = report.models().getFirst().certification();
         assertEquals(Certifier.PENDING_AGREEMENT, certification.status(), certification.reasons().toString());
+    }
+
+    @Test
+    void aGoldDeciderAnswersTheGoldFedQualifierStagesRight() {
+        var text = "Avery Lin has worked at Harborlight Analytics since 2019, does not use Kestrel CI, "
+                + "and goes to the Fernhill Summit in March.";
+        var c = new Case("q1", List.of("plain", "dated", "negated"), text,
+                List.of(GraphCases.Entity.of("operator", "Avery Lin", "Person"),
+                        GraphCases.Entity.of("harborlight", "Harborlight Analytics", "Organization"),
+                        GraphCases.Entity.of("kestrel", "Kestrel CI", "System"),
+                        new GraphCases.Entity("summit", "Fernhill Summit", "Event", List.of(), false, false, "2026-03")),
+                List.of(new GraphCases.Relation("operator", "works_at", "harborlight", GraphCases.HOLDS, "2019/..",
+                                null, false),
+                        new GraphCases.Relation("operator", "uses", "kestrel", GraphCases.DENIED, null, null, false)),
+                List.of(), LocalDate.of(2026, 2, 15),
+                List.of(new GraphCases.DateLabel("2019", "2019"), new GraphCases.DateLabel("March", "2026-03")));
+        for (var run : run(List.of(c), gold(List.of(c))).models().getFirst().runs()) {
+            var s = run.stages();
+            for (var ratio : Map.of("tense", s.tense(), "occurs", s.occurs(), "slot", s.slot(),
+                    "negationYes", s.negationYes()).entrySet()) {
+                assertTrue(ratio.getValue().total() > 0, ratio.getKey() + " is scored");
+                assertEquals(1.0, ratio.getValue().rate(), ratio.getKey() + " " + ratio.getValue());
+            }
+        }
+    }
+
+    @Test
+    void theCaseVoiceIsTheGuestsOnAGuestCaseAndAHeldCaseKeepsItsOwn() {
+        var owner = new Case("v1", List.of("plain"), "Avery Lin uses Kestrel CI.", List.of(), List.of(), List.of());
+        var guest = new Case("v2", List.of("guest"), "A guest uses Kestrel CI.", List.of(), List.of(), List.of());
+        assertEquals(MemoryAuthorType.HUMAN_TURN, GraphEvalHarness.inputs(owner, null, false, null).authorType());
+        assertEquals(MemoryAuthorType.GUEST_TURN, GraphEvalHarness.inputs(guest, null, false, null).authorType());
+        for (var author : Arrays.asList(MemoryAuthorType.GUEST_TURN, null)) {
+            var held = new HeldOut.HeldCase(42L, owner, author);
+            assertEquals(author, GraphEvalHarness.inputs(owner, null, false, held).authorType());
+        }
     }
 
     @Test
