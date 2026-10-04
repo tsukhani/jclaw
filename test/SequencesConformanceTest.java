@@ -137,6 +137,19 @@ class SequencesConformanceTest extends UnitTest {
         refused(d -> chain(d).addProperty("extra", 1), "c1", "extra");
         refused(d -> memory(d, 1).addProperty("extra", 1), "c1", "m2", "extra");
         refused(d -> probe(d).addProperty("extra", 1), "c1", "probe #0", "extra");
+        refused(d -> memory(d, 1).getAsJsonArray("entities").get(0).getAsJsonObject().addProperty("extra", 1),
+                "c1", "m2", "extra");
+        refused(d -> memory(d, 1).getAsJsonArray("relations").get(0).getAsJsonObject().addProperty("extra", 1),
+                "c1", "m2", "extra");
+        refused(d -> {
+            var date = new JsonObject();
+            date.addProperty("span", "Kestrel");
+            date.addProperty("value", "2025-01");
+            date.addProperty("extra", 1);
+            var dates = new JsonArray();
+            dates.add(date);
+            memory(d, 1).add("dates", dates);
+        }, "c1", "m2", "extra");
     }
 
     @Test

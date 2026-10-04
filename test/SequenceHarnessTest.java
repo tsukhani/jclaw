@@ -319,5 +319,11 @@ class SequenceHarnessTest extends UnitTest {
         assertEquals(ExtractionPipeline.fingerprint(SCHEMA), report.extraction());
         assertEquals(SequenceHarness.SUPPLIED_SOURCE, report.configurationSource());
         assertEquals(set.chains().size(), report.chains());
+
+        var defaulted = SequenceHarness.run(set, SCHEMA, List.of(new DecisionModel("tev1",
+                gold(set, new CopyOnWriteArrayList<>()))), 1, 1, Configuration.defaultFor(SCHEMA), true,
+                EvalProgress.none());
+        assertEquals(SequenceHarness.DEFAULT_SOURCE, defaulted.configurationSource());
+        assertTrue(GsonHolder.GSON.toJson(defaulted).contains("\"configurationSource\":\"default\""));
     }
 }

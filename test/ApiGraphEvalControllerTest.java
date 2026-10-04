@@ -127,6 +127,9 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
         assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"classes\":{\"status\":{\"state\":\"maybe\"}}}}",
                 "state must be certified, provisional or disabled");
         assertRefusedWithoutAgent(sequences + "[1]}", "configuration must be an object");
+        assertRefusedWithoutAgent(sequences + "{\"terms\":1.2}}", "must be in [0, 1]");
+        assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"classes\":{\"time\":{\"state\":\"certified\"}}}}",
+                "needs a threshold");
     }
 
     @Test
