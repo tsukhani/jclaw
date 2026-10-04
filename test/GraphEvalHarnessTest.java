@@ -352,7 +352,9 @@ class GraphEvalHarnessTest extends UnitTest {
         var stored = new AtomicBoolean();
         var golden = gold(cases);
         var report = run(cases, request -> {
-            if (!stored.get()) stored.set(Tx.run(() -> Memory.findByAgent(agentId)).size() == cases.size());
+            if (!stored.get()) {
+                stored.set(Tx.run(() -> Memory.findByAgent(agentId, cases.size() + 1)).size() == cases.size());
+            }
             return golden.decide(request);
         });
 
@@ -411,15 +413,16 @@ class GraphEvalHarnessTest extends UnitTest {
     }
 
     @Test
-    void theCommittedTrapSetIsTooSmallToCertifyAlone() throws Exception {
+    void theCommittedTrapSetNoLongerFailsG_trapOnItsSize() throws Exception {
         var cases = committed();
         var model = run(cases, gold(cases)).models().getFirst();
         for (var run : model.runs()) {
-            assertNull(run.walk().threshold());
-            // 9 ended, 1 denied and 7 unasserted labels (JCLAW-1373): even zero violations of 17 bounds above 0.05.
-            assertTrue(String.valueOf(run.walk().failure()).contains("(0 violations of 17)"), run.walk().failure());
+            assertFalse(String.valueOf(run.walk().failure()).contains("trap upper bound"), run.walk().failure());
+            var first = run.walk().steps().getFirst();
+            // 76 ended, 102 denied and 62 unasserted labels (JCLAW-1376): zero violations now bound below 0.05.
+            assertEquals(240, first.trapGold());
+            assertEquals(0, first.trapViolations());
         }
-        assertNull(model.certification().threshold());
     }
 
     @Test

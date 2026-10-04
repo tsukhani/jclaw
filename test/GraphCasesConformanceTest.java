@@ -20,9 +20,12 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.function.BiPredicate;
 import java.util.function.Consumer;
+import java.util.function.IntFunction;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
+import java.util.stream.Stream;
 
 /**
  * JCLAW-1356, JCLAW-1358: the committed v2 cases load against the seed ontology and meet every composition target, a
@@ -33,6 +36,14 @@ class GraphCasesConformanceTest extends UnitTest {
     private static final OntologySchema SCHEMA = OntologySchema.seed();
     private static final Pattern URL = Pattern.compile("https?://[^\\s,]+");
     private static final String OWNER = "Avery Lin";
+    private static final int CASES = 317;
+    private static final List<String> TRAP_TAGS = Stream.concat(GraphCases.HARD_NEGATIVE_TAGS.stream(),
+            Stream.of(GraphCases.ENDED, GraphCases.NEGATED, GraphCases.UNASSERTED)).toList();
+    private static final List<String> SHAPES = List.of("year", "month", "day", "season", "quarter", "interval",
+            "approximate", "null", "never");
+    private static final List<Pattern> SLASHLESS = List.of(Pattern.compile("\\d{4}"),
+            Pattern.compile("\\d{4}-(0[1-9]|1[0-2])"), Pattern.compile("\\d{4}-\\d{2}-\\d{2}"),
+            Pattern.compile("\\d{4}-2[1-4]"), Pattern.compile("\\d{4}-3[3-6]"));
 
     private static String tracked() throws Exception {
         return Files.readString(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH));
@@ -46,7 +57,7 @@ class GraphCasesConformanceTest extends UnitTest {
     static List<String> shortfalls(List<Case> cases) {
         var out = new ArrayList<String>();
         int n = cases.size();
-        if (n < 120) out.add("at least 120 cases");
+        if (n < CASES) out.add("at least " + CASES + " cases");
         long user = cases.stream().filter(c -> c.text().startsWith("The user")).count();
         if (user * 100 < 12L * n || user * 100 > 17L * n) out.add("12-17% begin \"The user\"");
         long owner = cases.stream().filter(c -> c.text().startsWith(OWNER)).count();
@@ -60,11 +71,30 @@ class GraphCasesConformanceTest extends UnitTest {
         }
         double words = cases.stream().mapToInt(c -> c.text().split("\\s+").length).average().orElse(0);
         if (words < 17 || words > 23) out.add("mean length 17-23 words");
-        for (var tag : GraphCases.HARD_NEGATIVE_TAGS) {
-            if (cases.stream().filter(c -> c.tags().contains(tag)).count() < 12) out.add("at least 12 cases tagged " + tag);
+        for (var tag : Stream.concat(TRAP_TAGS.stream(), Stream.of(GraphCases.DATED)).toList()) {
+            if (tagged(cases, tag) < 12) out.add("at least 12 cases tagged " + tag);
         }
-        long hard = cases.stream().filter(c -> c.tags().stream().anyMatch(GraphCases.HARD_NEGATIVE_TAGS::contains)).count();
+        if (tagged(cases, GraphCases.GUEST_ABOUT_OWNER) < 4) out.add("at least 4 guest-about-owner cases");
+        long hard = cases.stream().filter(c -> c.tags().stream().anyMatch(TRAP_TAGS::contains)).count();
         if (hard * 2 < n) out.add("hard-negative cases at least 50%");
+        if (relations(cases, (c, r) -> !r.noise() && c.scoredStatus(r, SCHEMA).equals(GraphCases.ENDED)) < 75) {
+            out.add("at least 75 ended relations");
+        }
+        if (relations(cases, (c, r) -> r.status().equals(GraphCases.DENIED)) < 100) out.add("at least 100 denied relations");
+        if (relations(cases, (c, r) -> r.status().equals(GraphCases.UNASSERTED)) < 50) {
+            out.add("at least 50 unasserted relations");
+        }
+        long times = relations(cases, (c, r) -> r.valid() != null)
+                + cases.stream().flatMap(c -> c.entities().stream()).filter(e -> e.occurs() != null).count();
+        if (times < 105) out.add("at least 105 time values");
+        if (relations(cases, (c, r) -> r.valence() != null) < 35) out.add("at least 35 valence values");
+        var used = new HashSet<String>();
+        for (var c : cases) {
+            c.dates().forEach(d -> used.addAll(shapes(d.value())));
+            c.relations().stream().filter(r -> r.valid() != null).forEach(r -> used.addAll(shapes(r.valid())));
+            c.entities().stream().filter(e -> e.occurs() != null).forEach(e -> used.addAll(shapes(e.occurs())));
+        }
+        SHAPES.stream().filter(s -> !used.contains(s)).forEach(s -> out.add("date-value shape " + s));
         if (cases.stream().mapToInt(c -> GraphEvalScorer.gold(c, SCHEMA)).sum() < 420) out.add("at least 420 non-noise gold records");
         var types = new HashSet<String>();
         var relations = new HashSet<String>();
@@ -79,6 +109,31 @@ class GraphCasesConformanceTest extends UnitTest {
         if (!types.equals(SCHEMA.termTypes().keySet())) out.add("every term type");
         if (!relations.equals(SCHEMA.relations().keySet())) out.add("every relation");
         if (seenIn.values().stream().filter(k -> k > 1).count() < 10) out.add("entity ids recur across cases");
+        return out;
+    }
+
+    private static long tagged(List<Case> cases, String tag) {
+        return cases.stream().filter(c -> c.tags().contains(tag)).count();
+    }
+
+    private static long relations(List<Case> cases, BiPredicate<Case, Relation> kind) {
+        return cases.stream().mapToLong(c -> c.relations().stream().filter(r -> kind.test(c, r)).count()).sum();
+    }
+
+    /** The date-value shapes one label's syntax shows; a value both approximate and a year counts as both. */
+    static List<String> shapes(@Nullable String value) {
+        if (value == null) return List.of("null");
+        if (value.startsWith("../")) return List.of("never");
+        var out = new ArrayList<String>();
+        if (value.contains("~")) out.add("approximate");
+        if (value.contains("/")) {
+            out.add("interval");
+            return out;
+        }
+        var bare = value.endsWith("~") ? value.substring(0, value.length() - 1) : value;
+        for (int i = 0; i < SLASHLESS.size(); i++) {
+            if (SLASHLESS.get(i).matcher(bare).matches()) out.add(SHAPES.get(i));
+        }
         return out;
     }
 
@@ -105,7 +160,7 @@ class GraphCasesConformanceTest extends UnitTest {
     @Test
     void aSetShortOfATargetFailsNamingIt() throws Exception {
         var cases = committed();
-        assertShort(cases.subList(0, 119), "at least 120 cases");
+        assertShort(cases.subList(0, CASES - 1), "at least " + CASES + " cases");
         assertShort(map(cases, c -> c.text().startsWith("The user") || c.text().startsWith(OWNER)
                 ? withText(c, "Someone" + c.text().substring(c.text().startsWith(OWNER) ? OWNER.length() : "The user".length()))
                 : c), "12-17% begin \"The user\"", "at least 60% begin \"" + OWNER + "\"",
@@ -130,25 +185,136 @@ class GraphCasesConformanceTest extends UnitTest {
                 .map(e -> e.operator() ? e : new Entity(c.id() + "-" + e.id(), e.mention(), e.type(), e.aliases(),
                         e.implicit(), e.noise())).toList(), c.relations(), c.negatives())),
                 "entity ids recur across cases");
+        for (var tag : List.of(GraphCases.ENDED, GraphCases.NEGATED, GraphCases.UNASSERTED, GraphCases.DATED)) {
+            assertShort(keepTagged(cases, tag, 0), "at least 12 cases tagged " + tag);
+        }
+        assertShort(keepTagged(cases, GraphCases.GUEST_ABOUT_OWNER, 0), "at least 4 guest-about-owner cases");
+        assertShort(keepRelations(cases, ENDED, 0), "at least 75 ended relations");
+        assertShort(keepRelations(cases, DENIED, 0), "at least 100 denied relations");
+        assertShort(keepRelations(cases, UNASSERTED, 0), "at least 50 unasserted relations");
+        assertShort(keepTimes(cases, 0), "at least 105 time values");
+        assertShort(keepValences(cases, 0), "at least 35 valence values");
+        assertShort(undated(cases), SHAPES.stream().map(s -> "date-value shape " + s).toArray(String[]::new));
+    }
+
+    private static final BiPredicate<Case, Relation> ENDED =
+            (c, r) -> !r.noise() && c.scoredStatus(r, SCHEMA).equals(GraphCases.ENDED);
+    private static final BiPredicate<Case, Relation> DENIED = (c, r) -> r.status().equals(GraphCases.DENIED);
+    private static final BiPredicate<Case, Relation> UNASSERTED = (c, r) -> r.status().equals(GraphCases.UNASSERTED);
+
+    @Test
+    void eachGoldFloorPassesAtItsEdgeAndFailsOneBelow() throws Exception {
+        var cases = committed();
+        assertEdge(k -> keepRelations(cases, ENDED, k), 75, "at least 75 ended relations");
+        assertEdge(k -> keepRelations(cases, DENIED, k), 100, "at least 100 denied relations");
+        assertEdge(k -> keepRelations(cases, UNASSERTED, k), 50, "at least 50 unasserted relations");
+        assertEdge(k -> keepTimes(cases, k), 105, "at least 105 time values");
+        assertEdge(k -> keepValences(cases, k), 35, "at least 35 valence values");
+    }
+
+    @Test
+    void eachStratumTagFloorPassesAtItsEdgeAndFailsOneBelow() throws Exception {
+        var cases = committed();
+        for (var tag : List.of(GraphCases.ENDED, GraphCases.NEGATED, GraphCases.UNASSERTED, GraphCases.DATED)) {
+            assertEdge(k -> keepTagged(cases, tag, k), 12, "at least 12 cases tagged " + tag);
+        }
+        assertEdge(k -> keepTagged(cases, GraphCases.GUEST_ABOUT_OWNER, k), 4, "at least 4 guest-about-owner cases");
+    }
+
+    @Test
+    void aMissingDateValueShapeIsNamedAlone() throws Exception {
+        var noQuarter = map(committed(), c -> new Case(c.id(), c.tags(), c.text(),
+                c.entities().stream().map(e -> e.occurs() != null && quarter(e.occurs()) ? withOccurs(e, null) : e)
+                        .toList(),
+                c.relations().stream().map(r -> r.valid() != null && quarter(r.valid())
+                        ? new Relation(r.from(), r.type(), r.to(), r.status(), null, r.valence(), r.noise()) : r).toList(),
+                c.negatives(), c.capturedAt(),
+                c.dates().stream().filter(d -> d.value() == null || !quarter(d.value())).toList()));
+        assertEquals(List.of("date-value shape quarter"),
+                shortfalls(noQuarter).stream().filter(s -> s.startsWith("date-value shape")).toList());
+    }
+
+    @Test
+    void aSetWithNoDateValuesNamesEveryShape() throws Exception {
+        assertEquals(SHAPES.stream().map(s -> "date-value shape " + s).toList(),
+                shortfalls(undated(committed())).stream().filter(s -> s.startsWith("date-value shape")).toList());
+    }
+
+    private static boolean quarter(String value) {
+        return shapes(value).contains("quarter");
+    }
+
+    private static void assertEdge(IntFunction<List<Case>> keep, int floor, String target) {
+        assertFalse(shortfalls(keep.apply(floor)).contains(target), target + " reported at " + floor);
+        assertShort(keep.apply(floor - 1), target);
+    }
+
+    /** {@code cases} keeping only the first {@code k} relations of one kind. */
+    private static List<Case> keepRelations(List<Case> cases, BiPredicate<Case, Relation> kind, int k) {
+        int[] seen = {0};
+        return map(cases, c -> withRelations(c, c.relations().stream()
+                .filter(r -> !kind.test(c, r) || seen[0]++ < k).toList()));
+    }
+
+    /** {@code cases} keeping only the first {@code k} time values, relation {@code valid} before entity {@code occurs}. */
+    private static List<Case> keepTimes(List<Case> cases, int k) {
+        int[] seen = {0};
+        return map(cases, c -> new Case(c.id(), c.tags(), c.text(),
+                c.entities(), c.relations().stream().map(r -> r.valid() == null || seen[0]++ < k ? r
+                        : new Relation(r.from(), r.type(), r.to(), r.status(), null, r.valence(), r.noise())).toList(),
+                c.negatives(), c.capturedAt(), c.dates()))
+                .stream().map(c -> new Case(c.id(), c.tags(), c.text(),
+                        c.entities().stream().map(e -> e.occurs() == null || seen[0]++ < k ? e : withOccurs(e, null))
+                                .toList(), c.relations(), c.negatives(), c.capturedAt(), c.dates())).toList();
+    }
+
+    /** {@code cases} keeping only the first {@code k} valence values. */
+    private static List<Case> keepValences(List<Case> cases, int k) {
+        int[] seen = {0};
+        return map(cases, c -> withRelations(c, c.relations().stream().map(r -> r.valence() == null || seen[0]++ < k
+                ? r : new Relation(r.from(), r.type(), r.to(), r.status(), r.valid(), null, r.noise())).toList()));
+    }
+
+    /** {@code cases} keeping {@code tag} on only the first {@code k} cases carrying it. */
+    private static List<Case> keepTagged(List<Case> cases, String tag, int k) {
+        int[] seen = {0};
+        return map(cases, c -> !c.tags().contains(tag) || seen[0]++ < k ? c
+                : withTags(c, c.tags().stream().filter(t -> !t.equals(tag)).toList()));
+    }
+
+    /** {@code cases} with no {@code dates} and every {@code valid} and {@code occurs} cleared. */
+    private static List<Case> undated(List<Case> cases) {
+        return map(cases, c -> new Case(c.id(), c.tags(), c.text(),
+                c.entities().stream().map(e -> withOccurs(e, null)).toList(),
+                c.relations().stream().map(r -> new Relation(r.from(), r.type(), r.to(), r.status(), null, r.valence(),
+                        r.noise())).toList(), c.negatives(), c.capturedAt(), List.of()));
+    }
+
+    private static Entity withOccurs(Entity e, @Nullable String occurs) {
+        return new Entity(e.id(), e.mention(), e.type(), e.aliases(), e.implicit(), e.noise(), occurs);
+    }
+
+    private static Case withRelations(Case c, List<Relation> relations) {
+        return new Case(c.id(), c.tags(), c.text(), c.entities(), relations, c.negatives(), c.capturedAt(), c.dates());
     }
 
     @Test
     void theUserBandFailsJustOutsideItAndPassesAtItsEdges() throws Exception {
         var cases = committed();
-        assertEquals(140, cases.size(), "the band edges below assume 140 cases");
-        assertShort(withUserOpeners(cases, 16), "12-17% begin \"The user\"");
-        assertFalse(shortfalls(withUserOpeners(cases, 17)).contains("12-17% begin \"The user\""));
-        assertFalse(shortfalls(withUserOpeners(cases, 23)).contains("12-17% begin \"The user\""));
-        assertShort(withUserOpeners(cases, 24), "12-17% begin \"The user\"");
+        assertEquals(CASES, cases.size(), "the band edges below assume 317 cases");
+        assertShort(withUserOpeners(cases, 38), "12-17% begin \"The user\"");
+        assertFalse(shortfalls(withUserOpeners(cases, 39)).contains("12-17% begin \"The user\""));
+        assertFalse(shortfalls(withUserOpeners(cases, 53)).contains("12-17% begin \"The user\""));
+        assertShort(withUserOpeners(cases, 54), "12-17% begin \"The user\"");
     }
 
     @Test
     void theOwnerShareFailsJustBelowSixtyPercentAndPassesAtIt() throws Exception {
         var cases = committed();
-        assertEquals(140, cases.size(), "84 owner openers is exactly 60% of 140");
+        assertEquals(CASES, cases.size(), "191 owner openers is the first count at or above 60% of 317");
         var target = "at least 60% begin \"" + OWNER + "\"";
-        assertFalse(shortfalls(withUserOpeners(cases, 31)).contains(target));
-        assertShort(withUserOpeners(cases, 32), target);
+        assertFalse(shortfalls(withUserOpeners(cases, 80)).contains(target));
+        assertShort(withUserOpeners(cases, 81), target);
     }
 
     @Test
@@ -255,7 +421,7 @@ class GraphCasesConformanceTest extends UnitTest {
 
         named.addProperty("text", "The user" + named.get("text").getAsString().substring("Avery".length()));
         entity(named, 0).addProperty("mention", "The user");
-        assertEquals(140, GraphCases.parse(root.toString(), SCHEMA).size());
+        assertEquals(CASES, GraphCases.parse(root.toString(), SCHEMA).size());
     }
 
     @Test
@@ -352,11 +518,11 @@ class GraphCasesConformanceTest extends UnitTest {
     }
 
     private static Case withText(Case c, String text) {
-        return new Case(c.id(), c.tags(), text, c.entities(), c.relations(), c.negatives());
+        return new Case(c.id(), c.tags(), text, c.entities(), c.relations(), c.negatives(), c.capturedAt(), c.dates());
     }
 
     private static Case withTags(Case c, List<String> tags) {
-        return new Case(c.id(), tags, c.text(), c.entities(), c.relations(), c.negatives());
+        return new Case(c.id(), tags, c.text(), c.entities(), c.relations(), c.negatives(), c.capturedAt(), c.dates());
     }
 
     private static JsonObject entity(JsonObject c, int i) {
