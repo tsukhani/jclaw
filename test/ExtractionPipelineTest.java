@@ -893,6 +893,18 @@ class ExtractionPipelineTest extends UnitTest {
         assertTrue(negation.subject().matches(".+ -[a-z_]+-> .+"), negation.subject());
     }
 
+    @Test
+    void negationIsNotAskedForARelationThatCannotBeDenied() {
+        var text = "Avery Lin doesn't use Osprey Dashboard and has views on jazz.";
+        var types = Map.of("Avery Lin", "Person", "Osprey Dashboard", "System", "jazz", "Topic");
+        var run = run(text, spans("Avery Lin", "Osprey Dashboard", "jazz"), scripted(types, Map.of()));
+        assertTrue(asked("r").stream().map(ExtractionPipelineTest::relationKey)
+                .anyMatch("Avery Lin holds_view_on jazz"::equals), "the view pair is related");
+        assertEquals(Set.of("Avery Lin -owns-> Osprey Dashboard", "Avery Lin -uses-> Osprey Dashboard"),
+                stage(run, ExtractionPipeline.NEGATION).stream().map(Decision::subject).collect(Collectors.toSet()),
+                "holds_view_on admits no denied status");
+    }
+
     private CaseRun works(double yes, double typing) {
         return run(TEXT, spans("Dana Reyes", "Harborlight Analytics"), scripted(Map.of("Dana Reyes", "Person",
                 "Harborlight Analytics", "Organization"), Map.of("Dana Reyes", typing,
@@ -962,24 +974,31 @@ class ExtractionPipelineTest extends UnitTest {
                 new ExtractionPipeline.Predecessor("m2", "The user plans the Meridian launch."),
                 new ExtractionPipeline.Predecessor("m3", "The user dropped the kickoff."));
         var lineageArrived = new CountDownLatch(1);
+        var overlapArrived = new CountDownLatch(1);
         var overlapWaited = new AtomicBoolean();
+        var lineageWaits = new CopyOnWriteArrayList<Boolean>();
         var answering = scripted(Map.of("lineage:The user dropped the kickoff.", ExtractionPipeline.CORRECTION),
                 Map.of());
         Decider decider = request -> {
             var keys = request.getAsJsonObject("questions").keySet();
-            if (keys.stream().anyMatch(k -> k.startsWith("l"))) lineageArrived.countDown();
-            if (keys.contains("o0")) {
-                try {
-                    overlapWaited.set(lineageArrived.await(10, TimeUnit.SECONDS));
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
+            try {
+                if (keys.stream().anyMatch(k -> k.startsWith("l"))) {
+                    lineageArrived.countDown();
+                    lineageWaits.add(overlapArrived.await(5, TimeUnit.SECONDS));
                 }
+                if (keys.contains("o0")) {
+                    overlapArrived.countDown();
+                    overlapWaited.set(lineageArrived.await(5, TimeUnit.SECONDS));
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
             }
             return answering.decide(request);
         };
         var inputs = Inputs.of(text, null, MemoryAuthorType.HUMAN_TURN, ANCHOR, predecessors, false);
         var run = ExtractionPipeline.run(SCHEMA, "m9", text, candidates, "tev1", decider, inputs);
         assertTrue(overlapWaited.get(), "the overlap request was in flight when a lineage request went out");
+        assertEquals(List.of(true, true, true), lineageWaits, "a lineage request was in flight when the overlap went out");
         var lineage = asked("l");
         assertEquals(3, lineage.size());
         assertEquals(3, run.questionsByStage().get(ExtractionPipeline.LINEAGE));
@@ -1174,9 +1193,23 @@ class ExtractionPipelineTest extends UnitTest {
                 ExtractionPipeline.slotQuestion(SCHEMA, "works_at", "X", "Y", TemporalExpressions.Kind.DAY, "D"),
                 ExtractionPipeline.slotQuestion(SCHEMA, "works_at", "X", "Y", TemporalExpressions.Kind.DURATION, "D"),
                 ExtractionPipeline.slotQuestion(SCHEMA, "works_at", "X", "Y", TemporalExpressions.Kind.RANGE, "D"),
+                ExtractionPipeline.relationQuestion(SCHEMA, "works_at", "Person", "X", "Y", owner),
                 ExtractionPipeline.relationQuestion(SCHEMA, "works_at", "Person", "X", "Y", guest),
                 ExtractionPipeline.relationQuestion(SCHEMA, "works_at", "Person", "X", "Y", ownerless))) {
             assertTrue(questions.contains(pair + expected), expected::toString);
+        }
+        assertTrue(questions.contains("kind_of Topic Topic "
+                + ExtractionPipeline.relationQuestion(SCHEMA, "kind_of", "Topic", "X", "Y", owner)));
+        assertTrue(questions.contains("holds_view_on Person Topic "
+                + ExtractionPipeline.relationQuestion(SCHEMA, "holds_view_on", "Person", "X", "Y", owner)));
+        // The overlap and term questions are private, so they are read back off the requests that carry them.
+        ExtractionPipeline.settle("XY", List.of(new Candidate("X", false, false, 0, 1),
+                new Candidate("Y", false, false, 0, 2)), "tev1", scripted(Map.of(), Map.of()));
+        ExtractionPipeline.type(SCHEMA, "X", List.of("X"), "tev1", scripted(Map.of(), Map.of()));
+        for (var expected : List.of(asked("o").getFirst(), asked("m").getFirst(),
+                ExtractionPipeline.tenseQuestion("D"), ExtractionPipeline.occursQuestion("E", "D"),
+                ExtractionPipeline.lineageQuestion())) {
+            assertTrue(questions.contains(expected.toString()), expected::toString);
         }
         assertNotEquals(ExtractionPipeline.statusQuestion(SCHEMA, "works_at", "X", "Y", owner).toString(),
                 ExtractionPipeline.statusQuestion(SCHEMA, "works_at", "X", "Y", ownerless).toString());

@@ -255,6 +255,12 @@ class CandidateGeneratorTest extends UnitTest {
     }
 
     @Test
+    void aSharedObjectKeepsTheFirstVerbsFrameWhenTheFavorableVerbComesFirst() {
+        var text = "Avery Lin loves Corvid Notes, but Dana Reyes hates Corvid Notes.";
+        assertFrame(text, "Corvid Notes", OntologyRecord.Valence.FAVORABLE, "Avery Lin");
+    }
+
+    @Test
     void aClaimedSeasonIsNeverACandidate() {
         var text = "Spring 2027 brings the Atlas Migration.";
         var claimed = TemporalExpressions.claimedSpans(text);

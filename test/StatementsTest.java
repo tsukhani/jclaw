@@ -318,6 +318,56 @@ class StatementsTest extends UnitTest {
                 0.80, AT_80).denials().isEmpty());
     }
 
+    private static final Classes TIME_AT_90 = new Classes(0.80, 0.90, 0.80, 0.80);
+
+    @Test
+    void anOccursNeverWritesAboveItsEventsTyping() {
+        var text = "The Lanternlight Gala is at the Larkspur Inn on 12 December 2026.";
+        var gala = CandidateGenerator.generate(text).stream().map(CandidateGenerator.Candidate::span)
+                .filter(s -> s.contains("Gala")).findFirst().orElseThrow();
+        var occurs = gala + " @ " + date(text);
+        var below = Statements.at(gala(Map.of(gala, 0.85, occurs, 0.95)), 0.80, TIME_AT_90);
+        var event = below.terms().stream().filter(t -> t.type().equals("Event")).findFirst().orElseThrow();
+        assertNull(event.occurs(), "an Event typed at 0.85 carries no 0.90 occurs");
+        var above = Statements.at(gala(Map.of(gala, 0.92, occurs, 0.95)), 0.80, TIME_AT_90);
+        assertEquals("2026-12-12", String.valueOf(above.terms().stream().filter(t -> t.type().equals("Event"))
+                .findFirst().orElseThrow().occurs()));
+    }
+
+    private Statements.Outcome startedInMarch(double tense) {
+        var text = "Avery Lin started at Harborlight Analytics in March.";
+        assertEquals("March", date(text));
+        var types = Map.of("Avery Lin", "Person", "Harborlight Analytics", "Organization");
+        var key = "Avery Lin works_at Harborlight Analytics";
+        var run = run(text, choices(types, Map.of("slot:March:" + key, ExtractionPipeline.FROM)), confidences(types,
+                Map.of(key, 0.95, "status:" + key, 0.95, "slot:March:" + key, 0.95, "tense:March", tense)));
+        return Statements.at(run, 0.80, TIME_AT_90);
+    }
+
+    @Test
+    void aValueReadThroughTheTenseQuestionNeverWritesAboveIt() {
+        assertNull(works(startedInMarch(0.85)).valid(), "a 0.85 tense cannot carry a 0.90 bound");
+        assertNotNull(works(startedInMarch(0.92)).valid());
+    }
+
+    private Statements.Outcome sinceAtStatus(double status) {
+        var text = "Avery Lin has worked at Harborlight Analytics since 2019.";
+        var span = date(text);
+        var types = Map.of("Avery Lin", "Person", "Harborlight Analytics", "Organization");
+        var key = "Avery Lin works_at Harborlight Analytics";
+        var run = run(text, choices(types, Map.of("slot:" + span + ":" + key, ExtractionPipeline.FROM)),
+                confidences(types, Map.of(key, 0.95, "status:" + key, status, "slot:" + span + ":" + key, 0.95)));
+        return Statements.at(run, 0.80, TIME_AT_90);
+    }
+
+    @Test
+    void aSlotNeverWritesAboveItsRelationsStatus() {
+        var below = works(sinceAtStatus(0.85));
+        assertEquals(OntologyRecord.Status.HOLDS, below.status());
+        assertNull(below.valid(), "a 0.85 status cannot carry a 0.90 bound under a 0.95 relation");
+        assertEquals("2019/..", valid(works(sinceAtStatus(0.92))));
+    }
+
     // --- Consistency ---
 
     private Statements.Outcome works(String text, String status, Map<String, String> slots, Map<String, Double> conf) {
@@ -350,6 +400,20 @@ class StatementsTest extends UnitTest {
         assertNull(works(out).status());
         assertNull(works(out).valid());
         assertEquals(1, out.conflict());
+    }
+
+    @Test
+    void anEndedRelationThatEndsAfterTheAnchorLosesItsStatus() {
+        var out = works("Avery Lin worked at Harborlight Analytics until 2028.", ExtractionPipeline.ENDED,
+                Map.of("2028", ExtractionPipeline.TO), Map.of());
+        assertNull(works(out).status());
+        assertNull(works(out).valid());
+        assertEquals(1, out.conflict());
+        var thisYear = works("Avery Lin worked at Harborlight Analytics until 2026.", ExtractionPipeline.ENDED,
+                Map.of("2026", ExtractionPipeline.TO), Map.of());
+        assertEquals(OntologyRecord.Status.ENDED, works(thisYear).status());
+        assertEquals("/2026", valid(works(thisYear)));
+        assertEquals(0, thisYear.conflict());
     }
 
     @Test

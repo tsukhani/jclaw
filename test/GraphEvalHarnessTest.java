@@ -503,6 +503,7 @@ class GraphEvalHarnessTest extends UnitTest {
                 assertFalse(json.contains(secret), "the report names " + secret + ": " + json);
             }
             assertEquals(1, report.cases());
+            assertEquals(ExtractionPipeline.fingerprint(SCHEMA), report.extraction());
             assertEquals(1, report.unlabelled());
             assertEquals(new GraphEvalHarness.HeldOutIntegrity(1, 1, 1), report.memoryIntegrity());
             assertNull(report.models().getFirst().walk().threshold(), "five records cannot bound the wrong share");
