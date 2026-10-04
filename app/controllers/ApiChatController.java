@@ -592,7 +592,7 @@ public class ApiChatController extends Controller {
                     // coalescing is disabled (buffers stay empty).
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
-                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get());
+                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), cbRef.get());
                     close.finished().set(true);
                     sse.send(Map.of("type", "complete", KEY_CONTENT, content));
                     sse.close();
@@ -600,7 +600,7 @@ public class ApiChatController extends Controller {
                 error -> {
                     tokenCoalescer.drain();
                     reasoningCoalescer.drain();
-                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get());
+                    SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), cbRef.get());
                     close.finished().set(true);
                     // JCLAW-1133: the raw throwable text goes only to the EventLogger line below.
                     sse.send(webErrorFrame(error));
@@ -614,7 +614,7 @@ public class ApiChatController extends Controller {
                 // It still fires on the SSE-close path (where onComplete/onError do
                 // not), so JCLAW-661 uses it to drop the coding-run bridge for a
                 // tab that closed mid-turn.
-                () -> SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get())
+                () -> SubagentSpawnTool.unregisterChatCallbacks(convIdRef.get(), cbRef.get())
         );
         cbRef.set(callbacks);
         return callbacks;

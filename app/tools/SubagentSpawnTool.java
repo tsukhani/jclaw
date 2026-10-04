@@ -729,8 +729,13 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
     /** JCLAW-661: drop the chat-turn callbacks for a conversation (turn closed).
      *  Facade delegator for {@link controllers.ApiChatController}. */
-    public static void unregisterChatCallbacks(@Nullable Long conversationId) {
-        SubagentChatBridge.unregisterChatCallbacks(conversationId);
+    public static void unregisterChatCallbacks(@Nullable Long conversationId, AgentRunner.@Nullable StreamingCallbacks cb) {
+        SubagentChatBridge.unregisterChatCallbacks(conversationId, cb);
+    }
+
+    /** Test seam: the chat-turn callbacks registered for {@code conversationId}, or null. */
+    public static AgentRunner.@Nullable StreamingCallbacks chatCallbacksForTest(Long conversationId) {
+        return SubagentChatBridge.chatCallbacks(conversationId);
     }
 
     /**

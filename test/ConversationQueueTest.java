@@ -738,4 +738,22 @@ class ConversationQueueTest extends UnitTest {
         ConversationQueue.releaseOwnership(convId, gen);
         assertFalse(ConversationQueue.isBusy(convId));
     }
+
+    @Test
+    void stopLeavesARunThatTookOverThroughADrainAlone() {
+        long convId = 12006L;
+        var streamed = new AtomicBoolean(false);
+        var gen = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), streamed);
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+        assertEquals(1, ConversationQueue.drain(convId, gen).size(), "B takes over through the drain");
+
+        assertFalse(ConversationQueue.stop(convId), "the drained run registered no cancel flag");
+
+        assertTrue(ConversationQueue.isBusy(convId), "the drained run still owns the conversation");
+        assertFalse(streamed.get(), "the finished turn's flag is not the drained run's");
+        assertEquals(gen, ConversationQueue.currentGeneration(convId), "generation unchanged");
+        assertTrue(ConversationQueue.drain(convId, gen).isEmpty());
+        assertFalse(ConversationQueue.isBusy(convId));
+    }
 }
