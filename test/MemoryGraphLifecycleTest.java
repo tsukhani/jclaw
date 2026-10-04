@@ -22,6 +22,7 @@ import services.Tx;
 import java.nio.file.Files;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -336,6 +337,74 @@ class MemoryGraphLifecycleTest extends UnitTest {
         var eA = evidence(f.agentId(), "eA");
         assertEquals(Instant.parse("2026-10-01T00:00:00Z"), eA.retiredAt());
         assertNull(eA.retiredBy());
+    }
+
+    @Test
+    void aRolledBackSupersedeLeavesTheGraphUnchanged() throws Exception {
+        var f = seed();
+        var before = files(f.agentId());
+        try (var _ = LuceneTestSync.closedLease()) {
+            assertThrows(RuntimeException.class, () -> commitInFreshTx(() -> {
+                Memory.<Memory>findById(f.first()).supersede(f.second());
+                throw new IllegalStateException("roll the supersede back");
+            }));
+        }
+        assertEquals(before, files(f.agentId()));
+    }
+
+    @Test
+    void aRowNoLongerSupersededAtReadBackWritesNothing() throws Exception {
+        var f = seed();
+        var before = files(f.agentId());
+        try (var _ = LuceneTestSync.closedLease()) {
+            commitInFreshTx(() -> {
+                Memory m = Memory.findById(f.first());
+                m.supersede(f.second());
+                m.supersededAt = null;
+                m.supersededById = null;
+                m.save();
+                return null;
+            });
+        }
+        assertEquals(before, files(f.agentId()));
+    }
+
+    @Test
+    void reconcileClearsTheRetirementOfAnUnsupersededRow() throws Exception {
+        var f = seed();
+        supersede(f.first(), f.second());
+        GraphStore.get().recordLineage(f.agentId(), Map.of(f.first(),
+                new LineageDecision(Lineage.UPDATE, LocalDate.parse("2026-10-01"), rowRetirement(f.first()))));
+        try (var _ = LuceneTestSync.closedLease()) {
+            commitInFreshTx(() -> JPA.em().createQuery(
+                            "UPDATE Memory m SET m.supersededAt = NULL, m.supersededById = NULL WHERE m.id = :id")
+                    .setParameter("id", f.first()).executeUpdate());
+        }
+
+        var result = GraphLifecycle.reconcile();
+
+        assertTrue(result.evidenceRetired() >= 1);
+        assertTrue(result.lineageCleared() >= 1);
+        assertEquals(new HashSet<>(graph(f)), new HashSet<>(GraphStore.get().read(f.agentId())));
+    }
+
+    @Test
+    void aRefusedStampLeavesTheGraphUnchanged() throws Exception {
+        var f = seed();
+        var a = f.agentId();
+        var future = new Evidence(meta(a, "eA"), GraphStore.memorySource(f.first()), null, null, null, null,
+                Instant.parse("2999-01-01T00:00:00Z"), null, null, null, null, null, null, null, null, null);
+        var records = new ArrayList<>(graph(f));
+        records.set(0, future);
+        GraphStore.get().write(a, records);
+        var before = files(a);
+
+        supersede(f.first(), f.second());
+        assertEquals(before, files(a), "the hook's refused stamp is logged, not written");
+        assertNotNull(supersededAt(f.first()), "the supersession still committed");
+
+        GraphLifecycle.reconcile();
+        assertEquals(before, files(a), "reconcile's refused stamp is logged, not written");
     }
 
     @Test
