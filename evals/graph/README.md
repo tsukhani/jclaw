@@ -1,4 +1,4 @@
-# Graph-extraction cases (JCLAW-1356, JCLAW-1358, JCLAW-1366)
+# Graph-extraction cases (JCLAW-1356, JCLAW-1358, JCLAW-1366, JCLAW-1367)
 
 `cases.json` is the labelled set that certifies a local Ollama decision model for graph
 extraction (`POST /api/graph/eval`, `./jclaw.sh grapheval run`). It is not an
@@ -367,6 +367,109 @@ files live under `data/graph-eval/`, which is gitignored, and never leave that m
 The held-out report carries aggregate counts only: no memory id, text, span or per-case
 result. Its walk is information; only the committed set certifies. Its progress lines and a
 failure's message are held to the same rule.
+
+## Sequences
+
+`sequences.json` (JCLAW-1367) measures supersession: whether the decision model's lineage
+choice is right, and whether `GraphView` then answers "did this hold at date D, as the sources
+said at instant s" the way a person reading the memories would. It needs no agent and writes
+nothing — no Memory row, no graph file.
+
+### Format
+
+The root holds `userMd` (the owner is the name it declares) and `chains`. Each chain is a list
+of memories that follow the v3 case rules above, plus probes labelled from the texts — never
+read back from `GraphView`.
+
+| Level | Key | Meaning |
+| --- | --- | --- |
+| chain | `id` | Unique in the file |
+| chain | `tags` | Any of `update`, `restatement`, `correction`, `guest-about-owner` |
+| chain | `memories`, `probes` | In order |
+| memory | `id` | Unique in the file |
+| memory | `capturedAt`, `text`, `entities`, `relations`, `dates` | As for a case; `capturedAt` never earlier than the previous memory's (equal is fine) |
+| memory | `supersedes` | `{earlierId: "update" \| "restatement" \| "correction"}`, the gold lineage of each link |
+| memory | `derivedFrom` | Earlier memory ids the text was derived from |
+| memory | `message` | The source turn's text, when it differs from the memory's |
+| memory | `authorType` | `human_turn` (default) or `guest_turn`; every memory of a `guest-about-owner` chain is `guest_turn`, and its relations reaching the operator are `unasserted` |
+| probe | `from`, `type`, `to` | Entity ids labelled in the chain, a relation the schema allows between their types |
+| probe | `d` | The valid date asked about |
+| probe | `after` \| `before` | Exactly one: the memory the probe is read just after or just before |
+| probe | `truth`, `assumed` | `YES`, `NO` or `UNKNOWN`; `assumed` (default false) when the answer rests on an open end |
+
+Every link names an earlier memory of the same chain. Any break of these rules is refused with
+a message naming the chain and the memory or probe. The fingerprint is `sequences@` plus the
+first 12 hex of a SHA-256 over the document with its keys sorted.
+
+### Harness
+
+1. **Ask.** Each chain runs through the production pipeline memory by memory, every question
+   asked once per run: the known names are the owner plus earlier memories' kept term spans,
+   one lineage question per gold `supersedes` link, and each date found against `capturedAt`
+   re-based through `AnchorResolver` over the chain.
+2. **Stamp.** Memory i of a chain (from 0) has the synthetic id `(chain+1)*1000 + i` and the
+   system time `capturedAt` at 12:00 in the app zone plus i minutes. A superseded memory is
+   retired at its successor's stamp.
+3. **Replay.** The record sets are rebuilt in memory, memory by memory, for three variants:
+   - `endToEnd` — the model's claims at the configuration, and its lineage at the run's own walk threshold;
+   - `goldClaimsModelLineage` — the labelled claims, with the model's lineage;
+   - `goldClaimsGoldLineage` — the labelled claims and lineage; every probe answers its label here.
+
+   With no lineage threshold a superseded claim is a retraction. A memory with any failed
+   decision adds no records and no lineage, though its predecessors are still retired.
+4. **Probe.** Each probe reads the chain's final set with `GraphView`, at the probed memory's
+   stamp plus 30 seconds (`after`) or minus 30 (`before`). A relation with no record is UNKNOWN.
+
+No variant, configuration or threshold asks another question.
+
+### Configuration
+
+`configuration` sets what the end-to-end variant writes at; it never changes what is asked.
+
+```json
+{"terms": 0.85,
+ "relations": {"uses": 0.85, "located_in": 0.85},
+ "classes": {"status": {"state": "provisional", "threshold": 0.85},
+             "negation": {"state": "disabled"}}}
+```
+
+`terms` is required. An absent relation writes nothing and an absent class is disabled; a
+certified or provisional class needs a threshold, a disabled one takes none. `lineage` is not
+configurable: it is the run's own walk. With no configuration the run uses the default —
+terms, every schema relation and the three classes provisional, all at 0.85 — and the report
+says `"configurationSource": "default"`.
+
+### Scoring
+
+**The lineage class** walks `Certifier.classWalk` over the run's lineage decisions: at each
+threshold, n decisions that write and k that chose other than gold. It is evaluable from
+n = 29 and gates from 250. A run with any failed decision is disabled. Several runs take the
+highest threshold at the lowest state any run reached. A single run re-asks chains 0, 10,
+20, ... and compares their decisions position by position; any difference makes the state
+`unconfirmed`.
+
+**The timeline** counts, per variant, the definite answers that differ from a definite label.
+An UNKNOWN answer to a definite label is `incomplete`, not wrong; a definite answer to an
+UNKNOWN label is counted apart; neither enters the wrong share. `assumedAgreement` counts the
+probes whose `assumed` matches. Below 250 definite labels the end-to-end result is `reported`;
+from there it is `failed` when the 95% upper bound exceeds 5%, else `passed` — `reported` if
+the run had a failed decision.
+
+### Report
+
+`set`, the `schema`, `extraction` and `sequences` fingerprints, `chains`, `probes`, `runs`,
+`configurationSource`, the `configuration`, and per model: each run's `failedDecisions`,
+lineage walk, three timelines and result; the single run's `spotCheck` (`chains`,
+`decisions`, `differing`); the model's `lineage` walk and `lineageState`; and its overall
+`timeline` — failed if any run failed, else reported if any did. Counts only: the same answers
+serialize identically.
+
+### Running it
+
+```bash
+./jclaw.sh grapheval run --set sequences --decision-model tev1
+./jclaw.sh grapheval run --set sequences --decision-model tev1 --configuration config.json --runs 2
+```
 
 ## Progress
 

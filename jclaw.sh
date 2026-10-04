@@ -985,6 +985,7 @@ USAGE
 usage_grapheval() {
     cat <<'USAGE'
 Usage: ./jclaw.sh grapheval run --agent NAME [options]
+       ./jclaw.sh grapheval run --set sequences [options]
        ./jclaw.sh grapheval blind-sheet
        ./jclaw.sh grapheval heldout-sample --agent NAME --count N [--seed S]
 
@@ -999,6 +1000,9 @@ run             Scores every stage and the end-to-end pipeline over
                 afterwards. With
                 --set heldout it measures data/graph-eval/heldout.json instead,
                 reading the memories in place; that report carries counts only.
+                With --set sequences it replays evals/graph/sequences.json
+                chain by chain, scoring the lineage class and the timeline
+                probes; it needs no --agent and writes no memory.
                 Prints a line as each model finishes a run, and every 30 s the
                 runs under way.
 blind-sheet     Writes data/graph-eval/blind-sheet.json: the ids and text of the
@@ -1009,10 +1013,15 @@ heldout-sample  Copies --count of the agent's memories, read-only, into
                 overwrite an existing file.
 
 Options for run:
-  --agent NAME             Agent whose memories hold the cases (required).
+  --agent NAME             Agent whose memories hold the cases (required,
+                           except for --set sequences).
   --decision-model ID      Ollama decision model; repeatable
                            (default: the models selected in Settings).
-  --set cases|heldout      Which set to run (default cases).
+  --set cases|heldout|sequences
+                           Which set to run (default cases).
+  --configuration FILE     JSON thresholds the sequences end-to-end variant
+                           writes at (default: terms and every relation at
+                           0.85, status/time/negation provisional at 0.85).
   --runs N                 Runs per model, 1-3 (default 1; two when a
                            spot-check differs).
   --recall-floor R         Recall every certified threshold must meet (default 0.50).
@@ -1020,6 +1029,10 @@ Options for run:
                            answers one request at a time).
   --timeout SECONDS        Per-decision timeout, 1-300 (default 30).
   --out FILE               Write the full JSON report to FILE.
+
+Examples:
+  ./jclaw.sh grapheval run --set sequences --decision-model tev1
+  ./jclaw.sh grapheval run --set sequences --decision-model tev1 --configuration config.json --runs 2
 USAGE
 }
 
@@ -3945,13 +3958,14 @@ do_grapheval() {
         --help|-h) usage_grapheval; exit 0 ;;
         *) echo "Error: grapheval needs a subcommand: run, blind-sheet or heldout-sample."; usage_grapheval; exit 2 ;;
     esac
-    local agent="" set="" runs="" floor="" concurrency="" timeout="" out="" count="" seed=""
+    local agent="" set="" runs="" floor="" concurrency="" timeout="" out="" count="" seed="" configuration=""
     local -a models=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --agent)          agent="${2:-}";       shift 2 ;;
             --decision-model) models+=("${2:-}");   shift 2 ;;
             --set)            set="${2:-}";         shift 2 ;;
+            --configuration)  configuration="${2:-}"; shift 2 ;;
             --runs)           runs="${2:-}";        shift 2 ;;
             --recall-floor)   floor="${2:-}";       shift 2 ;;
             --concurrency)    concurrency="${2:-}"; shift 2 ;;
@@ -3963,9 +3977,13 @@ do_grapheval() {
             *) echo "Error: unknown option for grapheval $sub: $1"; usage_grapheval; exit 2 ;;
         esac
     done
-    if [[ "$sub" != "blind-sheet" && -z "$agent" ]]; then
+    if [[ "$sub" != "blind-sheet" && -z "$agent" && ! ( "$sub" == "run" && "$set" == "sequences" ) ]]; then
         echo "Error: grapheval $sub needs --agent."
         usage_grapheval
+        exit 2
+    fi
+    if [[ -n "$configuration" && ! -r "$configuration" ]]; then
+        echo "Error: --configuration file '$configuration' is missing or unreadable."
         exit 2
     fi
     if [[ "$sub" == "heldout-sample" && -z "$count" ]]; then
@@ -3998,10 +4016,10 @@ do_grapheval() {
         heldout-sample) path="/api/graph/eval/heldout/sample" ;;
     esac
     body=$(python3 - "$sub" "$agent" "$set" "$runs" "$floor" "$concurrency" "$timeout" "$count" "$seed" \
-        ${models[@]+"${models[@]}"} <<'PYBODY'
+        "$configuration" ${models[@]+"${models[@]}"} <<'PYBODY'
 import json, sys
-sub, agent, set_, runs, floor, concurrency, timeout, count, seed = sys.argv[1:10]
-models = sys.argv[10:]
+sub, agent, set_, runs, floor, concurrency, timeout, count, seed, configuration = sys.argv[1:11]
+models = sys.argv[11:]
 body = {}
 if agent:
     body["agent"] = agent
@@ -4018,6 +4036,13 @@ if sub == "run":
         body["concurrency"] = int(concurrency)
     if timeout:
         body["timeoutSeconds"] = int(timeout)
+    if configuration:
+        try:
+            with open(configuration) as f:
+                body["configuration"] = json.load(f)
+        except (OSError, ValueError) as e:
+            sys.stderr.write("Error: --configuration %s does not parse as JSON: %s\n" % (configuration, e))
+            sys.exit(2)
 elif sub == "heldout-sample":
     body["count"] = int(count)
     if seed:
@@ -4118,6 +4143,27 @@ def pct(v):
 def ratio(x):
     return "%d/%d %s" % (x["hit"], x["total"], pct(x.get("rate")))
 print()
+if r["set"] == "sequences":
+    print("  set sequences: %d chains, %d probes, %d runs, configuration %s, %s, schema %s"
+          % (r["chains"], r["probes"], r["runs"], r["configurationSource"], r["sequences"], r["schema"]))
+    for m in r["models"]:
+        print()
+        print("  == %s" % m["model"])
+        for run in m["runs"]:
+            print("  run %d: %d failed decisions, lineage %s, timeline %s" % (run["run"], run["failedDecisions"],
+                  run["lineage"]["state"], run["timeline"]))
+            for name in ("endToEnd", "goldClaimsModelLineage", "goldClaimsGoldLineage"):
+                t = run[name]
+                print("        %-22s %d/%d definite wrong (bound %s), %d incomplete, %d probes"
+                      % (name, t["definiteWrong"], t["definiteGold"], pct(t["bound"]), t["incomplete"], t["probes"]))
+        sc = m.get("spotCheck")
+        if sc:
+            print("  spot-check: %d chains asked again, %d of %d decisions differ"
+                  % (sc["chains"], sc["differing"], sc["decisions"]))
+        t = m["lineage"].get("threshold")
+        print("  lineage: %s%s; timeline: %s" % (m["lineageState"], "" if t is None else " at %.2f" % t, m["timeline"]))
+    print()
+    sys.exit(0)
 print("  set %s: %d cases, %d runs, recall floor %.2f, schema %s"
       % (r["set"], r["cases"], r["runs"], r["recallFloor"], r["schema"]))
 if r.get("unlabelled"):

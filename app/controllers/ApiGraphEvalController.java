@@ -16,12 +16,15 @@ import services.decision.JevApi;
 import services.decision.OllamaDecision;
 import services.grapheval.Agreement;
 import services.grapheval.Certifier;
+import services.grapheval.Configuration;
 import services.grapheval.EvalProgress;
 import services.grapheval.ExtractionPipeline.Decider;
 import services.grapheval.GraphCases;
 import services.grapheval.GraphEvalHarness;
 import services.grapheval.GraphEvalHarness.DecisionModel;
 import services.grapheval.HeldOut;
+import services.grapheval.SequenceHarness;
+import services.grapheval.Sequences;
 import utils.ApiResponses;
 
 import java.io.IOException;
@@ -60,20 +63,23 @@ public class ApiGraphEvalController extends Controller {
     }
 
     /**
-     * {@code POST /api/graph/eval} with {@code {agent, decisionModels?, set?: "cases"|"heldout", runs?,
-     * recallFloor?, concurrency?, timeoutSeconds?, pairFilter?}}. Model calls run outside any transaction, so each DB step opens
+     * {@code POST /api/graph/eval} with {@code {agent, decisionModels?, set?: "cases"|"heldout"|"sequences", runs?,
+     * recallFloor?, concurrency?, timeoutSeconds?, pairFilter?, configuration?}}; {@code sequences} reads no
+     * {@code agent} and takes an optional {@code configuration} (JCLAW-1367). Model calls run outside any transaction, so each DB step opens
      * its own. A refused request is a 400; an accepted one is {@linkplain #stream streamed}.
      */
     @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,
-            reason = "measurement harness -- loopback plus X-Loadtest-Auth; spends model calls and writes then deletes an agent's memories")
+            reason = "measurement harness -- loopback plus X-Loadtest-Auth; spends model calls, and only the cases set writes then deletes an agent's memories")
     public static void run() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) throw invalid("A JSON body is required");
         if (body.has("proposers")) throw invalid("proposers are gone: candidates come from fixed rules (JCLAW-1356)");
         if (body.has("threshold")) throw invalid("threshold is gone: the certification walk chooses it");
         var set = body.has("set") ? string(body, "set") : "cases";
-        if (!set.equals("cases") && !set.equals("heldout")) throw invalid("set must be 'cases' or 'heldout'");
+        if (!set.equals("cases") && !set.equals("heldout") && !set.equals("sequences")) {
+            throw invalid("set must be 'cases', 'heldout' or 'sequences'");
+        }
         int runs = readInt(body, "runs", GraphEvalHarness.DEFAULT_RUNS);
         if (runs < 1 || runs > MAX_RUNS) throw invalid("runs must be between 1 and " + MAX_RUNS);
         double recallFloor = Certifier.DEFAULT_RECALL_FLOOR;
@@ -122,6 +128,31 @@ public class ApiGraphEvalController extends Controller {
             }
             stream(progress -> GraphEvalHarness.runHeldOut(loaded, ownerName, schema, models, runs, floor,
                     concurrency, progress, filter), true);
+            return;
+        }
+
+        if (set.equals("sequences")) {
+            Sequences sequences;
+            try {
+                sequences = Sequences.load(appPath(Sequences.DEFAULT_PATH), schema);
+            } catch (IOException | RuntimeException e) {
+                throw invalid("invalid sequence set: " + e.getMessage());
+            }
+            boolean defaultConfiguration = !body.has("configuration");
+            Configuration configuration;
+            if (defaultConfiguration) {
+                configuration = Configuration.defaultFor(schema);
+            } else {
+                var raw = body.get("configuration");
+                if (!raw.isJsonObject()) throw invalid("configuration must be an object");
+                try {
+                    configuration = Configuration.parse(raw.getAsJsonObject(), schema);
+                } catch (IllegalArgumentException e) {
+                    throw invalid(String.valueOf(e.getMessage()));
+                }
+            }
+            stream(progress -> SequenceHarness.run(sequences, schema, models, runs, concurrency, configuration,
+                    defaultConfiguration, progress), false);
             return;
         }
 
