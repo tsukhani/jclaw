@@ -1,7 +1,10 @@
 import com.google.gson.JsonObject;
 import memory.MemoryStoreFactory;
+import memory.TemporalExpressions;
+import memory.ontology.EdtfInterval;
 import memory.ontology.OntologySchema;
 import models.Memory;
+import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -29,10 +32,13 @@ import services.grapheval.StageScorer;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
+import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
@@ -71,6 +77,51 @@ class GraphEvalHarnessTest extends UnitTest {
         return GraphCases.load(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH), SCHEMA);
     }
 
+    /**
+     * The committed set made certifiable: each {@code holds_view_on} labelled with the valence its preference frame
+     * gives, and one {@code unasserted} relation added on an unlabelled pair per case, so the trap set is not empty.
+     */
+    private static List<Case> certifiable() throws Exception {
+        var known = owner() == null ? List.<String>of() : List.of(owner());
+        var out = new ArrayList<Case>();
+        for (var c : committed()) {
+            var frames = new HashMap<String, String>();
+            for (var candidate : CandidateGenerator.generate(c.text(), known)) {
+                var frame = candidate.frame();
+                if (frame != null) frames.put(candidate.span(), frame.valence().name().toLowerCase(Locale.ROOT));
+            }
+            var relations = new ArrayList<GraphCases.Relation>();
+            for (var r : c.relations()) {
+                var to = c.entity(r.to());
+                var valence = r.type().equals("holds_view_on") && to != null ? frames.get(to.span()) : r.valence();
+                relations.add(new GraphCases.Relation(r.from(), r.type(), r.to(), r.status(), r.valid(), valence,
+                        r.noise()));
+            }
+            var trap = unassertedPair(c);
+            if (trap != null) relations.add(trap);
+            out.add(new Case(c.id(), c.tags(), c.text(), c.entities(), relations, c.negatives(), c.capturedAt(),
+                    c.dates()));
+        }
+        return out;
+    }
+
+    private static GraphCases.@Nullable Relation unassertedPair(Case c) {
+        for (var from : c.entities()) {
+            for (var to : c.entities()) {
+                if (from == to || c.relations().stream().anyMatch(r -> r.reaches(from.id()) && r.reaches(to.id()))) {
+                    continue;
+                }
+                for (var type : SCHEMA.relations().keySet()) {
+                    if (SCHEMA.allows(type, from.type(), to.type())) {
+                        return new GraphCases.Relation(from.id(), type, to.id(), GraphCases.UNASSERTED, null, null,
+                                false);
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     private static @Nullable String owner() {
         try {
             return GraphCases.ownerName(Files.readString(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH)));
@@ -90,7 +141,8 @@ class GraphEvalHarnessTest extends UnitTest {
     /**
      * Answers gold, read back from the case whose text is {@code state.memory}: a term is its entity's type at 0.99
      * when the quoted span is that entity's mention; an overlap is the span naming an entity, else neither; a relation
-     * question is yes 0.99 when the case labels that relation in that direction (either, if symmetric), else 0.01.
+     * is yes 0.99 on a holds or admissible ended label of that type (either way round, if symmetric), a negation yes on
+     * a denial of it; status, slot, tense and occurs answer what the label says.
      */
     private static Decider gold(List<Case> cases) {
         var byText = new HashMap<String, Case>();
@@ -102,50 +154,92 @@ class GraphEvalHarnessTest extends UnitTest {
                 var question = q.getValue().getAsJsonObject();
                 var rules = question.getAsJsonObject("instructions").get("rules").getAsString();
                 var spans = QUOTED.matcher(rules).results().map(m -> m.group(1)).toList();
-                if (q.getKey().startsWith("n") || q.getKey().startsWith("e")) {
-                    var noul = new JsonObject();
-                    noul.addProperty("type", "noul");
-                    noul.addProperty("noul", 0.01);
-                    answers.add(q.getKey(), noul);
-                    continue;
-                }
-                if (q.getKey().startsWith("r")) {
-                    var from = c.entityAt(spans.get(0));
-                    var to = c.entityAt(spans.get(1));
-                    var r = from == null || to == null ? null : c.relation(from.id(), to.id());
-                    var yes = r != null && r.type().equals(relationOf(rules, spans.get(0), spans.get(1)));
+                var key = q.getKey();
+                if (key.startsWith("r") || key.startsWith("n") || key.startsWith("e")) {
+                    boolean yes;
+                    if (key.startsWith("e")) {
+                        var event = c.entityAt(spans.get(0));
+                        var label = dateLabel(c, spans.get(1));
+                        yes = event != null && event.occurs() != null && label != null
+                                && label.equals(EdtfInterval.parse(event.occurs()).toString());
+                    } else {
+                        var r = labelled(c, rules, spans.get(0), spans.get(1), key.startsWith("n"));
+                        yes = r != null && (r.denied() || c.holdsOrEnded(r, SCHEMA));
+                    }
                     var noul = new JsonObject();
                     noul.addProperty("type", "noul");
                     noul.addProperty("noul", yes ? 0.99 : 0.01);
-                    answers.add(q.getKey(), noul);
+                    answers.add(key, noul);
                     continue;
                 }
                 var ids = question.getAsJsonObject("criteria").keySet();
                 String choice;
-                if (q.getKey().startsWith("o")) {
+                if (key.startsWith("o")) {
                     choice = ids.stream().filter(id -> {
                         var e = c.entityAt(id);
                         return e != null && id.equals(e.mention());
                     }).findFirst().orElse(ids.stream().filter(id -> c.entityAt(id) != null).findFirst()
                             .orElse(ExtractionPipeline.NEITHER));
-                } else if (q.getKey().startsWith("m")) {
+                } else if (key.startsWith("m")) {
                     var e = c.entityAt(spans.getFirst());
                     choice = e != null && spans.getFirst().equals(e.mention()) ? e.type() : ExtractionPipeline.NOT_AN_ENTITY;
-                } else if (q.getKey().startsWith("t")) {
-                    choice = ExtractionPipeline.PAST;
-                } else if (q.getKey().startsWith("s")) {
-                    choice = ExtractionPipeline.HOLDS;
-                } else if (q.getKey().startsWith("d")) {
-                    choice = ExtractionPipeline.NEITHER;
+                } else if (key.startsWith("t")) {
+                    choice = tense(c, spans.getFirst());
+                } else if (key.startsWith("s")) {
+                    var r = labelled(c, rules, spans.get(0), spans.get(1), false);
+                    var status = r == null ? ExtractionPipeline.UNSTATED : c.scoredStatus(r, SCHEMA);
+                    choice = status.equals(ExtractionPipeline.HOLDS) || status.equals(ExtractionPipeline.ENDED) ? status
+                            : ExtractionPipeline.UNSTATED;
+                } else if (key.startsWith("d")) {
+                    var r = labelled(c, rules, spans.get(1), spans.get(2), false);
+                    var label = dateLabel(c, spans.get(0));
+                    choice = r == null || r.valid() == null || label == null ? ExtractionPipeline.NEITHER
+                            : slot(EdtfInterval.parse(label), EdtfInterval.parse(r.valid()));
                 } else {
-                    throw new AssertionError("unexpected question " + q.getKey());
+                    throw new AssertionError("unexpected question " + key);
                 }
-                answers.add(q.getKey(), answer(ids, choice, 0.99));
+                answers.add(key, answer(ids, choice, 0.99));
             }
             var response = new JsonObject();
             response.add("answers", answers);
             return response;
         };
+    }
+
+    /** The positive (or, when {@code denied}, the denied) label of the question's relation between two spans. */
+    private static GraphCases.@Nullable Relation labelled(Case c, String rules, String fromSpan, String toSpan,
+                                                         boolean denied) {
+        var from = c.entityAt(fromSpan);
+        var to = c.entityAt(toSpan);
+        if (from == null || to == null) return null;
+        var r = denied ? c.denied(from.id(), to.id(), SCHEMA.symmetricSet())
+                : c.positive(from.id(), to.id(), SCHEMA.symmetricSet());
+        return r != null && r.type().equals(relationOf(rules, fromSpan, toSpan)) ? r : null;
+    }
+
+    private static @Nullable String dateLabel(Case c, String span) {
+        return c.dates().stream().filter(d -> d.span().equals(span) && d.value() != null)
+                .map(d -> EdtfInterval.parse(d.value()).toString()).findFirst().orElse(null);
+    }
+
+    /** The reading of {@code span} equal to its label: upcoming when that is the second reading, else past. */
+    private static String tense(Case c, String span) {
+        var label = dateLabel(c, span);
+        for (var d : TemporalExpressions.find(c.text(), c.capturedAt()).found()) {
+            if (d.span().equals(span) && d.readings().size() == 2 && d.readings().get(1).toString().equals(label)) {
+                return ExtractionPipeline.UPCOMING;
+            }
+        }
+        return ExtractionPipeline.PAST;
+    }
+
+    private static String slot(EdtfInterval date, EdtfInterval valid) {
+        if (!date.single()) {
+            return date.start().equals(valid.start()) && date.end().equals(valid.end()) ? ExtractionPipeline.DURING
+                    : ExtractionPipeline.NEITHER;
+        }
+        if (date.start().equals(valid.start())) return ExtractionPipeline.FROM;
+        return date.start().equals(valid.end()) ? ExtractionPipeline.TO : ExtractionPipeline.NEITHER;
     }
 
     private static JsonObject answer(Set<String> ids, String choice, double p) {
@@ -191,7 +285,7 @@ class GraphEvalHarnessTest extends UnitTest {
 
     @Test
     void aWrongRecordAtTheCertifiedThresholdAwaitsAdjudicationThenCertifies() throws Exception {
-        var cases = committed();
+        var cases = certifiable();
         var expected = new WrongRecord("c015", "term:Larchmere House:Organization", GraphEvalScorer.TYPE);
 
         var pending = runWithLabels(cases, oneMistyped(cases), List.of());
@@ -254,7 +348,7 @@ class GraphEvalHarnessTest extends UnitTest {
 
     @Test
     void aGoldDeciderScoresEveryStageFullAndWalksToTheBottom() throws Exception {
-        var cases = committed();
+        var cases = certifiable();
         var stored = new AtomicBoolean();
         var golden = gold(cases);
         var report = run(cases, request -> {
@@ -277,7 +371,7 @@ class GraphEvalHarnessTest extends UnitTest {
         int ruleWritten = 0;
         for (var c : cases) {
             goldWithoutOperator += (int) (c.entities().stream().filter(e -> !e.noise() && !e.ruleWritten()).count()
-                    + c.relations().stream().filter(r -> !r.noise()).count());
+                    + c.relations().stream().filter(r -> !r.noise() && c.holdsOrEnded(r, SCHEMA)).count());
             if (c.text().startsWith("The user") || CandidateGenerator.subjectless(c.text())) ruleWritten++;
         }
         var model = report.models().getFirst();
@@ -298,10 +392,87 @@ class GraphEvalHarnessTest extends UnitTest {
             }
             var bottom = run.grid().getLast();
             assertEquals(0, bottom.wrong(), bottom.toString());
+            assertTrue(bottom.status().n() > 0, "the grid writes status values: " + bottom.status());
+            assertEquals(1.0, s.status().rate(), "status " + s.status());
+            assertEquals(0.0, s.vetoRate().rate(), "veto " + s.vetoRate());
+            var status = run.classWalks().getFirst();
+            assertEquals(GraphEvalScorer.STATUS, status.name());
+            assertNotEquals(Certifier.DISABLED, status.state(), status.toString());
+            assertNotNull(status.threshold(), status.toString());
+            assertEquals(0, status.k(), status.toString());
         }
+        var certificate = model.certificate();
+        assertEquals(SCHEMA.fingerprint(), certificate.schema());
+        assertEquals(ExtractionPipeline.fingerprint(SCHEMA), certificate.extraction());
+        assertNotNull(certificate.classes().getFirst().threshold(), certificate.toString());
         assertEquals(Certifier.PENDING_AGREEMENT, model.certification().status(), model.certification().reasons().toString());
         assertEquals(0.50, model.certification().threshold());
         assertFalse(report.agreement().complete());
+    }
+
+    @Test
+    void theCommittedSetHasNoTrapSetAndSoCertifiesNothing() throws Exception {
+        var cases = committed();
+        var model = run(cases, gold(cases)).models().getFirst();
+        for (var run : model.runs()) {
+            assertNull(run.walk().threshold());
+            assertTrue(String.valueOf(run.walk().failure()).contains("(0 violations of 0)"), run.walk().failure());
+        }
+        assertNull(model.certification().threshold());
+    }
+
+    @Test
+    void twoRunsWithTheSameAnswersReportTheSame() throws Exception {
+        var cases = certifiable().subList(0, 20);
+        assertEquals(GSON.toJson(run(cases, gold(cases))), GSON.toJson(run(cases, gold(cases))));
+    }
+
+    @Test
+    void secondLabelsThatPredateV3LeaveAGoldModelPendingAgreementWithTheReason() throws Exception {
+        var cases = certifiable();
+        var report = GraphEvalHarness.run(agentId, cases, owner(), SCHEMA, List.of(new DecisionModel("tev1", gold(cases))),
+                2, Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), List.of(), EvalProgress.none(), false,
+                Agreement.Result.PREDATES_V3 + "case s1: relation has no 'status'");
+        assertFalse(report.agreement().complete());
+        assertEquals(Agreement.Result.PREDATES_V3 + "case s1: relation has no 'status'", report.agreement().reason());
+        var certification = report.models().getFirst().certification();
+        assertEquals(Certifier.PENDING_AGREEMENT, certification.status(), certification.reasons().toString());
+    }
+
+    @Test
+    void aGoldDeciderAnswersTheGoldFedQualifierStagesRight() {
+        var text = "Avery Lin has worked at Harborlight Analytics since 2019, does not use Kestrel CI, "
+                + "and goes to the Fernhill Summit in March.";
+        var c = new Case("q1", List.of("plain", "dated", "negated"), text,
+                List.of(GraphCases.Entity.of("operator", "Avery Lin", "Person"),
+                        GraphCases.Entity.of("harborlight", "Harborlight Analytics", "Organization"),
+                        GraphCases.Entity.of("kestrel", "Kestrel CI", "System"),
+                        new GraphCases.Entity("summit", "Fernhill Summit", "Event", List.of(), false, false, "2026-03")),
+                List.of(new GraphCases.Relation("operator", "works_at", "harborlight", GraphCases.HOLDS, "2019/..",
+                                null, false),
+                        new GraphCases.Relation("operator", "uses", "kestrel", GraphCases.DENIED, null, null, false)),
+                List.of(), LocalDate.of(2026, 2, 15),
+                List.of(new GraphCases.DateLabel("2019", "2019"), new GraphCases.DateLabel("March", "2026-03")));
+        for (var run : run(List.of(c), gold(List.of(c))).models().getFirst().runs()) {
+            var s = run.stages();
+            for (var ratio : Map.of("tense", s.tense(), "occurs", s.occurs(), "slot", s.slot(),
+                    "negationYes", s.negationYes()).entrySet()) {
+                assertTrue(ratio.getValue().total() > 0, ratio.getKey() + " is scored");
+                assertEquals(1.0, ratio.getValue().rate(), ratio.getKey() + " " + ratio.getValue());
+            }
+        }
+    }
+
+    @Test
+    void theCaseVoiceIsTheGuestsOnAGuestCaseAndAHeldCaseKeepsItsOwn() {
+        var owner = new Case("v1", List.of("plain"), "Avery Lin uses Kestrel CI.", List.of(), List.of(), List.of());
+        var guest = new Case("v2", List.of("guest"), "A guest uses Kestrel CI.", List.of(), List.of(), List.of());
+        assertEquals(MemoryAuthorType.HUMAN_TURN, GraphEvalHarness.inputs(owner, null, false, null).authorType());
+        assertEquals(MemoryAuthorType.GUEST_TURN, GraphEvalHarness.inputs(guest, null, false, null).authorType());
+        for (var author : Arrays.asList(MemoryAuthorType.GUEST_TURN, null)) {
+            var held = new HeldOut.HeldCase(42L, owner, author);
+            assertEquals(author, GraphEvalHarness.inputs(owner, null, false, held).authorType());
+        }
     }
 
     @Test
@@ -387,7 +558,7 @@ class GraphEvalHarnessTest extends UnitTest {
 
     @Test
     void aSingleRunIsSpotCheckedAndCertifiesWhenEveryAnswerRepeats() throws Exception {
-        var cases = committed();
+        var cases = certifiable();
         var model = runOnce(cases, gold(cases)).models().getFirst();
         assertEquals(1, model.runs().size());
         var spot = model.spotCheck();
@@ -437,14 +608,16 @@ class GraphEvalHarnessTest extends UnitTest {
         var file = dir.resolve(HeldOut.FILE);
         try {
             Files.writeString(file, GSON.toJson(Map.of("cases", List.of(
-                    Map.of("memoryId", Long.parseLong(namedId), "labelled", true, "text", named,
+                    Map.of("memoryId", Long.parseLong(namedId), "labelled", true, "text", named, "capturedAt", "2026-10-03",
+                            "authorType", "human_turn",
                             "entities", List.of(Map.of("id", "operator", "mention", "Ada Pell", "type", "Person"),
                                     Map.of("id", "harborlight", "mention", "Harborlight Analytics", "type", "Organization")),
-                            "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight"))),
-                    Map.of("memoryId", Long.parseLong(legacyId), "labelled", true, "text", legacy,
+                            "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight", "status", "holds"))),
+                    Map.of("memoryId", Long.parseLong(legacyId), "labelled", true, "text", legacy, "capturedAt", "2026-10-03",
+                            "authorType", "human_turn",
                             "entities", List.of(Map.of("id", "operator", "mention", "The user", "type", "Person"),
                                     Map.of("id", "harborlight", "mention", "Harborlight Analytics", "type", "Organization")),
-                            "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight")))))));
+                            "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight", "status", "holds")))))));
             var loaded = HeldOut.load(file, SCHEMA);
             var decider = gold(loaded.cases().stream().map(HeldOut.HeldCase::labels).toList());
             Function<@Nullable String, StageScorer.Resolution> resolution = owner -> GraphEvalHarness.runHeldOut(loaded,
@@ -473,13 +646,14 @@ class GraphEvalHarnessTest extends UnitTest {
         var file = dir.resolve(HeldOut.FILE);
         try {
             var labelled = Map.of("cases", List.of(
-                    Map.of("memoryId", Long.parseLong(memoryId), "labelled", true, "text", text,
+                    Map.of("memoryId", Long.parseLong(memoryId), "labelled", true, "text", text, "capturedAt", "2026-10-03",
+                            "authorType", "human_turn",
                             "entities", List.of(
                                     Map.of("id", "operator", "mention", "The user", "type", "Person"),
                                     Map.of("id", "harborlight", "mention", "Harborlight Analytics", "type", "Organization"),
                                     Map.of("id", "kestrel", "mention", "Kestrel CI", "type", "System")),
-                            "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight"),
-                                    Map.of("from", "harborlight", "type", "uses", "to", "kestrel"))),
+                            "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight", "status", "holds"),
+                                    Map.of("from", "harborlight", "type", "uses", "to", "kestrel", "status", "holds"))),
                     Map.of("memoryId", 1, "labelled", false, "text", "unlabelled", "entities", List.of(),
                             "relations", List.of())));
             Files.writeString(file, GSON.toJson(labelled));
@@ -508,6 +682,11 @@ class GraphEvalHarnessTest extends UnitTest {
             assertEquals(new GraphEvalHarness.HeldOutIntegrity(1, 1, 1), report.memoryIntegrity());
             assertNull(report.models().getFirst().walk().threshold(), "five records cannot bound the wrong share");
             assertEquals(text, Tx.run(() -> Memory.<Memory>findById(Long.parseLong(memoryId))).text);
+            var held = loaded.cases().getFirst();
+            var c = held.labels();
+            var caseRun = ExtractionPipeline.run(SCHEMA, c.id(), c.text(), CandidateGenerator.generate(c.text()), "tev1",
+                    golden, GraphEvalHarness.inputs(c, null, false, held));
+            assertEquals(Long.parseLong(memoryId), caseRun.memoryId(), "the held-out run passes the memory id");
         } finally {
             Files.deleteIfExists(file);
             Files.deleteIfExists(dir);

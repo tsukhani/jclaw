@@ -3,6 +3,7 @@ import com.google.gson.JsonParser;
 import memory.MemoryStoreFactory;
 import memory.ontology.OntologySchema;
 import models.Memory;
+import models.MemoryAuthorType;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,9 +15,11 @@ import services.grapheval.HeldOut;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /** JCLAW-1356: sampling reads an agent's memories into a file without touching them; loading skips unlabelled rows. */
@@ -75,6 +78,8 @@ class HeldOutTest extends UnitTest {
             assertFalse(o.get("labelled").getAsBoolean());
             assertTrue(memoryIds.contains(String.valueOf(o.get("memoryId").getAsLong())));
             assertTrue(o.getAsJsonArray("candidates").toString().contains("Harborlight Analytics"));
+            LocalDate.parse(o.get("capturedAt").getAsString());
+            assertEquals("unattributed", o.get("authorType").getAsString(), "storeDeferred records no author");
         }
         assertEquals(new HeldOut.Sampled(5, 5), HeldOut.sample(dir.resolve("all.json"), agentId, 50, 7));
     }
@@ -121,8 +126,41 @@ class HeldOutTest extends UnitTest {
         first.getAsJsonArray("entities").add(unquoted);
         Files.writeString(file, root.toString());
         e = assertThrows(IllegalArgumentException.class, () -> HeldOut.load(file, OntologySchema.seed()));
-        assertEquals("case h0: labels break the v2 rules in GUIDE.md", e.getMessage());
+        assertEquals("case h0: labels break the v3 rules in evals/graph/README.md", e.getMessage());
         assertFalse(e.getMessage().contains("Quillfeather"), "a refusal never quotes a span");
+    }
+
+    @Test
+    void aLabelledCaseSampledBeforeV3IsRefusedByPositionWithAResample() throws Exception {
+        var file = dir.resolve("old.json");
+        HeldOut.sample(file, agentId, 2, 7);
+        var root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+        var cases = root.getAsJsonArray("cases");
+        cases.get(1).getAsJsonObject().addProperty("labelled", true);
+        var operator = new JsonObject();
+        operator.addProperty("id", "operator");
+        operator.addProperty("mention", "The user");
+        operator.addProperty("type", "Person");
+        cases.get(1).getAsJsonObject().getAsJsonArray("entities").add(operator);
+        var labelled = cases.get(1).getAsJsonObject().deepCopy();
+        var expected = "case h1: sampled before v3 (no capturedAt or authorType); move the file aside and resample";
+        for (Consumer<JsonObject> breakIt : List.<Consumer<JsonObject>>of(
+                o -> o.remove("capturedAt"), o -> o.remove("authorType"), o -> o.addProperty("authorType", "robot_turn"))) {
+            var broken = labelled.deepCopy();
+            breakIt.accept(broken);
+            cases.set(1, broken);
+            Files.writeString(file, root.toString());
+            var e = assertThrows(IllegalArgumentException.class, () -> HeldOut.load(file, OntologySchema.seed()));
+            assertEquals(expected, e.getMessage());
+        }
+        cases.set(1, labelled);
+        Files.writeString(file, root.toString());
+        var loaded = HeldOut.load(file, OntologySchema.seed()).cases();
+        assertEquals(1, loaded.size(), "the case as sampled loads");
+        assertNull(loaded.getFirst().authorType(), "unattributed loads as no author type");
+        labelled.addProperty("authorType", "guest_turn");
+        Files.writeString(file, root.toString());
+        assertEquals(MemoryAuthorType.GUEST_TURN, HeldOut.load(file, OntologySchema.seed()).cases().getFirst().authorType());
     }
 
     @Test

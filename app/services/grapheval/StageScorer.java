@@ -1,5 +1,9 @@
 package services.grapheval;
 
+import memory.TemporalExpressions;
+import memory.TemporalExpressions.DateSpan;
+import memory.ontology.EdtfInterval;
+import memory.ontology.OntologySchema;
 import org.jspecify.annotations.Nullable;
 import services.grapheval.ExactMatchResolver.Mention;
 import services.grapheval.ExtractionPipeline.Decision;
@@ -11,6 +15,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * Scores each extraction stage with gold swapped in for the stages before it (JCLAW-1356), so a stage's score is its
@@ -32,13 +38,26 @@ public final class StageScorer {
 
     /**
      * One case's answers to the stage questions: the settling of its overlapping candidates, the typing of its gold
-     * spans, the relations of its gold terms.
+     * spans, the relations of its gold terms, and the qualifier stages asked on gold: {@code tense} on its labelled
+     * dates, {@code negation} on its terms, {@code occurs} on its events and dates, {@code status} and {@code slot} on
+     * its relations.
      */
-    public record StageRun(String caseId, List<Overlap> overlap, List<Decision> typing, List<Decision> relations) {
+    public record StageRun(String caseId, List<Overlap> overlap, List<Decision> typing, List<Decision> relations,
+                           List<Decision> tense, List<Decision> negation, List<Decision> occurs,
+                           List<Decision> status, List<Decision> slot) {
         public StageRun {
             overlap = List.copyOf(overlap);
             typing = List.copyOf(typing);
             relations = List.copyOf(relations);
+            tense = List.copyOf(tense);
+            negation = List.copyOf(negation);
+            occurs = List.copyOf(occurs);
+            status = List.copyOf(status);
+            slot = List.copyOf(slot);
+        }
+
+        public StageRun(String caseId, List<Overlap> overlap, List<Decision> typing, List<Decision> relations) {
+            this(caseId, overlap, typing, relations, List.of(), List.of(), List.of(), List.of(), List.of());
         }
     }
 
@@ -53,10 +72,16 @@ public final class StageScorer {
     /**
      * {@code overlap} counts the overlap groups settled on a gold span, or on neither when no span is gold;
      * {@code relation} the labelled pairs whose kept relation is the label, in its direction, with yes at least
-     * one half; {@code noRelation} the unlabelled pairs whose kept relation has yes below one half.
+     * one half; {@code noRelation} the pairs with no {@code holds} or admissible {@code ended} label whose kept
+     * relation has yes below one half. {@code dateRecall} is the labelled dates the finder found, {@code normalizer}
+     * those found with a reading equal to the label; {@code tense}, {@code occurs}, {@code status} and {@code slot}
+     * count answers equal to the gold one; {@code negationYes} is yes on denied labels, {@code negationNo} no on
+     * positive ones, and {@code vetoRate} {@code unstated} on {@code holds} or admissible {@code ended} labels.
      */
     public record Stages(Ratio candidateRecall, Ratio overlap, Ratio typing, Ratio rejection, Ratio relation, Ratio noRelation,
-                         Resolution resolution, int failures) {}
+                         Resolution resolution, int failures, Ratio dateRecall, Ratio normalizer, Ratio tense,
+                         Ratio occurs, Ratio status, Ratio slot, Ratio negationYes, Ratio negationNo,
+                         Ratio vetoRate) {}
 
     /**
      * The spans the typing stage is asked about, in question order: gold mentions, the named owner's included, then
@@ -77,8 +102,14 @@ public final class StageScorer {
         return c.entities().stream().map(e -> new ExtractionPipeline.Typed(e.span(), e.type())).toList();
     }
 
-    /** Every stage over {@code runs}; {@code ownerName} is the set's declared owner, null when it declares none. */
-    public static Stages score(List<Case> cases, List<StageRun> runs, @Nullable String ownerName) {
+    /**
+     * Every stage over {@code runs}; {@code ownerName} is the set's declared owner, null when it declares none.
+     * {@code schema} decides which {@code ended} labels are admissible and which relations are symmetric.
+     */
+    public static Stages score(List<Case> cases, List<StageRun> runs, @Nullable String ownerName,
+                               OntologySchema schema) {
+        var symmetric = schema.symmetricSet();
+        var q = new Qualifiers();
         var byId = new HashMap<String, Case>();
         cases.forEach(c -> byId.put(c.id(), c));
         int typedRight = 0;
@@ -107,6 +138,7 @@ public final class StageScorer {
                 }
             }
             for (var d : run.typing()) {
+                if (!d.stage().equals(ExtractionPipeline.TERM)) continue;
                 if (d.failed()) failures++;
                 var entity = c.entityAt(d.subject());
                 if (entity != null && d.subject().equals(entity.mention())) {
@@ -122,22 +154,190 @@ public final class StageScorer {
                 var from = d.from() == null ? null : c.entityAt(d.from());
                 var to = d.to() == null ? null : c.entityAt(d.to());
                 if (from == null || to == null) continue;
-                var forward = c.relation(from.id(), to.id());
-                var gold = forward != null ? forward : c.relation(to.id(), from.id());
+                var forward = c.positive(from.id(), to.id(), symmetric);
+                var gold = forward != null ? forward : c.positive(to.id(), from.id(), symmetric);
                 boolean yes = !d.failed() && d.confidence() >= HALF;
-                if (gold != null) {
+                if (gold != null && c.holdsOrEnded(gold, schema)) {
                     relationTotal++;
-                    boolean directed = forward != null || GraphEvalScorer.SYMMETRIC.contains(gold.type());
-                    if (yes && directed && gold.type().equals(d.choice())) relationRight++;
+                    if (yes && forward != null && gold.type().equals(d.choice())) relationRight++;
                 } else {
                     noneTotal++;
                     if (!d.failed() && !yes) noneRight++;
                 }
             }
+            failures += q.add(c, run, schema);
         }
         return new Stages(candidateRecall(cases, ownerName), Ratio.of(overlapRight, overlapTotal),
                 Ratio.of(typedRight, typedTotal), Ratio.of(rejected, negatives), Ratio.of(relationRight, relationTotal),
-                Ratio.of(noneRight, noneTotal), resolution(cases, ownerName), failures);
+                Ratio.of(noneRight, noneTotal), resolution(cases, ownerName), failures, dateRecall(cases),
+                normalizer(cases), q.tense.done(), q.occurs.done(), q.status.done(), q.slot.done(), q.yes.done(),
+                q.no.done(), q.veto.done());
+    }
+
+    private static final class Count {
+        int hit;
+        int total;
+
+        void add(boolean right) {
+            total++;
+            if (right) hit++;
+        }
+
+        Ratio done() {
+            return Ratio.of(hit, total);
+        }
+    }
+
+    /** The gold-fed qualifier stages' tallies. */
+    private static final class Qualifiers {
+        final Count tense = new Count();
+        final Count occurs = new Count();
+        final Count status = new Count();
+        final Count slot = new Count();
+        final Count yes = new Count();
+        final Count no = new Count();
+        final Count veto = new Count();
+
+        /** Tallies {@code run}'s qualifier decisions against {@code c}; returns how many failed. */
+        int add(Case c, StageRun run, OntologySchema schema) {
+            var symmetric = schema.symmetricSet();
+            int failed = 0;
+            var found = new HashMap<String, DateSpan>();
+            TemporalExpressions.find(c.text(), c.capturedAt()).found().forEach(d -> found.putIfAbsent(d.span(), d));
+            for (var d : run.tense()) {
+                if (d.failed()) failed++;
+                var label = label(c, d.subject());
+                var date = found.get(d.subject());
+                if (label == null || date == null || date.readings().size() != 2) continue;
+                int index = ExtractionPipeline.PAST.equals(d.choice()) ? 0
+                        : ExtractionPipeline.UPCOMING.equals(d.choice()) ? 1 : -1;
+                tense.add(index >= 0 && date.readings().get(index).toString().equals(label.toString()));
+            }
+            for (var d : run.negation()) {
+                if (d.failed()) failed++;
+                var ids = ids(c, d);
+                var type = d.choice();
+                if (ids == null || type == null) continue;
+                boolean said = !d.failed() && d.confidence() >= HALF;
+                var denied = c.denied(ids[0], ids[1], symmetric);
+                var positive = c.positive(ids[0], ids[1], symmetric);
+                if (denied != null && denied.type().equals(type)) {
+                    yes.add(said);
+                } else if (positive != null && positive.type().equals(type) && c.holdsOrEnded(positive, schema)) {
+                    no.add(!d.failed() && !said);
+                }
+            }
+            for (var d : run.occurs()) {
+                if (d.failed()) failed++;
+                var event = d.from() == null ? null : c.entityAt(d.from());
+                if (event == null || d.to() == null || !hasLabel(c, d.to())) continue;
+                var label = label(c, d.to());
+                var gold = event.occurs();
+                boolean expected = label != null && gold != null
+                        && label.toString().equals(EdtfInterval.parse(gold).toString());
+                occurs.add(!d.failed() && (d.confidence() >= HALF) == expected);
+            }
+            for (var d : run.status()) {
+                if (d.failed()) failed++;
+                var gold = goldOf(c, d, d.subject(), symmetric);
+                if (gold == null) continue;
+                var scored = c.scoredStatus(gold, schema);
+                boolean holding = scored.equals(GraphCases.HOLDS) || scored.equals(GraphCases.ENDED);
+                status.add(Objects.equals(d.choice(), holding ? scored : ExtractionPipeline.UNSTATED));
+                if (holding) veto.add(ExtractionPipeline.UNSTATED.equals(d.choice()));
+            }
+            for (var d : run.slot()) {
+                if (d.failed()) failed++;
+                int at = d.subject().lastIndexOf(" @ ");
+                if (at < 0) continue;
+                var span = d.subject().substring(at + 3);
+                var gold = goldOf(c, d, d.subject().substring(0, at), symmetric);
+                if (gold == null || gold.denied() || !hasLabel(c, span)) continue;
+                slot.add(Objects.equals(d.choice(), slotAnswer(label(c, span), gold.valid())));
+            }
+            return failed;
+        }
+    }
+
+    /** The answer the slot question has for a date read as {@code date} against a gold {@code valid}. */
+    static String slotAnswer(@Nullable EdtfInterval date, @Nullable String valid) {
+        if (date == null || valid == null) return ExtractionPipeline.NEITHER;
+        var gold = EdtfInterval.parse(valid);
+        if (!date.single()) {
+            return date.start().equals(gold.start()) && date.end().equals(gold.end()) ? ExtractionPipeline.DURING
+                    : ExtractionPipeline.NEITHER;
+        }
+        if (date.start().equals(gold.start())) return ExtractionPipeline.FROM;
+        if (date.start().equals(gold.end())) return ExtractionPipeline.TO;
+        return ExtractionPipeline.NEITHER;
+    }
+
+    /** The gold ids of a decision's From and To, or null when either is no gold entity. */
+    private static String @Nullable [] ids(Case c, Decision d) {
+        var from = d.from() == null ? null : c.entityAt(d.from());
+        var to = d.to() == null ? null : c.entityAt(d.to());
+        return from == null || to == null ? null : new String[] {from.id(), to.id()};
+    }
+
+    /** The label a {@code from -type-> to} question was asked on: the positive of that type, else the denial. */
+    private static GraphCases.@Nullable Relation goldOf(Case c, Decision d, String triple, Set<String> symmetric) {
+        var ids = ids(c, d);
+        var from = d.from();
+        var to = d.to();
+        if (ids == null || from == null || to == null) return null;
+        var head = from + " -";
+        var tail = "-> " + to;
+        if (!triple.startsWith(head) || !triple.endsWith(tail) || triple.length() < head.length() + tail.length()) {
+            return null;
+        }
+        var type = triple.substring(head.length(), triple.length() - tail.length());
+        var positive = c.positive(ids[0], ids[1], symmetric);
+        if (positive != null && positive.type().equals(type)) return positive;
+        var denied = c.denied(ids[0], ids[1], symmetric);
+        return denied != null && denied.type().equals(type) ? denied : null;
+    }
+
+    private static boolean hasLabel(Case c, String span) {
+        return c.dates().stream().anyMatch(d -> d.span().equals(span));
+    }
+
+    /** The parsed label of a dated span, or null when it is unlabelled or labelled excluded. */
+    private static @Nullable EdtfInterval label(Case c, String span) {
+        for (var d : c.dates()) {
+            var value = d.value();
+            if (d.span().equals(span) && value != null) return EdtfInterval.parse(value);
+        }
+        return null;
+    }
+
+    /** The labelled dates (non-null value) whose span the finder found at the case's anchor. */
+    public static Ratio dateRecall(List<Case> cases) {
+        var count = new Count();
+        for (var c : cases) {
+            var spans = new HashSet<String>();
+            TemporalExpressions.find(c.text(), c.capturedAt()).found().forEach(d -> spans.add(d.span()));
+            for (var d : c.dates()) {
+                if (d.value() != null) count.add(spans.contains(d.span()));
+            }
+        }
+        return count.done();
+    }
+
+    /** Of the labelled dates the finder found, those with some reading equal to the label. */
+    public static Ratio normalizer(List<Case> cases) {
+        var count = new Count();
+        for (var c : cases) {
+            var found = TemporalExpressions.find(c.text(), c.capturedAt()).found();
+            for (var d : c.dates()) {
+                var value = d.value();
+                if (value == null) continue;
+                var label = EdtfInterval.parse(value).toString();
+                var spans = found.stream().filter(f -> f.span().equals(d.span())).toList();
+                if (spans.isEmpty()) continue;
+                count.add(spans.stream().anyMatch(f -> f.readings().stream().anyMatch(r -> r.toString().equals(label))));
+            }
+        }
+        return count.done();
     }
 
     private static boolean gold(Case c, String span) {

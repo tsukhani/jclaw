@@ -14,6 +14,7 @@ import services.grapheval.GraphCases.Relation;
 import services.grapheval.GraphEvalScorer;
 
 import java.nio.file.Files;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -64,7 +65,7 @@ class GraphCasesConformanceTest extends UnitTest {
         }
         long hard = cases.stream().filter(c -> c.tags().stream().anyMatch(GraphCases.HARD_NEGATIVE_TAGS::contains)).count();
         if (hard * 2 < n) out.add("hard-negative cases at least 50%");
-        if (cases.stream().mapToInt(GraphEvalScorer::gold).sum() < 420) out.add("at least 420 non-noise gold records");
+        if (cases.stream().mapToInt(c -> GraphEvalScorer.gold(c, SCHEMA)).sum() < 420) out.add("at least 420 non-noise gold records");
         var types = new HashSet<String>();
         var relations = new HashSet<String>();
         var seenIn = new HashMap<String, Integer>();
@@ -87,8 +88,10 @@ class GraphCasesConformanceTest extends UnitTest {
 
     /** What is wrong with a guest case's operator labels, or null when nothing is. */
     static @Nullable String guestViolation(Case c) {
-        if (c.entity(GraphCases.OPERATOR) != null) return c.id() + ": a guest case has no operator";
-        if (c.relations().stream().anyMatch(r -> r.from().equals(GraphCases.OPERATOR) || r.to().equals(GraphCases.OPERATOR))) {
+        boolean aboutOwner = c.tags().contains(GraphCases.GUEST_ABOUT_OWNER);
+        if (!aboutOwner && c.entity(GraphCases.OPERATOR) != null) return c.id() + ": a guest case has no operator";
+        if (c.relations().stream().anyMatch(r -> r.reaches(GraphCases.OPERATOR)
+                && !(aboutOwner && r.status().equals(GraphCases.UNASSERTED)))) {
             return c.id() + ": a guest case relates nothing to the operator";
         }
         return CandidateGenerator.subjectless(c.text()) ? c.id() + ": a guest case is not subjectless" : null;
@@ -362,6 +365,160 @@ class GraphCasesConformanceTest extends UnitTest {
 
     private static JsonObject relation(JsonObject c, int i) {
         return c.getAsJsonArray("relations").get(i).getAsJsonObject();
+    }
+
+    /** Edits the case {@code id} of the committed set and parses the result. */
+    private static List<Case> parseEdited(String id, Consumer<JsonObject> edit) throws Exception {
+        var root = JsonParser.parseString(tracked()).getAsJsonObject();
+        for (var c : root.getAsJsonArray("cases")) {
+            if (c.getAsJsonObject().get("id").getAsString().equals(id)) edit.accept(c.getAsJsonObject());
+        }
+        return GraphCases.parse(root.toString(), SCHEMA);
+    }
+
+    private static Case parsed(String id, Consumer<JsonObject> edit) throws Exception {
+        return parseEdited(id, edit).stream().filter(c -> c.id().equals(id)).findFirst().orElseThrow();
+    }
+
+    private static void assertRootRefused(Consumer<JsonObject> edit, String expected) throws Exception {
+        var root = JsonParser.parseString(tracked()).getAsJsonObject();
+        edit.accept(root);
+        var e = assertThrows(IllegalArgumentException.class, () -> GraphCases.parse(root.toString(), SCHEMA));
+        assertEquals(expected, e.getMessage());
+    }
+
+    @Test
+    void anUnknownKeyAtAnyLevelIsRefusedNamingTheCaseAndTheKey() throws Exception {
+        assertRootRefused(root -> root.addProperty("version", 3), "graph cases: unknown key 'version'");
+        assertRootRefused(root -> root.remove("capturedAt"), "graph cases: the root needs 'capturedAt'");
+        assertRefused(first -> first.addProperty("source", "x"), "unknown key 'source'");
+        assertRefused(first -> entity(first, 1).addProperty("role", "x"), "unknown key 'role'");
+        assertRefused(first -> relation(first, 0).addProperty("since", "2019"), "unknown key 'since'");
+        assertEquals(LocalDate.parse("2026-03-01"), parsed("c001", first -> first.addProperty("capturedAt", "2026-03-01"))
+                .capturedAt(), "a case's capturedAt overrides the root's");
+    }
+
+    @Test
+    void aRelationWithoutAStatusIsRefused() throws Exception {
+        assertRefused(first -> relation(first, 0).remove("status"), "has no 'status'");
+        assertEquals(GraphCases.ENDED, parsed("c001", first -> relation(first, 0).addProperty("status", "ended"))
+                .relations().getFirst().status());
+    }
+
+    @Test
+    void aValidTheFormatDoesNotAllowIsRefused() throws Exception {
+        assertRefused(first -> {
+            relation(first, 0).addProperty("status", "unasserted");
+            relation(first, 0).addProperty("valid", "2019");
+        }, "takes no 'valid'");
+        assertEquals("2019/..", parsed("c001", first -> relation(first, 0).addProperty("valid", "2019/.."))
+                .relations().getFirst().valid());
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> parseEdited("c011", c -> relation(c, 0).addProperty("valid", "2019/..")));
+        assertTrue(e.getMessage().endsWith("takes no 'valid'"), "a holds from an Event: " + e.getMessage());
+    }
+
+    @Test
+    void aDenialsValidIsExactlyTheNeverForm() throws Exception {
+        assertRefused(first -> {
+            relation(first, 0).addProperty("status", "denied");
+            relation(first, 0).addProperty("valid", "../2026-02-14");
+        }, "a denial's 'valid' is exactly '../2026-02-15'");
+        assertEquals("../2026-02-15", parsed("c001", first -> {
+            relation(first, 0).addProperty("status", "denied");
+            relation(first, 0).addProperty("valid", "../2026-02-15");
+        }).relations().getFirst().valid());
+    }
+
+    @Test
+    void aValenceOffHoldsViewOnIsRefused() throws Exception {
+        assertRefused(first -> relation(first, 0).addProperty("valence", "favorable"), "takes no 'valence'");
+        assertEquals("unfavorable", parsed("c005", c -> relation(c, 0).addProperty("valence", "unfavorable"))
+                .relations().getFirst().valence(), "a valence the lexicon would not give still parses");
+    }
+
+    @Test
+    void noiseOnADenialOrAnUnassertedIsRefused() throws Exception {
+        for (var status : List.of("denied", "unasserted")) {
+            assertRefused(first -> {
+                relation(first, 0).addProperty("status", status);
+                relation(first, 0).addProperty("noise", true);
+            }, "'noise' only marks a holds or ended relation, not " + status);
+        }
+        assertTrue(parsed("c001", first -> relation(first, 0).addProperty("noise", true)).relations().getFirst().noise());
+    }
+
+    @Test
+    void occursOnANonEventIsRefused() throws Exception {
+        assertRefused(first -> entity(first, 1).addProperty("occurs", "2026"), "only an Event occurs");
+        assertEquals("2027-10", parsed("c011", c -> entity(c, 2).addProperty("occurs", "2027-10"))
+                .entity("quillon").occurs(), "an occurs the text does not support still parses");
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> parseEdited("c011", c -> entity(c, 2).addProperty("occurs", "2027/..")));
+        assertTrue(e.getMessage().endsWith("'occurs' is a date or a closed interval"), e.getMessage());
+        assertEquals("2027-10/2027-11", parsed("c011", c -> entity(c, 2).addProperty("occurs", "2027-10/2027-11"))
+                .entity("quillon").occurs(), "a closed interval of two dates parses");
+    }
+
+    @Test
+    void aSecondDenialOnOnePairIsRefusedButADenialBesideAPositiveParses() throws Exception {
+        assertRefused(first -> {
+            var denial = relation(first, 0).deepCopy();
+            denial.addProperty("status", "denied");
+            first.getAsJsonArray("relations").add(denial);
+            first.getAsJsonArray("relations").add(denial.deepCopy());
+        }, "two denied relations on 'operator' -> 'harborlight'");
+        var c = parsed("c001", first -> {
+            var denial = relation(first, 0).deepCopy();
+            denial.addProperty("status", "denied");
+            first.getAsJsonArray("relations").add(denial);
+        });
+        assertEquals(3, c.relations().size());
+    }
+
+    @Test
+    void aDateOutsideTheEdtfSubsetOrNotVerbatimIsRefused() throws Exception {
+        assertRefused(first -> first.add("dates", JsonParser.parseString(
+                "[{\"span\":\"every release\",\"value\":\"June 2019\"}]")), "is outside the EDTF subset");
+        assertRefused(first -> first.add("dates", JsonParser.parseString(
+                "[{\"span\":\"2019\",\"value\":\"2019\"}]")), "date span '2019' is not verbatim in the text");
+        var c = parsed("c001", first -> first.add("dates", JsonParser.parseString(
+                "[{\"span\":\"every release\",\"value\":\"2019-21\"}]")));
+        assertEquals("2019-21", c.dates().getFirst().value(), "a value the normalizer would not produce still parses");
+        assertNull(parsed("c001", first -> first.add("dates", JsonParser.parseString(
+                "[{\"span\":\"every release\",\"value\":null}]"))).dates().getFirst().value());
+    }
+
+    @Test
+    void theFiveNewTagsParseAndHardNegativesKeepTheirSix() throws Exception {
+        var tags = parsed("c001", first -> List.of("ended", "negated", "unasserted", "dated")
+                .forEach(t -> first.getAsJsonArray("tags").add(t))).tags();
+        assertTrue(tags.containsAll(List.of("ended", "negated", "unasserted", "dated")), tags.toString());
+        assertTrue(parsed("c132", c -> c.getAsJsonArray("tags").add(GraphCases.GUEST_ABOUT_OWNER)).tags()
+                .contains(GraphCases.GUEST_ABOUT_OWNER));
+        assertRefused(first -> first.getAsJsonArray("tags").add(GraphCases.GUEST_ABOUT_OWNER),
+                "'guest-about-owner' is always tagged beside 'guest'");
+        assertEquals(6, GraphCases.HARD_NEGATIVE_TAGS.size());
+        assertTrue(GraphCases.HARD_NEGATIVE_TAGS.stream().noneMatch(List.of("ended", "negated", "unasserted", "dated",
+                GraphCases.GUEST_ABOUT_OWNER)::contains));
+    }
+
+    @Test
+    void aGuestAboutOwnerCaseMayNameTheOperatorButAssertsNothingOfIt() throws Exception {
+        Consumer<JsonObject> aboutOwner = c -> {
+            c.getAsJsonArray("tags").add(GraphCases.GUEST_ABOUT_OWNER);
+            c.getAsJsonArray("entities").add(JsonParser.parseString(
+                    "{\"id\":\"operator\",\"type\":\"Person\",\"implicit\":true}"));
+            c.getAsJsonArray("relations").add(JsonParser.parseString(
+                    "{\"from\":\"operator\",\"type\":\"family_of\",\"to\":\"jonah-pell\",\"status\":\"unasserted\"}"));
+        };
+        var c = parsed("c132", aboutOwner);
+        assertNull(guestViolation(c), "a guest-about-owner case may name the operator");
+        var e = assertThrows(IllegalArgumentException.class, () -> parseEdited("c132", aboutOwner.andThen(o -> relation(o,
+                o.getAsJsonArray("relations").size() - 1).addProperty("status", "holds"))));
+        assertTrue(e.getMessage().contains("must be unasserted"), e.getMessage());
+        var plain = new Case(c.id(), List.of(GraphCases.GUEST), c.text(), c.entities(), c.relations(), c.negatives());
+        assertEquals(c.id() + ": a guest case has no operator", guestViolation(plain), "a plain guest case still may not");
     }
 
     /** Edits the first committed case and expects a refusal naming it. */

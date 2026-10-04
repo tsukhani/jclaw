@@ -133,18 +133,21 @@ public class ApiGraphEvalController extends Controller {
         } catch (IOException | RuntimeException e) {
             throw invalid("invalid case set: " + e.getMessage());
         }
-        List<GraphCases.Case> secondLabels;
+        GraphCases.SecondLabels second;
+        try {
+            second = GraphCases.loadSecondLabels(appPath(GraphCases.SECOND_LABELS_PATH), schema);
+        } catch (IOException | RuntimeException e) {
+            throw invalid("invalid second labels: " + e.getMessage());
+        }
         List<Certifier.Adjudication> adjudications;
         try {
-            var second = appPath(GraphCases.SECOND_LABELS_PATH);
-            secondLabels = Files.exists(second) ? GraphCases.load(second, schema) : List.of();
             var verdicts = appPath(GraphCases.ADJUDICATIONS_PATH);
             adjudications = Files.exists(verdicts) ? Certifier.parseAdjudications(Files.readString(verdicts)) : List.of();
         } catch (IOException | RuntimeException e) {
-            throw invalid("invalid second labels or adjudications: " + e.getMessage());
+            throw invalid("invalid adjudications: " + e.getMessage());
         }
         stream(progress -> GraphEvalHarness.run(agentId, cases, ownerName, schema, models, runs, floor, concurrency,
-                secondLabels, adjudications, progress, filter), false);
+                second.cases(), adjudications, progress, filter, second.reason()), false);
     }
 
     /**
@@ -187,7 +190,7 @@ public class ApiGraphEvalController extends Controller {
         target.writeChunk((json + "\n").getBytes(StandardCharsets.UTF_8));
     }
 
-    /** {@code POST /api/graph/eval/blind-sheet}: writes the blind subset's ids, text and owner for a second labeller. */
+    /** {@code POST /api/graph/eval/blind-sheet}: the blind subset's ids, text, anchors and owner for a second labeller. */
     @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "measurement harness -- loopback plus X-Loadtest-Auth; writes a file under data/graph-eval")
@@ -196,7 +199,8 @@ public class ApiGraphEvalController extends Controller {
         JsonObject sheet;
         try {
             var json = Files.readString(appPath(GraphCases.DEFAULT_PATH));
-            sheet = Agreement.blindSheet(GraphCases.parse(json, schema), GraphCases.userMd(json));
+            sheet = Agreement.blindSheet(GraphCases.parse(json, schema), GraphCases.userMd(json),
+                    GraphCases.capturedAt(json));
         } catch (IOException | RuntimeException e) {
             throw invalid("invalid case set: " + e.getMessage());
         }

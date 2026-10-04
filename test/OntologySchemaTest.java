@@ -7,7 +7,6 @@ import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
 import services.grapheval.ExtractionPipeline;
-import services.grapheval.GraphEvalScorer;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -662,7 +661,7 @@ class OntologySchemaTest extends UnitTest {
     @Test
     void theSeedOwnsTheGlossesAndSymmetryTheEvalCodeStillHolds() {
         var seed = OntologySchema.seed();
-        assertEquals(GraphEvalScorer.SYMMETRIC, seed.symmetricSet());
+        assertEquals(Set.of("same_as", "family_of"), seed.symmetricSet());
         seed.relations().forEach((name, r) -> assertEquals(r.reads().replace("X", "\"X\"").replace("Y", "\"Y\""),
                 ExtractionPipeline.gloss(seed, name, "X", "Y"), name));
     }

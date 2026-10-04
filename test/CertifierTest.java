@@ -2,8 +2,10 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.grapheval.Certifier;
 import services.grapheval.Certifier.Adjudication;
+import services.grapheval.Certifier.ClassStep;
 import services.grapheval.Certifier.Walk;
 import services.grapheval.GraphEvalScorer;
+import services.grapheval.GraphEvalScorer.ClassTally;
 import services.grapheval.GraphEvalScorer.Point;
 import services.grapheval.GraphEvalScorer.WrongRecord;
 
@@ -15,9 +17,20 @@ class CertifierTest extends UnitTest {
     private static final int[][] BOUNDARY = {{0, 59}, {1, 93}, {2, 124}, {3, 153}, {5, 208}};
 
     private static Point point(double t, int written, int wrong, double recall) {
-        return new Point(t, written, written - wrong, wrong, wrong, 0, 0, 0, 0, 100, recall,
-                written == 0 ? null : (double) wrong / written, 0, 0);
+        return point(t, written, wrong, 0, recall, 0, TRAPS, 0);
     }
+
+    /** A base-only point with {@code trapGold} trap relations of which {@code violations} were written wrongly. */
+    private static Point point(double t, int written, int wrong, int noise, double recall, int failures,
+                               int trapGold, int violations) {
+        var share = written - noise == 0 ? null : (double) wrong / (written - noise);
+        return new Point(t, written, written - noise - wrong, wrong, wrong, 0, 0, 0, noise, 100, recall, share,
+                failures, 0, 0, 0, 0, ClassTally.EMPTY, ClassTally.EMPTY, ClassTally.EMPTY, ClassTally.EMPTY,
+                written - noise, wrong, trapGold, violations, 0, 0);
+    }
+
+    /** The smallest trap set that can pass with no violation: 0.95^59 is below 0.05. */
+    private static final int TRAPS = 59;
 
     /** A grid passing every threshold at or above {@code lowest} and failing on the bound below it. */
     private static List<Point> passingDownTo(double lowest) {
@@ -159,9 +172,8 @@ class CertifierTest extends UnitTest {
 
     @Test
     void aRunWithAFailedDecisionPassesNowhere() {
-        var grid = passingDownTo(0.5).stream().map(p -> new Point(p.threshold(), p.written(), p.right(), p.wrong(),
-                p.wrongMatch(), p.wrongType(), p.wrongDuplicate(), p.wrongRelation(), p.noise(), p.gold(), p.recall(),
-                p.wrongShare(), 3, p.ruleWritten())).toList();
+        var grid = passingDownTo(0.5).stream()
+                .map(p -> point(p.threshold(), p.written(), p.wrong(), 0, 0.9, 3, TRAPS, 0)).toList();
         var walk = Certifier.walk(grid, Certifier.DEFAULT_RECALL_FLOOR);
         assertNull(walk.threshold());
         assertTrue(walk.failure().startsWith("3 decisions failed"), walk.failure());
@@ -183,5 +195,99 @@ class CertifierTest extends UnitTest {
         var e = assertThrows(IllegalArgumentException.class, () -> Certifier.parseAdjudications(
                 "[{\"caseId\":\"c007\",\"record\":\"r\",\"verdict\":\"maybe\"}]"));
         assertTrue(e.getMessage().contains("verdict"), e.getMessage());
+    }
+
+    private static List<ClassStep> classSteps(int... nk) {
+        var out = new java.util.ArrayList<ClassStep>();
+        for (int i = 0; i < nk.length / 2; i++) {
+            out.add(new ClassStep(GraphEvalScorer.THRESHOLDS.get(i), nk[2 * i], nk[2 * i + 1]));
+        }
+        return out;
+    }
+
+    @Test
+    void twentyNineValuesWithNoWrongPassProvisionalAndTwentyEightAreNotEvaluable() {
+        assertTrue(Certifier.boundPasses(0, 29, Certifier.PROVISIONAL_LIMIT));
+        assertFalse(Certifier.boundPasses(0, 28, Certifier.PROVISIONAL_LIMIT));
+        var walk = Certifier.classWalk("status", classSteps(29, 0));
+        assertEquals(Certifier.PROVISIONAL, walk.state());
+        assertEquals(0.95, walk.threshold());
+        assertEquals(29, walk.n());
+        var none = Certifier.classWalk("status", classSteps(28, 0));
+        assertEquals(Certifier.DISABLED, none.state(), "no evaluable threshold");
+        assertNull(none.threshold());
+    }
+
+    @Test
+    void aClassWalkStartsAtTheHighestEvaluableThresholdAndTakesTheLowestOfItsRun() {
+        var walk = Certifier.classWalk("time", classSteps(10, 0, 20, 0, 40, 0, 60, 1, 80, 9, 100, 0));
+        assertEquals(0.80, walk.threshold(), "0.95 and 0.90 are not evaluable; 0.75 has k > 6");
+        assertEquals(Certifier.PROVISIONAL, walk.state());
+        assertEquals(60, walk.n());
+        assertEquals(1, walk.k());
+        assertEquals(Certifier.upperBound(1, 60), walk.bound());
+    }
+
+    @Test
+    void aClassCertifiesFromTwoHundredFiftyValuesWithinFivePercent() {
+        var walk = Certifier.classWalk("negation", classSteps(250, 2, 300, 3, 400, 30));
+        assertEquals(Certifier.CLASS_CERTIFIED, walk.state());
+        assertEquals(0.90, walk.threshold());
+        var loose = Certifier.classWalk("negation", classSteps(250, 10));
+        assertEquals(Certifier.DISABLED, loose.state(), "at n >= 250 only the 5% bound counts");
+    }
+
+    @Test
+    void aClassFailingAtItsFirstEvaluableThresholdIsDisabled() {
+        var walk = Certifier.classWalk("status", classSteps(5, 0, 40, 7, 60, 0));
+        assertEquals(Certifier.DISABLED, walk.state());
+        assertNull(walk.threshold());
+        assertEquals(40, walk.n(), "reported at the first evaluable step");
+        assertEquals(7, walk.k());
+    }
+
+    @Test
+    void classWalksCombineOnTheHighestThresholdAndADisabledRunDisables() {
+        var low = Certifier.classWalk("status", classSteps(29, 0, 40, 0));
+        var high = Certifier.classWalk("status", classSteps(29, 0, 40, 6));
+        assertEquals(0.90, low.threshold());
+        assertEquals(0.95, high.threshold());
+        assertEquals(0.95, Certifier.combineClass(List.of(low, high)).threshold());
+        var disabled = Certifier.classWalk("status", classSteps(5, 0));
+        assertEquals(Certifier.DISABLED, Certifier.combineClass(List.of(low, disabled, high)).state());
+    }
+
+    @Test
+    void gWrittenLeavesNoiseOutOfItsDenominator() {
+        var noisy = Certifier.walk(List.of(point(0.95, 64, 0, 5, 0.9, 0, TRAPS, 0)), 0.5);
+        assertEquals(59, noisy.steps().getFirst().written() - noisy.steps().getFirst().noise());
+        assertEquals(Certifier.upperBound(0, 59), noisy.steps().getFirst().upperBound());
+        assertEquals(0.95, noisy.threshold());
+        var tooNoisy = Certifier.walk(List.of(point(0.95, 64, 0, 6, 0.9, 0, TRAPS, 0)), 0.5);
+        assertNull(tooNoisy.threshold(), "58 non-noise items cannot pass");
+        assertTrue(tooNoisy.failure().contains("wrong-share"), tooNoisy.failure());
+    }
+
+    @Test
+    void gTrapBoundsTheViolationsOverTheTrapSet() {
+        var passing = Certifier.walk(List.of(point(0.95, 200, 0, 0, 0.9, 0, 59, 0)), 0.5);
+        assertEquals(0.95, passing.threshold());
+        assertEquals(Certifier.upperBound(0, 59), passing.steps().getFirst().trapBound());
+        var violated = Certifier.walk(List.of(point(0.95, 200, 0, 0, 0.9, 0, 59, 1)), 0.5);
+        assertNull(violated.threshold());
+        assertTrue(violated.failure().contains("trap upper bound") && violated.failure().contains("1 violations of 59"),
+                violated.failure());
+        var empty = Certifier.walk(List.of(point(0.95, 200, 0, 0, 0.9, 0, 0, 0)), 0.5);
+        assertNull(empty.threshold(), "an empty trap set bounds at 1.0");
+        assertEquals(1.0, empty.steps().getFirst().trapBound());
+    }
+
+    @Test
+    void theCertificateCheckNamesTheStampThatDiffers() {
+        var cert = new Certifier.Certificate(0.8, List.of(Certifier.classWalk("status", classSteps(29, 0))),
+                "v3@aaa", "x@111");
+        assertNull(Certifier.check(cert, "v3@aaa", "x@111"));
+        assertEquals("schema stamp v3@aaa differs from running v3@bbb", Certifier.check(cert, "v3@bbb", "x@111"));
+        assertEquals("extraction stamp x@111 differs from running x@222", Certifier.check(cert, "v3@aaa", "x@222"));
     }
 }

@@ -12,6 +12,7 @@ import services.grapheval.HeldOut;
 import java.nio.file.Files;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -135,7 +136,7 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
     }
 
     @Test
-    void theBlindSheetHoldsOnlyTheSelectedIdsTextAndOwner() throws Exception {
+    void theBlindSheetHoldsOnlyTheSelectedIdsTextCapturedAtAndOwner() throws Exception {
         var file = Play.applicationPath.toPath().resolve(HeldOut.DIR).resolve("blind-sheet.json");
         var saved = Files.exists(file) ? Files.readString(file) : null;
         try {
@@ -151,16 +152,39 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
             var declared = GraphCases.userMd(Files.readString(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH)));
             assertEquals(declared, sheet.has("userMd") ? sheet.get("userMd").getAsString() : null,
                     "the labeller is told who the owner is");
+            assertEquals(GraphCases.capturedAt(Files.readString(Play.applicationPath.toPath()
+                    .resolve(GraphCases.DEFAULT_PATH))).toString(), sheet.get("capturedAt").getAsString());
             var ids = new HashSet<String>();
             for (var e : sheet.getAsJsonArray("cases")) {
                 var o = e.getAsJsonObject();
-                assertEquals(Set.of("id", "text"), o.keySet());
+                assertEquals(Set.of("id", "text", "capturedAt"), o.keySet());
                 ids.add(o.get("id").getAsString());
             }
             assertEquals(new HashSet<>(selected), ids);
         } finally {
             if (saved == null) Files.deleteIfExists(file);
             else Files.writeString(file, saved);
+        }
+    }
+
+    @Test
+    void secondLabelsThatPredateV3AreNo400ButBadAdjudicationsStillAre() throws Exception {
+        var second = Play.applicationPath.toPath().resolve(GraphCases.SECOND_LABELS_PATH);
+        var e = assertThrows(IllegalArgumentException.class, () -> GraphCases.load(second, OntologySchema.seed()));
+        var loaded = GraphCases.loadSecondLabels(second, OntologySchema.seed());
+        assertEquals(List.of(), loaded.cases());
+        assertEquals(Agreement.Result.PREDATES_V3 + e.getMessage(), loaded.reason());
+        var absent = GraphCases.loadSecondLabels(second.resolveSibling("no-such-second-labels.json"),
+                OntologySchema.seed());
+        assertEquals(new GraphCases.SecondLabels(List.of(), null), absent, "no file is no reason");
+        var verdicts = Play.applicationPath.toPath().resolve(GraphCases.ADJUDICATIONS_PATH);
+        var saved = Files.exists(verdicts) ? Files.readString(verdicts) : null;
+        try {
+            Files.writeString(verdicts, "not json");
+            assertRefused("{\"agent\":\"" + AGENT + "\",\"decisionModels\":[\"tev1\"]}", "invalid adjudications");
+        } finally {
+            if (saved == null) Files.deleteIfExists(verdicts);
+            else Files.writeString(verdicts, saved);
         }
     }
 }
