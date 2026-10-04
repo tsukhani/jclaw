@@ -8,7 +8,8 @@ import services.EventLogger;
 
 /**
  * Repairs the memory graph once per boot: an interrupted swap, a directory whose agent is
- * gone, Evidence whose memory was deleted or superseded while no commit hook ran.
+ * gone. Evidence whose memory was deleted while no commit hook ran is withdrawn; Evidence
+ * whose memory was superseded is retired from the row.
  */
 @OnApplicationStart
 public class MemoryGraphConsistencyJob extends Job<Void> {
@@ -20,11 +21,12 @@ public class MemoryGraphConsistencyJob extends Job<Void> {
         }
         try {
             var result = GraphLifecycle.reconcile();
-            if (result.recovered() + result.orphansDeleted() + result.recordsRemoved() > 0) {
+            if (result.recovered() + result.orphansDeleted() + result.recordsRemoved() + result.evidenceRetired()
+                    + result.lineageCleared() > 0) {
                 EventLogger.info("memory", null, null,
-                        "Memory graph reconciled across %d agent(s): %d swap(s) recovered, %d orphaned graph(s) deleted, %d record(s) withdrawn"
+                        "Memory graph reconciled across %d agent(s): %d swap(s) recovered, %d orphaned graph(s) deleted, %d record(s) withdrawn, %d evidenceRetired, %d lineageCleared"
                                 .formatted(result.agents(), result.recovered(), result.orphansDeleted(),
-                                        result.recordsRemoved()));
+                                        result.recordsRemoved(), result.evidenceRetired(), result.lineageCleared()));
             }
         } catch (Exception e) {
             // A graph repair must never keep the application from starting.

@@ -168,13 +168,14 @@ public class Memory extends Model {
      * {@code @PostUpdate}, which removes the row's Lucene doc — FTS and KNN
      * vector leave the index together — while the DB-side
      * {@code supersededAt IS NULL} filters on the recall queries act as the
-     * backstop for anything already hydrating.
+     * backstop for anything already hydrating. Once committed, the row's graph Evidence is
+     * retired, not withdrawn.
      */
     public void supersede(Long newerId) {
         supersededAt = AppClock.now();
         supersededById = newerId;
         save();
-        if (id != null && agent != null) GraphLifecycle.withdrawAfterCommit(agent.id, id);
+        if (id != null && agent != null) GraphLifecycle.retireAfterCommit(agent.id, id);
     }
 
     // Deliberately NOT on TimestampedModel: these callbacks also clamp the importance
