@@ -246,5 +246,71 @@ describe('useChatStream', () => {
       api.stopStreaming()
       expect(deps.focusInput).not.toHaveBeenCalled()
     })
+
+    it('posts the conversation stop endpoint', async () => {
+      const stopped = vi.fn(() => ({ stopped: true }))
+      registerEndpoint('/api/conversations/42/stop', { method: 'POST', handler: stopped })
+      const deps = makeDeps({ streaming: ref(true), selectedConvoId: ref<number | null>(42) })
+      const { api } = await mountStream(deps)
+      api.stopStreaming()
+      await flushPromises()
+      expect(stopped).toHaveBeenCalledTimes(1)
+    })
+
+    it('posts nothing without a conversation id', async () => {
+      const stopped = vi.fn(() => ({ stopped: true }))
+      registerEndpoint('/api/conversations/42/stop', { method: 'POST', handler: stopped })
+      const deps = makeDeps({ streaming: ref(true), selectedConvoId: ref<number | null>(null) })
+      const { api } = await mountStream(deps)
+      api.stopStreaming()
+      await flushPromises()
+      expect(stopped).not.toHaveBeenCalled()
+    })
+
+    it('makes a send after Stop wait for the stop to finish', async () => {
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => {
+        release = resolve
+      })
+      registerEndpoint('/api/conversations/42/stop', {
+        method: 'POST',
+        handler: async () => {
+          await gate
+          return { stopped: true }
+        },
+      })
+      const deps = makeDeps({ streaming: ref(true), selectedConvoId: ref<number | null>(42) })
+      const fetchSpy = streamWith(['data: {"type":"complete","content":"fresh"}\n'])
+      const { api } = await mountStream(deps)
+      api.stopStreaming()
+      deps.input.value = 'next'
+      const sent = api.sendMessage()
+      await flushPromises()
+      const streamCalls = () => fetchSpy.mock.calls.filter(c => String(c[0]).includes('/api/chat/stream'))
+      expect(streamCalls()).toHaveLength(0)
+      release()
+      await sent
+      await flushPromises()
+      expect(streamCalls()).toHaveLength(1)
+    })
+
+    it('still sends when the stop POST fails', async () => {
+      registerEndpoint('/api/conversations/42/stop', {
+        method: 'POST',
+        handler: () => {
+          throw new Error('boom')
+        },
+      })
+      vi.spyOn(console, 'error').mockImplementation(() => {})
+      const deps = makeDeps({ streaming: ref(true), selectedConvoId: ref<number | null>(42) })
+      const fetchSpy = streamWith(['data: {"type":"complete","content":"fresh"}\n'])
+      const { api } = await mountStream(deps)
+      api.stopStreaming()
+      deps.input.value = 'next'
+      await api.sendMessage()
+      await flushPromises()
+      expect(fetchSpy.mock.calls.some(c => String(c[0]).includes('/api/chat/stream'))).toBe(true)
+      expect(deps.messages.value.at(-1)!.content).toBe('fresh')
+    })
   })
 })

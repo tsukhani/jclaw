@@ -656,4 +656,70 @@ class ConversationQueueTest extends UnitTest {
 
         ConversationQueue.releaseOwnership(convId);
     }
+
+    // ── GH-12: operator stop and the ownership generation fence ──
+
+    @Test
+    void stopReleasesABusyConversationAndCancelsItsOwner() {
+        long convId = 12001L;
+        var ownerCancel = new AtomicBoolean(false);
+        var gen = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), ownerCancel);
+        assertNotEquals(ConversationQueue.NOT_ACQUIRED, gen);
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+
+        assertTrue(ConversationQueue.stop(convId));
+
+        assertFalse(ConversationQueue.isBusy(convId), "stop releases ownership at once");
+        assertTrue(ownerCancel.get(), "stop flips the stopped turn's own cancel flag");
+        assertEquals(0, ConversationQueue.getQueueSize(convId), "stop drops pending messages");
+        assertFalse(ConversationQueue.cancellationFlag(convId).get(),
+                "the shared cancellation flag is untouched");
+    }
+
+    @Test
+    void stopOnAnIdleConversationChangesNothing() {
+        long convId = 12002L;
+        assertFalse(ConversationQueue.stop(convId), "unknown conversation");
+        var gen = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), null);
+        ConversationQueue.releaseOwnership(convId, gen);
+
+        assertFalse(ConversationQueue.stop(convId), "idle conversation");
+        assertEquals(gen, ConversationQueue.currentGeneration(convId), "generation unchanged");
+        assertTrue(ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent)));
+        ConversationQueue.releaseOwnership(convId);
+    }
+
+    @Test
+    void aStoppedTurnsLateReleaseLeavesTheNewOwnerAlone() {
+        long convId = 12003L;
+        var stale = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), new AtomicBoolean());
+        ConversationQueue.stop(convId);
+
+        var fresh = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("B", "web", "admin", agent), new AtomicBoolean());
+        assertNotEquals(ConversationQueue.NOT_ACQUIRED, fresh, "a send right after stop acquires");
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("C", "web", "admin", agent));
+
+        assertTrue(ConversationQueue.drain(convId, stale).isEmpty(), "stale drain returns nothing");
+        ConversationQueue.releaseOwnership(convId, stale);
+        assertTrue(ConversationQueue.isBusy(convId), "the new owner still owns the conversation");
+        assertEquals(1, ConversationQueue.getQueueSize(convId), "the new owner's pending queue is untouched");
+
+        var next = ConversationQueue.drain(convId, fresh);
+        assertEquals("C", next.getFirst().text(), "the current generation still drains FIFO");
+        assertTrue(ConversationQueue.drain(convId, fresh).isEmpty(), "and releases once empty");
+        assertFalse(ConversationQueue.isBusy(convId));
+    }
+
+    @Test
+    void aCurrentGenerationReleaseStillReleases() {
+        long convId = 12004L;
+        var gen = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), null);
+        ConversationQueue.releaseOwnership(convId, gen);
+        assertFalse(ConversationQueue.isBusy(convId));
+    }
 }

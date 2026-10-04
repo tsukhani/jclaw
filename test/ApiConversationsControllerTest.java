@@ -708,6 +708,73 @@ class ApiConversationsControllerTest extends FunctionalTest {
         assertTrue(content.contains("\"queueSize\""));
     }
 
+    // --- stopTurn tests (POST /api/conversations/{id}/stop, GH-12) ---
+
+    private static Conversation seedConversation(String agentName, String channelType) {
+        return commitInFreshTx(() -> {
+            var agent = new Agent();
+            agent.name = agentName;
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.enabled = true;
+            agent.save();
+            var convo = new Conversation();
+            convo.agent = agent;
+            convo.channelType = channelType;
+            convo.peerId = "gh12";
+            convo.save();
+            return convo;
+        });
+    }
+
+    @Test
+    void stopTurnReleasesABusyWebConversation() {
+        login();
+        var convo = seedConversation("gh12-stop-busy", "web");
+        var msg = new services.ConversationQueue.QueuedMessage("running", "web", "gh12", convo.agent);
+        var ownerFlag = new java.util.concurrent.atomic.AtomicBoolean(false);
+        services.ConversationQueue.tryAcquireOwnership(convo.id, msg, ownerFlag);
+        try {
+            var response = POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}");
+            assertIsOk(response);
+            assertTrue(getContent(response).contains("\"stopped\":true"));
+            assertFalse(services.ConversationQueue.isBusy(convo.id));
+            assertTrue(ownerFlag.get());
+        } finally {
+            services.ConversationQueue.releaseOwnership(convo.id);
+        }
+    }
+
+    @Test
+    void stopTurnOnAnIdleConversationReportsNothingStopped() {
+        login();
+        var convo = seedConversation("gh12-stop-idle", "web");
+        var response = POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}");
+        assertIsOk(response);
+        assertTrue(getContent(response).contains("\"stopped\":false"));
+        assertFalse(services.ConversationQueue.isBusy(convo.id));
+    }
+
+    @Test
+    void stopTurnForAnUnknownConversationIs404() {
+        login();
+        assertStatus(404, POST("/api/conversations/999999/stop", "application/json", "{}"));
+    }
+
+    @Test
+    void stopTurnRefusesANonWebConversation() {
+        login();
+        var convo = seedConversation("gh12-stop-telegram", "telegram");
+        var msg = new services.ConversationQueue.QueuedMessage("running", "telegram", "gh12", convo.agent);
+        assertTrue(services.ConversationQueue.tryAcquire(convo.id, msg));
+        try {
+            assertStatus(400, POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}"));
+            assertTrue(services.ConversationQueue.isBusy(convo.id), "a refused stop changes nothing");
+        } finally {
+            services.ConversationQueue.releaseOwnership(convo.id);
+        }
+    }
+
     // --- deleteMessage tests (DELETE /api/conversations/{id}/messages/{mid}) ---
 
     @Test

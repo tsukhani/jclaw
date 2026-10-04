@@ -168,9 +168,22 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     flushStreamRender,
   } = useStreamMarkdownRender(streamContent, streamReasoning, selectedAgentId, messages)
 
+  const { mutate } = useApiMutation()
+  // GH-12: the in-flight stop POST; a send waits for it so the backend has released the turn.
+  let pendingStop: Promise<unknown> | null = null
+
   function stopStreaming() {
     if (!streaming.value) return
     abortController.value?.abort()
+    const convoId = selectedConvoId.value
+    if (convoId != null) {
+      // mutate never rejects, so a failed stop cannot block the next send.
+      const stop: Promise<unknown> = mutate(`/api/conversations/${convoId}/stop`, { method: 'POST' })
+        .finally(() => {
+          if (pendingStop === stop) pendingStop = null
+        })
+      pendingStop = stop
+    }
     streaming.value = false
     streamStatus.value = ''
     focusInput()
@@ -527,6 +540,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     streamingMessageKey.value = assistantKey
     triggerRef(messages)
 
+    if (pendingStop) await pendingStop
     abortController.value?.abort() // cancel any orphaned previous stream
     abortController.value = new AbortController()
     try {

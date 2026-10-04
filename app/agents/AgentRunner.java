@@ -287,10 +287,11 @@ public class AgentRunner {
                                 @Nullable List<AttachmentService.Input> attachments) {
         var queueMsg = new ConversationQueue.QueuedMessage(
                 userMessage, conversation.channelType, conversation.peerId, agent);
-        if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
+        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, null);
+        if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
-        return runAfterAcquire(agent, conversation, userMessage, attachments);
+        return runAfterAcquire(agent, conversation, userMessage, attachments, false, generation);
     }
 
     /**
@@ -308,7 +309,8 @@ public class AgentRunner {
      * @return the run outcome
      */
     public static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage) {
-        return runAfterAcquire(agent, conversation, userMessage, null, false);
+        return runAfterAcquire(agent, conversation, userMessage, null, false,
+                ConversationQueue.currentGeneration(conversation.id));
     }
 
     /**
@@ -321,11 +323,12 @@ public class AgentRunner {
      * @param conversation   the conversation the caller already owns
      * @param userMessage    the user's input text; empty for a pure yield-resume
      * @param skipUserAppend true to run without persisting {@code userMessage}
+     * @param generation     the queue ownership generation the drain transferred
      * @return the run outcome
      */
     static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage,
-                                       boolean skipUserAppend) {
-        return runAfterAcquire(agent, conversation, userMessage, null, skipUserAppend);
+                                       boolean skipUserAppend, long generation) {
+        return runAfterAcquire(agent, conversation, userMessage, null, skipUserAppend, generation);
     }
 
     /**
@@ -358,10 +361,11 @@ public class AgentRunner {
         // Empty text + skipUserAppend=true: the child's reply is already the persisted announce row.
         var queueMsg = new ConversationQueue.QueuedMessage(
                 "", conversation.channelType, conversation.peerId, agent, true);
-        if (!ConversationQueue.tryAcquire(conversation.id, queueMsg)) {
+        long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, null);
+        if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
-        return runAfterAcquire(agent, conversation, "", null, true);
+        return runAfterAcquire(agent, conversation, "", null, true, generation);
     }
 
     /**
@@ -377,11 +381,6 @@ public class AgentRunner {
     static void deliverResumed(Agent agent, Conversation conversation, RunResult result) {
         if (QUEUED_MESSAGE_RESPONSE.equals(result.response())) return;
         dispatchToChannel(agent, conversation.channelType, conversation.peerId, result.response());
-    }
-
-    private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
-                                             @Nullable List<AttachmentService.Input> attachments) {
-        return runAfterAcquire(agent, conversation, userMessage, attachments, false);
     }
 
     /**
@@ -578,7 +577,7 @@ public class AgentRunner {
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
                                              @Nullable List<AttachmentService.Input> attachments,
-                                             boolean skipUserAppend) {
+                                             boolean skipUserAppend, long generation) {
         final Long conversationId = conversation.id;
         // JCLAW-21: every persistence write inside the runner routes
         // through this sink. ConversationSink keeps existing chat
@@ -627,7 +626,7 @@ public class AgentRunner {
             trace.mark(LatencyTrace.TERMINAL_SENT);
             trace.end();
             EventLogger.flush();
-            QueueDrainOrchestrator.processQueueDrain(conversationId);
+            QueueDrainOrchestrator.processQueueDrain(conversationId, generation);
         }
     }
 

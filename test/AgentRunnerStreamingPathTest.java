@@ -162,6 +162,79 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         }
     }
 
+    // ─── GH-12: operator stop releases the queue for the next send ──────
+
+    @Test
+    void aSendRightAfterStopStreamsAFreshRunAndTheStoppedTurnCannotReleaseIt() throws Exception {
+        var firstArrived = new CountDownLatch(1);
+        var releaseFirst = new CountDownLatch(1);
+        var secondArrived = new CountDownLatch(1);
+        var releaseSecond = new CountDownLatch(1);
+        var requests = new AtomicInteger();
+        llmServer = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        llmServer.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+        llmServer.createContext("/chat/completions", exchange -> {
+            boolean first = requests.getAndIncrement() == 0;
+            try {
+                (first ? firstArrived : secondArrived).countDown();
+                (first ? releaseFirst : releaseSecond).await(60, TimeUnit.SECONDS);
+                var body = """
+                        data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"%s"},"finish_reason":"stop"}]}
+
+                        data: [DONE]
+
+                        """.formatted(first ? "stale" : "fresh");
+                exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+                var bytes = body.getBytes();
+                exchange.sendResponseHeaders(200, bytes.length);
+                try (var os = exchange.getResponseBody()) { os.write(bytes); }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (java.io.IOException _) {
+                // The stopped turn may have hung up already.
+            }
+        });
+        llmServer.start();
+        port = llmServer.getAddress().getPort();
+        var provider = "gh12-stop-" + UUID.randomUUID();
+        configureProvider(provider);
+        var agent = persistAgent("gh12-stop-agent", provider, "test-model");
+        var convo = persistConversation(agent, "web", "u-gh12");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var stoppedFlag = new AtomicBoolean(false);
+        try {
+            var stopped = streamAndAwait(agent, convo.id, "web", convo.peerId, "long task", stoppedFlag);
+            assertTrue(firstArrived.await(30, TimeUnit.SECONDS), "the first turn reached the model");
+            assertTrue(services.ConversationQueue.isBusy(convo.id));
+
+            assertTrue(services.ConversationQueue.stop(convo.id));
+            assertTrue(stoppedFlag.get(), "stop flips the running turn's own cancel flag");
+            assertFalse(services.ConversationQueue.isBusy(convo.id), "stop releases the conversation at once");
+
+            var fresh = streamAndAwait(agent, convo.id, "web", convo.peerId, "follow-up", new AtomicBoolean(false));
+            assertTrue(secondArrived.await(30, TimeUnit.SECONDS),
+                    "the follow-up acquired and reached the model instead of being queued");
+
+            releaseFirst.countDown();
+            assertTrue(stopped.terminated.await(60, TimeUnit.SECONDS), "the stopped turn terminates");
+            assertTrue(services.ConversationQueue.isBusy(convo.id),
+                    "the stopped turn's late release leaves the new turn's ownership intact");
+
+            releaseSecond.countDown();
+            assertTrue(fresh.terminated.await(60, TimeUnit.SECONDS));
+            assertEquals("fresh", fresh.completed.get());
+            assertFalse(services.ConversationQueue.isBusy(convo.id), "the new turn released on completion");
+        } finally {
+            releaseFirst.countDown();
+            releaseSecond.countDown();
+            services.ConversationQueue.releaseOwnership(convo.id);
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
+    }
+
     // ─── Happy streaming path ───────────────────────────────────────────
 
     @Test
@@ -495,6 +568,11 @@ class AgentRunnerStreamingPathTest extends UnitTest {
 
     private Harness streamAndAwait(Agent agent, Long conversationId,
                                     String channelType, String peerId, String text) {
+        return streamAndAwait(agent, conversationId, channelType, peerId, text, new AtomicBoolean(false));
+    }
+
+    private Harness streamAndAwait(Agent agent, Long conversationId, String channelType, String peerId,
+                                   String text, AtomicBoolean isCancelled) {
         var h = new Harness();
         var cb = new AgentRunner.StreamingCallbacks(
                 h.initConvo::set,
@@ -507,7 +585,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 () -> { h.cancelled.set(true); h.terminated.countDown(); }
         );
         AgentRunner.runStreaming(agent, conversationId, channelType, peerId, text,
-                new AtomicBoolean(false), cb, null);
+                isCancelled, cb, null);
         return h;
     }
 
