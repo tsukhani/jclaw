@@ -391,6 +391,16 @@ class SequenceHarnessTest extends UnitTest {
     }
 
     @Test
+    void theThresholdBoundsZeroAndOneAreAccepted() {
+        var configuration = Configuration.parse(com.google.gson.JsonParser.parseString("""
+                {"terms": 0, "relations": {"uses": 1},
+                 "classes": {"time": {"state": "certified", "threshold": 1}}}""").getAsJsonObject(), SCHEMA);
+        assertEquals(0.0, configuration.terms());
+        assertEquals(1.0, configuration.relations().get("uses"));
+        assertEquals(1.0, configuration.statementClasses().time());
+    }
+
+    @Test
     void theSameAnswersSerializeIdentically() {
         var set = set();
         var a = GsonHolder.GSON.toJson(run(set, gold(set, new CopyOnWriteArrayList<>()), 1,

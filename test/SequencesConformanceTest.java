@@ -170,6 +170,22 @@ class SequencesConformanceTest extends UnitTest {
     }
 
     @Test
+    void aMissingRequiredKeyIsRefused() {
+        refused(d -> memory(d, 1).remove("text"), "c1", "m2", "text");
+        refused(d -> memory(d, 1).remove("capturedAt"), "c1", "m2", "capturedAt");
+        refused(d -> memory(d, 1).remove("entities"), "c1", "m2", "entities");
+        refused(d -> chain(d).remove("probes"), "c1", "probes");
+        refused(d -> probe(d).remove("truth"), "c1", "probe #0", "truth");
+        refused(d -> probe(d).remove("d"), "c1", "probe #0", "'d'");
+    }
+
+    @Test
+    void aMemoryRelationTheSchemaDoesNotAllowIsRefused() {
+        refused(d -> memory(d, 1).getAsJsonArray("relations").get(0).getAsJsonObject()
+                .addProperty("type", "located_in"), "c1", "m2", "located_in");
+    }
+
+    @Test
     void aMemoryBeforeItsPredecessorIsRefused() {
         refused(d -> memory(d, 1).addProperty("capturedAt", "2025-01-01"), "c1", "m2", "capturedAt");
     }
