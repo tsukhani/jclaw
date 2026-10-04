@@ -715,6 +715,22 @@ class ConversationQueueTest extends UnitTest {
     }
 
     @Test
+    void stopLeavesAnOwnerWithNoCancelFlagAlone() {
+        long convId = 12005L;
+        var gen = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), null);
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "web", "admin", agent));
+
+        assertFalse(ConversationQueue.stop(convId), "a run that cannot be cancelled is not stopped");
+        assertTrue(ConversationQueue.isBusy(convId), "it keeps the conversation");
+        assertEquals(1, ConversationQueue.getQueueSize(convId), "pending is kept");
+        assertEquals(gen, ConversationQueue.currentGeneration(convId), "generation unchanged");
+
+        assertEquals("B", ConversationQueue.drain(convId, gen).getFirst().text());
+        assertTrue(ConversationQueue.drain(convId, gen).isEmpty());
+    }
+
+    @Test
     void aCurrentGenerationReleaseStillReleases() {
         long convId = 12004L;
         var gen = ConversationQueue.tryAcquireOwnership(convId,

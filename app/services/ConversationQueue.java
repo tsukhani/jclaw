@@ -174,17 +174,18 @@ public class ConversationQueue {
      * messages, and release ownership now, so the next send acquires instead of queueing. The
      * stopped turn's later release carries a stale generation and is a no-op.
      *
-     * @return {@code true} when a turn owned the conversation and was stopped
+     * @return {@code true} when a turn that registered a cancel flag owned the conversation and was
+     *         stopped; {@code false}, changing nothing, otherwise
      */
     public static boolean stop(Long conversationId) {
         var state = queues.get(conversationId);
         if (state == null) return false;
         synchronized (state) {
-            if (!state.processing) return false;
-            if (state.ownerCancel != null) state.ownerCancel.set(true);
+            // An owner with no flag of its own (a drained or sync run) could not be told to stop.
+            if (!state.processing || state.ownerCancel == null) return false;
+            state.ownerCancel.set(true);
             state.pending.clear();
             state.generation = GENERATIONS.incrementAndGet();
-            state.lastActivityMs = System.currentTimeMillis();
             state.finishProcessing();
             return true;
         }

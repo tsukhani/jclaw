@@ -501,6 +501,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     const pending = attachedFiles.value.slice()
     const uploaded = await uploadOrReportAttachError()
     if (uploaded === null) return
+    if (pendingStop) await pendingStop
 
     // JCLAW-25: message.content is the user's raw text. Attachment metadata
     // rides in the `attachments` field; the backend persists chat_message_attachment
@@ -540,7 +541,6 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     streamingMessageKey.value = assistantKey
     triggerRef(messages)
 
-    if (pendingStop) await pendingStop
     abortController.value?.abort() // cancel any orphaned previous stream
     abortController.value = new AbortController()
     try {
