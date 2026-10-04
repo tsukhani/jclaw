@@ -377,6 +377,25 @@ class StatementsTest extends UnitTest {
     }
 
     @Test
+    void aStartOnTheEndDayKeepsTheInterval() {
+        var out = works("Avery Lin worked at Harborlight Analytics from March 3, 2023 to 3 March 2023.",
+                ExtractionPipeline.ENDED,
+                Map.of("March 3, 2023", ExtractionPipeline.FROM, "3 March 2023", ExtractionPipeline.TO), Map.of());
+        assertEquals("2023-03-03/2023-03-03", valid(works(out)));
+        assertEquals(0, out.conflict());
+    }
+
+    @Test
+    void aStartOneDayAfterTheEndIsInverted() {
+        var out = works("Avery Lin worked at Harborlight Analytics from March 4, 2023 to March 3, 2023.",
+                ExtractionPipeline.ENDED,
+                Map.of("March 4, 2023", ExtractionPipeline.FROM, "March 3, 2023", ExtractionPipeline.TO), Map.of());
+        assertEquals(OntologyRecord.Status.ENDED, works(out).status());
+        assertNull(works(out).valid());
+        assertEquals(1, out.conflict());
+    }
+
+    @Test
     void aDenialOfAWrittenPositiveWritesNeitherUnlessThePositiveEnded() {
         var both = Map.of("Vela Design uses Osprey Dashboard", 0.06, "Avery Lin uses Osprey Dashboard", 0.9);
         var holds = Statements.at(doesNotUse(Map.of(), both), 0.80, AT_80);
