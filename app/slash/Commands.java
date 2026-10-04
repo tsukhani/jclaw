@@ -435,7 +435,7 @@ public final class Commands {
                     "/stop for conversation %d — nothing in flight".formatted(current.id));
             return new Result(current, "Nothing to stop.", Command.STOP);
         }
-        ConversationQueue.cancellationFlag(current.id).set(true);
+        ConversationQueue.cancelTurn(current.id);
         EventLogger.info(EVENT_CATEGORY_SLASH, Agent.nameOf(agent), channelType,
                 "/stop signalled cancellation for conversation %d".formatted(current.id));
         return new Result(current, "Stopped.", Command.STOP);

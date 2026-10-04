@@ -33,6 +33,7 @@ public final class ToolErrorTemplates {
     public static final String SHELL_INTERRUPTED = "shell_interrupted";
     public static final String SHELL_EXIT_NONZERO = "shell_exit_nonzero";
     public static final String SHELL_TIMED_OUT = "shell_timed_out";
+    public static final String SHELL_STOPPED = "shell_stopped";
 
     public static final String FS_PATH_MISSING = "fs_path_missing";
     public static final String FS_PATH_REFUSED = "fs_path_refused";
@@ -155,6 +156,13 @@ public final class ToolErrorTemplates {
                 "'output' holds whatever it printed before the kill. A command that waits on input "
                         + "never finishes here — nothing is attached to its stdin.",
                 "Re-run with a larger 'timeout', or narrow the command so it completes inside one.");
+    }
+
+    public static ErrorTemplate shellStopped(String command) {
+        return new ErrorTemplate(SHELL_STOPPED,
+                "`%s` was stopped because its turn was stopped.".formatted(command),
+                "The operator stopped the turn; the command and every process it started were killed.",
+                "Check whether the command had already taken effect before running it again.");
     }
 
     /** Exit statuses whose meaning is fixed by POSIX shells; everything else is the command's own. */

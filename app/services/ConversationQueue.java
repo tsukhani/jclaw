@@ -1,5 +1,6 @@
 package services;
 
+import agents.TurnCancellation;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 
@@ -139,6 +140,7 @@ public class ConversationQueue {
         }
 
         if (interrupted) {
+            TurnCancellation.cancel(state.cancelled);
             EventLogger.info(QUEUE, message.agent().name, message.channelType(),
                     "Interrupt mode: signalled cancellation for conversation %d, queued new message"
                             .formatted(conversationId));
@@ -180,15 +182,48 @@ public class ConversationQueue {
     public static boolean stop(Long conversationId) {
         var state = queues.get(conversationId);
         if (state == null) return false;
+        AtomicBoolean stopped;
         synchronized (state) {
             // An owner with no flag of its own (a drained or sync run) could not be told to stop.
-            if (!state.processing || state.ownerCancel == null) return false;
-            state.ownerCancel.set(true);
+            stopped = state.ownerCancel;
+            if (!state.processing || stopped == null) return false;
+            stopped.set(true);
             state.pending.clear();
             state.generation = GENERATIONS.incrementAndGet();
             state.finishProcessing();
+        }
+        TurnCancellation.cancel(stopped);
+        return true;
+    }
+
+    /**
+     * Run {@code commit} only while the turn that acquired {@code generation} still owns the
+     * conversation and its {@code turnCancel} flag (when it has one) is unset. The check and the
+     * commit share {@link #stop}'s lock, so a racing write either lands before the stop returns
+     * or not at all.
+     *
+     * @return {@code true} when {@code commit} ran; {@code false}, running nothing, otherwise
+     */
+    public static boolean commitIfOwner(Long conversationId, long generation, @Nullable AtomicBoolean turnCancel,
+                                        Runnable commit) {
+        var state = queues.get(conversationId);
+        if (state == null) return false;
+        synchronized (state) {
+            if (!state.processing || state.generation != generation) return false;
+            if (turnCancel != null && turnCancel.get()) return false;
+            commit.run();
             return true;
         }
+    }
+
+    /** {@code /stop}: signal the in-flight turn through the conversation's cancel flag and run its cancel actions. */
+    public static void cancelTurn(Long conversationId) {
+        var state = queues.get(conversationId);
+        if (state == null) return;
+        synchronized (state) {
+            state.cancelled.set(true);
+        }
+        TurnCancellation.cancel(state.cancelled);
     }
 
     /**

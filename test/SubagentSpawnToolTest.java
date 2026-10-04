@@ -509,6 +509,73 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void stoppingTheParentTurnKillsASyncChild() throws Exception {
+        var parent = createAgent("p-turn-stop", "spawn-provider", "test-model");
+        var child = createAgent("c-turn-stop", "spawn-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-turn-stop");
+        var childConv = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
+        var run = Tx.run(() -> {
+            var r = new SubagentRun();
+            r.parentAgent = parent;
+            r.childAgent = child;
+            r.parentConversation = parentConv;
+            r.childConversation = childConv;
+            r.status = SubagentRun.Status.RUNNING;
+            r.save();
+            return r;
+        });
+        // The kill runs on the turn-cancel thread in its own transaction, so the row must be committed.
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(run.id, future);
+        var turn = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var outcome = new CompletableFuture<SubagentSpawnTool.SyncRunOutcome>();
+        try {
+            Thread.ofVirtual().start(() -> outcome.complete(agents.ToolContext.withScope(null, null, null, turn,
+                    () -> SubagentSpawnTool.awaitFuture(future, 3600, 3600, run.id))));
+            Thread.sleep(200);
+            agents.TurnCancellation.cancel(turn);
+
+            var result = outcome.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(SubagentRun.Status.KILLED, result.terminalStatus());
+            assertTrue(result.terminalOutcome().contains("parent turn was stopped"), result.terminalOutcome());
+            assertTrue(future.isCancelled(), "the child's future was cancelled through the registry");
+
+            // kill cancels the future before it writes the row, so the outcome can arrive first.
+            SubagentRun row = null;
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+            while (System.nanoTime() < deadline) {
+                JPA.em().clear();
+                row = SubagentRun.findById(run.id);
+                if (row.status == SubagentRun.Status.KILLED) break;
+                Thread.sleep(50);
+            }
+            assertEquals(SubagentRun.Status.KILLED, row.status);
+            assertTrue(row.outcome.contains("parent turn was stopped"), row.outcome);
+        } finally {
+            SubagentRegistry.unregister(run.id);
+        }
+    }
+
+    @Test
+    void aCompletedChildStillCompletesUnderATurnScope() {
+        Long runId = 90011L;
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(runId, future);
+        try {
+            future.complete(new AgentRunner.RunResult("done", null));
+            var outcome = agents.ToolContext.withScope(null, null, null, new java.util.concurrent.atomic.AtomicBoolean(false),
+                    () -> SubagentSpawnTool.awaitFuture(future, 5, 1800, runId));
+            assertEquals(SubagentRun.Status.COMPLETED, outcome.terminalStatus());
+            assertEquals("done", outcome.reply());
+        } finally {
+            SubagentRegistry.unregister(runId);
+        }
+    }
+
+    @Test
     void activityKeepsRunAlivePastIdleBudget() {
         // JCLAW-424 regression for SubagentRun #4654: a child that keeps working
         // (touches activity) for LONGER than the idle budget must NOT time out.

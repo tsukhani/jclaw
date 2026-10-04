@@ -10,7 +10,6 @@ import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.EventLogger;
 import services.SubagentRegistry;
-import services.Tx;
 import utils.LatencyTrace;
 
 import java.util.ArrayList;
@@ -74,6 +73,7 @@ public final class ParallelToolExecutor {
                                                @Nullable Long conversationId,
                                                @Nullable Long taskRunId,
                                                BooleanSupplier cancelled,
+                                               @Nullable AtomicBoolean turnCancel,
                                                @Nullable Consumer<String> onStatus,
                                                @Nullable Set<String> offeredTools) {
         var rawName = toolCall.function().name();
@@ -110,7 +110,7 @@ public final class ParallelToolExecutor {
         // JCLAW-462: expose the run scope (conversation id for chat, task-run
         // id for task fires) to tools that need it (ccr_retrieve) via
         // ToolContext, set on this tool's own VT.
-        var result = ToolContext.withScope(conversationId, taskRunId, cancelled,
+        var result = ToolContext.withScope(conversationId, taskRunId, cancelled, turnCancel,
                 () -> ToolRegistry.executeRich(rawName, rawArgs, agent, offeredTools));
         var text = result.text();
         var resultPreview = text.length() > 200
@@ -191,8 +191,8 @@ public final class ParallelToolExecutor {
 
         if (n == 1) {
             if (isCancelled == null || !isCancelled.get()) {
-                results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, taskRunId, cancelled, onStatus,
-                        offeredTools);
+                results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, taskRunId, cancelled, isCancelled,
+                        onStatus, offeredTools);
             }
         } else {
             dispatchMultiToolCalls(toolCalls, agent, conversationId, taskRunId, results, onStatus, isCancelled,
@@ -296,7 +296,7 @@ public final class ParallelToolExecutor {
             if (ctx.isCancelled() != null && ctx.isCancelled().get()) return;
             results[i] = runToolCallSafely(
                     ctx.toolCalls().get(i), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.cancelled(),
-                    ctx.onStatus(), ctx.offeredTools());
+                    ctx.isCancelled(), ctx.onStatus(), ctx.offeredTools());
         } finally {
             ctx.latch().countDown();
         }
@@ -309,7 +309,7 @@ public final class ParallelToolExecutor {
                 if (ctx.isCancelled() != null && ctx.isCancelled().get()) break;
                 results[idx] = runToolCallSafely(
                         ctx.toolCalls().get(idx), ctx.agent(), ctx.conversationId(), ctx.taskRunId(), ctx.cancelled(),
-                        ctx.onStatus(), ctx.offeredTools());
+                        ctx.isCancelled(), ctx.onStatus(), ctx.offeredTools());
             }
         } finally {
             ctx.latch().countDown();
@@ -324,10 +324,11 @@ public final class ParallelToolExecutor {
                                                              @Nullable Long conversationId,
                                                              @Nullable Long taskRunId,
                                                              BooleanSupplier cancelled,
+                                                             @Nullable AtomicBoolean turnCancel,
                                                              @Nullable Consumer<String> onStatus,
                                                              @Nullable Set<String> offeredTools) {
         try {
-            return runToolCall(tc, agent, conversationId, taskRunId, cancelled, onStatus, offeredTools);
+            return runToolCall(tc, agent, conversationId, taskRunId, cancelled, turnCancel, onStatus, offeredTools);
         } catch (Exception e) {
             EventLogger.error("tool", agent.name, null,
                     "Tool '%s' threw: %s"
@@ -366,7 +367,8 @@ public final class ParallelToolExecutor {
      *
      * <p>The whole round persists in ONE transaction — dispatch runs on a
      * background virtual thread with no ambient one, so a {@code Tx.run} per
-     * call cost a connection checkout, begin and commit per tool call.
+     * call cost a connection checkout, begin and commit per tool call. It goes through
+     * {@link AgentExecutionSink#commit} so a stopped turn's round is dropped, not written.
      */
     private static void commitToolResults(List<ToolCall> toolCalls, ToolRegistry.ToolResult[] results,
                                           List<ChatMessage> currentMessages,
@@ -374,7 +376,7 @@ public final class ParallelToolExecutor {
                                           @Nullable List<String> imageCollector, AgentExecutionSink sink) {
         var frames = new ArrayList<AgentRunner.ToolCallEvent>();
         var frameSink = onToolCall != null ? frames : null;
-        Tx.run(() -> {
+        sink.commit(() -> {
             for (int i = 0; i < toolCalls.size(); i++) {
                 var result = results[i];
                 if (result == null) continue; // skipped due to cancellation

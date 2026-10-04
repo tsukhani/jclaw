@@ -756,4 +756,92 @@ class ConversationQueueTest extends UnitTest {
         assertTrue(ConversationQueue.drain(convId, gen).isEmpty());
         assertFalse(ConversationQueue.isBusy(convId));
     }
+
+    // ── JCLAW-1385: the write fence a stopped turn's late commits hit ──
+
+    @Test
+    void theOwnerCommitPasses() {
+        long convId = 13001L;
+        var flag = new AtomicBoolean(false);
+        var gen = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), flag);
+        var ran = new AtomicBoolean(false);
+        assertTrue(ConversationQueue.commitIfOwner(convId, gen, flag, () -> ran.set(true)));
+        assertTrue(ran.get());
+        ConversationQueue.releaseOwnership(convId, gen);
+    }
+
+    @Test
+    void aStaleGenerationCommitIsDroppedAndTheNewOwnersPasses() {
+        long convId = 13002L;
+        var stale = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), new AtomicBoolean());
+        ConversationQueue.stop(convId);
+        var fresh = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("B", "web", "admin", agent), new AtomicBoolean());
+
+        var ran = new AtomicInteger();
+        assertFalse(ConversationQueue.commitIfOwner(convId, stale, null, ran::incrementAndGet));
+        assertEquals(0, ran.get(), "a dropped commit runs nothing");
+        assertTrue(ConversationQueue.commitIfOwner(convId, fresh, null, ran::incrementAndGet));
+        assertEquals(1, ran.get());
+        ConversationQueue.releaseOwnership(convId, fresh);
+    }
+
+    @Test
+    void aCommitWithItsTurnFlagSetIsDropped() {
+        long convId = 13003L;
+        var flag = new AtomicBoolean(false);
+        var gen = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), flag);
+        flag.set(true);
+        var ran = new AtomicBoolean(false);
+        assertFalse(ConversationQueue.commitIfOwner(convId, gen, flag, () -> ran.set(true)),
+                "an SSE disconnect leaves the generation alone, so the flag alone must drop it");
+        assertFalse(ran.get());
+        ConversationQueue.releaseOwnership(convId, gen);
+    }
+
+    @Test
+    void aCommitAfterStopWithNoNewOwnerIsDropped() {
+        long convId = 13004L;
+        var gen = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), new AtomicBoolean());
+        assertTrue(ConversationQueue.stop(convId));
+        var ran = new AtomicBoolean(false);
+        assertFalse(ConversationQueue.commitIfOwner(convId, gen, null, () -> ran.set(true)));
+        assertFalse(ran.get());
+        assertFalse(ConversationQueue.commitIfOwner(99_999_013L, 1, null, () -> ran.set(true)),
+                "an unknown conversation has no owner to commit for");
+    }
+
+    @Test
+    void stopWaitsForACommitAlreadyInsideTheFence() throws Exception {
+        long convId = 13005L;
+        var flag = new AtomicBoolean(false);
+        var gen = ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("A", "web", "admin", agent), flag);
+        var inside = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var committed = new java.util.concurrent.CompletableFuture<Boolean>();
+        Thread.ofVirtual().start(() -> committed.complete(ConversationQueue.commitIfOwner(convId, gen, flag, () -> {
+            inside.countDown();
+            try {
+                release.await(30, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        })));
+        assertTrue(inside.await(10, TimeUnit.SECONDS));
+
+        var stopped = new java.util.concurrent.CompletableFuture<Boolean>();
+        Thread.ofVirtual().start(() -> stopped.complete(ConversationQueue.stop(convId)));
+        Thread.sleep(300);
+        assertFalse(stopped.isDone(), "stop must block while a commit holds the fence");
+
+        release.countDown();
+        assertTrue(committed.get(10, TimeUnit.SECONDS), "the in-flight commit lands");
+        assertTrue(stopped.get(10, TimeUnit.SECONDS), "and stop returns true once it has");
+        assertFalse(ConversationQueue.commitIfOwner(convId, gen, flag, () -> {}), "later writes drop");
+    }
 }

@@ -585,7 +585,8 @@ public class AgentRunner {
         // ConversationService); TaskRunSink overrides the same surface
         // to write into task_run_message. Constructed at the boundary
         // where AgentRunner takes responsibility for the conversation.
-        final AgentExecutionSink sink = new ConversationSink(conversation);
+        // Fenced on the acquired generation, so an inline child's rows in a stopped parent conversation drop.
+        final var sink = new ConversationSink(conversation, generation, null);
         // Non-streaming callers (background jobs, webhook follow-ups) have
         // no pre-runner queue-accept timestamp, so queue_wait is naturally
         // skipped. Every other segment is captured, which is why
@@ -625,6 +626,9 @@ public class AgentRunner {
         } finally {
             trace.mark(LatencyTrace.TERMINAL_SENT);
             trace.end();
+            if (sink.droppedRows() > 0) {
+                StreamingAgentRunner.logDroppedRows(agent, conversation.channelType, sink);
+            }
             EventLogger.flush();
             QueueDrainOrchestrator.processQueueDrain(conversationId, generation);
         }
@@ -684,7 +688,7 @@ public class AgentRunner {
         // (loadtest cleanup, manual UI delete, etc.); ConversationSink
         // logs + skips internally rather than inserting a row with a
         // null FK.
-        Tx.run(() ->
+        boolean committed = sink.commit(() ->
                 sink.appendAssistantMessage(response, null, null, null, truncated));
 
         EventLogger.info("llm", agent.name, conversation.channelType,
@@ -694,7 +698,7 @@ public class AgentRunner {
         // JCLAW-39: async memory auto-capture for the completed turn. Runs on
         // its own virtual thread after the reply is persisted, so it never
         // blocks the response. No-op in test mode / when disabled.
-        MemoryAutoCapture.captureAsync(agent, conversationId, userMessage, response);
+        if (committed) MemoryAutoCapture.captureAsync(agent, conversationId, userMessage, response);
 
         var updatedConversation = Tx.run(() -> ConversationService.findById(conversationId));
         return new RunResult(response, updatedConversation, truncated);

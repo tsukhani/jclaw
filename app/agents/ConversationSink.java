@@ -5,11 +5,15 @@ import models.MessageAttachment;
 import models.VideoGenerationJob;
 import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
+import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
+import services.Tx;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * {@link AgentExecutionSink} backed by a {@link Conversation}. All
@@ -54,12 +58,66 @@ public class ConversationSink implements AgentExecutionSink {
     private static final String ASSISTANT = "assistant";
 
     private final Conversation conversation;
+    private final boolean fenced;
+    private final long generation;
+    private final @Nullable AtomicBoolean turnCancel;
+    /** Sticky: once a commit is refused, every later write of this turn is counted, not made. */
+    private volatile boolean discarding;
+    private final AtomicInteger droppedRows = new AtomicInteger();
 
     public ConversationSink(Conversation conversation) {
+        this(conversation, false, 0, null);
+    }
+
+    /**
+     * A sink whose {@link #commit} writes only while the turn still owns {@code conversation} at
+     * {@code generation} and {@code turnCancel} (when non-null) is unset.
+     */
+    public ConversationSink(Conversation conversation, long generation, @Nullable AtomicBoolean turnCancel) {
+        this(conversation, true, generation, turnCancel);
+    }
+
+    private ConversationSink(Conversation conversation, boolean fenced, long generation,
+                             @Nullable AtomicBoolean turnCancel) {
         if (conversation == null) {
             throw new IllegalArgumentException("conversation must not be null");
         }
         this.conversation = conversation;
+        this.fenced = fenced;
+        this.generation = generation;
+        this.turnCancel = turnCancel;
+    }
+
+    /**
+     * Commit {@code writes} under {@link ConversationQueue#commitIfOwner}. A refused commit still
+     * runs {@code writes}, so the caller's in-memory state stays consistent, but with every append
+     * turned into a count.
+     */
+    @Override
+    public boolean commit(Runnable writes) {
+        if (!fenced) {
+            Tx.run(writes);
+            return true;
+        }
+        if (!discarding && ConversationQueue.commitIfOwner(conversation.id, generation, turnCancel,
+                () -> Tx.run(writes))) {
+            return true;
+        }
+        discarding = true;
+        writes.run();
+        return false;
+    }
+
+    /** Rows this turn would have written after it lost the conversation. */
+    public int droppedRows() {
+        return droppedRows.get();
+    }
+
+    /** Count the row instead of writing it once the turn has lost the conversation. */
+    private boolean dropping() {
+        if (!discarding) return false;
+        droppedRows.incrementAndGet();
+        return true;
     }
 
     /**
@@ -74,6 +132,7 @@ public class ConversationSink implements AgentExecutionSink {
     @Override
     public void appendUserMessage(String content,
                                   @Nullable List<AttachmentService.Input> attachments) {
+        if (dropping()) return;
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped("user");
@@ -86,6 +145,7 @@ public class ConversationSink implements AgentExecutionSink {
     public void appendAssistantMessage(@Nullable String content, @Nullable String toolCalls,
                                        @Nullable String usageJson, @Nullable String reasoning,
                                        boolean truncated) {
+        if (dropping()) return;
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped(ASSISTANT);
@@ -99,6 +159,7 @@ public class ConversationSink implements AgentExecutionSink {
     public List<MessageAttachment> appendAssistantMessage(
             @Nullable String content, @Nullable String toolCalls,
             List<GeneratedAttachment> attachments) {
+        if (dropping()) return List.of();
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped(ASSISTANT);
@@ -119,6 +180,7 @@ public class ConversationSink implements AgentExecutionSink {
     @Override
     public @Nullable MessageAttachment appendVideoPlaceholder(@Nullable String content,
             @Nullable String toolCalls, ToolRegistry.VideoJobRef videoJob) {
+        if (dropping()) return null;
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped(ASSISTANT);
@@ -145,6 +207,7 @@ public class ConversationSink implements AgentExecutionSink {
     @Override
     public void appendToolResult(@Nullable String toolCallId, String result,
                                  @Nullable String structuredJson) {
+        if (dropping()) return;
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped("tool-result");

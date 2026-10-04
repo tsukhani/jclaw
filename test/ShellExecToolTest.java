@@ -231,6 +231,7 @@ class ShellExecToolTest extends UnitTest {
         assertTrue(result.contains("\"exitCode\":0"));
         assertTrue(result.contains("hello"));
         assertTrue(result.contains("\"timedOut\":false"));
+        assertTrue(result.contains("\"stopped\":false"), result);
     }
 
     @Test
@@ -329,9 +330,41 @@ class ShellExecToolTest extends UnitTest {
         var result = tool.execute("""
                 {"command": "sleep 30", "timeout": 1}
                 """, agent);
-        assertTrue(result.contains("\"timedOut\":true"));
+        assertTrue(result.contains("\"timedOut\":true,\"stopped\":false"), result);
         assertTrue(result.contains("\"exitCode\":-1"));
         assertTrue(result.contains("timeout after 1 seconds"));
+    }
+
+    @Test
+    void stoppingTheTurnKillsTheProcessTreeAndReportsStopped() throws Exception {
+        var turn = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var result = new java.util.concurrent.CompletableFuture<String>();
+        Thread.ofVirtual().start(() -> result.complete(agents.ToolContext.withScope(null, null, null, turn,
+                () -> tool.execute("""
+                        {"command": "sleep 4711", "timeout": 120}
+                        """, agent))));
+
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (sleepers().isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+        assertFalse(sleepers().isEmpty(), "the command started");
+
+        agents.TurnCancellation.cancel(turn);
+        var text = result.get(2, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(text.contains("\"stopped\":true"), text);
+        assertTrue(text.contains("\"exitCode\":-1"), text);
+        assertTrue(text.contains("[Process killed: turn stopped]"), text);
+        assertTrue(text.contains("was stopped because its turn was stopped"), text);
+
+        deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+        while (!sleepers().isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+        assertTrue(sleepers().isEmpty(), "no process of the stopped command survives");
+    }
+
+    private static java.util.List<ProcessHandle> sleepers() {
+        return ProcessHandle.allProcesses()
+                .filter(ProcessHandle::isAlive)
+                .filter(h -> h.info().commandLine().map(c -> c.contains("sleep 4711")).orElse(false))
+                .toList();
     }
 
     @Test

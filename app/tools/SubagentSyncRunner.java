@@ -2,6 +2,7 @@ package tools;
 
 import agents.AgentRunner;
 import agents.RunCancelledException;
+import agents.ToolContext;
 import models.Agent;
 import models.Conversation;
 import models.SubagentRun;
@@ -16,6 +17,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * JCLAW-677: synchronous child dispatch and the timeout/cancel policy,
@@ -103,39 +105,47 @@ final class SubagentSyncRunner {
         long idleBudgetNanos = TimeUnit.SECONDS.toNanos(Math.max(1, idleBudgetSeconds));
         long ceilingNanos = ceilingSeconds <= 0 ? Long.MAX_VALUE : TimeUnit.SECONDS.toNanos(ceilingSeconds);
         long startNanos = System.nanoTime();
-        while (true) {
-            try {
-                var result = future.get(IDLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
-                var reply = result == null ? "" : result.response();
-                var truncated = result != null && result.truncated();
-                return new SyncRunOutcome(reply, SubagentRun.Status.COMPLETED,
-                        reply, null, false, truncated);
-            } catch (TimeoutException _) {
-                // Poll tick — the child is still running. Check the two budgets.
-                long idleNanos = SubagentRegistry.nanosSinceActivity(runId);
-                if (idleNanos < 0) idleNanos = System.nanoTime() - startNanos; // unregistered fallback
-                if (idleNanos > idleBudgetNanos) {
-                    return stopChildOnTimeout(future, runId,
-                            "Subagent run exceeded its %d-second idle budget (no activity)".formatted(idleBudgetSeconds));
+        var parentStopped = new AtomicBoolean(false);
+        try (var _ = ToolContext.onCancel(() -> {
+            parentStopped.set(true);
+            SubagentRegistry.kill(runId, PARENT_STOPPED_REASON);
+        })) {
+            while (true) {
+                try {
+                    var result = future.get(IDLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);
+                    var reply = result == null ? "" : result.response();
+                    var truncated = result != null && result.truncated();
+                    return new SyncRunOutcome(reply, SubagentRun.Status.COMPLETED,
+                            reply, null, false, truncated);
+                } catch (TimeoutException _) {
+                    // Poll tick — the child is still running. Check the two budgets.
+                    long idleNanos = SubagentRegistry.nanosSinceActivity(runId);
+                    if (idleNanos < 0) idleNanos = System.nanoTime() - startNanos; // unregistered fallback
+                    if (idleNanos > idleBudgetNanos) {
+                        return stopChildOnTimeout(future, runId,
+                                "Subagent run exceeded its %d-second idle budget (no activity)".formatted(idleBudgetSeconds));
+                    }
+                    if (System.nanoTime() - startNanos > ceilingNanos) {
+                        return stopChildOnTimeout(future, runId,
+                                "Subagent run exceeded the absolute %d-second ceiling".formatted(ceilingSeconds));
+                    }
+                    // budgets intact — keep polling
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                    var reason = "Parent thread interrupted while awaiting subagent";
+                    return new SyncRunOutcome("", SubagentRun.Status.FAILED, reason, reason, false, false);
+                } catch (CancellationException _) {
+                    // JCLAW-291: kill primitive canceled our Future. Registry already KILLED.
+                    return new SyncRunOutcome("", SubagentRun.Status.KILLED,
+                            parentStopped.get() ? PARENT_STOPPED_REASON : "Killed by operator", null, true, false);
+                } catch (ExecutionException ee) {
+                    return fromExecutionException(ee);
                 }
-                if (System.nanoTime() - startNanos > ceilingNanos) {
-                    return stopChildOnTimeout(future, runId,
-                            "Subagent run exceeded the absolute %d-second ceiling".formatted(ceilingSeconds));
-                }
-                // budgets intact — keep polling
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-                var reason = "Parent thread interrupted while awaiting subagent";
-                return new SyncRunOutcome("", SubagentRun.Status.FAILED, reason, reason, false, false);
-            } catch (CancellationException _) {
-                // JCLAW-291: kill primitive canceled our Future. Registry already KILLED.
-                return new SyncRunOutcome("", SubagentRun.Status.KILLED,
-                        "Killed by operator", null, true, false);
-            } catch (ExecutionException ee) {
-                return fromExecutionException(ee);
             }
         }
     }
+
+    private static final String PARENT_STOPPED_REASON = "Killed because the parent turn was stopped";
 
     /**
      * JCLAW-424: on idle/ceiling timeout, flip the cooperative-stop flag and

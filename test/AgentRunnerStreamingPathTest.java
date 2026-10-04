@@ -1,4 +1,5 @@
 import agents.AgentRunner;
+import agents.ToolRegistry;
 import llm.LlmResilience;
 import models.Agent;
 import models.Conversation;
@@ -233,6 +234,205 @@ class AgentRunnerStreamingPathTest extends UnitTest {
             services.ConversationQueue.releaseOwnership(convo.id);
             CircuitBreakers.remove(LlmResilience.breakerName(provider));
         }
+    }
+
+    // ─── JCLAW-1385: a stopped turn writes nothing after the stop ───────
+
+    private static final String HOLD_TOOL = "gh1385_hold";
+
+    private static final String HOLD_TOOL_CALL_SSE = """
+            data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_hold","type":"function","function":{"name":"gh1385_hold","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}
+
+            data: [DONE]
+
+            """;
+
+    @Test
+    void aToolThatFinishesAfterStopWritesNothingAndTheFollowUpOwnsEveryLaterRow() throws Exception {
+        var toolEntered = new CountDownLatch(1);
+        var releaseTool = new CountDownLatch(1);
+        var secondArrived = new CountDownLatch(1);
+        var releaseSecond = new CountDownLatch(1);
+        var requests = new AtomicInteger();
+        llmServer = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        llmServer.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+        llmServer.createContext("/chat/completions", exchange -> {
+            boolean first = requests.getAndIncrement() == 0;
+            try {
+                String body;
+                if (first) {
+                    body = HOLD_TOOL_CALL_SSE;
+                } else {
+                    secondArrived.countDown();
+                    releaseSecond.await(60, TimeUnit.SECONDS);
+                    body = contentSse("fresh");
+                }
+                exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+                var bytes = body.getBytes();
+                exchange.sendResponseHeaders(200, bytes.length);
+                try (var os = exchange.getResponseBody()) { os.write(bytes); }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (java.io.IOException _) {
+                // A turn may have hung up already.
+            }
+        });
+        llmServer.start();
+        port = llmServer.getAddress().getPort();
+        var provider = "gh1385-stop-" + UUID.randomUUID();
+        configureProvider(provider);
+        var agent = persistAgent("gh1385-stop-" + UUID.randomUUID(), provider, "test-model");
+        var convo = persistConversation(agent, "web", "u-gh1385");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        ToolRegistrySync.withTools(List.of(holdTool(toolEntered, releaseTool)), () -> {
+            var stoppedFlag = new AtomicBoolean(false);
+            try {
+                var stopped = streamAndAwait(agent, convo.id, "web", convo.peerId, "long task", stoppedFlag);
+                assertTrue(toolEntered.await(30, TimeUnit.SECONDS), "the stopped turn's tool is running");
+
+                assertTrue(services.ConversationQueue.stop(convo.id));
+                long maxIdAtStop = messages(convo.id).stream().mapToLong(m -> m.id).max().orElse(0);
+
+                var fresh = streamAndAwait(agent, convo.id, "web", convo.peerId, "follow-up", new AtomicBoolean(false));
+                assertTrue(secondArrived.await(30, TimeUnit.SECONDS), "the follow-up owns the conversation");
+
+                releaseTool.countDown();
+                assertTrue(stopped.terminated.await(60, TimeUnit.SECONDS), "the stopped turn terminates");
+                assertTrue(services.ConversationQueue.isBusy(convo.id),
+                        "the stopped turn's late release leaves the new turn's ownership intact");
+                // The drop line is written in the stopped turn's finally, after its terminal callback and any capture.
+                List<EventLog> drops = new java.util.ArrayList<>();
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (drops.isEmpty() && System.nanoTime() < deadline) {
+                    EventLogger.flush();
+                    JPA.em().clear();
+                    for (Object o : EventLog.find("category = ?1 AND agentId = ?2 AND message LIKE ?3",
+                            "queue", agent.name, "Dropped%").fetch()) {
+                        drops.add((EventLog) o);
+                    }
+                    if (drops.isEmpty()) Thread.sleep(50);
+                }
+                assertEquals(1, drops.size(), "one drop line per stopped turn");
+                assertTrue(drops.getFirst().message.contains("Dropped 2 message rows")
+                                && drops.getFirst().message.contains("conversation " + convo.id),
+                        drops.getFirst().message);
+                assertFalse(memory.MemoryAutoCapture.captureRequestedForTest(convo.id),
+                        "the stopped exchange is never captured");
+
+                releaseSecond.countDown();
+                assertTrue(fresh.terminated.await(60, TimeUnit.SECONDS));
+                assertEquals("fresh", fresh.completed.get());
+                deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (services.ConversationQueue.isBusy(convo.id) && System.nanoTime() < deadline) {
+                    Thread.sleep(50);
+                }
+                assertFalse(services.ConversationQueue.isBusy(convo.id), "the new turn released on completion");
+
+                var all = messages(convo.id);
+                var after = all.stream().filter(m -> m.id > maxIdAtStop).toList();
+                assertEquals(List.of("user:follow-up", "assistant:fresh"),
+                        after.stream().map(m -> m.role + ":" + m.content).toList(),
+                        "every row after the stop is the follow-up's");
+                assertTrue(all.stream().noneMatch(m -> MessageRole.TOOL.value.equals(m.role) || m.toolCalls != null),
+                        "no tool-call or tool-result row from the stopped turn");
+            } finally {
+                releaseTool.countDown();
+                releaseSecond.countDown();
+                services.ConversationQueue.releaseOwnership(convo.id);
+                CircuitBreakers.remove(LlmResilience.breakerName(provider));
+            }
+        });
+    }
+
+    @Test
+    void anUnstoppedToolRoundPersistsItsRowsAndIsCaptured() throws Exception {
+        var requests = new AtomicInteger();
+        llmServer = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        llmServer.createContext("/chat/completions", exchange -> {
+            var body = requests.getAndIncrement() == 0 ? HOLD_TOOL_CALL_SSE : contentSse("done");
+            exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+            var bytes = body.getBytes();
+            exchange.sendResponseHeaders(200, bytes.length);
+            try (var os = exchange.getResponseBody()) { os.write(bytes); }
+        });
+        llmServer.start();
+        port = llmServer.getAddress().getPort();
+        var provider = "gh1385-ok-" + UUID.randomUUID();
+        configureProvider(provider);
+        var agent = persistAgent("gh1385-ok-" + UUID.randomUUID(), provider, "test-model");
+        var convo = persistConversation(agent, "web", "u-gh1385-ok");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var released = new CountDownLatch(0);
+        ToolRegistrySync.withTools(List.of(holdTool(new CountDownLatch(1), released)), () -> {
+            try {
+                var h = streamAndAwait(agent, convo.id, "web", convo.peerId, "run it", new AtomicBoolean(false));
+                assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
+                assertEquals("done", h.completed.get());
+                // onComplete fires inside the final persist; capture and the release follow it.
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (services.ConversationQueue.isBusy(convo.id) && System.nanoTime() < deadline) {
+                    Thread.sleep(50);
+                }
+                assertFalse(services.ConversationQueue.isBusy(convo.id));
+
+                var rows = messages(convo.id);
+                assertTrue(rows.stream().anyMatch(m -> m.toolCalls != null && m.toolCalls.contains(HOLD_TOOL)),
+                        "the tool-call row persists");
+                assertTrue(rows.stream().anyMatch(m -> MessageRole.TOOL.value.equals(m.role)),
+                        "the tool-result row persists");
+                EventLogger.flush();
+                assertEquals(0, EventLog.count("category = ?1 AND agentId = ?2 AND message LIKE ?3",
+                        "queue", agent.name, "Dropped%"), "an unstopped turn drops nothing");
+                assertTrue(memory.MemoryAutoCapture.captureRequestedForTest(convo.id),
+                        "the test can see a capture request");
+            } finally {
+                services.ConversationQueue.releaseOwnership(convo.id);
+                CircuitBreakers.remove(LlmResilience.breakerName(provider));
+            }
+        });
+    }
+
+    private static ToolRegistry.Tool holdTool(CountDownLatch entered, CountDownLatch release) {
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return HOLD_TOOL; }
+            @Override public String description() { return "Blocks until the test releases it"; }
+            @Override public java.util.Map<String, Object> parameters() {
+                return java.util.Map.of("type", "object", "properties", java.util.Map.of());
+            }
+            @Override public String execute(String argsJson, Agent agent) {
+                entered.countDown();
+                try {
+                    release.await(60, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                return "held";
+            }
+        };
+    }
+
+    private static String contentSse(String content) {
+        return """
+                data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"%s"},"finish_reason":"stop"}]}
+
+                data: [DONE]
+
+                """.formatted(content);
+    }
+
+    private static List<Message> messages(Long conversationId) {
+        JPA.em().clear();
+        List<Message> rows = new java.util.ArrayList<>();
+        for (Object o : Message.find("conversation.id = ?1 order by id", conversationId).fetch()) {
+            rows.add((Message) o);
+        }
+        return rows;
     }
 
     // ─── Happy streaming path ───────────────────────────────────────────
