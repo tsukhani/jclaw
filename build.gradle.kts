@@ -346,7 +346,7 @@ dependencies {
     // its classpath from the main dependency set + framework/lib; only transitive
     // dep is slf4j-api, already on the classpath. Never loaded at runtime (only the
     // test class references it), so its presence in the dist is inert.
-    implementation("com.tngtech.archunit:archunit:1.5.0")
+    implementation("com.tngtech.archunit:archunit:1.5.1")
 
     // JCLAW-1154: jqwik — property-based testing for the pure parsers and planners
     // (test/PropertyBasedTest). `implementation` for the same reason as ArchUnit above:
