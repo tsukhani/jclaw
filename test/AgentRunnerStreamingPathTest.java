@@ -374,7 +374,6 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 var h = streamAndAwait(agent, convo.id, "web", convo.peerId, "run it", new AtomicBoolean(false));
                 assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
                 assertEquals("done", h.completed.get());
-                // onComplete fires inside the final persist; capture and the release follow it.
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
                 while (services.ConversationQueue.isBusy(convo.id) && System.nanoTime() < deadline) {
                     Thread.sleep(50);
@@ -389,6 +388,10 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 EventLogger.flush();
                 assertEquals(0, EventLog.count("category = ?1 AND agentId = ?2 AND message LIKE ?3",
                         "queue", agent.name, "Dropped%"), "an unstopped turn drops nothing");
+                // The early release precedes onComplete, and capture follows finalize: wait for it too.
+                while (!memory.MemoryAutoCapture.captureRequestedForTest(convo.id) && System.nanoTime() < deadline) {
+                    Thread.sleep(50);
+                }
                 assertTrue(memory.MemoryAutoCapture.captureRequestedForTest(convo.id),
                         "the test can see a capture request");
             } finally {

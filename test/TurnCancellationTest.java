@@ -1,3 +1,4 @@
+import agents.ToolContext;
 import agents.TurnCancellation;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
@@ -82,5 +83,36 @@ class TurnCancellationTest extends UnitTest {
             assertTrue(ran.await(5, TimeUnit.SECONDS));
         }
         assertEquals("turn-cancel", name.get());
+    }
+
+    @Test
+    void onCancelReachesTheScopesTurnFlagAndIsANoOpWithoutOne() throws Exception {
+        var flag = new AtomicBoolean(false);
+        var ran = new CountDownLatch(1);
+        ToolContext.withScope(1L, null, null, flag, () -> {
+            try (var _ = ToolContext.onCancel(ran::countDown)) {
+                TurnCancellation.cancel(flag);
+                assertTrue(ran.await(5, TimeUnit.SECONDS), "the scope's turn flag reached the action");
+            } catch (InterruptedException e) {
+                throw new IllegalStateException(e);
+            }
+            return null;
+        });
+
+        var unflagged = new AtomicInteger();
+        ToolContext.withScope(1L, null, null, () -> {
+            try (var _ = ToolContext.onCancel(unflagged::incrementAndGet)) {
+                // a scope with no turn flag: nothing can ever run this
+            }
+            return null;
+        });
+        try (var _ = ToolContext.onCancel(unflagged::incrementAndGet)) {
+            // no scope at all
+        }
+        var control = new CountDownLatch(1);
+        try (var _ = TurnCancellation.register(new AtomicBoolean(true), control::countDown)) {
+            assertTrue(control.await(5, TimeUnit.SECONDS));
+        }
+        assertEquals(0, unflagged.get());
     }
 }
