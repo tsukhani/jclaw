@@ -79,10 +79,10 @@ class GraphEvalHarnessTest extends UnitTest {
         }
     }
 
-    /** The {@code noul} question's relation, matched against each sentence over its two quoted spans. */
+    /** The {@code noul} question's relation, matched against each schema gloss over its two quoted spans. */
     private static String relationOf(String rules, String from, String to) {
-        for (var relation : ExtractionPipeline.SENTENCES.keySet()) {
-            if (rules.contains(ExtractionPipeline.sentence(relation, from, to))) return relation;
+        for (var relation : SCHEMA.relations().keySet()) {
+            if (rules.contains(ExtractionPipeline.gloss(SCHEMA, relation, from, to))) return relation;
         }
         throw new AssertionError("no relation sentence in " + rules);
     }
@@ -102,6 +102,13 @@ class GraphEvalHarnessTest extends UnitTest {
                 var question = q.getValue().getAsJsonObject();
                 var rules = question.getAsJsonObject("instructions").get("rules").getAsString();
                 var spans = QUOTED.matcher(rules).results().map(m -> m.group(1)).toList();
+                if (q.getKey().startsWith("n") || q.getKey().startsWith("e")) {
+                    var noul = new JsonObject();
+                    noul.addProperty("type", "noul");
+                    noul.addProperty("noul", 0.01);
+                    answers.add(q.getKey(), noul);
+                    continue;
+                }
                 if (q.getKey().startsWith("r")) {
                     var from = c.entityAt(spans.get(0));
                     var to = c.entityAt(spans.get(1));
@@ -124,6 +131,12 @@ class GraphEvalHarnessTest extends UnitTest {
                 } else if (q.getKey().startsWith("m")) {
                     var e = c.entityAt(spans.getFirst());
                     choice = e != null && spans.getFirst().equals(e.mention()) ? e.type() : ExtractionPipeline.NOT_AN_ENTITY;
+                } else if (q.getKey().startsWith("t")) {
+                    choice = ExtractionPipeline.PAST;
+                } else if (q.getKey().startsWith("s")) {
+                    choice = ExtractionPipeline.HOLDS;
+                } else if (q.getKey().startsWith("d")) {
+                    choice = ExtractionPipeline.NEITHER;
                 } else {
                     throw new AssertionError("unexpected question " + q.getKey());
                 }
@@ -252,6 +265,8 @@ class GraphEvalHarnessTest extends UnitTest {
         assertTrue(stored.get(), "every case is a stored memory while the decisions run");
         assertEquals(List.of(), Tx.run(() -> Memory.findByAgent(agentId)), "every case memory deleted afterwards");
         assertEquals(SCHEMA.fingerprint(), report.schema(), "the report names the schema it certified under");
+        assertEquals(ExtractionPipeline.fingerprint(SCHEMA), report.extraction(), "and the extraction it asked with");
+        assertFalse(report.pairFilter());
         var integrity = report.memoryIntegrity();
         assertEquals(cases.size(), integrity.checked());
         assertEquals(cases.size(), integrity.unchanged());

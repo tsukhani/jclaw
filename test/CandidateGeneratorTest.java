@@ -1,3 +1,5 @@
+import memory.TemporalExpressions;
+import memory.ontology.OntologyRecord;
 import memory.ontology.OntologySchema;
 import org.junit.jupiter.api.Test;
 import play.Play;
@@ -183,6 +185,83 @@ class CandidateGeneratorTest extends UnitTest {
         var split = spans("The user considers Bo smart. Tea is a kind of drink.");
         assertTrue(split.contains("Tea") && split.contains("drink"), split.toString());
         assertTrue(split.stream().noneMatch(sp -> sp.contains("smart")), "considers does not reach past its sentence");
+    }
+
+    private static CandidateGenerator.PreferenceFrame frameOf(String text, String span) {
+        return CandidateGenerator.generate(text).stream().filter(c -> c.span().equals(span)).findFirst()
+                .orElseThrow(() -> new AssertionError(span + " not in " + CandidateGenerator.generate(text)))
+                .frame();
+    }
+
+    private static void assertFrame(String text, String object, OntologyRecord.Valence valence, String subject) {
+        var frame = frameOf(text, object);
+        assertNotNull(frame, text);
+        assertEquals(valence, frame.valence(), text);
+        assertEquals(subject, frame.subject(), text);
+    }
+
+    @Test
+    void aFavorableVerbFramesItsObjectWithTheSubjectBeforeIt() {
+        assertFrame("Dana Reyes enjoys Corvid Notes.", "Corvid Notes", OntologyRecord.Valence.FAVORABLE, "Dana Reyes");
+        assertNull(frameOf("Dana Reyes enjoys Corvid Notes.", "Dana Reyes"), "the subject itself carries no frame");
+    }
+
+    @Test
+    void everyUnfavorablePhraseFramesItsObject() {
+        for (var verb : List.of("hates", "dislikes", "can't stand", "cannot stand", "doesn't like", "does not like",
+                "never liked")) {
+            assertFrame("Dana Reyes " + verb + " Corvid Notes.", "Corvid Notes", OntologyRecord.Valence.UNFAVORABLE,
+                    "Dana Reyes");
+        }
+    }
+
+    @Test
+    void bothEndingFramesAreFavorable() {
+        assertFrame("Dana Reyes no longer likes Corvid Notes.", "Corvid Notes", OntologyRecord.Valence.FAVORABLE,
+                "Dana Reyes");
+        assertFrame("Dana Reyes doesn't like Corvid Notes anymore.", "Corvid Notes", OntologyRecord.Valence.FAVORABLE,
+                "Dana Reyes");
+        assertFalse(spans("Dana Reyes doesn't like Corvid Notes anymore.").stream().anyMatch(s -> s.contains("anymore")));
+    }
+
+    @Test
+    void frameAdverbsMayStandBetweenSubjectAndVerb() {
+        assertFrame("Dana Reyes really loves Corvid Notes.", "Corvid Notes", OntologyRecord.Valence.FAVORABLE,
+                "Dana Reyes");
+        assertFrame("Dana Reyes still hates Corvid Notes.", "Corvid Notes", OntologyRecord.Valence.UNFAVORABLE,
+                "Dana Reyes");
+        assertFrame("Dana Reyes said Mateo loves Corvid Notes.", "Corvid Notes", OntologyRecord.Valence.FAVORABLE,
+                "Mateo");
+        assertNull(frameOf("Dana Reyes said it loves Corvid Notes.", "Corvid Notes").subject(),
+                "no subject across a word that is not a frame word");
+    }
+
+    @Test
+    void aSubjectlessMemoryFramesTheOperator() {
+        assertFrame("Loves Corvid Notes.", "Corvid Notes", OntologyRecord.Valence.FAVORABLE,
+                GraphCases.IMPLICIT_OPERATOR_SPAN);
+        assertFrame("The user hates Corvid Notes.", "Corvid Notes", OntologyRecord.Valence.UNFAVORABLE, "The user");
+    }
+
+    @Test
+    void aViewTakesNoFrame() {
+        assertNull(frameOf("The user thinks that static typing prevents bugs.", "static typing prevents bugs"));
+    }
+
+    @Test
+    void aSharedObjectKeepsTheFirstVerbsFrame() {
+        var text = "Dana Reyes hates Corvid Notes, but Avery Lin loves Corvid Notes.";
+        assertFrame(text, "Corvid Notes", OntologyRecord.Valence.UNFAVORABLE, "Dana Reyes");
+    }
+
+    @Test
+    void aClaimedSeasonIsNeverACandidate() {
+        var text = "Spring 2027 brings the Atlas Migration.";
+        var claimed = TemporalExpressions.claimedSpans(text);
+        assertTrue(claimed.stream().anyMatch(r -> r.start() == 0 && r.end() >= "Spring".length()), claimed.toString());
+        var spans = spans(text);
+        assertTrue(spans.stream().noneMatch(s -> s.contains("Spring")), spans.toString());
+        assertTrue(spans.contains("the Atlas Migration") || spans.contains("Atlas Migration"), spans.toString());
     }
 
     @Test

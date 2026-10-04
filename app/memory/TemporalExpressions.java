@@ -677,6 +677,30 @@ public final class TemporalExpressions {
         return List.copyOf(cues);
     }
 
+    /** A negation cue at {@code [start, end)}; {@code perfectNever} when it is the never of "has never" or kin. */
+    public record NegationCue(int start, int end, boolean perfectNever) {}
+
+    /**
+     * The negation cues in {@code text} in order, at their offsets in {@code text}: ending matches are blanked first,
+     * so a cue inside one is never returned.
+     */
+    public static List<NegationCue> negationCueRanges(String text) {
+        var blanked = new StringBuilder(text);
+        for (var ending : ENDING_PATTERNS) {
+            var m = ending.matcher(blanked);
+            while (m.find()) {
+                for (int i = m.start(); i < m.end(); i++) blanked.setCharAt(i, ' ');
+            }
+        }
+        var perfectEnds = new HashSet<Integer>();
+        var p = PERFECT_NEVER_PATTERN.matcher(blanked);
+        while (p.find()) perfectEnds.add(p.end());
+        var cues = new ArrayList<NegationCue>();
+        var m = NEGATION.matcher(blanked);
+        while (m.find()) cues.add(new NegationCue(m.start(), m.end(), perfectEnds.contains(m.end())));
+        return List.copyOf(cues);
+    }
+
     /** Whether {@code text} holds a perfect-tense never ("has never", "'ve never"). */
     public static boolean perfectNever(String text) {
         return PERFECT_NEVER_PATTERN.matcher(text).find();

@@ -73,12 +73,30 @@ Decision-only: code finds every candidate and the decision model only chooses
 4. **Typing.** Each surviving candidate gets one choice over the term types plus
    `not_an_entity`.
 5. **Relations.** For every ordered pair of typed terms and every relation the schema allows
-   between them, one `noul` yes/no question: does the memory state the relation's sentence
-   ("X is a kind of Y", "X is a family member of Y", ...)? The false criterion names the
-   near-misses: the two only co-occur, share a topic, are related the other way round (except
-   for the symmetric `family_of` and `same_as`, which are asked once per pair), or the
-   relation is an inference. Per unordered pair only the highest-yes relation and direction
-   is kept, so a pair never holds two relations or one written both ways.
+   between them, one `noul` yes/no question: does the memory state the relation's gloss
+   (`RelationType.reads`, "X works at Y")? The wording has four variants: timeable, timeless,
+   `holds_view_on` and a guest turn. The false criterion names the near-misses: the two only
+   co-occur, share a topic, are related the other way round (except for symmetric relations,
+   asked once per pair), the relation is an inference or is about something else, or it is
+   only planned, wished, guessed, possible, asked about, a belief, or reported by someone
+   other than the owner. On a guest turn no pair with the owner or the operator is asked.
+   Per unordered pair only the highest-yes relation and direction is kept, so a pair never
+   holds two relations or one written both ways.
+6. **Negation, tense, occurs.** In a memory with a negation cue, each pair is asked whether
+   the memory denies a relation whose statuses include `denied`; each date with two readings
+   (a year-less month) is asked `past` or `upcoming`, in the type request; each Event and
+   date is asked whether the Event happens then. Negation and occurs ride the relate request.
+7. **Qualify.** Each relation kept at 0.50 is asked its status (`holds`, `ended`, `denied`,
+   `unstated`, as the schema allows) and, per date, which bound it marks (`from`, `to`,
+   `during` or `neither`, as the date's kind allows), in a fourth request.
+8. **Lineage.** Each predecessor the memory may supersede gets its own request, sent beside
+   the overlap request: `restatement`, `update` or `correction`; an unwritten one reads as
+   retracted.
+
+`Statements.at` and `Lineage.at` turn those decisions into claims at a threshold. The pair
+filter (`pairFilter`, off by default) asks only pairs inside one clause, split at
+`. ; : ! ?` or a comma before but/while/whereas/although/though/because, or with the owner
+as an endpoint.
 
 A decision's confidence is the chosen option's probability, or the kept relation's yes
 probability. A term chosen from an overlap set also needs that choice to reach the
@@ -139,7 +157,9 @@ at the first threshold that fails; the model certifies at the lowest threshold r
 model whose recall at 0.95 is under the floor certifies at nothing, by design.
 
 A run with any failed decision (a timeout, a request too large for the model's context)
-certifies nowhere: what it would have written is unknown. A request that times out while the
+certifies nowhere: what it would have written is unknown. Every report stamps `extraction: x@…`
+beside `schema`: a hash of every question text, lexicon and temporal probe the pipeline
+renders, so a wording change voids a certificate as a schema change does. A request that times out while the
 model is still loading waits for the load and is sent again, three attempts in all; one that
 times out on a loaded model is not, since it counts against the breaker the router's
 classifier shares. Concurrency defaults to 1: a local Ollama answers one request at a time,

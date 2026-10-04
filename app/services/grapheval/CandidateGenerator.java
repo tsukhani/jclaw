@@ -2,14 +2,18 @@ package services.grapheval;
 
 import memory.LiteralSpans;
 import memory.TemporalExpressions;
+import memory.ontology.OntologyRecord;
+import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -34,8 +38,14 @@ public final class CandidateGenerator {
 
     private static final Pattern THE_USER = Pattern.compile("(?i)\\bthe user\\b");
     private static final Pattern TOKEN = Pattern.compile("\\S+");
-    private static final Pattern PREFERENCE = Pattern.compile(
-            "(?i)\\b(?:prefers|likes|loves|dislikes|hates|is interested in)\\s+");
+    /** Words that may stand between a frame's subject and its verb, beside auxiliaries and negation. */
+    public static final List<String> FRAME_ADVERBS = List.of("really", "still", "truly", "genuinely", "actually",
+            "absolutely", "also", "just", "always", "definitely", "especially", "particularly", "simply");
+    private static final Set<String> FRAME_AUXILIARIES = Set.of("does", "do", "did", "is", "was", "has", "have", "had",
+            "will", "would", "not", "never");
+    private static final Pattern ENDING_WORD = Pattern.compile("(?i)(?:anymore|any\\s+more|any\\s+longer)$");
+    private static final Pattern LIKE = Pattern.compile("(?i)\\blike\\b");
+    private static final Pattern WORD = Pattern.compile("[\\w'\u2019]+");
     private static final Pattern PREFERENCE_END = Pattern.compile("[,;:!?]|\\.(?=\\s|$)|\\s(?:over|because|when|than)\\b");
     /** Topic frames: the view in "thinks that X", and both sides of "X is a kind of Y" or "considers X a kind of Y". */
     private static final Pattern VIEW = Pattern.compile("(?i)\\b(?:thinks|believes) that\\s+");
@@ -58,7 +68,12 @@ public final class CandidateGenerator {
      * {@link GraphCases#IMPLICIT_OPERATOR_SPAN}; an owner named in the text is an ordinary candidate. A candidate with
      * no position has offsets -1 and overlaps nothing.
      */
-    public record Candidate(String span, boolean operator, boolean implicit, int start, int end) {
+    public record Candidate(String span, boolean operator, boolean implicit, int start, int end,
+                            @Nullable PreferenceFrame frame) {
+        public Candidate(String span, boolean operator, boolean implicit, int start, int end) {
+            this(span, operator, implicit, start, end, null);
+        }
+
         public Candidate(String span, boolean operator, boolean implicit) {
             this(span, operator, implicit, -1, -1);
         }
@@ -71,6 +86,12 @@ public final class CandidateGenerator {
             return start >= 0 && other.start >= 0 && start < other.end && other.start < end;
         }
     }
+
+    /**
+     * The stance a preference verb takes towards the candidate it governs, and the span of the candidate stating it:
+     * the one directly before the verb, the operator's span in a subject-less memory, else null.
+     */
+    public record PreferenceFrame(OntologyRecord.Valence valence, @Nullable String subject) {}
 
     /** Whether {@code text}'s first word is one of {@link #SUBJECTLESS_VERBS}. */
     public static boolean subjectless(String text) {
@@ -107,12 +128,13 @@ public final class CandidateGenerator {
 
         var found = new ArrayList<int[]>();
         var taken = new ArrayList<int[]>();
+        var framed = new ArrayList<Framed>();
         for (var literal : LiteralSpans.spans(text)) {
             var range = new int[] {literal.start(), literal.end()};
             found.add(range);
             if (literal.kind() == LiteralSpans.Kind.URL || literal.kind() == LiteralSpans.Kind.PATH) taken.add(range);
         }
-        objects(text, PREFERENCE, PREFERENCE_END, taken, found);
+        preferences(text, taken, found, framed);
         objects(text, VIEW, PREFERENCE_END, taken, found);
         kindOf(text, taken, found);
         var known = new ArrayList<int[]>();
@@ -141,9 +163,97 @@ public final class CandidateGenerator {
                 chosen.put(span, r);
             }
         }
-        chosen.values().stream().sorted(Comparator.comparingInt(r -> r[0]))
-                .forEach(r -> out.add(new Candidate(text.substring(r[0], r[1]), false, false, r[0], r[1])));
+        var frames = frames(text, framed, found, out);
+        chosen.values().stream().sorted(Comparator.comparingInt(r -> r[0])).forEach(r -> {
+            var span = text.substring(r[0], r[1]);
+            out.add(new Candidate(span, false, false, r[0], r[1], frames.get(span)));
+        });
         return List.copyOf(out);
+    }
+
+    /** A preference object at {@code [start, end)} and the frame match {@code [verbStart, verbEnd)} governing it. */
+    private record Framed(int start, int end, int verbStart, int verbEnd, OntologyRecord.Valence valence) {}
+
+    /**
+     * The object of every valence frame, read in {@link TemporalExpressions#valence}'s order -- favorable endings,
+     * unfavorable stances, favorable stances -- so a match inside an earlier one is the same frame and is skipped.
+     */
+    private static void preferences(String text, List<int[]> taken, List<int[]> found, List<Framed> framed) {
+        var claimed = new ArrayList<int[]>();
+        frameObjects(text, TemporalExpressions.FAVORABLE_FRAMES, true, OntologyRecord.Valence.FAVORABLE, claimed, taken,
+                found, framed);
+        frameObjects(text, TemporalExpressions.UNFAVORABLE_FRAMES, false, OntologyRecord.Valence.UNFAVORABLE, claimed,
+                taken, found, framed);
+        frameObjects(text, TemporalExpressions.FAVORABLE_FRAMES, false, OntologyRecord.Valence.FAVORABLE, claimed, taken,
+                found, framed);
+    }
+
+    private static void frameObjects(String text, List<TemporalExpressions.Frame> frames, boolean ending,
+                                     OntologyRecord.Valence valence, List<int[]> claimed, List<int[]> taken,
+                                     List<int[]> found, List<Framed> framed) {
+        for (var frame : frames) {
+            if (frame.ending() != ending) continue;
+            var m = frame.pattern().matcher(text);
+            while (m.find()) {
+                int vs = m.start();
+                int ve = m.end();
+                if (claimed.stream().anyMatch(r -> vs < r[1] && r[0] < ve)) continue;
+                claimed.add(new int[] {vs, ve});
+                int s = ve;
+                int limit = text.length();
+                var endingWord = ENDING_WORD.matcher(m.group());
+                if (endingWord.find()) {
+                    // "doesn't like X anymore": the object sits between the verb and the ending word.
+                    var like = LIKE.matcher(text).region(vs, ve);
+                    if (!like.find()) continue;
+                    s = like.end();
+                    limit = vs + endingWord.start();
+                }
+                while (s < limit && Character.isWhitespace(text.charAt(s))) s++;
+                var stop = PREFERENCE_END.matcher(text).region(s, limit);
+                int e = trimSpace(text, s, stop.find() ? stop.start() : limit);
+                if (e > s && free(taken, s, e)) {
+                    found.add(new int[] {s, e});
+                    framed.add(new Framed(s, e, vs, ve, valence));
+                }
+            }
+        }
+    }
+
+    /** Each preference object's frame by span; a span framed twice keeps the frame of the verb that comes first. */
+    private static Map<String, PreferenceFrame> frames(String text, List<Framed> framed, List<int[]> found,
+                                                       List<Candidate> operators) {
+        var out = new HashMap<String, PreferenceFrame>();
+        framed.stream().sorted(Comparator.comparingInt(Framed::verbStart)).forEach(f -> out.putIfAbsent(
+                text.substring(f.start(), f.end()),
+                new PreferenceFrame(f.valence(), subject(text, f.verbStart(), found, operators))));
+        return out;
+    }
+
+    /**
+     * The longest candidate span ending before {@code verb} in its sentence with only frame adverbs, auxiliaries or
+     * negation between; else the implicit operator's span; else null.
+     */
+    private static @Nullable String subject(String text, int verb, List<int[]> found, List<Candidate> operators) {
+        int[] best = null;
+        var ranges = new ArrayList<>(found);
+        for (var op : operators) if (!op.implicit()) ranges.add(new int[] {op.start(), op.end()});
+        for (var r : ranges) {
+            if (r[1] > verb || !onlyFrameWords(text.substring(r[1], verb))) continue;
+            if (best == null || r[0] < best[0]) best = r;
+        }
+        if (best != null) return text.substring(best[0], best[1]);
+        return operators.stream().filter(Candidate::implicit).map(Candidate::span).findFirst().orElse(null);
+    }
+
+    private static boolean onlyFrameWords(String between) {
+        var rest = WORD.matcher(between).replaceAll(m -> {
+            var w = m.group().toLowerCase(Locale.ROOT);
+            boolean allowed = FRAME_ADVERBS.contains(w) || FRAME_AUXILIARIES.contains(w)
+                    || w.endsWith("n't") || w.endsWith("n\u2019t");
+            return allowed ? "" : "#";
+        });
+        return rest.isBlank();
     }
 
     /** Whether {@code r} overlaps a found range of a different span. */

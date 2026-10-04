@@ -335,6 +335,18 @@ class TemporalExpressionsTest extends UnitTest {
     }
 
     @Test
+    void cueRangesKeepTheirOffsetsAfterEndingsAreBlanked() {
+        assertEquals(List.of(), TemporalExpressions.negationCueRanges("Avery Lin hasn't used Osprey Dashboard since 2024."));
+        var text = "Avery Lin no longer drives; Jonah has never flown and doesn't sail.";
+        var cues = TemporalExpressions.negationCueRanges(text);
+        assertEquals(List.of("never", "doesn't"), cues.stream().map(c -> text.substring(c.start(), c.end())).toList(),
+                "offsets survive the blanking of \"no longer\"");
+        assertEquals(List.of(true, false), cues.stream().map(TemporalExpressions.NegationCue::perfectNever).toList());
+        assertFalse(TemporalExpressions.negationCueRanges("Jonah never drives.").getFirst().perfectNever());
+        assertTrue(TemporalExpressions.negationCueRanges("They’ve never met.").getFirst().perfectNever());
+    }
+
+    @Test
     void aStoppedLikingIsAFavorableEndingNeverAnUnfavorableStance() {
         var kale = TemporalExpressions.valence("Avery Lin doesn't like Kale anymore.").orElseThrow();
         assertEquals(Polarity.FAVORABLE, kale.polarity());
