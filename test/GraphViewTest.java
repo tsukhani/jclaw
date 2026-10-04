@@ -548,7 +548,15 @@ class GraphViewTest extends UnitTest {
             var a = row(g, "2025-12-01");
             yes(a);
             assertEquals(Contested.ASSUMED, a.contested());
-            assertEquals(Contested.NONE, row(g, "2025-03-15").contested(), "before hi(S) nothing is stopped");
+            var rejoin = single(ended("memory:1").anchor("2025-02-01").valid("/2025-01"),
+                    holds("memory:2").anchor("2026-01-01").valid("2025-03/.."));
+            var inside = row(rejoin, "2025-03-15");
+            noAssumed(inside, Reason.STATED);
+            assertEquals(Contested.NONE, inside.contested(), "inside S the ended claim's NO is not yet stopped");
+            var atHi = row(rejoin, "2025-04-01");
+            yes(atHi);
+            assertEquals(id(R, "memory:2"), atHi.deciding());
+            assertEquals(Contested.NONE, atHi.contested());
         });
     }
 
@@ -643,6 +651,19 @@ class GraphViewTest extends UnitTest {
             noAssumed(a, Reason.DENIED);
             assertEquals(Contested.GUEST, a.contested());
             assertEquals(id(R, "memory:2"), a.deciding());
+        });
+    }
+
+    @Test
+    void aGuestClaimWithTheOwnerAsTheToEndIsIneligible() {
+        clocked(() -> {
+            var g = new Graph().rel(R, "family_of", "jonah", OWNER,
+                    holds("memory:1").anchor("2025-01-01"),
+                    ended("memory:2").anchor("2026-10-03").valid("/2026-09").guest());
+            var a = row(g, "2026-10-03");
+            yesAssumed(a);
+            assertEquals(id(R, "memory:1"), a.deciding());
+            assertEquals(Contested.GUEST, a.contested());
         });
     }
 
@@ -1019,6 +1040,50 @@ class GraphViewTest extends UnitTest {
             var later = read(g, v -> v.occurrences("gala", LocalDate.parse("2027-02-01"), NOW));
             assertEquals(Timing.PAST, later.values().getFirst().timing());
             assertEquals(Timing.PAST, later.values().getLast().timing());
+
+            var beforeReschedule = read(g, v -> v.occurrences("gala", LocalDate.parse("2026-10-05"),
+                    noon("2026-10-05")));
+            assertEquals(List.of(new Occurrence(EdtfInterval.parse("2026-12-12"), List.of("r6"), Timing.UPCOMING)),
+                    beforeReschedule.values());
+            assertEquals(List.of(), beforeReschedule.series());
+            assertEquals(List.of(), beforeReschedule.previous());
+        });
+    }
+
+    @Test
+    void occurrencesSkipRetractedValuesAndClaimsNotYetRecorded() {
+        clocked(() -> {
+            var g = new Graph()
+                    .term("gala", "Event",
+                            bare("memory:1").anchor("2026-10-03").occurs("2026-12-12")
+                                    .retired(noon("2026-10-10"), "memory:3", Lineage.CORRECTION, null).build("gala"),
+                            bare("memory:2").anchor("2026-10-03").occurs("2027-01-09")
+                                    .retired(noon("2026-10-10"), "memory:3", null, null).build("gala"),
+                            bare("memory:3").anchor("2026-10-10").occurs("2027-03-03").build("gala"))
+                    .rel("r6", "located_in", "gala", "larkspur", holds("memory:3").anchor("2026-10-10"))
+                    .rel("r7", "located_in", "gala", "porto",
+                            holds("memory:3").anchor("2026-10-10").recordedAt(noon("2027-06-01")))
+                    .rel("r8", "involves", "gala", "jonah",
+                            holds("memory:4").anchor("2026-10-11").recordedAt(noon("2027-06-01")));
+            var o = read(g, v -> v.occurrences("gala", LocalDate.parse("2026-10-20"), NOW));
+            assertEquals(List.of(new Occurrence(EdtfInterval.parse("2027-03-03"), List.of("r6"), Timing.UPCOMING)),
+                    o.values());
+            assertEquals(List.of(), o.series());
+            assertEquals(List.of(), o.previous());
+        });
+    }
+
+    @Test
+    void occurrenceTimingBoundaries() {
+        clocked(() -> {
+            var g = new Graph()
+                    .term("gala", "Event", bare("memory:1").anchor("2026-10-03").occurs("2026-12-12").build("gala"))
+                    .rel("r6", "located_in", "gala", "larkspur", holds("memory:1").anchor("2026-10-03"));
+            for (var c : List.of(new String[] {"2026-12-11", "UPCOMING"}, new String[] {"2026-12-12", "NEITHER"},
+                    new String[] {"2026-12-13", "PAST"})) {
+                var o = read(g, v -> v.occurrences("gala", LocalDate.parse(c[0]), NOW));
+                assertEquals(Timing.valueOf(c[1]), o.values().getFirst().timing(), "today " + c[0]);
+            }
         });
     }
 }

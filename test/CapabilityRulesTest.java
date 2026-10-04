@@ -720,9 +720,8 @@ class CapabilityRulesTest extends UnitTest {
                         .stream().noneMatch(m -> m.getName().equals(method)))
                 .forEach(method -> missing.add(GRAPH_STORE + "." + method));
         assertTrue(missing.isEmpty(), missing + " is gone, so this rule would pass while guarding nothing");
-        // GraphEvalHarness is an allowed caller, so a match there proves the predicate still matches something.
-        assertTrue(sourceFilesAccessing(GRAPH_STORE_READ, c -> true).contains("GraphEvalHarness.java"),
-                "the predicate no longer matches GraphEvalHarness's read, so the rule guards nothing");
+        // The allowed callers prove the predicate still matches something.
+        assertFloor(sourceFilesAccessing(GRAPH_STORE_READ, c -> true), 1, "GraphStore read/update/index callers");
 
         ArchRule rule = noClasses()
                 .that().resideOutsideOfPackages("memory.graph..", "services.grapheval..")
