@@ -408,6 +408,30 @@ class MemoryGraphLifecycleTest extends UnitTest {
     }
 
     @Test
+    void reconcileWithdrawsADeletedMemoryEvenWhenAStampIsRefused() throws Exception {
+        var f = seed();
+        var a = f.agentId();
+        var future = new Evidence(meta(a, "eA"), GraphStore.memorySource(f.first()), null, null, null, null,
+                Instant.parse("2999-01-01T00:00:00Z"), null, null, null, null, null, null, null, null, null);
+        var records = new ArrayList<>(graph(f));
+        records.set(0, future);
+        GraphStore.get().write(a, records);
+        try (var _ = LuceneTestSync.closedLease()) {
+            // Bulk JPQL, so no hook fires for either change.
+            commitInFreshTx(() -> JPA.em().createQuery("UPDATE Memory m SET m.supersededAt = :at WHERE m.id = :id")
+                    .setParameter("at", Instant.parse("2026-10-01T00:00:00Z"))
+                    .setParameter("id", f.first()).executeUpdate());
+            commitInFreshTx(() -> JPA.em().createQuery("DELETE FROM Memory m WHERE m.id = :id")
+                    .setParameter("id", f.second()).executeUpdate());
+        }
+
+        GraphLifecycle.reconcile();
+
+        assertEquals(Set.of("eA", "T"), ids(a), "eB is withdrawn, with O and R cascading");
+        assertEquals(future, evidence(a, "eA"), "the refused stamp left eA unretired");
+    }
+
+    @Test
     void reconcileWithdrawsASourceNamingAnotherAgentsMemory() throws Exception {
         var f = seed();
         var other = seed();

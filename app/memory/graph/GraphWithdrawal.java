@@ -96,9 +96,13 @@ public final class GraphWithdrawal {
         int retired = 0;
         int cleared = 0;
         for (var record : records) {
-            var r = record instanceof Evidence ev ? bySource.get(ev.source()) : null;
-            if (r == null || !(record instanceof Evidence e)) {
+            if (!(record instanceof Evidence e)) {
                 out.add(record);
+                continue;
+            }
+            var r = bySource.get(e.source());
+            if (r == null) {
+                out.add(e);
                 continue;
             }
             var byChanged = !Objects.equals(e.retiredBy(), r.by());
@@ -125,9 +129,13 @@ public final class GraphWithdrawal {
         var retired = retire(records, retirements).records();
         var out = new ArrayList<OntologyRecord>(retired.size());
         for (var record : retired) {
-            var d = record instanceof Evidence ev ? bySource.get(ev.source()) : null;
-            if (d == null || !(record instanceof Evidence e)) {
+            if (!(record instanceof Evidence e)) {
                 out.add(record);
+                continue;
+            }
+            var d = bySource.get(e.source());
+            if (d == null) {
+                out.add(e);
                 continue;
             }
             var update = d.lineage() == Lineage.UPDATE;
