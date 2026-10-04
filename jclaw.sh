@@ -1023,7 +1023,9 @@ Options for run:
                            writes at (default: terms and every relation at
                            0.85, status/time/negation provisional at 0.85).
   --runs N                 Runs per model, 1-3 (default 1; two when a
-                           spot-check differs).
+                           spot-check differs). For --set sequences a
+                           differing spot-check marks lineage 'unconfirmed'
+                           and adds no run.
   --recall-floor R         Recall every certified threshold must meet (default 0.50).
   --concurrency N          Parallel cases, 1-4 (default 1: a local Ollama
                            answers one request at a time).
@@ -3982,6 +3984,10 @@ do_grapheval() {
         usage_grapheval
         exit 2
     fi
+    if [[ -n "$configuration" && ! ( "$sub" == "run" && "$set" == "sequences" ) ]]; then
+        echo "Error: --configuration applies only to grapheval run --set sequences."
+        exit 2
+    fi
     if [[ -n "$configuration" && ! -r "$configuration" ]]; then
         echo "Error: --configuration file '$configuration' is missing or unreadable."
         exit 2
@@ -4049,7 +4055,11 @@ elif sub == "heldout-sample":
         body["seed"] = int(seed)
 print(json.dumps(body))
 PYBODY
-) || { echo "Error: --recall-floor must be a number; --runs, --concurrency, --timeout, --count and --seed integers."; exit 2; }
+) || {
+        # Exit 2 is the configuration file's own error, already printed.
+        [[ $? -eq 2 ]] || echo "Error: --recall-floor must be a number; --runs, --concurrency, --timeout, --count and --seed integers."
+        exit 2
+    }
 
     echo "==> grapheval $sub${agent:+ for agent $agent}"
     local tmp status

@@ -455,6 +455,10 @@ probes whose `assumed` matches. Below 250 definite labels the end-to-end result 
 from there it is `failed` when the 95% upper bound exceeds 5%, else `passed` — `reported` if
 the run had a failed decision.
 
+The committed set is a fixture scaffold below both gates: lineage needs n ≥ 29 to be evaluable
+and the timeline 250 definite labels, so today lineage is always disabled and both
+model-lineage variants read every supersession as a retraction.
+
 ### Report
 
 `set`, the `schema`, `extraction` and `sequences` fingerprints, `chains`, `probes`, `runs`,

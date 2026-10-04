@@ -15,6 +15,7 @@
      "relations": [{"from": "operator", "type": "uses", "to": "kestrel-ci", "status": "ended", "valid": "/2026-03"}],
      "dates": [{"span": "March", "value": "2026-03"}]},
     {"id": "s01c", "capturedAt": "2026-10-04", "supersedes": {"s01b": "restatement"},
+     "derivedFrom": ["s01a"], "message": "I stopped using Kestrel CI back in March.",
      "text": "Avery Lin stopped using Kestrel CI in March.",
      "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
                   {"id": "kestrel-ci", "mention": "Kestrel CI", "type": "System"}],

@@ -80,6 +80,15 @@ public class ApiGraphEvalController extends Controller {
         if (!set.equals("cases") && !set.equals("heldout") && !set.equals("sequences")) {
             throw invalid("set must be 'cases', 'heldout' or 'sequences'");
         }
+        if (body.has("configuration") && !set.equals("sequences")) {
+            throw invalid("configuration applies only to the sequences set");
+        }
+        if (set.equals("sequences") && body.has("recallFloor")) {
+            throw invalid("recallFloor does not apply to the sequences set");
+        }
+        if (set.equals("sequences") && body.has("pairFilter")) {
+            throw invalid("pairFilter does not apply to the sequences set");
+        }
         int runs = readInt(body, "runs", GraphEvalHarness.DEFAULT_RUNS);
         if (runs < 1 || runs > MAX_RUNS) throw invalid("runs must be between 1 and " + MAX_RUNS);
         double recallFloor = Certifier.DEFAULT_RECALL_FLOOR;

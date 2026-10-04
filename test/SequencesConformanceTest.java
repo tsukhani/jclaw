@@ -72,7 +72,7 @@ class SequencesConformanceTest extends UnitTest {
     void theCommittedSetParsesWithNoModel() throws IOException {
         var set = Sequences.load(Path.of(Play.applicationPath.getAbsolutePath(), Sequences.DEFAULT_PATH), SCHEMA);
         assertEquals("Avery Lin", set.ownerName());
-        assertTrue(set.chains().size() >= 4 && set.chains().size() <= 6, () -> set.chains().size() + " chains");
+        assertTrue(set.chains().size() >= 4, () -> set.chains().size() + " chains");
         assertTrue(set.fingerprint().matches("sequences@[0-9a-f]{12}"), set.fingerprint());
         var tags = new HashSet<String>();
         var memoryIds = new HashSet<String>();

@@ -130,6 +130,25 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
         assertRefusedWithoutAgent(sequences + "{\"terms\":1.2}}", "must be in [0, 1]");
         assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"classes\":{\"time\":{\"state\":\"certified\"}}}}",
                 "needs a threshold");
+        assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"relations\":{\"uses\":1.5}}}",
+                "relation 'uses' must be in [0, 1]");
+        assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"classes\":{\"status\":{\"state\":\"provisional\"}}}}",
+                "a provisional class needs a threshold");
+    }
+
+    @Test
+    void aConfigurationOutsideTheSequenceSetIs400() {
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"configuration\":{\"terms\":0.8}}",
+                "configuration applies only to the sequences set");
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"set\":\"heldout\",\"configuration\":{\"terms\":0.8}}",
+                "configuration applies only to the sequences set");
+    }
+
+    @Test
+    void theSequenceSetRefusesTheCaseSetsKnobs() {
+        var sequences = "{\"set\":\"sequences\",\"decisionModels\":[\"tev1\"],";
+        assertRefusedWithoutAgent(sequences + "\"recallFloor\":0.5}", "recallFloor does not apply to the sequences set");
+        assertRefusedWithoutAgent(sequences + "\"pairFilter\":true}", "pairFilter does not apply to the sequences set");
     }
 
     @Test
