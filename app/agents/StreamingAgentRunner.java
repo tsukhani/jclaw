@@ -96,10 +96,9 @@ final class StreamingAgentRunner {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
                 var conversationOpt = resolveConversationAndAcquireQueue(
                         agent, conversationId, channelType, peerId, userMessage, tracedCb, attachments,
-                        isCancelled, generationRef, sinkRef);
+                        isCancelled, conversationIdRef, generationRef, sinkRef);
                 if (conversationOpt.isEmpty()) return; // queued, not-found, or error — already handled
                 var conversation = conversationOpt.get();
-                conversationIdRef[0] = conversation.id;
                 trace.conversationId(conversation.id);
 
                 trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
@@ -218,15 +217,17 @@ final class StreamingAgentRunner {
      * or {@link Optional#empty()} if the request was queued, not found, or
      * errored (in which case callbacks have already been invoked). On acquire,
      * {@code isCancelled} is registered as the owner's flag for an operator stop,
-     * the acquired generation is written to {@code generationRef[0]} and the turn's
+     * the conversation id and acquired generation are written to {@code conversationIdRef[0]}
+     * and {@code generationRef[0]} before anything else can throw, and the turn's
      * fenced sink to {@code sinkRef[0]}.
      */
-    @SuppressWarnings("java:S107") // the acquire needs the turn's cancel flag and slots for its generation and sink
+    @SuppressWarnings("java:S107") // the acquire needs the turn's cancel flag and slots for its ownership and sink
     private static Optional<Conversation> resolveConversationAndAcquireQueue(
             Agent agent, @Nullable Long conversationId, String channelType, String peerId,
             String userMessage, AgentRunner.StreamingCallbacks cb,
             @Nullable List<AttachmentService.Input> attachments,
-            AtomicBoolean isCancelled, long[] generationRef, ConversationSink[] sinkRef) {
+            AtomicBoolean isCancelled, Long[] conversationIdRef, long[] generationRef,
+            ConversationSink[] sinkRef) {
 
         Conversation conversation = Tx.run(() -> {
             if (conversationId != null) {
@@ -251,7 +252,9 @@ final class StreamingAgentRunner {
             cb.onComplete().accept(AgentRunner.QUEUED_MESSAGE_RESPONSE);
             return Optional.empty();
         }
+        // JCLAW-1386: recorded before the user-message save, so a save that throws is still released.
         generationRef[0] = generation;
+        conversationIdRef[0] = conversation.id;
 
         // Every write of the turn goes through this one sink, fenced on the ownership just acquired.
         var sink = new ConversationSink(conversation, generation, isCancelled);
