@@ -156,9 +156,44 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                             + harness.completed.get());
             assertNotNull(harness.initConvo.get(),
                     "onInit must fire with the resolved conversation even on queue-busy");
+            assertTrue(services.ConversationQueue.isBusy(convo.id),
+                    "a turn that never acquired must not release the holder's ownership");
         } finally {
             // Defensive: release so subsequent tests in the suite don't
             // see a stuck queue.
+            services.ConversationQueue.releaseOwnership(convo.id);
+        }
+    }
+
+    // ─── JCLAW-1386: a failure after the acquire still releases ─────────
+
+    @Test
+    void aUserMessageSaveThatThrowsAfterTheAcquireReleasesTheConversation() throws Exception {
+        var agent = persistAgent("jclaw1386-stale-att", "missing", "model");
+        var convo = persistConversation(agent, "web", "u-1386");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        try {
+            var stale = new services.AttachmentService.Input(
+                    "no-such-staged-upload-" + UUID.randomUUID(), "a.png", "image/png", 1, MessageAttachment.KIND_IMAGE);
+            var h = new Harness();
+            var cb = new AgentRunner.StreamingCallbacks(
+                    h.initConvo::set, h.tokens::add, h.reasoning::add, _ -> {}, _ -> {},
+                    content -> { h.completed.set(content); h.terminated.countDown(); },
+                    error -> { h.error.set(error); h.terminated.countDown(); },
+                    () -> { h.cancelled.set(true); h.terminated.countDown(); });
+            AgentRunner.runStreaming(agent, convo.id, "web", convo.peerId, "with a stale attachment",
+                    new AtomicBoolean(false), cb, null, List.of(stale));
+
+            assertTrue(h.terminated.await(30, TimeUnit.SECONDS), "the failed turn reaches a terminal callback");
+            assertNotNull(h.error.get(), "the stale attachment surfaces as onError");
+            assertNull(h.initConvo.get(), "the save threw before onInit");
+            assertFalse(services.ConversationQueue.isBusy(convo.id), "the failed turn released the conversation");
+            assertNotEquals(services.ConversationQueue.NOT_ACQUIRED, services.ConversationQueue.tryAcquireOwnership(
+                    convo.id, new services.ConversationQueue.QueuedMessage("next", "web", convo.peerId, agent), null),
+                    "the next message acquires instead of being queued");
+        } finally {
             services.ConversationQueue.releaseOwnership(convo.id);
         }
     }
