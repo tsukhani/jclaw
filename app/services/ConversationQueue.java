@@ -226,10 +226,32 @@ public class ConversationQueue {
         if (state == null) return;
         AtomicBoolean flag;
         synchronized (state) {
+            // The turn may have released since the caller saw it busy; a set flag would cancel the next one.
+            if (!state.processing) return;
             flag = state.cancelled;
             flag.set(true);
         }
         TurnCancellation.cancel(flag);
+    }
+
+    /**
+     * Run {@code commit} unless {@code turnCancel} is already set, under {@link #stop}'s lock, so a
+     * stop either lands first and nothing runs, or after {@code commit} has finished.
+     *
+     * @return {@code true} when {@code commit} ran
+     */
+    public static boolean commitUnlessCancelled(Long conversationId, @Nullable AtomicBoolean turnCancel,
+                                                Runnable commit) {
+        var state = queues.get(conversationId);
+        if (state == null || turnCancel == null) {
+            commit.run();
+            return true;
+        }
+        synchronized (state) {
+            if (turnCancel.get()) return false;
+            commit.run();
+            return true;
+        }
     }
 
     /**
@@ -282,7 +304,8 @@ public class ConversationQueue {
 
         synchronized (state) {
             if (state.generation != generation) return List.of();
-            state.cancelled.set(false);
+            // A fresh flag, not a reset: a stopped channel turn still holds the old one and must stay cancelled.
+            if (state.cancelled.get()) state.cancelled = new AtomicBoolean(false);
             state.lastActivityMs = System.currentTimeMillis();
 
             if (state.pending.isEmpty()) {

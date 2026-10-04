@@ -16,6 +16,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
@@ -2408,5 +2409,52 @@ class SubagentSpawnToolTest extends UnitTest {
         assertFalse(thread.isAlive(), "subagent_spawn must complete within 30s");
         if (errorRef.get() != null) throw errorRef.get();
         return resultRef.get();
+    }
+
+    @Test
+    void anInlineSpawnInAStoppedTurnStartsNoChildAndWritesNothing() throws Exception {
+        var parent = createAgent("p-inline-stopped", "spawn-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-inline-stopped");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        var turn = new AtomicBoolean(true);
+        ConversationQueue.tryAcquireOwnership(parentConv.id,
+                new ConversationQueue.QueuedMessage("parent turn", "web", "u-inline-stopped", parent), turn);
+        try {
+            var result = agents.ToolContext.withScope(parentConv.id, null, turn::get, turn,
+                    () -> new SubagentSpawnTool().execute("{\"task\":\"look it up\",\"mode\":\"inline\"}", parent));
+
+            assertTrue(result.contains("stopped before the subagent started"), result);
+            JPA.em().clear();
+            assertEquals(0, SubagentRun.count("parentAgent.id = ?1", parent.id), "no child run was started");
+            assertEquals(0, Message.count("conversation.id = ?1 AND content LIKE ?2", parentConv.id, "Spawning subagent%"));
+        } finally {
+            ConversationQueue.releaseOwnership(parentConv.id);
+        }
+    }
+
+    @Test
+    void anInlineSpawnWhoseMarkerTheStopRefusesKillsItsRun() throws Exception {
+        var parent = createAgent("p-inline-race", "spawn-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-inline-race");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        var turn = new AtomicBoolean(true);
+        ConversationQueue.tryAcquireOwnership(parentConv.id,
+                new ConversationQueue.QueuedMessage("parent turn", "web", "u-inline-race", parent), turn);
+        try {
+            // The stop lands after the spawn's cancel check, so only the fenced marker write sees it.
+            var result = agents.ToolContext.withScope(parentConv.id, null, () -> false, turn,
+                    () -> new SubagentSpawnTool().execute("{\"task\":\"look it up\",\"mode\":\"inline\"}", parent));
+
+            assertTrue(result.contains("stopped before the subagent started"), result);
+            JPA.em().clear();
+            java.util.List<SubagentRun> runs = SubagentRun.find("parentAgent.id = ?1", parent.id).fetch();
+            assertEquals(1, runs.size());
+            assertEquals(SubagentRun.Status.KILLED, runs.getFirst().status);
+            assertEquals(0, Message.count("conversation.id = ?1 AND content LIKE ?2", parentConv.id, "Spawning subagent%"));
+        } finally {
+            ConversationQueue.releaseOwnership(parentConv.id);
+        }
     }
 }

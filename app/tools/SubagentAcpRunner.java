@@ -242,7 +242,7 @@ final class SubagentAcpRunner {
             // JCLAW-267: inline runs in the parent Conversation (queue owned), with
             // a ThreadLocal marker stamping every Message AgentRunner persists.
             return ConversationService.withSubagentRunIdMarker(runId,
-                    () -> AgentRunner.runWithOwnedQueue(childAgent, childConv, task));
+                    () -> AgentRunner.runInParentConversation(childAgent, childConv, task));
         }
         return AgentRunner.run(childAgent, childConv, task);
     }

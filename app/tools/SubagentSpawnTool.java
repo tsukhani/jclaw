@@ -12,6 +12,7 @@ import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
+import services.SubagentRegistry;
 import services.Tx;
 import utils.GsonHolder;
 
@@ -103,6 +104,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     static final String DEFAULT_CONTEXT = "fresh";
     static final String CONTEXT_FRESH = "fresh";
     static final String CONTEXT_INHERIT = "inherit";
+    static final String STOPPED_BEFORE_START = "Error: The turn was stopped before the subagent started; no subagent ran.";
     static final Set<String> ALLOWED_CONTEXTS = Set.of(CONTEXT_FRESH, CONTEXT_INHERIT);
 
     /** Channel value stamped on subagent conversations. Not a real transport —
@@ -407,6 +409,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
 
         var summary = SubagentChildBootstrap.buildInheritSummary(parentAgent, parentConv.id, parsed.resolvedContext());
+        // The summary can be a model call: a turn stopped meanwhile starts no child and writes no rows.
+        if (ToolContext.cancelled()) return STOPPED_BEFORE_START;
         var bootstrap = SubagentChildBootstrap.bootstrapChildInTx(parentAgent, parentConv, parsed, summary);
         if (bootstrap.error() != null) return bootstrap.error();
         var childAgentId = bootstrap.childAgentId();
@@ -443,8 +447,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
 
         final boolean inlineMode = MODE_INLINE.equals(parsed.resolvedMode());
-        if (inlineMode) {
-            SubagentResponses.writeInlineStartMarker(parentConvIdFinal, runId, parsed.label(), parsed.resolvedTask());
+        if (inlineMode
+                && !SubagentResponses.writeInlineStartMarker(parentConvIdFinal, runId, parsed.label(), parsed.resolvedTask())) {
+            SubagentRegistry.kill(runId, SubagentSyncRunner.PARENT_STOPPED_REASON);
+            return STOPPED_BEFORE_START;
         }
 
         // JCLAW-270: async branch — dispatch the run to a background VT and

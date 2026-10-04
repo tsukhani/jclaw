@@ -389,9 +389,10 @@ class ConversationQueueTest extends UnitTest {
         ConversationQueue.tryAcquire(convId, new QueuedMessage("Barge-in", "web", "admin", agent));
         assertTrue(flag.get(), "interrupt must raise cancellation flag");
 
-        // Drain clears the flag so the subsequent processing run is fresh
+        // Drain gives the next run a fresh flag and leaves the interrupted run's flag set
         ConversationQueue.drain(convId);
-        assertFalse(flag.get(), "drain must reset cancellation flag");
+        assertFalse(ConversationQueue.cancellationFlag(convId).get(), "drain gives the next run a clear flag");
+        assertTrue(flag.get(), "the interrupted run still reads itself as cancelled");
 
         // Cleanup any pending
         while (!ConversationQueue.drain(convId).isEmpty()) {}
@@ -922,5 +923,54 @@ class ConversationQueueTest extends UnitTest {
         assertEquals(2, sink.droppedRows());
         assertEquals(0L, models.Message.count("conversation.id = ?1", conv.id));
         ConversationQueue.releaseOwnership(conv.id, gen);
+    }
+
+    @Test
+    void aHandOffLeavesAStoppedChannelTurnsFlagSetSoItsLateWritesDrop() {
+        long convId = 12010L;
+        ConversationQueue.drain(convId, ConversationQueue.tryAcquireOwnership(convId,
+                new QueuedMessage("earlier", "telegram", "peer", agent), null));
+        // A channel turn's own flag is the conversation's shared flag, read before it acquires.
+        var shared = ConversationQueue.cancellationFlag(convId);
+        var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "telegram", "peer", agent), shared);
+        ConversationQueue.tryAcquire(convId, new QueuedMessage("B", "telegram", "peer", agent));
+        ConversationQueue.cancelTurn(convId);
+
+        assertEquals(1, ConversationQueue.drain(convId, gen).size(), "B takes over through the drain");
+
+        assertTrue(shared.get(), "the stopped turn's flag stays set");
+        assertNotSame(shared, ConversationQueue.cancellationFlag(convId));
+        assertFalse(ConversationQueue.cancellationFlag(convId).get(), "the next turn starts with a fresh flag");
+        var wrote = new AtomicBoolean(false);
+        assertFalse(ConversationQueue.commitIfOwner(convId, gen, shared, () -> wrote.set(true)));
+        assertFalse(wrote.get(), "the stopped turn's late write does not land beside B");
+        ConversationQueue.drain(convId, gen);
+    }
+
+    @Test
+    void stopAfterTheTurnReleasedLeavesTheNextTurnUncancelled() {
+        long convId = 12011L;
+        var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "telegram", "peer", agent), null);
+        ConversationQueue.drain(convId, gen);
+
+        ConversationQueue.cancelTurn(convId);
+
+        assertFalse(ConversationQueue.cancellationFlag(convId).get(),
+                "a /stop that lands after the release does not cancel the next message's turn");
+    }
+
+    @Test
+    void aWriteUnderACancelledTurnFlagDoesNotRun() {
+        long convId = 12012L;
+        var turn = new AtomicBoolean(false);
+        var gen = ConversationQueue.tryAcquireOwnership(convId, new QueuedMessage("A", "web", "admin", agent), turn);
+        var ran = new AtomicInteger();
+
+        assertTrue(ConversationQueue.commitUnlessCancelled(convId, turn, ran::incrementAndGet));
+        turn.set(true);
+        assertFalse(ConversationQueue.commitUnlessCancelled(convId, turn, ran::incrementAndGet));
+
+        assertEquals(1, ran.get(), "only the write before the stop ran");
+        ConversationQueue.drain(convId, gen);
     }
 }

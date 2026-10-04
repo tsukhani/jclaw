@@ -553,6 +553,52 @@ class AgentRunnerSubagentTest extends UnitTest {
         assertEquals(1L, announceCount, "announce row must appear exactly once after drain");
     }
 
+    @Test
+    void anInlineChildLeavesItsParentOwningTheConversation() throws Exception {
+        startLlmServer(exchange -> {
+            var body = simpleResponse("child done");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+        var parent = createAgent("inline-owner-parent", "test-provider", "test-model");
+        var child = createAgent("inline-owner-child", "test-provider", "test-model");
+        var conv = ConversationService.create(parent, "web", "u-inline-owner");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var gen = services.ConversationQueue.tryAcquireOwnership(conv.id,
+                new services.ConversationQueue.QueuedMessage("parent turn", "web", "u-inline-owner", parent), null);
+        try {
+            var errorRef = new AtomicReference<Throwable>();
+            var thread = Thread.ofVirtual().start(() -> {
+                try {
+                    var a = Tx.run(() -> (Agent) Agent.findById(child.id));
+                    var c = Tx.run(() -> (Conversation) Conversation.findById(conv.id));
+                    AgentRunner.runInParentConversation(a, c, "child task");
+                } catch (Throwable t) {
+                    errorRef.set(t);
+                }
+            });
+            thread.join(30_000);
+            assertFalse(thread.isAlive(), "the inline child finished");
+            if (errorRef.get() != null) throw new AssertionError("inline child threw", errorRef.get());
+
+            assertTrue(services.ConversationQueue.isBusy(conv.id), "the parent still owns its conversation");
+            assertEquals(gen, services.ConversationQueue.currentGeneration(conv.id));
+            assertFalse(services.ConversationQueue.tryAcquire(conv.id,
+                    new services.ConversationQueue.QueuedMessage("meanwhile", "web", "u-inline-owner", parent)),
+                    "a message sent while the parent runs is queued, not started");
+            var wrote = new java.util.concurrent.atomic.AtomicBoolean(false);
+            assertTrue(services.ConversationQueue.commitIfOwner(conv.id, gen, null, () -> wrote.set(true)));
+            assertTrue(wrote.get(), "the parent's later rows still land");
+        } finally {
+            services.ConversationQueue.releaseOwnership(conv.id);
+        }
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────
 
     private Agent createAgent(String name, String provider, String model) {

@@ -401,6 +401,63 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         });
     }
 
+    @Test
+    void aReplyTheFenceDropsIsNotCaptured() throws Exception {
+        var arrived = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        llmServer = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        llmServer.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+        llmServer.createContext("/chat/completions", exchange -> {
+            try {
+                arrived.countDown();
+                release.await(60, TimeUnit.SECONDS);
+                var bytes = contentSse("late reply").getBytes();
+                exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+                exchange.sendResponseHeaders(200, bytes.length);
+                try (var os = exchange.getResponseBody()) { os.write(bytes); }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        });
+        llmServer.start();
+        port = llmServer.getAddress().getPort();
+        var provider = "gh1385-gate-" + UUID.randomUUID();
+        configureProvider(provider);
+        var agent = persistAgent("gh1385-gate-" + UUID.randomUUID(), provider, "test-model");
+        var convo = persistConversation(agent, "web", "u-gh1385-gate");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        try {
+            var h = streamAndAwait(agent, convo.id, "web", convo.peerId, "question", new AtomicBoolean(false));
+            assertTrue(arrived.await(30, TimeUnit.SECONDS));
+            // Ownership leaves the turn with its flag unset, so only the fence stands between it and a save.
+            services.ConversationQueue.releaseOwnership(convo.id);
+            assertNotEquals(services.ConversationQueue.NOT_ACQUIRED, services.ConversationQueue.tryAcquireOwnership(
+                    convo.id, new services.ConversationQueue.QueuedMessage("other", "web", convo.peerId, agent), null));
+            release.countDown();
+            assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
+
+            // The dropped-rows line follows the capture decision, so the turn has decided once it appears.
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            long dropped = 0;
+            while (dropped == 0 && System.nanoTime() < deadline) {
+                EventLogger.flush();
+                dropped = EventLog.count("category = ?1 AND agentId = ?2 AND message LIKE ?3", "queue", agent.name, "Dropped%");
+                if (dropped == 0) Thread.sleep(50);
+            }
+            assertTrue(dropped > 0, "the reply was dropped by the fence");
+            assertTrue(messages(convo.id).stream().noneMatch(m -> "late reply".equals(m.content)));
+            assertFalse(memory.MemoryAutoCapture.captureRequestedForTest(convo.id),
+                    "a reply the fence dropped is not captured");
+        } finally {
+            release.countDown();
+            services.ConversationQueue.releaseOwnership(convo.id);
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
+    }
+
     private static ToolRegistry.Tool holdTool(CountDownLatch entered, CountDownLatch release) {
         return new ToolRegistry.Tool() {
             @Override public String name() { return HOLD_TOOL; }

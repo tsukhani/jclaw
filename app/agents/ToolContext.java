@@ -94,6 +94,12 @@ public final class ToolContext {
         return (cancel != null && cancel.getAsBoolean()) || TaskRunRegistry.isCancelled(s.taskRunId());
     }
 
+    /** The dispatching turn's own cancel flag, or {@code null} when the scope carries none. */
+    public static @Nullable AtomicBoolean turnCancel() {
+        var s = SCOPE.get();
+        return s == null ? null : s.turnCancel();
+    }
+
     /**
      * Run {@code action} when the turn dispatching this tool is cancelled, until the returned
      * registration is closed. A no-op registration when the scope carries no turn flag.

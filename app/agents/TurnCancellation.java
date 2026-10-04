@@ -72,24 +72,25 @@ public final class TurnCancellation {
         return reg;
     }
 
-    /** Set {@code flag} and run every action registered against it, once, on a new platform thread. */
+    /** Set {@code flag} and run every action registered against it, once, each on its own platform thread. */
     public static void cancel(AtomicBoolean flag) {
         flag.set(true);
         var regs = ACTIONS.remove(flag);
         if (regs != null && !regs.isEmpty()) runOffThread(new ArrayList<>(regs));
     }
 
-    // A platform thread: an action may wait a timed grace (JDK-8373224) or open a transaction.
+    // Platform threads: an action may wait a timed grace (JDK-8373224) or open a transaction. One each,
+    // so a slow kill (an ACP harness's graceful close) cannot hold back exec's two-second one.
     private static void runOffThread(List<Registration> regs) {
-        Thread.ofPlatform().daemon().name("turn-cancel").start(() -> {
-            for (var reg : regs) {
-                if (!reg.claimed.compareAndSet(false, true)) continue;
+        for (var reg : regs) {
+            Thread.ofPlatform().daemon().name("turn-cancel").start(() -> {
+                if (!reg.claimed.compareAndSet(false, true)) return;
                 try {
                     reg.action.run();
                 } catch (RuntimeException e) {
                     EventLogger.warn("agent", "Turn cancel action threw: %s".formatted(e));
                 }
-            }
-        });
+            });
+        }
     }
 }

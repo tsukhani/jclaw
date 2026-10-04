@@ -291,7 +291,7 @@ public class AgentRunner {
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
-        return runAfterAcquire(agent, conversation, userMessage, attachments, false, generation, true);
+        return runAfterAcquire(agent, conversation, userMessage, attachments, false, generation, true, true);
     }
 
     /**
@@ -309,9 +309,24 @@ public class AgentRunner {
      * @return the run outcome
      */
     public static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage) {
-        // An inline child on a conversation nothing owns (a task fire's spawn) has no stop to fence against.
         return runAfterAcquire(agent, conversation, userMessage, null, false,
-                ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id));
+                ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id), true);
+    }
+
+    /**
+     * Run an inline subagent child inside its parent's conversation. The parent turn keeps ownership:
+     * this run never releases or drains the conversation, so the parent's later rows still land, and
+     * the child's rows are fenced on the parent's generation, so they drop once the parent is stopped.
+     *
+     * @param agent        the child agent
+     * @param conversation the parent's conversation
+     * @param task         the child's task
+     * @return the run outcome
+     */
+    public static RunResult runInParentConversation(Agent agent, Conversation conversation, String task) {
+        // A parent on a conversation nothing owns (a task fire's spawn) has no stop to fence against.
+        return runAfterAcquire(agent, conversation, task, null, false,
+                ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id), false);
     }
 
     /**
@@ -329,7 +344,7 @@ public class AgentRunner {
      */
     static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage,
                                        boolean skipUserAppend, long generation) {
-        return runAfterAcquire(agent, conversation, userMessage, null, skipUserAppend, generation, true);
+        return runAfterAcquire(agent, conversation, userMessage, null, skipUserAppend, generation, true, true);
     }
 
     /**
@@ -366,7 +381,7 @@ public class AgentRunner {
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
-        return runAfterAcquire(agent, conversation, "", null, true, generation, true);
+        return runAfterAcquire(agent, conversation, "", null, true, generation, true, true);
     }
 
     /**
@@ -578,7 +593,8 @@ public class AgentRunner {
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
                                              @Nullable List<AttachmentService.Input> attachments,
-                                             boolean skipUserAppend, long generation, boolean fenced) {
+                                             boolean skipUserAppend, long generation, boolean fenced,
+                                             boolean releases) {
         final Long conversationId = conversation.id;
         // JCLAW-21: every persistence write inside the runner routes
         // through this sink. ConversationSink keeps existing chat
@@ -632,7 +648,7 @@ public class AgentRunner {
                 StreamingAgentRunner.logDroppedRows(agent, conversation.channelType, sink);
             }
             EventLogger.flush();
-            QueueDrainOrchestrator.processQueueDrain(conversationId, generation);
+            if (releases) QueueDrainOrchestrator.processQueueDrain(conversationId, generation);
         }
     }
 

@@ -145,7 +145,7 @@ final class SubagentSyncRunner {
         }
     }
 
-    private static final String PARENT_STOPPED_REASON = "Killed because the parent turn was stopped";
+    static final String PARENT_STOPPED_REASON = "Killed because the parent turn was stopped";
 
     /**
      * JCLAW-424: on idle/ceiling timeout, flip the cooperative-stop flag and

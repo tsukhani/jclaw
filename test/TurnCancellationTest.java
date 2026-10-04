@@ -115,4 +115,25 @@ class TurnCancellationTest extends UnitTest {
         }
         assertEquals(0, unflagged.get());
     }
+
+    @Test
+    void everyActionRunsAtOnceSoASlowOneHoldsNoOtherBack() throws Exception {
+        var flag = new AtomicBoolean(false);
+        var started = new CountDownLatch(3);
+        var met = new CountDownLatch(3);
+        Runnable waitForTheOthers = () -> {
+            started.countDown();
+            try {
+                if (started.await(5, TimeUnit.SECONDS)) met.countDown();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        };
+        try (var _ = TurnCancellation.register(flag, waitForTheOthers);
+             var _ = TurnCancellation.register(flag, waitForTheOthers);
+             var _ = TurnCancellation.register(flag, waitForTheOthers)) {
+            TurnCancellation.cancel(flag);
+            assertTrue(met.await(10, TimeUnit.SECONDS), "all three actions were running at the same time");
+        }
+    }
 }
