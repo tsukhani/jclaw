@@ -655,6 +655,22 @@ class GraphViewTest extends UnitTest {
     }
 
     @Test
+    void definiteTakesPrecedenceOverAssumed() {
+        clocked(() -> {
+            var g = single(holds("memory:1").anchor("2025-01-01"),
+                    denied("memory:2").anchor("2026-01-01"),
+                    holds("memory:3").anchor("2026-06-01"),
+                    denied("memory:4").anchor("2026-06-01"));
+            var a = row(g, "2026-06-01");
+            no(a, Reason.DENIED);
+            assertEquals(id(R, "memory:4"), a.deciding());
+            assertEquals(Contested.DEFINITE, a.contested());
+            var dropOnly = single(holds("memory:1").anchor("2025-01-01"), denied("memory:2").anchor("2026-01-01"));
+            assertEquals(Contested.ASSUMED, row(dropOnly, "2026-06-01").contested());
+        });
+    }
+
+    @Test
     void aGuestClaimWithTheOwnerAsTheToEndIsIneligible() {
         clocked(() -> {
             var g = new Graph().rel(R, "family_of", "jonah", OWNER,
