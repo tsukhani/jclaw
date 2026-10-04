@@ -605,7 +605,7 @@ public final class GraphEvalHarness {
     }
 
     /** Runs {@code tasks} on at most {@code concurrency} threads, returning results in task order. */
-    private static <T> List<T> fanOut(List<Callable<T>> tasks, int concurrency) {
+    static <T> List<T> fanOut(List<Callable<T>> tasks, int concurrency) {
         var results = new ArrayList<T>(tasks.size());
         try {
             if (concurrency <= 1) {

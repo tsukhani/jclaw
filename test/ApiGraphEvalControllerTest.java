@@ -109,6 +109,55 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
         assertRefused("{\"agent\":\"" + AGENT + "\",\"set\":\"everything\"}", "set must be");
     }
 
+    /** Refused with {@code expected}, sent with no agent; a refusal that never names the agent shows none was required. */
+    private void assertRefusedWithoutAgent(String body, String expected) {
+        var response = evaluate(authed(), body);
+        assertEquals(400, response.status.intValue(), getContent(response));
+        assertTrue(getContent(response).contains(expected), getContent(response));
+        assertFalse(getContent(response).contains("'agent'"), getContent(response));
+    }
+
+    @Test
+    void theSequenceSetNeedsNoAgentAndRefusesABadConfiguration() {
+        var sequences = "{\"set\":\"sequences\",\"decisionModels\":[\"tev1\"],\"configuration\":";
+        assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"relations\":{\"knows_nothing\":0.8}}}",
+                "unknown relation 'knows_nothing'");
+        assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"classes\":{\"lineage\":{\"state\":\"provisional\","
+                + "\"threshold\":0.8}}}}", "unknown class 'lineage'");
+        assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"classes\":{\"status\":{\"state\":\"maybe\"}}}}",
+                "state must be certified, provisional or disabled");
+        assertRefusedWithoutAgent(sequences + "[1]}", "configuration must be an object");
+        assertRefusedWithoutAgent(sequences + "{\"terms\":1.2}}", "must be in [0, 1]");
+        assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"classes\":{\"time\":{\"state\":\"certified\"}}}}",
+                "needs a threshold");
+        assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"relations\":{\"uses\":1.5}}}",
+                "relation 'uses' must be in [0, 1]");
+        assertRefusedWithoutAgent(sequences + "{\"terms\":0.8,\"classes\":{\"status\":{\"state\":\"provisional\"}}}}",
+                "a provisional class needs a threshold");
+    }
+
+    @Test
+    void aConfigurationOutsideTheSequenceSetIs400() {
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"configuration\":{\"terms\":0.8}}",
+                "configuration applies only to the sequences set");
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"set\":\"heldout\",\"configuration\":{\"terms\":0.8}}",
+                "configuration applies only to the sequences set");
+    }
+
+    @Test
+    void theSequenceSetRefusesTheCaseSetsKnobs() {
+        var sequences = "{\"set\":\"sequences\",\"decisionModels\":[\"tev1\"],";
+        assertRefusedWithoutAgent(sequences + "\"recallFloor\":0.5}", "recallFloor does not apply to the sequences set");
+        assertRefusedWithoutAgent(sequences + "\"pairFilter\":true}", "pairFilter does not apply to the sequences set");
+    }
+
+    @Test
+    void theCaseSetStillRequiresAnAgent() {
+        var response = evaluate(authed(), "{\"set\":\"cases\",\"decisionModels\":[\"tev1\"]}");
+        assertEquals(400, response.status.intValue(), getContent(response));
+        assertTrue(getContent(response).contains("'agent'"), getContent(response));
+    }
+
     @Test
     void runsOutOfRangeAre400() {
         assertRefused("{\"agent\":\"" + AGENT + "\",\"runs\":0}", "runs must be between");
