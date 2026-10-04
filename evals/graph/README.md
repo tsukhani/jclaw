@@ -85,9 +85,7 @@ Labels are checked for syntax and verbatim spans only, never against `TemporalEx
 the valence lexicon: a date value the normalizer would not produce, or a valence the lexicon
 would not give, parses, so finder, normalizer and valence errors count against the model.
 
-The v2 set was migrated mechanically: the root `capturedAt` `2026-02-15` and `"status":
-"holds"` on every relation. It has no `ended`, `denied` or `unasserted` label yet, so its trap
-set is empty and it certifies nothing until JCLAW-1373 relabels it.
+The set is relabelled to GUIDE v3 (JCLAW-1373).
 
 `services.grapheval.GraphCases` refuses a set that breaks the key, mention, type, relation,
 status, qualifier, date, negative, tag or operator-mention rules, naming the case; `GraphCasesConformanceTest` checks
@@ -256,7 +254,8 @@ higher of t and the class's own) and passes t when every gate holds:
   `ended`, `denied` and `unasserted` relation; a violation is an `ended` written as `holds`, an
   inadmissible `ended` written at all, a `denied` triple written positive, or an `unasserted`
   triple written at all. A null status on gold `ended` is none. An empty trap set bounds at
-  1.0, so the committed set, which has none yet, certifies nothing.
+  1.0. The committed set's 17 traps bound at 0.162 even with no violation, so it certifies
+  nothing on its own.
 - recall at least the floor (default 0.50), unchanged from v2.
 
 The walk runs from 0.95 down and stops at the first threshold that fails; `t*` is the lowest
@@ -327,6 +326,11 @@ Second labels that predate v3 (the committed file is v2 until JCLAW-1378) fail t
 That is no 400: the run completes with no second labels, the agreement carries the reason
 `second labels predate v3: <message>`, and certification stops at `pending-agreement`. A file
 of adjudications that does not parse is still a 400.
+
+Two GUIDE v3 labels are flagged for JCLAW-1378 to put before the second labeller beside the
+blind subset. c061 labels `lantern part_of brightwell` ended: has the old floor's `part_of`
+ended? c127 keeps `gala involves operator` holds: does the owner's involvement in an
+unconfirmed gala hold?
 
 `evals/graph/adjudications.json` records verdicts on the report's wrong records:
 
