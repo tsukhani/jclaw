@@ -1,5 +1,6 @@
 package services;
 
+import agents.TurnCancellation;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 
@@ -46,8 +47,8 @@ public class ConversationQueue {
         final ArrayDeque<QueuedMessage> pending = new ArrayDeque<>();
         boolean processing = false; // all reads/writes guarded by synchronized(this)
         @Nullable String mode = QUEUE;
-        /** Signals in-flight processing to cancel. Set by interrupt mode, cleared on drain. */
-        final AtomicBoolean cancelled = new AtomicBoolean(false);
+        /** Signals in-flight processing to cancel. Set by interrupt mode, cleared on drain, replaced by {@link #stop}. */
+        volatile AtomicBoolean cancelled = new AtomicBoolean(false);
         /** Renewed on every acquire and every {@link #stop}; a release carrying another value is a no-op. */
         long generation = 0;
         /** The current owner's own cancel flag, flipped by {@link #stop}; null when the owner registered none. */
@@ -110,6 +111,7 @@ public class ConversationQueue {
         // log below — never hold the ingress lock across that I/O.
         boolean interrupted;
         boolean droppedOverflow = false;
+        AtomicBoolean interruptedFlag = state.cancelled;
         synchronized (state) {
             state.mode = mode;
             state.lastActivityMs = System.currentTimeMillis();
@@ -125,7 +127,8 @@ public class ConversationQueue {
             if (interrupted) {
                 // Signal the in-flight processor to cancel, then queue this message
                 // so drain() will pick it up after the current run finishes.
-                state.cancelled.set(true);
+                interruptedFlag = state.cancelled;
+                interruptedFlag.set(true);
                 state.pending.clear();
                 state.pending.addLast(message);
             } else {
@@ -139,6 +142,7 @@ public class ConversationQueue {
         }
 
         if (interrupted) {
+            TurnCancellation.cancel(interruptedFlag);
             EventLogger.info(QUEUE, message.agent().name, message.channelType(),
                     "Interrupt mode: signalled cancellation for conversation %d, queued new message"
                             .formatted(conversationId));
@@ -180,13 +184,72 @@ public class ConversationQueue {
     public static boolean stop(Long conversationId) {
         var state = queues.get(conversationId);
         if (state == null) return false;
+        AtomicBoolean stopped;
         synchronized (state) {
             // An owner with no flag of its own (a drained or sync run) could not be told to stop.
-            if (!state.processing || state.ownerCancel == null) return false;
-            state.ownerCancel.set(true);
+            stopped = state.ownerCancel;
+            if (!state.processing || stopped == null) return false;
+            stopped.set(true);
+            // A channel turn's flag is the conversation's, and the stale drain never clears it: renew it.
+            if (stopped == state.cancelled) state.cancelled = new AtomicBoolean(false);
             state.pending.clear();
             state.generation = GENERATIONS.incrementAndGet();
             state.finishProcessing();
+        }
+        TurnCancellation.cancel(stopped);
+        return true;
+    }
+
+    /**
+     * Run {@code commit} only while the turn that acquired {@code generation} still owns the
+     * conversation and its {@code turnCancel} flag (when it has one) is unset. The check and the
+     * commit share {@link #stop}'s lock, so a racing write either lands before the stop returns
+     * or not at all.
+     *
+     * @return {@code true} when {@code commit} ran; {@code false}, running nothing, otherwise
+     */
+    public static boolean commitIfOwner(Long conversationId, long generation, @Nullable AtomicBoolean turnCancel,
+                                        Runnable commit) {
+        var state = queues.get(conversationId);
+        if (state == null) return false;
+        synchronized (state) {
+            if (!state.processing || state.generation != generation) return false;
+            if (turnCancel != null && turnCancel.get()) return false;
+            commit.run();
+            return true;
+        }
+    }
+
+    /** {@code /stop}: signal the in-flight turn through the conversation's cancel flag and run its cancel actions. */
+    public static void cancelTurn(Long conversationId) {
+        var state = queues.get(conversationId);
+        if (state == null) return;
+        AtomicBoolean flag;
+        synchronized (state) {
+            // The turn may have released since the caller saw it busy; a set flag would cancel the next one.
+            if (!state.processing) return;
+            flag = state.cancelled;
+            flag.set(true);
+        }
+        TurnCancellation.cancel(flag);
+    }
+
+    /**
+     * Run {@code commit} unless {@code turnCancel} is already set, under {@link #stop}'s lock, so a
+     * stop either lands first and nothing runs, or after {@code commit} has finished.
+     *
+     * @return {@code true} when {@code commit} ran
+     */
+    public static boolean commitUnlessCancelled(Long conversationId, @Nullable AtomicBoolean turnCancel,
+                                                Runnable commit) {
+        var state = queues.get(conversationId);
+        if (state == null || turnCancel == null) {
+            commit.run();
+            return true;
+        }
+        synchronized (state) {
+            if (turnCancel.get()) return false;
+            commit.run();
             return true;
         }
     }
@@ -241,7 +304,8 @@ public class ConversationQueue {
 
         synchronized (state) {
             if (state.generation != generation) return List.of();
-            state.cancelled.set(false);
+            // A fresh flag, not a reset: a stopped channel turn still holds the old one and must stay cancelled.
+            if (state.cancelled.get()) state.cancelled = new AtomicBoolean(false);
             state.lastActivityMs = System.currentTimeMillis();
 
             if (state.pending.isEmpty()) {

@@ -2,6 +2,7 @@ package controllers;
 
 import agents.AgentRunner;
 import agents.ModelResolver;
+import agents.TurnCancellation;
 import channels.QuotedReply;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
@@ -448,7 +449,7 @@ public class ApiChatController extends Controller {
         var cancelled = new AtomicBoolean(false);
         sse.onClose(() -> {
             idle.cancel();
-            cancelled.set(true);
+            TurnCancellation.cancel(cancelled);
             if (!close.finished().get() && !close.idleTimedOut().get()) {
                 EventLogger.info("llm", agent.name, "web",
                         "Chat stream closed by the client before the turn finished — cancelling the turn");

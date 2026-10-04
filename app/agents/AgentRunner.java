@@ -291,7 +291,7 @@ public class AgentRunner {
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
-        return runAfterAcquire(agent, conversation, userMessage, attachments, false, generation);
+        return runAfterAcquire(agent, conversation, userMessage, attachments, false, generation, true, true);
     }
 
     /**
@@ -310,7 +310,23 @@ public class AgentRunner {
      */
     public static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage) {
         return runAfterAcquire(agent, conversation, userMessage, null, false,
-                ConversationQueue.currentGeneration(conversation.id));
+                ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id), true);
+    }
+
+    /**
+     * Run an inline subagent child inside its parent's conversation. The parent turn keeps ownership:
+     * this run never releases or drains the conversation, so the parent's later rows still land, and
+     * the child's rows are fenced on the parent's generation, so they drop once the parent is stopped.
+     *
+     * @param agent        the child agent
+     * @param conversation the parent's conversation
+     * @param task         the child's task
+     * @return the run outcome
+     */
+    public static RunResult runInParentConversation(Agent agent, Conversation conversation, String task) {
+        // A parent on a conversation nothing owns (a task fire's spawn) has no stop to fence against.
+        return runAfterAcquire(agent, conversation, task, null, false,
+                ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id), false);
     }
 
     /**
@@ -328,7 +344,7 @@ public class AgentRunner {
      */
     static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage,
                                        boolean skipUserAppend, long generation) {
-        return runAfterAcquire(agent, conversation, userMessage, null, skipUserAppend, generation);
+        return runAfterAcquire(agent, conversation, userMessage, null, skipUserAppend, generation, true, true);
     }
 
     /**
@@ -365,7 +381,7 @@ public class AgentRunner {
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
-        return runAfterAcquire(agent, conversation, "", null, true, generation);
+        return runAfterAcquire(agent, conversation, "", null, true, generation, true, true);
     }
 
     /**
@@ -577,7 +593,8 @@ public class AgentRunner {
 
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
                                              @Nullable List<AttachmentService.Input> attachments,
-                                             boolean skipUserAppend, long generation) {
+                                             boolean skipUserAppend, long generation, boolean fenced,
+                                             boolean releases) {
         final Long conversationId = conversation.id;
         // JCLAW-21: every persistence write inside the runner routes
         // through this sink. ConversationSink keeps existing chat
@@ -585,7 +602,9 @@ public class AgentRunner {
         // ConversationService); TaskRunSink overrides the same surface
         // to write into task_run_message. Constructed at the boundary
         // where AgentRunner takes responsibility for the conversation.
-        final AgentExecutionSink sink = new ConversationSink(conversation);
+        // Fenced on the acquired generation, so an inline child's rows in a stopped parent conversation drop.
+        final var sink = fenced ? new ConversationSink(conversation, generation, null)
+                : new ConversationSink(conversation);
         // Non-streaming callers (background jobs, webhook follow-ups) have
         // no pre-runner queue-accept timestamp, so queue_wait is naturally
         // skipped. Every other segment is captured, which is why
@@ -625,8 +644,11 @@ public class AgentRunner {
         } finally {
             trace.mark(LatencyTrace.TERMINAL_SENT);
             trace.end();
+            if (sink.droppedRows() > 0) {
+                StreamingAgentRunner.logDroppedRows(agent, conversation.channelType, sink);
+            }
             EventLogger.flush();
-            QueueDrainOrchestrator.processQueueDrain(conversationId, generation);
+            if (releases) QueueDrainOrchestrator.processQueueDrain(conversationId, generation);
         }
     }
 
@@ -684,7 +706,7 @@ public class AgentRunner {
         // (loadtest cleanup, manual UI delete, etc.); ConversationSink
         // logs + skips internally rather than inserting a row with a
         // null FK.
-        Tx.run(() ->
+        boolean committed = sink.commit(() ->
                 sink.appendAssistantMessage(response, null, null, null, truncated));
 
         EventLogger.info("llm", agent.name, conversation.channelType,
@@ -694,7 +716,7 @@ public class AgentRunner {
         // JCLAW-39: async memory auto-capture for the completed turn. Runs on
         // its own virtual thread after the reply is persisted, so it never
         // blocks the response. No-op in test mode / when disabled.
-        MemoryAutoCapture.captureAsync(agent, conversationId, userMessage, response);
+        if (committed) MemoryAutoCapture.captureAsync(agent, conversationId, userMessage, response);
 
         var updatedConversation = Tx.run(() -> ConversationService.findById(conversationId));
         return new RunResult(response, updatedConversation, truncated);

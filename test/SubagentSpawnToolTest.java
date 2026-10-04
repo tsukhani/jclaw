@@ -16,6 +16,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
@@ -501,6 +502,73 @@ class SubagentSpawnToolTest extends UnitTest {
         try {
             future.complete(new AgentRunner.RunResult("done", null));
             var outcome = SubagentSpawnTool.awaitFuture(future, 5, 1800, runId);
+            assertEquals(SubagentRun.Status.COMPLETED, outcome.terminalStatus());
+            assertEquals("done", outcome.reply());
+        } finally {
+            SubagentRegistry.unregister(runId);
+        }
+    }
+
+    @Test
+    void stoppingTheParentTurnKillsASyncChild() throws Exception {
+        var parent = createAgent("p-turn-stop", "spawn-provider", "test-model");
+        var child = createAgent("c-turn-stop", "spawn-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-turn-stop");
+        var childConv = ConversationService.create(child, SubagentSpawnTool.SUBAGENT_CHANNEL, null);
+        var run = Tx.run(() -> {
+            var r = new SubagentRun();
+            r.parentAgent = parent;
+            r.childAgent = child;
+            r.parentConversation = parentConv;
+            r.childConversation = childConv;
+            r.status = SubagentRun.Status.RUNNING;
+            r.save();
+            return r;
+        });
+        // The kill runs on the turn-cancel thread in its own transaction, so the row must be committed.
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(run.id, future);
+        var turn = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var outcome = new CompletableFuture<SubagentSpawnTool.SyncRunOutcome>();
+        try {
+            Thread.ofVirtual().start(() -> outcome.complete(agents.ToolContext.withScope(null, null, null, turn,
+                    () -> SubagentSpawnTool.awaitFuture(future, 3600, 3600, run.id))));
+            Thread.sleep(200);
+            agents.TurnCancellation.cancel(turn);
+
+            var result = outcome.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            assertEquals(SubagentRun.Status.KILLED, result.terminalStatus());
+            assertTrue(result.terminalOutcome().contains("parent turn was stopped"), result.terminalOutcome());
+            assertTrue(future.isCancelled(), "the child's future was cancelled through the registry");
+
+            // kill cancels the future before it writes the row, so the outcome can arrive first.
+            SubagentRun row = null;
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+            while (System.nanoTime() < deadline) {
+                JPA.em().clear();
+                row = SubagentRun.findById(run.id);
+                if (row.status == SubagentRun.Status.KILLED) break;
+                Thread.sleep(50);
+            }
+            assertEquals(SubagentRun.Status.KILLED, row.status);
+            assertTrue(row.outcome.contains("parent turn was stopped"), row.outcome);
+        } finally {
+            SubagentRegistry.unregister(run.id);
+        }
+    }
+
+    @Test
+    void aCompletedChildStillCompletesUnderATurnScope() {
+        Long runId = 90011L;
+        var future = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(runId, future);
+        try {
+            future.complete(new AgentRunner.RunResult("done", null));
+            var outcome = agents.ToolContext.withScope(null, null, null, new java.util.concurrent.atomic.AtomicBoolean(false),
+                    () -> SubagentSpawnTool.awaitFuture(future, 5, 1800, runId));
             assertEquals(SubagentRun.Status.COMPLETED, outcome.terminalStatus());
             assertEquals("done", outcome.reply());
         } finally {
@@ -1438,6 +1506,41 @@ class SubagentSpawnToolTest extends UnitTest {
         assertTrue(((Message) stamped.getLast()).content.startsWith("Subagent completed"),
                 "last stamped message must be the boundary-end marker, got: "
                         + ((Message) stamped.getLast()).content);
+        assertChildReplyStamped(stamped);
+    }
+
+    @Test
+    void inlineModeReplyLandsWhenTheParentOwnsItsConversation() throws Exception {
+        startLlmServer(simpleResponse("Subagent reply: inline."));
+        configureProvider();
+
+        var parent = createAgent("p-inline-owned", "spawn-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-inline-owned");
+        commitAndReopen();
+
+        var gen = services.ConversationQueue.tryAcquireOwnership(parentConv.id,
+                new services.ConversationQueue.QueuedMessage("go", "web", "u-inline-owned", parent), null);
+        assertNotEquals(services.ConversationQueue.NOT_ACQUIRED, gen);
+        try {
+            var reply = invokeOnVirtualThread(parent.id,
+                    "{\"task\":\"do inline work\",\"label\":\"inline-task\",\"mode\":\"inline\"}");
+            var parsed = JsonParser.parseString(reply).getAsJsonObject();
+            assertEquals("COMPLETED", parsed.get("status").getAsString(), reply);
+
+            JPA.em().clear();
+            var runId = Long.parseLong(parsed.get("run_id").getAsString());
+            assertChildReplyStamped(Message.find("conversation = ?1 AND subagentRunId = ?2 ORDER BY createdAt ASC",
+                    Conversation.findById(parentConv.id), runId).fetch());
+        } finally {
+            services.ConversationQueue.releaseOwnership(parentConv.id, gen);
+        }
+    }
+
+    private static void assertChildReplyStamped(java.util.List<?> stamped) {
+        assertTrue(stamped.stream().map(Message.class::cast).anyMatch(m ->
+                        MessageRole.ASSISTANT.value.equals(m.role) && m.content != null
+                                && m.content.contains("Subagent reply: inline.")),
+                "the child's reply row lands stamped in the parent conversation");
     }
 
     @Test
@@ -2306,5 +2409,52 @@ class SubagentSpawnToolTest extends UnitTest {
         assertFalse(thread.isAlive(), "subagent_spawn must complete within 30s");
         if (errorRef.get() != null) throw errorRef.get();
         return resultRef.get();
+    }
+
+    @Test
+    void anInlineSpawnInAStoppedTurnStartsNoChildAndWritesNothing() throws Exception {
+        var parent = createAgent("p-inline-stopped", "spawn-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-inline-stopped");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        var turn = new AtomicBoolean(true);
+        ConversationQueue.tryAcquireOwnership(parentConv.id,
+                new ConversationQueue.QueuedMessage("parent turn", "web", "u-inline-stopped", parent), turn);
+        try {
+            var result = agents.ToolContext.withScope(parentConv.id, null, turn::get, turn,
+                    () -> new SubagentSpawnTool().execute("{\"task\":\"look it up\",\"mode\":\"inline\"}", parent));
+
+            assertTrue(result.contains("stopped before the subagent started"), result);
+            JPA.em().clear();
+            assertEquals(0, SubagentRun.count("parentAgent.id = ?1", parent.id), "no child run was started");
+            assertEquals(0, Message.count("conversation.id = ?1 AND content LIKE ?2", parentConv.id, "Spawning subagent%"));
+        } finally {
+            ConversationQueue.releaseOwnership(parentConv.id);
+        }
+    }
+
+    @Test
+    void anInlineSpawnWhoseMarkerTheStopRefusesKillsItsRun() throws Exception {
+        var parent = createAgent("p-inline-race", "spawn-provider", "test-model");
+        var parentConv = ConversationService.create(parent, "web", "u-inline-race");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        var turn = new AtomicBoolean(true);
+        ConversationQueue.tryAcquireOwnership(parentConv.id,
+                new ConversationQueue.QueuedMessage("parent turn", "web", "u-inline-race", parent), turn);
+        try {
+            // The stop lands after the spawn's cancel check, so only the fenced marker write sees it.
+            var result = agents.ToolContext.withScope(parentConv.id, null, () -> false, turn,
+                    () -> new SubagentSpawnTool().execute("{\"task\":\"look it up\",\"mode\":\"inline\"}", parent));
+
+            assertTrue(result.contains("stopped before the subagent started"), result);
+            JPA.em().clear();
+            java.util.List<SubagentRun> runs = SubagentRun.find("parentAgent.id = ?1", parent.id).fetch();
+            assertEquals(1, runs.size());
+            assertEquals(SubagentRun.Status.KILLED, runs.getFirst().status);
+            assertEquals(0, Message.count("conversation.id = ?1 AND content LIKE ?2", parentConv.id, "Spawning subagent%"));
+        } finally {
+            ConversationQueue.releaseOwnership(parentConv.id);
+        }
     }
 }

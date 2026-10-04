@@ -1,6 +1,7 @@
 package tools;
 
 import agents.ToolAction;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -22,6 +23,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -30,7 +32,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
@@ -142,6 +147,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     private static final String FIELD_DURATION_MS = "durationMs";
     private static final String FIELD_TRUNCATED = "truncated";
     private static final String FIELD_TIMED_OUT = "timedOut";
+    private static final String FIELD_STOPPED = "stopped";
     private static final String FIELD_ERROR = "error";
 
     /** Atomically cached parsed allowlist: invalidated when the raw config string changes. */
@@ -501,12 +507,19 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 try {
                     if (!process.waitFor(timeoutSec, TimeUnit.SECONDS)) {
                         timedOut.set(true);
-                        process.destroyForcibly();
+                        terminate(process);
                     }
                 } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
             });
 
-            var readResult = readProcessOutput(process, maxOutputBytes, agent, timeoutSec, startTime);
+            var stopped = new AtomicBoolean(false);
+            ReadResult readResult;
+            try (var _ = ToolContext.onCancel(() -> {
+                stopped.set(true);
+                terminate(process);
+            })) {
+                readResult = readProcessOutput(process, maxOutputBytes, agent, timeoutSec, startTime);
+            }
             if (readResult.earlyReturn() != null) return readResult.earlyReturn();
 
             // Ensure process is fully dead before collecting exit code.
@@ -524,16 +537,21 @@ public class ShellExecTool implements ToolRegistry.Tool {
             long durationMs = System.currentTimeMillis() - startTime;
             var processedOutput = TerminalImageRenderer.replaceTerminalImagesInOutput(out.toString(), agent);
 
-            int exitCode = timedOut.get() ? -1 : process.exitValue();
+            boolean wasStopped = stopped.get() && !timedOut.get();
+            int exitCode = timedOut.get() || wasStopped ? -1 : process.exitValue();
+            String killNote = timedOut.get() ? "\n[Process killed: timeout after %d seconds]".formatted(timeoutSec)
+                    : wasStopped ? "\n[Process killed: turn stopped]" : "";
             var result = new JsonObject();
             result.addProperty(FIELD_EXIT_CODE, exitCode);
-            result.addProperty(FIELD_OUTPUT, processedOutput + (timedOut.get() ? "\n[Process killed: timeout after %d seconds]".formatted(timeoutSec) : ""));
+            result.addProperty(FIELD_OUTPUT, processedOutput + killNote);
             result.addProperty(FIELD_DURATION_MS, durationMs);
             result.addProperty(FIELD_TRUNCATED, readResult.truncated());
             result.addProperty(FIELD_TIMED_OUT, timedOut.get());
+            result.addProperty(FIELD_STOPPED, wasStopped);
 
             // Inside the envelope, not replacing it — the model needs the output as well as the remedy.
-            var failure = failureTemplate(command, exitCode, timedOut.get(), timeoutSec);
+            var failure = wasStopped ? ToolErrorTemplates.shellStopped(command)
+                    : failureTemplate(command, exitCode, timedOut.get(), timeoutSec);
             if (failure != null) result.add(FIELD_ERROR, ToolErrorTemplates.asJsonObject(failure));
             return result.toString();
 
@@ -545,6 +563,30 @@ public class ShellExecTool implements ToolRegistry.Tool {
             return ToolErrorTemplates.render(ToolErrorTemplates.shellInterrupted(command));
         }
     }
+
+    /**
+     * End {@code process} and every descendant: SIGTERM the tree, give it {@link #TERMINATE_GRACE_MS}
+     * to exit, then SIGKILL whatever survives. Descendants are captured first, because a child
+     * whose parent dies is reparented and no longer reachable from the handle.
+     */
+    static void terminate(Process process) {
+        var tree = new ArrayList<ProcessHandle>(process.descendants().toList());
+        tree.add(process.toHandle());
+        tree.forEach(ProcessHandle::destroy);
+        var exits = tree.stream().map(ProcessHandle::onExit).toArray(CompletableFuture[]::new);
+        try {
+            CompletableFuture.allOf(exits).get(TERMINATE_GRACE_MS, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException | TimeoutException _) {
+            // Survivors are force-killed below.
+        }
+        for (var h : tree) {
+            if (h.isAlive()) h.destroyForcibly();
+        }
+    }
+
+    private static final long TERMINATE_GRACE_MS = 500;
 
     /**
      * A negative exit is {@link #buildTerminalImageEarlyReturn}'s deliberate
@@ -722,6 +764,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         result.addProperty(FIELD_DURATION_MS, durationMs);
         result.addProperty(FIELD_TRUNCATED, truncated);
         result.addProperty(FIELD_TIMED_OUT, false);
+        result.addProperty(FIELD_STOPPED, false);
         return result.toString();
     }
 

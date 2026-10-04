@@ -154,6 +154,14 @@ public final class MemoryAutoCapture {
     /** One lock per agent id (JCLAW-965). Bounded by the agent count, so never reaped. */
     private static final ConcurrentMap<String, ReentrantLock> CAPTURE_LOCKS = new ConcurrentHashMap<>();
 
+    // Test mode never captures, so this records which conversations a turn asked to capture.
+    private static final Set<Long> CAPTURE_REQUESTS_FOR_TEST = ConcurrentHashMap.newKeySet();
+
+    /** Whether a turn in {@code conversationId} reached {@link #captureAsync} with a capturable exchange. */
+    public static boolean captureRequestedForTest(Long conversationId) {
+        return CAPTURE_REQUESTS_FOR_TEST.contains(conversationId);
+    }
+
     /** The lock capture holds for an agent's whole run; anything else rewriting that agent's memories takes it too. */
     static ReentrantLock captureLock(String agentKey) {
         return CAPTURE_LOCKS.computeIfAbsent(agentKey, _ -> new ReentrantLock());
@@ -247,7 +255,10 @@ public final class MemoryAutoCapture {
         if (agent == null || conversationId == null) return;
         if (userMessage == null || userMessage.isBlank()
                 || assistantResponse == null || assistantResponse.isBlank()) return;
-        if (Play.runningInTestMode()) return;
+        if (Play.runningInTestMode()) {
+            CAPTURE_REQUESTS_FOR_TEST.add(conversationId);
+            return;
+        }
         // JCLAW-539 (skip subagents) + JCLAW-534 (per-agent enable, on by
         // default): the agent-level eligibility gate, factored out so it's
         // unit-testable without the async / test-mode plumbing above.

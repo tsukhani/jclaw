@@ -231,6 +231,7 @@ class ShellExecToolTest extends UnitTest {
         assertTrue(result.contains("\"exitCode\":0"));
         assertTrue(result.contains("hello"));
         assertTrue(result.contains("\"timedOut\":false"));
+        assertTrue(result.contains("\"stopped\":false"), result);
     }
 
     @Test
@@ -329,9 +330,54 @@ class ShellExecToolTest extends UnitTest {
         var result = tool.execute("""
                 {"command": "sleep 30", "timeout": 1}
                 """, agent);
-        assertTrue(result.contains("\"timedOut\":true"));
+        assertTrue(result.contains("\"timedOut\":true,\"stopped\":false"), result);
         assertTrue(result.contains("\"exitCode\":-1"));
         assertTrue(result.contains("timeout after 1 seconds"));
+    }
+
+    @Test
+    void stoppingTheTurnKillsTheProcessTreeAndReportsStopped() throws Exception {
+        var turn = new java.util.concurrent.atomic.AtomicBoolean(false);
+        var result = new java.util.concurrent.CompletableFuture<String>();
+        Thread.ofVirtual().start(() -> result.complete(agents.ToolContext.withScope(null, null, null, turn,
+                () -> tool.execute("""
+                        {"command": "sleep 4711 & sleep 4712; wait", "timeout": 120}
+                        """, agent))));
+
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+        while (sleepers("sleep 4711", "sleep 4712").size() < 2 && System.nanoTime() < deadline) Thread.sleep(50);
+        assertEquals(2, sleepers("sleep 4711", "sleep 4712").size(), "both forked sleeps started");
+
+        agents.TurnCancellation.cancel(turn);
+        var text = result.get(2, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(text.contains("\"stopped\":true"), text);
+        assertTrue(text.contains("\"exitCode\":-1"), text);
+        assertTrue(text.contains("[Process killed: turn stopped]"), text);
+        assertTrue(text.contains("was stopped because its turn was stopped"), text);
+
+        deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+        while (!sleepers("sleep 4711", "sleep 4712").isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+        assertTrue(sleepers("sleep 4711", "sleep 4712").isEmpty(), "no process of the stopped command survives");
+    }
+
+    @Test
+    void aTimeoutKillsTheForkedDescendantsToo() throws Exception {
+        var result = tool.execute("""
+                {"command": "sleep 4713 & sleep 4714; wait", "timeout": 1}
+                """, agent);
+        assertTrue(result.contains("\"timedOut\":true"), result);
+
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+        while (!sleepers("sleep 4713", "sleep 4714").isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+        assertTrue(sleepers("sleep 4713", "sleep 4714").isEmpty(), "no process of the timed-out command survives");
+    }
+
+    private static java.util.List<ProcessHandle> sleepers(String... commands) {
+        return ProcessHandle.allProcesses()
+                .filter(ProcessHandle::isAlive)
+                .filter(h -> h.info().commandLine()
+                        .map(c -> java.util.Arrays.stream(commands).anyMatch(c::endsWith)).orElse(false))
+                .toList();
     }
 
     @Test

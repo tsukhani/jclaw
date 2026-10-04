@@ -2,6 +2,7 @@ package controllers;
 
 import agents.AgentRunner;
 import agents.ModelResolver;
+import agents.TurnCancellation;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmTypes.ModelInfo;
@@ -388,7 +389,7 @@ public class VoiceController extends WebSocketController {
     /** Trip the in-flight turn's cancel flag (if any) and clear the slot. */
     private static void cancelCurrent(AtomicReference<AtomicBoolean> current) {
         var prev = current.getAndSet(null);
-        if (prev != null) prev.set(true);
+        if (prev != null) TurnCancellation.cancel(prev);
     }
 
     /** Serialize outbound writes so two overlapping turn threads (a canceled one

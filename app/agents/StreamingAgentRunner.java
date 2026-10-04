@@ -75,6 +75,8 @@ final class StreamingAgentRunner {
             final Long[] conversationIdRef = {null};
             // GH-12: the queue generation acquired with, so a release after an operator stop is a no-op.
             final long[] generationRef = {0};
+            // The turn's fenced sink, once acquired; the finally reads its drop count.
+            final ConversationSink[] sinkRef = {null};
             // queueReleased is shared between the wrapper's terminal
             // callbacks (which do the early release before cb.onComplete
             // flushes the SSE terminal) and this finally block (which does
@@ -94,7 +96,7 @@ final class StreamingAgentRunner {
                 // Phase 1: Resolve conversation, acquire queue, persist user message
                 var conversationOpt = resolveConversationAndAcquireQueue(
                         agent, conversationId, channelType, peerId, userMessage, tracedCb, attachments,
-                        isCancelled, generationRef);
+                        isCancelled, generationRef, sinkRef);
                 if (conversationOpt.isEmpty()) return; // queued, not-found, or error — already handled
                 var conversation = conversationOpt.get();
                 conversationIdRef[0] = conversation.id;
@@ -107,7 +109,7 @@ final class StreamingAgentRunner {
 
                 // Phase 2: Assemble prompt, resolve provider, call LLM in streaming loop
                 streamRoutedLlmLoop(agent, conversation, channelType, userMessage, attachments,
-                        isCancelled, tracedCb, trace);
+                        isCancelled, tracedCb, trace, Objects.requireNonNull(sinkRef[0]));
 
             } catch (Exception e) {
                 if (e instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -115,6 +117,10 @@ final class StreamingAgentRunner {
                         "Streaming error: %s".formatted(e.getMessage()));
                 tracedCb.onError().accept(e);
             } finally {
+                var sink = sinkRef[0];
+                if (sink != null && sink.droppedRows() > 0) {
+                    logDroppedRows(agent, channelType, sink);
+                }
                 EventLogger.flush();
                 // Defense-in-depth: if a terminal callback already drained
                 // the queue (the normal happy / error / cancel paths via
@@ -125,6 +131,13 @@ final class StreamingAgentRunner {
                 QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
             }
         }));
+    }
+
+    /** One line per turn that lost its conversation mid-write; the count and the id, never the content. */
+    static void logDroppedRows(Agent agent, @Nullable String channelType, ConversationSink sink) {
+        EventLogger.info("queue", agent.name, channelType,
+                "Dropped %d message rows a stopped turn wrote after losing conversation %d"
+                        .formatted(sink.droppedRows(), sink.conversation().id));
     }
 
     /**
@@ -204,15 +217,16 @@ final class StreamingAgentRunner {
      * conversation queue, and persist the user message. Returns the conversation
      * or {@link Optional#empty()} if the request was queued, not found, or
      * errored (in which case callbacks have already been invoked). On acquire,
-     * {@code isCancelled} is registered as the owner's flag for an operator stop and
-     * the acquired generation is written to {@code generationRef[0]}.
+     * {@code isCancelled} is registered as the owner's flag for an operator stop,
+     * the acquired generation is written to {@code generationRef[0]} and the turn's
+     * fenced sink to {@code sinkRef[0]}.
      */
-    @SuppressWarnings("java:S107") // the acquire needs the turn's cancel flag and a slot for its generation
+    @SuppressWarnings("java:S107") // the acquire needs the turn's cancel flag and slots for its generation and sink
     private static Optional<Conversation> resolveConversationAndAcquireQueue(
             Agent agent, @Nullable Long conversationId, String channelType, String peerId,
             String userMessage, AgentRunner.StreamingCallbacks cb,
             @Nullable List<AttachmentService.Input> attachments,
-            AtomicBoolean isCancelled, long[] generationRef) {
+            AtomicBoolean isCancelled, long[] generationRef, ConversationSink[] sinkRef) {
 
         Conversation conversation = Tx.run(() -> {
             if (conversationId != null) {
@@ -239,12 +253,10 @@ final class StreamingAgentRunner {
         }
         generationRef[0] = generation;
 
-        // JCLAW-21: route the user-message persist through ConversationSink.
-        // Local sink construction here keeps this method's signature
-        // unchanged; streamLlmLoop builds its own ConversationSink from
-        // the returned Conversation for the post-LLM writes.
-        AgentExecutionSink sink = new ConversationSink(conversation);
-        Tx.run(() -> sink.appendUserMessage(userMessage, attachments));
+        // Every write of the turn goes through this one sink, fenced on the ownership just acquired.
+        var sink = new ConversationSink(conversation, generation, isCancelled);
+        sinkRef[0] = sink;
+        sink.commit(() -> sink.appendUserMessage(userMessage, attachments));
 
         cb.onInit().accept(conversation);
         return Optional.of(conversation);
@@ -258,7 +270,7 @@ final class StreamingAgentRunner {
     private static void streamRoutedLlmLoop(Agent agent, Conversation conversation, String channelType,
                                             String userMessage, @Nullable List<AttachmentService.Input> attachments,
                                             AtomicBoolean isCancelled, AgentRunner.StreamingCallbacks cb,
-                                            LatencyTrace trace)
+                                            LatencyTrace trace, AgentExecutionSink sink)
             throws InterruptedException {
         var route = TurnRouting.decide(agent, conversation, userMessage, attachments, channelType);
         if (route == null) {
@@ -266,13 +278,13 @@ final class StreamingAgentRunner {
                 cb.onError().accept(new RuntimeException(TurnRouting.ROUTER_UNAVAILABLE_ERROR));
                 return;
             }
-            streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace);
+            streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink);
             return;
         }
         RoutedTurn.callWith(route, conversation, () -> {
             // Emitted before the prologue so the chat shows the model while the reply is still streaming.
             cb.onStatus().accept(routeFrame(agent, conversation));
-            streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace);
+            streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink);
             return null;
         });
     }
@@ -285,16 +297,8 @@ final class StreamingAgentRunner {
     private static void streamLlmLoop(Agent agent, Conversation conversation,
                                        String channelType, String userMessage,
                                        AtomicBoolean isCancelled, AgentRunner.StreamingCallbacks cb,
-                                       LatencyTrace trace)
+                                       LatencyTrace trace, AgentExecutionSink sink)
             throws InterruptedException {
-
-        // JCLAW-21: streaming-side sink. Same construction shape as the
-        // sync runAfterAcquire path; the user-message append already
-        // happened inside resolveConversationAndAcquireQueue using its
-        // own local sink, so this one only owns the post-LLM writes
-        // (final assistant, per-tool-call via ParallelToolExecutor,
-        // truncation-fallback persist).
-        final AgentExecutionSink sink = new ConversationSink(conversation);
 
         EventLogger.info("llm", agent.name, channelType,
                 "Streaming: assembling prompt for conversation id: %d".formatted(conversation.id));
@@ -411,13 +415,14 @@ final class StreamingAgentRunner {
         }
 
         trace.mark(LatencyTrace.STREAM_BODY_END);
-        finalizeStreamingTurn(post.content(), post.replyTruncated(), turnUsage, modelInfo, streamStartMs,
-                agent, conversation, channelType, trace, sink, cb);
+        boolean committed = finalizeStreamingTurn(post.content(), post.replyTruncated(), turnUsage, modelInfo,
+                streamStartMs, agent, conversation, channelType, trace, sink, cb);
 
         // JCLAW-39: async memory auto-capture for the completed streaming turn.
         // Placed after finalize (response persisted + terminal emitted) so it
         // never blocks delivery; the YIELDED_RESPONSE path above already returned.
-        MemoryAutoCapture.captureAsync(agent, conversation.id, userMessage, post.content());
+        // A reply the fence dropped belongs to a stopped turn, whose exchange is not captured.
+        if (committed) MemoryAutoCapture.captureAsync(agent, conversation.id, userMessage, post.content());
     }
 
     /**
@@ -653,9 +658,11 @@ final class StreamingAgentRunner {
      * Persist the final assistant message and emit the terminal usage frame. Persist
      * BEFORE the terminal frame so the assistant message is committed by the time
      * {@code emitUsageAndComplete} fires {@code cb.onComplete}.
+     *
+     * @return whether the assistant row committed; false when the turn had lost the conversation
      */
     @SuppressWarnings("java:S107") // Final persist receives every piece of turn state by design
-    private static void finalizeStreamingTurn(String content, boolean replyTruncated,
+    private static boolean finalizeStreamingTurn(String content, boolean replyTruncated,
                                                LlmProvider.TurnUsage turnUsage,
                                                @Nullable ModelInfo modelInfo, long streamStartMs,
                                                Agent agent, Conversation conversation, String channelType,
@@ -671,10 +678,11 @@ final class StreamingAgentRunner {
         var finalReasoning = turnUsage.reasoningText();
         var finalTruncated = replyTruncated;
         long persistStartNs = System.nanoTime();
-        Tx.run(() ->
+        boolean committed = sink.commit(() ->
             sink.appendAssistantMessage(finalContent, null, usageJson, finalReasoning, finalTruncated));
         trace.recordPersist((System.nanoTime() - persistStartNs) / 1_000_000L);
         UsageMetricsBuilder.emitUsageAndComplete(agent, channelType, content, turnUsage, streamStartMs, usageJson, cb);
+        return committed;
     }
 
     /**
@@ -696,7 +704,7 @@ final class StreamingAgentRunner {
         trace.mark(LatencyTrace.STREAM_BODY_END);
         var finalContent = truncMsg;
         long truncPersistStartNs = System.nanoTime();
-        Tx.run(() -> sink.appendAssistantMessage(finalContent, null));
+        sink.commit(() -> sink.appendAssistantMessage(finalContent, null));
         trace.recordPersist((System.nanoTime() - truncPersistStartNs) / 1_000_000L);
         cb.onComplete().accept(finalContent);
     }

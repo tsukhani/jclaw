@@ -1,11 +1,13 @@
 package tools;
 
 import agents.AgentRunner;
+import agents.ToolContext;
 import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
+import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
@@ -32,9 +34,9 @@ final class SubagentResponses {
      * SubagentRun id so it groups with the child's own messages. The start
      * marker's content becomes the header label on the collapsed block.
      */
-    static void writeInlineStartMarker(Long parentConvId, Long runId,
-                                       @Nullable String label, @Nullable String task) {
-        Tx.run(() -> {
+    static boolean writeInlineStartMarker(Long parentConvId, Long runId,
+                                          @Nullable String label, @Nullable String task) {
+        return ConversationQueue.commitUnlessCancelled(parentConvId, ToolContext.turnCancel(), () -> Tx.run(() -> {
             var conv = Conversation.<Conversation>findById(parentConvId);
             ConversationService.withSubagentRunIdMarker(runId, () -> {
                 var startContent = "Spawning subagent: "
@@ -43,7 +45,7 @@ final class SubagentResponses {
                 ConversationService.appendAssistantMessage(conv, startContent, null);
                 return null;
             });
-        });
+        }));
     }
 
     /**

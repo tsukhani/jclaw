@@ -3,6 +3,7 @@ package agents;
 import models.MessageAttachment;
 import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
+import services.Tx;
 
 import java.util.List;
 
@@ -52,6 +53,17 @@ public interface AgentExecutionSink {
      * storage context (e.g. a Conversation) already exists.
      */
     default void onStart() {}
+
+    /**
+     * Commit {@code writes} — a block of {@code append...} calls — in one transaction.
+     *
+     * @return {@code true} when the rows were written; {@code false} when the sink dropped them
+     *         because its turn no longer owns the conversation
+     */
+    default boolean commit(Runnable writes) {
+        Tx.run(writes);
+        return true;
+    }
 
     /**
      * Persist the user turn.

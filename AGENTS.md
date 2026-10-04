@@ -564,7 +564,7 @@ method. Anything else fails the build.
 **What carries the annotation.** Every concrete `AutoCloseable` in `app/`: `McpClient`,
 `McpStdioTransport`, `McpStreamableHttpTransport`, `DirectLuceneMessageSearchRepository`'s
 `LeasedSearcher`, `VoiceVad`, `VoiceSession`, `TaskScope`, `BrowserScreenProxy`,
-`LatencyTrace.bind`, the three
+`LatencyTrace.bind`, `TurnCancellation.register`, the three
 delegating telemetry leaves `DelegatingSampler`, `DelegatingSpanExporter` and
 `DelegatingMetricExporter` (OTel's `Sampler` and both exporter interfaces extend `Closeable`),
 and `GenAiSpans.Call.makeCurrent`, which hands out a `Scope`. The

@@ -1,8 +1,10 @@
 package agents;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import org.jspecify.annotations.Nullable;
 import services.TaskRunRegistry;
 
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
@@ -30,9 +32,11 @@ public final class ToolContext {
 
     /**
      * The scope ids visible to a tool during its dispatch; exactly one id is set. {@code cancel}
-     * reads the turn's stop signals (Stop in chat, a subagent kill), or is null when it has none.
+     * reads the turn's stop signals (Stop in chat, a subagent kill), or is null when it has none;
+     * {@code turnCancel} is the turn's own cancel flag, which {@link #onCancel} registers against.
      */
-    public record Scope(@Nullable Long conversationId, @Nullable Long taskRunId, @Nullable BooleanSupplier cancel) {}
+    public record Scope(@Nullable Long conversationId, @Nullable Long taskRunId, @Nullable BooleanSupplier cancel,
+                        @Nullable AtomicBoolean turnCancel) {}
 
     private static final ThreadLocal<Scope> SCOPE = new ThreadLocal<>();
 
@@ -45,8 +49,15 @@ public final class ToolContext {
     /** {@link #withScope(Long, Long, Supplier)} plus the turn's stop signal, read by {@link #cancelled()}. */
     public static <T> T withScope(@Nullable Long conversationId, @Nullable Long taskRunId,
                                   @Nullable BooleanSupplier cancel, Supplier<T> body) {
+        return withScope(conversationId, taskRunId, cancel, null, body);
+    }
+
+    /** {@link #withScope(Long, Long, BooleanSupplier, Supplier)} plus the turn's cancel flag, for {@link #onCancel}. */
+    public static <T> T withScope(@Nullable Long conversationId, @Nullable Long taskRunId,
+                                  @Nullable BooleanSupplier cancel, @Nullable AtomicBoolean turnCancel,
+                                  Supplier<T> body) {
         var prev = SCOPE.get();
-        SCOPE.set(new Scope(conversationId, taskRunId, cancel));
+        SCOPE.set(new Scope(conversationId, taskRunId, cancel, turnCancel));
         try {
             return body.get();
         } finally {
@@ -81,5 +92,23 @@ public final class ToolContext {
         if (s == null) return false;
         var cancel = s.cancel();
         return (cancel != null && cancel.getAsBoolean()) || TaskRunRegistry.isCancelled(s.taskRunId());
+    }
+
+    /** The dispatching turn's own cancel flag, or {@code null} when the scope carries none. */
+    public static @Nullable AtomicBoolean turnCancel() {
+        var s = SCOPE.get();
+        return s == null ? null : s.turnCancel();
+    }
+
+    /**
+     * Run {@code action} when the turn dispatching this tool is cancelled, until the returned
+     * registration is closed. A no-op registration when the scope carries no turn flag.
+     */
+    @MustBeClosed
+    public static TurnCancellation.Registration onCancel(Runnable action) {
+        var s = SCOPE.get();
+        var flag = s == null ? null : s.turnCancel();
+        if (flag == null) return TurnCancellation.Registration.none();
+        return TurnCancellation.register(flag, action);
     }
 }
