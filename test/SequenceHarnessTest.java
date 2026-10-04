@@ -34,9 +34,9 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
@@ -47,49 +47,49 @@ class SequenceHarnessTest extends UnitTest {
     private static final OntologySchema SCHEMA = OntologySchema.seed();
     private static final ZoneId ZONE = TimezoneResolver.appZone();
 
-    /** Gold-fed probes whose answer differs from the label, each ruled on in the README's sequence section. */
-    private static final Set<String> PINNED_DISAGREEMENTS = Set.of(
-            "probe:operator:holds_view_on:bouldering:2024-01-01:after:s23c:YES",
-            "probe:operator:located_in:ashgrove:2025-10-01:after:s46b:NO",
-            "probe:operator:located_in:cindervale:2024-12-01:after:s02b:NO",
-            "probe:operator:located_in:dunmore-quay:2024-12-20:before:s14b:NO",
-            "probe:operator:located_in:larchmere:2019-06-01:after:s30b:NO",
-            "probe:operator:located_in:nettlefield:2021-06-01:after:s33a:YES",
-            "probe:operator:owns:fernlight:2025-05-06:after:s28b:NO",
-            "probe:operator:owns:ferrule-cabin:2024-08-02:after:s57c:YES",
-            "probe:operator:owns:ferrule-cabin:2025-02-01:after:s24b:YES",
-            "probe:operator:owns:orrin-lodge:2020-06-01:before:s32b:NO",
-            "probe:operator:uses:corvid:2025-06-01:after:s34a:NO",
-            "probe:operator:uses:glasswing:2024-04-01:after:s38b:NO",
-            "probe:operator:uses:osprey:2026-01-05:after:s03b:NO",
-            "probe:operator:uses:quillpad:2021-06-01:after:s21b:NO",
-            "probe:operator:uses:quillpad:2025-10-01:before:s34c:YES",
-            "probe:operator:uses:sorrel-drive:2024-10-06:after:s56b:NO",
-            "probe:operator:works_at:alderline-software:2022-06-01:after:s09c:YES",
-            "probe:operator:works_at:alderline-software:2024-06-01:after:s09b:NO",
-            "probe:operator:works_at:brightwell:2021-06-01:after:s26b:NO",
-            "probe:operator:works_at:brightwell:2024-11-08:after:s37b:NO",
-            "probe:operator:works_at:brightwell:2024-11-08:after:s37c:YES",
-            "probe:operator:works_at:brightwell:2025-05-01:after:s11c:YES",
-            "probe:operator:works_at:harborlight:2022-06-01:after:s45a:YES",
-            "probe:operator:works_at:harborlight:2023-09-01:after:s45c:NO",
-            "probe:operator:works_at:harborlight:2024-09-01:after:s48c:NO",
-            "probe:operator:works_at:harborlight:2024-10-01:after:s16b:NO",
-            "probe:operator:works_at:harborlight:2025-09-02:before:s16c:NO",
-            "probe:operator:works_at:juniper:2026-09-01:after:s44c:YES",
-            "probe:operator:works_at:kiln-street-studio:2025-06-01:after:s17c:NO",
-            "probe:operator:works_at:lantern:2025-06-01:after:s27c:YES",
-            "probe:operator:works_at:ostrander:2021-06-01:after:s04b:YES",
-            "probe:operator:works_at:ostrander:2024-05-01:before:s04b:NO",
-            "probe:operator:works_at:ostrander:2024-10-01:after:s04b:NO",
-            "probe:operator:works_at:vela:2025-04-01:after:s27b:NO",
-            "probe:operator:works_at:vela:2026-05-10:after:s31c:YES",
-            "probe:operator:works_at:vela:2026-09-20:after:s31c:NO",
-            "probe:operator:works_on:atlas-migration:2024-07-03:before:s12c:NO",
-            "probe:operator:works_on:atlas-migration:2025-06-20:after:s36b:YES",
-            "probe:operator:works_on:atlas-migration:2025-09-10:after:s51b:NO",
-            "probe:operator:works_on:bluefin:2024-04-15:after:s45c:NO",
-            "probe:operator:works_on:meridian:2025-06-01:after:s06b:NO");
+    /** Gold-fed probes whose answer differs from the label, to that answer; each ruled on in the README's sequence section. */
+    private static final Map<String, String> PINNED_DISAGREEMENTS = Map.ofEntries(
+            Map.entry("probe:operator:holds_view_on:bouldering:2024-01-01:after:s23c:YES", "YES assumed"),
+            Map.entry("probe:operator:located_in:ashgrove:2025-10-01:after:s46b:NO", "NO assumed"),
+            Map.entry("probe:operator:located_in:cindervale:2024-12-01:after:s02b:NO", "NO assumed"),
+            Map.entry("probe:operator:located_in:dunmore-quay:2024-12-20:before:s14b:NO", "NO assumed"),
+            Map.entry("probe:operator:located_in:larchmere:2019-06-01:after:s30b:NO", "NO assumed"),
+            Map.entry("probe:operator:located_in:nettlefield:2021-06-01:after:s33a:YES", "UNKNOWN"),
+            Map.entry("probe:operator:owns:fernlight:2025-05-06:after:s28b:NO", "UNKNOWN"),
+            Map.entry("probe:operator:owns:ferrule-cabin:2024-08-02:after:s57c:YES", "NO"),
+            Map.entry("probe:operator:owns:ferrule-cabin:2025-02-01:after:s24b:YES", "YES assumed"),
+            Map.entry("probe:operator:owns:orrin-lodge:2020-06-01:before:s32b:NO", "NO assumed"),
+            Map.entry("probe:operator:uses:corvid:2025-06-01:after:s34a:NO", "NO assumed"),
+            Map.entry("probe:operator:uses:glasswing:2024-04-01:after:s38b:NO", "NO assumed"),
+            Map.entry("probe:operator:uses:osprey:2026-01-05:after:s03b:NO", "NO assumed"),
+            Map.entry("probe:operator:uses:quillpad:2021-06-01:after:s21b:NO", "NO assumed"),
+            Map.entry("probe:operator:uses:quillpad:2025-10-01:before:s34c:YES", "YES assumed"),
+            Map.entry("probe:operator:uses:sorrel-drive:2024-10-06:after:s56b:NO", "UNKNOWN"),
+            Map.entry("probe:operator:works_at:alderline-software:2022-06-01:after:s09c:YES", "UNKNOWN"),
+            Map.entry("probe:operator:works_at:alderline-software:2024-06-01:after:s09b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:brightwell:2021-06-01:after:s26b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:brightwell:2024-11-08:after:s37b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:brightwell:2024-11-08:after:s37c:YES", "NO assumed"),
+            Map.entry("probe:operator:works_at:brightwell:2025-05-01:after:s11c:YES", "UNKNOWN"),
+            Map.entry("probe:operator:works_at:harborlight:2022-06-01:after:s45a:YES", "UNKNOWN"),
+            Map.entry("probe:operator:works_at:harborlight:2023-09-01:after:s45c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:harborlight:2024-09-01:after:s48c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:harborlight:2024-10-01:after:s16b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:harborlight:2025-09-02:before:s16c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:juniper:2026-09-01:after:s44c:YES", "YES"),
+            Map.entry("probe:operator:works_at:kiln-street-studio:2025-06-01:after:s17c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:lantern:2025-06-01:after:s27c:YES", "YES assumed"),
+            Map.entry("probe:operator:works_at:ostrander:2021-06-01:after:s04b:YES", "UNKNOWN"),
+            Map.entry("probe:operator:works_at:ostrander:2024-05-01:before:s04b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:ostrander:2024-10-01:after:s04b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:vela:2025-04-01:after:s27b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_at:vela:2026-05-10:after:s31c:YES", "YES assumed"),
+            Map.entry("probe:operator:works_at:vela:2026-09-20:after:s31c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_on:atlas-migration:2024-07-03:before:s12c:NO", "NO assumed"),
+            Map.entry("probe:operator:works_on:atlas-migration:2025-06-20:after:s36b:YES", "YES"),
+            Map.entry("probe:operator:works_on:atlas-migration:2025-09-10:after:s51b:NO", "NO assumed"),
+            Map.entry("probe:operator:works_on:bluefin:2024-04-15:after:s45c:NO", "UNKNOWN"),
+            Map.entry("probe:operator:works_on:meridian:2025-06-01:after:s06b:NO", "UNKNOWN"));
 
     private static Sequences load(String path) {
         try {
@@ -189,10 +189,10 @@ class SequenceHarnessTest extends UnitTest {
         }
     }
 
-    /** Each probe whose gold-claims, gold-lineage answer differs from its label in truth or {@code assumed}. */
-    private static Set<String> goldFedDisagreements(Sequences set) {
+    /** Each probe whose gold-claims, gold-lineage answer differs from its label in truth or {@code assumed}, to that answer. */
+    private static Map<String, String> goldFedDisagreements(Sequences set) {
         var configuration = Configuration.defaultFor(SCHEMA);
-        var out = new TreeSet<String>();
+        var out = new TreeMap<String, String>();
         int probes = 0;
         for (int c = 0; c < set.chains().size(); c++) {
             var chain = set.chains().get(c);
@@ -201,8 +201,9 @@ class SequenceHarnessTest extends UnitTest {
             for (var p : chain.probes()) {
                 var a = SequenceHarness.probe(SCHEMA, chain, p, sets.getLast(), ZONE);
                 if (a.truth() != p.truth() || a.assumed() != p.assumed()) {
-                    out.add(String.join(":", "probe", p.from(), p.type(), p.to(), p.d().toString(),
-                            p.after() != null ? "after" : "before", p.memoryId(), p.truth().name()));
+                    out.put(String.join(":", "probe", p.from(), p.type(), p.to(), p.d().toString(),
+                            p.after() != null ? "after" : "before", p.memoryId(), p.truth().name()),
+                            a.truth().name() + (a.assumed() ? " assumed" : ""));
                 }
                 probes++;
             }
@@ -212,15 +213,15 @@ class SequenceHarnessTest extends UnitTest {
     }
 
     @Test
-    void everyProbeAnswersItsLabelOnGoldClaimsWithGoldLineage() throws IOException {
+    void goldClaimsWithGoldLineageAnswerEveryLabelExceptThePinnedDisagreements() throws IOException {
         var fixture = goldFedDisagreements(fixture());
-        assertEquals(Set.of(), fixture, () -> "fixture disagreements: " + fixture);
+        assertEquals(Map.of(), fixture, () -> "fixture disagreements: " + fixture);
 
         var committed = goldFedDisagreements(set());
-        assertEquals(new TreeSet<>(PINNED_DISAGREEMENTS), committed,
-                () -> "committed-set disagreements: " + String.join("\n", committed));
+        assertEquals(new TreeMap<>(PINNED_DISAGREEMENTS), committed, () -> "committed-set disagreements:\n"
+                + String.join("\n", committed.entrySet().stream().map(e -> e.getKey() + " = " + e.getValue()).toList()));
         var readme = Files.readString(Play.applicationPath.toPath().resolve("evals/graph/README.md"));
-        for (var key : PINNED_DISAGREEMENTS) assertTrue(readme.contains(key), () -> "README rules on no " + key);
+        for (var key : PINNED_DISAGREEMENTS.keySet()) assertTrue(readme.contains(key), () -> "README rules on no " + key);
     }
 
     @Test

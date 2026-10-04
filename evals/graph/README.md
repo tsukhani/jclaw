@@ -417,7 +417,8 @@ first 12 hex of a SHA-256 over the document with its keys sorted.
 3. **Replay.** The record sets are rebuilt in memory, memory by memory, for three variants:
    - `endToEnd` — the model's claims at the configuration, and its lineage at the run's own walk threshold;
    - `goldClaimsModelLineage` — the labelled claims, with the model's lineage;
-   - `goldClaimsGoldLineage` — the labelled claims and lineage; every probe answers its label here.
+   - `goldClaimsGoldLineage` — the labelled claims and lineage; every probe answers its label here
+     except the pinned disagreements under [The committed set](#the-committed-set).
 
    With no lineage threshold a superseded claim is a retraction. A memory with any failed
    decision adds no records and no lineage, though its predecessors are still retired.
@@ -498,7 +499,7 @@ lineages and on 230 of the 240 probes. The reconciler decided the other 10 under
 rules: s04#3, s10#3, s21#3, s23#0, s26#3, s30#3, s38#2, s44#3, s46#0 and s53#0. No label
 changed after reconciliation.
 
-Three texts were punctuated after labelling without changing their meaning:
+Three texts were edited after labelling without changing their meaning:
 - s07b gained commas around "since a bad chill last November";
 - s53c gained commas around "after a shoulder injury in January";
 - s41c's "much prefers rowing instead" became "now much prefers rowing".
@@ -508,9 +509,9 @@ Unpunctuated, the object ran into the trailing clause and matched no labelled me
 a gold decider wrote no relation and the validator check failed.
 
 **Gold-fed disagreements.** With gold claims and gold lineage, `GraphView` answers 41 probes
-differently from their labels. `SequenceHarnessTest` pins exactly these keys. Every label
-stands: each answer follows the probe rules from the texts, and none is changed to match
-`GraphView`.
+differently from their labels. `SequenceHarnessTest` pins exactly these keys, each with the
+answer `GraphView` gives. Every label stands: each answer follows the probe rules from the
+texts, and none is changed to match `GraphView`.
 
 *Stated NO marked assumed.* The text itself states the end, the start or the refusal. The probe
 rules settle the NO without assuming ("a former home or employer is NO now", "a scheduled start
@@ -597,8 +598,8 @@ and answers UNKNOWN before its stamp.
 - `probe:operator:works_at:brightwell:2025-05-01:after:s11c:YES`
 
 **Operator spot-check.** `sequence-label-checks.json` holds 30 lineage records
-(`lineage:<later>:<earlier>:<lineage>`) and 40 probe records (the keys above), each with verdict
-`pending`.
+(`lineage:<later>:<earlier>:<lineage>`) and 40 probe records (keyed like the disagreements
+above, but drawn from every probe), each with verdict `pending`.
 - **Sampling rule.** Within each kind, sort every record in `sequences.json` ascending by the
   SHA-256 hex of `"11:" + record` (the seed, a colon, the record) and take the first k.
 - **Judging.** The operator replaces each `pending` with `agree` or `disagree`, or redraws at
