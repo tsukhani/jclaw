@@ -1,18 +1,26 @@
+import memory.TemporalExpressions;
+import memory.ontology.OntologySchema;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.grapheval.ExtractionPipeline;
 import services.grapheval.ExtractionPipeline.Decision;
 import services.grapheval.ExtractionPipeline.Overlap;
+import services.grapheval.GraphCases;
 import services.grapheval.GraphCases.Case;
+import services.grapheval.GraphCases.DateLabel;
 import services.grapheval.GraphCases.Entity;
 import services.grapheval.GraphCases.Relation;
 import services.grapheval.StageScorer;
 import services.grapheval.StageScorer.StageRun;
 
+import java.time.LocalDate;
 import java.util.List;
 
 /** JCLAW-1356, JCLAW-1357, JCLAW-1358: each gold-fed stage scored on its own answers. Pure, so no fixtures. */
 class StageScorerTest extends UnitTest {
+
+    private static final OntologySchema SCHEMA = OntologySchema.seed();
+    private static final LocalDate ANCHOR = LocalDate.of(2026, 10, 3);
 
     private static final Case A = new Case("a", List.of("role"),
             "The user is a data engineer at Harborlight Analytics, which runs Kestrel CI.",
@@ -54,7 +62,7 @@ class StageScorerTest extends UnitTest {
         assertEquals(List.of("Avery Lin", "Harborlight Analytics"), StageScorer.typingSpans(named));
         assertFalse(StageScorer.typingSpans(A).contains("The user"));
         var s = StageScorer.score(List.of(named), List.of(new StageRun("o", List.of(),
-                List.of(term("Avery Lin", "Person"), term("Harborlight Analytics", "Organization")), List.of())), null);
+                List.of(term("Avery Lin", "Person"), term("Harborlight Analytics", "Organization")), List.of())), null, SCHEMA);
         assertEquals(2, s.typing().hit());
         var resolved = StageScorer.resolution(List.of(named, A), "Avery Lin");
         assertEquals(3, resolved.clusters(), "operator x2, harborlight x2, kestrel");
@@ -73,7 +81,7 @@ class StageScorerTest extends UnitTest {
                 List.of(relation("The user", "works_at", "Harborlight Analytics", 0.9),
                         relation("Kestrel CI", "uses", "Harborlight Analytics", 0.9),
                         relation("The user", "uses", "Kestrel CI", 0.3)));
-        var s = StageScorer.score(List.of(A), List.of(run), null);
+        var s = StageScorer.score(List.of(A), List.of(run), null, SCHEMA);
         assertEquals(1, s.typing().hit());
         assertEquals(2, s.typing().total());
         assertEquals(1.0, s.rejection().rate());
@@ -94,7 +102,7 @@ class StageScorerTest extends UnitTest {
         var s = StageScorer.score(List.of(c), List.of(new StageRun("f", List.of(), List.of(),
                 List.of(relation("Wren Castillo", "family_of", "The user", 0.5),
                         relation("Wren Castillo", "works_at", "Harborlight", 0.49),
-                        relation("The user", "works_at", "Harborlight", 0.5)))), null);
+                        relation("The user", "works_at", "Harborlight", 0.5)))), null, SCHEMA);
         assertEquals(1, s.relation().hit());
         assertEquals(2, s.relation().total());
         assertEquals(0, s.noRelation().hit(), "yes at one half is a yes");
@@ -107,7 +115,7 @@ class StageScorerTest extends UnitTest {
                 overlap("Kestrel", "Kestrel", "Kestrel CI"),
                 overlap(ExtractionPipeline.NEITHER, "data", "data engineer"),
                 overlap(ExtractionPipeline.NEITHER, "Kestrel CI", "CI runs")), List.of(), List.of());
-        var s = StageScorer.score(List.of(A), List.of(run), null);
+        var s = StageScorer.score(List.of(A), List.of(run), null, SCHEMA);
         assertEquals(2, s.overlap().hit());
         assertEquals(4, s.overlap().total());
     }
@@ -122,7 +130,7 @@ class StageScorerTest extends UnitTest {
         var run = new StageRun("n", List.of(overlap(ExtractionPipeline.NEITHER, "Lapsang", "Lapsang tea"),
                 overlap("Lapsang tea", "Lapsang tea", "tea at Harborlight"),
                 overlap("Lapsang tea", "Lapsang tea", "Harborlight")), List.of(), List.of());
-        var s = StageScorer.score(List.of(c), List.of(run), null);
+        var s = StageScorer.score(List.of(c), List.of(run), null, SCHEMA);
         assertEquals(1, s.overlap().hit(), "neither is right beside noise, and choosing noise over gold is wrong");
         assertEquals(3, s.overlap().total());
     }
@@ -130,7 +138,7 @@ class StageScorerTest extends UnitTest {
     @Test
     void aFailedQuestionCountsAsAFailureAndAMiss() {
         var failed = new Decision(ExtractionPipeline.TERM, "Kestrel CI", null, null, null, 0, false, "invalid");
-        var s = StageScorer.score(List.of(A), List.of(new StageRun("a", List.of(), List.of(failed), List.of())), null);
+        var s = StageScorer.score(List.of(A), List.of(new StageRun("a", List.of(), List.of(failed), List.of())), null, SCHEMA);
         assertEquals(1, s.failures());
         assertEquals(0, s.typing().hit());
         assertEquals(1, s.typing().total());
@@ -156,5 +164,150 @@ class StageScorerTest extends UnitTest {
         assertEquals(1, r.falseMerges());
         assertTrue(r.bcubedPrecision() < 1.0);
         assertTrue(r.bcubedRecall() < 1.0);
+    }
+
+    private static Decision asked(String stage, String subject, String from, String to, String choice, double p) {
+        return new Decision(stage, subject, from, to, choice, p, false, null);
+    }
+
+    private static Case works(String status, String text, List<DateLabel> dates, String valid) {
+        return new Case("w", List.of("plain"), text,
+                List.of(Entity.of("operator", "The user", "Person"),
+                        Entity.of("harborlight", "Harborlight Analytics", "Organization")),
+                List.of(new Relation("operator", "works_at", "harborlight", status, valid, null, false)), List.of(),
+                ANCHOR, dates);
+    }
+
+    private static String span(String text) {
+        return TemporalExpressions.find(text, ANCHOR).found().getFirst().span();
+    }
+
+    @Test
+    void deniedUnassertedAndInadmissibleEndedPairsAreNoRelationPairs() {
+        for (var status : List.of(GraphCases.DENIED, GraphCases.UNASSERTED)) {
+            var c = works(status, "The user does not work at Harborlight Analytics.", List.of(), null);
+            var s = StageScorer.score(List.of(c), List.of(new StageRun("w", List.of(), List.of(),
+                    List.of(relation("The user", "works_at", "Harborlight Analytics", 0.2)))), null, SCHEMA);
+            assertEquals(0, s.relation().total(), status);
+            assertEquals(1, s.noRelation().hit(), status);
+            assertEquals(1, s.noRelation().total(), status);
+        }
+        var derived = new Case("d", List.of("plain"), "The Q3 report was derived from the Q2 report.",
+                List.of(Entity.of("q3", "The Q3 report", "Artifact"), Entity.of("q2", "the Q2 report", "Artifact")),
+                List.of(new Relation("q3", "derived_from", "q2", GraphCases.ENDED, null, null, false)), List.of());
+        var s = StageScorer.score(List.of(derived), List.of(new StageRun("d", List.of(), List.of(),
+                List.of(relation("The Q3 report", "derived_from", "the Q2 report", 0.9)))), null, SCHEMA);
+        assertEquals(0, s.relation().total(), "an ended derived_from is no gold");
+        assertEquals(0, s.noRelation().hit());
+        assertEquals(1, s.noRelation().total());
+
+        var ended = works(GraphCases.ENDED, "The user used to work at Harborlight Analytics.", List.of(), null);
+        var admissible = StageScorer.score(List.of(ended), List.of(new StageRun("w", List.of(), List.of(),
+                List.of(relation("The user", "works_at", "Harborlight Analytics", 0.9)))), null, SCHEMA);
+        assertEquals(1, admissible.relation().hit(), "an admissible ended is gold");
+    }
+
+    @Test
+    void aTenseDecisionOnANegativeSpanIsNeverARejection() {
+        var tense = asked(ExtractionPipeline.TENSE, "data engineer", null, null, ExtractionPipeline.NOT_AN_ENTITY,
+                0.9);
+        var s = StageScorer.score(List.of(A), List.of(new StageRun("a", List.of(), List.of(tense), List.of())), null,
+                SCHEMA);
+        assertEquals(0, s.rejection().total());
+        assertEquals(0, s.typing().total());
+    }
+
+    @Test
+    void tenseIsRightOnTheReadingEqualToTheLabel() {
+        var text = "The user moved to Ashgrove in June.";
+        var june = span(text);
+        var c = new Case("t", List.of("dated"), text,
+                List.of(Entity.of("operator", "The user", "Person"), Entity.of("ashgrove", "Ashgrove", "Place")),
+                List.of(), List.of(), ANCHOR, List.of(new DateLabel(june, "2026-06")));
+        var run = new StageRun("t", List.of(), List.of(), List.of(),
+                List.of(asked(ExtractionPipeline.TENSE, june, null, null, ExtractionPipeline.PAST, 0.9),
+                        asked(ExtractionPipeline.TENSE, june, null, null, ExtractionPipeline.UPCOMING, 0.9)),
+                List.of(), List.of(), List.of(), List.of());
+        var s = StageScorer.score(List.of(c), List.of(run), null, SCHEMA);
+        assertEquals(StageScorer.Ratio.of(1, 2), s.tense());
+        assertEquals(StageScorer.Ratio.of(1, 1), s.dateRecall());
+        assertEquals(StageScorer.Ratio.of(1, 1), s.normalizer());
+    }
+
+    @Test
+    void occursIsRightWhenYesMatchesTheEventsGoldDate() {
+        var text = "The user went to the Marrow Bay Retreat this June.";
+        var june = span(text);
+        var c = new Case("o", List.of("dated"), text,
+                List.of(Entity.of("operator", "The user", "Person"),
+                        new Entity("retreat", "Marrow Bay Retreat", "Event", List.of(), false, false, "2026-06")),
+                List.of(), List.of(), ANCHOR, List.of(new DateLabel(june, "2026-06")));
+        var other = new Case("o", List.of("dated"), text, c.entities().stream()
+                .map(e -> e.occurs() == null ? e : new Entity(e.id(), e.mention(), e.type(), List.of(), false, false,
+                        "2026-07")).toList(), List.of(), List.of(), ANCHOR, c.dates());
+        var yes = asked(ExtractionPipeline.OCCURS, "Marrow Bay Retreat @ " + june, "Marrow Bay Retreat", june,
+                "yes", 0.9);
+        var run = new StageRun("o", List.of(), List.of(), List.of(), List.of(), List.of(), List.of(yes), List.of(),
+                List.of());
+        assertEquals(StageScorer.Ratio.of(1, 1), StageScorer.score(List.of(c), List.of(run), null, SCHEMA).occurs());
+        assertEquals(StageScorer.Ratio.of(0, 1), StageScorer.score(List.of(other), List.of(run), null, SCHEMA)
+                .occurs(), "yes on a date that is not the event's");
+    }
+
+    private static Decision status(String choice) {
+        return asked(ExtractionPipeline.STATUS, "The user -works_at-> Harborlight Analytics", "The user",
+                "Harborlight Analytics", choice, 0.9);
+    }
+
+    private static StageRun statusRun(Decision... decisions) {
+        return new StageRun("w", List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(decisions),
+                List.of());
+    }
+
+    @Test
+    void statusIsRightOnTheGoldStatusOrUnstatedAndUnstatedOnAHoldingLabelIsAVeto() {
+        var ended = works(GraphCases.ENDED, "The user used to work at Harborlight Analytics.", List.of(), null);
+        var s = StageScorer.score(List.of(ended), List.of(statusRun(status(ExtractionPipeline.ENDED),
+                status(ExtractionPipeline.HOLDS), status(ExtractionPipeline.UNSTATED))), null, SCHEMA);
+        assertEquals(StageScorer.Ratio.of(1, 3), s.status());
+        assertEquals(StageScorer.Ratio.of(1, 3), s.vetoRate());
+
+        var denied = works(GraphCases.DENIED, "The user does not work at Harborlight Analytics.", List.of(), null);
+        var d = StageScorer.score(List.of(denied), List.of(statusRun(status(ExtractionPipeline.UNSTATED),
+                status(ExtractionPipeline.HOLDS))), null, SCHEMA);
+        assertEquals(StageScorer.Ratio.of(1, 2), d.status());
+        assertEquals(0, d.vetoRate().total(), "a denial is not vetoed by unstated");
+    }
+
+    @Test
+    void slotIsRightOnTheBoundTheDateIs() {
+        var text = "The user has worked at Harborlight Analytics since 2019.";
+        var year = span(text);
+        var c = works(GraphCases.HOLDS, text, List.of(new DateLabel(year, "2019")), "2019/..");
+        var subject = "The user -works_at-> Harborlight Analytics @ " + year;
+        var run = new StageRun("w", List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(),
+                List.of(asked(ExtractionPipeline.SLOT, subject, "The user", "Harborlight Analytics",
+                                ExtractionPipeline.FROM, 0.9),
+                        asked(ExtractionPipeline.SLOT, subject, "The user", "Harborlight Analytics",
+                                ExtractionPipeline.TO, 0.9)));
+        assertEquals(StageScorer.Ratio.of(1, 2), StageScorer.score(List.of(c), List.of(run), null, SCHEMA).slot());
+    }
+
+    @Test
+    void negationReportsTheYesRateOnDenialsAndTheNoRateOnPositives() {
+        var denied = works(GraphCases.DENIED, "The user does not work at Harborlight Analytics.", List.of(), null);
+        var holds = new Case("h", List.of("plain"), denied.text(), denied.entities(),
+                List.of(Relation.of("operator", "works_at", "harborlight")), List.of());
+        var yes = asked(ExtractionPipeline.NEGATION, "The user -> Harborlight Analytics", "The user",
+                "Harborlight Analytics", "works_at", 0.9);
+        var no = asked(ExtractionPipeline.NEGATION, "The user -> Harborlight Analytics", "The user",
+                "Harborlight Analytics", "works_at", 0.1);
+        var s = StageScorer.score(List.of(denied, holds), List.of(
+                new StageRun("w", List.of(), List.of(), List.of(), List.of(), List.of(yes, no), List.of(), List.of(),
+                        List.of()),
+                new StageRun("h", List.of(), List.of(), List.of(), List.of(), List.of(yes, no), List.of(), List.of(),
+                        List.of())), null, SCHEMA);
+        assertEquals(StageScorer.Ratio.of(1, 2), s.negationYes());
+        assertEquals(StageScorer.Ratio.of(1, 2), s.negationNo());
     }
 }

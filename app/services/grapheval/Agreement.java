@@ -2,13 +2,16 @@ package services.grapheval;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import memory.ontology.EdtfInterval;
 import org.jspecify.annotations.Nullable;
 import services.grapheval.GraphCases.Case;
 import services.grapheval.GraphCases.Entity;
+import services.grapheval.GraphCases.Relation;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -16,6 +19,8 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * Agreement between the committed labels and a blind second labeller over a fixed subset of the cases
@@ -30,10 +35,29 @@ public final class Agreement {
 
     /**
      * {@code covered} of the {@code selected} blind cases carry second labels; the scores are over those, each null
-     * when it has nothing to measure.
+     * when it has nothing to measure. {@code statusKappa} is over the relation triples both labellers wrote; the
+     * {@code valid}, {@code occurs}, {@code valence} and {@code dates} agreements are exact-match shares over matched
+     * items where either side has a value. {@code reason} says why no second labels were read, when none were.
      */
     public record Result(int selected, int covered, boolean complete, @Nullable Double entityF1,
-                         @Nullable Double typeKappa, @Nullable Double relationF1) {}
+                         @Nullable Double typeKappa, @Nullable Double relationF1, @Nullable Double statusKappa,
+                         @Nullable Double validAgreement, @Nullable Double occursAgreement,
+                         @Nullable Double valenceAgreement, @Nullable Double datesAgreement,
+                         @Nullable String reason) {
+
+        public static final String PREDATES_V3 = "second labels predate v3: ";
+
+        /** No second labels read, because the file does not parse under v3: {@code message} is the parse error. */
+        public static Result predatesV3(String message) {
+            return new Result(0, 0, false, null, null, null, null, null, null, null, null,
+                    PREDATES_V3 + message);
+        }
+
+        public Result withReason(@Nullable String reason) {
+            return new Result(selected, covered, complete, entityF1, typeKappa, relationF1, statusKappa,
+                    validAgreement, occursAgreement, valenceAgreement, datesAgreement, reason);
+        }
+    }
 
     /** The blind subset's ids: ceil(15%) of the cases, by ascending SHA-256 of {@code "jclaw-1356:" + id}. */
     public static List<String> blindSelection(List<Case> cases) {
@@ -42,10 +66,11 @@ public final class Agreement {
     }
 
     /**
-     * The sheet a blind labeller works from: the selected cases' ids and text, and the set's {@code userMd} when it
-     * declares an owner, so the labeller knows whose name stands for the operator. Nothing else.
+     * The sheet a blind labeller works from: the selected cases' ids, text and anchors, the set's {@code capturedAt},
+     * and its {@code userMd} when it declares an owner, so the labeller knows whose name stands for the operator.
+     * Nothing else.
      */
-    public static JsonObject blindSheet(List<Case> cases, @Nullable String userMd) {
+    public static JsonObject blindSheet(List<Case> cases, @Nullable String userMd, LocalDate capturedAt) {
         var selected = new HashSet<>(blindSelection(cases));
         var out = new JsonArray();
         for (var c : cases) {
@@ -53,10 +78,12 @@ public final class Agreement {
             var o = new JsonObject();
             o.addProperty("id", c.id());
             o.addProperty("text", c.text());
+            o.addProperty("capturedAt", c.capturedAt().toString());
             out.add(o);
         }
         var root = new JsonObject();
         if (userMd != null) root.addProperty("userMd", userMd);
+        root.addProperty("capturedAt", capturedAt.toString());
         root.add("cases", out);
         return root;
     }
@@ -70,8 +97,11 @@ public final class Agreement {
         }
     }
 
-    /** Compares {@code second} with {@code first} over the blind subset of {@code first}. */
-    public static Result compare(List<Case> first, List<Case> second) {
+    /**
+     * Compares {@code second} with {@code first} over the blind subset of {@code first}; a {@code symmetric}
+     * relation's two directions are one triple.
+     */
+    public static Result compare(List<Case> first, List<Case> second, Set<String> symmetric) {
         var selected = blindSelection(first);
         var firstById = byId(first);
         var secondById = byId(second);
@@ -83,6 +113,11 @@ public final class Agreement {
         int matchedRelations = 0;
         int firstRelations = 0;
         int secondRelations = 0;
+        var statusPairs = new ArrayList<String[]>();
+        var valid = new Share();
+        var occurs = new Share();
+        var valence = new Share();
+        var dates = new Share();
         for (var id : selected) {
             var a = firstById.get(id);
             var b = secondById.get(id);
@@ -99,29 +134,61 @@ public final class Agreement {
                         match.put(e.id(), f.id());
                         taken.add(f.id());
                         typePairs.add(new String[] {f.type(), e.type()});
+                        occurs.add(f.occurs(), e.occurs(), true);
                         break;
                     }
                 }
             }
             matchedEntities += match.size();
 
-            var gold = new HashSet<List<String>>();
-            a.relations().forEach(r -> gold.add(key(r.from(), r.type(), r.to())));
+            var gold = new HashMap<List<String>, Relation>();
+            a.relations().forEach(r -> gold.putIfAbsent(key(r.from(), r.type(), r.to(), symmetric), r));
             firstRelations += gold.size();
             var seen = new HashSet<List<String>>();
             for (var r : b.relations()) {
                 var from = match.get(r.from());
                 var to = match.get(r.to());
                 var k = from == null || to == null ? List.of(r.from(), r.type(), r.to(), "unmatched")
-                        : key(from, r.type(), to);
+                        : key(from, r.type(), to, symmetric);
                 if (!seen.add(k)) continue;
                 secondRelations++;
-                if (gold.contains(k)) matchedRelations++;
+                var f = gold.get(k);
+                if (f == null) continue;
+                matchedRelations++;
+                statusPairs.add(new String[] {f.status(), r.status()});
+                valid.add(f.valid(), r.valid(), true);
+                valence.add(f.valence(), r.valence(), false);
+            }
+            var secondDates = new HashMap<String, @Nullable String>();
+            b.dates().forEach(d -> secondDates.putIfAbsent(d.span(), d.value()));
+            for (var d : a.dates()) {
+                if (secondDates.containsKey(d.span())) dates.add(d.value(), secondDates.get(d.span()), true);
             }
         }
         boolean complete = !selected.isEmpty() && covered == selected.size();
         return new Result(selected.size(), covered, complete, f1(matchedEntities, firstEntities, secondEntities),
-                kappa(typePairs), f1(matchedRelations, firstRelations, secondRelations));
+                kappa(typePairs), f1(matchedRelations, firstRelations, secondRelations), kappa(statusPairs),
+                valid.done(), occurs.done(), valence.done(), dates.done(), null);
+    }
+
+    /** Exact agreement over pairs where either side has a value; EDTF values compare in canonical form. */
+    private static final class Share {
+        int same;
+        int total;
+
+        void add(@Nullable String first, @Nullable String second, boolean edtf) {
+            if (first == null && second == null) return;
+            total++;
+            if (Objects.equals(canonical(first, edtf), canonical(second, edtf))) same++;
+        }
+
+        @Nullable Double done() {
+            return total == 0 ? null : (double) same / total;
+        }
+
+        private static @Nullable String canonical(@Nullable String value, boolean edtf) {
+            return value == null || !edtf ? value : EdtfInterval.parse(value).toString();
+        }
     }
 
     /** Same operator, or a span of one is a span of the other. */
@@ -134,8 +201,8 @@ public final class Agreement {
                 || (firstMention != null && second.answersTo(firstMention));
     }
 
-    private static List<String> key(String from, String type, String to) {
-        if (GraphEvalScorer.SYMMETRIC.contains(type) && from.compareTo(to) > 0) return List.of(to, type, from);
+    private static List<String> key(String from, String type, String to, Set<String> symmetric) {
+        if (symmetric.contains(type) && from.compareTo(to) > 0) return List.of(to, type, from);
         return List.of(from, type, to);
     }
 

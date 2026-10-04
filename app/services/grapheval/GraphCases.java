@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
 import com.google.gson.JsonParser;
+import memory.ontology.EdtfInterval;
 import memory.ontology.OntologySchema;
 import org.jspecify.annotations.Nullable;
 import services.WorkspaceFiles;
@@ -12,6 +13,8 @@ import services.WorkspaceFiles;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -21,8 +24,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The v2 labelled memories in {@code evals/graph/cases.json} (JCLAW-1356), validated against an ontology. The rules
- * are {@code evals/graph/GUIDE.md}'s; the format is {@code evals/graph/README.md}'s.
+ * The v3 labelled memories in {@code evals/graph/cases.json} (JCLAW-1356, JCLAW-1366), validated against an ontology.
+ * The rules are {@code evals/graph/GUIDE.md}'s; the format is {@code evals/graph/README.md}'s. Labels are checked for
+ * syntax and verbatim spans only, never against the code that extracts them.
  */
 public final class GraphCases {
 
@@ -37,16 +41,41 @@ public final class GraphCases {
     public static final String PLAIN = "plain";
     /** A memory about a guest, not the owner: it carries no operator. */
     public static final String GUEST = "guest";
+    /** A guest's memory that speaks about the owner: it may name the operator, but asserts nothing of them. */
+    public static final String GUEST_ABOUT_OWNER = "guest-about-owner";
+    public static final String NEGATED = "negated";
+    public static final String DATED = "dated";
     public static final Set<String> TAGS = Set.of("weekday-time", "role", "everyday-object", "descriptive-phrase",
-            "reversed-direction", "employer-tool", PLAIN, GUEST);
+            "reversed-direction", "employer-tool", PLAIN, GUEST, "ended", NEGATED, "unasserted", DATED,
+            GUEST_ABOUT_OWNER);
+    public static final String HOLDS = "holds";
+    public static final String ENDED = "ended";
+    public static final String DENIED = "denied";
+    /** An eval-only label: the text mentions the relation without asserting it. */
+    public static final String UNASSERTED = "unasserted";
+    public static final Set<String> STATUSES = Set.of(HOLDS, ENDED, DENIED, UNASSERTED);
+    public static final Set<String> VALENCES = Set.of("favorable", "unfavorable");
+
+    static final Set<String> ROOT_KEYS = Set.of("userMd", "capturedAt", "cases");
+    static final Set<String> CASE_KEYS = Set.of("id", "tags", "text", "entities", "relations", "negatives",
+            "capturedAt", "dates");
+    private static final Set<String> ENTITY_KEYS = Set.of("id", "mention", "type", "aliases", "implicit", "noise",
+            "occurs");
+    private static final Set<String> RELATION_KEYS = Set.of("from", "type", "to", "status", "valid", "valence", "noise");
+    private static final Set<String> DATE_KEYS = Set.of("span", "value");
 
     private GraphCases() {}
 
     /** A labelled entity; {@code mention} is null only on an implicit operator. */
     public record Entity(String id, @Nullable String mention, String type, List<String> aliases, boolean implicit,
-                         boolean noise) {
+                         boolean noise, @Nullable String occurs) {
         public Entity {
             aliases = List.copyOf(aliases);
+        }
+
+        public Entity(String id, @Nullable String mention, String type, List<String> aliases, boolean implicit,
+                      boolean noise) {
+            this(id, mention, type, aliases, implicit, noise, null);
         }
 
         public static Entity of(String id, String mention, String type, String... aliases) {
@@ -76,19 +105,42 @@ public final class GraphCases {
         }
     }
 
-    public record Relation(String from, String type, String to, boolean noise) {
+    /** {@code status} is one of {@link #STATUSES}; {@code valid} and {@code valence} are as labelled. */
+    public record Relation(String from, String type, String to, String status, @Nullable String valid,
+                           @Nullable String valence, boolean noise) {
+        public Relation(String from, String type, String to, boolean noise) {
+            this(from, type, to, HOLDS, null, null, noise);
+        }
+
         public static Relation of(String from, String type, String to) {
             return new Relation(from, type, to, false);
         }
+
+        public boolean denied() {
+            return status.equals(DENIED);
+        }
+
+        public boolean reaches(String id) {
+            return from.equals(id) || to.equals(id);
+        }
     }
 
+    /** A labelled date span; {@code value} is an EDTF string, or null for a span excluded from scoring. */
+    public record DateLabel(String span, @Nullable String value) {}
+
     public record Case(String id, List<String> tags, String text, List<Entity> entities, List<Relation> relations,
-                       List<String> negatives) {
+                       List<String> negatives, LocalDate capturedAt, List<DateLabel> dates) {
         public Case {
             tags = List.copyOf(tags);
             entities = List.copyOf(entities);
             relations = List.copyOf(relations);
             negatives = List.copyOf(negatives);
+            dates = List.copyOf(dates);
+        }
+
+        public Case(String id, List<String> tags, String text, List<Entity> entities, List<Relation> relations,
+                    List<String> negatives) {
+            this(id, tags, text, entities, relations, negatives, ExtractionPipeline.DEFAULT_ANCHOR, List.of());
         }
 
         public @Nullable Entity entity(String id) {
@@ -103,13 +155,39 @@ public final class GraphCases {
             return span.equalsIgnoreCase(IMPLICIT_OPERATOR_SPAN) ? entity(OPERATOR) : null;
         }
 
-        /** The labelled relation from one id to another, either way round for a symmetric type. */
-        public @Nullable Relation relation(String from, String to) {
+        /** The positive (holds, ended or unasserted) label from one id to another, either way round when symmetric. */
+        public @Nullable Relation positive(String from, String to, Set<String> symmetric) {
+            return find(from, to, symmetric, false);
+        }
+
+        /** The denied label from one id to another, either way round for a symmetric type. */
+        public @Nullable Relation denied(String from, String to, Set<String> symmetric) {
+            return find(from, to, symmetric, true);
+        }
+
+        private @Nullable Relation find(String from, String to, Set<String> symmetric, boolean denied) {
             for (var r : relations) {
+                if (r.denied() != denied) continue;
                 if (r.from().equals(from) && r.to().equals(to)) return r;
-                if (GraphEvalScorer.SYMMETRIC.contains(r.type()) && r.from().equals(to) && r.to().equals(from)) return r;
+                if (symmetric.contains(r.type()) && r.from().equals(to) && r.to().equals(from)) return r;
             }
             return null;
+        }
+
+        /**
+         * The status {@code r} scores under: its label, except that an {@code ended} its relation cannot take (a
+         * dated From, or a type without ended) scores as {@link #UNASSERTED}.
+         */
+        public String scoredStatus(Relation r, OntologySchema schema) {
+            if (!r.status().equals(ENDED)) return r.status();
+            var from = entity(r.from());
+            return from != null && schema.effectiveStatuses(r.type(), from.type()).contains(ENDED) ? ENDED : UNASSERTED;
+        }
+
+        /** Whether {@code r} is base gold: a {@code holds}, or an {@code ended} its relation admits. */
+        public boolean holdsOrEnded(Relation r, OntologySchema schema) {
+            var status = scoredStatus(r, schema);
+            return status.equals(HOLDS) || status.equals(ENDED);
         }
     }
 
@@ -120,11 +198,14 @@ public final class GraphCases {
     /**
      * The cases in {@code json}, in file order.
      *
-     * @throws IllegalArgumentException naming the case, on any break of the v2 rules
+     * @throws IllegalArgumentException naming the case, on any break of the v3 rules
      */
     public static List<Case> parse(String json, OntologySchema schema) {
         var root = root(json);
+        onlyKeys(root, ROOT_KEYS, "graph cases");
+        var anchor = capturedAt(root);
         var owner = ownerName(root);
+        var symmetric = schema.symmetricSet();
         var cases = new ArrayList<Case>();
         var types = new HashMap<String, String>();
         var ids = new HashSet<String>();
@@ -134,7 +215,7 @@ public final class GraphCases {
             if (!element.isJsonObject()) throw new IllegalArgumentException(where + ": must be an object");
             var object = element.getAsJsonObject();
             var id = text(object, "id", where);
-            var c = parseCase(object, id, true, schema, types);
+            var c = parseCase(object, id, true, CASE_KEYS, anchor, schema, types, symmetric);
             var operator = c.entity(OPERATOR);
             var mention = operator == null ? null : operator.mention();
             if (owner != null && mention != null && !mention.equalsIgnoreCase(IMPLICIT_OPERATOR_SPAN)
@@ -176,6 +257,20 @@ public final class GraphCases {
         return userMd.getAsString();
     }
 
+    /**
+     * The set's root {@code capturedAt}, the anchor every case inherits.
+     *
+     * @throws IllegalArgumentException when {@code json} is not a case set, or has no ISO-date {@code capturedAt}
+     */
+    public static LocalDate capturedAt(String json) {
+        return capturedAt(root(json));
+    }
+
+    private static LocalDate capturedAt(JsonObject root) {
+        if (!root.has("capturedAt")) throw new IllegalArgumentException("graph cases: the root needs 'capturedAt'");
+        return date(root, "capturedAt", "graph cases");
+    }
+
     private static @Nullable String ownerName(JsonObject root) {
         var userMd = userMd(root);
         return userMd == null ? null : WorkspaceFiles.ownerNameIn(userMd);
@@ -195,18 +290,37 @@ public final class GraphCases {
     }
 
     /**
-     * One case under the v2 rules. {@code types} carries each entity id's type across the cases parsed so far;
-     * {@code tagged} cases must carry known tags, held-out ones may omit them.
+     * One case under the v3 rules. {@code keys} are the keys the case may carry; {@code inherited} is the root's
+     * {@code capturedAt}, or null when the case must carry its own. {@code types} carries each entity id's type across
+     * the cases parsed so far; {@code tagged} cases must carry known tags, held-out ones may omit them.
      */
-    static Case parseCase(JsonObject object, String id, boolean tagged, OntologySchema schema, Map<String, String> types) {
+    static Case parseCase(JsonObject object, String id, boolean tagged, Set<String> keys, @Nullable LocalDate inherited,
+                          OntologySchema schema, Map<String, String> types, Set<String> symmetric) {
         var where = "case " + id;
+        onlyKeys(object, keys, where);
         var text = text(object, "text", where);
+        LocalDate capturedAt;
+        if (object.has("capturedAt")) capturedAt = date(object, "capturedAt", where);
+        else if (inherited != null) capturedAt = inherited;
+        else throw new IllegalArgumentException(where + ": 'capturedAt' is required");
 
         var tags = new ArrayList<String>();
         if (tagged || object.has("tags")) {
             for (var tag : strings(object, "tags", where)) {
                 if (!TAGS.contains(tag)) throw new IllegalArgumentException(where + ": unknown tag '" + tag + "'");
                 tags.add(tag);
+            }
+        }
+        boolean aboutOwner = tags.contains(GUEST_ABOUT_OWNER);
+        if (aboutOwner && !tags.contains(GUEST)) {
+            throw new IllegalArgumentException(where + ": '" + GUEST_ABOUT_OWNER + "' is always tagged beside '" + GUEST + "'");
+        }
+
+        var dates = new ArrayList<DateLabel>();
+        if (object.has("dates")) {
+            for (var d : array(object, "dates", where)) {
+                if (!d.isJsonObject()) throw new IllegalArgumentException(where + ": a date must be an object");
+                dates.add(parseDate(d.getAsJsonObject(), text, where));
             }
         }
 
@@ -229,28 +343,27 @@ public final class GraphCases {
         }
 
         var relations = new ArrayList<Relation>();
-        var pairs = new HashSet<List<String>>();
+        var positivePairs = new HashSet<List<String>>();
+        var deniedPairs = new HashSet<List<String>>();
         for (var r : array(object, "relations", where)) {
             if (!r.isJsonObject()) throw new IllegalArgumentException(where + ": a relation must be an object");
-            var o = r.getAsJsonObject();
-            var from = text(o, "from", where);
-            var type = text(o, "type", where);
-            var to = text(o, "to", where);
-            var fromEntity = entities.get(from);
-            var toEntity = entities.get(to);
-            if (fromEntity == null || toEntity == null) {
-                throw new IllegalArgumentException(where + ": relation endpoint '" + (fromEntity == null ? from : to)
-                        + "' is not a case entity id");
+            var relation = parseRelation(r.getAsJsonObject(), where, entities, capturedAt, schema);
+            var from = relation.from();
+            var to = relation.to();
+            var pairs = relation.denied() ? deniedPairs : positivePairs;
+            boolean taken = pairs.contains(List.of(from, to))
+                    || (symmetric.contains(relation.type()) && pairs.contains(List.of(to, from)));
+            if (taken) {
+                throw new IllegalArgumentException(where + ": two " + (relation.denied() ? "denied relations" : "relations")
+                        + " on '" + from + "' -> '" + to + "'");
             }
-            if (!schema.allows(type, fromEntity.type(), toEntity.type())) {
-                throw new IllegalArgumentException(where + ": the schema does not allow " + fromEntity.type() + " "
-                        + type + " " + toEntity.type() + " ('" + from + "' -> '" + to + "')");
+            pairs.add(List.of(from, to));
+            if (symmetric.contains(relation.type())) pairs.add(List.of(to, from));
+            if (aboutOwner && relation.reaches(OPERATOR) && !relation.status().equals(UNASSERTED)) {
+                throw new IllegalArgumentException(where + ": a " + GUEST_ABOUT_OWNER + " case asserts nothing of the "
+                        + "operator, so '" + from + "' -> '" + to + "' must be " + UNASSERTED);
             }
-            boolean reversedSymmetric = GraphEvalScorer.SYMMETRIC.contains(type) && pairs.contains(List.of(to, from));
-            if (!pairs.add(List.of(from, to)) || reversedSymmetric) {
-                throw new IllegalArgumentException(where + ": two relations on '" + from + "' -> '" + to + "'");
-            }
-            relations.add(new Relation(from, type, to, flag(o, "noise", where)));
+            relations.add(relation);
         }
 
         var negatives = new ArrayList<String>();
@@ -265,22 +378,111 @@ public final class GraphCases {
                 negatives.add(negative);
             }
         }
-        return new Case(id, tags, text, List.copyOf(entities.values()), relations, negatives);
+        return new Case(id, tags, text, List.copyOf(entities.values()), relations, negatives, capturedAt, dates);
+    }
+
+    private static DateLabel parseDate(JsonObject o, String text, String where) {
+        onlyKeys(o, DATE_KEYS, where);
+        var span = text(o, "span", where);
+        if (!text.contains(span)) {
+            throw new IllegalArgumentException(where + ": date span '" + span + "' is not verbatim in the text");
+        }
+        var value = o.get("value");
+        if (value == null) throw new IllegalArgumentException(where + ": date '" + span + "' needs a 'value' (or null)");
+        if (value.isJsonNull()) return new DateLabel(span, null);
+        if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString()) {
+            throw new IllegalArgumentException(where + ": date '" + span + "' value must be an EDTF string or null");
+        }
+        return new DateLabel(span, edtf(value.getAsString(), "date '" + span + "'", where).toString());
+    }
+
+    private static Relation parseRelation(JsonObject o, String where, Map<String, Entity> entities, LocalDate capturedAt,
+                                          OntologySchema schema) {
+        onlyKeys(o, RELATION_KEYS, where);
+        var from = text(o, "from", where);
+        var type = text(o, "type", where);
+        var to = text(o, "to", where);
+        var fromEntity = entities.get(from);
+        var toEntity = entities.get(to);
+        if (fromEntity == null || toEntity == null) {
+            throw new IllegalArgumentException(where + ": relation endpoint '" + (fromEntity == null ? from : to)
+                    + "' is not a case entity id");
+        }
+        if (!schema.allows(type, fromEntity.type(), toEntity.type())) {
+            throw new IllegalArgumentException(where + ": the schema does not allow " + fromEntity.type() + " "
+                    + type + " " + toEntity.type() + " ('" + from + "' -> '" + to + "')");
+        }
+        var pair = "'" + from + "' -" + type + "-> '" + to + "'";
+        if (!o.has("status")) throw new IllegalArgumentException(where + ": relation " + pair + " has no 'status'");
+        var status = text(o, "status", where);
+        if (!STATUSES.contains(status)) {
+            throw new IllegalArgumentException(where + ": relation " + pair + " has unknown status '" + status + "'");
+        }
+        boolean positive = status.equals(HOLDS) || status.equals(ENDED);
+
+        String valid = null;
+        if (o.has("valid")) {
+            var raw = text(o, "valid", where);
+            if (status.equals(UNASSERTED) || !schema.validAllowed(type, fromEntity.type())) {
+                throw new IllegalArgumentException(where + ": relation " + pair + " takes no 'valid'");
+            }
+            if (status.equals(DENIED)) {
+                var never = "../" + capturedAt;
+                if (!raw.equals(never)) {
+                    throw new IllegalArgumentException(where + ": a denial's 'valid' is exactly '" + never + "', not '"
+                            + raw + "'");
+                }
+                valid = raw;
+            } else {
+                valid = edtf(raw, "relation " + pair + " 'valid'", where).toString();
+            }
+        }
+
+        String valence = null;
+        if (o.has("valence")) {
+            valence = text(o, "valence", where);
+            var relation = schema.relations().get(type);
+            if (relation == null || !relation.valence()) {
+                throw new IllegalArgumentException(where + ": relation " + pair + " takes no 'valence'");
+            }
+            if (!VALENCES.contains(valence)) {
+                throw new IllegalArgumentException(where + ": valence '" + valence + "' is neither favorable nor unfavorable");
+            }
+        }
+
+        boolean noise = flag(o, "noise", where);
+        if (noise && !positive) {
+            throw new IllegalArgumentException(where + ": 'noise' only marks a holds or ended relation, not " + status);
+        }
+        return new Relation(from, type, to, status, valid, valence, noise);
     }
 
     private static Entity parseEntity(JsonObject o, String text, String where, OntologySchema schema) {
+        onlyKeys(o, ENTITY_KEYS, where);
         var id = text(o, "id", where);
         var type = text(o, "type", where);
-        if (!schema.termTypes().containsKey(type)) {
+        var termType = schema.termTypes().get(type);
+        if (termType == null) {
             throw new IllegalArgumentException(where + ": entity '" + id + "' has undeclared type '" + type + "'");
         }
         boolean implicit = flag(o, "implicit", where);
         boolean noise = flag(o, "noise", where);
+        String occurs = null;
+        if (o.has("occurs")) {
+            if (!termType.dated()) {
+                throw new IllegalArgumentException(where + ": entity '" + id + "' is a " + type + ", and only an Event occurs");
+            }
+            var interval = edtf(text(o, "occurs", where), "entity '" + id + "' 'occurs'", where);
+            if (!(interval.start() instanceof EdtfInterval.Point) || !(interval.end() instanceof EdtfInterval.Point)) {
+                throw new IllegalArgumentException(where + ": entity '" + id + "' 'occurs' is a date or a closed interval");
+            }
+            occurs = interval.toString();
+        }
         if (implicit) {
             if (!id.equals(OPERATOR) || o.has("mention") || o.has("aliases")) {
                 throw new IllegalArgumentException(where + ": only the operator is implicit, and it has no span");
             }
-            return new Entity(id, null, type, List.of(), true, noise);
+            return new Entity(id, null, type, List.of(), true, noise, occurs);
         }
         var mention = text(o, "mention", where);
         var aliases = o.has("aliases") ? strings(o, "aliases", where) : List.<String>of();
@@ -289,7 +491,30 @@ public final class GraphCases {
                 throw new IllegalArgumentException(where + ": mention '" + span + "' is not verbatim in the text");
             }
         }
-        return new Entity(id, mention, type, aliases, false, noise);
+        return new Entity(id, mention, type, aliases, false, noise, occurs);
+    }
+
+    static void onlyKeys(JsonObject object, Set<String> keys, String where) {
+        for (var key : object.keySet()) {
+            if (!keys.contains(key)) throw new IllegalArgumentException(where + ": unknown key '" + key + "'");
+        }
+    }
+
+    private static EdtfInterval edtf(String value, String what, String where) {
+        try {
+            return EdtfInterval.parse(value);
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(where + ": " + what + " '" + value + "' is outside the EDTF subset", e);
+        }
+    }
+
+    static LocalDate date(JsonObject object, String key, String where) {
+        var raw = text(object, key, where);
+        try {
+            return LocalDate.parse(raw);
+        } catch (DateTimeParseException _) {
+            throw new IllegalArgumentException(where + ": '" + key + "' must be an ISO date (YYYY-MM-DD)");
+        }
     }
 
     private static List<String> spansOf(Entity e) {

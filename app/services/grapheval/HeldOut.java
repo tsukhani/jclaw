@@ -2,7 +2,9 @@ package services.grapheval;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
+import memory.AnchorResolver;
 import memory.ontology.OntologySchema;
+import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.db.jpa.JPA;
@@ -15,8 +17,11 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Random;
+import java.util.Set;
 
 import static utils.GsonHolder.GSON;
 
@@ -34,8 +39,22 @@ public final class HeldOut {
     /** How many memories were written to the file, of how many active ones the agent has. */
     public record Sampled(int sampled, int available) {}
 
-    /** A labelled held-out case; {@code memoryId} stays inside the harness and never reaches a report. */
-    public record HeldCase(long memoryId, Case labels) {}
+    /** The held-out author type for a memory with none. */
+    public static final String UNATTRIBUTED = "unattributed";
+
+    private static final Set<String> CASE_KEYS = heldKeys();
+    private static final Set<String> AUTHOR_TYPES = Set.of("human_turn", "guest_turn", "agent_synthesized",
+            "consolidation_derived", UNATTRIBUTED);
+
+    /**
+     * A labelled held-out case; {@code memoryId} stays inside the harness and never reaches a report. A null
+     * {@code authorType} is an unattributed memory.
+     */
+    public record HeldCase(long memoryId, Case labels, @Nullable MemoryAuthorType authorType) {
+        public HeldCase(long memoryId, Case labels) {
+            this(memoryId, labels, MemoryAuthorType.HUMAN_TURN);
+        }
+    }
 
     public record Loaded(List<HeldCase> cases, int unlabelled) {
         public Loaded {
@@ -59,17 +78,24 @@ public final class HeldOut {
     public static Sampled sample(Path file, String agentId, int count, long seed) throws IOException {
         if (Files.exists(file)) throw new IllegalStateException("held-out file already exists; move it aside first");
         long agent = Long.parseLong(agentId);
-        List<Object[]> rows = Tx.run(() -> JPA.em().createQuery("SELECT m.id, m.text FROM Memory m "
+        List<Object[]> rows = Tx.run(() -> JPA.em().createQuery("SELECT m.id, m.text, m.authorType FROM Memory m "
                         + "WHERE m.agent.id = :agent AND m.supersededAt IS NULL ORDER BY m.id", Object[].class)
                 .setParameter("agent", agent).getResultList());
         var shuffled = new ArrayList<>(rows);
         Collections.shuffle(shuffled, new Random(seed));
         var cases = new JsonArray();
+        var anchors = new AnchorResolver.JpaLookup();
         for (var row : shuffled.subList(0, Math.min(count, shuffled.size()))) {
+            long id = (Long) row[0];
             var text = (String) row[1];
+            var author = (MemoryAuthorType) row[2];
+            var anchor = anchors.node(id).map(AnchorResolver.Node::anchor)
+                    .orElseThrow(() -> new IllegalStateException("a sampled memory vanished before its anchor was read"));
             var o = new JsonObject();
-            o.addProperty("memoryId", (Long) row[0]);
+            o.addProperty("memoryId", id);
             o.addProperty("text", text);
+            o.addProperty("capturedAt", anchor.toString());
+            o.addProperty("authorType", author == null ? UNATTRIBUTED : author.name().toLowerCase(Locale.ROOT));
             o.addProperty("labelled", false);
             var candidates = new JsonArray();
             CandidateGenerator.generate(text).forEach(c -> candidates.add(c.span()));
@@ -102,11 +128,13 @@ public final class HeldOut {
     }
 
     /**
-     * The labelled cases in {@code file}, validated under the v2 rules with tags optional; an unlabelled one is
+     * The labelled cases in {@code file}, validated under the v3 rules with tags optional; an unlabelled one is
      * skipped and counted. Refusals name a case by its position, never its memory.
      */
     public static Loaded load(Path file, OntologySchema schema) throws IOException {
         var root = GraphCases.root(Files.readString(file));
+        GraphCases.onlyKeys(root, Set.of("cases"), "graph cases");
+        var symmetric = schema.symmetricSet();
         var cases = new ArrayList<HeldCase>();
         var types = new HashMap<String, String>();
         int unlabelled = 0;
@@ -125,15 +153,30 @@ public final class HeldOut {
             } catch (RuntimeException _) {
                 throw new IllegalArgumentException("case " + id + ": 'memoryId' must be a number");
             }
+            var author = o.get("authorType");
+            if (!o.has("capturedAt") || author == null || !author.isJsonPrimitive()
+                    || !AUTHOR_TYPES.contains(author.getAsString())) {
+                throw new IllegalArgumentException("case " + id
+                        + ": sampled before v3 (no capturedAt or authorType); move the file aside and resample");
+            }
             GraphCases.Case labels;
             try {
-                labels = GraphCases.parseCase(o, id, false, schema, types);
+                labels = GraphCases.parseCase(o, id, false, CASE_KEYS, null, schema, types, symmetric);
             } catch (IllegalArgumentException _) {
                 // parseCase quotes spans, and a held-out span is real memory text.
-                throw new IllegalArgumentException("case " + id + ": labels break the v2 rules in GUIDE.md");
+                throw new IllegalArgumentException("case " + id + ": labels break the v3 rules in evals/graph/README.md");
             }
-            cases.add(new HeldCase(memoryId, labels));
+            var raw = author.getAsString();
+            cases.add(new HeldCase(memoryId, labels,
+                    raw.equals(UNATTRIBUTED) ? null : MemoryAuthorType.valueOf(raw.toUpperCase(Locale.ROOT))));
         }
         return new Loaded(cases, unlabelled);
+    }
+
+    private static Set<String> heldKeys() {
+        var keys = new HashSet<>(GraphCases.CASE_KEYS);
+        keys.remove("id");
+        keys.addAll(List.of("memoryId", "labelled", "candidates", "authorType"));
+        return Set.copyOf(keys);
     }
 }

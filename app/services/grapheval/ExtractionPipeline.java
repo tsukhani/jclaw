@@ -197,10 +197,12 @@ public final class ExtractionPipeline {
 
     /**
      * What a run needs beyond the text and its candidates. {@code dates} are found against {@code anchor}; a
-     * {@code pairFilter} asks only pairs inside one clause or with the owner as an endpoint (JCLAW-1380).
+     * {@code pairFilter} asks only pairs inside one clause or with the owner as an endpoint (JCLAW-1380). A null
+     * {@code authorType} is an unattributed memory, read in the owner's voice; {@code memoryId} names a stored memory.
      */
-    public record Inputs(@Nullable String ownerName, MemoryAuthorType authorType, LocalDate anchor, List<DateSpan> dates,
-                         List<Predecessor> predecessors, boolean pairFilter) {
+    public record Inputs(@Nullable String ownerName, @Nullable MemoryAuthorType authorType, LocalDate anchor,
+                         List<DateSpan> dates, List<Predecessor> predecessors, boolean pairFilter,
+                         @Nullable Long memoryId) {
         public Inputs {
             dates = List.copyOf(dates);
             predecessors = List.copyOf(predecessors);
@@ -212,10 +214,16 @@ public final class ExtractionPipeline {
         }
 
         /** Inputs whose dates are {@link TemporalExpressions#find}'s over {@code text} at {@code anchor}. */
-        public static Inputs of(String text, @Nullable String ownerName, MemoryAuthorType authorType, LocalDate anchor,
-                                List<Predecessor> predecessors, boolean pairFilter) {
+        public static Inputs of(String text, @Nullable String ownerName, @Nullable MemoryAuthorType authorType,
+                                LocalDate anchor, List<Predecessor> predecessors, boolean pairFilter) {
+            return of(text, ownerName, authorType, anchor, predecessors, pairFilter, null);
+        }
+
+        public static Inputs of(String text, @Nullable String ownerName, @Nullable MemoryAuthorType authorType,
+                                LocalDate anchor, List<Predecessor> predecessors, boolean pairFilter,
+                                @Nullable Long memoryId) {
             return new Inputs(ownerName, authorType, anchor, TemporalExpressions.find(text, anchor).found(),
-                    predecessors, pairFilter);
+                    predecessors, pairFilter, memoryId);
         }
 
         public Voice voice() {
@@ -249,12 +257,12 @@ public final class ExtractionPipeline {
      * Everything one decision model did with one case's candidates: the decisions of every stage, the dates found and
      * the anchor they were read at, the negation cues left after endings, the predecessors asked about, how many
      * questions each stage asked (a relation question once per ordered pair and relation) and which requests went
-     * out. {@code schema} is null only on a run built by hand without one.
+     * out. {@code schema} is null only on a run built by hand without one; {@code memoryId} only on a held-out run.
      */
     public record CaseRun(String caseId, List<Candidate> candidates, int prunedPairs, List<Decision> decisions,
                           String text, LocalDate anchor, List<DateSpan> dates, List<NegationCue> cues,
                           List<Predecessor> predecessors, Map<String, Integer> questionsByStage, Set<Request> sent,
-                          @Nullable OntologySchema schema) {
+                          @Nullable OntologySchema schema, @Nullable Long memoryId) {
         public CaseRun {
             candidates = List.copyOf(candidates);
             decisions = List.copyOf(decisions);
@@ -263,6 +271,14 @@ public final class ExtractionPipeline {
             predecessors = List.copyOf(predecessors);
             questionsByStage = Collections.unmodifiableMap(new LinkedHashMap<>(questionsByStage));
             sent = sent.isEmpty() ? Set.of() : Collections.unmodifiableSet(EnumSet.copyOf(sent));
+        }
+
+        public CaseRun(String caseId, List<Candidate> candidates, int prunedPairs, List<Decision> decisions,
+                       String text, LocalDate anchor, List<DateSpan> dates, List<NegationCue> cues,
+                       List<Predecessor> predecessors, Map<String, Integer> questionsByStage, Set<Request> sent,
+                       @Nullable OntologySchema schema) {
+            this(caseId, candidates, prunedPairs, decisions, text, anchor, dates, cues, predecessors, questionsByStage,
+                    sent, schema, null);
         }
 
         public CaseRun(String caseId, List<Candidate> candidates, int prunedPairs, List<Decision> decisions) {
@@ -459,7 +475,7 @@ public final class ExtractionPipeline {
         decisions.addAll(floorSlots(slot.parse().apply(qualifyAnswers), statuses));
         decisions.addAll(lineage);
         return new CaseRun(caseId, candidates, relate.pruned(), decisions, text, inputs.anchor(), inputs.dates(), cues,
-                predecessors, counts, sent, schema);
+                predecessors, counts, sent, schema, inputs.memoryId());
     }
 
     /** The relation decisions that write at {@link #KEPT}, each with its From's type. */

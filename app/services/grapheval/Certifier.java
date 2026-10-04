@@ -13,10 +13,11 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Certifies a decision model from its end-to-end grids (JCLAW-1356): a threshold passes when the one-sided 95%
- * Clopper-Pearson upper bound on its wrong share is at most 5% and its recall meets the floor. One run certifies when
- * a spot-check that re-asks a share of its cases gets the same decisions back; several runs must each certify.
- * Pure: no I/O, no clock.
+ * Certifies a decision model from its end-to-end grids (JCLAW-1356, JCLAW-1366): a threshold passes when the one-sided
+ * 95% Clopper-Pearson upper bound is at most 5% both on its written items' wrong share ({@code G_written}) and on its
+ * trap violations ({@code G_trap}), and its recall meets the floor. Each qualifier class first walks its own
+ * threshold. One run certifies when a spot-check that re-asks a share of its cases gets the same decisions back;
+ * several runs must each certify. Pure: no I/O, no clock.
  */
 public final class Certifier {
 
@@ -36,11 +37,48 @@ public final class Certifier {
     public static final String NEEDS_SPOT_CHECK = "a single run needs its spot-check";
     public static final double SPOT_CHECK_SHARE = 0.10;
 
+    public static final String CLASS_CERTIFIED = "certified";
+    public static final String PROVISIONAL = "provisional";
+    public static final String DISABLED = "disabled";
+    /** A class threshold needs this many values to be evaluable at all. */
+    public static final int MIN_CLASS_N = 29;
+    /** From this many values a class can certify; below it, at best provisional. */
+    public static final int CERTIFIED_CLASS_N = 250;
+    public static final double PROVISIONAL_LIMIT = 0.10;
+    public static final int PROVISIONAL_MAX_WRONG = 6;
+
     private Certifier() {}
 
-    /** One threshold of a walk: the grid's counts plus the bound and whether it passed. */
+    /**
+     * One threshold of a walk: the grid's counts plus the bounds and whether it passed. {@code wrong} is
+     * {@code G_written}'s, over the written items but noise; {@code trapBound} is {@code G_trap}'s.
+     */
     public record Step(double threshold, int written, int wrong, int noise, @Nullable Double recall,
-                       double upperBound, boolean passes) {}
+                       double upperBound, boolean passes, int trapGold, int trapViolations, double trapBound) {}
+
+    /** One threshold of a class walk: {@code n} values written on base-right parents, {@code k} of them wrong. */
+    public record ClassStep(double t, int n, int k) {}
+
+    /**
+     * One qualifier class walked: {@code threshold} is null when {@code state} is {@link #DISABLED}; {@code n},
+     * {@code k} and {@code bound} are those at the threshold, else at the first evaluable step (0, 0, 1.0 with none).
+     */
+    public record ClassWalk(String name, @Nullable Double threshold, String state, int n, int k, double bound,
+                            List<ClassStep> steps) {
+        public ClassWalk {
+            steps = List.copyOf(steps);
+        }
+    }
+
+    /**
+     * What a walked model certified, stamped with the schema and extraction fingerprints it was measured under:
+     * {@code threshold} is {@code t*}, null when nothing certified.
+     */
+    public record Certificate(@Nullable Double threshold, List<ClassWalk> classes, String schema, String extraction) {
+        public Certificate {
+            classes = List.copyOf(classes);
+        }
+    }
 
     /** One run's walk; {@code threshold} is where it certified, or null with {@code failure} saying why. */
     public record Walk(List<Step> steps, @Nullable Double threshold, @Nullable String failure) {
@@ -91,7 +129,78 @@ public final class Certifier {
 
     /** Whether the bound is within {@link #LIMIT}; decided on the CDF itself, so the boundary is exact. */
     public static boolean boundPasses(int wrong, int written) {
-        return written > 0 && wrong < written && logCdf(wrong, written, LIMIT) <= Math.log(CONFIDENCE_TAIL);
+        return boundPasses(wrong, written, LIMIT);
+    }
+
+    /** Whether the bound on {@code k} wrong of {@code n} is within {@code limit}. */
+    public static boolean boundPasses(int k, int n, double limit) {
+        return n > 0 && k < n && logCdf(k, n, limit) <= Math.log(CONFIDENCE_TAIL);
+    }
+
+    /**
+     * Walks a class from the highest threshold with n at least {@link #MIN_CLASS_N} down while each step is certified
+     * or provisional; its threshold is the lowest of that run. Disabled when no step is evaluable or the first fails.
+     */
+    public static ClassWalk classWalk(String name, List<ClassStep> steps) {
+        var ordered = new ArrayList<>(steps);
+        ordered.sort((a, b) -> Double.compare(b.t(), a.t()));
+        ClassStep first = null;
+        ClassStep last = null;
+        String state = DISABLED;
+        for (var step : ordered) {
+            if (first == null) {
+                if (step.n() < MIN_CLASS_N) continue;
+                first = step;
+            }
+            var passed = classState(step);
+            if (passed == null) break;
+            last = step;
+            state = passed;
+        }
+        if (last == null) {
+            var at = first;
+            return new ClassWalk(name, null, DISABLED, at == null ? 0 : at.n(), at == null ? 0 : at.k(),
+                    at == null ? 1.0 : upperBound(at.k(), at.n()), ordered);
+        }
+        return new ClassWalk(name, last.t(), state, last.n(), last.k(), upperBound(last.k(), last.n()), ordered);
+    }
+
+    /** {@link #CLASS_CERTIFIED} or {@link #PROVISIONAL} when the step passes, else null. */
+    private static @Nullable String classState(ClassStep s) {
+        if (s.n() >= CERTIFIED_CLASS_N) return boundPasses(s.k(), s.n(), LIMIT) ? CLASS_CERTIFIED : null;
+        if (s.n() >= MIN_CLASS_N && s.k() <= PROVISIONAL_MAX_WRONG && boundPasses(s.k(), s.n(), PROVISIONAL_LIMIT)) {
+            return PROVISIONAL;
+        }
+        return null;
+    }
+
+    /**
+     * One class's walks across runs: the highest threshold wins, with that run's n, k and bound; a class disabled in
+     * any run is disabled.
+     */
+    public static ClassWalk combineClass(List<ClassWalk> runs) {
+        if (runs.isEmpty()) throw new IllegalArgumentException("no class walks to combine");
+        var best = runs.getFirst();
+        for (var w : runs) {
+            var t = w.threshold();
+            if (t == null) return w;
+            var top = best.threshold();
+            if (top == null || t > top) best = w;
+        }
+        return best;
+    }
+
+    /** Null when both stamps match the running fingerprints, else the reason naming the stamp that differs. */
+    public static @Nullable String check(Certificate certificate, String schemaFingerprint,
+                                         String extractionFingerprint) {
+        if (!certificate.schema().equals(schemaFingerprint)) {
+            return "schema stamp %s differs from running %s".formatted(certificate.schema(), schemaFingerprint);
+        }
+        if (!certificate.extraction().equals(extractionFingerprint)) {
+            return "extraction stamp %s differs from running %s".formatted(certificate.extraction(),
+                    extractionFingerprint);
+        }
+        return null;
     }
 
     /** log P(X <= x) for X ~ Binomial(n, p), summed in log space. */
@@ -116,9 +225,9 @@ public final class Certifier {
     }
 
     /**
-     * Walks {@code grid} from 0.95 down, certifying at the lowest threshold where it and every one above it pass,
-     * and stopping at the first that does not. A run with a failed decision passes nowhere: what it would have
-     * written is unknown.
+     * Walks {@code grid} from 0.95 down, certifying at the lowest threshold where it and every one above it pass
+     * {@code G_written}, {@code G_trap} and the recall floor, and stopping at the first that does not. A run with a
+     * failed decision passes nowhere: what it would have written is unknown.
      */
     public static Walk walk(List<Point> grid, double recallFloor) {
         var ordered = new ArrayList<>(grid);
@@ -129,22 +238,28 @@ public final class Certifier {
         String failure = failed == 0 ? null : "%d decisions failed, and a run with a failed decision does not certify"
                 .formatted(failed);
         for (var p : ordered) {
-            int denominator = p.written() - p.noise();
-            double bound = upperBound(p.wrong(), denominator);
-            boolean boundOk = boundPasses(p.wrong(), denominator);
+            int denominator = p.gWritten();
+            double bound = upperBound(p.gWrong(), denominator);
+            boolean boundOk = boundPasses(p.gWrong(), denominator);
+            double trapBound = upperBound(p.trapViolations(), p.trapGold());
+            boolean trapOk = boundPasses(p.trapViolations(), p.trapGold());
             var recall = p.recall();
             boolean recallOk = recall != null && recall >= recallFloor;
-            boolean passes = failure == null && boundOk && recallOk;
-            steps.add(new Step(p.threshold(), p.written(), p.wrong(), p.noise(), recall, bound, passes));
+            boolean passes = failure == null && boundOk && trapOk && recallOk;
+            steps.add(new Step(p.threshold(), p.written(), p.gWrong(), p.noise(), recall, bound, passes,
+                    p.trapGold(), p.trapViolations(), trapBound));
             if (failure != null) continue;
             if (passes) {
                 certified = p.threshold();
+            } else if (!boundOk) {
+                failure = "at %s the wrong-share upper bound %s exceeds %s (%d wrong of %d)".formatted(
+                        fmt(p.threshold()), fmt(bound), fmt(LIMIT), p.gWrong(), denominator);
+            } else if (!trapOk) {
+                failure = "at %s the trap upper bound %s exceeds %s (%d violations of %d)".formatted(
+                        fmt(p.threshold()), fmt(trapBound), fmt(LIMIT), p.trapViolations(), p.trapGold());
             } else {
-                failure = boundOk
-                        ? "at %s recall %s is below the floor %s".formatted(fmt(p.threshold()),
-                                recall == null ? "n/a" : fmt(recall), fmt(recallFloor))
-                        : "at %s the wrong-share upper bound %s exceeds %s (%d wrong of %d)".formatted(
-                                fmt(p.threshold()), fmt(bound), fmt(LIMIT), p.wrong(), denominator);
+                failure = "at %s recall %s is below the floor %s".formatted(fmt(p.threshold()),
+                        recall == null ? "n/a" : fmt(recall), fmt(recallFloor));
             }
         }
         return new Walk(steps, certified, certified == null ? failure : null);

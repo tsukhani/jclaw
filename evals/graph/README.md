@@ -1,4 +1,4 @@
-# Graph-extraction cases (JCLAW-1356, JCLAW-1358)
+# Graph-extraction cases (JCLAW-1356, JCLAW-1358, JCLAW-1366)
 
 `cases.json` is the labelled set that certifies a local Ollama decision model for graph
 extraction (`POST /api/graph/eval`, `./jclaw.sh grapheval run`). It is not an
@@ -10,44 +10,85 @@ models selected in Settings. A hosted model such as `jev-latest` is refused with
 
 ## Format
 
+The set is format v3. Every level is strict: a key not listed here is refused, at the root as
+`graph cases: unknown key '<k>'` and below it as `case <id>: unknown key '<k>'`.
+
 ```json
-{"userMd": "Name: Avery Lin",
+{"userMd": "Name: Avery Lin", "capturedAt": "2026-02-15",
  "cases": [
-  {"id": "c042", "tags": ["role", "employer-tool"],
-   "text": "Avery Lin is a data engineer at Harborlight Analytics, which runs Kestrel CI, the team's deployment platform, every Tuesday.",
+  {"id": "c181", "tags": ["ended", "dated"], "capturedAt": "2026-10-03",
+   "text": "Avery Lin moved to Ashgrove in 2019 from Port Calloway, where Avery Lin had rented a flat by the harbour.",
+   "dates": [{"span": "2019", "value": "2019"}],
    "entities": [{"id": "operator", "mention": "Avery Lin", "type": "Person"},
-                {"id": "harborlight", "mention": "Harborlight Analytics", "type": "Organization"},
-                {"id": "kestrel-ci", "mention": "Kestrel CI", "type": "System",
-                 "aliases": ["the team's deployment platform"]}],
-   "relations": [{"from": "operator", "type": "works_at", "to": "harborlight"},
-                 {"from": "harborlight", "type": "uses", "to": "kestrel-ci"}],
-   "negatives": ["data engineer", "Tuesday"]}
+                {"id": "ashgrove", "mention": "Ashgrove", "type": "Place"},
+                {"id": "port-calloway", "mention": "Port Calloway", "type": "Place"}],
+   "relations": [
+     {"from": "operator", "type": "located_in", "to": "ashgrove", "status": "holds", "valid": "2019/.."},
+     {"from": "operator", "type": "located_in", "to": "port-calloway", "status": "ended", "valid": "/2019"}],
+   "negatives": []}
 ]}
 ```
 
-- `id` is unique. `text` is stored verbatim as one memory of the requested agent for the run,
-  snapshotted, checked and deleted afterwards.
+- The root holds `userMd`, `capturedAt` (required: the anchor every case inherits) and `cases`,
+  nothing else; a second-label file has the same root.
 - `userMd` is a USER.md header declaring the owner, read by the same `WorkspaceFiles` parse
   the live owner name uses. The committed owner is the synthetic Avery Lin.
+- A case holds `id`, `tags`, `text`, `entities`, `relations`, `negatives`, and optionally
+  `capturedAt` (overrides the root's) and `dates`. `id` is unique. `text` is stored verbatim as
+  one memory of the requested agent for the run, snapshotted, checked and deleted afterwards.
+- `dates` lists `{span, value}`: `span` verbatim in the text, `value` an EDTF string, or `null`
+  for a span the graph should not date (recurring, vague, or inside a file name, URL or
+  ticket). A case without `dates` lists no date spans.
 - Every case but a guest case has exactly one `operator` entity, mentioned by the declared
   name or, in a legacy case captured before the owner had a name, as "The user". A text that
   says neither opens with a subjectless verb ("Prefers ...") and its operator is
   `{"id": "operator", "type": "Person", "implicit": true}`, with no mention. When the set
   declares an owner, any other operator mention is refused.
 - A `guest` case is about someone other than the owner: a named guest is an ordinary Person,
-  "a guest" is a negative, and the case has no `operator` entity and no relation to one.
-- Every `mention` and alias appears verbatim in `text`. Its `type` is one of the seed
-  ontology's term types (`conf/ontology/seed-schema.yaml`), and an entity id keeps one type
-  across every case it appears in.
-- A relation's `from` and `to` are entity ids of the same case, and the schema allows its
-  `type` between their types. At most one relation per ordered pair.
+  "a guest" is a negative, and the case has no `operator` entity and no relation to one. A
+  case also tagged `guest-about-owner` is a guest talking about the owner: it may name the
+  operator, and every relation touching the operator is `unasserted`, since a guest's word is
+  no assertion by the owner.
+- An entity holds `id`, `mention`, `type`, `aliases`, `implicit`, `noise` and `occurs`. Every
+  `mention` and alias appears verbatim in `text`. Its `type` is one of the seed ontology's
+  term types (`conf/ontology/seed-schema.yaml`), and an entity id keeps one type across every
+  case it appears in. `occurs` is only on an Event, only when the text asserts the date, and
+  is an EDTF date or a closed interval.
+- A relation holds `from`, `type`, `to`, `status`, `valid`, `valence` and `noise`. `from` and
+  `to` are entity ids of the same case, and the schema allows `type` between their types.
+  - `status` is required: `holds`, `ended` (it held and has stopped), `denied` (the text says
+    it does not hold) or `unasserted` (planned, wished, guessed, asked about or reported by a
+    guest: true or not, the owner did not assert it). `ended` is legal on any type; on one
+    whose statuses exclude it, it scores as `unasserted`.
+  - `valid` is the EDTF interval the relation holds over, on `holds` or `ended` where the
+    schema allows valid time for the type and its `from` type. On `denied` it may only be the
+    never form `../<capturedAt>`, the case's effective anchor; never on `unasserted`.
+  - `valence` is `favorable` or `unfavorable`, only on `holds_view_on`, labelled from the
+    text's meaning for that holder.
+  - `noise` only with `holds` or `ended`.
+- Pair rule: at most one positive (`holds`, `ended` or `unasserted`) and one `denied` relation
+  per ordered pair; a symmetric relation's two directions are one pair. A positive `uses` and
+  a denied `owns` on one pair is fine.
+- EDTF is the subset `EdtfInterval.parse` accepts: `YYYY`, `YYYY-MM`, `YYYY-MM-DD`, a season
+  `YYYY-21..24` or a quarter `YYYY-33..36`, each optionally ending `~`; an interval joins two
+  with `/`, either end unknown (empty) or open (`..`), an open start only in the never form.
 - `negatives` are spans that must not become terms; none may be a labelled mention or alias.
 - An entity or relation that is true but not worth a graph record carries `"noise": true`.
 - `tags` are from `weekday-time`, `role`, `everyday-object`, `descriptive-phrase`,
-  `reversed-direction`, `employer-tool` (the hard negatives), `plain` and `guest`.
+  `reversed-direction`, `employer-tool` (the hard negatives), `plain`, `guest`, and the v3 tags
+  `ended`, `negated`, `unasserted`, `dated` (a stratum) and `guest-about-owner` (always beside
+  `guest`). The v3 tags are not hard negatives yet, so the per-tag floor does not cover them.
 
-`services.grapheval.GraphCases` refuses a set that breaks the mention, type, relation,
-negative, tag or operator-mention rules, naming the case; `GraphCasesConformanceTest` checks
+Labels are checked for syntax and verbatim spans only, never against `TemporalExpressions` or
+the valence lexicon: a date value the normalizer would not produce, or a valence the lexicon
+would not give, parses, so finder, normalizer and valence errors count against the model.
+
+The v2 set was migrated mechanically: the root `capturedAt` `2026-02-15` and `"status":
+"holds"` on every relation. It has no `ended`, `denied` or `unasserted` label yet, so its trap
+set is empty and it certifies nothing until JCLAW-1373 relabels it.
+
+`services.grapheval.GraphCases` refuses a set that breaks the key, mention, type, relation,
+status, qualifier, date, negative, tag or operator-mention rules, naming the case; `GraphCasesConformanceTest` checks
 the operator count and the guest rules, and fails the build on a refusal or on a missed
 composition target: at least 120 cases, 12-17% beginning "The user", at least 60% beginning the
 owner's name, every case owner-voiced (one of those two or subjectless) or `guest`, at least 6
@@ -79,7 +120,8 @@ Decision-only: code finds every candidate and the decision model only chooses
    co-occur, share a topic, are related the other way round (except for symmetric relations,
    asked once per pair), the relation is an inference or is about something else, or it is
    only planned, wished, guessed, possible, asked about, a belief, or reported by someone
-   other than the owner. On a guest turn no pair with the owner or the operator is asked.
+   other than the owner. On a guest turn no pair with the owner or the operator is asked; a
+   committed case tagged `guest` runs as a guest turn, every other as the owner's.
    Per unordered pair only the highest-yes relation and direction is kept, so a pair never
    holds two relations or one written both ways.
 6. **Negation, tense, occurs.** In a memory with a negation cue, each pair is asked whether
@@ -123,38 +165,104 @@ operator's cluster.
 - overlap: overlap sets settled on a gold span, or on `neither` when no span is gold;
 - typing: gold spans typed as labelled; rejection: negatives answered `not_an_entity`;
 - relation: labelled pairs whose kept relation is the label, in its direction, at yes of at
-  least 0.5; no-relation: unlabelled pairs whose kept relation is below 0.5;
-- resolution: B-cubed and pairwise precision and recall, and false merges, over gold mentions.
+  least 0.5; no-relation: unlabelled pairs, and pairs whose only label is denied, unasserted or
+  an `ended` the type does not admit, whose kept relation is below 0.5;
+- resolution: B-cubed and pairwise precision and recall, and false merges, over gold mentions;
+- dates (no model): date-finder recall over gold `dates` with a value, against
+  `TemporalExpressions.find(text, capturedAt)`, and normalizer accuracy, the found spans with
+  a reading equal to the label;
+- tense: two-reading gold dates answered with the label's reading (`past` or `upcoming`);
+- negation: the yes-rate on gold denied pairs and the no-rate on gold positives, asked only
+  where the text has a negation cue;
+- occurs: each gold Event and gold date answered yes exactly when the date is its `occurs`;
+- status: gold relations whose type admits `ended`, answered with the gold status, or
+  `unstated` for `unasserted` and `denied`; `unstated` on gold `holds` or admissible `ended` is
+  the veto rate;
+- slot: each relation allowing valid time and each gold date, answered `from`, `to`, `during`
+  or `neither` by where the date sits in the gold `valid`.
 
-**End to end**, strictly. At a threshold t a decision is written only when its probability and
-its floor are at least t; a relation also needs both endpoint terms written at t. An implicit
-operator or "The user" is written by rule, not decided, so it counts in neither written nor
-gold; the grid's `ruleWritten` reports how many were left out, and relations to the operator
-still count. The owner named in the text is decided, so it counts in both. Each written record
-is right, noise or wrong:
+**End to end**, strictly, from the claims `Statements.at(run, t, classes)` writes. At a
+threshold t a decision is written only when its probability and its floor are at least t; a
+relation also needs both endpoint terms written at t, and a status decision of `unstated`
+leaves it unwritten. Only model decisions count: an implicit operator or "The user" is
+written by rule, and so is `holds` on a relation that cannot end; both are in no count, class
+or gate, and the grid's `ruleWritten` and `ruleStatus` report how many were left out.
+Relations to the operator still count, and the owner named in the text is decided, so it
+counts. The symmetric relations (`same_as`, `family_of`) come from the schema's symmetric
+set: they match either direction, and written both ways are one record.
+
+Five classes are scored. Qualifier values are scored only on a parent right at base, and are
+compared as `EdtfInterval.parse(...).toString()` for dates and in lower case for valence.
+
+| Class | Adjudication key | Right | Wrong kinds |
+|---|---|---|---|
+| base | `term:<span>:<type>`, `rel:<from>:<type>:<to>` | a term on a labelled span and type; a relation on gold `holds` or an admissible `ended` | `match`, `type`, `duplicate`, `relation`, `polarity`, `unasserted` |
+| status | `status:<from>:<type>:<to>:<value>` | the gold status | `status` |
+| time | `valid:<from>:<type>:<to>:<edtf>`, `occurs:<span>:<edtf>` | the gold value | `time` |
+| negation | `neg:<from>:<type>:<to>` | gold `denied` on that triple | `negative` |
+| valence | `valence:<from>:<to>:<value>` | the gold valence | `valence` |
 
 - **match** — the span is no labelled mention or alias (a partial span is wrong);
 - **type** — a matched span typed differently from its label;
 - **duplicate** — a second record for an entity already written, such as its alias;
-- **relation** — a relation whose triple is not labelled. `same_as` and `family_of` match
-  either direction, and written both ways are one record.
+- a written relation is checked against the pair's positive label of that type first:
+  right on `holds` or an admissible `ended`, **unasserted** on `unasserted` or an `ended` the
+  type does not admit; then against the pair's denial of that type, **polarity**; otherwise
+  **relation**. A positive `uses` and a denied `owns` on one pair score the same in either
+  file order.
+- **time** is a wrong value, a value where gold has none, or a date the finder or normalizer
+  got wrong; **valence** likewise counts a value where gold has none. Status and `valid` come
+  only from a status decision.
+- **Incomplete:** a null qualifier where gold has a value (no status, a missing bound or
+  `occurs`, no valence, a date the finder missed) is right for every wrong share and a miss
+  for that class's recall.
 
 A record labelled noise counts in neither the wrong count nor the denominator:
 
 - wrong share = wrong / (written - noise)
-- recall = right / non-noise gold records
+- base recall = right / non-noise gold (entities, `holds` and admissible `ended` relations)
 
 The grid scores every threshold from 0.95 to 0.50 by 0.05.
 
 ## Certification
 
-At each threshold the one-sided 95% Clopper-Pearson upper bound on the wrong share must be at
-most 5%: with no wrong record that takes 59 written, with one 93, two 124, three 153, five
-208. Rule-written operator terms (implicit or "The user") are in neither count; the
-named owner is in both. Recall must also meet the floor
-(default 0.50). The walk runs from 0.95 down and stops
-at the first threshold that fails; the model certifies at the lowest threshold reached. So a
-model whose recall at 0.95 is under the floor certifies at nothing, by design.
+Certification runs in two walks, both on the one-sided 95% Clopper-Pearson upper bound.
+
+**Class walks** come first: status, then time with status at its walked threshold, then
+negation. Their items are the qualifier values written on base-right parents in
+`Statements.at(run, 0.50, classes)`, with the class under test set to each t. At t, n is
+those values and k the wrong ones:
+
+- n of at least 250 with a bound of at most 5% is `certified`;
+- n of 29 to 249 with a bound of at most 10% and k of at most 6 is `provisional`
+  (29 values with none wrong just pass; 28 are not evaluable);
+- the walk starts at the highest evaluable t and goes down while the state holds; the class
+  threshold is the lowest t of that run. No evaluable t, or a failure at the first, leaves the
+  class `disabled`: it writes no value and no denial.
+
+Across runs the highest class threshold wins and a class disabled in any run is disabled.
+Valence is scored but not walked; the walk takes a fourth class when lineage joins it.
+
+**The base walk** then scores the grid with those class thresholds (`Statements` applies the
+higher of t and the class's own) and passes t when every gate holds:
+
+- `G_written`: the bound on wrong / (written - noise) is at most 5%: with no wrong record that
+  takes 59 written, with one 93, two 124, three 153, five 208. A term is wrong if its base or
+  `occurs` is; a positive relation if its base or any written status, `valid` or valence is;
+  a written denial unless gold is `denied`.
+- `G_trap`: the bound on violations / trap gold is at most 5%. The trap set is every gold
+  `ended`, `denied` and `unasserted` relation; a violation is an `ended` written as `holds`, an
+  inadmissible `ended` written at all, a `denied` triple written positive, or an `unasserted`
+  triple written at all. A null status on gold `ended` is none. An empty trap set bounds at
+  1.0, so the committed set, which has none yet, certifies nothing.
+- recall at least the floor (default 0.50), unchanged from v2.
+
+The walk runs from 0.95 down and stops at the first threshold that fails; `t*` is the lowest
+reached. So a model whose recall at 0.95 is under the floor certifies at nothing, by design.
+
+Every model carries a `certificate`: `t*`, each class's threshold, state, n, k and bound, and
+the `schema` and `extraction` stamps. `Certifier.check` voids it when either stamp differs
+from the running one (`schema stamp v3@… differs from running v3@…`).
 
 A run with any failed decision (a timeout, a request too large for the model's context)
 certifies nowhere: what it would have written is unknown. Every report stamps `extraction: x@…`
@@ -178,8 +286,8 @@ order:
 4. a wrong record at the certified threshold with no `wrong` verdict → `pending-adjudication`;
 5. otherwise `certified`, with the noise rate at that threshold.
 
-The report lists the wrong records at the certified threshold (at 0.50 when nothing
-certified). A written set only grows as t falls, so adjudicating those covers every
+The report lists the wrong records of the enabled classes at the certified configuration (at
+0.50 when nothing certified), keyed as in the scoring table. A written set only grows as t falls, so adjudicating those covers every
 threshold above it.
 
 The report's `schema` is the seed's fingerprint, `v<version>@<12 hex>`: a SHA-256 prefix over
@@ -187,14 +295,34 @@ each term type's name and covers text and each relation's name and endpoints, th
 the schema the questions are built from. A certificate holds only while the loaded seed has
 that fingerprint; any edit to those parts means certifying again.
 
+## Report
+
+Counts only, and identical on a rerun with the same answers. Per run, at the certified
+configuration: questions per stage and per memory, the share of memories that sent the
+qualify request, conflicts and the veto rate, each class's n, k, bound and state, status
+coverage (gold timeable relations written with a status), date-finder recall, normalizer and
+valence accuracy, the noise rate, the rule-written records left out, and, as information, the
+base wrong share reweighted by stratum (`negated` 11.5%, `unasserted` 10.7%, `dated` 11%, the
+rest 66.8%, each case in the first it carries; an empty stratum drops out and the rest are
+rescaled). The held-out report adds cue recall (gold denials whose memory has a negation
+cue), the time error and the valence error, as information.
+
 ## Second labels and adjudications
 
 `./jclaw.sh grapheval blind-sheet` writes `data/graph-eval/blind-sheet.json`: the ids and
 text of the blind subset, ceil(15%) of the cases chosen by SHA-256 of `"jclaw-1356:" + id`,
 and the set's `userMd`, which says whose name stands for the operator.
 A second labeller works from that sheet and `GUIDE.md` alone and commits
-`evals/graph/second-labels.json` in the same format as `cases.json`. The report gives entity
-F1, Cohen's kappa on matched entity types and relation F1.
+`evals/graph/second-labels.json` in the same format as `cases.json`. The sheet also carries the
+root `capturedAt` and each case's, so dates resolve against the same anchor. The report gives
+entity F1, Cohen's kappa on matched entity types, relation F1, Cohen's kappa on status over
+matched triples, and exact agreement on `valid`, `occurs`, `valence` and `dates` over matched
+items where either side has a value.
+
+Second labels that predate v3 (the committed file is v2 until JCLAW-1378) fail the v3 parse.
+That is no 400: the run completes with no second labels, the agreement carries the reason
+`second labels predate v3: <message>`, and certification stops at `pending-agreement`. A file
+of adjudications that does not parse is still a 400.
 
 `evals/graph/adjudications.json` records verdicts on the report's wrong records:
 
@@ -214,14 +342,23 @@ files live under `data/graph-eval/`, which is gitignored, and never leave that m
 
 1. `./jclaw.sh grapheval heldout-sample --agent NAME --count 100 [--seed S]` reads that
    many of the agent's active memories, read-only, into `data/graph-eval/heldout.json`,
-   each with `labelled: false` and its generated candidates. It refuses to overwrite an
-   existing file.
-2. Label each case in place under `GUIDE.md` (tags optional) and set `labelled: true`.
+   each with `labelled: false`, its generated candidates, `capturedAt` (the memory's
+   production anchor, an ISO date) and `authorType` (`human_turn`, `guest_turn`,
+   `agent_synthesized`, `consolidation_derived`, or `unattributed` when the memory records
+   none). It refuses to overwrite an existing file.
+2. Label each case in place under `GUIDE.md` (tags optional) and set `labelled: true`. A
+   held-out case is a case without `id` (cases are named h0, h1, ... by position) plus
+   `memoryId`, `labelled`, `candidates`, `capturedAt` and `authorType`; the file's root holds
+   `cases` only. A labelled case without `capturedAt` or a valid `authorType` was sampled
+   before v3 and is refused (`case h<N>: sampled before v3 ...; move the file aside and
+   resample`); a label error reads `case h<N>: labels break the v3 rules in
+   evals/graph/README.md`, quoting no text.
 3. `./jclaw.sh grapheval run --agent NAME --set heldout` reads the memories where they live:
    nothing is stored, edited or deleted, and the report checks every row is unchanged and
    still present. Unlabelled cases are skipped and counted. The owner is the one named in
    the USER.md of the agent the sampled memories belong to; label their mentions of that name
-   as the operator. A file holding memories of two agents is refused.
+   as the operator. Each case runs with its own anchor and author type, `unattributed` read in
+   the owner's voice. A file holding memories of two agents is refused.
 
 The held-out report carries aggregate counts only: no memory id, text, span or per-case
 result. Its walk is information; only the committed set certifies. Its progress lines and a
