@@ -21,7 +21,7 @@ Review branch `{{SOURCE_BRANCH}}`, which implements ticket {{KEY}}: {{SUMMARY}}.
 # DIFF TO main
 
 ```diff
-!`git diff main...HEAD`
+!`d=$(git diff main...HEAD); if [ ${#d} -le 150000 ]; then printf '%s\n' "$d"; else git diff --stat main...HEAD; printf '\nToo large to inline: read each file with git diff main...HEAD -- <path>.\n'; fi`
 ```
 
 # REVIEW
