@@ -83,7 +83,7 @@ labelled: list it as a negative.
   anymore" are favorable with status ended.
 - In "A hates X, but B loves it", each holder gets their own valence.
 
-## 6. One relation per ordered pair
+## 6. One positive and one denied relation per ordered pair
 
 At most one positive (holds, ended or unasserted) and one denied relation per ordered pair. When
 two positive relations fit, pick the most specific the text states
