@@ -3,6 +3,7 @@ import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { clearNuxtData } from '#app'
+import { createError } from 'h3'
 import SettingsSoftwareFactoryPanel from '~/components/settings/SettingsSoftwareFactoryPanel.vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
 import { elapsed, groupStories, mergedLabel, type BoardStory, type StatusView } from '~/components/settings/factory-board'
@@ -43,6 +44,9 @@ let statusGets = 0
 let logGets = 0
 let posts: string[] = []
 let puts: unknown[] = []
+let statusFails = false
+let statusGate: Promise<void> | null = null
+let refuseSettings = false
 
 function installed(over: Partial<StatusView> = {}): StatusView {
   return {
@@ -62,8 +66,10 @@ const SETTINGS = [
   { key: 'FACTORY_MODEL', value: 'claude-opus-5-5', defaultValue: 'claude-opus-5-5', set: false },
 ]
 
-registerEndpoint('/api/factory', { method: 'GET', handler: () => {
+registerEndpoint('/api/factory', { method: 'GET', handler: async () => {
   statusGets++
+  if (statusGate) await statusGate
+  if (statusFails) throw createError({ statusCode: 500, statusMessage: 'probe failed' })
   return status
 } })
 registerEndpoint('/api/factory/setup', { method: 'GET', handler: () => ({
@@ -73,6 +79,7 @@ registerEndpoint('/api/factory/settings', { method: 'GET', handler: () => ({ set
 registerEndpoint('/api/factory/settings', { method: 'PUT', handler: async (event) => {
   const { readBody } = await import('h3')
   puts.push(await readBody(event))
+  if (refuseSettings) throw createError({ statusCode: 400, statusMessage: 'FACTORY_CPUS is more than the 4 CPUs Docker has.' })
   return { settings: SETTINGS, message: 'Saved; applies once the factory is idle.' }
 } })
 for (const path of ['harness/start', 'harness/stop', 'gateway/pause', 'gateway/resume', 'sandboxes/sandcastle-jclaw-2/stop']) {
@@ -86,6 +93,11 @@ for (const path of ['harness/start', 'harness/stop', 'gateway/pause', 'gateway/r
 registerEndpoint('/api/factory/stories/JCLAW-2/logs/JCLAW-2.log', { method: 'GET', handler: () => {
   logGets++
   return { key: 'JCLAW-2', file: 'JCLAW-2.log', size: 10, modifiedAt: '2026-10-05T10:00:00Z', truncated: false, text: `tail ${logGets}` }
+} })
+
+registerEndpoint('/api/factory/stories/JCLAW-2/logs/JCLAW-2-review.log', { method: 'GET', handler: () => {
+  logGets++
+  throw createError({ statusCode: 404, statusMessage: 'JCLAW-2-review.log is not on the board.' })
 } })
 
 function dialogButton(label: string): HTMLButtonElement | null {
@@ -119,6 +131,9 @@ beforeEach(() => {
   logGets = 0
   posts = []
   puts = []
+  statusFails = false
+  statusGate = null
+  refuseSettings = false
 })
 
 afterEach(() => {
@@ -342,5 +357,72 @@ describe('Settings — Software Factory panel', () => {
     await vi.advanceTimersByTimeAsync(5_000)
     await settle()
     expect(statusGets).toBe(afterMount + 3)
+  })
+
+  it('shows Setup and a loading line until the status arrives, with no strip, form or board', async () => {
+    let open!: () => void
+    statusGate = new Promise(r => (open = r))
+    const c = await mount()
+    expect(c.find('[data-testid="factory-status-pending"]').text()).toBe('Loading…')
+    expect(c.text()).toContain('Setup')
+    for (const id of ['factory-status', 'factory-settings', 'factory-board']) {
+      expect(c.find(`[data-testid="${id}"]`).exists(), id).toBe(false)
+    }
+    open()
+    await settle()
+    expect(c.find('[data-testid="factory-status"]').exists()).toBe(true)
+  })
+
+  it('says it could not read the status when the request fails, and shows Setup alone', async () => {
+    statusFails = true
+    const c = await mount()
+    expect(c.find('[data-testid="factory-status-pending"]').text()).toBe('Could not read the factory status.')
+    expect(c.text()).toContain('Setup')
+    for (const id of ['factory-status', 'factory-settings', 'factory-board']) {
+      expect(c.find(`[data-testid="${id}"]`).exists(), id).toBe(false)
+    }
+  })
+
+  it.each(['paused', 'created'])('offers Resume for a %s gateway', async (state) => {
+    status = installed({ gateway: { state } })
+    const c = await mount()
+    expect(c.find('[data-testid="factory-gateway-resume"]').exists()).toBe(true)
+    expect(c.find('[data-testid="factory-gateway-pause"]').exists()).toBe(false)
+  })
+
+  it('shows an unknown gateway\'s state with no control', async () => {
+    status = installed({ gateway: { state: 'unknown' } })
+    const c = await mount()
+    expect(c.find('[data-testid="factory-gateway"] button').exists()).toBe(false)
+    expect(c.find('[data-testid="factory-gateway"]').text()).toContain('unknown')
+  })
+
+  it('accepts 6 CPUs and shows the server\'s refusal of a saved value', async () => {
+    refuseSettings = true
+    const c = await mount()
+    const cpus = c.find('[data-testid="factory-setting-FACTORY_CPUS"]')
+    await cpus.setValue('6')
+    expect(c.find('[data-testid="factory-setting-error-FACTORY_CPUS"]').exists()).toBe(false)
+    await cpus.setValue('8')
+    await c.find('[data-testid="factory-settings"]').trigger('submit')
+    await vi.waitFor(() => expect(puts).toEqual([{ FACTORY_CPUS: '8' }]))
+    await settle()
+    expect(c.find('[data-testid="factory-settings"]').text()).toContain('FACTORY_CPUS is more than the 4 CPUs Docker has.')
+  })
+
+  it('shows a rotated log\'s 404 in its tab and keeps polling while the story runs', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const c = await mount()
+    await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
+    await settle()
+    await c.find('[data-testid="factory-log-tab-JCLAW-2-review.log"]').trigger('click')
+    await settle()
+    const view = c.find('[data-testid="factory-story-view"]')
+    expect(view.text()).toContain('JCLAW-2-review.log is not on the board.')
+    expect(view.find('[data-testid="factory-log-text"]').exists()).toBe(false)
+    const after = logGets
+    await vi.advanceTimersByTimeAsync(3_000)
+    await settle()
+    expect(logGets).toBe(after + 1)
   })
 })
