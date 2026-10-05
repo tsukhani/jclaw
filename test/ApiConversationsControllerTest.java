@@ -755,6 +755,48 @@ class ApiConversationsControllerTest extends FunctionalTest {
         assertFalse(services.ConversationQueue.isBusy(convo.id));
     }
 
+    private static long stopMarkers(Long convId) {
+        return commitInFreshTx(() -> Message.count("conversation.id = ?1 AND messageKind = ?2",
+                convId, services.ConversationService.MESSAGE_KIND_STOP_MARKER));
+    }
+
+    @Test
+    void stopTurnLeavesOneStopMarkerUnderTheRunningRequest() {
+        login();
+        var convo = seedConversation("jclaw1388-stop-marker", "web");
+        commitInFreshTx(() -> services.ConversationService.appendUserMessage(
+                Conversation.findById(convo.id), "run the long command"));
+        var msg = new services.ConversationQueue.QueuedMessage("running", "web", "gh12", convo.agent);
+        services.ConversationQueue.tryAcquireOwnership(convo.id, msg, new java.util.concurrent.atomic.AtomicBoolean(false));
+        try {
+            var response = POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}");
+            assertIsOk(response);
+            assertTrue(getContent(response).contains("\"stopped\":true"));
+            assertEquals(1L, stopMarkers(convo.id));
+        } finally {
+            services.ConversationQueue.releaseOwnership(convo.id);
+        }
+    }
+
+    @Test
+    void stopTurnThatStopsNothingLeavesNoMarker() {
+        login();
+        var convo = seedConversation("jclaw1388-stop-idle", "web");
+        commitInFreshTx(() -> services.ConversationService.appendUserMessage(
+                Conversation.findById(convo.id), "an unanswered request"));
+        var response = POST("/api/conversations/" + convo.id + "/stop", "application/json", "{}");
+        assertIsOk(response);
+        assertTrue(getContent(response).contains("\"stopped\":false"));
+        assertEquals(0L, stopMarkers(convo.id));
+    }
+
+    @Test
+    void stopTurnOptsOutOfThePerRequestTransaction() throws NoSuchMethodException {
+        var stopTurn = controllers.ApiConversationsController.class.getDeclaredMethod("stopTurn", Long.class);
+        assertNotNull(stopTurn.getAnnotation(play.db.jpa.NoTransaction.class),
+                "inside a request transaction the stop marker would commit only after the conversation is released");
+    }
+
     @Test
     void stopTurnForAnUnknownConversationIs404() {
         login();

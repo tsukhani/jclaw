@@ -50,7 +50,8 @@ import java.util.Set;
  *
  * <p><b>Why USER role for both directions.</b>
  * {@link ConversationService#loadRecentMessages} hides every
- * {@code messageKind != null} row from the LLM unless its role is USER —
+ * {@code messageKind != null} row from the LLM unless its role is USER (or it is an
+ * ASSISTANT {@code stop_marker}) —
  * the announce-flow's SYSTEM-vs-USER toggle for fire-and-forget vs
  * yield-resume rests on that filter. For conversation_send the calling agent's
  * intent is to deliver content the other side should see, so USER is the

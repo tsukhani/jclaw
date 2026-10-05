@@ -246,7 +246,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
             assertTrue(firstArrived.await(30, TimeUnit.SECONDS), "the first turn reached the model");
             assertTrue(services.ConversationQueue.isBusy(convo.id));
 
-            assertTrue(services.ConversationQueue.stop(convo.id));
+            assertTrue(stopLikeTheEndpoint(convo.id));
             assertTrue(stoppedFlag.get(), "stop flips the running turn's own cancel flag");
             assertFalse(services.ConversationQueue.isBusy(convo.id), "stop releases the conversation at once");
 
@@ -328,7 +328,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 var stopped = streamAndAwait(agent, convo.id, "web", convo.peerId, "long task", stoppedFlag);
                 assertTrue(toolEntered.await(30, TimeUnit.SECONDS), "the stopped turn's tool is running");
 
-                assertTrue(services.ConversationQueue.stop(convo.id));
+                assertTrue(stopLikeTheEndpoint(convo.id));
                 long maxIdAtStop = messages(convo.id).stream().mapToLong(m -> m.id).max().orElse(0);
 
                 var fresh = streamAndAwait(agent, convo.id, "web", convo.peerId, "follow-up", new AtomicBoolean(false));
@@ -488,6 +488,263 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                     "a reply the fence dropped is not captured");
         } finally {
             release.countDown();
+            services.ConversationQueue.releaseOwnership(convo.id);
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
+    }
+
+    // ─── JCLAW-1388: a stopped turn leaves a stop marker under its request ───
+
+    private static final String STOP_MARKER = ConversationService.MESSAGE_KIND_STOP_MARKER;
+
+    /** Request {@code i} counts down {@code arrived[i]}, waits on {@code release[i]}, then answers {@code replies[i]}. */
+    private void startHeldServer(CountDownLatch[] arrived, CountDownLatch[] release, String... replies) throws Exception {
+        var requests = new AtomicInteger();
+        llmServer = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress("127.0.0.1", 0), 0);
+        llmServer.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
+        llmServer.createContext("/chat/completions", exchange -> {
+            int i = Math.min(requests.getAndIncrement(), replies.length - 1);
+            try {
+                arrived[i].countDown();
+                release[i].await(60, TimeUnit.SECONDS);
+                var bytes = contentSse(replies[i]).getBytes();
+                exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+                exchange.sendResponseHeaders(200, bytes.length);
+                try (var os = exchange.getResponseBody()) { os.write(bytes); }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } catch (java.io.IOException _) {
+                // A stopped turn may have hung up already.
+            }
+        });
+        llmServer.start();
+        port = llmServer.getAddress().getPort();
+    }
+
+    /** Stop as the {@code @NoTransaction} endpoint does: with no ambient transaction for the marker to join. */
+    private static boolean stopLikeTheEndpoint(Long conversationId) {
+        var stopped = new java.util.concurrent.CompletableFuture<Boolean>();
+        Thread.ofPlatform().start(() -> {
+            try {
+                stopped.complete(services.ConversationQueue.stop(conversationId));
+            } catch (Throwable t) {
+                stopped.completeExceptionally(t);
+            }
+        });
+        try {
+            return stopped.get(30, TimeUnit.SECONDS);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static List<String> transcript(Long conversationId) {
+        return messages(conversationId).stream()
+                .map(m -> (STOP_MARKER.equals(m.messageKind) ? "marker" : m.role) + ":" + m.content)
+                .toList();
+    }
+
+    private static long markerCount(Long conversationId) {
+        return messages(conversationId).stream().filter(m -> STOP_MARKER.equals(m.messageKind)).count();
+    }
+
+    private static void awaitIdle(Long conversationId) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (services.ConversationQueue.isBusy(conversationId) && System.nanoTime() < deadline) {
+            Thread.sleep(50);
+        }
+        assertFalse(services.ConversationQueue.isBusy(conversationId), "the turn released the conversation");
+    }
+
+    @Test
+    void anOperatorStopMarksTheRequestBeforeTheFollowUpAndTheTurnAddsNoSecondMarker() throws Exception {
+        var arrived = new CountDownLatch[]{new CountDownLatch(1), new CountDownLatch(1)};
+        var release = new CountDownLatch[]{new CountDownLatch(1), new CountDownLatch(1)};
+        startHeldServer(arrived, release, "stale", "fresh");
+        var provider = "jclaw1388-stop-" + UUID.randomUUID();
+        configureProvider(provider);
+        var agent = persistAgent("jclaw1388-stop-" + UUID.randomUUID(), provider, "test-model");
+        var convo = persistConversation(agent, "web", "u-1388-stop");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        try {
+            var stopped = streamAndAwait(agent, convo.id, "web", convo.peerId, "long task", new AtomicBoolean(false));
+            assertTrue(arrived[0].await(30, TimeUnit.SECONDS), "the first turn reached the model");
+
+            // The follow-up waits on a latch and sends the moment the stop has released the conversation.
+            var go = new CountDownLatch(1);
+            var followUp = new AtomicReference<Harness>();
+            var sent = new CountDownLatch(1);
+            Thread.ofVirtual().start(() -> {
+                try {
+                    go.await(30, TimeUnit.SECONDS);
+                    while (services.ConversationQueue.isBusy(convo.id)) Thread.onSpinWait();
+                    followUp.set(streamAndAwait(agent, convo.id, "web", convo.peerId, "follow-up",
+                            new AtomicBoolean(false)));
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    sent.countDown();
+                }
+            });
+            go.countDown();
+            assertTrue(stopLikeTheEndpoint(convo.id));
+            assertTrue(sent.await(30, TimeUnit.SECONDS));
+            assertTrue(arrived[1].await(30, TimeUnit.SECONDS), "the follow-up acquired and reached the model");
+
+            release[0].countDown();
+            assertTrue(stopped.terminated.await(60, TimeUnit.SECONDS), "the stopped turn terminates");
+            release[1].countDown();
+            assertTrue(followUp.get().terminated.await(60, TimeUnit.SECONDS));
+            assertEquals("fresh", followUp.get().completed.get());
+            awaitIdle(convo.id);
+
+            assertEquals(List.of("user:long task", "marker:" + ConversationService.STOP_MARKER_CONTENT,
+                            "user:follow-up", "assistant:fresh"), transcript(convo.id),
+                    "the marker sits between the stopped request and the follow-up, once");
+
+            var marker = messages(convo.id).get(1);
+            assertEquals(MessageRole.ASSISTANT.value, marker.role);
+            JPA.em().clear();
+            Conversation fresh = Conversation.findById(convo.id);
+            var history = ConversationService.loadRecentMessages(fresh).stream()
+                    .map(m -> (STOP_MARKER.equals(m.messageKind) ? "marker" : m.role) + ":" + m.content).toList();
+            int request = history.indexOf("user:long task");
+            assertTrue(request >= 0, history.toString());
+            assertEquals("marker:" + ConversationService.STOP_MARKER_CONTENT, history.get(request + 1),
+                    "the next turn's history carries the marker right after the stopped request");
+        } finally {
+            release[0].countDown();
+            release[1].countDown();
+            services.ConversationQueue.releaseOwnership(convo.id);
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
+    }
+
+    @Test
+    void aSlashStopOnAChannelTurnLeavesOneMarkerAndNothingIsCaptured() throws Exception {
+        var arrived = new CountDownLatch[]{new CountDownLatch(1)};
+        var release = new CountDownLatch[]{new CountDownLatch(1)};
+        startHeldServer(arrived, release, "late");
+        var provider = "jclaw1388-tg-" + UUID.randomUUID();
+        configureProvider(provider);
+        var agent = persistAgent("jclaw1388-tg-" + UUID.randomUUID(), provider, "test-model");
+        var convo = persistConversation(agent, "telegram", "tg-1388");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        // A channel turn reads the conversation's flag before it acquires, so the queue state must exist.
+        services.ConversationQueue.drain(convo.id, services.ConversationQueue.tryAcquireOwnership(convo.id,
+                new services.ConversationQueue.QueuedMessage("earlier", "telegram", convo.peerId, agent), null));
+        try {
+            var h = streamAndAwait(agent, convo.id, "telegram", convo.peerId, "long task",
+                    services.ConversationQueue.cancellationFlag(convo.id));
+            assertTrue(arrived[0].await(30, TimeUnit.SECONDS));
+
+            services.ConversationQueue.cancelTurn(convo.id);
+            release[0].countDown();
+            assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
+            awaitIdle(convo.id);
+
+            assertEquals(List.of("user:long task", "marker:" + ConversationService.STOP_MARKER_CONTENT),
+                    transcript(convo.id));
+            assertFalse(memory.MemoryAutoCapture.captureRequestedForTest(convo.id),
+                    "a stopped request and its marker are never captured");
+            assertEquals(0, models.Memory.count("sourceConversationId = ?1", convo.id));
+        } finally {
+            release[0].countDown();
+            services.ConversationQueue.releaseOwnership(convo.id);
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
+    }
+
+    @Test
+    void anSseDisconnectLeavesOneMarker() throws Exception {
+        var arrived = new CountDownLatch[]{new CountDownLatch(1)};
+        var release = new CountDownLatch[]{new CountDownLatch(1)};
+        startHeldServer(arrived, release, "late");
+        var provider = "jclaw1388-sse-" + UUID.randomUUID();
+        configureProvider(provider);
+        var agent = persistAgent("jclaw1388-sse-" + UUID.randomUUID(), provider, "test-model");
+        var convo = persistConversation(agent, "web", "u-1388-sse");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        try {
+            var cancelled = new AtomicBoolean(false);
+            var h = streamAndAwait(agent, convo.id, "web", convo.peerId, "long task", cancelled);
+            assertTrue(arrived[0].await(30, TimeUnit.SECONDS));
+
+            agents.TurnCancellation.cancel(cancelled);
+            release[0].countDown();
+            assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
+            awaitIdle(convo.id);
+
+            assertEquals(1, markerCount(convo.id));
+            assertEquals(List.of("user:long task", "marker:" + ConversationService.STOP_MARKER_CONTENT),
+                    transcript(convo.id));
+        } finally {
+            release[0].countDown();
+            services.ConversationQueue.releaseOwnership(convo.id);
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
+    }
+
+    @Test
+    void aCancelThatLandsAfterTheFinalCheckMarksTheRequestThroughOnComplete() throws Exception {
+        var arrived = new CountDownLatch[]{new CountDownLatch(1)};
+        var release = new CountDownLatch[]{new CountDownLatch(1)};
+        startHeldServer(arrived, release, "late reply");
+        var provider = "jclaw1388-late-" + UUID.randomUUID();
+        configureProvider(provider);
+        var agent = persistAgent("jclaw1388-late-" + UUID.randomUUID(), provider, "test-model");
+        var convo = persistConversation(agent, "web", "u-1388-late");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var cancelled = new AtomicBoolean(false);
+        var turnThread = new AtomicReference<Thread>();
+        var h = new Harness();
+        var cb = new AgentRunner.StreamingCallbacks(
+                c -> { turnThread.set(Thread.currentThread()); h.initConvo.set(c); },
+                h.tokens::add, h.reasoning::add, _ -> {}, _ -> {},
+                content -> { h.completed.set(content); h.terminated.countDown(); },
+                error -> { h.error.set(error); h.terminated.countDown(); },
+                () -> { h.cancelled.set(true); h.terminated.countDown(); });
+        var held = new CountDownLatch(1);
+        var flipped = new java.util.concurrent.CompletableFuture<Boolean>();
+        try {
+            AgentRunner.runStreaming(agent, convo.id, "web", convo.peerId, "long task", cancelled, cb, null);
+            assertTrue(arrived[0].await(30, TimeUnit.SECONDS));
+            long gen = services.ConversationQueue.currentGeneration(convo.id);
+
+            // Hold the queue lock so the turn passes its last cancel check and parks on the reply's
+            // commit; flip its flag only once it is parked there.
+            Thread.ofPlatform().start(() -> flipped.complete(
+                    services.ConversationQueue.commitIfOwner(convo.id, gen, null, () -> {
+                        held.countDown();
+                        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                        while (turnThread.get().getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+                            Thread.onSpinWait();
+                        }
+                        cancelled.set(turnThread.get().getState() == Thread.State.BLOCKED);
+                    })));
+            assertTrue(held.await(30, TimeUnit.SECONDS));
+            release[0].countDown();
+            assertTrue(flipped.get(30, TimeUnit.SECONDS));
+            assertTrue(cancelled.get(), "the turn parked on the commit and the flag flipped there");
+
+            assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
+            assertFalse(h.cancelled.get(), "the turn ended through onComplete, not onCancel");
+            assertEquals("late reply", h.completed.get());
+            awaitIdle(convo.id);
+
+            assertEquals(List.of("user:long task", "marker:" + ConversationService.STOP_MARKER_CONTENT),
+                    transcript(convo.id), "one marker, and the refused reply is not saved");
+        } finally {
+            release[0].countDown();
             services.ConversationQueue.releaseOwnership(convo.id);
             CircuitBreakers.remove(LlmResilience.breakerName(provider));
         }

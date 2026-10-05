@@ -87,7 +87,8 @@ final class StreamingAgentRunner {
             final var queueReleased = new AtomicBoolean(false);
             var trace = LatencyTrace.forTurn(channelType, acceptedAtNs);
             trace.mark(LatencyTrace.PROLOGUE_REQUEST_PARSED);
-            var tracedCb = wrapCallbacksWithTrace(cb, trace, conversationIdRef, generationRef, queueReleased);
+            var tracedCb = wrapCallbacksWithTrace(cb, trace, conversationIdRef, generationRef, queueReleased,
+                    isCancelled);
             // JCLAW-882: bind the turn to this virtual thread so every provider
             // dispatch on it — round 1, each tool-loop continuation, the empty-
             // continuation retry, any prologue compaction call — counts against
@@ -170,7 +171,8 @@ final class StreamingAgentRunner {
     private static AgentRunner.StreamingCallbacks wrapCallbacksWithTrace(AgentRunner.StreamingCallbacks cb, LatencyTrace trace,
                                                               Long[] conversationIdRef,
                                                               long[] generationRef,
-                                                              AtomicBoolean queueReleased) {
+                                                              AtomicBoolean queueReleased,
+                                                              AtomicBoolean isCancelled) {
         var firstTokenSeen = new AtomicBoolean(false);
         return new AgentRunner.StreamingCallbacks(
                 cb.onInit(),
@@ -194,6 +196,7 @@ final class StreamingAgentRunner {
                     cb.onToolCall().accept(toolCall);
                 },
                 content -> {
+                    if (isCancelled.get()) writeStopMarker(conversationIdRef, generationRef, queueReleased);
                     QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
                     try { cb.onComplete().accept(content); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
@@ -204,11 +207,24 @@ final class StreamingAgentRunner {
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 },
                 () -> {
+                    writeStopMarker(conversationIdRef, generationRef, queueReleased);
                     QueueDrainOrchestrator.releaseQueueOnce(conversationIdRef, generationRef, queueReleased);
                     try { cb.onCancel().run(); }
                     finally { trace.mark(LatencyTrace.TERMINAL_SENT); trace.end(); }
                 }
         );
+    }
+
+    /** A stopped turn marks its unanswered request before releasing; a failure must never skip the release. */
+    private static void writeStopMarker(Long[] conversationIdRef, long[] generationRef, AtomicBoolean queueReleased) {
+        var conversationId = conversationIdRef[0];
+        if (conversationId == null || queueReleased.get()) return;
+        try {
+            ConversationQueue.writeStopMarkerIfOwner(conversationId, generationRef[0]);
+        } catch (RuntimeException e) {
+            EventLogger.warn("queue", "Stop marker not written for conversation %d: %s"
+                    .formatted(conversationId, e.getMessage()));
+        }
     }
 
     /**

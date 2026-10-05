@@ -211,4 +211,27 @@ describe('hydrateToolCalls', () => {
     const final = msgs[1] as unknown as { toolCalls: Array<{ icon: string }> }
     expect(final.toolCalls[0]!.icon).toBe('wrench')
   })
+
+  it('leaves a stopped turn\'s calls and attachments off its stop marker', () => {
+    const img = { id: 9, kind: 'image' }
+    const msgs: Array<Record<string, unknown>> = [
+      { role: 'user', id: 1, content: 'draw and run' },
+      {
+        role: 'assistant',
+        id: 2,
+        content: null,
+        toolCalls: [{ id: 'tc1', type: 'function', function: { name: 'exec', arguments: '{}' } }],
+        attachments: [img],
+      },
+      { role: 'tool', id: 3, content: 'partial', toolResults: 'tc1' },
+      { role: 'assistant', id: 4, messageKind: 'stop_marker', content: '(Stopped by the user before replying.)' },
+    ]
+    hydrateToolCalls(msgs)
+    const marker = msgs[3]!
+    expect(marker.toolCalls ?? null).toBeNull()
+    expect(marker.attachments ?? null).toBeNull()
+    const carrier = msgs[1] as { toolCalls: Array<{ id: string }>, attachments: unknown[] }
+    expect(carrier.toolCalls.map(tc => tc.id)).toEqual(['tc1'])
+    expect(carrier.attachments).toEqual([img])
+  })
 })

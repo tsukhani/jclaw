@@ -46,6 +46,10 @@ public class ConversationService {
 
     private static final String PARAM_VALUE = "value";
 
+    /** {@link Message#messageKind} of the row a stopped turn leaves under its unanswered request. */
+    public static final String MESSAGE_KIND_STOP_MARKER = "stop_marker";
+    public static final String STOP_MARKER_CONTENT = "(Stopped by the user before replying.)";
+
     /**
      * Run {@code body} with {@link #INLINE_SUBAGENT_RUN_ID} bound to
      * {@code runId} so every {@link #appendMessage} call made on the current
@@ -511,11 +515,54 @@ public class ConversationService {
         // user input by construction and MUST stay in context so the LLM
         // sees what it's resuming on. Rows without a messageKind discriminator
         // (the dominant case — regular user/assistant/tool messages) always
-        // pass through.
+        // pass through. A stop marker stays too: without it the model reads the
+        // stopped request as still pending and carries it out (JCLAW-1388).
         return recent.stream()
                 .filter(m -> m.messageKind == null
-                        || MessageRole.USER.value.equals(m.role))
+                        || MessageRole.USER.value.equals(m.role)
+                        || MESSAGE_KIND_STOP_MARKER.equals(m.messageKind))
                 .toList();
+    }
+
+    /**
+     * Append the stop marker under the newest user request when no reply or marker follows it,
+     * in its own transaction when none is active. The one write both stop paths use.
+     *
+     * @return {@code true} when a marker was written
+     */
+    public static boolean appendStopMarkerIfUnanswered(Long conversationId) {
+        return Tx.run(() -> {
+            Conversation conversation = Conversation.findById(conversationId);
+            if (conversation == null || !isUnanswered(conversation)) return false;
+            var msg = appendMessage(conversation, MessageRole.ASSISTANT, STOP_MARKER_CONTENT, null, null, null);
+            msg.messageKind = MESSAGE_KIND_STOP_MARKER;
+            msg.save();
+            return true;
+        });
+    }
+
+    /**
+     * Whether the newest top-level user row has neither a final reply nor a stop marker after it.
+     * No row window: a stopped tool loop can put its request hundreds of rows back, and an inline
+     * subagent's rows (its start row, its child's reply) never count as the parent's reply.
+     */
+    static boolean isUnanswered(Conversation conversation) {
+        List<Message> newestRequest = Message.find(
+                "conversation = ?1 AND role = ?2 AND subagentRunId IS NULL ORDER BY createdAt DESC, id DESC",
+                conversation, MessageRole.USER.value).fetch(1);
+        if (newestRequest.isEmpty()) return false;
+        Message request = newestRequest.getFirst();
+        List<Message> closers = Message.find(
+                "conversation = ?1 AND (createdAt > ?2 OR (createdAt = ?2 AND id > ?3))"
+                        + " AND (messageKind = ?4 OR (role = ?5 AND subagentRunId IS NULL"
+                        + " AND messageKind IS NULL AND toolCalls IS NULL))",
+                conversation, request.createdAt, request.id, MESSAGE_KIND_STOP_MARKER,
+                MessageRole.ASSISTANT.value).fetch();
+        for (Message m : closers) {
+            if (MESSAGE_KIND_STOP_MARKER.equals(m.messageKind)) return false;
+            if (m.content != null && !m.content.isBlank()) return false;
+        }
+        return true;
     }
 
     /** Global history-limit fallback, also the default for the per-type key. */

@@ -973,4 +973,169 @@ class ConversationQueueTest extends UnitTest {
         assertEquals(1, ran.get(), "only the write before the stop ran");
         ConversationQueue.drain(convId, gen);
     }
+
+    // ── JCLAW-1388: a stopped turn leaves a stop marker under its unanswered request ──
+
+    private models.Conversation conversationWithRequest(String peer) {
+        var conv = services.ConversationService.create(agent, "web", peer);
+        services.ConversationService.appendUserMessage(conv, "run the long command");
+        return conv;
+    }
+
+    private static long markers(Long convId) {
+        return models.Message.count("conversation.id = ?1 AND messageKind = ?2",
+                convId, services.ConversationService.MESSAGE_KIND_STOP_MARKER);
+    }
+
+    private static java.util.List<models.Message> rows(Long convId) {
+        return models.Message.find("conversation.id = ?1 ORDER BY createdAt, id", convId).fetch();
+    }
+
+    @Test
+    void stopWritesOneMarkerUnderTheUnansweredRequest() {
+        var conv = conversationWithRequest("marker-stop");
+        ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "web", "admin", agent),
+                new AtomicBoolean());
+
+        assertTrue(ConversationQueue.stop(conv.id));
+
+        var all = rows(conv.id);
+        assertEquals(2, all.size());
+        var marker = all.get(1);
+        assertEquals("assistant", marker.role);
+        assertEquals("stop_marker", marker.messageKind);
+        assertEquals("(Stopped by the user before replying.)", marker.content);
+    }
+
+    @Test
+    void aStopThatFindsNoRunningTurnWritesNoMarker() {
+        var conv = conversationWithRequest("marker-idle");
+        var gen = ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "web", "admin", agent),
+                new AtomicBoolean());
+        ConversationQueue.releaseOwnership(conv.id, gen);
+
+        assertFalse(ConversationQueue.stop(conv.id));
+        assertEquals(0, markers(conv.id));
+    }
+
+    @Test
+    void noMarkerAfterASavedReply() {
+        var conv = conversationWithRequest("marker-answered");
+        services.ConversationService.appendAssistantMessage(conv, "the reply", null);
+        ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "web", "admin", agent),
+                new AtomicBoolean());
+
+        assertTrue(ConversationQueue.stop(conv.id));
+        assertEquals(0, markers(conv.id));
+    }
+
+    @Test
+    void aMarkerFollowsToolRoundsWithNoReply() {
+        var conv = conversationWithRequest("marker-tools");
+        services.ConversationService.appendAssistantMessage(conv, "Let me run that.",
+                "[{\"id\":\"c1\",\"type\":\"function\",\"function\":{\"name\":\"exec\",\"arguments\":\"{}\"}}]");
+        services.ConversationService.appendToolResult(conv, "c1", "partial output");
+
+        assertTrue(services.ConversationService.appendStopMarkerIfUnanswered(conv.id),
+                "a tool-call row is not a reply");
+        assertEquals(1, markers(conv.id));
+        assertEquals("stop_marker", rows(conv.id).getLast().messageKind);
+    }
+
+    @Test
+    void noMarkerWhenTheNewestRequestIsAlreadyAnswered() {
+        var conv = conversationWithRequest("marker-earlier");
+        services.ConversationService.appendAssistantMessage(conv, "earlier reply", null);
+
+        assertFalse(services.ConversationService.appendStopMarkerIfUnanswered(conv.id),
+                "a stop before the new request was saved finds only the answered one");
+        assertEquals(0, markers(conv.id));
+    }
+
+    @Test
+    void aRepeatedMarkerWriteLeavesOneRow() {
+        var conv = conversationWithRequest("marker-repeat");
+
+        assertTrue(services.ConversationService.appendStopMarkerIfUnanswered(conv.id));
+        assertFalse(services.ConversationService.appendStopMarkerIfUnanswered(conv.id));
+        assertEquals(1, markers(conv.id));
+    }
+
+    @Test
+    void theTurnSideMarkerWriteIsRefusedAfterStop() {
+        var conv = conversationWithRequest("marker-fence");
+        var flag = new AtomicBoolean();
+        var gen = ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "web", "admin", agent), flag);
+        assertTrue(ConversationQueue.stop(conv.id));
+
+        assertFalse(ConversationQueue.writeStopMarkerIfOwner(conv.id, gen), "stale generation");
+        assertEquals(1, markers(conv.id), "only stop's own marker");
+    }
+
+    @Test
+    void theTurnSideMarkerWriteIgnoresTheTurnsSetFlag() {
+        var conv = conversationWithRequest("marker-own-cancel");
+        var flag = new AtomicBoolean();
+        var gen = ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "web", "admin", agent), flag);
+        flag.set(true);
+
+        assertTrue(ConversationQueue.writeStopMarkerIfOwner(conv.id, gen));
+        assertEquals(1, markers(conv.id));
+        ConversationQueue.releaseOwnership(conv.id, gen);
+    }
+
+    @Test
+    void aMarkerWriteThatThrowsStillReleasesAndStopStillReportsTrue() {
+        var conv = conversationWithRequest("marker-throws");
+        var em = play.db.jpa.JPA.em();
+        em.getTransaction().commit();
+        var gen = ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "web", "admin", agent),
+                new AtomicBoolean());
+        boolean stopped;
+        try {
+            // The thread's JPA context stays bound with no transaction open, so Tx.run joins it,
+            // the read succeeds and the marker's flush fails with TransactionRequiredException.
+            stopped = ConversationQueue.stop(conv.id);
+        } finally {
+            em.getTransaction().begin();
+        }
+
+        assertTrue(stopped, "a failed marker write does not undo the stop");
+        assertFalse(ConversationQueue.isBusy(conv.id), "ownership was released");
+        assertNotEquals(gen, ConversationQueue.currentGeneration(conv.id));
+        services.EventLogger.flush();
+        em.clear();
+        assertEquals(0, markers(conv.id), "no marker reached the database");
+        assertEquals(1L, models.EventLog.count("category = ?1 AND message LIKE ?2", "queue",
+                "Stop marker not written for conversation " + conv.id + ":%"), "the failure is logged");
+    }
+
+    @Test
+    void aRequestMoreThanFiftyRowsBackStillGetsAMarker() {
+        var conv = conversationWithRequest("marker-long-loop");
+        for (int i = 0; i < 40; i++) {
+            services.ConversationService.appendAssistantMessage(conv, "round " + i,
+                    "[{\"id\":\"c" + i + "\",\"type\":\"function\",\"function\":{\"name\":\"exec\",\"arguments\":\"{}\"}}]");
+            services.ConversationService.appendToolResult(conv, "c" + i, "output " + i);
+        }
+
+        assertTrue(services.ConversationService.appendStopMarkerIfUnanswered(conv.id),
+                "80 tool rows after the request, n=" + rows(conv.id).size());
+        assertEquals("stop_marker", rows(conv.id).getLast().messageKind);
+    }
+
+    @Test
+    void anInlineSubagentsRowsAreNotTheParentsReply() {
+        var conv = conversationWithRequest("marker-inline");
+        services.ConversationService.withSubagentRunIdMarker(424242L, () -> {
+            services.ConversationService.appendAssistantMessage(conv, "Spawning subagent: research — dig", null);
+            services.ConversationService.appendUserMessage(conv, "dig");
+            services.ConversationService.appendAssistantMessage(conv, "the child's reply", null);
+            return null;
+        });
+
+        assertTrue(services.ConversationService.appendStopMarkerIfUnanswered(conv.id),
+                "inline child rows neither answer nor replace the parent's request");
+        assertEquals(1, markers(conv.id));
+    }
 }
