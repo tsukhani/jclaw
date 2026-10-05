@@ -292,6 +292,13 @@ public final class StageScorer {
             }
             return null;
         }
+
+        /** The gold ids of a decision's From and To, or null when either is no gold entity. */
+        private static String @Nullable [] ids(Case c, Decision d) {
+            var from = d.from() == null ? null : c.entityAt(d.from());
+            var to = d.to() == null ? null : c.entityAt(d.to());
+            return from == null || to == null ? null : new String[] {from.id(), to.id()};
+        }
     }
 
     /** The answer the slot question has for a date read as {@code date} against a gold {@code valid}. */
@@ -305,13 +312,6 @@ public final class StageScorer {
         if (date.start().equals(gold.start())) return ExtractionPipeline.FROM;
         if (date.start().equals(gold.end())) return ExtractionPipeline.TO;
         return ExtractionPipeline.NEITHER;
-    }
-
-    /** The gold ids of a decision's From and To, or null when either is no gold entity. */
-    private static String @Nullable [] ids(Case c, Decision d) {
-        var from = d.from() == null ? null : c.entityAt(d.from());
-        var to = d.to() == null ? null : c.entityAt(d.to());
-        return from == null || to == null ? null : new String[] {from.id(), to.id()};
     }
 
     /** The labelled dates (non-null value) whose span the finder found at the case's anchor. */

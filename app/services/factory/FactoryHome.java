@@ -38,21 +38,25 @@ public final class FactoryHome {
         SETTINGS = java.util.Collections.unmodifiableMap(m);
     }
 
-    private static final Pattern DIGITS = Pattern.compile("[0-9]+");
+    private static final Pattern DIGITS = Pattern.compile("\\d+");
     // A newline would smuggle a second line into settings.env.
     private static final Pattern WHITESPACE = Pattern.compile("\\s");
     // Sandcastle names a worktree after its branch, "/" as "-": agent/<KEY> builds, factory/land-<KEY> re-gates.
     private static final Pattern STORY_WORKTREE =
-            Pattern.compile("/\\.sandcastle/worktrees/(?:agent|factory-land)-([A-Z][A-Z0-9]*-[0-9]+)$");
+            Pattern.compile("/\\.sandcastle/worktrees/(?:agent|factory-land)-([A-Z][A-Z0-9]*-\\d+)$");
 
-    /** Test seam: when non-null, {@link #home()} returns it. */
-    public static volatile @Nullable Path homeForTest;
+    private static volatile @Nullable Path homeOverride;
 
     private FactoryHome() {}
 
+    /** Test-only: make {@link #home()} return {@code home} (or clear with {@code null}). */
+    public static void setHomeForTest(@Nullable Path home) {
+        homeOverride = home;
+    }
+
     /** {@code FACTORY_HOME} when set and non-blank, else {@code ~/.jclaw-factory}. */
     public static Path home() {
-        var override = homeForTest;
+        var override = homeOverride;
         if (override != null) return override;
         var env = System.getenv("FACTORY_HOME");
         if (env != null && !env.isBlank()) return Path.of(env);

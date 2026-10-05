@@ -562,7 +562,7 @@ public final class WorkspaceFiles {
     public static @Nullable String ownerNameIn(String userMd) {
         var m = NAME_LINE.matcher(headerOf(userMd));
         if (!m.find()) return null;
-        var name = m.group(1).strip().replaceAll("(?:^[*_]+)|(?:[*_]+$)", "").strip();
+        var name = withoutEmphasis(m.group(1));
         return name.isEmpty() || name.startsWith("<") ? null : name;
     }
 
@@ -580,12 +580,17 @@ public final class WorkspaceFiles {
         if (!updated.equals(current)) writeWorkspaceFile(agentName, USER_MD, updated);
     }
 
+    /** The value with surrounding Markdown emphasis removed: **Tarun** and _Tarun_ both read as Tarun. */
+    private static String withoutEmphasis(String value) {
+        return value.strip().replaceAll("^[*_]+", "").replaceAll("[*_]+$", "").strip();
+    }
+
     static String withOwnerName(String text, String name) {
         var section = Pattern.compile("(?m)^##").matcher(text);
         int headerEnd = section.find() ? section.start() : text.length();
         var line = NAME_LINE.matcher(text).region(0, headerEnd);
         if (!line.find()) return afterTitle(text, "Name: " + name + "\n");
-        var previous = line.group(1).strip().replaceAll("(?:^[*_]+)|(?:[*_]+$)", "").strip();
+        var previous = withoutEmphasis(line.group(1));
         if (previous.equals(name)) return text;
         var nameLine = "Name: " + name;
         var out = text.substring(0, line.start()) + nameLine + text.substring(line.end());
