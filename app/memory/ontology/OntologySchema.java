@@ -260,16 +260,7 @@ public record OntologySchema(
                     new Family(text(entry, "meaning", where), text(entry, "must_link", where), identifier(entry, where)));
         });
 
-        var references = new ArrayList<String>();
-        for (var value : list(doc.get("references"), "references")) {
-            var reference = String.valueOf(value);
-            var sides = sides(reference, "reference '" + reference + "'");
-            for (var name : splitNames(sides[0])) requireDeclared(families, name, reference);
-            for (var name : splitNames(sides[1])) {
-                if (!name.equals(ANY)) requireDeclared(families, name, reference);
-            }
-            references.add(reference);
-        }
+        var references = parseReferences(doc.get("references"), families);
 
         var systemTime = section(doc, "system_time", v3) ? parseSystemTime(doc.get("system_time")) : null;
         var dates = section(doc, "dates", v3) ? parseDates(doc.get("dates")) : null;
@@ -289,23 +280,7 @@ public record OntologySchema(
             var where = "relation " + name;
             var entry = map(value, where);
             knownKeys(entry, RELATION_KEYS, where);
-            var endpoints = new ArrayList<String>();
-            for (var endpointValue : list(entry.get("endpoints"), where + " endpoints")) {
-                var endpoint = String.valueOf(endpointValue).trim();
-                if (!endpoint.equals(SAME)) {
-                    var sides = sides(endpoint, where + " endpoint '" + endpoint + "'");
-                    for (var side : sides) {
-                        for (var type : splitNames(side)) {
-                            if (!termTypes.containsKey(type)) {
-                                throw new IllegalArgumentException(
-                                        where + ": endpoint '" + endpoint + "' names unknown term type '" + type + "'");
-                            }
-                        }
-                    }
-                }
-                endpoints.add(endpoint);
-            }
-            if (endpoints.isEmpty()) throw new IllegalArgumentException(where + ": endpoints is empty");
+            var endpoints = parseEndpoints(entry, termTypes.keySet(), where);
             relations.put(String.valueOf(name), new RelationType(
                     text(entry, "kind", where),
                     identifier(entry, where),
@@ -319,6 +294,42 @@ public record OntologySchema(
         });
 
         return new OntologySchema(version, families, references, systemTime, dates, claims, termTypes, relations);
+    }
+
+    private static List<String> parseReferences(@Nullable Object value, Map<String, Family> families) {
+        var references = new ArrayList<String>();
+        for (var item : list(value, "references")) {
+            var reference = String.valueOf(item);
+            var sides = sides(reference, "reference '" + reference + "'");
+            for (var name : splitNames(sides[0])) requireDeclared(families, name, reference);
+            for (var name : splitNames(sides[1])) {
+                if (!name.equals(ANY)) requireDeclared(families, name, reference);
+            }
+            references.add(reference);
+        }
+        return references;
+    }
+
+    private static List<String> parseEndpoints(Map<?, ?> entry, Set<String> termTypes, String where) {
+        var endpoints = new ArrayList<String>();
+        for (var endpointValue : list(entry.get("endpoints"), where + " endpoints")) {
+            var endpoint = String.valueOf(endpointValue).trim();
+            if (!endpoint.equals(SAME)) requireTermTypes(endpoint, termTypes, where);
+            endpoints.add(endpoint);
+        }
+        if (endpoints.isEmpty()) throw new IllegalArgumentException(where + ": endpoints is empty");
+        return endpoints;
+    }
+
+    private static void requireTermTypes(String endpoint, Set<String> termTypes, String where) {
+        for (var side : sides(endpoint, where + " endpoint '" + endpoint + "'")) {
+            for (var type : splitNames(side)) {
+                if (!termTypes.contains(type)) {
+                    throw new IllegalArgumentException(
+                            where + ": endpoint '" + endpoint + "' names unknown term type '" + type + "'");
+                }
+            }
+        }
     }
 
     private static boolean section(Map<?, ?> doc, String key, boolean required) {

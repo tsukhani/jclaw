@@ -220,7 +220,7 @@ public final class Certifier {
 
     private static double logChoose(int n, int k) {
         double out = 0;
-        for (int i = 1; i <= k; i++) out += Math.log(n - k + i) - Math.log(i);
+        for (int i = 1; i <= k; i++) out += Math.log((double) n - k + i) - Math.log(i);
         return out;
     }
 

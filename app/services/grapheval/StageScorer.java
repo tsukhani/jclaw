@@ -209,8 +209,7 @@ public final class StageScorer {
                 var label = label(c, d.subject());
                 var date = found.get(d.subject());
                 if (label == null || date == null || date.readings().size() != 2) continue;
-                int index = ExtractionPipeline.PAST.equals(d.choice()) ? 0
-                        : ExtractionPipeline.UPCOMING.equals(d.choice()) ? 1 : -1;
+                int index = readingIndex(d.choice());
                 tense.add(index >= 0 && date.readings().get(index).toString().equals(label.toString()));
             }
             for (var d : run.negation()) {
@@ -257,6 +256,42 @@ public final class StageScorer {
             }
             return failed;
         }
+
+        private static int readingIndex(@Nullable String choice) {
+            if (ExtractionPipeline.PAST.equals(choice)) return 0;
+            return ExtractionPipeline.UPCOMING.equals(choice) ? 1 : -1;
+        }
+
+        /** The label a {@code from -type-> to} question was asked on: the positive of that type, else the denial. */
+        private static GraphCases.@Nullable Relation goldOf(Case c, Decision d, String triple, Set<String> symmetric) {
+            var ids = ids(c, d);
+            var from = d.from();
+            var to = d.to();
+            if (ids == null || from == null || to == null) return null;
+            var head = from + " -";
+            var tail = "-> " + to;
+            if (!triple.startsWith(head) || !triple.endsWith(tail) || triple.length() < head.length() + tail.length()) {
+                return null;
+            }
+            var type = triple.substring(head.length(), triple.length() - tail.length());
+            var positive = c.positive(ids[0], ids[1], symmetric);
+            if (positive != null && positive.type().equals(type)) return positive;
+            var denied = c.denied(ids[0], ids[1], symmetric);
+            return denied != null && denied.type().equals(type) ? denied : null;
+        }
+
+        private static boolean hasLabel(Case c, String span) {
+            return c.dates().stream().anyMatch(d -> d.span().equals(span));
+        }
+
+        /** The parsed label of a dated span, or null when it is unlabelled or labelled excluded. */
+        private static @Nullable EdtfInterval label(Case c, String span) {
+            for (var d : c.dates()) {
+                var value = d.value();
+                if (d.span().equals(span) && value != null) return EdtfInterval.parse(value);
+            }
+            return null;
+        }
     }
 
     /** The answer the slot question has for a date read as {@code date} against a gold {@code valid}. */
@@ -277,37 +312,6 @@ public final class StageScorer {
         var from = d.from() == null ? null : c.entityAt(d.from());
         var to = d.to() == null ? null : c.entityAt(d.to());
         return from == null || to == null ? null : new String[] {from.id(), to.id()};
-    }
-
-    /** The label a {@code from -type-> to} question was asked on: the positive of that type, else the denial. */
-    private static GraphCases.@Nullable Relation goldOf(Case c, Decision d, String triple, Set<String> symmetric) {
-        var ids = ids(c, d);
-        var from = d.from();
-        var to = d.to();
-        if (ids == null || from == null || to == null) return null;
-        var head = from + " -";
-        var tail = "-> " + to;
-        if (!triple.startsWith(head) || !triple.endsWith(tail) || triple.length() < head.length() + tail.length()) {
-            return null;
-        }
-        var type = triple.substring(head.length(), triple.length() - tail.length());
-        var positive = c.positive(ids[0], ids[1], symmetric);
-        if (positive != null && positive.type().equals(type)) return positive;
-        var denied = c.denied(ids[0], ids[1], symmetric);
-        return denied != null && denied.type().equals(type) ? denied : null;
-    }
-
-    private static boolean hasLabel(Case c, String span) {
-        return c.dates().stream().anyMatch(d -> d.span().equals(span));
-    }
-
-    /** The parsed label of a dated span, or null when it is unlabelled or labelled excluded. */
-    private static @Nullable EdtfInterval label(Case c, String span) {
-        for (var d : c.dates()) {
-            var value = d.value();
-            if (d.span().equals(span) && value != null) return EdtfInterval.parse(value);
-        }
-        return null;
     }
 
     /** The labelled dates (non-null value) whose span the finder found at the case's anchor. */

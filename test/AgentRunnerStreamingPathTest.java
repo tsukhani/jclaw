@@ -225,7 +225,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 var bytes = body.getBytes();
                 exchange.sendResponseHeaders(200, bytes.length);
                 try (var os = exchange.getResponseBody()) { os.write(bytes); }
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             } catch (java.io.IOException _) {
                 // The stopped turn may have hung up already.
@@ -307,7 +307,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 var bytes = body.getBytes();
                 exchange.sendResponseHeaders(200, bytes.length);
                 try (var os = exchange.getResponseBody()) { os.write(bytes); }
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             } catch (java.io.IOException _) {
                 // A turn may have hung up already.
@@ -451,7 +451,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
                 exchange.sendResponseHeaders(200, bytes.length);
                 try (var os = exchange.getResponseBody()) { os.write(bytes); }
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         });
@@ -512,7 +512,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
                 exchange.sendResponseHeaders(200, bytes.length);
                 try (var os = exchange.getResponseBody()) { os.write(bytes); }
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             } catch (java.io.IOException _) {
                 // A stopped turn may have hung up already.
@@ -583,7 +583,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                     while (services.ConversationQueue.isBusy(convo.id)) Thread.onSpinWait();
                     followUp.set(streamAndAwait(agent, convo.id, "web", convo.peerId, "follow-up",
                             new AtomicBoolean(false)));
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 } finally {
                     sent.countDown();
@@ -761,7 +761,7 @@ class AgentRunnerStreamingPathTest extends UnitTest {
                 entered.countDown();
                 try {
                     release.await(60, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
                 return "held";

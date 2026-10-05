@@ -2412,7 +2412,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void anInlineSpawnInAStoppedTurnStartsNoChildAndWritesNothing() throws Exception {
+    void anInlineSpawnInAStoppedTurnStartsNoChildAndWritesNothing() {
         var parent = createAgent("p-inline-stopped", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-inline-stopped");
         JPA.em().getTransaction().commit();
@@ -2434,7 +2434,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void anInlineSpawnWhoseMarkerTheStopRefusesKillsItsRun() throws Exception {
+    void anInlineSpawnWhoseMarkerTheStopRefusesKillsItsRun() {
         var parent = createAgent("p-inline-race", "spawn-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-inline-race");
         JPA.em().getTransaction().commit();

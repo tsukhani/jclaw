@@ -829,7 +829,7 @@ class ConversationQueueTest extends UnitTest {
             inside.countDown();
             try {
                 release.await(30, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         })));

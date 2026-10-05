@@ -30,7 +30,7 @@ class MemoryAuthorTypeColumnJobTest extends UnitTest {
                 try {
                     insert(s, 2, "GUEST_TURN");
                     fail("the ENUM fixture must reject GUEST_TURN, or this test proves nothing");
-                } catch (SQLException expected) {
+                } catch (SQLException _) {
                     // the production failure, reproduced
                 }
             }

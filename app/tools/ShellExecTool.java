@@ -539,11 +539,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
             boolean wasStopped = stopped.get() && !timedOut.get();
             int exitCode = timedOut.get() || wasStopped ? -1 : process.exitValue();
-            String killNote = timedOut.get() ? "\n[Process killed: timeout after %d seconds]".formatted(timeoutSec)
-                    : wasStopped ? "\n[Process killed: turn stopped]" : "";
             var result = new JsonObject();
             result.addProperty(FIELD_EXIT_CODE, exitCode);
-            result.addProperty(FIELD_OUTPUT, processedOutput + killNote);
+            result.addProperty(FIELD_OUTPUT, processedOutput + killNote(timedOut.get(), wasStopped, timeoutSec));
             result.addProperty(FIELD_DURATION_MS, durationMs);
             result.addProperty(FIELD_TRUNCATED, readResult.truncated());
             result.addProperty(FIELD_TIMED_OUT, timedOut.get());
@@ -562,6 +560,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
             Thread.currentThread().interrupt();
             return ToolErrorTemplates.render(ToolErrorTemplates.shellInterrupted(command));
         }
+    }
+
+    private static String killNote(boolean timedOut, boolean stopped, int timeoutSec) {
+        if (timedOut) return "\n[Process killed: timeout after %d seconds]".formatted(timeoutSec);
+        return stopped ? "\n[Process killed: turn stopped]" : "";
     }
 
     /**

@@ -22,6 +22,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
 
@@ -113,6 +114,30 @@ public final class GraphView {
 
     private static final Verdict UNKNOWN = new Verdict(Truth.UNKNOWN, false, null);
 
+    private record Claims(List<Evidence> visible, List<Evidence> eligible, List<Evidence> ineligible,
+            Map<String, Verdict> verdicts) {}
+
+    private record Persisted(List<Evidence> definite, List<Evidence> surviving, boolean unexplainedDrop) {}
+
+    /** A dated Term's stated values, each with the Relations joined to it, and which values each source stated. */
+    private static final class Stated {
+        final TreeMap<EdtfInterval, TreeSet<String>> values = new TreeMap<>(BY_LO);
+        private final Map<String, List<EdtfInterval>> bySource = new HashMap<>();
+
+        void add(String source, EdtfInterval value) {
+            values.computeIfAbsent(value, k -> new TreeSet<>());
+            bySource.computeIfAbsent(source, k -> new ArrayList<>()).add(value);
+        }
+
+        /** Joins the Relation to every value {@code source} stated; false when it stated none. */
+        boolean join(String source, String relationId) {
+            var stated = bySource.get(source);
+            if (stated == null) return false;
+            stated.forEach(v -> Objects.requireNonNull(values.get(v)).add(relationId));
+            return true;
+        }
+    }
+
     /** Step 4's order: anchor, then recordedAt, then confidence (null below any value), then Evidence id. */
     private static final Comparator<Evidence> RANK = Comparator
             .comparing(Evidence::anchor, Comparator.nullsFirst(Comparator.<LocalDate>naturalOrder()))
@@ -192,36 +217,53 @@ public final class GraphView {
         if (!(byId.get(termId) instanceof Term term) || !dated(term)) {
             throw new IllegalArgumentException("'" + termId + "' is not a dated Term in this graph");
         }
-        var current = new TreeMap<EdtfInterval, TreeSet<String>>(BY_LO);
-        var previous = new TreeMap<EdtfInterval, TreeSet<String>>(BY_LO);
-        var stating = new HashMap<String, List<EdtfInterval>>();
-        var statingPrevious = new HashMap<String, List<EdtfInterval>>();
+        var current = new Stated();
+        var previous = new Stated();
         for (var e : resolve(term.evidenceIds())) {
             var occurs = e.occurs();
             if (occurs == null || !visible(e, s)) continue;
-            boolean capped = capped(e, s);
-            (capped ? previous : current).computeIfAbsent(occurs, k -> new TreeSet<>());
-            (capped ? statingPrevious : stating).computeIfAbsent(e.source(), k -> new ArrayList<>()).add(occurs);
+            (capped(e, s) ? previous : current).add(e.source(), occurs);
         }
         var series = new TreeSet<String>();
         for (var relation : relations.values()) {
             if (!relation.from().equals(termId) && !relation.to().equals(termId)) continue;
-            for (var claim : resolve(relation.evidenceIds())) {
-                if (!visible(claim, s)) continue;
-                var source = claim.source();
-                var values = stating.get(source);
-                var prior = statingPrevious.get(source);
-                if (values != null) values.forEach(v -> Objects.requireNonNull(current.get(v)).add(relation.id()));
-                if (prior != null) prior.forEach(v -> Objects.requireNonNull(previous.get(v)).add(relation.id()));
-                if (values == null && prior == null) series.add(relation.id());
-            }
+            join(relation, s, current, previous, series);
         }
-        return new Occurrences(occurrenceList(current, today), List.copyOf(series), occurrenceList(previous, today));
+        return new Occurrences(occurrenceList(current.values, today), List.copyOf(series),
+                occurrenceList(previous.values, today));
     }
 
     // ---- steps ----
 
     private Answer answer(Relation relation, LocalDate d, Instant s) {
+        var claims = claims(relation, d, s);
+        var verdicts = claims.verdicts();
+
+        // Step 3: persistence stops at a later stated change.
+        var persisted = persisted(claims.eligible(), verdicts, d);
+
+        // Step 4: decide.
+        Evidence decided = persisted.definite().stream().max(RANK).orElse(null);
+        boolean assumed = false;
+        if (decided == null) {
+            decided = persisted.surviving().stream().max(RANK).orElse(null);
+            assumed = decided != null;
+        }
+        var verdict = decided == null ? UNKNOWN : Objects.requireNonNull(verdicts.get(decided.id()));
+        var truth = verdict.truth();
+
+        // Step 5: flags.
+        var contested = contested(claims, persisted, truth);
+
+        var visible = claims.visible();
+        var decidingId = decided == null ? null : decided.id();
+        var others = visible.stream().map(Evidence::id).filter(id -> !id.equals(decidingId)).toList();
+        var valences = visible.stream().map(Evidence::valence).filter(Objects::nonNull).distinct().sorted().toList();
+        return new Answer(relation.id(), truth, assumed, contested, truth == Truth.NO ? verdict.reason() : null,
+                decidingId, others, decided == null ? null : decided.valence(), valences);
+    }
+
+    private Claims claims(Relation relation, LocalDate d, Instant s) {
         boolean timeless = timeless(relation);
         boolean touchesOwner = ownerTermId != null
                 && (relation.from().equals(ownerTermId) || relation.to().equals(ownerTermId));
@@ -233,8 +275,10 @@ public final class GraphView {
             verdicts.put(e.id(), verdict(e, d, s, timeless));
             (touchesOwner && guest(e) ? ineligible : eligible).add(e);
         }
+        return new Claims(visible, eligible, ineligible, verdicts);
+    }
 
-        // Step 3: persistence stops at a later stated change.
+    private static Persisted persisted(List<Evidence> eligible, Map<String, Verdict> verdicts, LocalDate d) {
         var definite = new ArrayList<Evidence>();
         var surviving = new ArrayList<Evidence>();
         boolean unexplainedDrop = false;
@@ -252,35 +296,22 @@ public final class GraphView {
                 unexplainedDrop = true;
             }
         }
+        return new Persisted(definite, surviving, unexplainedDrop);
+    }
 
-        // Step 4: decide.
-        Evidence decided = definite.stream().max(RANK).orElse(null);
-        boolean assumed = false;
-        if (decided == null) {
-            decided = surviving.stream().max(RANK).orElse(null);
-            assumed = decided != null;
-        }
-        var verdict = decided == null ? UNKNOWN : Objects.requireNonNull(verdicts.get(decided.id()));
-        var truth = verdict.truth();
-
-        // Step 5: flags.
-        boolean contestedDefinite = definite.stream().map(e -> verdicts.get(e.id())).filter(Objects::nonNull)
-                .map(Verdict::truth).distinct().count() > 1;
-        boolean contestedGuest = (!visible.isEmpty() && eligible.isEmpty())
-                || (truth != Truth.UNKNOWN && ineligible.stream().anyMatch(e -> {
+    private static Contested contested(Claims claims, Persisted persisted, Truth truth) {
+        var verdicts = claims.verdicts();
+        boolean contestedDefinite = persisted.definite().stream().map(e -> verdicts.get(e.id()))
+                .filter(Objects::nonNull).map(Verdict::truth).distinct().count() > 1;
+        boolean contestedGuest = (!claims.visible().isEmpty() && claims.eligible().isEmpty())
+                || (truth != Truth.UNKNOWN && claims.ineligible().stream().anyMatch(e -> {
                     var v = verdicts.get(e.id());
                     return v != null && v.truth() != Truth.UNKNOWN && v.truth() != truth;
                 }));
-        var contested = contestedDefinite ? Contested.DEFINITE
-                : contestedGuest ? Contested.GUEST
-                : unexplainedDrop ? Contested.ASSUMED
-                : Contested.NONE;
-
-        var decidingId = decided == null ? null : decided.id();
-        var others = visible.stream().map(Evidence::id).filter(id -> !id.equals(decidingId)).toList();
-        var valences = visible.stream().map(Evidence::valence).filter(Objects::nonNull).distinct().sorted().toList();
-        return new Answer(relation.id(), truth, assumed, contested, truth == Truth.NO ? verdict.reason() : null,
-                decidingId, others, decided == null ? null : decided.valence(), valences);
+        if (contestedDefinite) return Contested.DEFINITE;
+        if (contestedGuest) return Contested.GUEST;
+        if (persisted.unexplainedDrop()) return Contested.ASSUMED;
+        return Contested.NONE;
     }
 
     /** Step 2: what one claim says at {@code d}. */
@@ -308,17 +339,19 @@ public final class GraphView {
             if (!d.isBefore(end.hi())) return new Verdict(Truth.NO, true, Reason.EXPIRED);
             if (!d.isBefore(end.lo())) return UNKNOWN;
         }
-        if (start != null && start.lo().isAfter(a)) {
-            if (d.isBefore(start.lo())) return new Verdict(Truth.NO, d.isBefore(a), Reason.SCHEDULED);
-            if (d.isBefore(start.hi())) return UNKNOWN;
-            return new Verdict(Truth.YES, true, null);
-        }
+        if (start != null && start.lo().isAfter(a)) return laterStart(d, a, start);
         if (d.equals(a)) return new Verdict(Truth.YES, false, null);
         if (d.isAfter(a)) return new Verdict(Truth.YES, true, null);
         if (start == null) return UNKNOWN;
         if (d.isBefore(start.lo())) return new Verdict(Truth.NO, true, Reason.SCHEDULED);
         if (d.isBefore(start.hi())) return UNKNOWN;
         return new Verdict(Truth.YES, false, null);
+    }
+
+    private static Verdict laterStart(LocalDate d, LocalDate a, EdtfDate start) {
+        if (d.isBefore(start.lo())) return new Verdict(Truth.NO, d.isBefore(a), Reason.SCHEDULED);
+        if (d.isBefore(start.hi())) return UNKNOWN;
+        return new Verdict(Truth.YES, true, null);
     }
 
     private static Verdict ended(LocalDate d, LocalDate a, @Nullable EdtfDate start, @Nullable EdtfDate end) {
@@ -471,14 +504,27 @@ public final class GraphView {
         throw new IllegalStateException("an interval needs at least one date: " + v);
     }
 
+    private void join(Relation relation, Instant s, Stated current, Stated previous, Set<String> series) {
+        for (var claim : resolve(relation.evidenceIds())) {
+            if (!visible(claim, s)) continue;
+            boolean inCurrent = current.join(claim.source(), relation.id());
+            boolean inPrevious = previous.join(claim.source(), relation.id());
+            if (!inCurrent && !inPrevious) series.add(relation.id());
+        }
+    }
+
     private static List<Occurrence> occurrenceList(TreeMap<EdtfInterval, TreeSet<String>> values, LocalDate today) {
         var out = new ArrayList<Occurrence>();
         values.forEach((value, ids) -> {
-            var timing = lo(value).isAfter(today) ? Timing.UPCOMING
-                    : !hi(value).isAfter(today) ? Timing.PAST
-                    : Timing.NEITHER;
+            var timing = timing(value, today);
             out.add(new Occurrence(value, List.copyOf(ids), timing));
         });
         return out;
+    }
+
+    private static Timing timing(EdtfInterval value, LocalDate today) {
+        if (lo(value).isAfter(today)) return Timing.UPCOMING;
+        if (!hi(value).isAfter(today)) return Timing.PAST;
+        return Timing.NEITHER;
     }
 }

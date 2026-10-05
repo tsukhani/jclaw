@@ -19,7 +19,7 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 /**
  * Turns one memory's statements into graph records (JCLAW-1367): one Term per term id and one Relation per relation
@@ -86,9 +86,10 @@ public final class StatementRecords {
             var evidenceId = Evidence.claimId(id, memory);
             if (byId.containsKey(evidenceId)) continue;
             var symmetric = schema.symmetric(c.type()) && c.fromId().compareTo(c.toId()) > 0;
+            var from = symmetric ? c.toId() : c.fromId();
+            var to = symmetric ? c.fromId() : c.toId();
             var relation = byId.get(id) instanceof Relation existing ? existing
-                    : new Relation(Meta.fresh(id, 0L, Tier.FIRM), c.type(), symmetric ? c.toId() : c.fromId(),
-                            symmetric ? c.fromId() : c.toId(), List.of());
+                    : new Relation(Meta.fresh(id, 0L, Tier.FIRM), c.type(), from, to, List.of());
             byId.put(id, new Relation(relation.meta(), relation.type(), relation.from(), relation.to(),
                     relation.weight(), append(relation.evidenceIds(), evidenceId)));
             byId.put(evidenceId, evidence(evidenceId, memory, id, source, c.confidence(), c.status(), c.valid(), null,
@@ -102,7 +103,7 @@ public final class StatementRecords {
      * the denial's own valid). {@code termId} maps a span to the term id it is recorded under.
      */
     public static Facts fromStatements(Statements.Outcome terms, List<Statements.Claim> relations,
-                                       List<Statements.Claim> denials, Function<String, String> termId) {
+                                       List<Statements.Claim> denials, UnaryOperator<String> termId) {
         var termFacts = new ArrayList<TermFact>();
         for (var t : terms.terms()) {
             termFacts.add(new TermFact(termId.apply(t.span()), t.span(), t.type(), t.confidence(), t.occurs()));

@@ -28,7 +28,7 @@ public record Configuration(double terms, SortedMap<String, Double> relations,
     public static final double DEFAULT_THRESHOLD = 0.85;
     private static final Set<String> KEYS = Set.of("terms", "relations", "classes");
     private static final Set<String> CLASS_KEYS = Set.of("state", "threshold");
-    private static final List<String> CLASSES = List.of(STATUS, TIME, NEGATION);
+    private static final List<String> CLASS_NAMES = List.of(STATUS, TIME, NEGATION);
     private static final Set<String> STATES = Set.of(CERTIFIED, PROVISIONAL, DISABLED);
 
     public Configuration {
@@ -44,7 +44,7 @@ public record Configuration(double terms, SortedMap<String, Double> relations,
         var relations = new TreeMap<String, Double>();
         schema.relations().keySet().forEach(r -> relations.put(r, DEFAULT_THRESHOLD));
         var classes = new TreeMap<String, ClassSetting>();
-        CLASSES.forEach(c -> classes.put(c, new ClassSetting(PROVISIONAL, DEFAULT_THRESHOLD)));
+        CLASS_NAMES.forEach(c -> classes.put(c, new ClassSetting(PROVISIONAL, DEFAULT_THRESHOLD)));
         return new Configuration(DEFAULT_THRESHOLD, relations, classes);
     }
 
@@ -73,7 +73,7 @@ public record Configuration(double terms, SortedMap<String, Double> relations,
             for (var entry : object(json.get("classes"), "classes").entrySet()) {
                 var name = entry.getKey();
                 var where = "configuration: class '" + name + "'";
-                if (!CLASSES.contains(name)) {
+                if (!CLASS_NAMES.contains(name)) {
                     throw new IllegalArgumentException("configuration: unknown class '" + name
                             + "' (status, time or negation; lineage comes from the run's own walk)");
                 }

@@ -242,9 +242,12 @@ public final class Statements {
         }
         if (start == null && end == null) return new Timed(status, null);
         EdtfInterval.Endpoint lo = start != null ? new EdtfInterval.Point(start) : EdtfInterval.UNKNOWN;
-        EdtfInterval.Endpoint hi = end != null ? new EdtfInterval.Point(end)
-                : status == OntologyRecord.Status.HOLDS ? EdtfInterval.OPEN : EdtfInterval.UNKNOWN;
+        EdtfInterval.Endpoint hi = end != null ? new EdtfInterval.Point(end) : unboundedEnd(status);
         return new Timed(status, EdtfInterval.between(lo, hi));
+    }
+
+    private static EdtfInterval.Endpoint unboundedEnd(OntologyRecord.Status status) {
+        return status == OntologyRecord.Status.HOLDS ? EdtfInterval.OPEN : EdtfInterval.UNKNOWN;
     }
 
     private static void add(List<Bound<EdtfDate>> bounds, EdtfInterval.Endpoint endpoint, double confidence) {
@@ -295,13 +298,18 @@ public final class Statements {
         int best = Integer.MAX_VALUE;
         for (var cue : run.cues()) {
             if (cue.start() < sentenceStart || cue.end() > sentenceEnd) continue;
-            int distance = cue.end() <= lo ? lo - cue.end() : cue.start() >= hi ? cue.start() - hi : 0;
+            int distance = distance(cue, lo, hi);
             if (distance < best) {
                 best = distance;
                 nearest = cue;
             }
         }
         return nearest != null && nearest.perfectNever();
+    }
+
+    private static int distance(NegationCue cue, int lo, int hi) {
+        if (cue.end() <= lo) return lo - cue.end();
+        return cue.start() >= hi ? cue.start() - hi : 0;
     }
 
 }

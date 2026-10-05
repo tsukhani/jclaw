@@ -510,16 +510,7 @@ public final class MemoryAutoCapture {
         int maxCandidates = ConfigService.getInt("memory.autocapture.maxCandidates", 25);
         List<Candidate> parsed = dedupeWithinBatch(parseCandidates(raw));
         // The owner's name lives on USER.md's Name line, never in memory; a guest's turn cannot set it.
-        if (provenance.authorType() != MemoryAuthorType.GUEST_TURN) {
-            // Both names: "Tarun prefers to be called Ty" states the name the turn has just replaced.
-            var before = WorkspaceFiles.ownerName(agentName);
-            var stated = parseOwnerName(raw);
-            if (stated != null && MemorySubject.isNameShaped(stated)) WorkspaceFiles.setOwnerName(agentName, stated);
-            var after = WorkspaceFiles.ownerName(agentName);
-            parsed = parsed.stream()
-                    .filter(c -> !MemorySubject.statesOwnerName(c.text(), before) && !MemorySubject.statesOwnerName(c.text(), after))
-                    .toList();
-        }
+        if (provenance.authorType() != MemoryAuthorType.GUEST_TURN) parsed = takeOwnerName(agentName, raw, parsed);
         if (parsed.size() > maxCandidates) {
             EventLogger.warn(EVENT_CATEGORY, agentName, null,
                     "Extractor returned %d candidates; capping at %d".formatted(parsed.size(), maxCandidates));
@@ -610,6 +601,18 @@ public final class MemoryAutoCapture {
         } finally {
             lock.unlock();
         }
+    }
+
+    /** Writes a name the turn states to USER.md and drops the candidates stating the owner's old or new name. */
+    private static List<Candidate> takeOwnerName(String agentName, @Nullable String raw, List<Candidate> parsed) {
+        // Both names: "Tarun prefers to be called Ty" states the name the turn has just replaced.
+        var before = WorkspaceFiles.ownerName(agentName);
+        var stated = parseOwnerName(raw);
+        if (stated != null && MemorySubject.isNameShaped(stated)) WorkspaceFiles.setOwnerName(agentName, stated);
+        var after = WorkspaceFiles.ownerName(agentName);
+        return parsed.stream()
+                .filter(c -> !MemorySubject.statesOwnerName(c.text(), before) && !MemorySubject.statesOwnerName(c.text(), after))
+                .toList();
     }
 
     /**

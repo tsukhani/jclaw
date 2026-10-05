@@ -179,12 +179,12 @@ class SequenceHarnessTest extends UnitTest {
                 String content = "";
                 try {
                     if (Files.isRegularFile(path)) content = Files.readString(path);
-                } catch (IOException e) {
+                } catch (IOException _) {
                     // Another class is rewriting its own agent's graph concurrently.
                 }
                 return new String[] {path.toString(), content};
             }).toList();
-        } catch (IOException | UncheckedIOException e) {
+        } catch (IOException | UncheckedIOException _) {
             return List.of();
         }
     }
