@@ -2,6 +2,7 @@ package services.factory;
 
 import org.jspecify.annotations.Nullable;
 import play.Play;
+import services.ConfigService;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -20,6 +21,8 @@ import java.util.regex.Pattern;
  * The validation and IO methods take an explicit {@link Path} and read no seam.
  */
 public final class FactoryHome {
+
+    public static final String HOME_KEY = "factory.home";
 
     public static final String KEY_MAX_PARALLEL = "FACTORY_MAX_PARALLEL";
     public static final String KEY_CPUS = "FACTORY_CPUS";
@@ -54,13 +57,33 @@ public final class FactoryHome {
         homeOverride = home;
     }
 
-    /** {@code FACTORY_HOME} when set and non-blank, else {@code ~/.jclaw-factory}. */
+    /**
+     * The Config key {@value #HOME_KEY} when set and non-blank ({@code ~} expanded), else
+     * {@code FACTORY_HOME}, else {@code ~/.jclaw-factory}.
+     */
     public static Path home() {
         var override = homeOverride;
         if (override != null) return override;
+        var configured = ConfigService.get(HOME_KEY);
+        if (configured != null && !configured.isBlank()) return expandHome(configured.strip());
         var env = System.getenv("FACTORY_HOME");
         if (env != null && !env.isBlank()) return Path.of(env);
         return Path.of(System.getProperty("user.home"), ".jclaw-factory");
+    }
+
+    static Path expandHome(String path) {
+        var userHome = System.getProperty("user.home");
+        if (path.equals("~")) return Path.of(userHome);
+        if (path.startsWith("~/")) return Path.of(userHome, path.substring(2));
+        return Path.of(path);
+    }
+
+    public static Path logsDir() {
+        return home().resolve("logs");
+    }
+
+    public static Path boardFile() {
+        return home().resolve("board.json");
     }
 
     public static Path installer() {

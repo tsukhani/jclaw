@@ -9,6 +9,7 @@ import play.test.FunctionalTest;
 import services.EventLogger;
 import services.factory.FactoryHome;
 import services.factory.FactoryProcess;
+import services.factory.FactoryStatus;
 
 import java.io.File;
 import java.nio.file.Files;
@@ -38,6 +39,7 @@ class ApiFactoryControllerTest extends FunctionalTest {
         AuthFixture.seedAdminPassword("changeme");
         FactoryHome.setHomeForTest(home);
         FactoryProcess.setRunnerForTest(runner);
+        FactoryStatus.clearCache();
         clearCookies();
     }
 
@@ -379,13 +381,69 @@ class ApiFactoryControllerTest extends FunctionalTest {
             assertStatus(403, resp);
             assertTrue(getContent(resp).contains("operator_only"), url + ": " + getContent(resp));
         }
-        var get = asAgent(() -> GET(agentRequest(), "/api/factory/settings"));
-        assertStatus(403, get);
+        for (var url : List.of("/api/factory/settings", "/api/factory",
+                "/api/factory/stories/JCLAW-7/logs/JCLAW-7-implement.log")) {
+            assertStatus(403, asAgent(() -> GET(agentRequest(), url)));
+        }
         var put = asAgent(() -> PUT(agentRequest(), "/api/factory/settings", "application/json",
                 "{\"FACTORY_MAX_PARALLEL\":3}"));
         assertStatus(403, put);
         assertTrue(runner.calls.isEmpty(), runner.calls::toString);
         assertFalse(Files.exists(home.resolve("settings.env")));
+    }
+
+    // --- status and story logs (JCLAW-1391) ---
+
+    private void storyBoard() throws Exception {
+        Files.createDirectories(home.resolve("logs"));
+        Files.writeString(home.resolve("board.json"), """
+                {"schema": 1, "updatedAt": "2026-10-05T09:12:44.120Z",
+                 "harness": {"pid": 4242, "startedAt": "2026-10-05T08:00:01.002Z", "main": null},
+                 "stories": [{"key": "JCLAW-7", "summary": "s", "source": "jira", "autoMerge": false,
+                              "state": "review", "since": "2026-10-05T08:31:40.007Z",
+                              "logs": ["JCLAW-7-implement.log", "../.env"]}]}
+                """);
+        Files.writeString(home.resolve("logs/JCLAW-7-implement.log"), "built\n");
+        Files.writeString(home.resolve("logs/JCLAW-7-other.log"), "x");
+        Files.writeString(home.resolve(".env"), "ANTHROPIC_API_KEY=sk-test");
+    }
+
+    @Test
+    void statusReturnsTheBoard() throws Exception {
+        storyBoard();
+        login();
+        var resp = GET("/api/factory");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"installed\":true"), body);
+        assertTrue(body.contains("\"key\":\"JCLAW-7\""), body);
+        assertTrue(body.contains("\"state\":\"review\""), body);
+        assertFalse(body.contains("sk-test"), body);
+    }
+
+    @Test
+    void storyLogServesAListedLog() throws Exception {
+        storyBoard();
+        login();
+        var resp = GET("/api/factory/stories/JCLAW-7/logs/JCLAW-7-implement.log");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"text\":\"built\\n\""), body);
+        assertTrue(body.contains("\"size\":6"), body);
+        assertTrue(body.contains("\"modifiedAt\""), body);
+    }
+
+    @Test
+    void storyLogIs404ForAnythingTheBoardDoesNotListOrThatLeavesTheLogsDirectory() throws Exception {
+        storyBoard();
+        login();
+        for (var path : List.of("JCLAW-7/logs/JCLAW-7-other.log", "JCLAW-8/logs/JCLAW-7-implement.log",
+                "JCLAW-7/logs/..%2F.env", "JCLAW-7/logs/%2E%2E%2F.env", "JCLAW-7/logs/.env",
+                "JCLAW-7/logs/jira.env", "JCLAW-7/logs/..")) {
+            var resp = GET("/api/factory/stories/" + path);
+            assertStatus(404, resp);
+            assertFalse(getContent(resp).contains("sk-test"), path);
+        }
     }
 
     private Http.Response asAgent(Supplier<Http.Response> call) {
