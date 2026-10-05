@@ -81,11 +81,13 @@ export const landBranch = async (opts: {
   const base = git(clone, "rev-parse", "origin/main");
   const regated = git(clone, "merge-base", base, built) !== base;
 
+  // GitHub verifies a signature only when the committer is the key's own account, never the clone's factory identity.
+  const operator = ["user.name", "user.email"].flatMap((k) => ["-c", `${k}=${git(checkout, "config", k)}`]);
   const worktree = fs.mkdtempSync(path.join(os.tmpdir(), `jclaw-land-${key}-`));
   try {
     git(clone, "worktree", "add", "--quiet", "-B", land, worktree, built);
     try {
-      git(worktree, "rebase", "--quiet", "--force-rebase", "--gpg-sign", base);
+      git(worktree, ...operator, "rebase", "--quiet", "--force-rebase", "--gpg-sign", base);
     } catch (error) {
       const conflicted = gitOrUndefined(worktree, "diff", "--name-only", "--diff-filter=U")?.split("\n").filter(Boolean) ?? [];
       gitOrUndefined(worktree, "rebase", "--abort");
@@ -101,7 +103,7 @@ export const landBranch = async (opts: {
       if (red) throw new MergeRefused(`main had moved since the branch was built, and the suite is red on the rebased branch: ${red}`, true);
     }
     git(worktree, "checkout", "--quiet", "--detach", base);
-    git(worktree, "merge", "--quiet", "--no-ff", "--gpg-sign", "-m", `Merge branch '${branch}'`, ...opts.messages.flatMap((m) => ["-m", m]), land);
+    git(worktree, ...operator, "merge", "--quiet", "--no-ff", "--gpg-sign", "-m", `Merge branch '${branch}'`, ...opts.messages.flatMap((m) => ["-m", m]), land);
     const merge = git(worktree, "rev-parse", "HEAD");
 
     const operation = busy(checkout);

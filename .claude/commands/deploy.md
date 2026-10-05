@@ -22,16 +22,17 @@ Reject anything else with a clear message; do not guess.
 
 ---
 
-**Preflight: every commit either remote would receive is signed**
+**Preflight: every commit either remote would receive is signed, and committed by you**
 
-GitHub's `main` refuses unsigned commits and Bitbucket does not, so one unsigned commit lets `origin` take the release after the full suite while `github` refuses it, leaving the remotes apart. Check before bumping anything:
+GitHub's `main` refuses unverified commits and Bitbucket does not, so one of them lets `origin` take the release after the full suite while `github` refuses it, leaving the remotes apart. GitHub verifies a signature only when the committer email is a verified address of the key's own account, so a good local signature (`G`) is not enough. Check before bumping anything:
 
 ```bash
 /usr/bin/git fetch -q origin && /usr/bin/git fetch -q github
-for r in origin github; do /usr/bin/git log "$r/main..HEAD" --format='%G? %h %an | %s'; done | grep -v '^G ' | sort -u
+me=$(/usr/bin/git config user.email)
+for r in origin github; do /usr/bin/git log "$r/main..HEAD" --format='%G? %ce %h %an | %s'; done | grep -v "^G $me " | sort -u
 ```
 
-If that prints anything, stop and list it. The usual source is an AFK factory branch merged without re-signing; `.sandcastle/README.md` gives the signed merge. A listed commit already on `origin` can only be re-signed by a force-push, so that is the user's decision.
+If that prints anything, stop and list it. The usual sources are an AFK factory branch merged without re-signing, and a factory landing from before the landing committed as the operator (`jclaw-factory-agent@localhost` as committer); `.sandcastle/README.md` gives the signed merge. A listed commit already on `origin` can only be re-signed by a force-push, so that is the user's decision.
 
 **Phase 1: Bump the version**
 

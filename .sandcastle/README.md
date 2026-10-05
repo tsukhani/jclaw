@@ -161,7 +161,8 @@ review and merge per link. Blocks links between epics are not read.
 ### Auto-merge
 
 Label a story `afk-merge`, or its epic, and once it is in Review the factory merges it the way you would. It rebases
-`agent/<KEY>` onto your checkout's `main` with every commit re-signed. It merges it with a signed merge commit, moves
+`agent/<KEY>` onto your checkout's `main` with every commit re-signed and committed as you, the only committer GitHub
+verifies your key for; the agent stays the author. It merges it with a signed merge commit, moves
 the story to Done, and deletes the branch in your checkout and in its clone. It never pushes, so `/deploy` still ships
 it. The label works before the story is built or after, and `no-afk-merge` exempts one story of a labelled epic.
 

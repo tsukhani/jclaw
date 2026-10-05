@@ -131,6 +131,10 @@ fs.mkdirSync(checkout);
 g(checkout, "init", "--quiet", "--initial-branch=main");
 commit(checkout, "base.txt", "base\n");
 g(sandbox, "clone", "--quiet", checkout, clone);
+// The factory's clone commits as its own identity, as setup gives it.
+g(clone, "config", "user.name", "jclaw-factory-agent");
+g(clone, "config", "user.email", "jclaw-factory-agent@localhost");
+const operatorEmail = g(checkout, "config", "user.email");
 // A finished story, as processStory leaves it: built in the clone, copied into the checkout, its tip recorded.
 const story = (key: string, file: string, text: string) => {
   g(clone, "fetch", "--quiet", "origin", "main");
@@ -160,6 +164,8 @@ const a = await attempt("T-1", story("T-1", "one.txt", "one\n"));
 const main1 = g(checkout, "rev-parse", "main");
 check("an unmoved main lands without a re-gate", typeof a === "object" && !a.regated && regates.length === 0 && main1 === a.merge, true);
 check("the merge commit and the rebased commit are signed", g(checkout, "log", "--format=%G?", "-2", "main").split("\n"), ["G", "G"]);
+check("the operator commits the merge and the rebased commit, so GitHub can verify them; the agent stays the author",
+  g(checkout, "log", "--format=%ae %ce", "-2", "main").split("\n"), [`${operatorEmail} ${operatorEmail}`, `jclaw-factory-agent@localhost ${operatorEmail}`]);
 check("the merge has two parents and names the branch", [g(checkout, "rev-list", "--parents", "-n1", "main").split(" ").length, g(checkout, "log", "-1", "--format=%s", "main")], [3, "Merge branch 'agent/T-1'"]);
 check("the checkout fast-forwarded its working tree", fs.readFileSync(path.join(checkout, "one.txt"), "utf8"), "one\n");
 check("a landed story is recognised by its merge commit; an unlanded one is not", [typeof a === "object" && landedAs(checkout, "T-1") === a.merge, landedAs(checkout, "T-9")], [true, undefined]);
