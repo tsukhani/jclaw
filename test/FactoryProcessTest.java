@@ -59,6 +59,15 @@ class FactoryProcessTest extends UnitTest {
     }
 
     @Test
+    void multibyteCharactersSurviveTheChunkBoundary() {
+        // tr writes one ASCII byte then "é" in even-sized blocks, so every block ends inside a character.
+        var res = FactoryProcess.run(List.of("sh", "-c",
+                "{ printf a; yes \"$(printf '\\303\\251')\" | head -n 10000; } | tr -d '\\n'"), Duration.ofSeconds(10));
+        assertEquals(0, res.exitCode(), res::toString);
+        assertEquals("a" + "\u00e9".repeat(10_000), res.output());
+    }
+
+    @Test
     void aMissingExecutableIsMinusOneWithoutATimeout() {
         var res = FactoryProcess.run(List.of("/nonexistent/jclaw-factory-no-such-binary"), Duration.ofSeconds(5));
         assertEquals(-1, res.exitCode(), res::toString);

@@ -140,9 +140,9 @@ public final class FactoryHome {
     /**
      * Rewrite {@code file} atomically with {@code updates} applied: a key already present is
      * replaced in place (every occurrence), a new key is appended, and every other line is kept
-     * in order.
+     * in order. Synchronized, so two concurrent writes cannot lose one's update.
      */
-    public static void writeSettings(Path file, Map<String, String> updates) throws IOException {
+    public static synchronized void writeSettings(Path file, Map<String, String> updates) throws IOException {
         var lines = Files.isRegularFile(file)
                 ? new ArrayList<>(Files.readAllLines(file, StandardCharsets.UTF_8))
                 : new ArrayList<String>();

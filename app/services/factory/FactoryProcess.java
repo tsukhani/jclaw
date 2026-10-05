@@ -3,6 +3,7 @@ package services.factory;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 
+import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -66,8 +67,8 @@ public final class FactoryProcess {
         } catch (IOException e) {
             return new ExecResult(-1, e.getMessage() != null ? e.getMessage() : "exec failed", false);
         }
-        // StringBuffer: the drainer appends while the timeout path may read.
-        var out = new StringBuffer();
+        // Bytes, decoded once at the end, so a chunk boundary cannot split a UTF-8 character.
+        var out = new ByteArrayOutputStream();
         var drainer = Thread.ofVirtual().start(() -> drain(proc.getInputStream(), out));
         boolean finished;
         try {
@@ -81,18 +82,18 @@ public final class FactoryProcess {
             proc.destroyForcibly();
             closeQuietly(proc.getInputStream());
             joinQuietly(drainer);
-            return new ExecResult(-1, out.toString(), true);
+            return new ExecResult(-1, out.toString(StandardCharsets.UTF_8), true);
         }
         joinQuietly(drainer);
-        return new ExecResult(proc.exitValue(), out.toString(), false);
+        return new ExecResult(proc.exitValue(), out.toString(StandardCharsets.UTF_8), false);
     }
 
-    private static void drain(InputStream in, StringBuffer sink) {
+    private static void drain(InputStream in, ByteArrayOutputStream sink) {
         // Chunked, so what was read survives a close on timeout or a child holding the pipe open.
         var buf = new byte[8192];
         try (in) {
             int n;
-            while ((n = in.read(buf)) > 0) sink.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+            while ((n = in.read(buf)) > 0) sink.write(buf, 0, n);
         } catch (IOException _) {
             // partial output is enough for the response tail
         }

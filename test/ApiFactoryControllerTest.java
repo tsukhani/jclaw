@@ -362,11 +362,24 @@ class ApiFactoryControllerTest extends FunctionalTest {
     }
 
     @Test
-    void theAgentPrincipalIsRefused() {
-        var resp = asAgent(() -> POST(agentRequest(), "/api/factory/gateway/pause", "application/json", "{}"));
-        assertStatus(403, resp);
-        assertTrue(getContent(resp).contains("operator_only"), getContent(resp));
-        assertTrue(runner.calls.isEmpty());
+    void theAgentPrincipalIsRefusedOnEveryRoute() throws Exception {
+        install();
+        var name = sandboxName();
+        runner.replies.put("docker ps", new FactoryProcess.ExecResult(0, name + "\n", false));
+        for (var url : List.of("/api/factory/harness/start", "/api/factory/harness/stop",
+                "/api/factory/gateway/pause", "/api/factory/gateway/resume",
+                "/api/factory/sandboxes/" + name + "/stop")) {
+            var resp = asAgent(() -> POST(agentRequest(), url, "application/json", "{}"));
+            assertStatus(403, resp);
+            assertTrue(getContent(resp).contains("operator_only"), url + ": " + getContent(resp));
+        }
+        var get = asAgent(() -> GET(agentRequest(), "/api/factory/settings"));
+        assertStatus(403, get);
+        var put = asAgent(() -> PUT(agentRequest(), "/api/factory/settings", "application/json",
+                "{\"FACTORY_MAX_PARALLEL\":3}"));
+        assertStatus(403, put);
+        assertTrue(runner.calls.isEmpty(), runner.calls::toString);
+        assertFalse(Files.exists(home.resolve("settings.env")));
     }
 
     private Http.Response asAgent(Supplier<Http.Response> call) {
