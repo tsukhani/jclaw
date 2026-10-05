@@ -361,6 +361,8 @@ async function turnOffSchedule() {
 /** How long a finished restore or repair stays on screen, measured from when it started. */
 const LAST_OP_WINDOW_MS = 15 * 60 * 1000
 
+const OP_VERBS = new Map([['restore', 'Restore'], ['repair', 'Repair']])
+
 /**
  * The outcome `jclaw.sh` left in logs/database-status.json. It exists for the reload the
  * restart forces, but the file stays until the next operation overwrites it — so show it
@@ -379,7 +381,7 @@ const lastOp = computed(() => {
     const started = op.startedAt ? Date.parse(op.startedAt) : Number.NaN
     if (Number.isNaN(started) || Date.now() - started > LAST_OP_WINDOW_MS) return null
   }
-  const verb = op.op === 'restore' ? 'Restore' : op.op === 'repair' ? 'Repair' : 'Maintenance'
+  const verb = OP_VERBS.get(op.op ?? '') ?? 'Maintenance'
   return {
     text: `${verb}: ${op.message ?? op.phase}`,
     ok,
