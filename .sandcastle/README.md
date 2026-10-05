@@ -52,6 +52,10 @@ lockfile changes. Every two minutes it:
    [GitHub issues](#github-issues)).
 2. Rebuilds the sandbox image if `main` has moved, and has a planner agent predict each story's files, decide whether
    it needs BMAD, and decline one that should not be built at all. A story waits while its files overlap a branch awaiting review or a story already running.
+   A running story holds its predicted files (all files, if the prediction is unknown) until its implement, build or
+   rework phase completes, and from then on the files its branch changes against `main`, recomputed each round. A
+   later review fix or repair can touch a file outside that diff after another story has started on it; nothing
+   prevents that, but landing refuses a branch that conflicts with `main` and reports it.
 3. Claims a story by assigning it to its own Jira user, moves it to In Progress, and runs it in a fresh sandbox:
    - **Implement**, or **rework** if you sent it back. A story that needs BMAD is **specced**, then **built**, by
      BMAD instead (see [BMAD stories](#bmad-stories)).

@@ -12,7 +12,7 @@ import { githubTracker } from "./github.ts";
 import { jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
 import { MergeRefused, landBranch, landedAs, mergeVerdict, type Report } from "./merge.ts";
-import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type StoryPlan } from "./plan.ts";
+import { buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, type About } from "./board.ts";
 import { MAX_OVERLOADS, Overloads, afterFailure, overloadReason, resetsOverloads } from "./overload.ts";
@@ -162,6 +162,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     try {
       const result = await body();
       if (resetsOverloads(phase)) overloads.completed(key);
+      if (buildsTheDiff(phase)) builtDiff(key);
       return result;
     } catch (error) {
       failedIn ??= phase;
@@ -199,6 +200,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
       }
     } else if (alreadyAhead > 0) {
       console.log(`[${key} implement] skipped: ${branch} is already ${alreadyAhead} commit(s) ahead of main`);
+      builtDiff(key);
     } else if (mode.bmad) {
       // BMAD's bmad-build-auto writes the spec, then builds from it. Halting in between means a ticket it can read more
       // than one way goes back with its questions before any code is written.
@@ -427,9 +429,14 @@ const predictPlans = async (stories: Snapshot[]): Promise<Map<string, StoryPlan>
   }
 };
 
-// Stories this process is running, with the files each was predicted to change (undefined: unknown).
-const running = new Map<string, Set<string> | undefined>();
+// Stories this process is running: the files each was predicted to change (undefined: unknown), and whether its build
+// phase has completed, after which it holds its real diff instead.
+const running = new Map<string, RunningStory>();
 const predicted = new Map<string, { updated: string; plan: StoryPlan }>();
+const builtDiff = (key: string) => {
+  const run = running.get(key);
+  if (run) run.built = true;
+};
 
 // A source refused the story as it stands (GitHub: its text changed after the owner's label). Blocking it takes it out of
 // the next intake, so the comment is posted once.
@@ -533,7 +540,7 @@ const landAll = async (): Promise<Promise<void>[]> => {
   const started: Promise<void>[] = [];
   for (const key of await fromAll("stories to merge", (t) => t.mergeQueue())) {
     if (running.has(key) || running.size >= LIMIT) continue;
-    running.set(key, new Set(changedOn(key)));
+    running.set(key, { predicted: undefined, built: true });
     started.push(land(key).catch((error) => console.log(`[${key} merge] failed: ${errorText(error)}`)).finally(() => running.delete(key)));
   }
   return started;
@@ -586,8 +593,9 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   for (const k of await fromAll("stories in review", (t) => t.inReview())) {
     if (!unblocked.some((s) => s.key === k)) for (const f of changedOn(k)) inFlight.set(f, `${k} (in review)`);
   }
-  for (const [k, files] of running) for (const f of files ?? []) inFlight.set(f, `${k} (in progress)`);
-  if ([...running.values()].includes(undefined)) {
+  const holding = [...running].map(([k, run]) => [k, heldFiles(k, run, changedOn)] as const);
+  for (const [k, files] of holding) for (const f of files ?? []) inFlight.set(f, `${k} (in progress)`);
+  if (holding.some(([, files]) => files === undefined)) {
     note("alone", "[plan] a running story's files are unknown, so nothing else starts until it finishes");
     wait(unblocked, "a running story's files are unknown, so nothing else starts until it finishes");
     return [];
@@ -621,7 +629,7 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   console.log(`[plan] starting ${described.join(", ")}; main is at ${gitIn(REPO, "rev-parse", "--short", "main")}`);
   if (process.env.FACTORY_PLAN_ONLY) return [];
   return starting.map(({ story: s, mode }) => {
-    running.set(s.key, files.get(s.key));
+    running.set(s.key, { predicted: files.get(s.key), built: false });
     lastSaid.delete(s.key);
     return processStory(s, mode)
       .catch(() => {

@@ -81,3 +81,12 @@ const SENSITIVE = [
   /^(AGENTS|CLAUDE)\.md$/,
 ];
 export const sensitivePaths = (files: string[]): string[] => files.filter((f) => SENSITIVE.some((r) => r.test(f)));
+
+// A running story holds its predicted files (undefined: unknown, so everything) until its build phase completes, and its
+// branch's real diff against main from then on, recomputed each round.
+export type RunningStory = { predicted: Set<string> | undefined; built: boolean };
+export const heldFiles = (key: string, run: RunningStory, changedOn: (key: string) => string[]): Set<string> | undefined =>
+  run.built ? new Set(changedOn(key)) : run.predicted;
+
+// The phases whose completion means the branch holds the story's real diff.
+export const buildsTheDiff = (phase: string) => phase === "implement" || phase === "build" || phase === "rework";
