@@ -150,3 +150,24 @@ describe('ChatMessage lewis fence (JCLAW-1309)', () => {
     }
   })
 })
+
+describe('ChatMessage stop marker (JCLAW-1388)', () => {
+  it('renders a stored stop marker as the muted stop note with no reply actions', async () => {
+    const marker = msg({ id: 7, role: 'assistant', messageKind: 'stop_marker', content: '(Stopped by the user before replying.)' })
+    const c = await mountSuspended(ChatMessage, { props: props(marker) })
+    const note = c.find('[data-testid="stop-marker"] .italic')
+    expect(note.exists()).toBe(true)
+    expect(note.classes()).toContain('text-fg-muted')
+    expect(c.text()).toContain('(stopped before any response)')
+    expect(c.text()).not.toContain('Stopped by the user before replying')
+    expect(c.find('button[title="Regenerate response"]').exists()).toBe(false)
+    expect(c.find('button[aria-label="Read message aloud"]').exists()).toBe(false)
+  })
+
+  it('keeps Regenerate and Read aloud on an ordinary assistant reply', async () => {
+    const c = await mountSuspended(ChatMessage, { props: props(msg({ id: 8, role: 'assistant', content: 'a reply' })) })
+    expect(c.find('[data-testid="stop-marker"]').exists()).toBe(false)
+    expect(c.find('button[title="Regenerate response"]').exists()).toBe(true)
+    expect(c.find('button[aria-label="Read message aloud"]').exists()).toBe(true)
+  })
+})

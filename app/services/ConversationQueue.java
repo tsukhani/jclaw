@@ -185,19 +185,42 @@ public class ConversationQueue {
         var state = queues.get(conversationId);
         if (state == null) return false;
         AtomicBoolean stopped;
+        @Nullable RuntimeException markerFailure = null;
         synchronized (state) {
             // An owner with no flag of its own (a drained or sync run) could not be told to stop.
             stopped = state.ownerCancel;
             if (!state.processing || stopped == null) return false;
             stopped.set(true);
+            // Committed before the release, so the next turn's request cannot land ahead of it.
+            try {
+                ConversationService.appendStopMarkerIfUnanswered(conversationId);
+            } catch (RuntimeException e) {
+                markerFailure = e;
+            }
             // A channel turn's flag is the conversation's, and the stale drain never clears it: renew it.
             if (stopped == state.cancelled) state.cancelled = new AtomicBoolean(false);
             state.pending.clear();
             state.generation = GENERATIONS.incrementAndGet();
             state.finishProcessing();
         }
+        if (markerFailure != null) {
+            EventLogger.warn(QUEUE, "Stop marker not written for conversation %d: %s"
+                    .formatted(conversationId, markerFailure.getMessage()));
+        }
         TurnCancellation.cancel(stopped);
         return true;
+    }
+
+    /**
+     * Write the stop marker while the turn that acquired {@code generation} still owns the
+     * conversation, ignoring its cancel flag: a stopped turn's own cancel path writes it, and an
+     * operator {@link #stop} that already wrote one has made the generation stale.
+     *
+     * @return {@code true} when the conversation was still owned (whether or not a marker was due)
+     */
+    public static boolean writeStopMarkerIfOwner(Long conversationId, long generation) {
+        return commitIfOwner(conversationId, generation, null,
+                () -> ConversationService.appendStopMarkerIfUnanswered(conversationId));
     }
 
     /**

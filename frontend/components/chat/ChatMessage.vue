@@ -186,6 +186,17 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
     v-show="!runSlice || !runSlice?.collapsed"
     :msg="msg"
   />
+  <!-- JCLAW-1388: the stored stop marker reads like the live note and offers no reply actions. -->
+  <div
+    v-else-if="msg.messageKind === 'stop_marker'"
+    v-show="!runSlice || !runSlice?.collapsed"
+    class="flex justify-start"
+    data-testid="stop-marker"
+  >
+    <div class="text-fg-muted text-base italic">
+      (stopped before any response)
+    </div>
+  </div>
   <div
     v-else
     v-show="!runSlice || !runSlice?.collapsed"

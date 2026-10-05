@@ -20,6 +20,7 @@ import models.MessageAttachment;
 import models.SessionCompaction;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
+import play.db.jpa.NoTransaction;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AttachmentService;
@@ -27,6 +28,7 @@ import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
 import services.ModelOverrideResolver;
+import services.Tx;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
 import utils.ApiResponses;
@@ -485,15 +487,20 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = StopTurnResponse.class)))
     @Operation(summary = "Stop the web chat turn running in a conversation and release it")
     @AgentAccess(value = OPERATOR_ONLY, reason = "the operator's chat Stop button")
+    @NoTransaction
     public static void stopTurn(Long id) {
-        var conversation = requireConversation(id);
-        if (!"web".equals(conversation.channelType)) {
-            badRequest();
-        }
+        // No request transaction: the stop marker must commit before the stop releases the conversation.
+        var agentName = Tx.run(() -> {
+            var conversation = requireConversation(id);
+            if (!"web".equals(conversation.channelType)) {
+                badRequest();
+            }
+            return conversation.agent.name;
+        });
         var pending = ConversationQueue.getQueueSize(id);
         var stopped = ConversationQueue.stop(id);
         if (stopped) {
-            EventLogger.info("queue", conversation.agent.name, conversation.channelType,
+            EventLogger.info("queue", agentName, "web",
                     "Stopped the turn in conversation %d, dropped %d pending message(s)".formatted(id, pending));
         }
         renderJSON(gson.toJson(new StopTurnResponse(stopped)));
