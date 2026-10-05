@@ -9,6 +9,7 @@ import play.mvc.With;
 import services.EventLogger;
 import services.factory.FactoryHome;
 import services.factory.FactoryProcess;
+import services.factory.FactoryStatus;
 import utils.ApiResponses;
 
 import java.io.IOException;
@@ -25,8 +26,9 @@ import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
- * Software Factory controls (JCLAW-1392): start or stop the AFK harness, pause or resume its
- * gateway, stop one sandbox, and read or edit {@code settings.env}. The terminal equivalents are
+ * Software Factory status (JCLAW-1391) and controls (JCLAW-1392): read the factory's state, board
+ * and story logs; start or stop the AFK harness, pause or resume its gateway, stop one sandbox,
+ * and read or edit {@code settings.env}. The terminal equivalents are
  * in {@code .sandcastle/README.md} under Operating and Settings.
  */
 @With(AuthCheck.class)
@@ -62,6 +64,31 @@ public class ApiFactoryController extends Controller {
 
     /** @param message null on a read; what happens next on a write */
     public record SettingsView(List<SettingEntry> settings, @Nullable String message) {}
+
+    /** GET /api/factory — installed, supported, harness, gateway, sandboxes and the parsed board. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = FactoryStatus.StatusView.class)))
+    @AgentAccess(OPERATOR_ONLY)
+    public static void status() {
+        renderJSON(GSON.toJson(FactoryStatus.current()));
+    }
+
+    /** GET /api/factory/stories/{key}/logs/{file} — the last 256 KB of a log board.json lists for the story. */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = FactoryStatus.LogView.class)))
+    @AgentAccess(OPERATOR_ONLY)
+    public static void storyLog(String key, String file) {
+        FactoryStatus.LogView view;
+        try {
+            view = FactoryStatus.log(key, file);
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, "Could not read factory log " + file + ": " + ApiResponses.messageOf(e));
+            view = null;
+        }
+        if (view == null) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No log " + file + " for story " + key + ".");
+            throw ApiResponses.unreachable();
+        }
+        renderJSON(GSON.toJson(view));
+    }
 
     /** POST /api/factory/harness/start — run {@code .sandcastle/install-agent.sh}. */
     @AgentAccess(value = OPERATOR_ONLY, reason = "installs and starts the AFK harness on the operator's machine")
@@ -105,6 +132,7 @@ public class ApiFactoryController extends Controller {
         }
         var story = storyIn(name);
         var res = FactoryProcess.run(List.of(DOCKER, "stop", name), DOCKER_ACTION_TIMEOUT);
+        FactoryStatus.clearCache();
         var message = res.ok() ? stoppedMessage(story) : failureMessage(res);
         log("sandbox stop " + name + (story != null ? " (story " + story + ")" : ""), res);
         renderJSON(GSON.toJson(new SandboxStopResult(res.exitCode(), res.timedOut(), res.tail(), message, story)));
@@ -233,6 +261,7 @@ public class ApiFactoryController extends Controller {
     }
 
     private static void renderCommand(String did, FactoryProcess.ExecResult res, String successMessage) {
+        FactoryStatus.clearCache();
         log(did, res);
         var message = res.ok() ? successMessage : failureMessage(res);
         renderJSON(GSON.toJson(new CommandResult(res.exitCode(), res.timedOut(), res.tail(), message)));

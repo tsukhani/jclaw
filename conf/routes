@@ -303,6 +303,9 @@ PUT     /api/channels/{channelType}             ApiChannelsController.save
 GET     /api/tailscale                          ApiTailscaleController.status
 POST    /api/tailscale                          ApiTailscaleController.toggle
 
+# Software Factory status, board and story logs (JCLAW-1391)
+GET     /api/factory                            ApiFactoryController.status
+GET     /api/factory/stories/{key}/logs/{file}  ApiFactoryController.storyLog
 # Software Factory controls (JCLAW-1392): the AFK harness, its gateway, one sandbox, settings.env
 POST    /api/factory/harness/start              ApiFactoryController.harnessStart
 POST    /api/factory/harness/stop               ApiFactoryController.harnessStop
