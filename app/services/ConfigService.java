@@ -281,6 +281,26 @@ public class ConfigService {
      * @return an error message if the key is rejected, or {@code null} on success
      */
     public static @Nullable String setWithSideEffects(String key, String value) {
+        var rejection = rejectionFor(key, value);
+        if (rejection != null) {
+            return rejection;
+        }
+
+        set(key, value);
+
+        for (var effect : SIDE_EFFECTS) {
+            effect.apply(key, value);
+        }
+        return null;
+    }
+
+    /**
+     * The refusal {@link #setWithSideEffects} would answer for this write, without storing it or
+     * running a side effect.
+     *
+     * @return the 403 message, or {@code null} when the write may proceed
+     */
+    public static @Nullable String rejectionFor(String key, String value) {
         var rejection = guardRejection(key, value);
         if (rejection != null) {
             return rejection;
@@ -290,12 +310,6 @@ public class ConfigService {
             if (rejection != null) {
                 return rejection;
             }
-        }
-
-        set(key, value);
-
-        for (var effect : SIDE_EFFECTS) {
-            effect.apply(key, value);
         }
         return null;
     }

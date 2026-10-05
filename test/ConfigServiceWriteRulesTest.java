@@ -20,8 +20,9 @@ import utils.SsrfGuard;
  * Pins every refusal {@link ConfigService#setWithSideEffects} can answer, the precedence between
  * checks that share a key, and that a refused write stores nothing and applies nothing.
  *
- * <p>No {@code Fixtures.deleteDatabase()}: refused writes leave no row, and every accepted write
- * restores the key it touched, so this class owns its keys rather than the whole table.
+ * <p>No {@code Fixtures.deleteDatabase()}: refused writes leave no row, accepted values are checked
+ * through {@link ConfigService#rejectionFor} without one, and the one stored write is to a logger
+ * this class owns.
  */
 class ConfigServiceWriteRulesTest extends UnitTest {
 
@@ -36,14 +37,10 @@ class ConfigServiceWriteRulesTest extends UnitTest {
         assertRefused(owner, key, value);
     }
 
-    private static void assertAcceptedThenRestored(String key, String value) {
-        var before = ConfigService.get(key);
-        try {
-            assertNull(ConfigService.setWithSideEffects(key, value), () -> key + "=" + value);
-        } finally {
-            if (before == null) ConfigService.delete(key);
-            else ConfigService.set(key, before);
-        }
+    /** Validated without a write: these keys are read live, and a floor value stored for a moment
+     *  would reach whatever concurrent class reads them (a retention of 1 empties its fixture). */
+    private static void assertAccepted(String key, String value) {
+        assertNull(ConfigService.rejectionFor(key, value), () -> key + "=" + value);
     }
 
     // --- cross-cutting guards, in order ---
@@ -115,9 +112,9 @@ class ConfigServiceWriteRulesTest extends UnitTest {
 
     @Test
     void recallKnobsAtTheirBoundsAreAccepted() {
-        assertAcceptedThenRestored("memory.recall.rrfK", "0");
-        assertAcceptedThenRestored("memory.recall.minCosine", "-1.0");
-        assertAcceptedThenRestored("memory.recall.minCosine", "1.0");
+        assertAccepted("memory.recall.rrfK", "0");
+        assertAccepted("memory.recall.minCosine", "-1.0");
+        assertAccepted("memory.recall.minCosine", "1.0");
     }
 
     @Test
@@ -161,7 +158,7 @@ class ConfigServiceWriteRulesTest extends UnitTest {
                 "ocr.tesseract.timeout", "0");
         assertRefused("ocr.pdf.strategy must be one of auto, no_ocr, ocr_only or ocr_and_text_extraction.",
                 "ocr.pdf.strategy", "sometimes");
-        assertAcceptedThenRestored("ocr.tesseract.timeout", "1");
+        assertAccepted("ocr.tesseract.timeout", "1");
     }
 
     @Test
@@ -169,8 +166,8 @@ class ConfigServiceWriteRulesTest extends UnitTest {
         assertRefused("logs.retentionDays must be a whole number of days, at least 1.", "logs.retentionDays", "0");
         assertRefused("tasks.fireMaxDurationSeconds must be a whole number of seconds; 0 turns the limit off.",
                 "tasks.fireMaxDurationSeconds", "-1");
-        assertAcceptedThenRestored("logs.retentionDays", "1");
-        assertAcceptedThenRestored("tasks.fireMaxDurationSeconds", "0");
+        assertAccepted("logs.retentionDays", "1");
+        assertAccepted("tasks.fireMaxDurationSeconds", "0");
     }
 
     @Test
@@ -191,7 +188,7 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     void theApprovalTimeoutRuleOutranksTheTelegramNamespace() {
         assertRefused("telegram.approval.timeout-seconds must be a whole number of seconds, at least 1.",
                 agents.DangerousActionGate.APPROVAL_TIMEOUT_KEY, "0");
-        assertAcceptedThenRestored(agents.DangerousActionGate.APPROVAL_TIMEOUT_KEY, "1");
+        assertAccepted(agents.DangerousActionGate.APPROVAL_TIMEOUT_KEY, "1");
     }
 
     @Test
@@ -250,12 +247,21 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
-    void aRefusedLoggerKeyNeverReachesTheLogger() {
-        // Refused by the mask guard, so the per-logger side effect must not run.
-        var logger = "jclaw1402.probe.apiKey";
-        var before = LogManager.getLogger(logger).getLevel();
-        assertNotNull(ConfigService.setWithSideEffects("logging.level." + logger, "DEBU****"));
-        assertEquals(before, LogManager.getLogger(logger).getLevel());
+    void aRefusedWriteToAKeyWithASideEffectStoresNothing() {
+        // No value is both a mask and a valid level, so the logger cannot show the effect not running;
+        // the absent row shows set() was never reached, and every side effect runs after it.
+        var key = "logging.level.jclaw1402.probe.apiKey";
+        assertNotNull(ConfigService.setWithSideEffects(key, "DEBU****"));
+        assertNull(ConfigService.get(key));
+    }
+
+    @Test
+    void rejectionForAnswersWhatTheWriteWouldWithoutStoringIt() {
+        var key = "logging.level.jclaw1402.probe.validate";
+        assertNull(ConfigService.rejectionFor(key, "TRACE"));
+        assertNull(ConfigService.get(key));
+        assertEquals(ConfigService.rejectionFor("logs.retentionDays", "0"),
+                ConfigService.setWithSideEffects("logs.retentionDays", "0"));
     }
 
     // --- side effects of an accepted write ---
