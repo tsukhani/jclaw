@@ -1,4 +1,7 @@
-import { test, expect, gotoPage } from './helpers'
+import type { Page } from '@playwright/test'
+import type { Agent, ConfigResponse, ProviderModelDef } from '~/types/api'
+import { ROUTER_MODEL_ID, ROUTER_PROVIDER } from '../../utils/model-route'
+import { test, expect, gotoPage, json } from './helpers'
 
 /**
  * UAT-15 — Chat, the core product path.
@@ -18,13 +21,46 @@ function sse(events: Array<Record<string, unknown>>): string {
   return events.map(e => `data: ${JSON.stringify(e)}\n`).join('')
 }
 
+/** The agent the chat page opened on, as GET /api/agents reports it. */
+async function selectedAgent(page: Page): Promise<Agent> {
+  const agents = (await json(page.request, '/api/agents')).body as Agent[]
+  const select = page.getByRole('combobox', { name: 'Agent:' })
+  // With a single agent the page renders its name as text, not a select.
+  if (await select.count() === 0) return agents[0]!
+  await expect(select).not.toHaveValue('')
+  const id = Number(await select.inputValue())
+  const agent = agents.find(a => a.id === id)
+  if (!agent) throw new Error(`the chat page opened on agent ${id}, which GET /api/agents does not list`)
+  return agent
+}
+
+/** Whether the agent's model is configured as thinking-capable, from the entry the page's capability pills read. */
+async function supportsThinking(page: Page, agent: Agent): Promise<boolean> {
+  const { entries } = (await json(page.request, '/api/config')).body as ConfigResponse
+  const models = entries.find(e => e.key === `provider.${agent.modelProvider}.models`)?.value ?? '[]'
+  return (JSON.parse(models) as ProviderModelDef[]).find(m => m.id === agent.modelId)?.supportsThinking === true
+}
+
+/** The model picker, whose label is "<model name><provider>". */
+function modelPicker(page: Page, agent: Agent) {
+  return page.locator('button').filter({ hasText: agent.modelProvider }).first()
+}
+
 test.describe('UAT-15 chat', () => {
   test('chat page renders its composer and controls', async ({ page }) => {
     await gotoPage(page, '/chat')
     await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
     await expect(page.getByLabel('Upload files')).toBeAttached()
     await expect(page.getByRole('button', { name: 'Start voice mode' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Think' })).toBeVisible()
+
+    const agent = await selectedAgent(page)
+    // The picker naming the model proves the data the pills derive from has loaded, so an absent Think means absent.
+    await expect(modelPicker(page, agent)).toBeVisible()
+    // On Auto no model is resolved until a turn's route frame names one (JCLAW-1222), so Think cannot show yet.
+    const onRouter = agent.modelProvider === ROUTER_PROVIDER && agent.modelId === ROUTER_MODEL_ID
+    const think = page.getByRole('button', { name: 'Think' })
+    if (!onRouter && await supportsThinking(page, agent)) await expect(think).toBeVisible()
+    else await expect(think).toHaveCount(0)
   })
 
   test('the chat fits under the status banner without overflowing the page', async ({ page, context }) => {
@@ -48,10 +84,8 @@ test.describe('UAT-15 chat', () => {
 
   test('model picker exposes the active model', async ({ page }) => {
     await gotoPage(page, '/chat')
-    // The combobox label is "<model name><provider>" — assert a provider is
-    // named, which is what tells the operator where a turn will actually go.
-    const picker = page.locator('button').filter({ hasText: /ollama|openai|openrouter|anthropic|lm-?studio/i }).first()
-    await expect(picker).toBeVisible()
+    // Naming the agent's own provider is what tells the operator where a turn will actually go.
+    await expect(modelPicker(page, await selectedAgent(page))).toBeVisible()
   })
 
   test('a full turn streams, renders and reports usage', async ({ page }) => {
