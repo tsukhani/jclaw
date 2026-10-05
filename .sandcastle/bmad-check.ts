@@ -1,5 +1,5 @@
 // Live check of a bmad story's setup: the seed installs into a sandbox, BMAD renders bmad-build-auto there with the
-// factory's overrides, and the tree stays clean for bmad-build-auto's own check. No model call. `npx tsx bmad-check.ts`
+// factory's overrides, and the tree stays clean for bmad-build-auto's own check. No model call. `pnpm exec tsx bmad-check.ts`
 import { execFileSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { ensureBmadSeed, ensureGateway, factorySandbox, installBmad, planHooks } from "./factory.ts";

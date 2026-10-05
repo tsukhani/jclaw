@@ -164,12 +164,12 @@
 
     // The AFK factory's Sandcastle. Before 1.0 it ships breaking changes as patch releases, and
     // .sandcastle/factory.ts wraps its Docker provider's internals to lock the sandbox's .git down, so a
-    // bump is reviewed and `npx tsx sandbox-check.ts` run before merging.
+    // bump is reviewed and `pnpm exec tsx sandbox-check.ts` run before merging.
     {
       matchPackageNames: ["@ai-hero/sandcastle"],
       automerge: false,
       prBodyNotes: [
-        ":warning: Run `cd .sandcastle && npm ci && npx tsx sandbox-check.ts` before merging: the factory's `.git` lockdown wraps Sandcastle's Docker provider.",
+        ":warning: Run `cd .sandcastle && pnpm install --frozen-lockfile && pnpm exec tsx sandbox-check.ts` before merging: the factory's `.git` lockdown wraps Sandcastle's Docker provider.",
       ],
     },
 

@@ -19,9 +19,9 @@ set -euo pipefail
 REPO_ROOT="$(git rev-parse --show-toplevel)"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 
-# pnpm package-manager integrity guard. Refuse commits that pin pnpm in
-# frontend/package.json while frontend/pnpm-lock.yaml carries no record of the
-# package manager itself.
+# pnpm package-manager integrity guard, for each pnpm project (frontend/ and
+# the factory's .sandcastle/). Refuse commits that pin pnpm in its package.json
+# while its pnpm-lock.yaml carries no record of the package manager itself.
 #
 # This used to check for a +sha512-... suffix on the pin, which is what corepack
 # verified tarballs against. pnpm 12 ignores that suffix entirely (measured) and
@@ -33,29 +33,30 @@ FRONTEND_DIR="$REPO_ROOT/frontend"
 # Reads staged blobs via `git show :` — for a path that is not staged that
 # returns the index copy, i.e. HEAD's content, so a package.json-only commit is
 # still checked against the lockfile that will be in the tree.
-if git diff --cached --name-only --diff-filter=ACMR | grep -qx 'frontend/package.json'; then
-    staged_pin=$(git show ':frontend/package.json' \
+for pnpm_dir in frontend .sandcastle; do
+    git diff --cached --name-only --diff-filter=ACMR | grep -qx "$pnpm_dir/package.json" || continue
+    staged_pin=$(git show ":$pnpm_dir/package.json" \
         | sed -n 's/.*"packageManager": *"\([^"]*\)".*/\1/p' | head -1)
     if [[ -n "$staged_pin" ]]; then
         # grep -c, not grep -q: this file runs under `set -o pipefail`, and
         # `grep -q` closes the pipe on its first match, so `git show` dies of
         # SIGPIPE and the pipeline reports failure on the SUCCESS path — which
-        # would block every commit that touches frontend/package.json.
-        lock_pm_records=$(git show ':frontend/pnpm-lock.yaml' 2>/dev/null \
+        # would block every commit that touches the package.json.
+        lock_pm_records=$(git show ":$pnpm_dir/pnpm-lock.yaml" 2>/dev/null \
             | grep -c 'packageManagerDependencies:' || true)
         if [[ "${lock_pm_records:-0}" -eq 0 ]]; then
-            echo "[jclaw pre-commit] frontend/package.json pins ${staged_pin} but frontend/pnpm-lock.yaml" >&2
+            echo "[jclaw pre-commit] $pnpm_dir/package.json pins ${staged_pin} but $pnpm_dir/pnpm-lock.yaml" >&2
             echo "[jclaw pre-commit] records no packageManagerDependencies block." >&2
             echo "[jclaw pre-commit] That block is what pnpm verifies its own binary against; without it" >&2
             echo "[jclaw pre-commit] the package manager is unverified — refusing the commit." >&2
             echo "" >&2
             echo "[jclaw pre-commit] Fix with:" >&2
-            echo "[jclaw pre-commit]   cd frontend && pnpm install" >&2
-            echo "[jclaw pre-commit] then stage frontend/pnpm-lock.yaml and re-commit." >&2
+            echo "[jclaw pre-commit]   cd $pnpm_dir && pnpm install" >&2
+            echo "[jclaw pre-commit] then stage $pnpm_dir/pnpm-lock.yaml and re-commit." >&2
             exit 1
         fi
     fi
-fi
+done
 
 # Heads-up check for newly-added files that an ignore layer would silently
 # strip from a downstream artifact. Catches the class of bug where a new

@@ -1,6 +1,6 @@
 // Live check of the sandbox lockdown: resource limits, which parts of the clone's .git a sandbox can write, that a
 // commit and the gate's switch to main still work, and that git on the Mac runs no planted hook. No model call.
-// `npx tsx sandbox-check.ts`
+// `pnpm exec tsx sandbox-check.ts`
 import { execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";

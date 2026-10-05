@@ -289,7 +289,7 @@ BMAD is the exception: it follows your checkout, not main. The BMAD seed is repl
 
 ## Setup on a Mac
 
-Prerequisites: Docker Desktop running, Node 24 or newer, a JClaw checkout, and a Jira personal access token.
+Prerequisites: Docker Desktop running, Node 24 or newer, pnpm 12 or newer, a JClaw checkout, and a Jira personal access token.
 
 1. Create `~/.jclaw-factory/.env` holding the model credential: `CLAUDE_CODE_OAUTH_TOKEN=…` (from `claude setup-token`) or
    `ANTHROPIC_API_KEY=…`.
@@ -400,8 +400,8 @@ with the reason in the log. A model name is checked only when the first story ru
 
 ## Checks
 
-- `npm run check`: typecheck plus the offline logic checks.
-- `npx tsx sandbox-check.ts`: live check of a sandbox's `.git` lockdown and limits, and of hook-free git on the Mac.
-- `npx tsx gateway-check.ts`: live check of the gateway, egress and route allowlist. It spends one small model call.
-- `npx tsx bmad-check.ts`: live check that a `bmad` story's sandbox gets BMAD, that BMAD renders there with the factory's
+- `pnpm run check`: typecheck plus the offline logic checks.
+- `pnpm exec tsx sandbox-check.ts`: live check of a sandbox's `.git` lockdown and limits, and of hook-free git on the Mac.
+- `pnpm exec tsx gateway-check.ts`: live check of the gateway, egress and route allowlist. It spends one small model call.
+- `pnpm exec tsx bmad-check.ts`: live check that a `bmad` story's sandbox gets BMAD, that BMAD renders there with the factory's
   overrides, and that the tree stays clean. No model call.

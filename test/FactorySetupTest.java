@@ -106,11 +106,13 @@ class FactorySetupTest extends UnitTest {
     @Test
     void allPrerequisitesOk() {
         replies.put("node", new FactoryProcess.ExecResult(0, "v24.3.0\n", false));
+        replies.put("pnpm", new FactoryProcess.ExecResult(0, "12.6.0\n", false));
         var p = prerequisites("Mac OS X");
-        assertEquals(List.of("macos", "docker", "node", "checkout"), List.copyOf(p.keySet()));
+        assertEquals(List.of("macos", "docker", "node", "pnpm", "checkout"), List.copyOf(p.keySet()));
         assertState(FactorySetup.OK, p.get("macos"));
         assertState(FactorySetup.OK, p.get("docker"));
         assertState(FactorySetup.OK, p.get("node"));
+        assertState(FactorySetup.OK, p.get("pnpm"));
         assertState(Files.isRegularFile(FactoryHome.installer()) ? FactorySetup.OK : FactorySetup.MISSING,
                 p.get("checkout"));
     }
@@ -121,21 +123,29 @@ class FactorySetupTest extends UnitTest {
 
         replies.put("docker", new FactoryProcess.ExecResult(-1, "no such file", false));
         replies.put("node", new FactoryProcess.ExecResult(-1, "no such file", false));
-        assertState(FactorySetup.MISSING, prerequisites("Mac OS X").get("docker"));
-        assertState(FactorySetup.MISSING, prerequisites("Mac OS X").get("node"));
+        replies.put("pnpm", new FactoryProcess.ExecResult(-1, "no such file", false));
+        var absent = prerequisites("Mac OS X");
+        assertState(FactorySetup.MISSING, absent.get("docker"));
+        assertState(FactorySetup.MISSING, absent.get("node"));
+        assertState(FactorySetup.MISSING, absent.get("pnpm"));
+        assertTrue(absent.get("pnpm").fix().contains("put pnpm on JClaw's PATH"), absent.get("pnpm")::toString);
 
         replies.put("docker", new FactoryProcess.ExecResult(1, "Cannot connect", false));
         replies.put("node", new FactoryProcess.ExecResult(0, "v22.1.0\n", false));
+        replies.put("pnpm", new FactoryProcess.ExecResult(0, "11.9.0\n", false));
         var p = prerequisites("Mac OS X");
         assertState(FactorySetup.MISSING, p.get("docker"));
         assertTrue(p.get("docker").fix().contains("Start Docker Desktop"), p.get("docker")::toString);
         assertState(FactorySetup.MISSING, p.get("node"));
+        assertState(FactorySetup.MISSING, p.get("pnpm"));
 
         replies.put("docker", new FactoryProcess.ExecResult(-1, "", true));
         replies.put("node", new FactoryProcess.ExecResult(0, "garbage\n", false));
+        replies.put("pnpm", new FactoryProcess.ExecResult(0, "garbage\n", false));
         p = prerequisites("Mac OS X");
         assertState(FactorySetup.UNKNOWN, p.get("docker"));
         assertState(FactorySetup.UNKNOWN, p.get("node"));
+        assertState(FactorySetup.UNKNOWN, p.get("pnpm"));
     }
 
     @Test
@@ -146,6 +156,7 @@ class FactorySetupTest extends UnitTest {
         var p = prerequisites("Mac OS X");
         assertState(FactorySetup.UNKNOWN, p.get("docker"));
         assertState(FactorySetup.UNKNOWN, p.get("node"));
+        assertState(FactorySetup.UNKNOWN, p.get("pnpm"));
     }
 
     @Test

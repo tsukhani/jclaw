@@ -66,7 +66,7 @@ With `$ARGUMENTS` = `caps`, stop here. Otherwise continue to Phase 1; a stale ca
 3. **Classify each surviving branch by its changed files** (authoritative — branch names are only a hint): `/usr/bin/git diff --name-only main...origin/renovate/<b>`.
    - Touches any `frontend/**` (typically `frontend/package.json`, `frontend/pnpm-lock.yaml`) → **FRONTEND**.
    - Touches `build.gradle.kts`, `settings.gradle.kts`, `gradle/**`, `*.gradle.kts`, or `gradle.properties` → **BACKEND**.
-   - Touches `.sandcastle/**` (the AFK factory's `package.json` / `package-lock.json`) → **FACTORY**.
+   - Touches `.sandcastle/**` (the AFK factory's `package.json` / `pnpm-lock.yaml`) → **FACTORY**.
    - Touches both → **BOTH** (run both suites).
    - Touches neither code path (e.g. only `.github/**` or a renovate config) → **DOCS/CONFIG** (merge, no suite — note it).
 4. Present a **plan table** — branch, ecosystem, what it bumps (read the `package.json` / `build.gradle.kts` hunk to name the dependency + version), already-merged-skips — and get a quick confirmation before any merge.
@@ -106,9 +106,9 @@ Process **BACKEND** branches first, then **FRONTEND**, then **FACTORY** — each
 
    If the regen is red but the merged lockfile (`git checkout HEAD -- pnpm-lock.yaml`, clean `--frozen-lockfile` install) is green, the regen moved a transitive, not a bump. Look for a test or app import of a package `package.json` does not declare: it resolves to whichever copy pnpm hoists, and re-resolution can swap it. On 2026-10-06 that was `h3`, a peer of `@nuxt/test-utils`; declaring it fixed the regen.
 
-9. **Factory: merge, rebuild the npm lockfile by hand, validate in a scratch copy** — `.sandcastle/` is npm, not pnpm, and the factory runs live out of its `node_modules`:
-   - Merge each: `/usr/bin/git merge --no-edit origin/renovate/<b>`. **Never `-X theirs` here**: two bumps edit adjacent lines of `package.json`, and `-X theirs` takes the incoming side whole, reverting the other bump and leaving a lockfile `npm ci` rejects. On a conflict, `git merge --no-commit`, set `package.json` to both bumps, restore the lockfile from `HEAD`, and update it with `npm install --package-lock-only` in a scratch export, which moves only the conflicting package.
-   - Validate in that scratch export (`/usr/bin/git archive HEAD | tar -x -C <scratch>`, with the resolved files copied in): `npm ci && npm run check`. **Never `npm ci` in the checkout's `.sandcastle/`**: it deletes the `node_modules` the running harness and its esbuild service load from. `run.sh` reinstalls on the factory's next idle restart, when the lockfile hash changes.
+9. **Factory: merge, regenerate the lockfile in a scratch copy, validate there** — `.sandcastle/` is a pnpm project like `frontend/`, but its `package.json` pins exact versions and the factory runs live out of its `node_modules`:
+   - Merge each: `/usr/bin/git merge --no-edit origin/renovate/<b>`. **Never `-X theirs` here**: two bumps edit adjacent lines of `package.json`, and `-X theirs` takes the incoming side whole, reverting the other bump. On a conflict, `git merge --no-commit`, set `package.json` to both bumps, and take either side of `pnpm-lock.yaml` for now.
+   - Regenerate in a scratch export (`/usr/bin/git archive HEAD .sandcastle | tar -x -C <scratch>`, with the resolved `package.json` copied in): `rm -f pnpm-lock.yaml && pnpm install`, then `pnpm install --frozen-lockfile && pnpm run check`. Copy the lockfile back and commit it, with the open merge if there is one. **Never install in the checkout's `.sandcastle/`**: it replaces the `node_modules` the running harness and its esbuild service load from. `run.sh` reinstalls on the factory's next idle restart, when the lockfile hash changes.
 
 **Phase 4 — Report & hand off**
 
@@ -126,7 +126,7 @@ Process **BACKEND** branches first, then **FRONTEND**, then **FACTORY** — each
 - **Never `git push` or run `/deploy`** as part of this command — stop at the local merge commits. The lone exception is the Phase-4 branch-deletion push, and only when the user explicitly asks for cleanup.
 - Never `--no-verify`, `--force`, or any hook/signing bypass (except the documented `JCLAW_SKIP_TESTS=1` on the cleanup delete-push).
 - The frontend **lockfile regen is mandatory** after the merge cascade — a plain `pnpm install` is not sufficient and gives false greens.
-- Validate by ecosystem: backend → `play autotest`; frontend → `pnpm test` + `lint` + `typecheck` + `stylelint` (+ `pnpm install --frozen-lockfile`); factory → `npm ci` + `npm run check` in a scratch export, never in the live `.sandcastle/`. A BOTH branch runs both.
+- Validate by ecosystem: backend → `play autotest`; frontend → `pnpm test` + `lint` + `typecheck` + `stylelint` (+ `pnpm install --frozen-lockfile`); factory → `pnpm install --frozen-lockfile` + `pnpm run check` in a scratch export, never in the live `.sandcastle/`. A BOTH branch runs both.
 - Confirm before stopping jclaw for the backend suite; restart it afterward only if it was running.
 - A failing backend bump is undone (`reset --hard HEAD~1`) and skipped, not forced through; a failing frontend batch is reported for the user to triage.
 - **Never lift a version cap without the user choosing it.** Report the verdict and the cost; the decision is theirs. A lift and the upgrade behind it land in one commit, never separately.

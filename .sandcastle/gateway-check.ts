@@ -1,5 +1,5 @@
 // Live check of the lockdown: the gateway's own hardening, then egress and an agent turn from a sandbox behind it.
-// Spends one small model call. `npx tsx gateway-check.ts`
+// Spends one small model call. `pnpm exec tsx gateway-check.ts`
 import { execFileSync } from "node:child_process";
 import * as sandcastle from "@ai-hero/sandcastle";
 import { IMAGE, ensureGateway, ensureGradleSeed, factorySandbox, planHooks } from "./factory.ts";

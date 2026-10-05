@@ -40,11 +40,13 @@ public final class FactorySetup {
     static final String KEY_GITHUB = "GITHUB_TOKEN";
 
     static final int MIN_NODE = 24;
+    static final int MIN_PNPM = 12;
     static final Duration PROBE_TIMEOUT = Duration.ofSeconds(5);
 
     private static final List<String> FIELDS =
             List.of(FIELD_CLAUDE_OAUTH, FIELD_ANTHROPIC_KEY, FIELD_JIRA_URL, FIELD_JIRA_TOKEN, FIELD_GITHUB);
-    private static final Pattern NODE_VERSION = Pattern.compile("^v(\\d+)\\.");
+    // node prints v24.3.0, pnpm 12.6.0.
+    private static final Pattern MAJOR_VERSION = Pattern.compile("^v?(\\d+)\\.");
 
     /** @param state {@link #OK}, {@link #MISSING} or {@link #UNKNOWN}; {@code fix} is empty when ok */
     public record Prerequisite(String id, String label, String state, String fix) {}
@@ -82,7 +84,9 @@ public final class FactorySetup {
                 ? ok("macos", "macOS")
                 : new Prerequisite("macos", "macOS", MISSING, "The factory runs only on macOS."));
         out.add(docker());
-        out.add(node());
+        out.add(tool("node", "Node", MIN_NODE, "Install Node " + MIN_NODE + " or newer"));
+        out.add(tool("pnpm", "pnpm", MIN_PNPM,
+                "Install pnpm " + MIN_PNPM + " or newer (curl -fsSL https://get.pnpm.io/install.sh | sh -)"));
         out.add(checkout(FactoryHome.installer()));
         return out;
     }
@@ -107,22 +111,22 @@ public final class FactorySetup {
         return ok("docker", label);
     }
 
-    private static Prerequisite node() {
-        var label = "Node " + MIN_NODE + " or newer";
-        var fix = "Install Node " + MIN_NODE + " or newer.";
-        var res = probe(List.of("node", "--version"));
-        if (res == null || res.timedOut()) return new Prerequisite("node", label, UNKNOWN, "Node did not answer.");
+    /** The executable {@code command} answering {@code --version} with a major version of at least {@code min}. */
+    private static Prerequisite tool(String command, String name, int min, String install) {
+        var label = name + " " + min + " or newer";
+        var res = probe(List.of(command, "--version"));
+        if (res == null || res.timedOut()) return new Prerequisite(command, label, UNKNOWN, name + " did not answer.");
         if (res.exitCode() == -1) {
-            return new Prerequisite("node", label, MISSING, "Install Node " + MIN_NODE + " or newer, or put node on JClaw's PATH.");
+            return new Prerequisite(command, label, MISSING, install + ", or put " + command + " on JClaw's PATH.");
         }
-        Integer major = res.exitCode() == 0 ? nodeMajor(res.output()) : null;
-        if (major == null) return new Prerequisite("node", label, UNKNOWN, "Could not read the Node version.");
-        return major >= MIN_NODE ? ok("node", label) : new Prerequisite("node", label, MISSING, fix);
+        Integer major = res.exitCode() == 0 ? majorVersion(res.output()) : null;
+        if (major == null) return new Prerequisite(command, label, UNKNOWN, "Could not read the " + name + " version.");
+        return major >= min ? ok(command, label) : new Prerequisite(command, label, MISSING, install + ".");
     }
 
-    private static @Nullable Integer nodeMajor(String output) {
+    private static @Nullable Integer majorVersion(String output) {
         for (var line : output.lines().map(String::trim).toList()) {
-            var m = NODE_VERSION.matcher(line);
+            var m = MAJOR_VERSION.matcher(line);
             if (!m.find()) continue;
             try {
                 return Integer.parseInt(m.group(1));

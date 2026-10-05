@@ -1,5 +1,5 @@
 // Offline checks on synthetic tickets: review feedback, planning, build mode, the GitHub trust rule, Jira's intake and
-// merge queries, the board, model-API overloads, and auto-merge, which lands branches between throwaway repos with real signing. `npm run check`.
+// merge queries, the board, model-API overloads, and auto-merge, which lands branches between throwaway repos with real signing. `pnpm run check`.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";

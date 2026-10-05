@@ -1,6 +1,6 @@
 #!/bin/bash
 # Installs the factory as a macOS LaunchAgent (started at login, restarted when it exits), or removes it with --remove.
-# The agent records this checkout's path and the current Node install, so re-run it after moving either.
+# The agent records this checkout's path and the current Node and pnpm installs, so re-run it after moving any of them.
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 LABEL=com.jclaw.factory
@@ -19,6 +19,7 @@ fail() { echo "install-agent: $*" >&2; exit 1; }
 [[ "$(uname)" == Darwin ]] || fail "LaunchAgents are macOS only"
 command -v node >/dev/null || fail "node is not on PATH (Node 24 or newer)"
 node -e 'process.exit(Number(process.versions.node.split(".")[0]) >= 24 ? 0 : 1)' || fail "Node 24 or newer is required, found $(node --version)"
+command -v pnpm >/dev/null || fail "pnpm is not on PATH (pnpm 12 or newer: curl -fsSL https://get.pnpm.io/install.sh | sh -)"
 command -v docker >/dev/null || fail "docker is not on PATH: install Docker Desktop"
 docker info >/dev/null 2>&1 || fail "Docker is not running: start Docker Desktop"
 mkdir -p "$FACTORY_HOME/logs" "$(dirname "$PLIST")"
@@ -33,6 +34,7 @@ fi
 
 NODE_DIR="$(dirname "$(command -v node)")"
 DOCKER_DIR="$(dirname "$(command -v docker)")"
+PNPM_DIR="$(dirname "$(command -v pnpm)")"
 "$HERE/run.sh" --install-only
 cat > "$PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -45,7 +47,7 @@ cat > "$PLIST" <<PLIST
   <key>WorkingDirectory</key><string>$HERE</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>PATH</key><string>$NODE_DIR:$DOCKER_DIR:/usr/bin:/bin:/usr/sbin:/sbin</string>
+    <key>PATH</key><string>$NODE_DIR:$PNPM_DIR:$DOCKER_DIR:/usr/bin:/bin:/usr/sbin:/sbin</string>
     <key>FACTORY_HOME</key><string>$FACTORY_HOME</string>
     <key>FACTORY_SUPERVISED</key><string>launchd</string>
   </dict>

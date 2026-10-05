@@ -160,7 +160,7 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
             ids.add(o.get("id").getAsString());
             assertTrue(List.of("ok", "missing", "unknown").contains(o.get("state").getAsString()), body);
         }
-        assertEquals(List.of("macos", "docker", "node", "checkout"), ids);
+        assertEquals(List.of("macos", "docker", "node", "pnpm", "checkout"), ids);
     }
 
     // --- credentials ---
