@@ -1,4 +1,4 @@
-import { test, expect, gotoPage, applyFilter, expectFilterChip } from './helpers'
+import { test, expect, gotoPage, applyFilter, expectFilterChip, blockApiWrites } from './helpers'
 
 /**
  * UAT-7 — Memories (JCLAW-39/40, retrieval epic JCLAW-942).
@@ -7,15 +7,10 @@ import { test, expect, gotoPage, applyFilter, expectFilterChip } from './helpers
  * "Delete all" — the latter wipes the whole corpus, so neither is clicked and
  * the selection tests assert on checkbox state rather than following through.
  *
- * Importance is editable inline; this spec writes a value and restores the
- * original in the same test, through the API if the UI path fails, so the
- * operator's ranking is unchanged.
- *
- * Serial because of that write: the importance edit briefly reorders the
- * corpus, and the sort and filter tests read row order from the same live
- * table. Run in parallel they interleave and fail on each other's state.
+ * Importance is editable inline, and its save is answered by a stub, never the
+ * server: since JCLAW-1318 any real edit records an operator verification and
+ * marks the memory human-reviewed, which no restore can undo.
  */
-test.describe.configure({ mode: 'serial' })
 
 test.describe('UAT-7 memories', () => {
   test('memory table renders with sortable columns', async ({ page }) => {
@@ -70,49 +65,33 @@ test.describe('UAT-7 memories', () => {
     await expect(page.getByTestId('select-memory').first()).not.toBeChecked()
   })
 
-  test('inline importance edit round-trips and is restored', async ({ page }) => {
+  test('inline importance edit saves to its own memory, and a refused save reverts', async ({ page }) => {
+    const puts: Array<{ path: string, body: unknown }> = []
+    let refuse = false
+    await blockApiWrites(page)
+    await page.route(url => /^\/api\/memories\/\d+$/.test(url.pathname), (route) => {
+      const req = route.request()
+      if (req.method() !== 'PUT') return route.fallback()
+      puts.push({ path: new URL(req.url()).pathname, body: req.postDataJSON() })
+      return refuse ? route.fulfill({ status: 500, json: { error: 'internal_error' } }) : route.fulfill({ json: {} })
+    })
+    const list = page.waitForResponse(r => r.request().method() === 'GET' && new URL(r.url()).pathname === '/api/memories')
     await gotoPage(page, '/memories')
-    const firstRow = page.getByTestId('memory-row').first()
-    // Identify the row by content, not by position. If a reload reorders the
-    // table, restoring "the first row" would write the original value onto a
-    // different memory — silent corruption of the operator's real corpus.
-    const rowId = await firstRow.textContent()
-    const input = firstRow.getByTestId('importance-input')
-    const original = await input.inputValue()
-    // A reload aborts the save still in flight, so each one waits for the PUT to answer first.
-    const saved = () => page.waitForResponse(r => r.request().method() === 'PUT' && r.url().includes('/api/memories/'))
+    const first = (await (await list).json() as Array<{ id: number }>)[0]
+    test.skip(!first, 'no memories on this install')
+    const input = page.getByTestId('memory-row').first().getByTestId('importance-input')
 
-    const edit = saved()
     await input.fill('0.42')
     await input.blur()
-    const edited = await edit
-    expect(edited.ok()).toBe(true)
+    await expect.poll(() => puts.length).toBe(1)
+    expect(puts[0]).toEqual({ path: `/api/memories/${first!.id}`, body: { importance: 0.42 } })
+    await expect(input).toHaveValue('0.42')
 
-    // From here the operator's memory holds 0.42, so any failure below still restores it, by the
-    // id the PUT went to rather than by table position.
-    let restored = false
-    try {
-      await page.reload()
-      await page.waitForLoadState('domcontentloaded')
-
-      const sameRow = page.getByTestId('memory-row').first()
-      expect(await sameRow.textContent(), 'table reordered — refusing to restore onto another row').toBe(rowId)
-      await expect(sameRow.getByTestId('importance-input')).toHaveValue('0.42', { timeout: 10_000 })
-
-      const restore = saved()
-      await sameRow.getByTestId('importance-input').fill(original)
-      await sameRow.getByTestId('importance-input').blur()
-      expect((await restore).ok()).toBe(true)
-      restored = true
-      await page.reload()
-      await expect(page.getByTestId('memory-row').first().getByTestId('importance-input'))
-        .toHaveValue(original, { timeout: 10_000 })
-    }
-    finally {
-      if (!restored) {
-        await page.request.put(edited.url(), { data: { importance: Number(original) } })
-      }
-    }
+    refuse = true
+    await input.fill('0.43')
+    await input.blur()
+    await expect.poll(() => puts.length).toBe(2)
+    await expect(input).toHaveValue('0.42')
   })
 
   test('recall endpoint answers a semantic query', async ({ request }) => {

@@ -44,7 +44,7 @@ and the eval suites.
 | UAT-4 Agent lifecycle | `agents.uat.spec.ts` | Create/read/update/delete + 409 conflict paths |
 | UAT-5 Prompts library | `prompts.uat.spec.ts` | Create via API, UI for search/filter/edit/delete |
 | UAT-6 Tasks & reminders | `tasks.uat.spec.ts` | Read-only over the live schedule |
-| UAT-7 Memories | `memories.uat.spec.ts` | Serial; importance edit restores its own write |
+| UAT-7 Memories | `memories.uat.spec.ts` | Importance save answered by a stub; writes nothing |
 | UAT-8 Conversations | `conversations.uat.spec.ts` | List, filter, transcript, subagent runs |
 | UAT-9 Settings | `settings.uat.spec.ts` | All 26 panels mount |
 | UAT-10 Capability surface | `skills-tools.uat.spec.ts` | Skills, tools, per-agent grant round-trip |
