@@ -34,6 +34,7 @@ class ApiFactoryControllerTest extends FunctionalTest {
 
     @BeforeEach
     void setup() throws Exception {
+        FactoryRunnerSync.acquire();
         AuthFixture.seedAdminPassword("changeme");
         FactoryHome.homeForTest = home;
         FactoryProcess.runnerForTest = runner;
@@ -45,6 +46,7 @@ class ApiFactoryControllerTest extends FunctionalTest {
         FactoryHome.homeForTest = null;
         FactoryProcess.runnerForTest = null;
         clearCookies();
+        FactoryRunnerSync.release();
     }
 
     /** Records every command and working directory; replies by the longest matching prefix. */
@@ -122,12 +124,16 @@ class ApiFactoryControllerTest extends FunctionalTest {
 
     @Test
     void harnessRoutesRefuseWhenNotInstalled() throws Exception {
-        Files.writeString(home.resolve(".env"), "x"); // jira.env missing
         login();
-        for (var url : List.of("/api/factory/harness/start", "/api/factory/harness/stop")) {
-            var resp = POST(url, "application/json", "{}");
-            assertStatus(409, resp);
-            assertTrue(getContent(resp).contains("\"conflict\""), getContent(resp));
+        for (var present : List.of(".env", "jira.env")) {
+            Files.deleteIfExists(home.resolve(".env"));
+            Files.deleteIfExists(home.resolve("jira.env"));
+            Files.writeString(home.resolve(present), "x");
+            for (var url : List.of("/api/factory/harness/start", "/api/factory/harness/stop")) {
+                var resp = POST(url, "application/json", "{}");
+                assertStatus(409, resp);
+                assertTrue(getContent(resp).contains("\"conflict\""), present + ": " + getContent(resp));
+            }
         }
         assertTrue(runner.calls.isEmpty(), runner.calls::toString);
     }
@@ -161,6 +167,19 @@ class ApiFactoryControllerTest extends FunctionalTest {
                 List.of("docker", "start", "jclaw-factory-gateway")), runner.calls);
     }
 
+    @Test
+    void aFailedOrTimedOutPauseSaysSo() {
+        login();
+        runner.replies.put("docker stop jclaw-factory-gateway", new FactoryProcess.ExecResult(1, "no such container\n", false));
+        var failed = getContent(POST("/api/factory/gateway/pause", "application/json", "{}"));
+        assertTrue(failed.contains("The command failed with exit code 1."), failed);
+        assertFalse(failed.contains("Gateway paused"), failed);
+
+        runner.replies.put("docker stop jclaw-factory-gateway", new FactoryProcess.ExecResult(-1, "", true));
+        var timedOut = getContent(POST("/api/factory/gateway/pause", "application/json", "{}"));
+        assertTrue(timedOut.contains("The command timed out."), timedOut);
+    }
+
     // --- sandboxes ---
 
     @Test
@@ -190,6 +209,22 @@ class ApiFactoryControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"story\":null"), body);
         assertTrue(body.contains("No story on the board ran in this sandbox."), body);
         assertTrue(runner.ranPrefix("docker stop " + name));
+    }
+
+    @Test
+    void aFailedSandboxStopSaysSoAndStillNamesTheStory() throws Exception {
+        var name = sandboxName();
+        Files.writeString(home.resolve("board.json"),
+                "{\"stories\":[{\"key\":\"JCLAW-7\",\"sandbox\":\"" + name + "\"}]}");
+        runner.replies.put("docker ps", new FactoryProcess.ExecResult(0, name + "\n", false));
+        runner.replies.put("docker stop", new FactoryProcess.ExecResult(1, "daemon error\n", false));
+        login();
+        var resp = POST("/api/factory/sandboxes/" + name + "/stop", "application/json", "{}");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("The command failed with exit code 1."), body);
+        assertFalse(body.contains("will fail"), body);
+        assertTrue(body.contains("\"story\":\"JCLAW-7\""), body);
     }
 
     @Test
@@ -287,6 +322,24 @@ class ApiFactoryControllerTest extends FunctionalTest {
         runner.replies.put("docker info", new FactoryProcess.ExecResult(0, "lots\n", false));
         assertIsOk(PUT("/api/factory/settings", "application/json", "{\"FACTORY_CPUS\":65}"));
         assertEquals("FACTORY_CPUS=65\n", Files.readString(home.resolve("settings.env")));
+    }
+
+    @Test
+    void settingsPutAnswers500WhenTheFileCannotBeWritten() throws Exception {
+        Files.createDirectory(home.resolve("settings.env"));
+        login();
+        var resp = PUT("/api/factory/settings", "application/json", "{\"FACTORY_MAX_PARALLEL\":3}");
+        assertStatus(500, resp);
+        assertTrue(getContent(resp).contains("\"internal_error\""), getContent(resp));
+        assertFalse(getContent(resp).contains("applies changes once it is idle"), getContent(resp));
+    }
+
+    @Test
+    void settingsCpuCapReadsTheCountPastDockerWarnings() {
+        runner.replies.put("docker info", new FactoryProcess.ExecResult(0, "WARNING: No swap limit support\n8\n", false));
+        login();
+        assertStatus(400, PUT("/api/factory/settings", "application/json", "{\"FACTORY_CPUS\":9}"));
+        assertIsOk(PUT("/api/factory/settings", "application/json", "{\"FACTORY_CPUS\":8}"));
     }
 
     @Test

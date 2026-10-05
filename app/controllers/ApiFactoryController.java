@@ -104,7 +104,8 @@ public class ApiFactoryController extends Controller {
         }
         var story = FactoryHome.storyForSandbox(FactoryHome.boardFile(), name);
         var res = FactoryProcess.run(List.of("docker", "stop", name), DOCKER_ACTION_TIMEOUT);
-        var message = story != null ? "Story " + story + " will fail." : "No story on the board ran in this sandbox.";
+        var message = !res.ok() ? failureMessage(res)
+                : story != null ? "Story " + story + " will fail." : "No story on the board ran in this sandbox.";
         log("sandbox stop " + name + (story != null ? " (story " + story + ")" : ""), res);
         renderJSON(GSON.toJson(new SandboxStopResult(res.exitCode(), res.timedOut(), res.tail(), message, story)));
     }
@@ -184,11 +185,17 @@ public class ApiFactoryController extends Controller {
     private static OptionalInt dockerCpus() {
         var res = FactoryProcess.run(List.of("docker", "info", "--format", "{{.NCPU}}"), DOCKER_QUERY_TIMEOUT);
         if (!res.ok()) return OptionalInt.empty();
-        try {
-            return OptionalInt.of(Integer.parseInt(res.output().trim()));
-        } catch (NumberFormatException _) {
-            return OptionalInt.empty();
+        // stderr is merged in, so skip any WARNING lines docker prints around the count.
+        for (var line : res.output().lines().map(String::trim).toList()) {
+            if (!line.matches("[0-9]+")) continue;
+            try {
+                var n = Integer.parseInt(line);
+                if (n >= 1) return OptionalInt.of(n);
+            } catch (NumberFormatException _) {
+                // beyond int range: not a CPU count
+            }
         }
+        return OptionalInt.empty();
     }
 
     private static AssertionError refuse(int status, String code, String action, String reason) {
@@ -209,10 +216,11 @@ public class ApiFactoryController extends Controller {
 
     private static void renderCommand(String did, FactoryProcess.ExecResult res, String successMessage) {
         log(did, res);
-        String message;
-        if (res.timedOut()) message = "The command timed out.";
-        else if (res.exitCode() != 0) message = "The command failed with exit code " + res.exitCode() + ".";
-        else message = successMessage;
+        var message = res.ok() ? successMessage : failureMessage(res);
         renderJSON(GSON.toJson(new CommandResult(res.exitCode(), res.timedOut(), res.tail(), message)));
+    }
+
+    private static String failureMessage(FactoryProcess.ExecResult res) {
+        return res.timedOut() ? "The command timed out." : "The command failed with exit code " + res.exitCode() + ".";
     }
 }

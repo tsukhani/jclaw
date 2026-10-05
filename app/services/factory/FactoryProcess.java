@@ -77,6 +77,7 @@ public final class FactoryProcess {
             finished = false;
         }
         if (!finished) {
+            proc.descendants().forEach(ProcessHandle::destroyForcibly);
             proc.destroyForcibly();
             closeQuietly(proc.getInputStream());
             joinQuietly(drainer);
@@ -87,8 +88,11 @@ public final class FactoryProcess {
     }
 
     private static void drain(InputStream in, StringBuffer sink) {
+        // Chunked, so what was read survives a close on timeout or a child holding the pipe open.
+        var buf = new byte[8192];
         try (in) {
-            sink.append(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+            int n;
+            while ((n = in.read(buf)) > 0) sink.append(new String(buf, 0, n, StandardCharsets.UTF_8));
         } catch (IOException _) {
             // partial output is enough for the response tail
         }
