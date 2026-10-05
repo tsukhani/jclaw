@@ -314,6 +314,11 @@ POST    /api/factory/gateway/resume             ApiFactoryController.gatewayResu
 POST    /api/factory/sandboxes/{name}/stop      ApiFactoryController.sandboxStop
 GET     /api/factory/settings                   ApiFactoryController.settings
 PUT     /api/factory/settings                   ApiFactoryController.updateSettings
+# Software Factory setup (JCLAW-1393)
+GET     /api/factory/setup                      ApiFactorySetupController.setup
+POST    /api/factory/setup/credentials          ApiFactorySetupController.credentials
+POST    /api/factory/setup/install              ApiFactorySetupController.install
+GET     /api/factory/setup/install/{id}         ApiFactorySetupController.installStatus
 
 # Instance maintenance. GET is the preflight (what a restart interrupts);
 # POST hands off to jclaw.sh and acks 202 — the JVM it reboots is this one.

@@ -12,8 +12,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * The one process spawner behind the Software Factory controls (JCLAW-1392): an argument list,
@@ -24,12 +24,27 @@ public final class FactoryProcess {
     static final int TAIL_LINES = 40;
     static final int TAIL_CHARS = 4000;
     private static final long DRAIN_JOIN_MILLIS = 2000;
-    private static final ReentrantLock HARNESS = new ReentrantLock();
+    // A permit, not a lock: an install job takes it on the request thread and releases it on its own.
+    private static final Semaphore HARNESS = new Semaphore(1);
 
     /** Runs a command and returns its result. Injectable for tests. */
     @FunctionalInterface
     public interface Runner {
         ExecResult run(List<String> command, File workDir, Duration timeout);
+
+        /** {@link #run(List, File, Duration)}, handing the whole output to {@code sink} once it returns. */
+        default ExecResult run(List<String> command, File workDir, Duration timeout, OutputSink sink) {
+            var res = run(command, workDir, timeout);
+            var bytes = res.output().getBytes(StandardCharsets.UTF_8);
+            sink.write(bytes, 0, bytes.length);
+            return res;
+        }
+    }
+
+    /** Receives a command's output as it is read; called from the draining thread. */
+    @FunctionalInterface
+    public interface OutputSink {
+        void write(byte[] buf, int off, int len);
     }
 
     /**
@@ -64,12 +79,22 @@ public final class FactoryProcess {
      * launchd's bootout and bootstrap of the harness agent.
      */
     public static @Nullable ExecResult runHarnessCommand(List<String> command, Duration timeout) {
-        if (!HARNESS.tryLock()) return null;
+        if (!HARNESS.tryAcquire()) return null;
         try {
             return run(command, timeout);
         } finally {
-            HARNESS.unlock();
+            HARNESS.release();
         }
+    }
+
+    /** Take the harness permit for a caller that releases it later, possibly from another thread; false while held. */
+    public static boolean tryAcquireHarness() {
+        return HARNESS.tryAcquire();
+    }
+
+    /** Release the permit a successful {@link #tryAcquireHarness()} took. */
+    public static void releaseHarness() {
+        HARNESS.release();
     }
 
     /** Run {@code command} with the checkout ({@code Play.applicationPath}) as its working directory. */
@@ -77,11 +102,24 @@ public final class FactoryProcess {
         var runner = runnerOverride;
         var dir = Play.applicationPath;
         if (runner != null) return runner.run(command, dir, timeout);
+        refuseInTestMode(command);
+        return execProcess(command, dir, timeout, null);
+    }
+
+    /** {@link #run}, also handing each chunk of output to {@code sink} as it is read. */
+    public static ExecResult runStreaming(List<String> command, Duration timeout, OutputSink sink) {
+        var runner = runnerOverride;
+        var dir = Play.applicationPath;
+        if (runner != null) return runner.run(command, dir, timeout, sink);
+        refuseInTestMode(command);
+        return execProcess(command, dir, timeout, sink);
+    }
+
+    private static void refuseInTestMode(List<String> command) {
         // A request left queued after a test cleared its runner once ran the real install-agent.sh --remove.
         if (Play.runningInTestMode() && reachesTheFactory(command)) {
             throw new IllegalStateException("refused in test mode with no runner installed: " + String.join(" ", command));
         }
-        return execProcess(command, dir, timeout);
     }
 
     private static boolean reachesTheFactory(List<String> command) {
@@ -89,7 +127,8 @@ public final class FactoryProcess {
         return program.equals("docker") || program.endsWith("install-agent.sh");
     }
 
-    private static ExecResult execProcess(List<String> command, File workDir, Duration timeout) {
+    private static ExecResult execProcess(List<String> command, File workDir, Duration timeout,
+                                          @Nullable OutputSink sink) {
         Process proc;
         try {
             proc = new ProcessBuilder(command).directory(workDir).redirectErrorStream(true).start();
@@ -98,7 +137,7 @@ public final class FactoryProcess {
         }
         // Bytes, decoded once at the end, so a chunk boundary cannot split a UTF-8 character.
         var out = new ByteArrayOutputStream();
-        var drainer = Thread.ofVirtual().start(() -> drain(proc.getInputStream(), out));
+        var drainer = Thread.ofVirtual().start(() -> drain(proc.getInputStream(), out, sink));
         boolean finished;
         try {
             finished = proc.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
@@ -117,12 +156,15 @@ public final class FactoryProcess {
         return new ExecResult(proc.exitValue(), out.toString(StandardCharsets.UTF_8), false);
     }
 
-    private static void drain(InputStream in, ByteArrayOutputStream sink) {
+    private static void drain(InputStream in, ByteArrayOutputStream out, @Nullable OutputSink sink) {
         // Chunked, so what was read survives a close on timeout or a child holding the pipe open.
         var buf = new byte[8192];
         try (in) {
             int n;
-            while ((n = in.read(buf)) > 0) sink.write(buf, 0, n);
+            while ((n = in.read(buf)) > 0) {
+                out.write(buf, 0, n);
+                if (sink != null) sink.write(buf, 0, n);
+            }
         } catch (IOException _) {
             // partial output is enough for the response tail
         }

@@ -113,4 +113,75 @@ class FactoryProcessTest extends UnitTest {
         }
         assertEquals(0, FactoryProcess.run(List.of("true"), Duration.ofSeconds(5)).exitCode());
     }
+
+    @Test
+    void runStreamingDeliversOutputBeforeTheProcessExits(@TempDir Path dir) throws Exception {
+        var go = dir.resolve("go");
+        var seen = new java.io.ByteArrayOutputStream();
+        var firstChunk = new CompletableFuture<String>();
+        var script = "echo first; while [ ! -f '" + go + "' ]; do sleep 0.05; done; echo second";
+        var run = new CompletableFuture<FactoryProcess.ExecResult>();
+        var starter = Thread.ofPlatform().start(() -> run.complete(FactoryProcess.runStreaming(
+                List.of("sh", "-c", script), Duration.ofSeconds(30), (b, off, n) -> {
+                    synchronized (seen) {
+                        seen.write(b, off, n);
+                        firstChunk.complete(seen.toString(java.nio.charset.StandardCharsets.UTF_8));
+                    }
+                })));
+        try {
+            assertTrue(firstChunk.get(10, TimeUnit.SECONDS).contains("first"));
+            assertFalse(run.isDone(), "the process finished before its first chunk arrived");
+        } finally {
+            Files.writeString(go, "");
+            starter.join(30_000);
+        }
+        var res = run.get(5, TimeUnit.SECONDS);
+        assertTrue(res.ok(), res::toString);
+        assertEquals("first\nsecond\n", res.output());
+        synchronized (seen) {
+            assertEquals("first\nsecond\n", seen.toString(java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
+
+    @Test
+    void aThreeArgumentRunnerStillFeedsTheSink() {
+        FactoryProcess.setRunnerForTest((List<String> c, java.io.File d, Duration t) ->
+                new FactoryProcess.ExecResult(0, "canned\n", false));
+        try {
+            var seen = new StringBuilder();
+            var res = FactoryProcess.runStreaming(List.of("anything"), Duration.ofSeconds(5),
+                    (b, off, n) -> seen.append(new String(b, off, n, java.nio.charset.StandardCharsets.UTF_8)));
+            assertEquals("canned\n", res.output());
+            assertEquals("canned\n", seen.toString());
+        } finally {
+            FactoryProcess.setRunnerForTest(null);
+        }
+    }
+
+    @Test
+    void inTestModeStreamingTheInstallerIsRefusedWithoutARunner() {
+        var e = assertThrows(IllegalStateException.class, () -> FactoryProcess.runStreaming(
+                List.of("/checkout/.sandcastle/install-agent.sh"), Duration.ofSeconds(5), (b, off, n) -> { }));
+        assertTrue(e.getMessage().contains("refused in test mode"), e.getMessage());
+    }
+
+    @Test
+    void theHarnessPermitRefusesASecondHolderUntilReleased() throws Exception {
+        // Release only a permit this test holds: a spare release would leave the global semaphore at 2.
+        var held = FactoryProcess.tryAcquireHarness();
+        assertTrue(held);
+        try {
+            assertFalse(FactoryProcess.tryAcquireHarness());
+            assertNull(FactoryProcess.runHarnessCommand(List.of("true"), Duration.ofSeconds(5)));
+            // Released from another thread, as an install job does.
+            var other = Thread.ofPlatform().start(FactoryProcess::releaseHarness);
+            other.join(5_000);
+            held = false;
+            held = FactoryProcess.tryAcquireHarness();
+            assertTrue(held, "the permit was not freed by the other thread");
+        } finally {
+            if (held) FactoryProcess.releaseHarness();
+        }
+        assertNotNull(FactoryProcess.runHarnessCommand(List.of("true"), Duration.ofSeconds(5)));
+    }
 }

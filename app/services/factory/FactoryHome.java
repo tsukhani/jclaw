@@ -9,11 +9,14 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileAttribute;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.OptionalInt;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -94,12 +97,24 @@ public final class FactoryHome {
         return home().resolve("settings.env");
     }
 
+    /** The model credential, the one file the gateway mounts. */
+    public static Path modelEnvFile() {
+        return home().resolve(".env");
+    }
+
+    public static Path jiraEnvFile() {
+        return home().resolve("jira.env");
+    }
+
+    public static Path githubEnvFile() {
+        return home().resolve("github.env");
+    }
+
     /** The three files {@code install-agent.sh} requires: itself, {@code <home>/.env} and {@code <home>/jira.env}. */
     public static boolean installed() {
-        var home = home();
         return Files.isRegularFile(installer())
-                && Files.isRegularFile(home.resolve(".env"))
-                && Files.isRegularFile(home.resolve("jira.env"));
+                && Files.isRegularFile(modelEnvFile())
+                && Files.isRegularFile(jiraEnvFile());
     }
 
     /**
@@ -115,6 +130,11 @@ public final class FactoryHome {
             if (entry != null) out.put(entry[0], entry[1]);
         }
         return out;
+    }
+
+    /** A credential {@code .env} file, read with {@link #readSettings}'s grammar. */
+    public static Map<String, String> readEnv(Path file) throws IOException {
+        return readSettings(file);
     }
 
     private static String @Nullable [] parseLine(String raw) {
@@ -168,22 +188,61 @@ public final class FactoryHome {
      * in order. Synchronized, so two concurrent writes cannot lose one's update.
      */
     public static synchronized void writeSettings(Path file, Map<String, String> updates) throws IOException {
+        rewrite(file, updates, Set.of(), ".settings.env.");
+    }
+
+    /**
+     * {@link #writeSettings} for a credential file, also dropping every line whose key is in
+     * {@code remove}. The parent is created owner-only if missing, and the file is written
+     * owner-only ({@code 0600}) whatever mode it had before.
+     */
+    public static synchronized void writeEnvFile(Path file, Map<String, String> set, Set<String> remove)
+            throws IOException {
+        var dir = parentOf(file);
+        if (!Files.isDirectory(dir)) {
+            if (posix(dir)) Files.createDirectories(dir, PosixFilePermissions.asFileAttribute(
+                    PosixFilePermissions.fromString("rwx------")));
+            else Files.createDirectories(dir);
+        }
+        rewrite(file, set, remove, "." + file.getFileName() + ".");
+    }
+
+    private static Path parentOf(Path file) {
+        var dir = file.toAbsolutePath().getParent();
+        if (dir == null) throw new IllegalArgumentException("no parent directory: " + file);
+        return dir;
+    }
+
+    private static boolean posix(Path path) {
+        return path.getFileSystem().supportedFileAttributeViews().contains("posix");
+    }
+
+    private static void rewrite(Path file, Map<String, String> updates, Set<String> remove, String tmpPrefix)
+            throws IOException {
         var lines = Files.isRegularFile(file)
                 ? new ArrayList<>(Files.readAllLines(file, StandardCharsets.UTF_8))
                 : new ArrayList<String>();
         var pending = new LinkedHashSet<>(updates.keySet());
-        for (int i = 0; i < lines.size(); i++) {
-            var entry = parseLine(lines.get(i));
+        var out = new ArrayList<String>(lines.size() + pending.size());
+        for (var line : lines) {
+            var entry = parseLine(line);
+            if (entry != null && remove.contains(entry[0])) continue;
             if (entry != null && updates.containsKey(entry[0])) {
-                lines.set(i, entry[0] + "=" + updates.get(entry[0]));
+                out.add(entry[0] + "=" + updates.get(entry[0]));
                 pending.remove(entry[0]);
+            } else {
+                out.add(line);
             }
         }
-        for (var key : pending) lines.add(key + "=" + updates.get(key));
+        for (var key : pending) out.add(key + "=" + updates.get(key));
 
-        var tmp = Files.createTempFile(file.getParent(), ".settings.env.", ".tmp");
+        var dir = parentOf(file);
+        FileAttribute<?>[] ownerOnly = posix(dir)
+                ? new FileAttribute<?>[] {PosixFilePermissions.asFileAttribute(PosixFilePermissions.fromString("rw-------"))}
+                : new FileAttribute<?>[0];
+        var tmp = Files.createTempFile(dir, tmpPrefix, ".tmp", ownerOnly);
         try {
-            Files.writeString(tmp, String.join("\n", lines) + "\n", StandardCharsets.UTF_8);
+            Files.writeString(tmp, String.join("\n", out) + "\n", StandardCharsets.UTF_8);
             Files.move(tmp, file, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         } finally {
             Files.deleteIfExists(tmp);
