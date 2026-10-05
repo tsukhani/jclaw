@@ -140,7 +140,7 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
 ```
 
 - **When it fails:** a story the factory gives up on gets the `afk-blocked` label and a comment saying why. Remove the
-  label to retry.
+  label to retry. A model API overload is the exception (see [Operating](#operating)).
 - **When the harness stops:** an interrupted story still has `afk-running`. The next start sends it back to To Do,
   and its branch keeps what it had committed.
 
@@ -324,6 +324,14 @@ Jira user.
   `git branch -d agent/<KEY>` and `git -C ~/.jclaw-factory/jclaw branch -D agent/<KEY>` (the re-sign gave the merged
   commits new hashes, so the clone's copy needs `-D`). Or label it `afk-merge` and the factory does all of this (see
   [Auto-merge](#auto-merge)).
+- **Model API overloads:** when an agent phase (`spec`, `build`, `implement`, `rework`, `repair-N`, `review`, `brief`)
+  fails and the last lines of that run in its log, `logs/<KEY>-<phase>.log`, carry Claude Code's
+  `API Error` for a 529 overload, a 500, 502, 503 or 504, an `overloaded_error` or a rate limit, the story is not
+  blocked. It goes back to To Do without `afk-blocked`, its branch keeps every commit, and a comment says the model API
+  was overloaded and when the factory tries again. No round starts it before then: 10 minutes after the first
+  consecutive overload, 20 after the second. The third consecutive overload blocks it as any failure does, with a
+  reason naming the overloads. Any agent phase that completes resets the count (a gate does not), which lives in `state/overloads.json` so a
+  restart keeps it; the board shows the story `waiting` until it is eligible again. Every other failure blocks.
 - **Reject:** move the story back to To Do with a comment saying what to change. The next round reworks it on the same
   branch. The general rule behind your comment goes into `~/.jclaw-factory/lessons.md`, which every prompt includes.
   Promote a lesson into `AGENTS.md`, or delete it there.
@@ -358,7 +366,7 @@ other, never a partial one. `FACTORY_PLAN_ONLY` writes nothing.
 
 | `state` | Extra fields | Means |
 |---|---|---|
-| `waiting` | `reason` | A candidate not started: blocked by named stories, a named file overlap, every slot busy, or interrupted by the last stop |
+| `waiting` | `reason` | A candidate not started: blocked by named stories, a named file overlap, every slot busy, interrupted by the last stop, or a model API overload with the time it is eligible again |
 | `running` | `phase`, `phaseStartedAt` | `picked-up`, then `implement`, `rework`, `spec`, `build`, `gate-N`, `repair-N`, `review`, `gate-review`, `brief`; a landing runs `merge`, then `gate-merge` |
 | `review` | | Offered for review, awaiting a human |
 | `blocked` | `reason` | The factory gave up, or would not start it (a won't-do verdict, or a GitHub issue edited after its label) |
