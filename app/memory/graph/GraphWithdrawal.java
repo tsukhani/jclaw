@@ -66,7 +66,13 @@ public final class GraphWithdrawal {
             }
         }
         if (removed.isEmpty()) return new Result(List.copyOf(current), Set.of());
+        var survivors = cascadeAll(current, removed);
+        return new Result(List.copyOf(survivors), Set.copyOf(removed));
+    }
 
+    /** Cascades until a pass changes nothing; each record that no longer stands is added to {@code removed}. */
+    private static List<OntologyRecord> cascadeAll(List<OntologyRecord> records, Set<String> removed) {
+        var current = records;
         boolean changed = true;
         while (changed) {
             changed = false;
@@ -83,7 +89,7 @@ public final class GraphWithdrawal {
             }
             current = next;
         }
-        return new Result(List.copyOf(current), Set.copyOf(removed));
+        return current;
     }
 
     /**
@@ -112,7 +118,9 @@ public final class GraphWithdrawal {
             }
             retired++;
             if (byChanged && (e.lineage() != null || e.changedBy() != null)) cleared++;
-            out.add(stamp(e, r.at(), r.by(), byChanged ? null : e.lineage(), byChanged ? null : e.changedBy()));
+            out.add(byChanged
+                    ? stamp(e, r.at(), r.by(), null, null)
+                    : stamp(e, r.at(), r.by(), e.lineage(), e.changedBy()));
         }
         return new Stamped(List.copyOf(out), retired, cleared);
     }

@@ -470,7 +470,7 @@ class ExtractionPipelineTest extends UnitTest {
         assertEquals(V2_TYPING_AND_OVERLAP, bodies);
     }
 
-    private int relationQuestions(CaseRun ignored) {
+    private int relationQuestions() {
         return (int) requests.stream().flatMap(r -> r.getAsJsonObject("questions").keySet().stream())
                 .filter(k -> k.startsWith("r")).count();
     }
@@ -485,7 +485,8 @@ class ExtractionPipelineTest extends UnitTest {
 
     @Test
     void theWidenedFalseCriterionAddsNoQuestion() {
-        assertEquals(V2_RELATION_QUESTIONS, relationQuestions(relationFixture()));
+        relationFixture();
+        assertEquals(V2_RELATION_QUESTIONS, relationQuestions());
     }
 
     private static List<Candidate> manySpans(int n) {
@@ -601,7 +602,7 @@ class ExtractionPipelineTest extends UnitTest {
     }
 
     @Test
-    void theOllamaDeciderHalvesOnARealHttp400() throws Exception {
+    void theOllamaDeciderHalvesOnARealHttp400() {
         var base = "http://192.168.1.20:11434";
         JevBreakerTestSync.acquire();
         try {
@@ -720,7 +721,7 @@ class ExtractionPipelineTest extends UnitTest {
     }
 
     @Test
-    void theOllamaDeciderLoadsTheModelAndAsksAgainAfterATimeout() throws Exception {
+    void theOllamaDeciderLoadsTheModelAndAsksAgainAfterATimeout() {
         var base = "http://192.168.1.20:11434";
         JevBreakerTestSync.acquire();
         try {
@@ -967,7 +968,7 @@ class ExtractionPipelineTest extends UnitTest {
     }
 
     @Test
-    void eachPredecessorIsAskedInALineageRequestBesideTheOverlapRequest() throws Exception {
+    void eachPredecessorIsAskedInALineageRequestBesideTheOverlapRequest() {
         var text = "The user plans the Meridian kickoff.";
         var candidates = CandidateGenerator.generate(text, List.of("Meridian kickoff"));
         var predecessors = List.of(new ExtractionPipeline.Predecessor("m1", "The user plans a kickoff."),
@@ -990,7 +991,7 @@ class ExtractionPipelineTest extends UnitTest {
                     overlapArrived.countDown();
                     overlapWaited.set(lineageArrived.await(5, TimeUnit.SECONDS));
                 }
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             return answering.decide(request);

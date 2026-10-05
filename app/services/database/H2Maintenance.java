@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
@@ -164,23 +165,7 @@ public final class H2Maintenance {
      * never reaches a backup. A missing graph leaves the zip as it was.
      */
     public static void appendGraph(Path zip, Path dataDir) throws IOException {
-        var graphRoot = dataDir.resolve(GRAPH_DIR);
-        var files = new TreeMap<String, Path>();
-        if (Files.isDirectory(graphRoot)) {
-            try (var agents = Files.list(graphRoot)) {
-                for (var agentDir : agents.toList()) {
-                    var agent = agentDir.getFileName().toString();
-                    if (!AGENT_DIR.matcher(agent).matches() || !Files.isDirectory(agentDir)) continue;
-                    try (var inside = Files.list(agentDir)) {
-                        for (var file : inside.toList()) {
-                            if (Files.isRegularFile(file)) {
-                                files.put(GRAPH_DIR + "/" + agent + "/" + file.getFileName(), file);
-                            }
-                        }
-                    }
-                }
-            }
-        }
+        var files = graphFiles(dataDir);
         if (files.isEmpty()) {
             return;
         }
@@ -212,6 +197,26 @@ public final class H2Maintenance {
         } finally {
             Files.deleteIfExists(tmp);
         }
+    }
+
+    private static SortedMap<String, Path> graphFiles(Path dataDir) throws IOException {
+        var graphRoot = dataDir.resolve(GRAPH_DIR);
+        var files = new TreeMap<String, Path>();
+        if (!Files.isDirectory(graphRoot)) return files;
+        try (var agents = Files.list(graphRoot)) {
+            for (var agentDir : agents.toList()) {
+                var agent = agentDir.getFileName().toString();
+                if (!AGENT_DIR.matcher(agent).matches() || !Files.isDirectory(agentDir)) continue;
+                try (var inside = Files.list(agentDir)) {
+                    for (var file : inside.toList()) {
+                        if (Files.isRegularFile(file)) {
+                            files.put(GRAPH_DIR + "/" + agent + "/" + file.getFileName(), file);
+                        }
+                    }
+                }
+            }
+        }
+        return files;
     }
 
     /** A zip holding one {@value #DATA_FILE} entry that starts like an MVStore file. */

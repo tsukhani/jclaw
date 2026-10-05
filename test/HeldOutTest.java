@@ -164,7 +164,7 @@ class HeldOutTest extends UnitTest {
     }
 
     @Test
-    void theHeldOutAgentIsTheOneItsMemoriesBelongTo() throws Exception {
+    void theHeldOutAgentIsTheOneItsMemoriesBelongTo() {
         Function<List<String>, HeldOut.Loaded> loaded = ids -> new HeldOut.Loaded(ids.stream()
                 .map(id -> new HeldOut.HeldCase(Long.parseLong(id), new GraphCases.Case("h", List.of(), "x", List.of(),
                         List.of(), List.of()))).toList(), 0);

@@ -18,6 +18,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.IntFunction;
 import java.util.regex.MatchResult;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -257,36 +258,7 @@ public final class TemporalExpressions {
      * literal.
      */
     public static Result find(String text, LocalDate anchor) {
-        var literals = LiteralSpans.spans(text);
-        var hits = new ArrayList<Hit>();
-        for (int p = 0; p < RULES.size(); p++) {
-            var rule = RULES.get(p);
-            var m = rule.pattern().matcher(text);
-            while (m.find()) {
-                if (m.group(rule.group()) == null) continue;
-                @Nullable Outcome outcome;
-                if (touchesLiteral(literals, m.start(), m.end())) {
-                    outcome = new Refusal(Reason.LITERAL);
-                } else {
-                    try {
-                        outcome = rule.normalizer().apply(m.toMatchResult(), text, anchor);
-                    } catch (IllegalArgumentException | java.time.DateTimeException e) {
-                        outcome = null;
-                    }
-                }
-                if (outcome != null) {
-                    hits.add(new Hit(m.start(), m.end(), m.start(rule.group()), m.end(rule.group()), p, outcome));
-                }
-            }
-        }
-        hits.sort(Comparator.comparingInt(Hit::start).thenComparingInt(h -> h.start() - h.end())
-                .thenComparingInt(Hit::priority));
-        var chosen = new ArrayList<Hit>();
-        for (var h : hits) {
-            if (chosen.stream().allMatch(c -> h.end() <= c.start() || h.start() >= c.end())) chosen.add(h);
-        }
-        chosen.sort(Comparator.comparingInt(Hit::spanStart));
-
+        var chosen = leftmostLongest(hits(text, anchor));
         var found = new ArrayList<DateSpan>();
         var refused = new ArrayList<Refused>();
         for (var h : chosen) {
@@ -295,18 +267,57 @@ public final class TemporalExpressions {
             var phrase = text.substring(phraseStart, Math.max(h.end(), h.spanEnd()));
             boolean recurring = recurring(text, phraseStart, Math.max(h.end(), h.spanEnd()));
             switch (h.outcome()) {
-                case Refusal r -> refused.add(new Refused(h.spanStart(), h.spanEnd(), span,
-                        recurring && r.reason() == Reason.WEEKDAY ? Reason.RECURRING : r.reason()));
-                case Reading ignored when recurring ->
+                case Refusal(var reason) -> refused.add(new Refused(h.spanStart(), h.spanEnd(), span,
+                        recurring && reason == Reason.WEEKDAY ? Reason.RECURRING : reason));
+                case Reading _ when recurring ->
                         refused.add(new Refused(h.spanStart(), h.spanEnd(), span, Reason.RECURRING));
                 case Reading r when (r.kind() == Kind.QUARTER || r.kind() == Kind.YEAR)
                         && FISCAL_CUE.matcher(clause(text, h.start())).find() ->
                         refused.add(new Refused(h.spanStart(), h.spanEnd(), span, Reason.FISCAL));
-                case Reading r -> found.add(new DateSpan(h.spanStart(), h.spanEnd(), span, phrase, r.kind(),
-                        r.relative(), r.readings(), r.duration()));
+                case Reading(var kind, var relative, var readings, var duration) -> found.add(new DateSpan(
+                        h.spanStart(), h.spanEnd(), span, phrase, kind, relative, readings, duration));
             }
         }
         return new Result(List.copyOf(found), List.copyOf(refused));
+    }
+
+    private static List<Hit> hits(String text, LocalDate anchor) {
+        var literals = LiteralSpans.spans(text);
+        var hits = new ArrayList<Hit>();
+        for (int p = 0; p < RULES.size(); p++) {
+            var rule = RULES.get(p);
+            var m = rule.pattern().matcher(text);
+            while (m.find()) {
+                if (m.group(rule.group()) == null) continue;
+                var outcome = outcome(rule, m, text, anchor, literals);
+                if (outcome != null) {
+                    hits.add(new Hit(m.start(), m.end(), m.start(rule.group()), m.end(rule.group()), p, outcome));
+                }
+            }
+        }
+        return hits;
+    }
+
+    private static @Nullable Outcome outcome(Rule rule, Matcher m, String text, LocalDate anchor,
+            List<LiteralSpans.Span> literals) {
+        if (touchesLiteral(literals, m.start(), m.end())) return new Refusal(Reason.LITERAL);
+        try {
+            return rule.normalizer().apply(m.toMatchResult(), text, anchor);
+        } catch (IllegalArgumentException | java.time.DateTimeException _) {
+            return null;
+        }
+    }
+
+    /** The hits no earlier, longer or higher-priority hit overlaps, ordered by span start. */
+    private static List<Hit> leftmostLongest(List<Hit> hits) {
+        hits.sort(Comparator.comparingInt(Hit::start).thenComparingInt(h -> h.start() - h.end())
+                .thenComparingInt(Hit::priority));
+        var chosen = new ArrayList<Hit>();
+        for (var h : hits) {
+            if (chosen.stream().allMatch(c -> h.end() <= c.start() || h.start() >= c.end())) chosen.add(h);
+        }
+        chosen.sort(Comparator.comparingInt(Hit::spanStart));
+        return chosen;
     }
 
     /** The offsets {@link #find} reports as found; offsets never depend on the anchor, so any fixed one serves. */
@@ -372,7 +383,7 @@ public final class TemporalExpressions {
     private static @Nullable EdtfDate tryYear(IntFunction<EdtfDate> inYear, int year) {
         try {
             return inYear.apply(year);
-        } catch (java.time.DateTimeException | IllegalArgumentException e) {
+        } catch (java.time.DateTimeException | IllegalArgumentException _) {
             return null;
         }
     }
@@ -474,10 +485,14 @@ public final class TemporalExpressions {
 
     private static Outcome dayWord(MatchResult m, String text, LocalDate anchor) {
         var word = m.group().toLowerCase(Locale.ROOT);
-        var day = word.startsWith("the") ? anchor.plusDays(word.endsWith("yesterday") ? -2 : 2)
-                : word.equals("tomorrow") ? anchor.plusDays(1)
-                : word.equals("yesterday") || word.startsWith("last") ? anchor.minusDays(1) : anchor;
-        return relative(Kind.DAY, EdtfDate.ofDay(day, false));
+        return relative(Kind.DAY, EdtfDate.ofDay(dayOf(word, anchor), false));
+    }
+
+    private static LocalDate dayOf(String word, LocalDate anchor) {
+        if (word.startsWith("the")) return anchor.plusDays(word.endsWith("yesterday") ? -2 : 2);
+        if (word.equals("tomorrow")) return anchor.plusDays(1);
+        if (word.equals("yesterday") || word.startsWith("last")) return anchor.minusDays(1);
+        return anchor;
     }
 
     /** "N units ago" ({@code sign} -1) or "in N units" (+1): a year, month or week back is approximate, a day exact. */
@@ -804,19 +819,21 @@ public final class TemporalExpressions {
         out.append('\n');
         for (var probe : NORMALIZER_PROBES) {
             out.append(probe);
-            for (var a : NORMALIZER_PROBE_ANCHORS) {
-                var result = find(probe, a);
-                var cells = new ArrayList<String>();
-                for (var d : result.found()) {
-                    cells.add(d.readings().stream().map(EdtfInterval::toString).collect(Collectors.joining(","))
-                            + (d.duration() != null ? " " + d.duration() : ""));
-                }
-                for (var r : result.refused()) cells.add(r.reason().toString());
-                out.append(" | ").append(cells.isEmpty() ? "-" : String.join("; ", cells));
-            }
+            for (var a : NORMALIZER_PROBE_ANCHORS) out.append(" | ").append(normalizerCell(probe, a));
             out.append('\n');
         }
         return out.toString();
+    }
+
+    private static String normalizerCell(String probe, LocalDate anchor) {
+        var result = find(probe, anchor);
+        var cells = new ArrayList<String>();
+        for (var d : result.found()) {
+            cells.add(d.readings().stream().map(EdtfInterval::toString).collect(Collectors.joining(","))
+                    + (d.duration() != null ? " " + d.duration() : ""));
+        }
+        for (var r : result.refused()) cells.add(r.reason().toString());
+        return cells.isEmpty() ? "-" : String.join("; ", cells);
     }
 
     private static String render(DateSpan d) {

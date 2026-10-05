@@ -125,7 +125,7 @@ class MemoryGraphLifecycleTest extends UnitTest {
         assertFirstWithdrawn(f);
     }
 
-    private static void supersede(long memoryId, long by) throws Exception {
+    private static void supersede(long memoryId, long by) {
         try (var _ = LuceneTestSync.closedLease()) {
             commitInFreshTx(() -> {
                 Memory.<Memory>findById(memoryId).supersede(by);

@@ -250,7 +250,7 @@ class GraphViewTest extends UnitTest {
     }
 
     private static void expect(Answer a, Truth truth, boolean assumed, Reason reason) {
-        assertEquals(truth, a.truth(), () -> a.toString());
+        assertEquals(truth, a.truth(), a::toString);
         assertEquals(assumed, a.assumed(), () -> "assumed: " + a);
         assertEquals(reason, a.reason(), () -> "reason: " + a);
     }

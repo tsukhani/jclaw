@@ -117,9 +117,12 @@ public final class WorkspaceFiles {
         sizeCache.invalidateAll();
     }
 
+    private static final String USER_MD = "USER.md";
+    private static final String BOOTSTRAP_MD = "BOOTSTRAP.md";
+
     /** The Standing Orders files at a workspace root; listed but never delete targets. */
     public static final Set<String> PROTECTED_ROOT_FILES =
-            Set.of("SOUL.md", "IDENTITY.md", "USER.md", "BOOTSTRAP.md", "AGENT.md");
+            Set.of("SOUL.md", "IDENTITY.md", USER_MD, BOOTSTRAP_MD, "AGENT.md");
 
     /**
      * One node of a workspace listing. {@code path} is root-relative with forward slashes;
@@ -550,8 +553,8 @@ public final class WorkspaceFiles {
 
     /** The owner's name from the agent's USER.md, or null when the file is missing or its Name line is empty. */
     public static @Nullable String ownerName(String agentName) {
-        if (!Files.isRegularFile(workspacePath(agentName).resolve("USER.md"))) return null;
-        var text = readWorkspaceFile(agentName, "USER.md");
+        if (!Files.isRegularFile(workspacePath(agentName).resolve(USER_MD))) return null;
+        var text = readWorkspaceFile(agentName, USER_MD);
         return text == null ? null : ownerNameIn(text);
     }
 
@@ -559,7 +562,7 @@ public final class WorkspaceFiles {
     public static @Nullable String ownerNameIn(String userMd) {
         var m = NAME_LINE.matcher(headerOf(userMd));
         if (!m.find()) return null;
-        var name = m.group(1).strip().replaceAll("^[*_]+|[*_]+$", "").strip();
+        var name = m.group(1).strip().replaceAll("(?:^[*_]+)|(?:[*_]+$)", "").strip();
         return name.isEmpty() || name.startsWith("<") ? null : name;
     }
 
@@ -571,10 +574,10 @@ public final class WorkspaceFiles {
      */
     public static void setOwnerName(String agentName, String name) {
         if (!Files.isDirectory(workspacePath(agentName))) return;
-        var current = Files.isRegularFile(workspacePath(agentName).resolve("USER.md"))
-                ? readWorkspaceFile(agentName, "USER.md") : null;
+        var current = Files.isRegularFile(workspacePath(agentName).resolve(USER_MD))
+                ? readWorkspaceFile(agentName, USER_MD) : null;
         var updated = withOwnerName(current == null ? USER_TEMPLATE : current, name);
-        if (!updated.equals(current)) writeWorkspaceFile(agentName, "USER.md", updated);
+        if (!updated.equals(current)) writeWorkspaceFile(agentName, USER_MD, updated);
     }
 
     static String withOwnerName(String text, String name) {
@@ -582,7 +585,7 @@ public final class WorkspaceFiles {
         int headerEnd = section.find() ? section.start() : text.length();
         var line = NAME_LINE.matcher(text).region(0, headerEnd);
         if (!line.find()) return afterTitle(text, "Name: " + name + "\n");
-        var previous = line.group(1).strip().replaceAll("^[*_]+|[*_]+$", "").strip();
+        var previous = line.group(1).strip().replaceAll("(?:^[*_]+)|(?:[*_]+$)", "").strip();
         if (previous.equals(name)) return text;
         var nameLine = "Name: " + name;
         var out = text.substring(0, line.start()) + nameLine + text.substring(line.end());
@@ -612,17 +615,17 @@ public final class WorkspaceFiles {
     public static void addOwnerNamePrompts(String agentName) {
         var dir = workspacePath(agentName);
         if (!Files.isDirectory(dir)) return;
-        var user = Files.isRegularFile(dir.resolve("USER.md")) ? readWorkspaceFile(agentName, "USER.md") : null;
+        var user = Files.isRegularFile(dir.resolve(USER_MD)) ? readWorkspaceFile(agentName, USER_MD) : null;
         if (user == null) {
-            writeWorkspaceFile(agentName, "USER.md", USER_TEMPLATE);
+            writeWorkspaceFile(agentName, USER_MD, USER_TEMPLATE);
         } else if (!NAME_LINE.matcher(headerOf(user)).find()) {
-            writeWorkspaceFile(agentName, "USER.md", afterTitle(user, "Name:\n"));
+            writeWorkspaceFile(agentName, USER_MD, afterTitle(user, "Name:\n"));
         }
-        var bootstrap = Files.isRegularFile(dir.resolve("BOOTSTRAP.md")) ? readWorkspaceFile(agentName, "BOOTSTRAP.md") : null;
+        var bootstrap = Files.isRegularFile(dir.resolve(BOOTSTRAP_MD)) ? readWorkspaceFile(agentName, BOOTSTRAP_MD) : null;
         if (bootstrap == null || bootstrap.strip().equals(PRE_NAME_BOOTSTRAP_TEMPLATE.strip())) {
-            writeWorkspaceFile(agentName, "BOOTSTRAP.md", BOOTSTRAP_TEMPLATE);
+            writeWorkspaceFile(agentName, BOOTSTRAP_MD, BOOTSTRAP_TEMPLATE);
         } else if (!bootstrap.contains(NAME_STEP_MARKER)) {
-            writeWorkspaceFile(agentName, "BOOTSTRAP.md", afterTitle(bootstrap, NAME_STEP));
+            writeWorkspaceFile(agentName, BOOTSTRAP_MD, afterTitle(bootstrap, NAME_STEP));
         }
     }
 
@@ -665,9 +668,9 @@ public final class WorkspaceFiles {
                     Name: %s
                     """.formatted(agentName), overwrite);
 
-            writeFile(dir.resolve("USER.md"), USER_TEMPLATE, overwrite);
+            writeFile(dir.resolve(USER_MD), USER_TEMPLATE, overwrite);
 
-            writeFile(dir.resolve("BOOTSTRAP.md"), BOOTSTRAP_TEMPLATE, overwrite);
+            writeFile(dir.resolve(BOOTSTRAP_MD), BOOTSTRAP_TEMPLATE, overwrite);
 
             writeFile(dir.resolve("AGENT.md"), """
                     # Agent Instructions

@@ -56,6 +56,7 @@ public class ApiGraphEvalController extends Controller {
     private static final long DEFAULT_SEED = 1356;
     private static final String BLIND_SHEET = "blind-sheet.json";
     private static final long HEARTBEAT_SECONDS = 30;
+    private static final String INVALID_CASE_SET = "invalid case set: ";
 
     @Before
     static void requireLoadtestAuth() {
@@ -171,7 +172,7 @@ public class ApiGraphEvalController extends Controller {
         try {
             ownerName = GraphCases.ownerName(Files.readString(appPath(GraphCases.DEFAULT_PATH)));
         } catch (IOException | RuntimeException e) {
-            throw invalid("invalid case set: " + e.getMessage());
+            throw invalid(INVALID_CASE_SET + e.getMessage());
         }
         GraphCases.SecondLabels second;
         try {
@@ -199,20 +200,17 @@ public class ApiGraphEvalController extends Controller {
         var target = response;
         target.contentType = "application/x-ndjson";
         var progress = new EvalProgress(event -> writeLine(target, GSON.toJson(event)));
-        var timer = Executors.newSingleThreadScheduledExecutor(
-                Thread.ofPlatform().daemon().name("grapheval-heartbeat").factory());
-        timer.scheduleAtFixedRate(progress::heartbeat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
         Object report = null;
         String failure = null;
-        try {
+        // close() runs before the catch and waits out a heartbeat already writing, so none lands after the report.
+        try (var timer = Executors.newSingleThreadScheduledExecutor(
+                Thread.ofPlatform().daemon().name("grapheval-heartbeat").factory())) {
+            timer.scheduleAtFixedRate(progress::heartbeat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
             report = measure.apply(progress);
         } catch (RuntimeException e) {
-            var cause = e.getCause();
-            failure = heldOut ? e.getClass().getSimpleName()
-                    : e.getMessage() + (cause == null ? "" : ": " + cause.getMessage());
+            failure = heldOut ? e.getClass().getSimpleName() : withCause(e);
             EventLogger.warn("grapheval", "graph eval failed: " + failure);
         } finally {
-            timer.shutdown();
             progress.close();
         }
         if (report != null) {
@@ -223,6 +221,12 @@ public class ApiGraphEvalController extends Controller {
         error.addProperty("event", "error");
         error.addProperty("message", failure);
         writeLine(target, GSON.toJson(error));
+    }
+
+    private static String withCause(RuntimeException e) {
+        var cause = e.getCause();
+        if (cause == null) return String.valueOf(e.getMessage());
+        return e.getMessage() + ": " + cause.getMessage();
     }
 
     /** Bytes, not a String: Play encodes a String chunk with {@code Response.current()}, unset on the timer thread. */
@@ -242,7 +246,7 @@ public class ApiGraphEvalController extends Controller {
             sheet = Agreement.blindSheet(GraphCases.parse(json, schema), GraphCases.userMd(json),
                     GraphCases.capturedAt(json));
         } catch (IOException | RuntimeException e) {
-            throw invalid("invalid case set: " + e.getMessage());
+            throw invalid(INVALID_CASE_SET + e.getMessage());
         }
         var file = appPath(HeldOut.DIR).resolve(BLIND_SHEET);
         try {
@@ -306,7 +310,7 @@ public class ApiGraphEvalController extends Controller {
         try {
             return GraphCases.load(appPath(GraphCases.DEFAULT_PATH), schema);
         } catch (IOException | RuntimeException e) {
-            throw invalid("invalid case set: " + e.getMessage());
+            throw invalid(INVALID_CASE_SET + e.getMessage());
         }
     }
 

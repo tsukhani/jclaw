@@ -125,7 +125,7 @@ class TurnCancellationTest extends UnitTest {
             started.countDown();
             try {
                 if (started.await(5, TimeUnit.SECONDS)) met.countDown();
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
         };

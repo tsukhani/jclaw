@@ -116,16 +116,12 @@ public final class GraphLifecycle {
             agents++;
             try {
                 if (store.recover(agentId)) recovered++;
-                if (Tx.run(() -> Agent.findById(agentId) == null)) {
+                if (Boolean.TRUE.equals(Tx.run(() -> Agent.findById(agentId) == null))) {
                     store.deleteAgent(agentId);
                     orphans++;
                     continue;
                 }
-                var referenced = new TreeSet<Long>();
-                for (var record : store.read(agentId)) {
-                    var memoryId = memoryId(GraphStore.sourceOf(record));
-                    if (memoryId != null) referenced.add(memoryId);
-                }
+                var referenced = referencedMemoryIds(store, agentId);
                 if (referenced.isEmpty()) continue;
                 var rows = rows(agentId, referenced);
                 var stale = new TreeSet<>(referenced);
@@ -144,6 +140,15 @@ public final class GraphLifecycle {
             }
         }
         return new ReconcileResult(agents, recovered, orphans, removed, retired, cleared);
+    }
+
+    private static Set<Long> referencedMemoryIds(GraphStore store, long agentId) throws IOException {
+        var referenced = new TreeSet<Long>();
+        for (var record : store.read(agentId)) {
+            var memoryId = memoryId(GraphStore.sourceOf(record));
+            if (memoryId != null) referenced.add(memoryId);
+        }
+        return referenced;
     }
 
     private static @Nullable Long memoryId(@Nullable String source) {

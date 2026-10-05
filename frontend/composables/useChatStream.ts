@@ -490,6 +490,16 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
   }
 
+  // Whether the agent is still processing queued messages.
+  async function refreshAgentBusy() {
+    if (!selectedConvoId.value) return
+    try {
+      const status = await $fetch<ConversationQueueStatus>(`/api/conversations/${selectedConvoId.value}/queue`)
+      agentBusy.value = status.busy
+    }
+    catch { agentBusy.value = false }
+  }
+
   async function sendMessage() {
     if (streaming.value || !selectedAgentId.value) return
     // Subagent transcripts are read-only — the user reached this view via a
@@ -577,14 +587,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       // reflects the final layout, then pin to the bottom.
       nextTick().then(scrollToBottom)
       focusInput()
-      // Check if agent is still processing queued messages
-      if (selectedConvoId.value) {
-        try {
-          const status = await $fetch<ConversationQueueStatus>(`/api/conversations/${selectedConvoId.value}/queue`)
-          agentBusy.value = status.busy
-        }
-        catch { agentBusy.value = false }
-      }
+      await refreshAgentBusy()
       // Fire the refresh twice. Immediate: catches the common case where the
       // backend persist already landed by the time onComplete fires. Delayed:
       // catches the race where the SSE `complete` frame beat the persist Tx

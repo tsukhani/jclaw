@@ -288,38 +288,43 @@ public class ApiMemoryController extends Controller {
             badRequest();
             throw ApiResponses.unreachable();
         }
-        boolean changed = false;
-        if (body.has(KEY_IMPORTANCE) && !body.get(KEY_IMPORTANCE).isJsonNull()) {
-            double imp = body.get(KEY_IMPORTANCE).getAsDouble();
-            // JCLAW-970: the body parser is lenient, so NaN arrives as a number and passes both
-            // range comparisons. Reject rather than let the @PreUpdate backstop silently reset it.
-            if (!Double.isFinite(imp) || imp < 0.0 || imp > 1.0) {
-                ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "importance must be between 0.0 and 1.0");
-            }
-            changed |= imp != memory.importance;
-            memory.importance = imp;
-        }
-        if (body.has(KEY_CATEGORY) && !body.get(KEY_CATEGORY).isJsonNull()) {
-            var normalized = MemoryCategory.normalize(body.get(KEY_CATEGORY).getAsString());
-            // JCLAW-927: rejected rather than coerced. Capture coerces because the
-            // alternative is discarding a memory over a label, but this is an operator
-            // typing a category deliberately — silently storing something else would hide
-            // the mistake behind a 200.
-            if (normalized != null && MemoryCategory.from(normalized).isEmpty()) {
-                ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
-                        "category must be one of " + MemoryCategory.labels());
-            }
-            if (normalized != null && !normalized.equals(memory.category)) {
-                memory.category = normalized;
-                changed = true;
-            }
-        }
+        boolean changed = updateImportance(memory, body);
+        changed |= updateCategory(memory, body);
         // A save that changes nothing is not a review: MemoryTrust reads any human event as firm.
         if (changed) {
             memory.save();
             MemoryVerification.record(memory, MemoryProvenance.OPERATOR_ACTOR, MemoryVerification.Kind.EDITED);
         }
         renderJSON(gson.toJson(toDto(memory, agentNamesById())));
+    }
+
+    private static boolean updateImportance(Memory memory, JsonObject body) {
+        if (!body.has(KEY_IMPORTANCE) || body.get(KEY_IMPORTANCE).isJsonNull()) return false;
+        double imp = body.get(KEY_IMPORTANCE).getAsDouble();
+        // JCLAW-970: the body parser is lenient, so NaN arrives as a number and passes both
+        // range comparisons. Reject rather than let the @PreUpdate backstop silently reset it.
+        if (!Double.isFinite(imp) || imp < 0.0 || imp > 1.0) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "importance must be between 0.0 and 1.0");
+        }
+        boolean changed = imp != memory.importance;
+        memory.importance = imp;
+        return changed;
+    }
+
+    private static boolean updateCategory(Memory memory, JsonObject body) {
+        if (!body.has(KEY_CATEGORY) || body.get(KEY_CATEGORY).isJsonNull()) return false;
+        var normalized = MemoryCategory.normalize(body.get(KEY_CATEGORY).getAsString());
+        // JCLAW-927: rejected rather than coerced. Capture coerces because the
+        // alternative is discarding a memory over a label, but this is an operator
+        // typing a category deliberately — silently storing something else would hide
+        // the mistake behind a 200.
+        if (normalized != null && MemoryCategory.from(normalized).isEmpty()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "category must be one of " + MemoryCategory.labels());
+        }
+        if (normalized == null || normalized.equals(memory.category)) return false;
+        memory.category = normalized;
+        return true;
     }
 
     /**

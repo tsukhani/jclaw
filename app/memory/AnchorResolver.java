@@ -121,18 +121,21 @@ public final class AnchorResolver {
             for (var s : superseded) predecessors.add(new MemoryPred(s.id, s.createdAt));
             List<MemoryDerivation> inputs = MemoryDerivation.find("derivedMemory = ?1", m).fetch();
             for (var d : inputs) {
-                if (d.inputMemoryId != null) {
-                    Memory input = Memory.findById(d.inputMemoryId);
-                    if (input != null) predecessors.add(new MemoryPred(input.id, input.createdAt));
-                    continue;
-                }
-                Message message = d.inputMessageId != null ? Message.findById(d.inputMessageId) : null;
-                if (message != null) {
-                    predecessors.add(new MessagePred(message.id, message.createdAt,
-                            message.content == null ? "" : message.content, day(message.createdAt)));
-                }
+                var input = input(d);
+                if (input != null) predecessors.add(input);
             }
             return new Node(m.text, anchor, sourceText, m.derived, List.copyOf(predecessors));
+        }
+
+        private static @Nullable Predecessor input(MemoryDerivation d) {
+            if (d.inputMemoryId != null) {
+                Memory input = Memory.findById(d.inputMemoryId);
+                return input == null ? null : new MemoryPred(input.id, input.createdAt);
+            }
+            Message message = d.inputMessageId != null ? Message.findById(d.inputMessageId) : null;
+            if (message == null) return null;
+            return new MessagePred(message.id, message.createdAt, message.content == null ? "" : message.content,
+                    day(message.createdAt));
         }
 
         private static LocalDate day(Instant at) {

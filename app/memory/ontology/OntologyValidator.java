@@ -11,6 +11,7 @@ import memory.ontology.OntologyRecord.Relation;
 import memory.ontology.OntologyRecord.Status;
 import memory.ontology.OntologyRecord.Term;
 
+import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
@@ -61,9 +62,9 @@ public final class OntologyValidator {
         DUPLICATE_CLAIM
     }
 
-    private static final Pattern MEMORY_SOURCE = Pattern.compile("memory:[0-9]+");
+    private static final Pattern MEMORY_SOURCE = Pattern.compile("memory:\\d+");
 
-    public record Violation(String recordId, Kind kind, String message) {}
+    public record Violation(String recordId, Kind kind, String message) implements Serializable {}
 
     private static final Comparator<Violation> ORDER = Comparator.comparing(Violation::recordId)
             .thenComparing(Violation::kind)
@@ -121,21 +122,7 @@ public final class OntologyValidator {
 
         void check(OntologyRecord record) {
             switch (record) {
-                case Term term -> {
-                    if (!schema.termTypes().containsKey(term.type())) undeclared(term, term.type());
-                    for (var mappingId : term.mappingIds()) {
-                        var mappings = resolve(term, "mappingIds", mappingId, Mapping.class);
-                        if (!mappings.isEmpty()
-                                && mappings.stream().noneMatch(m -> m.termId().equals(term.id()))) {
-                            var grounded = new TreeSet<String>();
-                            mappings.forEach(m -> grounded.add(m.termId()));
-                            add(term.id(), Kind.UNRESOLVED_REFERENCE,
-                                    label(term) + ": mappingIds '" + mappingId + "' grounds '"
-                                            + String.join("', '", grounded) + "', not this term");
-                        }
-                    }
-                    evidence(term, term.evidenceIds());
-                }
+                case Term term -> checkTerm(term);
                 case Mapping mapping -> {
                     resolve(mapping, "termId", mapping.termId(), Term.class);
                     source(mapping, mapping.source());
@@ -163,6 +150,22 @@ public final class OntologyValidator {
                     }
                 }
             }
+        }
+
+        private void checkTerm(Term term) {
+            if (!schema.termTypes().containsKey(term.type())) undeclared(term, term.type());
+            for (var mappingId : term.mappingIds()) {
+                var mappings = resolve(term, "mappingIds", mappingId, Mapping.class);
+                if (!mappings.isEmpty()
+                        && mappings.stream().noneMatch(m -> m.termId().equals(term.id()))) {
+                    var grounded = new TreeSet<String>();
+                    mappings.forEach(m -> grounded.add(m.termId()));
+                    add(term.id(), Kind.UNRESOLVED_REFERENCE,
+                            label(term) + ": mappingIds '" + mappingId + "' grounds '"
+                                    + String.join("', '", grounded) + "', not this term");
+                }
+            }
+            evidence(term, term.evidenceIds());
         }
 
         private void systemTime(Evidence e) {
@@ -252,47 +255,37 @@ public final class OntologyValidator {
             if ((e.status() != null || e.valid() != null) && subjects.stream().noneMatch(Relation.class::isInstance)) {
                 add(e.id(), Kind.CLAIM_LINK, label(e) + ": status and valid need a relation subject");
             }
-            if (e.occurs() != null) {
-                boolean dated = false;
-                boolean undeclared = false;
-                for (var s : subjects) {
-                    if (s instanceof Term t) {
-                        var type = schema.termTypes().get(t.type());
-                        if (type == null) undeclared = true;
-                        else if (type.dated()) dated = true;
-                    }
-                }
-                if (!dated && !undeclared) {
-                    add(e.id(), Kind.CLAIM_LINK, label(e) + ": occurs needs a term of a dated type");
+            if (e.occurs() != null && !hasDatedOrUndeclaredTerm(subjects)) {
+                add(e.id(), Kind.CLAIM_LINK, label(e) + ": occurs needs a term of a dated type");
+            }
+            if (e.valence() != null && !hasValencedOrUndeclaredRelation(subjects)) {
+                add(e.id(), Kind.CLAIM_LINK, label(e) + ": valence needs a relation of a type that takes one");
+            }
+        }
+
+        private boolean hasDatedOrUndeclaredTerm(List<OntologyRecord> subjects) {
+            for (var s : subjects) {
+                if (s instanceof Term t) {
+                    var type = schema.termTypes().get(t.type());
+                    if (type == null || type.dated()) return true;
                 }
             }
-            if (e.valence() != null) {
-                boolean valenced = false;
-                boolean undeclared = false;
-                for (var s : subjects) {
-                    if (s instanceof Relation r) {
-                        var type = schema.relations().get(r.type());
-                        if (type == null) undeclared = true;
-                        else if (type.valence()) valenced = true;
-                    }
-                }
-                if (!valenced && !undeclared) {
-                    add(e.id(), Kind.CLAIM_LINK, label(e) + ": valence needs a relation of a type that takes one");
+            return false;
+        }
+
+        private boolean hasValencedOrUndeclaredRelation(List<OntologyRecord> subjects) {
+            for (var s : subjects) {
+                if (s instanceof Relation r) {
+                    var type = schema.relations().get(r.type());
+                    if (type == null || type.valence()) return true;
                 }
             }
+            return false;
         }
 
         /** Judged only against a declared relation whose From is a Term of declared type; any From type may allow it. */
         private void claimAllowed(Evidence e, List<OntologyRecord> subjects) {
-            var pairs = new ArrayList<List<String>>();
-            for (var s : subjects) {
-                if (!(s instanceof Relation r) || !schema.relations().containsKey(r.type())) continue;
-                for (var from : byId.getOrDefault(r.from(), List.of())) {
-                    if (from instanceof Term t && schema.termTypes().containsKey(t.type())) {
-                        pairs.add(List.of(r.type(), t.type()));
-                    }
-                }
-            }
+            var pairs = declaredPairs(subjects);
             if (pairs.isEmpty()) return;
             var status = e.status();
             var valid = e.valid();
@@ -319,46 +312,61 @@ public final class OntologyValidator {
             }
         }
 
+        private List<List<String>> declaredPairs(List<OntologyRecord> subjects) {
+            var pairs = new ArrayList<List<String>>();
+            for (var s : subjects) {
+                if (!(s instanceof Relation r) || !schema.relations().containsKey(r.type())) continue;
+                for (var from : byId.getOrDefault(r.from(), List.of())) {
+                    if (from instanceof Term t && schema.termTypes().containsKey(t.type())) {
+                        pairs.add(List.of(r.type(), t.type()));
+                    }
+                }
+            }
+            return pairs;
+        }
+
         /** A denial's valid is {@link #claimAllowed}'s; an interval that cannot be constructed is the codec's. */
         private void intervals(Evidence e) {
             var status = e.status();
             var valid = e.valid();
-            var anchor = e.anchor();
             if (valid != null && status != Status.DENIED) {
                 if (valid.start() instanceof Open) {
                     add(e.id(), Kind.INVALID_INTERVAL, label(e) + ": valid " + valid + " has an open start");
                 }
-                var end = valid.end();
-                if (status == Status.HOLDS) {
-                    if (!valid.single() && end instanceof Unknown) {
-                        add(e.id(), Kind.INVALID_INTERVAL,
-                                label(e) + ": valid " + valid + " holds but its end is unknown");
-                    } else if (!valid.single() && anchor != null && end instanceof Point(var d)
-                            && !d.hi().isAfter(anchor)) {
-                        add(e.id(), Kind.INVALID_INTERVAL,
-                                label(e) + ": valid " + valid + " holds but ends before its anchor " + anchor);
-                    }
-                }
-                if (status == Status.ENDED) {
-                    if (end instanceof Open) {
-                        add(e.id(), Kind.INVALID_INTERVAL, label(e) + ": valid " + valid + " ended but has an open end");
-                    }
-                    if (anchor != null && end instanceof Point(var d) && d.lo().isAfter(anchor)) {
-                        add(e.id(), Kind.INVALID_INTERVAL,
-                                label(e) + ": valid " + valid + " ended after its anchor " + anchor);
-                    }
-                    if (anchor != null && !valid.single() && valid.start() instanceof Point(var d)
-                            && d.lo().isAfter(anchor)) {
-                        add(e.id(), Kind.INVALID_INTERVAL,
-                                label(e) + ": valid " + valid + " starts after its anchor " + anchor);
-                    }
-                }
+                if (status == Status.HOLDS) heldInterval(e, valid);
+                if (status == Status.ENDED) endedInterval(e, valid);
             }
             var occurs = e.occurs();
             if (occurs != null && !occurs.single()
                     && !(occurs.start() instanceof Point && occurs.end() instanceof Point)) {
                 add(e.id(), Kind.INVALID_INTERVAL,
                         label(e) + ": occurs " + occurs + " is neither a date nor a closed interval");
+            }
+        }
+
+        private void heldInterval(Evidence e, EdtfInterval valid) {
+            var anchor = e.anchor();
+            var end = valid.end();
+            if (!valid.single() && end instanceof Unknown) {
+                add(e.id(), Kind.INVALID_INTERVAL, label(e) + ": valid " + valid + " holds but its end is unknown");
+            } else if (!valid.single() && anchor != null && end instanceof Point(var d) && !d.hi().isAfter(anchor)) {
+                add(e.id(), Kind.INVALID_INTERVAL,
+                        label(e) + ": valid " + valid + " holds but ends before its anchor " + anchor);
+            }
+        }
+
+        private void endedInterval(Evidence e, EdtfInterval valid) {
+            var anchor = e.anchor();
+            var end = valid.end();
+            if (end instanceof Open) {
+                add(e.id(), Kind.INVALID_INTERVAL, label(e) + ": valid " + valid + " ended but has an open end");
+            }
+            if (anchor != null && end instanceof Point(var d) && d.lo().isAfter(anchor)) {
+                add(e.id(), Kind.INVALID_INTERVAL, label(e) + ": valid " + valid + " ended after its anchor " + anchor);
+            }
+            if (anchor != null && !valid.single() && valid.start() instanceof Point(var d) && d.lo().isAfter(anchor)) {
+                add(e.id(), Kind.INVALID_INTERVAL,
+                        label(e) + ": valid " + valid + " starts after its anchor " + anchor);
             }
         }
 

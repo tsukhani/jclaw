@@ -42,18 +42,52 @@ import java.util.Map;
  */
 public final class GraphCodec {
 
+    private static final String KEY_ID = "id";
+    private static final String KEY_AGENT_ID = "agentId";
+    private static final String KEY_TIER = "tier";
+    private static final String KEY_USEFUL_RECALL_COUNT = "usefulRecallCount";
+    private static final String KEY_LAST_USEFUL_RECALL = "lastUsefulRecall";
+    private static final String KEY_GRAPH_VERSION = "graphVersion";
+    private static final String KEY_TYPE = "type";
+    private static final String KEY_NAME = "name";
+    private static final String KEY_MAPPING_IDS = "mappingIds";
+    private static final String KEY_EVIDENCE_IDS = "evidenceIds";
+    private static final String KEY_ALIASES = "aliases";
+    private static final String KEY_MERGED_INTO = "mergedInto";
+    private static final String KEY_TERM_ID = "termId";
+    private static final String KEY_SOURCE = "source";
+    private static final String KEY_SURFACES = "surfaces";
+    private static final String KEY_FROM = "from";
+    private static final String KEY_TO = "to";
+    private static final String KEY_WEIGHT = "weight";
+    private static final String KEY_RULE = "rule";
+    private static final String KEY_SUBJECT_ID = "subjectId";
+    private static final String KEY_AUTHOR_TYPE = "authorType";
+    private static final String KEY_CONFIDENCE = "confidence";
+    private static final String KEY_RUN_ID = "runId";
+    private static final String KEY_RECORDED_AT = "recordedAt";
+    private static final String KEY_RETIRED_AT = "retiredAt";
+    private static final String KEY_RETIRED_BY = "retiredBy";
+    private static final String KEY_LINEAGE = "lineage";
+    private static final String KEY_CHANGED_BY = "changedBy";
+    private static final String KEY_ANCHOR = "anchor";
+    private static final String KEY_STATUS = "status";
+    private static final String KEY_VALID = "valid";
+    private static final String KEY_OCCURS = "occurs";
+    private static final String KEY_VALENCE = "valence";
+
     private static final List<String> META_KEYS =
-            List.of("id", "agentId", "tier", "usefulRecallCount", "lastUsefulRecall", "graphVersion");
+            List.of(KEY_ID, KEY_AGENT_ID, KEY_TIER, KEY_USEFUL_RECALL_COUNT, KEY_LAST_USEFUL_RECALL, KEY_GRAPH_VERSION);
 
     /** One document per family; the declaration order is the order files are written in. */
     public enum Family {
-        TERM("term.jsonl", List.of("type", "name", "mappingIds", "evidenceIds"), List.of("aliases", "mergedInto")),
-        MAPPING("mapping.jsonl", List.of("termId", "source", "evidenceIds"), List.of("surfaces")),
-        RELATION("relation.jsonl", List.of("type", "from", "to", "weight", "evidenceIds"), List.of()),
-        CONSTRAINT("constraint.jsonl", List.of("termId", "rule", "evidenceIds"), List.of()),
-        EVIDENCE("evidence.jsonl", List.of("source", "subjectId"), List.of("authorType", "confidence", "runId",
-                "recordedAt", "retiredAt", "retiredBy", "lineage", "changedBy", "anchor", "status", "valid", "occurs",
-                "valence"));
+        TERM("term.jsonl", List.of(KEY_TYPE, KEY_NAME, KEY_MAPPING_IDS, KEY_EVIDENCE_IDS), List.of(KEY_ALIASES, KEY_MERGED_INTO)),
+        MAPPING("mapping.jsonl", List.of(KEY_TERM_ID, KEY_SOURCE, KEY_EVIDENCE_IDS), List.of(KEY_SURFACES)),
+        RELATION("relation.jsonl", List.of(KEY_TYPE, KEY_FROM, KEY_TO, KEY_WEIGHT, KEY_EVIDENCE_IDS), List.of()),
+        CONSTRAINT("constraint.jsonl", List.of(KEY_TERM_ID, KEY_RULE, KEY_EVIDENCE_IDS), List.of()),
+        EVIDENCE("evidence.jsonl", List.of(KEY_SOURCE, KEY_SUBJECT_ID), List.of(KEY_AUTHOR_TYPE, KEY_CONFIDENCE, KEY_RUN_ID,
+                KEY_RECORDED_AT, KEY_RETIRED_AT, KEY_RETIRED_BY, KEY_LINEAGE, KEY_CHANGED_BY, KEY_ANCHOR, KEY_STATUS, KEY_VALID, KEY_OCCURS,
+                KEY_VALENCE));
 
         private final String fileName;
         private final List<String> keys;
@@ -119,66 +153,66 @@ public final class GraphCodec {
             w.setSerializeNulls(true);
             w.beginObject();
             var meta = record.meta();
-            w.name("id").value(meta.id());
-            w.name("agentId").value(meta.agentId());
-            w.name("tier").value(meta.tier().name().toLowerCase(Locale.ROOT));
-            w.name("usefulRecallCount").value(meta.usefulRecallCount());
+            w.name(KEY_ID).value(meta.id());
+            w.name(KEY_AGENT_ID).value(meta.agentId());
+            w.name(KEY_TIER).value(meta.tier().name().toLowerCase(Locale.ROOT));
+            w.name(KEY_USEFUL_RECALL_COUNT).value(meta.usefulRecallCount());
             var last = meta.lastUsefulRecall();
-            w.name("lastUsefulRecall").value(last == null ? null : last.toString());
-            w.name("graphVersion").value(meta.graphVersion());
+            w.name(KEY_LAST_USEFUL_RECALL).value(last == null ? null : last.toString());
+            w.name(KEY_GRAPH_VERSION).value(meta.graphVersion());
             switch (record) {
                 case Term t -> {
-                    w.name("type").value(t.type());
-                    w.name("name").value(t.name());
-                    strings(w.name("mappingIds"), t.mappingIds());
-                    strings(w.name("evidenceIds"), t.evidenceIds());
-                    optionalStrings(w, "aliases", t.aliases());
-                    optional(w, "mergedInto", t.mergedInto());
+                    w.name(KEY_TYPE).value(t.type());
+                    w.name(KEY_NAME).value(t.name());
+                    strings(w.name(KEY_MAPPING_IDS), t.mappingIds());
+                    strings(w.name(KEY_EVIDENCE_IDS), t.evidenceIds());
+                    optionalStrings(w, KEY_ALIASES, t.aliases());
+                    optional(w, KEY_MERGED_INTO, t.mergedInto());
                 }
                 case Mapping m -> {
-                    w.name("termId").value(m.termId());
-                    w.name("source").value(m.source());
-                    strings(w.name("evidenceIds"), m.evidenceIds());
-                    optionalStrings(w, "surfaces", m.surfaces());
+                    w.name(KEY_TERM_ID).value(m.termId());
+                    w.name(KEY_SOURCE).value(m.source());
+                    strings(w.name(KEY_EVIDENCE_IDS), m.evidenceIds());
+                    optionalStrings(w, KEY_SURFACES, m.surfaces());
                 }
                 case Relation r -> {
-                    w.name("type").value(r.type());
-                    w.name("from").value(r.from());
-                    w.name("to").value(r.to());
+                    w.name(KEY_TYPE).value(r.type());
+                    w.name(KEY_FROM).value(r.from());
+                    w.name(KEY_TO).value(r.to());
                     if (!Double.isFinite(r.weight())) {
                         throw new IllegalArgumentException("relation " + r.id() + ": weight " + r.weight() + " is not finite");
                     }
-                    w.name("weight").value(r.weight());
-                    strings(w.name("evidenceIds"), r.evidenceIds());
+                    w.name(KEY_WEIGHT).value(r.weight());
+                    strings(w.name(KEY_EVIDENCE_IDS), r.evidenceIds());
                 }
                 case Constraint c -> {
-                    w.name("termId").value(c.termId());
-                    w.name("rule").value(c.rule());
-                    strings(w.name("evidenceIds"), c.evidenceIds());
+                    w.name(KEY_TERM_ID).value(c.termId());
+                    w.name(KEY_RULE).value(c.rule());
+                    strings(w.name(KEY_EVIDENCE_IDS), c.evidenceIds());
                 }
                 case Evidence e -> {
-                    w.name("source").value(e.source());
-                    w.name("subjectId").value(e.subjectId());
-                    optional(w, "authorType", lower(e.authorType()));
+                    w.name(KEY_SOURCE).value(e.source());
+                    w.name(KEY_SUBJECT_ID).value(e.subjectId());
+                    optional(w, KEY_AUTHOR_TYPE, lower(e.authorType()));
                     var confidence = e.confidence();
                     if (confidence != null) {
                         if (!Double.isFinite(confidence)) {
                             throw new IllegalArgumentException(
                                     "evidence " + e.id() + ": confidence " + confidence + " is not finite");
                         }
-                        w.name("confidence").value(confidence);
+                        w.name(KEY_CONFIDENCE).value(confidence);
                     }
-                    optional(w, "runId", e.runId());
-                    optional(w, "recordedAt", text(e.recordedAt()));
-                    optional(w, "retiredAt", text(e.retiredAt()));
-                    optional(w, "retiredBy", e.retiredBy());
-                    optional(w, "lineage", lower(e.lineage()));
-                    optional(w, "changedBy", text(e.changedBy()));
-                    optional(w, "anchor", text(e.anchor()));
-                    optional(w, "status", lower(e.status()));
-                    optional(w, "valid", text(e.valid()));
-                    optional(w, "occurs", text(e.occurs()));
-                    optional(w, "valence", lower(e.valence()));
+                    optional(w, KEY_RUN_ID, e.runId());
+                    optional(w, KEY_RECORDED_AT, text(e.recordedAt()));
+                    optional(w, KEY_RETIRED_AT, text(e.retiredAt()));
+                    optional(w, KEY_RETIRED_BY, e.retiredBy());
+                    optional(w, KEY_LINEAGE, lower(e.lineage()));
+                    optional(w, KEY_CHANGED_BY, text(e.changedBy()));
+                    optional(w, KEY_ANCHOR, text(e.anchor()));
+                    optional(w, KEY_STATUS, lower(e.status()));
+                    optional(w, KEY_VALID, text(e.valid()));
+                    optional(w, KEY_OCCURS, text(e.occurs()));
+                    optional(w, KEY_VALENCE, lower(e.valence()));
                 }
             }
             w.endObject();
@@ -249,33 +283,33 @@ public final class GraphCodec {
                 if (!values.containsKey(key)) throw new IllegalArgumentException("missing key '" + key + "'");
             }
             var fields = new Fields(values);
-            var meta = new Meta(fields.string("id"), fields.longValue("agentId"), tier(fields.string("tier")),
-                    fields.intValue("usefulRecallCount"), instant(fields.nullableString("lastUsefulRecall")),
-                    fields.intValue("graphVersion"));
+            var meta = new Meta(fields.string(KEY_ID), fields.longValue(KEY_AGENT_ID), tier(fields.string(KEY_TIER)),
+                    fields.intValue(KEY_USEFUL_RECALL_COUNT), instant(fields.nullableString(KEY_LAST_USEFUL_RECALL)),
+                    fields.intValue(KEY_GRAPH_VERSION));
             return switch (family) {
-                case TERM -> new Term(meta, fields.string("type"), fields.string("name"),
-                        fields.strings("mappingIds"), fields.strings("evidenceIds"), fields.optionalStrings("aliases"),
-                        fields.optionalString("mergedInto"));
-                case MAPPING -> new Mapping(meta, fields.string("termId"), fields.string("source"),
-                        fields.strings("evidenceIds"), fields.optionalStrings("surfaces"));
-                case RELATION -> new Relation(meta, fields.string("type"), fields.string("from"), fields.string("to"),
-                        fields.doubleValue("weight"), fields.strings("evidenceIds"));
-                case CONSTRAINT -> new Constraint(meta, fields.string("termId"), fields.string("rule"),
-                        fields.strings("evidenceIds"));
-                case EVIDENCE -> new Evidence(meta, fields.string("source"), fields.nullableString("subjectId"),
-                        fields.optionalEnum("authorType", MemoryAuthorType.class),
-                        fields.optionalDouble("confidence"),
-                        fields.optionalString("runId"),
-                        instant(fields.optionalString("recordedAt")),
-                        instant(fields.optionalString("retiredAt")),
-                        fields.optionalString("retiredBy"),
-                        fields.optionalEnum("lineage", Lineage.class),
-                        date(fields.optionalString("changedBy")),
-                        date(fields.optionalString("anchor")),
-                        fields.optionalEnum("status", Status.class),
-                        interval(fields.optionalString("valid")),
-                        interval(fields.optionalString("occurs")),
-                        fields.optionalEnum("valence", Valence.class));
+                case TERM -> new Term(meta, fields.string(KEY_TYPE), fields.string(KEY_NAME),
+                        fields.strings(KEY_MAPPING_IDS), fields.strings(KEY_EVIDENCE_IDS), fields.optionalStrings(KEY_ALIASES),
+                        fields.optionalString(KEY_MERGED_INTO));
+                case MAPPING -> new Mapping(meta, fields.string(KEY_TERM_ID), fields.string(KEY_SOURCE),
+                        fields.strings(KEY_EVIDENCE_IDS), fields.optionalStrings(KEY_SURFACES));
+                case RELATION -> new Relation(meta, fields.string(KEY_TYPE), fields.string(KEY_FROM), fields.string(KEY_TO),
+                        fields.doubleValue(KEY_WEIGHT), fields.strings(KEY_EVIDENCE_IDS));
+                case CONSTRAINT -> new Constraint(meta, fields.string(KEY_TERM_ID), fields.string(KEY_RULE),
+                        fields.strings(KEY_EVIDENCE_IDS));
+                case EVIDENCE -> new Evidence(meta, fields.string(KEY_SOURCE), fields.nullableString(KEY_SUBJECT_ID),
+                        fields.optionalEnum(KEY_AUTHOR_TYPE, MemoryAuthorType.class),
+                        fields.optionalDouble(KEY_CONFIDENCE),
+                        fields.optionalString(KEY_RUN_ID),
+                        instant(fields.optionalString(KEY_RECORDED_AT)),
+                        instant(fields.optionalString(KEY_RETIRED_AT)),
+                        fields.optionalString(KEY_RETIRED_BY),
+                        fields.optionalEnum(KEY_LINEAGE, Lineage.class),
+                        date(fields.optionalString(KEY_CHANGED_BY)),
+                        date(fields.optionalString(KEY_ANCHOR)),
+                        fields.optionalEnum(KEY_STATUS, Status.class),
+                        interval(fields.optionalString(KEY_VALID)),
+                        interval(fields.optionalString(KEY_OCCURS)),
+                        fields.optionalEnum(KEY_VALENCE, Valence.class));
             };
         } catch (IllegalArgumentException | IllegalStateException | IOException | DateTimeParseException e) {
             throw new IllegalArgumentException(file + ":" + lineNo + ": " + e.getMessage(), e);

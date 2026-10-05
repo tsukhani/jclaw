@@ -62,26 +62,8 @@ public final class MemoryOwnerNameRewrite {
         var removed = new int[1];
         try {
             changed = Tx.run(() -> {
-                var ids = new ArrayList<Long>();
-                // The name lives on USER.md's Name line now: a memory that only states it goes, superseded copies too.
-                List<Memory> mentions = Memory.find("agent.id = ?1 AND (LOWER(text) LIKE ?2 OR LOWER(text) LIKE ?3)",
-                        agent.id, "%the user%", "%" + owner.toLowerCase(Locale.ROOT) + "%").fetch();
-                for (var memory : mentions) {
-                    if (memory.authorType != MemoryAuthorType.GUEST_TURN && MemorySubject.statesOwnerName(memory.text, owner)) {
-                        MemoryStoreFactory.get().delete(String.valueOf(memory.id));
-                        removed[0]++;
-                    }
-                }
-                List<Memory> rows = Memory.find("agent.id = ?1 AND supersededAt IS NULL AND LOWER(text) LIKE ?2",
-                        agent.id, "%the user%").fetch();
-                for (var memory : rows) {
-                    var text = named(memory.text, memory.authorType == MemoryAuthorType.GUEST_TURN ? guestName(memory) : owner);
-                    if (text.equals(memory.text)) continue;
-                    memory.text = text;
-                    memory.save();
-                    ids.add(memory.id);
-                }
-                return ids;
+                removed[0] = removeNameStatements(agent, owner);
+                return renameActive(agent, owner);
             });
         } finally {
             lock.unlock();
@@ -94,6 +76,34 @@ public final class MemoryOwnerNameRewrite {
                             .formatted(owner, changed.size(), removed[0]));
         }
         return changed.size();
+    }
+
+    private static int removeNameStatements(Agent agent, String owner) {
+        int removed = 0;
+        // The name lives on USER.md's Name line now: a memory that only states it goes, superseded copies too.
+        List<Memory> mentions = Memory.find("agent.id = ?1 AND (LOWER(text) LIKE ?2 OR LOWER(text) LIKE ?3)",
+                agent.id, "%the user%", "%" + owner.toLowerCase(Locale.ROOT) + "%").fetch();
+        for (var memory : mentions) {
+            if (memory.authorType != MemoryAuthorType.GUEST_TURN && MemorySubject.statesOwnerName(memory.text, owner)) {
+                MemoryStoreFactory.get().delete(String.valueOf(memory.id));
+                removed++;
+            }
+        }
+        return removed;
+    }
+
+    private static List<Long> renameActive(Agent agent, String owner) {
+        var ids = new ArrayList<Long>();
+        List<Memory> rows = Memory.find("agent.id = ?1 AND supersededAt IS NULL AND LOWER(text) LIKE ?2",
+                agent.id, "%the user%").fetch();
+        for (var memory : rows) {
+            var text = named(memory.text, memory.authorType == MemoryAuthorType.GUEST_TURN ? guestName(memory) : owner);
+            if (text.equals(memory.text)) continue;
+            memory.text = text;
+            memory.save();
+            ids.add(memory.id);
+        }
+        return ids;
     }
 
     private static String guestName(Memory memory) {
