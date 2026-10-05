@@ -34,6 +34,7 @@ public class ApiFactoryController extends Controller {
 
     private static final String CATEGORY = "factory";
     private static final String GATEWAY = "jclaw-factory-gateway";
+    private static final String DOCKER = "docker";
     private static final Pattern SANDBOX_NAME = Pattern.compile(
             "^sandcastle-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", Pattern.CASE_INSENSITIVE);
 
@@ -83,14 +84,14 @@ public class ApiFactoryController extends Controller {
     @AgentAccess(value = OPERATOR_ONLY, reason = "pauses the factory, failing stories already running")
     public static void gatewayPause() {
         renderCommand("gateway pause",
-                FactoryProcess.run(List.of("docker", "stop", GATEWAY), DOCKER_ACTION_TIMEOUT), PAUSE_MESSAGE);
+                FactoryProcess.run(List.of(DOCKER, "stop", GATEWAY), DOCKER_ACTION_TIMEOUT), PAUSE_MESSAGE);
     }
 
     /** POST /api/factory/gateway/resume — {@code docker start jclaw-factory-gateway}. */
     @AgentAccess(value = OPERATOR_ONLY, reason = "resumes the factory's model and egress gateway")
     public static void gatewayResume() {
         renderCommand("gateway resume",
-                FactoryProcess.run(List.of("docker", "start", GATEWAY), DOCKER_ACTION_TIMEOUT), "Gateway resumed.");
+                FactoryProcess.run(List.of(DOCKER, "start", GATEWAY), DOCKER_ACTION_TIMEOUT), "Gateway resumed.");
     }
 
     /** POST /api/factory/sandboxes/{name}/stop — stop one running {@code sandcastle-<uuid>} container. */
@@ -103,9 +104,8 @@ public class ApiFactoryController extends Controller {
             throw refuse(404, ApiResponses.NOT_FOUND, "stop sandbox " + name, "Docker lists no such running container");
         }
         var story = storyIn(name);
-        var res = FactoryProcess.run(List.of("docker", "stop", name), DOCKER_ACTION_TIMEOUT);
-        var message = !res.ok() ? failureMessage(res)
-                : story != null ? "Story " + story + " will fail." : "No story ran in this sandbox.";
+        var res = FactoryProcess.run(List.of(DOCKER, "stop", name), DOCKER_ACTION_TIMEOUT);
+        var message = res.ok() ? stoppedMessage(story) : failureMessage(res);
         log("sandbox stop " + name + (story != null ? " (story " + story + ")" : ""), res);
         renderJSON(GSON.toJson(new SandboxStopResult(res.exitCode(), res.timedOut(), res.tail(), message, story)));
     }
@@ -183,24 +183,24 @@ public class ApiFactoryController extends Controller {
 
     private static @Nullable String storyIn(String name) {
         var res = FactoryProcess.run(
-                List.of("docker", "inspect", "--format", "{{range .Mounts}}{{println .Source}}{{end}}", name),
+                List.of(DOCKER, "inspect", "--format", "{{range .Mounts}}{{println .Source}}{{end}}", name),
                 DOCKER_QUERY_TIMEOUT);
         return res.ok() ? FactoryHome.storyFromMounts(res.output()) : null;
     }
 
     private static boolean isRunning(String name) {
         var res = FactoryProcess.run(
-                List.of("docker", "ps", "--filter", "name=^" + name + "$", "--format", "{{.Names}}"),
+                List.of(DOCKER, "ps", "--filter", "name=^" + name + "$", "--format", "{{.Names}}"),
                 DOCKER_QUERY_TIMEOUT);
         return res.ok() && res.output().lines().map(String::trim).anyMatch(name::equals);
     }
 
     private static OptionalInt dockerCpus() {
-        var res = FactoryProcess.run(List.of("docker", "info", "--format", "{{.NCPU}}"), DOCKER_QUERY_TIMEOUT);
+        var res = FactoryProcess.run(List.of(DOCKER, "info", "--format", "{{.NCPU}}"), DOCKER_QUERY_TIMEOUT);
         if (!res.ok()) return OptionalInt.empty();
         // stderr is merged in, so skip any WARNING lines docker prints around the count.
         for (var line : res.output().lines().map(String::trim).toList()) {
-            if (!line.matches("[0-9]+")) continue;
+            if (!line.matches("\\d+")) continue;
             try {
                 var n = Integer.parseInt(line);
                 if (n >= 1) return OptionalInt.of(n);
@@ -218,13 +218,18 @@ public class ApiFactoryController extends Controller {
     }
 
     private static void log(String did, FactoryProcess.ExecResult res) {
+        var ran = "Operator ran " + did;
         if (res.timedOut()) {
-            EventLogger.warn(CATEGORY, "Operator ran " + did + ": timed out", res.tail());
+            EventLogger.warn(CATEGORY, ran + ": timed out", res.tail());
         } else if (res.exitCode() != 0) {
-            EventLogger.warn(CATEGORY, "Operator ran " + did + ": failed with exit code " + res.exitCode(), res.tail());
+            EventLogger.warn(CATEGORY, ran + ": failed with exit code " + res.exitCode(), res.tail());
         } else {
-            EventLogger.info(CATEGORY, "Operator ran " + did + ": exit code 0");
+            EventLogger.info(CATEGORY, ran + ": exit code 0");
         }
+    }
+
+    private static String stoppedMessage(@Nullable String story) {
+        return story != null ? "Story " + story + " will fail." : "No story ran in this sandbox.";
     }
 
     private static void renderCommand(String did, FactoryProcess.ExecResult res, String successMessage) {

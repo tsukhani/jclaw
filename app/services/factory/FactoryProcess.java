@@ -50,10 +50,14 @@ public final class FactoryProcess {
         }
     }
 
-    /** Test seam: when non-null, every {@link #run} goes here instead of spawning. */
-    public static volatile @Nullable Runner runnerForTest;
+    private static volatile @Nullable Runner runnerOverride;
 
     private FactoryProcess() {}
+
+    /** Test-only: send every {@link #run} to {@code runner} instead of spawning (or clear with {@code null}). */
+    public static void setRunnerForTest(@Nullable Runner runner) {
+        runnerOverride = runner;
+    }
 
     /**
      * Run a harness command, or return null while another is still running: two would race
@@ -70,7 +74,7 @@ public final class FactoryProcess {
 
     /** Run {@code command} with the checkout ({@code Play.applicationPath}) as its working directory. */
     public static ExecResult run(List<String> command, Duration timeout) {
-        var runner = runnerForTest;
+        var runner = runnerOverride;
         var dir = Play.applicationPath;
         return runner != null ? runner.run(command, dir, timeout) : execProcess(command, dir, timeout);
     }

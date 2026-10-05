@@ -1,7 +1,7 @@
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Serializes the classes that depend on {@code FactoryProcess.runnerForTest}: it is
+ * Serializes the classes that depend on {@code FactoryProcess.setRunnerForTest}: it is
  * process-global, so {@link ApiFactoryControllerTest}'s fake would otherwise capture
  * {@link FactoryProcessTest}'s real runs across play1's concurrent lanes.
  */

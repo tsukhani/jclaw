@@ -19,7 +19,7 @@ class FactoryProcessTest extends UnitTest {
     @BeforeEach
     void lock() {
         FactoryRunnerSync.acquire();
-        FactoryProcess.runnerForTest = null;
+        FactoryProcess.setRunnerForTest(null);
     }
 
     @AfterEach

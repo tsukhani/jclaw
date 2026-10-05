@@ -33,18 +33,18 @@ class ApiFactoryControllerTest extends FunctionalTest {
     private final FakeRunner runner = new FakeRunner();
 
     @BeforeEach
-    void setup() throws Exception {
+    void setup() {
         FactoryRunnerSync.acquire();
         AuthFixture.seedAdminPassword("changeme");
-        FactoryHome.homeForTest = home;
-        FactoryProcess.runnerForTest = runner;
+        FactoryHome.setHomeForTest(home);
+        FactoryProcess.setRunnerForTest(runner);
         clearCookies();
     }
 
     @AfterEach
     void clearSeams() {
-        FactoryHome.homeForTest = null;
-        FactoryProcess.runnerForTest = null;
+        FactoryHome.setHomeForTest(null);
+        FactoryProcess.setRunnerForTest(null);
         clearCookies();
         FactoryRunnerSync.release();
     }
@@ -351,7 +351,7 @@ class ApiFactoryControllerTest extends FunctionalTest {
     @Test
     void settingsPutRefusesWhenTheHomeDoesNotExist() {
         var absent = home.resolve("absent");
-        FactoryHome.homeForTest = absent;
+        FactoryHome.setHomeForTest(absent);
         login();
         var resp = PUT("/api/factory/settings", "application/json", "{\"FACTORY_MAX_PARALLEL\":3}");
         assertStatus(409, resp);
