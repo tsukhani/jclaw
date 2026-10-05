@@ -446,6 +446,17 @@ class ApiFactoryControllerTest extends FunctionalTest {
         }
     }
 
+    @Test
+    void aControlActionDropsTheCachedProbes() {
+        login();
+        FactoryStatus.current("Mac OS X");
+        assertIsOk(POST("/api/factory/gateway/pause", "application/json", "{}"));
+        var before = runner.calls.stream().filter(c -> String.join(" ", c).startsWith("docker ps")).count();
+        FactoryStatus.current("Mac OS X");
+        var after = runner.calls.stream().filter(c -> String.join(" ", c).startsWith("docker ps")).count();
+        assertEquals(before + 1, after, runner.calls::toString);
+    }
+
     private Http.Response asAgent(Supplier<Http.Response> call) {
         try {
             return call.get();

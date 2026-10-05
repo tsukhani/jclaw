@@ -132,6 +132,7 @@ public class ApiFactoryController extends Controller {
         }
         var story = storyIn(name);
         var res = FactoryProcess.run(List.of(DOCKER, "stop", name), DOCKER_ACTION_TIMEOUT);
+        FactoryStatus.clearCache();
         var message = res.ok() ? stoppedMessage(story) : failureMessage(res);
         log("sandbox stop " + name + (story != null ? " (story " + story + ")" : ""), res);
         renderJSON(GSON.toJson(new SandboxStopResult(res.exitCode(), res.timedOut(), res.tail(), message, story)));
@@ -260,6 +261,7 @@ public class ApiFactoryController extends Controller {
     }
 
     private static void renderCommand(String did, FactoryProcess.ExecResult res, String successMessage) {
+        FactoryStatus.clearCache();
         log(did, res);
         var message = res.ok() ? successMessage : failureMessage(res);
         renderJSON(GSON.toJson(new CommandResult(res.exitCode(), res.timedOut(), res.tail(), message)));

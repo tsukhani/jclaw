@@ -7,10 +7,14 @@ import services.ConfigService;
 import services.factory.FactoryHome;
 import services.factory.FactoryProcess;
 import services.factory.FactoryStatus;
+import utils.AppClock;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 
 /**
@@ -32,6 +36,7 @@ class FactoryStatusTest extends UnitTest {
         FactoryRunnerSync.acquire();
         FactoryHome.setHomeForTest(home);
         FactoryProcess.setRunnerForTest(runner);
+        FactoryStatus.clearCache();
         Files.createDirectories(home.resolve("logs"));
     }
 
@@ -159,6 +164,22 @@ class FactoryStatusTest extends UnitTest {
         assertTrue(s.reason().contains("only on macOS"), s.reason());
         assertEquals("stopped", s.harness().state());
         assertTrue(runner.calls.isEmpty(), runner.calls::toString);
+    }
+
+    @Test
+    void probesAreReusedWithinTheTtlAndAskedAgainAfterItOrAClear() {
+        var t0 = Instant.parse("2026-10-05T09:00:00Z");
+        assertEquals(1, dockerPsCountAfterStatusAt(t0));
+        assertEquals(1, dockerPsCountAfterStatusAt(t0.plusMillis(4999)), "within the TTL");
+        assertEquals(2, dockerPsCountAfterStatusAt(t0.plusSeconds(5)), "at the TTL");
+        assertEquals(2, dockerPsCountAfterStatusAt(t0.plusSeconds(6)));
+        FactoryStatus.clearCache();
+        assertEquals(3, dockerPsCountAfterStatusAt(t0.plusSeconds(6)), "after a clear");
+    }
+
+    private long dockerPsCountAfterStatusAt(Instant at) {
+        AppClock.runWith(Clock.fixed(at, ZoneOffset.UTC), () -> FactoryStatus.current(MAC));
+        return runner.calls.stream().filter(c -> String.join(" ", c).startsWith("docker ps")).count();
     }
 
     @Test

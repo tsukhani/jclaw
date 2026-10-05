@@ -103,7 +103,12 @@ public final class FactoryStatus {
 
     /** The status with probes no older than {@link #CACHE_TTL}; the board is read fresh. */
     public static StatusView current() {
-        return assemble(cachedProbes(System.getProperty("os.name", "")));
+        return current(System.getProperty("os.name", ""));
+    }
+
+    /** {@link #current()} as on a host whose {@code os.name} is {@code osName}. */
+    public static StatusView current(String osName) {
+        return assemble(cachedProbes(osName));
     }
 
     /** The status with fresh probes, as on a host whose {@code os.name} is {@code osName}. */
