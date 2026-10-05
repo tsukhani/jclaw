@@ -25,14 +25,14 @@ const api = async (path: string, init: { method?: string; body?: unknown } = {})
 export const snapshot = async (key: string): Promise<Snapshot> => {
   const f = (await api(`/rest/api/2/issue/${key}?fields=summary,description,labels,comment,issuelinks,updated,${EPIC_LINK}`)).fields;
   const epicKey: string | null = f[EPIC_LINK];
-  const epic = epicKey ? (await api(`/rest/api/2/issue/${epicKey}?fields=summary,description`)).fields : null;
+  const epic = epicKey ? (await api(`/rest/api/2/issue/${epicKey}?fields=summary,description,labels`)).fields : null;
   return {
     key,
     summary: f.summary,
     description: f.description ?? "",
     labels: f.labels ?? [],
     comments: (f.comment?.comments ?? []).map((c: any) => ({ author: c.author?.displayName ?? "unknown", body: c.body })),
-    parent: epic ? { key: epicKey!, summary: epic.summary, description: epic.description ?? "" } : undefined,
+    parent: epic ? { key: epicKey!, summary: epic.summary, description: epic.description ?? "", labels: epic.labels ?? [] } : undefined,
     // On issue A, a Blocks link carrying an inwardIssue B reads "A is blocked by B".
     blockedBy: (f.issuelinks ?? [])
       .filter((l: any) => l.type.name === "Blocks" && l.inwardIssue)
@@ -155,6 +155,7 @@ export const jira: Tracker = {
   merged: async (key) => {
     await transitionTo(key, "Done");
   },
+  done: async (key) => (await api(`/rest/api/2/issue/${key}?fields=status`)).fields.status.statusCategory.key === "done",
   comment: async (key, body) => {
     await comment(key, body);
   },

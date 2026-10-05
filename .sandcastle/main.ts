@@ -13,7 +13,8 @@ import { jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
 import { MergeRefused, landBranch, landedAs, mergeVerdict, type Report } from "./merge.ts";
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type StoryPlan } from "./plan.ts";
-import { CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
+import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
+import { Board, autoMerges, type About } from "./board.ts";
 
 // Sandcastle's lines too: one log spans every launchd restart. Local time, to read beside `pmset -g log`.
 for (const level of ["log", "error", "warn"] as const) {
@@ -53,7 +54,7 @@ const trackerFor = (key: string): Tracker => {
 };
 // A source that cannot be read this poll contributes nothing, so a GitHub outage or a bad token never stops Jira work;
 // while it fails, its stories in review hold no files.
-const fromAll = async <T>(what: string, read: (t: Tracker) => Promise<T[]>): Promise<T[]> =>
+const fromAll = async <T>(what: string, read: (t: Tracker) => Promise<T[]>, unread?: Set<Tracker>): Promise<T[]> =>
   (
     await Promise.all(
       TRACKERS.map(async (t) => {
@@ -64,6 +65,7 @@ const fromAll = async <T>(what: string, read: (t: Tracker) => Promise<T[]>): Pro
           return found;
         } catch (error) {
           note(topic, `[factory] could not read ${what} from ${t.name}, so it is skipped this poll: ${errorText(error)}`);
+          unread?.add(t);
           return [];
         }
       }),
@@ -152,6 +154,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
   const environmentFailures = new Set<string>();
   const flakes: { gate: string; failure: string }[] = [];
   const timed =async <T>(phase: string, body: () => Promise<T>): Promise<T> => {
+    board.set(key, { state: "running", phase });
     const started = Date.now();
     try {
       return await body();
@@ -297,8 +300,10 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
 
   if (!(await tracker.claim(key))) {
     console.log(`[${key}] claimed by another harness; leaving it`);
+    board.remove(key);
     return;
   }
+  board.set(key, { state: "running", phase: "picked-up" }, about(picked));
   await tracker.started(key);
   // A story taken through its epic's label gets its own, which the queries for stories in review read.
   if (!PINNED && !picked.labels.includes("afk")) await tracker.addLabel(key, "afk");
@@ -313,10 +318,13 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     await tracker.comment(key, reviewComment(brief, sensitive));
     const head = gitIn(REPO, "rev-parse", branch);
     fs.writeFileSync(`${LOGS}/${key}-report.json`, JSON.stringify({ key, branch, head, model: MODEL, buildMode: mode, timings, gates, brief, environmentFailures: [...environmentFailures], flakes }, null, 2));
+    board.set(key, { state: "review" });
     console.log(`[${key} done] → Review\n` + execFileSync("/usr/bin/git", ["-C", REPO, "log", "--stat", "--format=%h %an %s", `main..${branch}`], { encoding: "utf8" }));
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.log(`[${key} blocked] ${reason}`);
+    // The first line only: BMAD's halts append its questions, which quote the ticket.
+    board.set(key, { state: "blocked", reason: reason.split("\n")[0] });
     await tracker.blocked(key);
     await tracker.comment(key, `${tracker.header} gave up\nBranch ${m.code(branch)} (local). ${reason}\n\nRemove the ${m.code("afk-blocked")} label to let the factory retry.`);
     throw error;
@@ -329,6 +337,17 @@ if (!(POLL_SECONDS > 0)) throw new Error(`FACTORY_POLL_SECONDS must be a positiv
 // watches the active sprint's `afk` stories until it is signalled.
 const PINNED = process.env.FACTORY_TICKET?.split(",").map((k) => k.trim()).filter(Boolean);
 const ONE_ROUND = PINNED !== undefined || Boolean(process.env.FACTORY_PLAN_ONLY);
+
+// FACTORY_PLAN_ONLY changes nothing, the board included.
+const board = new Board({
+  file: BOARD_FILE,
+  logs: LOGS,
+  pid: process.pid,
+  startedAt: new Date(),
+  settings: { FACTORY_MAX_PARALLEL: LIMIT, FACTORY_CPUS: CPUS, FACTORY_POLL_SECONDS: POLL_SECONDS, FACTORY_MODEL: MODEL },
+  enabled: !process.env.FACTORY_PLAN_ONLY,
+});
+const about = (s: Snapshot): About => ({ summary: s.summary, autoMerge: autoMerges(s) });
 
 // A repeated state is logged once, not on every poll.
 const lastSaid = new Map<string, string>();
@@ -394,6 +413,7 @@ const predicted = new Map<string, { updated: string; plan: StoryPlan }>();
 const refuse = async (story: Snapshot) => {
   note(story.key, `[plan] ${story.key} refused: ${story.refused}`);
   if (process.env.FACTORY_PLAN_ONLY) return;
+  board.set(story.key, { state: "blocked", reason: story.refused! }, about(story));
   const tracker = trackerFor(story.key);
   const m = tracker.markup;
   await tracker.blocked(story.key);
@@ -405,6 +425,7 @@ const refuse = async (story: Snapshot) => {
 const decline = async (story: Snapshot, reason: string) => {
   console.log(`[plan] ${story.key} declined: ${reason}`);
   if (process.env.FACTORY_PLAN_ONLY) return;
+  board.set(story.key, { state: "blocked", reason: `won't do: ${reason}` }, about(story));
   const tracker = trackerFor(story.key);
   const m = tracker.markup;
   await tracker.addLabel(story.key, "wont-do");
@@ -420,6 +441,7 @@ const land = async (key: string): Promise<void> => {
   // A refusal takes the label off the story, or opts it out of its epic's, so nothing retries until the operator says so.
   const refuse = async (reason: string) => {
     console.log(`[${key} merge] not merged: ${reason}`);
+    board.set(key, { state: "refused", reason });
     const own = (await tracker.snapshotToState(key)).labels.includes("afk-merge");
     if (own) await tracker.removeLabel(key, "afk-merge");
     else await tracker.addLabel(key, "no-afk-merge");
@@ -429,12 +451,15 @@ const land = async (key: string): Promise<void> => {
   // A landing that merged but stopped before the tracker heard of it: finish the bookkeeping, not the merge.
   const earlier = landedAs(CHECKOUT, key);
   if (earlier && !gitIn(REPO, "branch", "--list", `agent/${key}`)) {
+    board.set(key, { state: "merged", sha: earlier, by: "factory" });
     await tracker.merged(key);
     await tracker.comment(key, `${tracker.header}: merged\nMerged earlier as ${m.code(earlier.slice(0, 8))}, in your checkout and not pushed; the factory stopped before it could mark the story.`);
     return console.log(`[${key} merge] already merged as ${earlier.slice(0, 8)}; marked`);
   }
   const verdict = mergeVerdict(report, sensitivePaths(changedOn(key)));
   if (!report) return note(`merge ${key}`, `[${key} merge] skipped: ${verdict}`);
+  // A story offered before the board existed is described once, from its ticket.
+  if (!board.has(key)) board.set(key, { state: "review" }, about(await tracker.snapshotToState(key)));
   if (verdict) return refuse(verdict);
 
   // The rebase targets the checkout's main, and a re-gate needs the image built from it.
@@ -443,9 +468,11 @@ const land = async (key: string): Promise<void> => {
   const gates: string[] = [];
   const timed = <T>(phase: string, body: () => Promise<T>) => {
     console.log(`[${key} ${phase}] started`);
+    board.set(key, { state: "running", phase });
     return body();
   };
   try {
+    board.set(key, { state: "running", phase: "merge" }, { autoMerge: true });
     const landed = await landBranch({
       checkout: CHECKOUT,
       clone: REPO,
@@ -462,6 +489,7 @@ const land = async (key: string): Promise<void> => {
         return fresh.length === 0 ? undefined : fresh.map((f) => f.message.split("\n")[0]).join("; ");
       },
     });
+    board.set(key, { state: "merged", sha: landed.merge, by: "factory" });
     await tracker.merged(key);
     const tested = landed.regated
       ? `Main had moved since the branch was built, so the full suite ran again on the rebased branch (${gates.join("; ")}).`
@@ -469,7 +497,10 @@ const land = async (key: string): Promise<void> => {
     await tracker.comment(key, `${tracker.header}: merged\nRebased onto main with every commit re-signed, then merged as ${m.code(landed.merge.slice(0, 8))} with a signed merge commit, in your checkout and not pushed. ${tested} Its branches are deleted; /deploy ships it.`);
     console.log(`[${key} merge] merged as ${landed.merge.slice(0, 8)}${landed.regated ? " after a re-gate" : ""}`);
   } catch (error) {
-    if (error instanceof MergeRefused && !error.permanent) return note(`merge ${key}`, `[${key} merge] waiting: ${error.message}`);
+    if (error instanceof MergeRefused && !error.permanent) {
+      board.set(key, { state: "review" });
+      return note(`merge ${key}`, `[${key} merge] waiting: ${error.message}`);
+    }
     await refuse(error instanceof MergeRefused ? error.message : `landing failed: ${errorText(error)}`);
   }
 };
@@ -485,6 +516,10 @@ const landAll = async (): Promise<Promise<void>[]> => {
   return started;
 };
 
+const wait = (stories: Snapshot[], reason: string) => {
+  for (const s of stories) board.set(s.key, { state: "waiting", reason }, about(s));
+};
+
 // Starts as many stories as there are free slots, returning their runs.
 const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   const free = LIMIT - running.size;
@@ -498,15 +533,25 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
     }
     const open = story.blockedBy.filter((b) => !b.done);
     if (open.length === 0) unblocked.push(story);
-    else note(story.key, `[plan] ${story.key} waits: blocked by ${open.map((b) => `${b.key} (${b.status})`).join(", ")}`);
+    else {
+      const reason = `blocked by ${open.map((b) => `${b.key} (${b.status})`).join(", ")}`;
+      note(story.key, `[plan] ${story.key} waits: ${reason}`);
+      wait([story], reason);
+    }
   }
+  const busy = `all ${LIMIT} slots are busy`;
+  if (free <= 0) wait(unblocked, busy);
   if (free <= 0 || unblocked.length === 0) return [];
 
   // ff-only: nothing in the factory commits to main, so a divergence is for a human to look at, not to merge.
   gitIn(REPO, "fetch", "--quiet", "origin", "main");
   gitIn(REPO, "merge", "--ff-only", "--quiet", "origin/main");
   ensureBmadSeed(running.size === 0);
-  if (!ensureImage(REPO, gitIn(REPO, "rev-parse", "main"), `${LOGS}/image-build.log`)) return [];
+  board.main = gitIn(REPO, "rev-parse", "main");
+  if (!ensureImage(REPO, board.main, `${LOGS}/image-build.log`)) {
+    wait(unblocked, "the sandbox image for main did not build");
+    return [];
+  }
 
   // A story pinned by FACTORY_TICKET may itself be in review; its own branch is not someone else's work.
   const inFlight = new Map<string, string>();
@@ -516,6 +561,7 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   for (const [k, files] of running) for (const f of files ?? []) inFlight.set(f, `${k} (in progress)`);
   if ([...running.values()].includes(undefined)) {
     note("alone", "[plan] a running story's files are unknown, so nothing else starts until it finishes");
+    wait(unblocked, "a running story's files are unknown, so nothing else starts until it finishes");
     return [];
   }
 
@@ -536,7 +582,11 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   });
   for (const s of declined) await decline(s, predicted.get(s.key)!.plan.wontDo!);
   const { picked, deferred } = pickNonOverlapping(unblocked.filter((s) => !declined.includes(s)), files, inFlight);
-  for (const d of deferred) note(d.key, `[plan] ${d.key} waits: ${d.reason}`);
+  for (const d of deferred) {
+    note(d.key, `[plan] ${d.key} waits: ${d.reason}`);
+    wait(unblocked.filter((s) => s.key === d.key), d.reason);
+  }
+  wait(picked.slice(free), busy);
   const starting = picked.slice(0, free).map((s) => ({ story: s, mode: buildMode(s.labels, predicted.get(s.key)?.plan) }));
   if (starting.length === 0) return [];
   const described = starting.map(({ story, mode }) => `${story.key} (${mode.bmad ? "BMAD" : "plain"}: ${mode.why})`);
@@ -551,6 +601,29 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
       })
       .finally(() => running.delete(s.key));
   });
+};
+
+// What the board holds that no transition here reports: a waiting story that left intake is no longer the factory's,
+// and a story in review that is Done was merged by hand.
+const reconcile = async (candidates: Snapshot[], unread: Set<Tracker>) => {
+  for (const s of candidates) board.describe(s.key, about(s));
+  // A run that threw before it reported (a failed claim write-back, say) leaves its story shown running.
+  for (const key of board.keys("running")) if (!running.has(key)) board.abandoned(key, "its last run stopped before it finished");
+  const source = (key: string) => TRACKERS.find((t) => t.owns(key));
+  for (const key of board.keys("waiting")) {
+    const tracker = source(key);
+    if (!running.has(key) && !(tracker && unread.has(tracker)) && !candidates.some((c) => c.key === key)) board.remove(key);
+  }
+  for (const key of board.keys("review", "refused")) {
+    const tracker = source(key);
+    if (!tracker || running.has(key)) continue;
+    try {
+      if (await tracker.done(key)) board.set(key, { state: "merged", sha: landedAs(CHECKOUT, key) ?? null, by: "operator" });
+      lastSaid.delete(`done ${key}`);
+    } catch (error) {
+      note(`done ${key}`, `[factory] could not read whether ${key} is Done: ${errorText(error)}`);
+    }
+  }
 };
 
 let wake = () => {};
@@ -588,11 +661,15 @@ if (fs.existsSync(PIDFILE)) {
 }
 fs.writeFileSync(PIDFILE, String(process.pid));
 process.on("exit", () => fs.rmSync(PIDFILE, { force: true }));
+board.load();
+board.main = gitIn(REPO, "rev-parse", "main");
+board.write();
 
 // Stopping the harness (Ctrl-C, kill, a crash, a reboot) interrupts its stories: Sandcastle removes their containers,
 // the branches keep their commits, and they are queued again here so the next round resumes them.
 for (const key of process.env.FACTORY_PLAN_ONLY ? [] : await fromAll("interrupted stories", (t) => t.orphaned())) {
   const tracker = trackerFor(key);
+  board.set(key, { state: "waiting", reason: "interrupted by the last stop" });
   await tracker.requeued(key);
   await tracker.comment(key, `${tracker.header} was interrupted\nThe factory stopped while working on this story. Its branch keeps what was committed, and the next round resumes it.`);
   console.log(`[factory] ${key}: interrupted by the last stop, queued again`);
@@ -645,9 +722,11 @@ while (true) {
       try {
         // Landing first: a story it merges is Done, which can unblock a candidate in the same round.
         const landings = ONE_ROUND ? [] : await landAll();
+        const unread = new Set<Tracker>();
         const candidates = PINNED
           ? await Promise.all(PINNED.map((k) => trackerFor(k).snapshotToState(k)))
-          : await fromAll("afk stories", (t) => t.intake());
+          : await fromAll("afk stories", (t) => t.intake(), unread);
+        if (!PINNED) await reconcile(candidates, unread);
         for (const run of [...landings, ...(await round(candidates))]) {
           runs.add(run);
           void run.finally(() => {
@@ -661,6 +740,7 @@ while (true) {
       }
     }
   }
+  board.write();
   if (ONE_ROUND && runs.size === 0) break;
   // A finishing story wakes the loop early: its slot is free.
   await nap(POLL_SECONDS);
