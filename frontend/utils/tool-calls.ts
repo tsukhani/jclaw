@@ -105,6 +105,11 @@ function collectNormalizedCalls(
   return out
 }
 
+// A stop marker renders as a bare note, so a stopped turn's calls and attachments stay on its own rows.
+function isStopMarker(row: RawRow): boolean {
+  return row.messageKind === 'stop_marker'
+}
+
 function attachLeftoverPending(
   msgs: RawRow[],
   pending: ToolCall[],
@@ -116,7 +121,7 @@ function attachLeftoverPending(
   // getting dropped silently.
   for (let i = msgs.length - 1; i >= 0; i--) {
     const row = msgs[i]
-    if (row?.role === 'assistant') {
+    if (row?.role === 'assistant' && !isStopMarker(row)) {
       if (pending.length) row.toolCalls = pending
       if (pendingAttachments.length) {
         row.attachments = [
@@ -175,7 +180,7 @@ export function hydrateToolCalls(msgs: RawRow[]): void {
   const resultsByCallId = indexToolResults(msgs)
   const pending: Pending = { calls: [], attachments: [] }
   for (const m of msgs) {
-    if (m.role !== 'assistant') continue
+    if (m.role !== 'assistant' || isStopMarker(m)) continue
     drainIntermediateRow(m, resultsByCallId, pending)
     flushIntoContentRow(m, pending)
   }
