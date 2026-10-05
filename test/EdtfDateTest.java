@@ -93,6 +93,7 @@ class EdtfDateTest extends UnitTest {
     void plusYearsMovesTheYearOnly() {
         assertEquals(EdtfDate.parse("2027-24"), EdtfDate.parse("2026-24").plusYears(1));
         assertEquals(EdtfDate.parse("2027-10-10~"), EdtfDate.parse("2026-10-10~").plusYears(1));
-        assertThrows(IllegalArgumentException.class, () -> EdtfDate.parse("2028-02-29").plusYears(1));
+        var leapDay = EdtfDate.parse("2028-02-29");
+        assertThrows(IllegalArgumentException.class, () -> leapDay.plusYears(1));
     }
 }

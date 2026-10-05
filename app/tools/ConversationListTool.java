@@ -232,24 +232,28 @@ public class ConversationListTool implements ToolRegistry.Tool {
 
         var runsJson = new ArrayList<Map<String, Object>>(rows.size());
         for (var run : rows) {
-            var row = new LinkedHashMap<String, Object>();
-            row.put("runId", String.valueOf(run.id));
-            row.put("childConversationId",
-                    run.childConversation != null ? String.valueOf(run.childConversation.id) : null);
-            row.put("childAgentId",
-                    run.childAgent != null ? String.valueOf(run.childAgent.id) : null);
-            row.put("label", run.label);
-            row.put(PARAM_STATUS, run.status != null ? run.status.name() : null);
-            row.put("startedAt", run.startedAt != null ? run.startedAt.toString() : null);
-            row.put("endedAt", run.endedAt != null ? run.endedAt.toString() : null);
-            row.put("outcomePreview", truncatePreview(run.outcome));
-            runsJson.add(row);
+            runsJson.add(runRow(run));
         }
         var payload = new LinkedHashMap<String, Object>();
         payload.put("count", runsJson.size());
         payload.put("has_more", hasMore);
         payload.put("runs", runsJson);
         return GsonHolder.GSON.toJson(payload, Map.class);
+    }
+
+    private static Map<String, Object> runRow(SubagentRun run) {
+        var row = new LinkedHashMap<String, Object>();
+        row.put("runId", String.valueOf(run.id));
+        row.put("childConversationId",
+                run.childConversation != null ? String.valueOf(run.childConversation.id) : null);
+        row.put("childAgentId",
+                run.childAgent != null ? String.valueOf(run.childAgent.id) : null);
+        row.put("label", run.label);
+        row.put(PARAM_STATUS, run.status != null ? run.status.name() : null);
+        row.put("startedAt", run.startedAt != null ? run.startedAt.toString() : null);
+        row.put("endedAt", run.endedAt != null ? run.endedAt.toString() : null);
+        row.put("outcomePreview", truncatePreview(run.outcome));
+        return row;
     }
 
     /** Truncate {@link SubagentRun#outcome} to {@link #OUTCOME_PREVIEW_MAX_CHARS}

@@ -19,6 +19,7 @@ import utils.ApiResponses;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
@@ -118,18 +119,7 @@ public class ApiPrintersController extends Controller {
             return;
         }
 
-        // Options arrive as an IPP attribute → value map, whatever the printer
-        // offered. Named fields here would mean a code change every time a vendor
-        // exposes something new, which is the opposite of reading capabilities.
-        var options = new LinkedHashMap<String, String>();
-        if (body.has(KEY_OPTIONS) && body.get(KEY_OPTIONS).isJsonObject()) {
-            for (var entry : body.getAsJsonObject(KEY_OPTIONS).entrySet()) {
-                var value = entry.getValue().isJsonNull() ? null : entry.getValue().getAsString().trim();
-                if (value != null && !value.isEmpty()) {
-                    options.put(entry.getKey(), value);
-                }
-            }
-        }
+        var options = readOptions(body);
 
         // Validate only the attributes JClaw itself interprets. The rest are the
         // printer's vocabulary — it announced them, and it is the authority on
@@ -149,6 +139,22 @@ public class ApiPrintersController extends Controller {
                 str(body, "protocol"), options);
         PrinterDefaults.save(saved);
         renderJSON(GSON.toJson(saved));
+    }
+
+    // Options arrive as an IPP attribute → value map, whatever the printer
+    // offered. Named fields here would mean a code change every time a vendor
+    // exposes something new, which is the opposite of reading capabilities.
+    private static Map<String, String> readOptions(JsonObject body) {
+        var options = new LinkedHashMap<String, String>();
+        if (body.has(KEY_OPTIONS) && body.get(KEY_OPTIONS).isJsonObject()) {
+            for (var entry : body.getAsJsonObject(KEY_OPTIONS).entrySet()) {
+                var value = entry.getValue().isJsonNull() ? null : entry.getValue().getAsString().trim();
+                if (value != null && !value.isEmpty()) {
+                    options.put(entry.getKey(), value);
+                }
+            }
+        }
+        return options;
     }
 
     /**

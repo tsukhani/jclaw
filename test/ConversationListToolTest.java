@@ -15,7 +15,9 @@ import services.EventLogger;
 import services.Tx;
 import tools.ConversationListTool;
 
+import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -217,6 +219,25 @@ class ConversationListToolTest extends UnitTest {
         var row = parsed.getAsJsonArray("runs").get(0).getAsJsonObject();
         assertTrue(row.get("label").isJsonNull(),
                 "null label must serialize as JSON null, got: " + json);
+    }
+
+    @Test
+    void aRowCarriesItsIdsAsStringsAndAnOpenRunsEndAsNull() throws Exception {
+        var running = seedRun(parentAgent, childAgentA, "row-shape", SubagentRun.Status.RUNNING);
+        var json = invokeTool(parentAgent.id, "{}");
+        var row = JsonParser.parseString(json).getAsJsonObject().getAsJsonArray("runs").get(0).getAsJsonObject();
+
+        assertEquals(List.of("runId", "childConversationId", "childAgentId", "label", "status", "startedAt",
+                "endedAt", "outcomePreview"), List.copyOf(row.keySet()));
+        assertEquals(String.valueOf(running.id), row.get("runId").getAsString());
+        assertEquals(String.valueOf(running.childConversation.id), row.get("childConversationId").getAsString());
+        assertEquals(String.valueOf(childAgentA.id), row.get("childAgentId").getAsString());
+        assertEquals("row-shape", row.get("label").getAsString());
+        assertEquals("RUNNING", row.get("status").getAsString());
+        var startedAt = Instant.parse(row.get("startedAt").getAsString());
+        assertTrue(Duration.between(running.startedAt, startedAt).abs().toMillis() < 1, json);
+        assertTrue(row.get("endedAt").isJsonNull(), json);
+        assertTrue(row.get("outcomePreview").isJsonNull(), json);
     }
 
     // ──────── helpers ────────

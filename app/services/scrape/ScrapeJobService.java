@@ -59,6 +59,7 @@ public final class ScrapeJobService {
     private static final String EVENT_CATEGORY = "scrape";
     private static final String STOPPED = "stopped on request";
     private static final String PAUSED = "paused";
+    private static final String PAGES_IN_ORDER = "job = ?1 ORDER BY pageIndex";
 
     /** Runs a job's crawl, from the start or from where an earlier run of it stopped. */
     @FunctionalInterface
@@ -396,7 +397,7 @@ public final class ScrapeJobService {
         ScrapeJob job = ScrapeJob.findById(id);
         if (job == null) return null;
         var request = ScrapeJobRequest.fromJson(job.options);
-        List<ScrapeJobPage> pages = ScrapeJobPage.find("job = ?1 ORDER BY pageIndex", job).fetch();
+        List<ScrapeJobPage> pages = ScrapeJobPage.find(PAGES_IN_ORDER, job).fetch();
         var recorded = new HashMap<String, CrawlListener.Recorded>();
         int lastIndex = 0;
         for (var page : pages) {
@@ -471,7 +472,7 @@ public final class ScrapeJobService {
 
     /** Why a job that retrieved nothing failed, told from its first page or the refusal of its seed. */
     private static String nothingRead(ScrapeJob job, WebScrapeTool.@Nullable JobCrawl crawl) {
-        ScrapeJobPage first = ScrapeJobPage.find("job = ?1 ORDER BY pageIndex", job).first();
+        ScrapeJobPage first = ScrapeJobPage.find(PAGES_IN_ORDER, job).first();
         if (first != null) {
             return "No page could be read: the starting page was %s (%s)."
                     .formatted(first.outcome.name().toLowerCase(Locale.ROOT), first.reason);
@@ -484,7 +485,7 @@ public final class ScrapeJobService {
 
     private static void writeCombinedQuietly(ScrapeJob job, String header) {
         var format = ScrapeJobRequest.fromJson(job.options).output().format();
-        List<ScrapeJobPage> pages = ScrapeJobPage.find("job = ?1 ORDER BY pageIndex", job).fetch();
+        List<ScrapeJobPage> pages = ScrapeJobPage.find(PAGES_IN_ORDER, job).fetch();
         try {
             ScrapeJobFiles.writeCombined(job, new ArrayList<>(pages), format, header);
         } catch (IOException | SecurityException e) {

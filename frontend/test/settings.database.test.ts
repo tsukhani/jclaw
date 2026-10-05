@@ -378,6 +378,12 @@ describe('Settings → Database — the last operation is transient', () => {
     expect(c.find('[data-testid="db-last-op"]').text()).toBe('Restore: Stopping the instance')
   })
 
+  it('names an operation it does not recognise as Maintenance, and falls back to its phase', async () => {
+    status = healthy({ lastOperation: { op: 'compact', phase: 'done', message: null, startedAt: recent(), backup: '' } })
+    const c = await mount()
+    expect(c.find('[data-testid="db-last-op"]').text()).toBe('Maintenance: done')
+  })
+
   it('files a restore outcome under Backups, where the action lives', async () => {
     status = healthy({ lastOperation: { op: 'restore', phase: 'done', message: 'Restore complete', startedAt: recent(), backup: 'x.zip' } })
     const c = await mount()

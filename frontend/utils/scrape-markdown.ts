@@ -40,7 +40,8 @@ renderer.link = function (this: Renderer, { href, title, tokens }: Tokens.Link) 
   const inner = tokens.map(token => token.type === 'image'
     ? escapeHtml(imageLabel((token as Tokens.Image).text))
     : this.parser.parseInline([token])).join('')
-  return `<a href="${escapeHtml(href)}"${title ? ` title="${escapeHtml(title)}"` : ''}>${inner}</a>`
+  const titleAttr = title ? ` title="${escapeHtml(title)}"` : ''
+  return `<a href="${escapeHtml(href)}"${titleAttr}>${inner}</a>`
 }
 
 const markdown = new Marked({ gfm: true, breaks: false, renderer })

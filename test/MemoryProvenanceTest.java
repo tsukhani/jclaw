@@ -109,14 +109,15 @@ class MemoryProvenanceTest extends UnitTest {
         var foreign = MemoryStoreFactory.get().storeDeferred(String.valueOf(other.id), "Not yours", "fact",
                 0.5, null, MemoryProvenance.extractor("m1"));
 
-        assertThrows(IllegalArgumentException.class,
-                () -> storeWith("Derived", derivedFrom(Long.parseLong(foreign))));
+        var fromForeign = derivedFrom(Long.parseLong(foreign));
+        assertThrows(IllegalArgumentException.class, () -> storeWith("Derived", fromForeign));
         assertTrue(Memory.findByAgent(aid()).isEmpty(), "a refused derived write leaves no row");
     }
 
     @Test
     void aMissingInputWritesNoRow() {
-        assertThrows(IllegalArgumentException.class, () -> storeWith("Derived", derivedFrom(999_999L)));
+        var fromMissing = derivedFrom(999_999L);
+        assertThrows(IllegalArgumentException.class, () -> storeWith("Derived", fromMissing));
         assertTrue(Memory.findByAgent(aid()).isEmpty());
     }
 
