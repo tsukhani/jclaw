@@ -1,6 +1,5 @@
 import models.Agent;
 import models.Conversation;
-import models.EventLog;
 import models.SubagentRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -234,9 +233,10 @@ class SubagentSlashCommandsTest extends UnitTest {
         assertFalse(SubagentRegistry.isCancelled(run.id),
                 "isCancelled must be false before kill");
 
-        var result = Commands.handle("/subagent kill " + run.id,
-                parentAgent, "web", "u", parentConv).orElseThrow();
-        var text = result.responseText();
+        var holder = new String[1];
+        var events = EventLogger.captureForTest(() -> holder[0] = Commands.handle("/subagent kill " + run.id,
+                parentAgent, "web", "u", parentConv).orElseThrow().responseText());
+        var text = holder[0];
         assertTrue(text.contains("killed"), "kill confirmation: " + text);
 
         // Audit row flipped to KILLED with our reason recorded.
@@ -250,10 +250,8 @@ class SubagentSlashCommandsTest extends UnitTest {
                 "outcome includes operator marker: " + fresh.outcome);
 
         // SUBAGENT_KILL event emitted.
-        EventLogger.flush();
-        var killEvents = EventLog.find(
-                "category = ?1 ORDER BY timestamp DESC",
-                EventLogger.SUBAGENT_KILL).fetch();
+        var killEvents = events.stream()
+                .filter(e -> EventLogger.SUBAGENT_KILL.equals(e.category())).toList();
         assertEquals(1, killEvents.size(),
                 "exactly one SUBAGENT_KILL event after kill");
 
@@ -272,10 +270,11 @@ class SubagentSlashCommandsTest extends UnitTest {
     void killOnTerminalRunIsIdempotent() {
         var run = seedRun(SubagentRun.Status.COMPLETED);
 
-        var result = Commands.handle("/subagent kill " + run.id,
-                parentAgent, "web", "u", parentConv).orElseThrow();
-        assertTrue(result.responseText().contains("already completed"),
-                "idempotent terminal-state message: " + result.responseText());
+        var holder = new String[1];
+        var events = EventLogger.captureForTest(() -> holder[0] = Commands.handle("/subagent kill " + run.id,
+                parentAgent, "web", "u", parentConv).orElseThrow().responseText());
+        assertTrue(holder[0].contains("already completed"),
+                "idempotent terminal-state message: " + holder[0]);
 
         JPA.em().clear();
         var fresh = (SubagentRun) SubagentRun.findById(run.id);
@@ -283,9 +282,8 @@ class SubagentSlashCommandsTest extends UnitTest {
                 "kill on terminal run must not flip status");
 
         // No SUBAGENT_KILL event for the no-op.
-        EventLogger.flush();
-        var killEvents = EventLog.find(
-                "category = ?1", EventLogger.SUBAGENT_KILL).fetch();
+        var killEvents = events.stream()
+                .filter(e -> EventLogger.SUBAGENT_KILL.equals(e.category())).toList();
         assertTrue(killEvents.isEmpty(),
                 "no SUBAGENT_KILL event when kill was a no-op");
     }

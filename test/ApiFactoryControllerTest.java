@@ -1,4 +1,3 @@
-import models.EventLog;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -93,10 +92,15 @@ class ApiFactoryControllerTest extends FunctionalTest {
         return "sandcastle-" + UUID.randomUUID();
     }
 
-    private static long factoryRows(String level, String messageFragment) {
-        EventLogger.flush();
-        return EventLog.count("category = ?1 AND level = ?2 AND message LIKE ?3",
-                "factory", level, "Operator %" + messageFragment + "%");
+    private static List<EventLogger.Captured> eventsNaming(String messageFragment, Runnable requests) {
+        return EventLogger.captureMatchingForTest(e -> e.message().contains(messageFragment), _ -> requests.run());
+    }
+
+    private static long factoryRows(List<EventLogger.Captured> events, String level) {
+        return events.stream()
+                .filter(e -> e.category().equals("factory") && e.level().equals(level)
+                        && e.message().startsWith("Operator "))
+                .count();
     }
 
     // --- harness ---
@@ -196,14 +200,16 @@ class ApiFactoryControllerTest extends FunctionalTest {
         runner.replies.put("docker ps", new FactoryProcess.ExecResult(0, "  " + name + "\n", false));
         runner.replies.put("docker inspect", mounts("agent-JCLAW-7"));
         login();
-        var resp = POST("/api/factory/sandboxes/" + name + "/stop", "application/json", "{}");
-        assertIsOk(resp);
-        var body = getContent(resp);
-        assertTrue(body.contains("\"story\":\"JCLAW-7\""), body);
-        assertTrue(body.contains("Story JCLAW-7 will fail."), body);
+        var events = eventsNaming(name, () -> {
+            var resp = POST("/api/factory/sandboxes/" + name + "/stop", "application/json", "{}");
+            assertIsOk(resp);
+            var body = getContent(resp);
+            assertTrue(body.contains("\"story\":\"JCLAW-7\""), body);
+            assertTrue(body.contains("Story JCLAW-7 will fail."), body);
+        });
         assertTrue(String.join(" ", runner.calls.get(1)).startsWith("docker inspect"), runner.calls::toString);
         assertEquals(List.of("docker", "stop", name), runner.calls.getLast());
-        assertEquals(1, factoryRows("INFO", name));
+        assertEquals(1, factoryRows(events, "INFO"));
     }
 
     @Test
@@ -239,13 +245,15 @@ class ApiFactoryControllerTest extends FunctionalTest {
     void sandboxStopRefusesAnyOtherNameWithoutCallingDocker() {
         login();
         var uuid = UUID.randomUUID().toString();
-        for (var name : List.of("sandcastle-abc", "foo", "sandcastle-" + uuid + "x", "jclaw-factory-gateway")) {
-            var resp = POST("/api/factory/sandboxes/" + name + "/stop", "application/json", "{}");
-            assertStatus(404, resp);
-            assertTrue(getContent(resp).contains("\"not_found\""), getContent(resp));
-        }
+        var events = eventsNaming("sandcastle-" + uuid + "x", () -> {
+            for (var name : List.of("sandcastle-abc", "foo", "sandcastle-" + uuid + "x", "jclaw-factory-gateway")) {
+                var resp = POST("/api/factory/sandboxes/" + name + "/stop", "application/json", "{}");
+                assertStatus(404, resp);
+                assertTrue(getContent(resp).contains("\"not_found\""), getContent(resp));
+            }
+        });
         assertTrue(runner.calls.isEmpty(), runner.calls::toString);
-        assertEquals(1, factoryRows("WARN", "sandcastle-" + uuid + "x"));
+        assertEquals(1, factoryRows(events, "WARN"));
     }
 
     @Test

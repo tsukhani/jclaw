@@ -4,7 +4,6 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.AgentToolConfig;
 import models.Conversation;
-import models.EventLog;
 import models.Message;
 import models.MessageRole;
 import models.SubagentRun;
@@ -856,26 +855,23 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var reply = invokeOnVirtualThread(parent.id,
+        var spawned = invokeCapturing(parent,
                 "{\"task\":\"investigate X\",\"label\":\"investigate-x\"}");
-        EventLogger.flush();
+        var reply = spawned.reply();
 
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
         var runId = Long.parseLong(parsed.get("run_id").getAsString());
 
         // Event lifecycle: SPAWN + COMPLETE, no ERROR.
-        java.util.List<EventLog> spawnEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        var spawnEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_SPAWN);
         assertEquals(1, spawnEvents.size(), "exactly one SUBAGENT_SPAWN event");
-        java.util.List<EventLog> completeEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_COMPLETE, parent.name).fetch();
+        var completeEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_COMPLETE);
         assertEquals(1, completeEvents.size(), "exactly one SUBAGENT_COMPLETE event");
-        java.util.List<EventLog> errorEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_ERROR, parent.name).fetch();
+        var errorEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_ERROR);
         assertTrue(errorEvents.isEmpty(), "happy path must not emit ERROR events");
 
         // SPAWN details carry the run_id we returned to the LLM.
-        var spawnDetails = spawnEvents.getFirst().details;
+        var spawnDetails = spawnEvents.getFirst().details();
         assertTrue(spawnDetails.contains("\"run_id\":\"" + runId + "\""),
                 "SUBAGENT_SPAWN details must reference the persisted run id");
         assertTrue(spawnDetails.contains("\"mode\":\"session\""));
@@ -959,9 +955,9 @@ class SubagentSpawnToolTest extends UnitTest {
         commitAndReopen();
 
         try {
-            var reply = invokeOnVirtualThread(parent.id,
+            var spawned = invokeCapturing(parent,
                     "{\"task\":\"slow task\",\"runTimeoutSeconds\":1}");
-            EventLogger.flush();
+            var reply = spawned.reply();
 
             var parsed = JsonParser.parseString(reply).getAsJsonObject();
             assertEquals("TIMEOUT", parsed.get("status").getAsString(),
@@ -973,8 +969,7 @@ class SubagentSpawnToolTest extends UnitTest {
             assertEquals(SubagentRun.Status.TIMEOUT, run.status);
             assertNotNull(run.endedAt);
 
-            java.util.List<EventLog> timeoutEvents = EventLog.find(
-                    "category = ?1", EventLogger.SUBAGENT_TIMEOUT).fetch();
+            var timeoutEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_TIMEOUT);
             assertEquals(1, timeoutEvents.size(),
                     "TIMEOUT path must emit exactly one SUBAGENT_TIMEOUT event");
         } finally {
@@ -998,8 +993,8 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var reply = invokeOnVirtualThread(child.id, "{\"task\":\"nope\"}");
-        EventLogger.flush();
+        var spawned = invokeCapturing(child, "{\"task\":\"nope\"}");
+        var reply = spawned.reply();
 
         assertTrue(reply.startsWith("Subagent spawn refused: depth limit"),
                 "depth refusal must surface plain-text error, got: " + reply);
@@ -1010,12 +1005,10 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals(0, SubagentRun.count(),
                 "depth refusal must not insert a SubagentRun row");
 
-        java.util.List<EventLog> limitEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2",
-                EventLogger.SUBAGENT_LIMIT_EXCEEDED, child.name).fetch();
+        var limitEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_LIMIT_EXCEEDED);
         assertEquals(1, limitEvents.size(),
                 "exactly one SUBAGENT_LIMIT_EXCEEDED event on depth refusal");
-        assertTrue(limitEvents.getFirst().details.contains("depth limit"),
+        assertTrue(limitEvents.getFirst().details().contains("depth limit"),
                 "event details must include the depth-refusal reason");
     }
 
@@ -1050,8 +1043,8 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"one too many\"}");
-        EventLogger.flush();
+        var spawned = invokeCapturing(parent, "{\"task\":\"one too many\"}");
+        var reply = spawned.reply();
 
         assertTrue(reply.startsWith("Subagent spawn refused: breadth limit"),
                 "breadth refusal must surface plain-text error, got: " + reply);
@@ -1062,12 +1055,10 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals(5, SubagentRun.count(),
                 "breadth refusal must not insert a new SubagentRun row");
 
-        java.util.List<EventLog> limitEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2",
-                EventLogger.SUBAGENT_LIMIT_EXCEEDED, parent.name).fetch();
+        var limitEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_LIMIT_EXCEEDED);
         assertEquals(1, limitEvents.size(),
                 "exactly one SUBAGENT_LIMIT_EXCEEDED event on breadth refusal");
-        assertTrue(limitEvents.getFirst().details.contains("breadth limit"),
+        assertTrue(limitEvents.getFirst().details().contains("breadth limit"),
                 "event details must include the breadth-refusal reason");
     }
 
@@ -1173,8 +1164,8 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"plain\"}");
-        EventLogger.flush();
+        var spawned = invokeCapturing(parent, "{\"task\":\"plain\"}");
+        var reply = spawned.reply();
 
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
         assertEquals("COMPLETED", parsed.get("status").getAsString());
@@ -1194,10 +1185,9 @@ class SubagentSpawnToolTest extends UnitTest {
                 "fresh-mode child must keep AgentService.create's default-disabled browser row");
 
         // SPAWN event records context="fresh".
-        java.util.List<EventLog> spawnEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        var spawnEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_SPAWN);
         assertEquals(1, spawnEvents.size());
-        assertTrue(spawnEvents.getFirst().details.contains("\"context\":\"fresh\""),
+        assertTrue(spawnEvents.getFirst().details().contains("\"context\":\"fresh\""),
                 "fresh-mode SPAWN must record context=\"fresh\"");
     }
 
@@ -1242,9 +1232,9 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var reply = invokeOnVirtualThread(parent.id,
+        var spawned = invokeCapturing(parent,
                 "{\"task\":\"continue work\",\"context\":\"inherit\"}");
-        EventLogger.flush();
+        var reply = spawned.reply();
 
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
         assertEquals("COMPLETED", parsed.get("status").getAsString(),
@@ -1274,15 +1264,13 @@ class SubagentSpawnToolTest extends UnitTest {
                 "inherit-mode child must have browser enabled (UNION with parent's enabled set)");
 
         // SPAWN event records context="inherit".
-        java.util.List<EventLog> spawnEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        var spawnEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_SPAWN);
         assertEquals(1, spawnEvents.size());
-        assertTrue(spawnEvents.getFirst().details.contains("\"context\":\"inherit\""),
+        assertTrue(spawnEvents.getFirst().details().contains("\"context\":\"inherit\""),
                 "inherit-mode SPAWN must record context=\"inherit\"");
 
         // No SUBAGENT_ERROR on the happy path.
-        java.util.List<EventLog> errorEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_ERROR, parent.name).fetch();
+        var errorEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_ERROR);
         assertTrue(errorEvents.isEmpty(),
                 "inherit-mode happy path must not emit SUBAGENT_ERROR");
 
@@ -1338,9 +1326,9 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var reply = invokeOnVirtualThread(parent.id,
+        var spawned = invokeCapturing(parent,
                 "{\"task\":\"continue\",\"context\":\"inherit\"}");
-        EventLogger.flush();
+        var reply = spawned.reply();
 
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
         // Child still runs even when the summary failed.
@@ -1364,20 +1352,18 @@ class SubagentSpawnToolTest extends UnitTest {
                 "summarization-degraded child must keep default-disabled browser");
 
         // SUBAGENT_ERROR event records the failure reason.
-        java.util.List<EventLog> errorEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_ERROR, parent.name).fetch();
+        var errorEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_ERROR);
         assertEquals(1, errorEvents.size(),
                 "exactly one SUBAGENT_ERROR event on summarization failure");
-        assertTrue(errorEvents.getFirst().details.contains("Parent-context summarization failed"),
+        assertTrue(errorEvents.getFirst().details().contains("Parent-context summarization failed"),
                 "SUBAGENT_ERROR details must include the summarization-failure reason, got: "
-                        + errorEvents.getFirst().details);
+                        + errorEvents.getFirst().details());
 
         // SPAWN event still records context="inherit" (the request was for
         // inherit; failure didn't rewrite the request).
-        java.util.List<EventLog> spawnEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        var spawnEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_SPAWN);
         assertEquals(1, spawnEvents.size());
-        assertTrue(spawnEvents.getFirst().details.contains("\"context\":\"inherit\""));
+        assertTrue(spawnEvents.getFirst().details().contains("\"context\":\"inherit\""));
     }
 
     @Test
@@ -1394,9 +1380,9 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var reply = invokeOnVirtualThread(parent.id,
+        var spawned = invokeCapturing(parent,
                 "{\"task\":\"first time\",\"context\":\"inherit\"}");
-        EventLogger.flush();
+        var reply = spawned.reply();
 
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
         assertEquals("COMPLETED", parsed.get("status").getAsString(),
@@ -1411,8 +1397,7 @@ class SubagentSpawnToolTest extends UnitTest {
                 "no parent turns must leave child Conversation.parentContext null");
 
         // No SUBAGENT_ERROR — empty-parent is a clean-skip path, not a failure.
-        java.util.List<EventLog> errorEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_ERROR, parent.name).fetch();
+        var errorEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_ERROR);
         assertTrue(errorEvents.isEmpty(),
                 "empty-parent inherit-mode must not emit SUBAGENT_ERROR");
     }
@@ -1456,9 +1441,9 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var reply = invokeOnVirtualThread(parent.id,
+        var spawned = invokeCapturing(parent,
                 "{\"task\":\"do inline work\",\"label\":\"inline-task\",\"mode\":\"inline\"}");
-        EventLogger.flush();
+        var reply = spawned.reply();
 
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
         assertEquals("COMPLETED", parsed.get("status").getAsString(),
@@ -1476,17 +1461,15 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals(parentConv.id, run.parentConversation.id);
 
         // SPAWN event records mode="inline".
-        java.util.List<EventLog> spawnEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        var spawnEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_SPAWN);
         assertEquals(1, spawnEvents.size());
-        assertTrue(spawnEvents.getFirst().details.contains("\"mode\":\"inline\""),
+        assertTrue(spawnEvents.getFirst().details().contains("\"mode\":\"inline\""),
                 "inline-mode SPAWN must record mode=\"inline\", got: "
-                        + spawnEvents.getFirst().details);
+                        + spawnEvents.getFirst().details());
         // COMPLETE event also carries the inline mode.
-        java.util.List<EventLog> completeEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2", EventLogger.SUBAGENT_COMPLETE, parent.name).fetch();
+        var completeEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_COMPLETE);
         assertEquals(1, completeEvents.size());
-        assertTrue(completeEvents.getFirst().details.contains("\"mode\":\"inline\""),
+        assertTrue(completeEvents.getFirst().details().contains("\"mode\":\"inline\""),
                 "inline-mode COMPLETE must record mode=\"inline\"");
 
         // All messages persisted under the parent Conversation that belong to
@@ -1610,16 +1593,15 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var reply = invokeOnVirtualThread(parent.id, "{\"task\":\"ok\"}");
-        EventLogger.flush();
+        var spawned = invokeCapturing(parent, "{\"task\":\"ok\"}");
+        var reply = spawned.reply();
 
         assertFalse(reply.startsWith("Subagent spawn refused"),
                 "happy path must not be refused, got: " + reply);
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
         assertEquals("COMPLETED", parsed.get("status").getAsString());
 
-        java.util.List<EventLog> limitEvents = EventLog.find(
-                "category = ?1", EventLogger.SUBAGENT_LIMIT_EXCEEDED).fetch();
+        var limitEvents = ofCategory(spawned.events(), EventLogger.SUBAGENT_LIMIT_EXCEEDED);
         assertTrue(limitEvents.isEmpty(),
                 "no SUBAGENT_LIMIT_EXCEEDED event on the happy path");
     }
@@ -1642,25 +1624,30 @@ class SubagentSpawnToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var reply = invokeOnVirtualThread(parent.id,
-                "{\"task\":\"async work\",\"label\":\"async-task\",\"async\":true}");
+        var runIdRef = new AtomicReference<Long>();
+        var events = captureFor(parent.name, live -> {
+            var reply = invokeOnVirtualThread(parent.id,
+                    "{\"task\":\"async work\",\"label\":\"async-task\",\"async\":true}");
 
-        var parsed = JsonParser.parseString(reply).getAsJsonObject();
-        assertEquals("RUNNING", parsed.get("status").getAsString(),
-                "async spawn must return status=RUNNING immediately, got: " + reply);
-        assertNotNull(parsed.get("run_id").getAsString());
-        assertNotNull(parsed.get("conversation_id").getAsString());
-        // Reply field is NOT in the async return — that's the announce's job.
-        assertFalse(parsed.has("reply"),
-                "async return must not carry a 'reply' field — that arrives via the announce");
+            var parsed = JsonParser.parseString(reply).getAsJsonObject();
+            assertEquals("RUNNING", parsed.get("status").getAsString(),
+                    "async spawn must return status=RUNNING immediately, got: " + reply);
+            assertNotNull(parsed.get("run_id").getAsString());
+            assertNotNull(parsed.get("conversation_id").getAsString());
+            // Reply field is NOT in the async return — that's the announce's job.
+            assertFalse(parsed.has("reply"),
+                    "async return must not carry a 'reply' field — that arrives via the announce");
 
-        var runId = Long.parseLong(parsed.get("run_id").getAsString());
+            runIdRef.set(Long.parseLong(parsed.get("run_id").getAsString()));
 
-        // Await the background VT's terminal state. Poll for the COMPLETED
-        // status; bounded by a generous 10s budget so a slow test runner
-        // doesn't flake.
-        awaitTerminalStatus(runId, SubagentRun.Status.COMPLETED, 10_000);
-        EventLogger.flush();
+            // Await the background VT's terminal state. Poll for the COMPLETED
+            // status; bounded by a generous 10s budget so a slow test runner
+            // doesn't flake.
+            awaitTerminalStatus(runIdRef.get(), SubagentRun.Status.COMPLETED, 10_000);
+            // The async runner records COMPLETE after stamping the status awaited above.
+            awaitEvents(live, EventLogger.SUBAGENT_COMPLETE, 1, 5_000);
+        });
+        var runId = runIdRef.get();
 
         JPA.em().clear();
         SubagentRun run = SubagentRun.findById(runId);
@@ -1688,17 +1675,11 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals(run.childConversation.id, (Long) payload.get("childConversationId").getAsLong());
 
         // Lifecycle events: SPAWN immediate + COMPLETE on terminal. No ERROR.
-        java.util.List<EventLog> spawnEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2",
-                EventLogger.SUBAGENT_SPAWN, parent.name).fetch();
+        var spawnEvents = ofCategory(events, EventLogger.SUBAGENT_SPAWN);
         assertEquals(1, spawnEvents.size(), "exactly one SUBAGENT_SPAWN event");
-        java.util.List<EventLog> completeEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2",
-                EventLogger.SUBAGENT_COMPLETE, parent.name).fetch();
+        var completeEvents = ofCategory(events, EventLogger.SUBAGENT_COMPLETE);
         assertEquals(1, completeEvents.size(), "exactly one SUBAGENT_COMPLETE event");
-        java.util.List<EventLog> errorEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2",
-                EventLogger.SUBAGENT_ERROR, parent.name).fetch();
+        var errorEvents = ofCategory(events, EventLogger.SUBAGENT_ERROR);
         assertTrue(errorEvents.isEmpty(),
                 "async happy path must not emit SUBAGENT_ERROR");
     }
@@ -1745,11 +1726,10 @@ class SubagentSpawnToolTest extends UnitTest {
         // bogus id bypasses the Hibernate cascade that previously fired
         // TransientPropertyValueException on AgentToolConfig flushes.
         long bogusChildAgentId = 999_999_999L;
-        SubagentSpawnTool.runAsyncAndAnnounce(
+        var events = EventLogger.captureForTest(() -> SubagentSpawnTool.runAsyncAndAnnounce(
                 runId, bogusChildAgentId, childConvId, parentConvId,
                 parentName, "session", "fresh", "will-fail",
-                30, "async-fail-task");
-        EventLogger.flush();
+                30, "async-fail-task"));
 
         JPA.em().clear();
         SubagentRun fresh = SubagentRun.findById(runId);
@@ -1768,9 +1748,8 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals("FAILED", payload.get("status").getAsString());
         assertEquals(childConvId, (Long) payload.get("childConversationId").getAsLong());
 
-        java.util.List<EventLog> errorEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2",
-                EventLogger.SUBAGENT_ERROR, parentName).fetch();
+        var errorEvents = ofCategory(events, EventLogger.SUBAGENT_ERROR).stream()
+                .filter(e -> parentName.equals(e.agentId())).toList();
         assertEquals(1, errorEvents.size(),
                 "FAILED async spawn must emit exactly one SUBAGENT_ERROR");
     }
@@ -1798,38 +1777,38 @@ class SubagentSpawnToolTest extends UnitTest {
         commitAndReopen();
 
         try {
-            var reply = invokeOnVirtualThread(parent.id,
-                    "{\"task\":\"slow\",\"async\":true,\"runTimeoutSeconds\":1}");
-            var parsed = JsonParser.parseString(reply).getAsJsonObject();
-            assertEquals("RUNNING", parsed.get("status").getAsString(), reply);
-            var runId = Long.parseLong(parsed.get("run_id").getAsString());
+            captureFor(parent.name, live -> {
+                var reply = invokeOnVirtualThread(parent.id,
+                        "{\"task\":\"slow\",\"async\":true,\"runTimeoutSeconds\":1}");
+                var parsed = JsonParser.parseString(reply).getAsJsonObject();
+                assertEquals("RUNNING", parsed.get("status").getAsString(), reply);
+                var runId = Long.parseLong(parsed.get("run_id").getAsString());
 
-            awaitTerminalStatus(runId, SubagentRun.Status.TIMEOUT, 10_000);
-            EventLogger.flush();
+                awaitTerminalStatus(runId, SubagentRun.Status.TIMEOUT, 10_000);
 
-            JPA.em().clear();
-            SubagentRun run = SubagentRun.findById(runId);
-            assertEquals(SubagentRun.Status.TIMEOUT, run.status);
-            assertNotNull(run.endedAt);
+                JPA.em().clear();
+                SubagentRun run = SubagentRun.findById(runId);
+                assertEquals(SubagentRun.Status.TIMEOUT, run.status);
+                assertNotNull(run.endedAt);
 
-            java.util.List<Message> announces = Message.find(
-                    "conversation = ?1 AND messageKind = ?2",
-                    Conversation.findById(parentConv.id),
-                    SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
-            assertEquals(1, announces.size(),
-                    "TIMEOUT path must still post an announce");
-            var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
-            assertEquals("TIMEOUT", payload.get("status").getAsString());
-            assertTrue(payload.get("reply").getAsString().contains("exceeded"),
-                    "TIMEOUT reply must surface the budget-exceeded reason, got: " + payload.get("reply").getAsString());
+                java.util.List<Message> announces = Message.find(
+                        "conversation = ?1 AND messageKind = ?2",
+                        Conversation.findById(parentConv.id),
+                        SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                assertEquals(1, announces.size(),
+                        "TIMEOUT path must still post an announce");
+                var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
+                assertEquals("TIMEOUT", payload.get("status").getAsString());
+                assertTrue(payload.get("reply").getAsString().contains("exceeded"),
+                        "TIMEOUT reply must surface the budget-exceeded reason, got: " + payload.get("reply").getAsString());
 
-            // Async timeout emits SUBAGENT_TIMEOUT AFTER stamping the run TIMEOUT
-            // (which awaitTerminalStatus observed), so flushing once can race the
-            // emit and see zero. Await the event, scoped to this run's parent agent.
-            java.util.List<EventLog> timeoutEvents =
-                    awaitEventLogs(EventLogger.SUBAGENT_TIMEOUT, parent.name, 1, 5_000);
-            assertEquals(1, timeoutEvents.size(),
-                    "TIMEOUT path must emit exactly one SUBAGENT_TIMEOUT event");
+                // Async timeout emits SUBAGENT_TIMEOUT AFTER stamping the run TIMEOUT
+                // (which awaitTerminalStatus observed), so reading once can race the
+                // emit and see zero. Await the event, scoped to this run's parent agent.
+                var timeoutEvents = awaitEvents(live, EventLogger.SUBAGENT_TIMEOUT, 1, 5_000);
+                assertEquals(1, timeoutEvents.size(),
+                        "TIMEOUT path must emit exactly one SUBAGENT_TIMEOUT event");
+            });
         } finally {
             llmGate.countDown();
         }
@@ -2261,11 +2240,10 @@ class SubagentSpawnToolTest extends UnitTest {
         commitAndReopen();
 
         long bogusChildAgentId = 999_999_999L;
-        SubagentSpawnTool.runAsyncAndAnnounce(
+        var events = EventLogger.captureForTest(() -> SubagentSpawnTool.runAsyncAndAnnounce(
                 runId, bogusChildAgentId, childConvId, parentConvId,
                 parentName, "session", "fresh", "regression",
-                30, "regression-task");
-        EventLogger.flush();
+                30, "regression-task"));
 
         JPA.em().clear();
         SubagentRun fresh = SubagentRun.findById(runId);
@@ -2278,9 +2256,8 @@ class SubagentSpawnToolTest extends UnitTest {
                 SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
         assertEquals(1, announces.size(),
                 "non-cancellation failure still posts announce");
-        java.util.List<EventLog> errorEvents = EventLog.find(
-                "category = ?1 AND agentId = ?2",
-                EventLogger.SUBAGENT_ERROR, parentName).fetch();
+        var errorEvents = ofCategory(events, EventLogger.SUBAGENT_ERROR).stream()
+                .filter(e -> parentName.equals(e.agentId())).toList();
         assertEquals(1, errorEvents.size(),
                 "non-cancellation failure still emits SUBAGENT_ERROR");
     }
@@ -2358,28 +2335,55 @@ class SubagentSpawnToolTest extends UnitTest {
                 + " within " + timeoutMillis + "ms (last seen: " + seen + ")");
     }
 
+    @FunctionalInterface
+    private interface CaptureBody {
+        void run(java.util.List<EventLogger.Captured> live) throws Exception;
+    }
+
+    /** Events any thread records for {@code agentName} while {@code body} runs: the tool logs off the test thread. */
+    private static java.util.List<EventLogger.Captured> captureFor(String agentName, CaptureBody body)
+            throws Exception {
+        var error = new AtomicReference<Exception>();
+        var events = EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), live -> {
+            try {
+                body.run(live);
+            } catch (Exception e) {
+                error.set(e);
+            }
+        });
+        if (error.get() != null) throw error.get();
+        return events;
+    }
+
+    private static java.util.List<EventLogger.Captured> ofCategory(
+            java.util.List<EventLogger.Captured> events, String category) {
+        return events.stream().filter(e -> category.equals(e.category())).toList();
+    }
+
     /**
-     * Await {@code expected} EventLog rows of {@code category} for {@code agentId},
-     * flushing EventLogger's async pending queue on each poll. The async terminal
-     * paths emit the terminal event AFTER stamping the run status (which
-     * {@link #awaitTerminalStatus} observes), so flushing once can race the emit and
-     * read zero. Scoped by agentId so a concurrently-running test's event can't
-     * inflate the count.
+     * Await {@code expected} events of {@code category} on a live capture. The async terminal
+     * paths emit the terminal event AFTER stamping the run status, so one read can race the emit.
      */
-    private static java.util.List<EventLog> awaitEventLogs(
-            String category, String agentId, int expected, long timeoutMillis) {
+    private static java.util.List<EventLogger.Captured> awaitEvents(
+            java.util.List<EventLogger.Captured> live, String category, int expected, long timeoutMillis) {
         var deadline = System.currentTimeMillis() + timeoutMillis;
-        java.util.List<EventLog> rows;
         while (true) {
-            EventLogger.flush();
-            JPA.em().clear();
-            rows = EventLog.find("category = ?1 and agentId = ?2", category, agentId).fetch();
+            var rows = ofCategory(live, category);
             if (rows.size() >= expected || System.currentTimeMillis() >= deadline) {
                 return rows;
             }
             try { Thread.sleep(50); }
             catch (InterruptedException _) { Thread.currentThread().interrupt(); return rows; }
         }
+    }
+
+    private record Spawned(String reply, java.util.List<EventLogger.Captured> events) {}
+
+    /** {@link #invokeOnVirtualThread}, capturing the events recorded for {@code agent} meanwhile. */
+    private Spawned invokeCapturing(Agent agent, String argsJson) throws Exception {
+        var reply = new AtomicReference<String>();
+        var events = captureFor(agent.name, live -> reply.set(invokeOnVirtualThread(agent.id, argsJson)));
+        return new Spawned(reply.get(), events);
     }
 
     /** Commit pending parent setup rows so the VT-dispatched child run can

@@ -1,6 +1,5 @@
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import models.EventLog;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -102,12 +101,20 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
         return PosixFilePermissions.toString(Files.getPosixFilePermissions(file));
     }
 
-    private static List<String> eventRowsContaining(String fragment) {
-        EventLogger.flush();
-        List<EventLog> rows = EventLog.find("message LIKE ?1 OR details LIKE ?1", "%" + fragment + "%").fetch();
-        var out = new ArrayList<String>();
-        for (var r : rows) out.add(r.message);
-        return out;
+    // Only the factory test classes log to "factory", and FactoryRunnerSync runs them one at a time.
+    private static Http.Response postCredentials(List<EventLogger.Captured> events, String body) {
+        var resp = new Http.Response[1];
+        events.addAll(EventLogger.captureMatchingForTest(e -> mentions(e, SECRET) || "factory".equals(e.category()),
+                _ -> resp[0] = POST("/api/factory/setup/credentials", "application/json", body)));
+        return resp[0];
+    }
+
+    private static boolean mentions(EventLogger.Captured e, String fragment) {
+        return e.message().contains(fragment) || (e.details() != null && e.details().contains(fragment));
+    }
+
+    private static List<String> messagesContaining(List<EventLogger.Captured> events, String fragment) {
+        return events.stream().filter(e -> mentions(e, fragment)).map(EventLogger.Captured::message).toList();
     }
 
     private JsonObject startInstall() {
@@ -162,16 +169,15 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
     void eachCredentialFieldWritesItsFileOwnerOnly() throws Exception {
         Files.writeString(home.resolve(".env"), "FOO=1\nANTHROPIC_API_KEY=old\n");
         login();
-        var resp = POST("/api/factory/setup/credentials", "application/json",
-                "{\"claudeOauthToken\":\"" + SECRET + "-oauth\"}");
+        var events = new ArrayList<EventLogger.Captured>();
+        var resp = postCredentials(events, "{\"claudeOauthToken\":\"" + SECRET + "-oauth\"}");
         assertIsOk(resp);
         assertFalse(getContent(resp).contains(SECRET), getContent(resp));
         assertTrue(json(resp).get("hasModelCredential").getAsBoolean());
         assertEquals("FOO=1\nCLAUDE_CODE_OAUTH_TOKEN=" + SECRET + "-oauth\n", Files.readString(home.resolve(".env")));
 
-        resp = POST("/api/factory/setup/credentials", "application/json",
-                "{\"jiraUrl\":\"https://jira.example.com/" + SECRET + "\",\"jiraPersonalToken\":\"" + SECRET + "-jira\","
-                        + "\"githubToken\":\"" + SECRET + "-gh\"}");
+        resp = postCredentials(events, "{\"jiraUrl\":\"https://jira.example.com/" + SECRET + "\",\"jiraPersonalToken\":\""
+                + SECRET + "-jira\"," + "\"githubToken\":\"" + SECRET + "-gh\"}");
         assertIsOk(resp);
         assertFalse(getContent(resp).contains(SECRET), getContent(resp));
         assertTrue(json(resp).get("hasJira").getAsBoolean());
@@ -182,8 +188,8 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
         if (posix()) {
             for (var f : List.of(".env", "jira.env", "github.env")) assertEquals("rw-------", mode(home.resolve(f)), f);
         }
-        assertEquals(List.of(), eventRowsContaining(SECRET));
-        assertFalse(eventRowsContaining("Operator updated factory credentials: jiraUrl, jiraPersonalToken, githubToken")
+        assertEquals(List.of(), messagesContaining(events, SECRET));
+        assertFalse(messagesContaining(events, "Operator updated factory credentials: jiraUrl, jiraPersonalToken, githubToken")
                 .isEmpty());
     }
 
@@ -192,6 +198,7 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
         Files.writeString(home.resolve(".env"), "ANTHROPIC_API_KEY=keep\n");
         var before = Files.readAllBytes(home.resolve(".env"));
         login();
+        var events = new ArrayList<EventLogger.Captured>();
         for (var body : List.of(
                 "{\"anthropicApiKey\":\"" + SECRET + "\\nX=1\"}",
                 "{\"anthropicApiKey\":\"" + SECRET + "\\r\"}",
@@ -202,7 +209,7 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
                 "{}",
                 "not json " + SECRET,
                 "{\"jiraUrl\":\"file:///" + SECRET + "\",\"githubToken\":\"" + SECRET + "\"}")) {
-            var resp = POST("/api/factory/setup/credentials", "application/json", body);
+            var resp = postCredentials(events, body);
             assertStatus(400, resp);
             assertTrue(getContent(resp).contains("invalid_request"), getContent(resp));
             assertFalse(getContent(resp).contains(SECRET), getContent(resp));
@@ -210,7 +217,7 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
             assertFalse(Files.exists(home.resolve("jira.env")), body);
             assertFalse(Files.exists(home.resolve("github.env")), body);
         }
-        assertEquals(List.of(), eventRowsContaining(SECRET));
+        assertEquals(List.of(), messagesContaining(events, SECRET));
     }
 
     // --- install ---
@@ -333,12 +340,12 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
         Files.writeString(notADir, "x");
         FactoryHome.setHomeForTest(notADir);
         login();
-        var resp = POST("/api/factory/setup/credentials", "application/json",
-                "{\"githubToken\":\"" + SECRET + "\"}");
+        var events = new ArrayList<EventLogger.Captured>();
+        var resp = postCredentials(events, "{\"githubToken\":\"" + SECRET + "\"}");
         assertStatus(500, resp);
         assertFalse(getContent(resp).contains(SECRET), getContent(resp));
         assertFalse(getContent(resp).contains("Credentials saved"), getContent(resp));
-        assertEquals(List.of(), eventRowsContaining(SECRET));
+        assertEquals(List.of(), messagesContaining(events, SECRET));
     }
 
     @Test

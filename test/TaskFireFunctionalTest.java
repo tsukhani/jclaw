@@ -3,7 +3,6 @@ import com.github.kagkarlsson.scheduler.task.Execution;
 import com.github.kagkarlsson.scheduler.task.ExecutionContext;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import models.Agent;
-import models.EventLog;
 import models.MessageRole;
 import models.Task;
 import models.TaskRun;
@@ -22,6 +21,7 @@ import services.Tx;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -105,15 +105,19 @@ class TaskFireFunctionalTest extends UnitTest {
         var ctx = new ExecutionContext(null, execution, null, null);
 
         var errorRef = new AtomicReference<Exception>();
-        var thread = Thread.ofVirtual().start(() -> {
-            try {
-                dbTask.execute(instance, ctx);
-            } catch (Exception e) {
-                errorRef.set(e);
-            }
+        var events = new ArrayList<EventLogger.Captured>();
+        capturing(agent.name, events, () -> {
+            var thread = Thread.ofVirtual().start(() -> {
+                try {
+                    dbTask.execute(instance, ctx);
+                } catch (Exception e) {
+                    errorRef.set(e);
+                }
+            });
+            thread.join(30_000);
+            assertFalse(thread.isAlive(), "execute should complete within 30s");
+            return null;
         });
-        thread.join(30_000);
-        assertFalse(thread.isAlive(), "execute should complete within 30s");
         if (errorRef.get() != null) throw errorRef.get();
 
         JPA.em().clear();
@@ -121,8 +125,7 @@ class TaskFireFunctionalTest extends UnitTest {
         var run = assertSingleCompletedRun(task.id);
         assertTaskRunTranscript(run.id);
 
-        EventLogger.flush();
-        assertLifecycleEvents(agent.name, task.id, run.id);
+        assertLifecycleEvents(events, agent.name, task.id, run.id);
     }
 
     /**
@@ -163,42 +166,42 @@ class TaskFireFunctionalTest extends UnitTest {
      * exactly once each, carry the expected ids, and that no TASK_FAILED
      * event leaked from the happy path.
      */
-    private void assertLifecycleEvents(String agentName, Long taskId, Long runId) {
-        var startedEvents = loadEventsByCategory("TASK_STARTED", agentName);
-        var completedEvents = loadEventsByCategory("TASK_COMPLETED", agentName);
+    private void assertLifecycleEvents(List<EventLogger.Captured> events, String agentName, Long taskId, Long runId) {
+        var startedEvents = ofCategory(events, "TASK_STARTED");
+        var completedEvents = ofCategory(events, "TASK_COMPLETED");
         assertEquals(1, startedEvents.size(), "exactly one TASK_STARTED for this fire");
         assertEquals(1, completedEvents.size(), "exactly one TASK_COMPLETED for this fire");
 
         var started = startedEvents.getFirst();
-        assertEquals("INFO", started.level);
-        assertEquals(agentName, started.agentId,
+        assertEquals("INFO", started.level());
+        assertEquals(agentName, started.agentId(),
                 "TASK_STARTED carries the executing agent's name");
-        assertTrue(started.message.contains("Daily summary"),
+        assertTrue(started.message().contains("Daily summary"),
                 "TASK_STARTED message references the task name");
-        assertTrue(started.details != null && started.details.contains("\"task_id\":" + taskId),
+        assertTrue(started.details() != null && started.details().contains("\"task_id\":" + taskId),
                 "TASK_STARTED details carry task_id");
-        assertTrue(started.details.contains("\"run_id\":" + runId),
+        assertTrue(started.details().contains("\"run_id\":" + runId),
                 "TASK_STARTED details carry run_id");
-        assertTrue(started.details.contains("\"type\":\"IMMEDIATE\""),
+        assertTrue(started.details().contains("\"type\":\"IMMEDIATE\""),
                 "TASK_STARTED details carry the Task.Type");
 
         var completed = completedEvents.getFirst();
-        assertEquals("INFO", completed.level);
-        assertTrue(completed.details.contains("\"task_id\":" + taskId),
+        assertEquals("INFO", completed.level());
+        assertTrue(completed.details().contains("\"task_id\":" + taskId),
                 "TASK_COMPLETED carries task_id");
-        assertTrue(completed.details.contains("\"run_id\":" + runId),
+        assertTrue(completed.details().contains("\"run_id\":" + runId),
                 "TASK_COMPLETED carries run_id");
-        assertTrue(completed.details.contains("\"duration_ms\":"),
+        assertTrue(completed.details().contains("\"duration_ms\":"),
                 "TASK_COMPLETED carries duration_ms");
 
-        assertTrue(loadEventsByCategory("TASK_FAILED", agentName).isEmpty(),
+        assertTrue(ofCategory(events, "TASK_FAILED").isEmpty(),
                 "TASK_FAILED must not fire on a successful run");
     }
 
     @Test
     void cancelledTaskIsSkippedWithoutOpeningARun() throws Exception {
         // No LLM server needed — handler short-circuits before runForTask.
-        var agent = createAgent("cancel-test-agent", "test-provider", "test-model");
+        var agent = createAgent("fire-cancel-test-agent", "test-provider", "test-model");
         var task = persistTask(agent, "Was cancelled",
                 "Should not run.", Task.Type.IMMEDIATE);
         task.status = Task.Status.CANCELLED;
@@ -213,19 +216,22 @@ class TaskFireFunctionalTest extends UnitTest {
         var ctx = new ExecutionContext(null,
                 new Execution(Instant.now(), instance), null, null);
 
-        var thread = Thread.ofVirtual().start(() -> dbTask.execute(instance, ctx));
-        thread.join(5_000);
-        assertFalse(thread.isAlive());
+        var events = new ArrayList<EventLogger.Captured>();
+        capturing(agent.name, events, () -> {
+            var thread = Thread.ofVirtual().start(() -> dbTask.execute(instance, ctx));
+            thread.join(5_000);
+            assertFalse(thread.isAlive());
+            return null;
+        });
 
         JPA.em().clear();
 
         // Skip means: no TaskRun row, no lifecycle events.
         var runs = listRunsForTask(task.id);
         assertTrue(runs.isEmpty(), "CANCELLED skip must not open a TaskRun");
-        EventLogger.flush();
-        assertTrue(loadEventsByCategory("TASK_STARTED", agent.name).isEmpty());
-        assertTrue(loadEventsByCategory("TASK_COMPLETED", agent.name).isEmpty());
-        assertTrue(loadEventsByCategory("TASK_FAILED", agent.name).isEmpty());
+        assertTrue(ofCategory(events, "TASK_STARTED").isEmpty());
+        assertTrue(ofCategory(events, "TASK_COMPLETED").isEmpty());
+        assertTrue(ofCategory(events, "TASK_FAILED").isEmpty());
     }
 
     /**
@@ -254,15 +260,16 @@ class TaskFireFunctionalTest extends UnitTest {
         var instance = new TaskInstance<Void>(TaskExecutionHandler.TASK_NAME,
                 task.id.toString());
 
+        var events = new ArrayList<EventLogger.Captured>();
+
         // === Fire 1: unpaused → full execution ===
-        driveFire(dbTask, instance);
+        capturing(agent.name, events, () -> driveFire(dbTask, instance));
         JPA.em().clear();
         assertEquals(1, listRunsForTask(task.id).size(),
                 "fire 1 should produce one TaskRun");
-        EventLogger.flush();
-        assertEquals(1, loadEventsByCategory("TASK_STARTED", agent.name).size(),
+        assertEquals(1, ofCategory(events, "TASK_STARTED").size(),
                 "fire 1 emits TASK_STARTED");
-        assertEquals(1, loadEventsByCategory("TASK_COMPLETED", agent.name).size(),
+        assertEquals(1, ofCategory(events, "TASK_COMPLETED").size(),
                 "fire 1 emits TASK_COMPLETED");
 
         // === Pause via the service (matches production caller — both
@@ -280,14 +287,13 @@ class TaskFireFunctionalTest extends UnitTest {
         // it still calls scheduleNextIfRecurring so the cadence
         // continues (we just can't observe that scheduling at this layer
         // because db-scheduler is unwired in this test) ===
-        driveFire(dbTask, instance);
+        capturing(agent.name, events, () -> driveFire(dbTask, instance));
         JPA.em().clear();
         assertEquals(1, listRunsForTask(task.id).size(),
                 "fire 2 (paused) must not open a new TaskRun");
-        EventLogger.flush();
-        assertEquals(1, loadEventsByCategory("TASK_STARTED", agent.name).size(),
+        assertEquals(1, ofCategory(events, "TASK_STARTED").size(),
                 "fire 2 (paused) must not emit a new TASK_STARTED");
-        assertEquals(1, loadEventsByCategory("TASK_COMPLETED", agent.name).size(),
+        assertEquals(1, ofCategory(events, "TASK_COMPLETED").size(),
                 "fire 2 (paused) must not emit a new TASK_COMPLETED");
 
         // === Resume via the service ===
@@ -298,14 +304,13 @@ class TaskFireFunctionalTest extends UnitTest {
 
         // === Fire 3: resumed → full execution, second TaskRun + second
         // TASK_STARTED/COMPLETED pair ===
-        driveFire(dbTask, instance);
+        capturing(agent.name, events, () -> driveFire(dbTask, instance));
         JPA.em().clear();
         assertEquals(2, listRunsForTask(task.id).size(),
                 "fire 3 (resumed) should produce a second TaskRun");
-        EventLogger.flush();
-        assertEquals(2, loadEventsByCategory("TASK_STARTED", agent.name).size(),
+        assertEquals(2, ofCategory(events, "TASK_STARTED").size(),
                 "fire 3 (resumed) emits a second TASK_STARTED");
-        assertEquals(2, loadEventsByCategory("TASK_COMPLETED", agent.name).size(),
+        assertEquals(2, ofCategory(events, "TASK_COMPLETED").size(),
                 "fire 3 (resumed) emits a second TASK_COMPLETED");
     }
 
@@ -351,16 +356,19 @@ class TaskFireFunctionalTest extends UnitTest {
         var ctx = new ExecutionContext(null,
                 new Execution(Instant.now(), instance), null, null);
 
-        var thread = Thread.ofVirtual().start(() -> dbTask.execute(instance, ctx));
-        thread.join(5_000);
-        assertFalse(thread.isAlive());
+        var events = new ArrayList<EventLogger.Captured>();
+        capturing(agent.name, events, () -> {
+            var thread = Thread.ofVirtual().start(() -> dbTask.execute(instance, ctx));
+            thread.join(5_000);
+            assertFalse(thread.isAlive());
+            return null;
+        });
 
         JPA.em().clear();
 
         var runs = listRunsForTask(task.id);
         assertTrue(runs.isEmpty(), "paused skip must not open a TaskRun");
-        EventLogger.flush();
-        assertTrue(loadEventsByCategory("TASK_STARTED", agent.name).isEmpty(),
+        assertTrue(ofCategory(events, "TASK_STARTED").isEmpty(),
                 "paused skip must not emit TASK_STARTED — fire body never ran");
     }
 
@@ -519,12 +527,23 @@ class TaskFireFunctionalTest extends UnitTest {
         });
     }
 
-    private List<EventLog> loadEventsByCategory(String category, String agentId) {
-        return Tx.run(() -> {
-            var raw = EventLog.find("category = ?1 and agentId = ?2", category, agentId).fetch();
-            var typed = new ArrayList<EventLog>(raw.size());
-            for (var r : raw) typed.add((EventLog) r);
-            return typed;
-        });
+    /** Runs {@code body}, adding to {@code events} what any thread logs for {@code agentName} meanwhile. */
+    private static <T> T capturing(String agentName, List<EventLogger.Captured> events, Callable<T> body)
+            throws Exception {
+        var result = new AtomicReference<T>();
+        var failure = new AtomicReference<Exception>();
+        events.addAll(EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), _ -> {
+            try {
+                result.set(body.call());
+            } catch (Exception e) {
+                failure.set(e);
+            }
+        }));
+        if (failure.get() != null) throw failure.get();
+        return result.get();
+    }
+
+    private static List<EventLogger.Captured> ofCategory(List<EventLogger.Captured> events, String category) {
+        return events.stream().filter(e -> category.equals(e.category())).toList();
     }
 }

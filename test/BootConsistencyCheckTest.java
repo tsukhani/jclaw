@@ -4,7 +4,6 @@ import com.github.kagkarlsson.scheduler.task.Execution;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import jobs.BootConsistencyCheck;
 import models.Agent;
-import models.EventLog;
 import models.Task;
 import models.TaskRun;
 import org.junit.jupiter.api.AfterEach;
@@ -328,16 +327,16 @@ class BootConsistencyCheckTest extends UnitTest {
     void strandedRunningTaskIsReturnedToAliveStateAndLogged() {
         var task = persistRecurringTask("jclaw1103-stranded", Task.Status.RUNNING);
 
-        int reconciled = BootConsistencyCheck.reconcileStrandedRunning(
-                Set.of(), Instant.now().plusSeconds(60));
+        var reconciled = new int[1];
+        var logged = EventLogger.captureForTest(() -> reconciled[0] = BootConsistencyCheck.reconcileStrandedRunning(
+                Set.of(), Instant.now().plusSeconds(60)));
 
-        assertEquals(1, reconciled);
+        assertEquals(1, reconciled[0]);
         var reloaded = (Task) Task.findById(task.id);
         assertEquals(Task.Status.ACTIVE, reloaded.status,
                 "a recurring Task stranded in RUNNING must return to ACTIVE so the re-arm registers it");
 
-        EventLogger.flush();
-        assertEquals(1L, EventLog.count("message LIKE ?1", "%jclaw1103-stranded%"),
+        assertEquals(1L, logged.stream().filter(e -> e.message().contains("jclaw1103-stranded")).count(),
                 "reconciliation must name the Task in an operator-visible event");
     }
 

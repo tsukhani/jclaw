@@ -1,4 +1,3 @@
-import models.EventLog;
 import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -22,6 +21,8 @@ import java.util.regex.Pattern;
  */
 class ApiTasksControllerRunTest extends FunctionalTest {
 
+    private static final String AGENT_NAME = "task-run-agent";
+
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
@@ -43,8 +44,8 @@ class ApiTasksControllerRunTest extends FunctionalTest {
 
     private Long seedAgent() {
         var resp = POST("/api/agents", "application/json", """
-                {"name": "task-run-agent", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """);
+                {"name": "%s", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """.formatted(AGENT_NAME));
         assertIsOk(resp);
         return Long.parseLong(extractId(getContent(resp)));
     }
@@ -150,20 +151,22 @@ class ApiTasksControllerRunTest extends FunctionalTest {
         // Cancel via API to set up the CANCELLED state.
         assertIsOk(POST("/api/tasks/" + taskId + "/cancel", "application/json", ""));
 
-        var resp = POST("/api/tasks/" + taskId + "/run", "application/json", "");
-        assertIsOk(resp);
-        // CANCELLED must flip back to the alive-state for the task's type —
-        // ACTIVE for INTERVAL recurring (this case), PENDING for one-shot —
-        // otherwise TaskExecutionHandler swallows the fire at the
-        // CANCELLED-skip branch.
-        assertContentMatch("\"status\":\"ACTIVE\"", resp);
+        var events = EventLogger.captureMatchingForTest(e -> AGENT_NAME.equals(e.agentId()), _ -> {
+            var resp = POST("/api/tasks/" + taskId + "/run", "application/json", "");
+            assertIsOk(resp);
+            // CANCELLED must flip back to the alive-state for the task's type —
+            // ACTIVE for INTERVAL recurring (this case), PENDING for one-shot —
+            // otherwise TaskExecutionHandler swallows the fire at the
+            // CANCELLED-skip branch.
+            assertContentMatch("\"status\":\"ACTIVE\"", resp);
+        });
 
         // The audit message should call out the revival so operators can
         // grep for unusual flips.
-        EventLogger.flush();
-        long count = EventLog.count(
-                "category = ?1 AND message LIKE ?2",
-                "TASK_MGMT_MANUAL_RUN", "%revived from CANCELLED%");
+        long count = events.stream()
+                .filter(e -> e.category().equals("TASK_MGMT_MANUAL_RUN")
+                        && e.message().contains("revived from CANCELLED"))
+                .count();
         assertEquals(1L, count, "expected one audit row mentioning the revival");
     }
 
@@ -178,12 +181,11 @@ class ApiTasksControllerRunTest extends FunctionalTest {
         var agent = seedAgent();
         var taskId = seedTask(agent, "audited-run", "now");
 
-        var resp = POST("/api/tasks/" + taskId + "/run", "application/json", "");
-        assertIsOk(resp);
-        EventLogger.flush();
-        long count = EventLog.count(
-                "category = ?1 AND message LIKE ?2",
-                "TASK_MGMT_MANUAL_RUN", "%audited-run%");
+        var events = EventLogger.captureMatchingForTest(e -> AGENT_NAME.equals(e.agentId()),
+                _ -> assertIsOk(POST("/api/tasks/" + taskId + "/run", "application/json", "")));
+        long count = events.stream()
+                .filter(e -> e.category().equals("TASK_MGMT_MANUAL_RUN") && e.message().contains("audited-run"))
+                .count();
         assertEquals(1L, count, "expected exactly one TASK_MGMT_MANUAL_RUN event");
     }
 }

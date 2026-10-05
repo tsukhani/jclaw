@@ -9,7 +9,6 @@ import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import jobs.BootConsistencyCheck;
 import models.Agent;
-import models.EventLog;
 import models.Task;
 import models.TaskRun;
 import org.junit.jupiter.api.AfterEach;
@@ -28,6 +27,8 @@ import java.lang.reflect.Proxy;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -342,30 +343,36 @@ class TaskExecutionHandlerTest extends UnitTest {
     void undecodableInstanceIdLogsWarnAndExitsCleanly() throws Exception {
         commitAndReopen();
         var dbTask = TaskExecutionHandler.buildTask();
-        var instance = new TaskInstance<Void>(TaskExecutionHandler.TASK_NAME, "not-a-number");
+        var instanceId = "not-a-number-" + UUID.randomUUID();
+        var instance = new TaskInstance<Void>(TaskExecutionHandler.TASK_NAME, instanceId);
         var ctx = new ExecutionContext(null,
                 new Execution(Instant.now(), instance), null, null);
 
         var errorRef = new AtomicReference<Throwable>();
         var resultRef = new AtomicReference<CompletionHandler<Void>>();
-        var t = Thread.ofVirtual().start(() -> {
+        var events = EventLogger.captureMatchingForTest(e -> e.message().contains(instanceId), _ -> {
+            var t = Thread.ofVirtual().start(() -> {
+                try {
+                    resultRef.set(dbTask.execute(instance, ctx));
+                } catch (Throwable ex) {
+                    errorRef.set(ex);
+                }
+            });
             try {
-                resultRef.set(dbTask.execute(instance, ctx));
-            } catch (Throwable ex) {
-                errorRef.set(ex);
+                t.join(10_000);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(ex);
             }
         });
-        t.join(10_000);
         if (errorRef.get() != null) throw new RuntimeException(errorRef.get());
         assertNotNull(resultRef.get(),
                 "undecodable id must return a CompletionHandler, not throw");
         assertTrue(resultRef.get() instanceof CompletionHandler.OnCompleteRemove,
                 "undecodable id falls through to defaultCompletion()");
 
-        EventLogger.flush();
-        var warnings = loadEventsByCategory("task");
-        assertTrue(warnings.stream().anyMatch(e ->
-                e.message != null && e.message.contains("undecodable task_instance")),
+        assertTrue(events.stream().anyMatch(e ->
+                "task".equals(e.category()) && e.message().contains("undecodable task_instance")),
                 "undecodable id must log the warn");
     }
 
@@ -373,31 +380,37 @@ class TaskExecutionHandlerTest extends UnitTest {
     void missingTaskIdLogsWarnAndExitsCleanly() throws Exception {
         commitAndReopen();
         var dbTask = TaskExecutionHandler.buildTask();
-        var instance = new TaskInstance<Void>(TaskExecutionHandler.TASK_NAME, "999999999");
+        var missingId = ThreadLocalRandom.current().nextLong(1L << 40, 1L << 50);
+        var instance = new TaskInstance<Void>(TaskExecutionHandler.TASK_NAME, Long.toString(missingId));
         var ctx = new ExecutionContext(null,
                 new Execution(Instant.now(), instance), null, null);
 
         var errorRef = new AtomicReference<Throwable>();
         var resultRef = new AtomicReference<CompletionHandler<Void>>();
-        var t = Thread.ofVirtual().start(() -> {
+        var events = EventLogger.captureMatchingForTest(e -> e.message().contains("missing Task id " + missingId + ";"), _ -> {
+            var t = Thread.ofVirtual().start(() -> {
+                try {
+                    resultRef.set(dbTask.execute(instance, ctx));
+                } catch (Throwable ex) {
+                    errorRef.set(ex);
+                }
+            });
             try {
-                resultRef.set(dbTask.execute(instance, ctx));
-            } catch (Throwable ex) {
-                errorRef.set(ex);
+                t.join(10_000);
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(ex);
             }
         });
-        t.join(10_000);
         if (errorRef.get() != null) throw new RuntimeException(errorRef.get());
         assertNotNull(resultRef.get(),
                 "missing Task must return a CompletionHandler, not throw");
         assertTrue(resultRef.get() instanceof CompletionHandler.OnCompleteRemove,
                 "missing Task id falls through to defaultCompletion()");
 
-        EventLogger.flush();
-        var warnings = loadEventsByCategory("task");
-        assertTrue(warnings.stream().anyMatch(e ->
-                e.message != null
-                && e.message.contains("scheduled fire arrived for missing Task id")),
+        assertTrue(events.stream().anyMatch(e ->
+                "task".equals(e.category())
+                && e.message().contains("scheduled fire arrived for missing Task id")),
                 "missing-Task fire must log the warn");
     }
 
@@ -788,15 +801,6 @@ class TaskExecutionHandlerTest extends UnitTest {
             var raw = TaskRun.find("task.id = ?1 ORDER BY startedAt ASC", taskId).fetch();
             var typed = new ArrayList<TaskRun>(raw.size());
             for (var r : raw) typed.add((TaskRun) r);
-            return typed;
-        });
-    }
-
-    private List<EventLog> loadEventsByCategory(String category) {
-        return services.Tx.run(() -> {
-            var raw = EventLog.find("category = ?1", category).fetch();
-            var typed = new ArrayList<EventLog>(raw.size());
-            for (var r : raw) typed.add((EventLog) r);
             return typed;
         });
     }

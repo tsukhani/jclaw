@@ -1,4 +1,3 @@
-import models.EventLog;
 import models.Message;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -7,6 +6,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
 import services.ConversationService;
+import services.DeliveryDispatcher;
 import services.EventLogger;
 import services.OperatorAlerts;
 import services.Tx;
@@ -137,12 +137,13 @@ class OperatorAlertsTest extends UnitTest {
         var agent = Tx.run(() -> AgentService.create("alerts-unbound-" + System.nanoTime(), "test-provider", "test-model"));
         var spec = "telegram:" + System.nanoTime();
 
-        var result = OperatorAlerts.deliver(agent, spec, "JClaw alert: test");
+        var result = new DeliveryDispatcher.DispatchResult[1];
+        var events = EventLogger.captureForTest(
+                () -> result[0] = OperatorAlerts.deliver(agent, spec, "JClaw alert: test"));
 
-        assertFalse(result.ok(), "the agent has no Telegram binding");
-        EventLogger.flush();
-        var logged = Tx.run(() -> EventLog.find("category = ?1", OperatorAlerts.CATEGORY).fetch()).stream()
-                .filter(e -> ((EventLog) e).message.contains(spec)).count();
+        assertFalse(result[0].ok(), "the agent has no Telegram binding");
+        var logged = events.stream()
+                .filter(e -> e.category().equals(OperatorAlerts.CATEGORY) && e.message().contains(spec)).count();
         assertEquals(1, logged);
     }
 

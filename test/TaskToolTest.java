@@ -3,7 +3,6 @@ import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import com.google.gson.JsonParser;
 import models.Agent;
-import models.EventLog;
 import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -56,6 +55,7 @@ class TaskToolTest extends UnitTest {
     private Agent otherAgent;
     private TaskTool tool;
     private RecordingSchedulerStub stub;
+    private final List<EventLogger.Captured> logged = new ArrayList<>();
 
     @BeforeEach
     void setup() {
@@ -122,9 +122,9 @@ class TaskToolTest extends UnitTest {
 
     @Test
     void createTaskImmediateSchedulesAndEmitsAudit() {
-        var result = tool.execute("""
+        var result = execute("""
                 {"action":"createTask","name":"now-task","description":"do it",
-                 "schedule":"now"}""", agent);
+                 "schedule":"now"}""");
         assertTrue(result.contains("immediate execution"),
                 "IMMEDIATE branch reply; got: " + result);
 
@@ -313,19 +313,19 @@ class TaskToolTest extends UnitTest {
 
     @Test
     void pauseAndResumeRoundTripWithAudit() {
-        tool.execute("""
-                {"action":"createTask","name":"pauseme","schedule":"every 1h"}""", agent);
+        execute("""
+                {"action":"createTask","name":"pauseme","schedule":"every 1h"}""");
         var taskId = findTaskByName("pauseme").id;
 
-        var pauseReply = tool.execute("""
-                {"action":"pause","name":"pauseme"}""", agent);
+        var pauseReply = execute("""
+                {"action":"pause","name":"pauseme"}""");
         assertTrue(pauseReply.contains("paused"),
                 "pause reply; got: " + pauseReply);
         var afterPause = (Task) Tx.run(() -> Task.findById(taskId));
         assertTrue(afterPause.paused, "paused flag should be true after pause");
 
-        var resumeReply = tool.execute("""
-                {"action":"resume","name":"pauseme"}""", agent);
+        var resumeReply = execute("""
+                {"action":"resume","name":"pauseme"}""");
         assertTrue(resumeReply.contains("resumed"),
                 "resume reply; got: " + resumeReply);
         var afterResume = (Task) Tx.run(() -> Task.findById(taskId));
@@ -367,13 +367,13 @@ class TaskToolTest extends UnitTest {
 
     @Test
     void runNowReschedulesExistingPendingTask() {
-        tool.execute("""
-                {"action":"createTask","name":"runme","schedule":"every 1h"}""", agent);
+        execute("""
+                {"action":"createTask","name":"runme","schedule":"every 1h"}""");
         var taskId = findTaskByName("runme").id;
         stub.reschedules.clear();  // ignore create-time schedule
 
-        var reply = tool.execute("""
-                {"action":"runNow","name":"runme"}""", agent);
+        var reply = execute("""
+                {"action":"runNow","name":"runme"}""");
         assertTrue(reply.contains("run-now triggered"),
                 "runNow happy path; got: " + reply);
         // reschedule() called against the stub with the matching Task id.
@@ -423,12 +423,12 @@ class TaskToolTest extends UnitTest {
 
     @Test
     void updateTaskDescription() {
-        tool.execute("""
-                {"action":"createTask","name":"u1","schedule":"now"}""", agent);
+        execute("""
+                {"action":"createTask","name":"u1","schedule":"now"}""");
         var taskId = findTaskByName("u1").id;
 
-        var result = tool.execute("""
-                {"action":"updateTask","name":"u1","description":"new body"}""", agent);
+        var result = execute("""
+                {"action":"updateTask","name":"u1","description":"new body"}""");
         assertTrue(result.contains("updated"), result);
         var fresh = (Task) Tx.run(() -> Task.findById(taskId));
         assertEquals("new body", fresh.description);
@@ -653,13 +653,13 @@ class TaskToolTest extends UnitTest {
 
     @Test
     void cancelTaskFlipsStatusToCancelledAndRemovesSchedulerRow() {
-        tool.execute("""
-                {"action":"createTask","name":"cancelme","schedule":"every 1h"}""", agent);
+        execute("""
+                {"action":"createTask","name":"cancelme","schedule":"every 1h"}""");
         var taskId = findTaskByName("cancelme").id;
         int cancelsBefore = stub.cancels.size();
 
-        var reply = tool.execute("""
-                {"action":"cancelTask","name":"cancelme"}""", agent);
+        var reply = execute("""
+                {"action":"cancelTask","name":"cancelme"}""");
         assertTrue(reply.contains("cancelled"), reply);
         var fresh = (Task) Tx.run(() -> Task.findById(taskId));
         assertEquals(Task.Status.CANCELLED, fresh.status,
@@ -890,10 +890,16 @@ class TaskToolTest extends UnitTest {
         return Tx.run(() -> Task.count("name = ?1", name));
     }
 
-    private static void assertAuditCount(String category, String namePattern, long expected) {
-        EventLogger.flush();
-        long got = EventLog.count("category = ?1 AND message LIKE ?2",
-                category, "%" + namePattern + "%");
+    /** {@link TaskTool#execute} as {@link #agent}, keeping the events it records for {@link #assertAuditCount}. */
+    private String execute(String argsJson) {
+        var reply = new String[1];
+        logged.addAll(EventLogger.captureForTest(() -> reply[0] = tool.execute(argsJson, agent)));
+        return reply[0];
+    }
+
+    private void assertAuditCount(String category, String namePattern, long expected) {
+        long got = logged.stream()
+                .filter(e -> e.category().equals(category) && e.message().contains(namePattern)).count();
         assertEquals(expected, got,
                 "expected " + expected + " " + category + " event(s) referencing "
                         + namePattern);

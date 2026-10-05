@@ -1,4 +1,3 @@
-import models.EventLog;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +18,8 @@ import java.util.regex.Pattern;
  * audit cases.
  */
 class ApiTasksControllerUpdateTest extends FunctionalTest {
+
+    private static final String AGENT_NAME = "task-update-agent";
 
     @BeforeEach
     void setup() {
@@ -41,8 +42,8 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
 
     private Long seedAgent() {
         var resp = POST("/api/agents", "application/json", """
-                {"name": "task-update-agent", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """);
+                {"name": "%s", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """.formatted(AGENT_NAME));
         assertIsOk(resp);
         return Long.parseLong(extractId(getContent(resp)));
     }
@@ -235,14 +236,13 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
         var agent = seedAgent();
         var taskId = seedTask(agent, "audited-update", "now");
 
-        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
-                {"description": "after update"}
-                """);
-        assertIsOk(resp);
-        EventLogger.flush();
-        long count = EventLog.count(
-                "category = ?1 AND message LIKE ?2",
-                "TASK_MGMT_UPDATE", "%audited-update%");
+        var events = EventLogger.captureMatchingForTest(e -> AGENT_NAME.equals(e.agentId()),
+                _ -> assertIsOk(PATCH("/api/tasks/" + taskId, "application/json", """
+                        {"description": "after update"}
+                        """)));
+        long count = events.stream()
+                .filter(e -> e.category().equals("TASK_MGMT_UPDATE") && e.message().contains("audited-update"))
+                .count();
         assertEquals(1L, count, "expected exactly one TASK_MGMT_UPDATE event");
     }
 
