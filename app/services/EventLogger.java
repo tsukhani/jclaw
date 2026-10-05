@@ -8,6 +8,7 @@ import utils.GsonHolder;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -38,6 +39,11 @@ public class EventLogger {
     public static final String SUBAGENT_TIMEOUT = "SUBAGENT_TIMEOUT";
 
     private static final ConcurrentLinkedQueue<EventLog> pending = new ConcurrentLinkedQueue<>();
+
+    /** One event as {@link #record} received it: what {@link #captureForTest} hands back. */
+    public record Captured(String level, String category, String message) {}
+
+    private static final ScopedValue<List<Captured>> CAPTURE = ScopedValue.newInstance();
     private static final int BATCH_SIZE = 20;
 
     /** Set at the start of graceful shutdown (by the @OnApplicationStop hooks).
@@ -111,6 +117,8 @@ public class EventLogger {
             default -> Logger.info(logMessage);
         }
 
+        if (CAPTURE.isBound()) CAPTURE.get().add(new Captured(level, category, message));
+
         // During graceful shutdown stay file-only: the JPA layer is closing, so
         // queuing for DB persistence is pointless and would trip the batch flush
         // into a doomed "begin transaction failed". The file line above is what
@@ -134,6 +142,17 @@ public class EventLogger {
         if (pending.size() >= BATCH_SIZE) {
             flush();
         }
+    }
+
+    /**
+     * Test-only: run {@code body} and return every event recorded on this thread meanwhile. Concurrent
+     * test classes {@link #clear} the pending queue and wipe event_log, so a test asserting its own
+     * event reads it here rather than from the table.
+     */
+    public static List<Captured> captureForTest(Runnable body) {
+        var seen = new ArrayList<Captured>();
+        ScopedValue.where(CAPTURE, seen).run(body);
+        return List.copyOf(seen);
     }
 
     /**

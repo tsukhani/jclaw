@@ -603,7 +603,8 @@ class CapabilityRulesTest extends UnitTest {
             "tools.jev.JevPage", Set.of("callWithCallLimitForTest"),
             "utils.HttpFactories", Set.of("runWith", "callWith"),
             "utils.AppClock", Set.of("runWith", "callWith"),
-            "tools.PlaywrightBrowserTool", Set.of("callWithFailingScreenForTest"));
+            "tools.PlaywrightBrowserTool", Set.of("callWithFailingScreenForTest"),
+            "services.EventLogger", Set.of("captureForTest"));
 
     private static final DescribedPredicate<JavaAccess<?>> TEST_SEAM_ACCESS = seamAccess(TEST_SEAMS);
 

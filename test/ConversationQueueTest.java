@@ -6,6 +6,7 @@ import play.test.UnitTest;
 import services.ConversationQueue;
 import services.ConversationQueue.QueuedMessage;
 
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
@@ -1091,23 +1092,24 @@ class ConversationQueueTest extends UnitTest {
         em.getTransaction().commit();
         var gen = ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "web", "admin", agent),
                 new AtomicBoolean());
-        boolean stopped;
+        var stopped = new boolean[1];
+        List<services.EventLogger.Captured> logged;
         try {
             // The thread's JPA context stays bound with no transaction open, so Tx.run joins it,
             // the read succeeds and the marker's flush fails with TransactionRequiredException.
-            stopped = ConversationQueue.stop(conv.id);
+            logged = services.EventLogger.captureForTest(() -> stopped[0] = ConversationQueue.stop(conv.id));
         } finally {
             em.getTransaction().begin();
         }
 
-        assertTrue(stopped, "a failed marker write does not undo the stop");
+        assertTrue(stopped[0], "a failed marker write does not undo the stop");
         assertFalse(ConversationQueue.isBusy(conv.id), "ownership was released");
         assertNotEquals(gen, ConversationQueue.currentGeneration(conv.id));
-        services.EventLogger.flush();
         em.clear();
         assertEquals(0, markers(conv.id), "no marker reached the database");
-        assertEquals(1L, models.EventLog.count("category = ?1 AND message LIKE ?2", "queue",
-                "Stop marker not written for conversation " + conv.id + ":%"), "the failure is logged");
+        var prefix = "Stop marker not written for conversation " + conv.id + ":";
+        assertEquals(1L, logged.stream().filter(e -> e.category().equals("queue") && e.message().startsWith(prefix))
+                .count(), "the failure is logged");
     }
 
     @Test
