@@ -228,6 +228,7 @@ export const githubTracker = (): Tracker | undefined => {
       await addLabel(key, "afk-merged");
       await removeLabel(key, "afk-review");
     },
+    done: async (key) => (await api(`${issuesPath}/${number(key)}`)).state === "closed",
     comment: async (key, body) => {
       await api(`${issuesPath}/${number(key)}/comments`, { method: "POST", body: { body } });
     },

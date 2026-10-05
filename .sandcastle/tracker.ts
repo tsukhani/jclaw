@@ -7,7 +7,7 @@ export type Snapshot = {
   description: string;
   labels: string[];
   comments: { author: string; body: string }[];
-  parent?: { key: string; summary: string; description: string };
+  parent?: { key: string; summary: string; description: string; labels: string[] };
   blockedBy: { key: string; status: string; done: boolean }[];
   updated: string;
   fetchedAt: string;
@@ -42,6 +42,8 @@ export interface Tracker {
   requeued(key: string): Promise<void>;
   // The factory merged the story's branch into the checkout's main.
   merged(key: string): Promise<void>;
+  // The story is Done (Jira) or closed (GitHub), by whoever moved it.
+  done(key: string): Promise<boolean>;
   comment(key: string, body: string): Promise<void>;
   addLabel(key: string, label: string): Promise<void>;
   removeLabel(key: string, label: string): Promise<void>;

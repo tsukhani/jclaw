@@ -122,6 +122,7 @@ every decision (`docker logs jclaw-factory-gateway`).
 | `~/.jclaw-factory/jira.env` | Jira access. Only the harness on your Mac reads it. |
 | `~/.jclaw-factory/github.env` | GitHub access, optional. Only the harness on your Mac reads it. |
 | `~/.jclaw-factory/settings.env` | Your [settings](#settings), optional. Only the harness on your Mac reads it. |
+| `~/.jclaw-factory/board.json` | The factory's [board](#board): every story it holds and its state, for readers outside the harness |
 
 Nothing the harness writes lives in the checkout, because `/deploy` stages the whole working tree. It only adds
 `agent/<KEY>` branches there and, for an `afk-merge` story, fast-forwards `main`.
@@ -311,6 +312,7 @@ Jira user.
 ## Operating
 
 - **Watch:** `tail -f ~/.jclaw-factory/logs/factory.log`. Each story's phases are logged under `~/.jclaw-factory/logs/<KEY>-*`.
+  For a program, read `~/.jclaw-factory/board.json` (see [Board](#board)) rather than the log, whose wording changes.
 - **Pause:** `docker stop jclaw-factory-gateway`. No new stories start, and stories already running fail. Resume with
   `docker start jclaw-factory-gateway`.
 - **Stop the harness:** `.sandcastle/install-agent.sh --remove`.
@@ -322,6 +324,46 @@ Jira user.
 - **Reject:** move the story back to To Do with a comment saying what to change. The next round reworks it on the same
   branch. The general rule behind your comment goes into `~/.jclaw-factory/lessons.md`, which every prompt includes.
   Promote a lesson into `AGENTS.md`, or delete it there.
+
+## Board
+
+The harness keeps `~/.jclaw-factory/board.json` current for readers outside it, such as JClaw's Software Factory
+panel. It writes the file at start, after every poll, and whenever a story changes state or phase. Each write goes to a
+temporary file in the same directory and is renamed over the old one, so a reader sees one whole document or the
+other, never a partial one. `FACTORY_PLAN_ONLY` writes nothing.
+
+```json
+{
+  "schema": 1,
+  "updatedAt": "2026-10-05T09:12:44.120Z",
+  "harness": { "pid": 4242, "startedAt": "2026-10-05T08:00:01.002Z", "main": "9c50828a…" },
+  "settings": { "FACTORY_MAX_PARALLEL": 2, "FACTORY_CPUS": 6, "FACTORY_POLL_SECONDS": 120, "FACTORY_MODEL": "claude-opus-5-5" },
+  "stories": [
+    { "key": "JCLAW-1390", "summary": "Factory writes a board.json status file", "source": "jira", "autoMerge": false,
+      "state": "running", "phase": "gate-1", "phaseStartedAt": "2026-10-05T09:10:02.311Z", "since": "2026-10-05T08:31:40.007Z",
+      "logs": ["JCLAW-1390-gate-1-diag.json", "JCLAW-1390-implement.log"] }
+  ]
+}
+```
+
+- `schema` is an integer, 1 for this shape. A change a reader must handle differently raises it.
+- `updatedAt` is when the file was written. `harness.main` is the clone's `main` the factory last built from (null
+  before it knows). `settings` holds the values in effect, defaults included.
+- `stories` is ordered by most recent change, first. `source` is `jira` or `github`. `autoMerge` is true when the
+  story or its epic carries `afk-merge` and `no-afk-merge` does not exempt it. `since` is when the story entered its
+  state. `logs` names the files under `~/.jclaw-factory/logs/` that belong to the story.
+
+| `state` | Extra fields | Means |
+|---|---|---|
+| `waiting` | `reason` | A candidate not started: blocked by named stories, a named file overlap, every slot busy, or interrupted by the last stop |
+| `running` | `phase`, `phaseStartedAt` | `picked-up`, then `implement`, `rework`, `spec`, `build`, `gate-N`, `repair-N`, `review`, `gate-review`, `brief`; a landing runs `merge`, then `gate-merge` |
+| `review` | | Offered for review, awaiting a human |
+| `blocked` | `reason` | The factory gave up, or would not start it (a won't-do verdict, or a GitHub issue edited after its label) |
+| `refused` | `reason` | Auto-merge refused it; it stays in review |
+| `merged` | `sha`, `by` | `by` is `factory` for an auto-merge, or `operator` when a story in review turned Done by hand. `sha` is the merge commit, or null when no `Merge branch 'agent/<KEY>'` commit is on `main` |
+
+A story leaves the list 14 days after it reached `merged` or `blocked`, and a waiting story leaves as soon as it is no
+longer a candidate. The file holds only the fields above: never ticket text, comments or a credential.
 
 ## Settings
 

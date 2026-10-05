@@ -1,9 +1,10 @@
 // Offline checks on synthetic tickets: review feedback, planning, build mode, the GitHub trust rule, Jira's intake and
-// merge queries, and auto-merge, which lands branches between throwaway repos with real signing. `npm run check`.
+// merge queries, the board, and auto-merge, which lands branches between throwaway repos with real signing. `npm run check`.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
+import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, type Entry, type State, type Story } from "./board.ts";
 import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { MergeRefused, landBranch, landedAs, mergeVerdict } from "./merge.ts";
@@ -116,6 +117,109 @@ check("an unvalidated brief is refused", mergeVerdict({}, []), "the agent's brie
 check("an unmet criterion is refused", mergeVerdict(brief([true, false]), []), "acceptance criteria not met: AC 2");
 check("files that run on the Mac need a human", mergeVerdict(brief([true]), [".githooks/pre-push"]),
   "it changes files that run on your Mac once merged, which a human must read first: .githooks/pre-push");
+
+// The board: one transition per state, what moves `since`, retention at its boundary, and the document's shape.
+const T0 = new Date("2026-10-01T10:00:00.000Z"), T1 = new Date("2026-10-01T11:00:00.000Z"), T2 = new Date("2026-10-01T12:00:00.000Z");
+const entering = (next: State) => transition(undefined, "JCLAW-7", next, T0, { summary: "Do it", autoMerge: true });
+check("waiting carries its reason", entering({ state: "waiting", reason: "blocked by JCLAW-6 (To Do)" }),
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "waiting", reason: "blocked by JCLAW-6 (To Do)", since: T0.toISOString() });
+check("running carries its phase and when it started", entering({ state: "running", phase: "gate-1" }),
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "running", phase: "gate-1", phaseStartedAt: T0.toISOString(), since: T0.toISOString() });
+check("review carries nothing more", entering({ state: "review" }),
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "review", since: T0.toISOString() });
+check("blocked carries why the factory gave up", entering({ state: "blocked", reason: "the implementer made no commits" }),
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "blocked", reason: "the implementer made no commits", since: T0.toISOString() });
+check("refused carries the auto-merge refusal", entering({ state: "refused", reason: "acceptance criteria not met: AC 2" }),
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "refused", reason: "acceptance criteria not met: AC 2", since: T0.toISOString() });
+check("merged by the factory carries its merge commit", entering({ state: "merged", sha: "abc123", by: "factory" }),
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "merged", sha: "abc123", by: "factory", since: T0.toISOString() });
+check("merged by hand names the operator", entering({ state: "merged", sha: null, by: "operator" }),
+  { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "merged", sha: null, by: "operator", since: T0.toISOString() });
+check("a GitHub issue's source is github", transition(undefined, "GH-12", { state: "review" }, T0)?.source, "github");
+
+const gate1 = entering({ state: "running", phase: "gate-1" })!;
+const repair = transition(gate1, "JCLAW-7", { state: "running", phase: "repair-1" }, T1)!;
+check("a new phase moves phaseStartedAt, not since", [repair.since, repair.state === "running" && repair.phaseStartedAt], [T0.toISOString(), T1.toISOString()]);
+check("the same phase again changes nothing", transition(repair, "JCLAW-7", { state: "running", phase: "repair-1" }, T2), undefined);
+const reviewed = transition(repair, "JCLAW-7", { state: "review" }, T2)!;
+check("leaving running moves since and drops the phase", reviewed, { key: "JCLAW-7", summary: "Do it", source: "jira", autoMerge: true, state: "review", since: T2.toISOString() });
+const waited = entering({ state: "waiting", reason: "all 2 slots are busy" })!;
+const rewaited = transition(waited, "JCLAW-7", { state: "waiting", reason: "app/X.java is changed by JCLAW-5 (in review)" }, T1)!;
+check("a new reason for the same state keeps since", [rewaited.since, rewaited.state === "waiting" && rewaited.reason], [T0.toISOString(), "app/X.java is changed by JCLAW-5 (in review)"]);
+check("a state without its description keeps the old one", [transition(waited, "JCLAW-7", { state: "review" }, T1)?.summary], ["Do it"]);
+
+const at = (ms: number) => new Date(T0.getTime() + ms);
+const blockedAt = entering({ state: "blocked", reason: "x" })!, mergedAt = entering({ state: "merged", sha: "abc", by: "factory" })!;
+check("merged and blocked stay until 14 days, and leave at 14 days",
+  [expired(blockedAt, at(RETENTION_MS - 1)), expired(blockedAt, at(RETENTION_MS)), expired(mergedAt, at(RETENTION_MS - 1)), expired(mergedAt, at(RETENTION_MS))],
+  [false, true, false, true]);
+check("review, refused and waiting never age out",
+  (["review", "refused", "waiting"] as const).map((state) => expired({ ...blockedAt, state, reason: "x" } as Entry, at(10 * RETENTION_MS))), [false, false, false]);
+
+check("auto-merge from the story's label, its epic's, and not when exempted",
+  [autoMerges({ labels: ["afk", "afk-merge"] }), autoMerges({ labels: ["afk"], parent: { labels: ["afk", "afk-merge"] } }),
+    autoMerges({ labels: ["afk", "no-afk-merge"], parent: { labels: ["afk-merge"] } }), autoMerges({ labels: ["afk-merge", "no-afk-merge"] }),
+    autoMerges({ labels: ["afk"], parent: { labels: ["afk"] } })],
+  [true, true, false, false, false]);
+
+const home = fs.mkdtempSync(path.join(os.tmpdir(), "jclaw-board-check-"));
+const boardLogs = path.join(home, "logs"), boardFile = path.join(home, "board.json");
+fs.mkdirSync(boardLogs);
+for (const f of ["JCLAW-1-build.log", "JCLAW-1-report.json", "JCLAW-10-build.log", "factory.log", "plan.log"]) fs.writeFileSync(path.join(boardLogs, f), "");
+const settings = { FACTORY_MAX_PARALLEL: 2, FACTORY_CPUS: 6, FACTORY_POLL_SECONDS: 120, FACTORY_MODEL: "claude-opus-5-5" };
+const newBoard = () => new Board({ file: boardFile, logs: boardLogs, pid: 4242, startedAt: T0, settings, enabled: true });
+const board = newBoard();
+board.main = "f".repeat(40);
+board.set("JCLAW-1", { state: "running", phase: "picked-up" }, { summary: "One", autoMerge: false }, T0);
+board.set("JCLAW-10", { state: "waiting", reason: "blocked by JCLAW-1 (In Progress)" }, { summary: "Ten", autoMerge: true }, T1);
+board.set("JCLAW-1", { state: "running", phase: "build" }, undefined, T2);
+const written = JSON.parse(fs.readFileSync(boardFile, "utf8"));
+check("the document carries exactly its fields", Object.keys(written), ["schema", "updatedAt", "harness", "settings", "stories"]);
+check("…with the harness and its effective settings", [written.schema, written.updatedAt, written.harness, written.settings],
+  [1, T2.toISOString(), { pid: 4242, startedAt: T0.toISOString(), main: "f".repeat(40) }, settings]);
+check("stories by most recent change, each with only its own logs",
+  written.stories.map((s: Story) => [s.key, s.state, s.logs]), [["JCLAW-1", "running", ["JCLAW-1-build.log", "JCLAW-1-report.json"]], ["JCLAW-10", "waiting", ["JCLAW-10-build.log"]]]);
+check("a story entry carries exactly its fields", Object.keys(written.stories[0]).sort(),
+  ["autoMerge", "key", "logs", "phase", "phaseStartedAt", "since", "source", "state", "summary"]);
+board.set("JCLAW-2", { state: "blocked", reason: "x" }, { summary: "Two" }, T0);
+check("a blocked story leaves the next write after 14 days", board.document(at(RETENTION_MS)).stories.map((s) => s.key), ["JCLAW-1", "JCLAW-10"]);
+board.set("JCLAW-3", { state: "running", phase: "gate-merge" }, { summary: "Three" }, T2);
+board.write(T2);
+const restarted = newBoard();
+restarted.load();
+check("a restart keeps the order; a story left running waits, and one left landing is back in review",
+  restarted.document(T2).stories.map((s) => [s.key, s.state]), [["JCLAW-3", "review"], ["JCLAW-1", "waiting"], ["JCLAW-10", "waiting"]]);
+check("a disabled board writes nothing", (() => {
+  const other = path.join(home, "plan-only.json");
+  new Board({ file: other, logs: boardLogs, pid: 1, startedAt: T0, settings, enabled: false }).set("JCLAW-1", { state: "review" });
+  return fs.existsSync(other);
+})(), false);
+
+// A reader in another process, racing a writer that replaces a large board as fast as it can, must never see a partial one.
+const race = path.join(home, "race.json");
+const big = (n: number) => JSON.stringify({ schema: 1, n, stories: Array.from({ length: 4000 }, (_, i) => ({ key: `JCLAW-${i}`, summary: "x".repeat(40) })) });
+writeAtomically(race, big(0));
+const reader = spawn(process.execPath, ["-e", `
+  const fs = require("node:fs");
+  let reads = 0, torn = 0;
+  process.stdout.write("ready\\n");
+  const until = Date.now() + 1500;
+  while (Date.now() < until) {
+    try { JSON.parse(fs.readFileSync(${JSON.stringify(race)}, "utf8")); } catch { torn++; }
+    reads++;
+  }
+  process.stdout.write(JSON.stringify({ reads, torn }));
+`]);
+let out = "";
+reader.stdout.on("data", (d) => (out += d));
+await new Promise<void>((resolve) => reader.stdout.once("data", () => resolve()));
+let writes = 0;
+for (const until = Date.now() + 1500; Date.now() < until; ) writeAtomically(race, big(++writes));
+await new Promise((resolve) => reader.on("exit", resolve));
+const raced = JSON.parse(out.slice(out.indexOf("{")));
+check("a reader racing the writer always parses a complete board", [writes > 50, raced.reads > 50, raced.torn], [true, true, 0]);
+check("the temporary file does not outlive the write", fs.readdirSync(home).filter((f) => f.endsWith(".tmp")), []);
+fs.rmSync(home, { recursive: true, force: true });
 
 // landBranch between a throwaway checkout and its clone, signing with the operator's own git configuration.
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "jclaw-land-check-"));
