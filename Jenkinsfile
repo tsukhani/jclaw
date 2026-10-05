@@ -423,6 +423,19 @@ pipeline {
                     // subject-line guard keeps us from pasting an unrelated
                     // commit's body if a RELEASE build is ever run on a
                     // non-release HEAD.
+
+                    // SHA256SUMS and its signature ride on the release so
+                    // `jclaw.sh upgrade` and install.sh can prove what they
+                    // downloaded before installing it. Bare filenames (no dist/
+                    // prefix) because the verifiers match on the asset name as
+                    // published. Signed before the old release is deleted, so a
+                    // signing failure leaves the published one in place, and in
+                    // its own block so the key reaches no other step.
+                    sh '( cd dist && shasum -a 256 jclaw.zip jclaw-bundle.zip > SHA256SUMS )'
+                    withCredentials([file(credentialsId: 'jclaw-release-signing-key', variable: 'SIGNING_KEY')]) {
+                        sh 'bin/sign-release.sh dist/SHA256SUMS'
+                    }
+
                     withCredentials([string(credentialsId: 'github-token', variable: 'GH_TOKEN')]) {
                         sh """
                             gh release delete ${version} --repo tsukhani/jclaw --yes || true
@@ -437,14 +450,7 @@ pipeline {
                                 NOTES_ARG='--generate-notes'
                             fi
 
-                            # SHA256SUMS rides on the release so `jclaw.sh upgrade`
-                            # can verify what it downloaded before installing it
-                            # over a working instance. Bare filenames (no dist/
-                            # prefix) because the verifier matches on the asset
-                            # name as published.
-                            ( cd dist && shasum -a 256 jclaw.zip jclaw-bundle.zip > SHA256SUMS )
-
-                            gh release create ${version} dist/jclaw.zip dist/jclaw-bundle.zip dist/SHA256SUMS \
+                            gh release create ${version} dist/jclaw.zip dist/jclaw-bundle.zip dist/SHA256SUMS dist/SHA256SUMS.sig \
                                 --repo tsukhani/jclaw \
                                 --title "JClaw ${version}" \
                                 \$NOTES_ARG

@@ -93,7 +93,7 @@ Node.js and provide Chromium under `PLAYWRIGHT_BROWSERS_PATH`.
 | `JCLAW_NO_RC_EDIT` | — | Set to `1` to generate completion scripts without editing your shell rc |
 | `JCLAW_FORCE_REINSTALL` | — | Set to `1` to replace an existing install from scratch, **discarding** its database, workspace and credentials (otherwise an existing install is upgraded in place) |
 | `JCLAW_BIN_DIR` | `~/.local/bin` | Where the `jclaw` command goes (`install.sh` only) |
-| `JCLAW_BUNDLE_URL` | — | Install from a specific bundle URL (including `file://`) instead of GitHub Releases (`install.sh` only) |
+| `JCLAW_BUNDLE_URL` | — | Install from a specific bundle URL (including `file://`) instead of GitHub Releases, skipping the release-signature check (`install.sh` only) |
 
 ```bash
 # Pin a version and install without auto-starting:

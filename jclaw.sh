@@ -5048,6 +5048,16 @@ UPGRADE_REPO="${JCLAW_UPGRADE_REPO:-tsukhani/jclaw}"
 UPGRADE_API="${JCLAW_UPGRADE_API:-https://api.github.com}"
 UPGRADE_DL="${JCLAW_UPGRADE_DOWNLOAD:-https://github.com}"
 
+# Releases after this one carry SHA256SUMS.sig; at or below it they are unsigned.
+UPGRADE_LAST_UNSIGNED="0.19.25"
+
+# Public half of the Jenkins credential jclaw-release-signing-key (ECDSA P-256).
+# install.sh pins the same key; ReleaseSigningConformanceTest holds the two equal.
+UPGRADE_RELEASE_PUBKEY='-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEESTRoh6FNrJfdmlUEwT+7VTYneMd
+IZGsQ3joF/NEpzn/jTMzI+UT4r/btJ+LTsXpI+pHG+7Rl2VV2mI4dadqSg==
+-----END PUBLIC KEY-----'
+
 # Build outputs that must come from the new release verbatim. Everything else
 # in the old tree that the release doesn't ship is carried over (see
 # merge_absent) — an inverted allowlist, so a runtime directory added in a
@@ -5249,6 +5259,34 @@ upgrade_download() {
     wait "$dl"
 }
 
+# Proves $3/$2 is the asset the Release stage built for tag $1: SHA256SUMS must
+# verify under the pinned key and list the asset's hash. Every failure refuses
+# the install — a missing signature is what a swapped release looks like.
+upgrade_verify_release() {
+    local target="$1" asset="$2" dir="$3" want got
+    local base="$UPGRADE_DL/$UPGRADE_REPO/releases/download/$target"
+    if ! http_get_text "$base/SHA256SUMS" >"$dir/SHA256SUMS" 2>/dev/null \
+        || ! http_get_text "$base/SHA256SUMS.sig" >"$dir/SHA256SUMS.sig" 2>/dev/null; then
+        echo "Error: could not fetch SHA256SUMS and its signature for $target." >&2
+        return 1
+    fi
+    printf '%s\n' "$UPGRADE_RELEASE_PUBKEY" >"$dir/release.pub"
+    # The installed tree's own verifier, not openssl: Java is the one tool every
+    # install has, and minimal Fedora, Alpine and UBI images ship no openssl.
+    if ! java -cp "$(native_path "$SCRIPT_DIR/precompiled/java")" utils.ReleaseSignature \
+            "$(native_path "$dir/release.pub")" "$(native_path "$dir/SHA256SUMS.sig")" \
+            "$(native_path "$dir/SHA256SUMS")"; then
+        echo "Error: the signature on SHA256SUMS for $target does not verify." >&2
+        return 1
+    fi
+    want=$(awk -v a="$asset" '($2 == a || $2 == "*" a) {print $1; exit}' "$dir/SHA256SUMS")
+    got=$(sha256_file "$dir/$asset")
+    if [[ -z "$want" || -z "$got" || "$want" != "$got" ]]; then
+        echo "Error: $asset does not match the signed checksum (wanted ${want:-none}, got ${got:-none})." >&2
+        return 1
+    fi
+}
+
 do_upgrade() {
     cd "$SCRIPT_DIR"
 
@@ -5365,17 +5403,23 @@ do_upgrade() {
         exit 1
     fi
 
-    # SHA256SUMS is a newer release artifact; releases published before it
-    # existed simply don't have one. Warn and continue rather than blocking an
-    # upgrade on an asset the publisher hadn't started attaching yet.
     upgrade_status verifying 100 "Verifying download…"
-    local sums want got
+    local sums want got signed=false
     if [[ -n "${JCLAW_UPGRADE_ASSET_URL:-}" ]]; then
         # The operator chose the source (air-gapped mirror, fork build, or the
         # archive install.sh already fetched). Checking it against the published
         # release's SHA256SUMS would reject exactly the artifacts this override
         # exists to install.
         echo "    asset source overridden — skipping checksum verification"
+    elif version_gt "$target" "$UPGRADE_LAST_UNSIGNED"; then
+        if ! upgrade_verify_release "$target" "$asset" "$staging"; then
+            upgrade_status failed 0 "Release verification failed — refusing to install."
+            exit 1
+        fi
+        signed=true
+        echo "    release signature verified"
+    # Below here are the unsigned releases. SHA256SUMS is itself newer than the
+    # oldest of them, so its absence warns rather than blocks.
     elif sums=$(http_get_text "$UPGRADE_DL/$UPGRADE_REPO/releases/download/$target/SHA256SUMS" 2>/dev/null) && [[ -n "$sums" ]]; then
         want=$(printf '%s\n' "$sums" | awk -v a="$asset" '$2 == a || $2 == "*" a {print $1}' | head -1)
         got=$(sha256_file "$staging/$asset")
@@ -5409,6 +5453,13 @@ do_upgrade() {
     # and the manifest has to describe what is actually on disk.
     installed=$(sed -n 's/^application\.version=\(.*\)/\1/p' "$new_tree/conf/application.conf" | head -1 | tr -d '\r')
     [[ -n "$installed" ]] || installed="${target#v}"
+    # The signature proves Jenkins built the archive, not which release it is:
+    # an older signed pair re-published under this tag would verify.
+    if [[ "$signed" == true && "$installed" != "${target#v}" ]]; then
+        upgrade_status failed 0 "The release is not the version it claims — refusing to install."
+        echo "Error: the archive published as $target is version $installed." >&2
+        exit 1
+    fi
     UPGRADE_TO="$installed"
 
     # ─── Downtime starts here ───

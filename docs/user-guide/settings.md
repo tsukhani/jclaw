@@ -197,7 +197,7 @@ The panel shows the version you're running and the newest published release. **C
 
 When JClaw is served from a git checkout, the panel also names the commit it's running, marked when the working tree has uncommitted changes. A checkout keeps the same version number across many commits, so the version alone can't tell you which build is live. A packaged install has no repository and shows nothing here.
 
-**The download happens while JClaw keeps serving.** The release (~190 MB for a bundle install) is fetched, checksum-verified and unpacked before anything is stopped, so a network failure, a bad download or a full disk costs no downtime at all — you're told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.
+**The download happens while JClaw keeps serving.** The release (~190 MB for a bundle install) is fetched, checked against the release's signature and unpacked before anything is stopped, so a network failure, a download that fails verification or a full disk costs no downtime at all — you're told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.
 
 ### What is kept
 

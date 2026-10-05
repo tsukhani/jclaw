@@ -61,6 +61,16 @@ ASSET="jclaw-bundle.zip"
 MIN_JAVA=25
 AZUL_API="https://api.azul.com/metadata/v1/zulu/packages/"
 
+# Releases after this one carry SHA256SUMS.sig; at or below it they are unsigned.
+LAST_UNSIGNED_RELEASE="0.19.25"
+
+# Public half of the Jenkins credential jclaw-release-signing-key (ECDSA P-256).
+# jclaw.sh pins the same key; ReleaseSigningConformanceTest holds the two equal.
+RELEASE_PUBKEY='-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEESTRoh6FNrJfdmlUEwT+7VTYneMd
+IZGsQ3joF/NEpzn/jTMzI+UT4r/btJ+LTsXpI+pHG+7Rl2VV2mI4dadqSg==
+-----END PUBLIC KEY-----'
+
 # ─── Output helpers (TTY + NO_COLOR aware) ───────────────────────────────────
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     EMERALD=$(printf '\033[38;2;52;211;153m')
@@ -291,6 +301,51 @@ sha256_of() {
     fi
 }
 
+# 0 when JCLAW_VERSION pins a release published before signing began. "latest"
+# never is: an unsigned latest is what a swapped release looks like.
+predates_signing() {
+    case "${JCLAW_VERSION#v}" in ''|*[!0-9.]*) return 1 ;; esac
+    printf '%s %s\n' "${JCLAW_VERSION#v}" "$LAST_UNSIGNED_RELEASE" | awk '{
+        split($1, a, "."); split($2, b, ".")
+        for (i = 1; i <= 3; i++) {
+            if (a[i] + 0 < b[i] + 0) exit 0
+            if (a[i] + 0 > b[i] + 0) exit 1
+        }
+        exit 0
+    }'
+}
+
+# Proves bundle $1 is the one the Release stage built: SHA256SUMS must verify
+# under RELEASE_PUBKEY and list the bundle's hash. Scratch files go in $2.
+verify_bundle() {
+    _zip="$1"; _dir="$2"
+    if [ -n "$JCLAW_BUNDLE_URL" ]; then
+        substep "bundle source overridden — skipping signature verification"
+        return 0
+    fi
+    if predates_signing; then
+        warn "release $JCLAW_VERSION predates signed releases — installing it unverified."
+        return 0
+    fi
+    command -v openssl >/dev/null 2>&1 \
+        || die "openssl is needed to verify the release signature — install it and re-run."
+    _base="${URL%/*}"
+    { http_get "$_base/SHA256SUMS" >"$_dir/SHA256SUMS" \
+        && http_get "$_base/SHA256SUMS.sig" >"$_dir/SHA256SUMS.sig"; } 2>/dev/null \
+        || die "could not fetch SHA256SUMS and its signature — refusing to install an unverified bundle."
+    printf '%s\n' "$RELEASE_PUBKEY" >"$_dir/release.pub"
+    # Exit status, not output: LibreSSL and OpenSSL word a failed verify differently.
+    openssl dgst -sha256 -verify "$_dir/release.pub" \
+        -signature "$_dir/SHA256SUMS.sig" "$_dir/SHA256SUMS" >/dev/null 2>&1 \
+        || die "the signature on SHA256SUMS is not valid — refusing to install."
+    _want=$(awk -v a="$ASSET" '($2 == a || $2 == "*" a) {print $1; exit}' "$_dir/SHA256SUMS")
+    _got=$(sha256_of "$_zip")
+    if [ -z "$_want" ] || [ "$_got" != "$_want" ]; then
+        die "$ASSET does not match the signed checksum (wanted ${_want:-none}, got ${_got:-none}) — refusing to install."
+    fi
+    substep "release signature verified"
+}
+
 # Record the version installed and the checksum of conf/application.conf *as
 # shipped*. `jclaw.sh upgrade` compares the live conf against this to tell an
 # operator's edits from an untouched default: matching means it can safely
@@ -398,6 +453,7 @@ if [ -x "$APP_DIR/jclaw.sh" ] && [ -z "$JCLAW_FORCE_REINSTALL" ]; then
     ZIP="$TMP_DL/$ASSET"
     substep "$JCLAW_VERSION → ${DIM}$URL${RESET}"
     download "$URL" "$ZIP"
+    verify_bundle "$ZIP" "$TMP_DL"
     extract "$ZIP" "$TMP_DL/staged"
     [ -f "$TMP_DL/staged/jclaw/jclaw.sh" ] \
         || die "the downloaded archive has no jclaw/jclaw.sh — the layout may have changed."
@@ -435,6 +491,7 @@ step "Downloading $ASSET ${DIM}(~190 MB, first run only)${RESET}"
 TMP_DL=$(mktemp -d "${TMPDIR:-/tmp}/jclaw-install.XXXXXX")
 ZIP="$TMP_DL/$ASSET"
 download "$URL" "$ZIP"
+verify_bundle "$ZIP" "$TMP_DL"
 
 step "Installing to $APP_DIR"
 mkdir -p "$JCLAW_HOME"
