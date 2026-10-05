@@ -32,6 +32,11 @@ let jobState = 'running'
 let jobGone = false
 let setupGets = 0
 
+// The status endpoint reports not installed, so the panel shows the Setup section alone.
+registerEndpoint('/api/factory', {
+  method: 'GET',
+  handler: () => ({ installed: false, supported: true, reason: null, harness: { state: 'unknown', pid: null }, gateway: { state: 'absent' }, sandboxes: null, board: null, boardReason: null }),
+})
 registerEndpoint('/api/factory/setup', {
   method: 'GET',
   handler: () => {
