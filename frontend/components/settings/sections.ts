@@ -30,6 +30,7 @@ import {
   ServerStackIcon,
   CommandLineIcon,
   CpuChipIcon,
+  CubeIcon,
   DocumentMagnifyingGlassIcon,
   DocumentTextIcon,
   EyeIcon,
@@ -65,6 +66,7 @@ import SettingsImageGenPanel from './SettingsImageGenPanel.vue'
 import SettingsLoggingPanel from './SettingsLoggingPanel.vue'
 import SettingsMaintenancePanel from './SettingsMaintenancePanel.vue'
 import SettingsTelemetryPanel from './SettingsTelemetryPanel.vue'
+import SettingsSoftwareFactoryPanel from './SettingsSoftwareFactoryPanel.vue'
 import SettingsMalwarePanel from './SettingsMalwarePanel.vue'
 import SettingsMemoryEmbeddingsPanel from './SettingsMemoryEmbeddingsPanel.vue'
 import SettingsMemoryLimitsPanel from './SettingsMemoryLimitsPanel.vue'
@@ -169,6 +171,7 @@ export const sectionGroups: SettingsSectionGroup[] = [
       { id: 'model-router', title: 'Model Router', icon: ArrowsRightLeftIcon, component: SettingsModelRouterPanel },
       { id: 'subagents', title: 'Subagents', icon: UserGroupIcon, component: SettingsSubagentsPanel },
       { id: 'coding', title: 'Coding', icon: CodeBracketIcon, component: SettingsCodingPanel },
+      { id: 'software-factory', title: 'Software Factory', icon: CubeIcon, component: SettingsSoftwareFactoryPanel },
       { id: 'web-scraping', title: 'Web Scraping', icon: GlobeAltIcon, component: SettingsWebScrapePanel },
       { id: 'browser', title: 'Browser', icon: WindowIcon, component: SettingsBrowserPanel },
       { id: 'tasks', title: 'Tasks', icon: ClipboardDocumentCheckIcon, component: SettingsTasksPanel },

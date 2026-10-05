@@ -1,0 +1,343 @@
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import models.EventLog;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import play.mvc.Http;
+import play.test.FunctionalTest;
+import services.EventLogger;
+import services.factory.FactoryHome;
+import services.factory.FactoryInstallJob;
+import services.factory.FactoryProcess;
+import services.factory.FactoryStatus;
+
+import java.io.File;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
+
+/**
+ * The Software Factory setup routes (JCLAW-1393), driven over HTTP with a fake command runner and
+ * a temporary factory home — never real docker, never the real installer or {@code ~/.jclaw-factory}.
+ */
+class ApiFactorySetupControllerTest extends FunctionalTest {
+
+    private static final String SECRET = "sentinel-s3cr3t-7f1d";
+
+    @TempDir
+    Path home;
+
+    private volatile FactoryProcess.Runner installer = (c, d, t) -> new FactoryProcess.ExecResult(0, "", false);
+    private final List<List<String>> calls = new ArrayList<>();
+    private final List<String> started = new ArrayList<>();
+
+    @BeforeEach
+    void setup() {
+        FactoryRunnerSync.acquire();
+        AuthFixture.seedAdminPassword("changeme");
+        FactoryHome.setHomeForTest(home);
+        FactoryProcess.setRunnerForTest(new FactoryProcess.Runner() {
+            @Override
+            public FactoryProcess.ExecResult run(List<String> command, File workDir, Duration timeout) {
+                synchronized (calls) {
+                    calls.add(command);
+                }
+                if (command.getFirst().endsWith("install-agent.sh")) return installer.run(command, workDir, timeout);
+                if (command.getFirst().equals("node")) return new FactoryProcess.ExecResult(0, "v24.3.0\n", false);
+                return new FactoryProcess.ExecResult(0, "27.0.0\n", false);
+            }
+
+            @Override
+            public FactoryProcess.ExecResult run(List<String> command, File workDir, Duration timeout,
+                                                 FactoryProcess.OutputSink sink) {
+                if (!command.getFirst().endsWith("install-agent.sh")) {
+                    return FactoryProcess.Runner.super.run(command, workDir, timeout, sink);
+                }
+                synchronized (calls) {
+                    calls.add(command);
+                }
+                var hello = "step 1\n".getBytes(StandardCharsets.UTF_8);
+                sink.write(hello, 0, hello.length);
+                return installer.run(command, workDir, timeout);
+            }
+        });
+        FactoryStatus.clearCache();
+        clearCookies();
+    }
+
+    @AfterEach
+    void clearSeams() throws Exception {
+        for (var id : started) awaitFinished(id);
+        FactoryHome.setHomeForTest(null);
+        FactoryProcess.setRunnerForTest(null);
+        clearCookies();
+        FactoryRunnerSync.release();
+    }
+
+    private void login() {
+        clearCookies();
+        assertIsOk(POST("/api/auth/login", "application/json",
+                "{\"username\": \"admin\", \"password\": \"changeme\"}"));
+    }
+
+    private static JsonObject json(Http.Response resp) {
+        return JsonParser.parseString(getContent(resp)).getAsJsonObject();
+    }
+
+    private static boolean posix() {
+        return FileSystems.getDefault().supportedFileAttributeViews().contains("posix");
+    }
+
+    private static String mode(Path file) throws Exception {
+        return PosixFilePermissions.toString(Files.getPosixFilePermissions(file));
+    }
+
+    private static List<String> eventRowsContaining(String fragment) {
+        EventLogger.flush();
+        List<EventLog> rows = EventLog.find("message LIKE ?1 OR details LIKE ?1", "%" + fragment + "%").fetch();
+        var out = new ArrayList<String>();
+        for (var r : rows) out.add(r.message);
+        return out;
+    }
+
+    private JsonObject startInstall() {
+        var resp = POST("/api/factory/setup/install", "application/json", "{}");
+        assertStatus(202, resp);
+        var job = json(resp);
+        started.add(job.get("id").getAsString());
+        return job;
+    }
+
+    private static void awaitFinished(String id) throws Exception {
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while (System.nanoTime() < deadline) {
+            var view = FactoryInstallJob.get(id);
+            if (view != null && !view.state().equals("running")) return;
+            Thread.sleep(20);
+        }
+        throw new AssertionError("install job " + id + " never finished");
+    }
+
+    private JsonObject awaitDone(String id) throws Exception {
+        awaitFinished(id);
+        return json(GET("/api/factory/setup/install/" + id));
+    }
+
+    // --- GET ---
+
+    @Test
+    void setupReportsPrerequisitesAndBooleansButNoValue() throws Exception {
+        Files.writeString(home.resolve(".env"), "ANTHROPIC_API_KEY=" + SECRET + "\n");
+        login();
+        var resp = GET("/api/factory/setup");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertFalse(body.contains(SECRET), body);
+        var view = json(resp);
+        assertTrue(view.get("hasModelCredential").getAsBoolean(), body);
+        assertFalse(view.get("hasJira").getAsBoolean(), body);
+        assertFalse(view.get("hasGithub").getAsBoolean(), body);
+        var ids = new ArrayList<String>();
+        for (var p : view.getAsJsonArray("prerequisites")) {
+            var o = p.getAsJsonObject();
+            ids.add(o.get("id").getAsString());
+            assertTrue(List.of("ok", "missing", "unknown").contains(o.get("state").getAsString()), body);
+        }
+        assertEquals(List.of("macos", "docker", "node", "checkout"), ids);
+    }
+
+    // --- credentials ---
+
+    @Test
+    void eachCredentialFieldWritesItsFileOwnerOnly() throws Exception {
+        Files.writeString(home.resolve(".env"), "FOO=1\nANTHROPIC_API_KEY=old\n");
+        login();
+        var resp = POST("/api/factory/setup/credentials", "application/json",
+                "{\"claudeOauthToken\":\"" + SECRET + "-oauth\"}");
+        assertIsOk(resp);
+        assertFalse(getContent(resp).contains(SECRET), getContent(resp));
+        assertTrue(json(resp).get("hasModelCredential").getAsBoolean());
+        assertEquals("FOO=1\nCLAUDE_CODE_OAUTH_TOKEN=" + SECRET + "-oauth\n", Files.readString(home.resolve(".env")));
+
+        resp = POST("/api/factory/setup/credentials", "application/json",
+                "{\"jiraUrl\":\"https://jira.example.com/" + SECRET + "\",\"jiraPersonalToken\":\"" + SECRET + "-jira\","
+                        + "\"githubToken\":\"" + SECRET + "-gh\"}");
+        assertIsOk(resp);
+        assertFalse(getContent(resp).contains(SECRET), getContent(resp));
+        assertTrue(json(resp).get("hasJira").getAsBoolean());
+        assertTrue(json(resp).get("hasGithub").getAsBoolean());
+        assertEquals("JIRA_URL=https://jira.example.com/" + SECRET + "\nJIRA_PERSONAL_TOKEN=" + SECRET + "-jira\n",
+                Files.readString(home.resolve("jira.env")));
+        assertEquals("GITHUB_TOKEN=" + SECRET + "-gh\n", Files.readString(home.resolve("github.env")));
+        if (posix()) {
+            for (var f : List.of(".env", "jira.env", "github.env")) assertEquals("rw-------", mode(home.resolve(f)), f);
+        }
+        assertEquals(List.of(), eventRowsContaining(SECRET));
+        assertFalse(eventRowsContaining("Operator updated factory credentials: jiraUrl, jiraPersonalToken, githubToken")
+                .isEmpty());
+    }
+
+    @Test
+    void refusedCredentialsWriteNothingAndEchoNoValue() throws Exception {
+        Files.writeString(home.resolve(".env"), "ANTHROPIC_API_KEY=keep\n");
+        var before = Files.readAllBytes(home.resolve(".env"));
+        login();
+        for (var body : List.of(
+                "{\"anthropicApiKey\":\"" + SECRET + "\\nX=1\"}",
+                "{\"anthropicApiKey\":\"" + SECRET + "\\r\"}",
+                "{\"githubToken\":\"  \"}",
+                "{\"anthropicApiKey\":\"" + SECRET + "\",\"claudeOauthToken\":\"" + SECRET + "\"}",
+                "{\"githubToken\":\"" + SECRET + "\",\"other\":\"" + SECRET + "\"}",
+                "{\"githubToken\":[\"" + SECRET + "\"]}",
+                "{}",
+                "not json " + SECRET,
+                "{\"jiraUrl\":\"file:///" + SECRET + "\",\"githubToken\":\"" + SECRET + "\"}")) {
+            var resp = POST("/api/factory/setup/credentials", "application/json", body);
+            assertStatus(400, resp);
+            assertTrue(getContent(resp).contains("invalid_request"), getContent(resp));
+            assertFalse(getContent(resp).contains(SECRET), getContent(resp));
+            assertArrayEquals(before, Files.readAllBytes(home.resolve(".env")), body);
+            assertFalse(Files.exists(home.resolve("jira.env")), body);
+            assertFalse(Files.exists(home.resolve("github.env")), body);
+        }
+        assertEquals(List.of(), eventRowsContaining(SECRET));
+    }
+
+    // --- install ---
+
+    @Test
+    void installReturns202AtOnceAndThePollShowsTheOutcome() throws Exception {
+        var release = new CountDownLatch(1);
+        installer = (c, d, t) -> {
+            await(release);
+            return new FactoryProcess.ExecResult(0, "step 1\ndone\n", false);
+        };
+        login();
+        var job = startInstall();
+        assertEquals("running", job.get("state").getAsString(), job.toString());
+        var id = job.get("id").getAsString();
+
+        var running = json(GET("/api/factory/setup/install/" + id));
+        assertEquals("running", running.get("state").getAsString(), running.toString());
+        assertTrue(json(GET("/api/factory/setup")).get("installJobId").getAsString().equals(id));
+
+        release.countDown();
+        var done = awaitDone(id);
+        assertEquals("succeeded", done.get("state").getAsString(), done.toString());
+        assertEquals(0, done.get("exitCode").getAsInt());
+        assertTrue(done.get("output").getAsString().contains("step 1"), done.toString());
+        assertTrue(done.get("elapsedMillis").getAsLong() >= 0, done.toString());
+        assertEquals(List.of(FactoryHome.installer().toString()), calls.stream()
+                .filter(c -> c.getFirst().endsWith("install-agent.sh")).findFirst().orElseThrow());
+    }
+
+    @Test
+    void aNonZeroExitOrAThrowingRunnerIsFailed() throws Exception {
+        login();
+        installer = (c, d, t) -> new FactoryProcess.ExecResult(2, "boom\n", false);
+        var failed = awaitDone(startInstall().get("id").getAsString());
+        assertEquals("failed", failed.get("state").getAsString(), failed.toString());
+        assertEquals(2, failed.get("exitCode").getAsInt());
+
+        installer = (c, d, t) -> {
+            throw new IllegalStateException("runner exploded");
+        };
+        var threw = awaitDone(startInstall().get("id").getAsString());
+        assertEquals("failed", threw.get("state").getAsString(), threw.toString());
+        assertTrue(threw.get("exitCode").isJsonNull(), threw.toString());
+    }
+
+    @Test
+    void aSecondInstallOrAHarnessCommandWhileOneRunsIs409() throws Exception {
+        Files.writeString(home.resolve(".env"), "x");
+        Files.writeString(home.resolve("jira.env"), "x");
+        var release = new CountDownLatch(1);
+        installer = (c, d, t) -> {
+            await(release);
+            return new FactoryProcess.ExecResult(0, "", false);
+        };
+        login();
+        var id = startInstall().get("id").getAsString();
+        try {
+            var second = POST("/api/factory/setup/install", "application/json", "{}");
+            assertStatus(409, second);
+            assertTrue(getContent(second).contains("conflict"), getContent(second));
+            if (Files.isRegularFile(FactoryHome.installer())) {
+                assertStatus(409, POST("/api/factory/harness/start", "application/json", "{}"));
+                assertStatus(409, POST("/api/factory/harness/stop", "application/json", "{}"));
+            }
+        } finally {
+            release.countDown();
+        }
+        awaitDone(id);
+        installer = (c, d, t) -> new FactoryProcess.ExecResult(0, "", false);
+        startInstall();
+    }
+
+    @Test
+    void anUnknownJobIs404() {
+        login();
+        assertStatus(404, GET("/api/factory/setup/install/no-such-job"));
+    }
+
+    // --- auth ---
+
+    @Test
+    void anUnauthenticatedRequestIs401() {
+        assertStatus(401, GET("/api/factory/setup"));
+        assertStatus(401, POST("/api/factory/setup/credentials", "application/json", "{\"githubToken\":\"g\"}"));
+        assertStatus(401, POST("/api/factory/setup/install", "application/json", "{}"));
+        assertStatus(401, GET("/api/factory/setup/install/x"));
+        assertFalse(Files.exists(home.resolve("github.env")));
+    }
+
+    @Test
+    void theAgentPrincipalIsRefusedOnEveryRoute() {
+        for (var url : List.of("/api/factory/setup/credentials", "/api/factory/setup/install")) {
+            var resp = asAgent(() -> POST(agentRequest(), url, "application/json", "{\"githubToken\":\"g\"}"));
+            assertStatus(403, resp);
+            assertTrue(getContent(resp).contains("operator_only"), url + ": " + getContent(resp));
+        }
+        for (var url : List.of("/api/factory/setup", "/api/factory/setup/install/x")) {
+            assertStatus(403, asAgent(() -> GET(agentRequest(), url)));
+        }
+        assertFalse(Files.exists(home.resolve("github.env")));
+        synchronized (calls) {
+            assertTrue(calls.isEmpty(), calls::toString);
+        }
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            if (!latch.await(20, TimeUnit.SECONDS)) throw new IllegalStateException("latch never released");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private Http.Response asAgent(Supplier<Http.Response> call) {
+        try {
+            return call.get();
+        } finally {
+            clearCookies();
+        }
+    }
+
+    private static Http.Request agentRequest() {
+        var request = newRequest();
+        var token = AuthFixture.seedBearerToken();
+        request.headers.put("authorization", new Http.Header("authorization", "Bearer " + token));
+        return request;
+    }
+}

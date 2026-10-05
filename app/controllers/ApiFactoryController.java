@@ -8,6 +8,7 @@ import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
 import services.factory.FactoryHome;
+import services.factory.FactoryInstallJob;
 import services.factory.FactoryProcess;
 import services.factory.FactoryStatus;
 import utils.ApiResponses;
@@ -40,8 +41,7 @@ public class ApiFactoryController extends Controller {
     private static final Pattern SANDBOX_NAME = Pattern.compile(
             "^sandcastle-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", Pattern.CASE_INSENSITIVE);
 
-    // install-agent.sh may build the sandbox image the first time.
-    private static final Duration INSTALL_TIMEOUT = Duration.ofMinutes(15);
+    private static final Duration INSTALL_TIMEOUT = FactoryInstallJob.INSTALL_TIMEOUT;
     private static final Duration REMOVE_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration DOCKER_ACTION_TIMEOUT = Duration.ofSeconds(60);
     private static final Duration DOCKER_QUERY_TIMEOUT = Duration.ofSeconds(15);

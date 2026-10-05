@@ -649,6 +649,14 @@ The model override is never written into `subagent.acp.command`: each harness ta
 
 The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](/agents) page; the main agent always may), and each run is bounded by `subagent.maxWallClockSeconds` (default 1800). See [External coding harness](/guide#subagents-acp-harness) for the full setup.
 
+## Software Factory
+
+The optional AFK factory builds Jira stories labelled `afk` unattended in sandboxes on this Mac and returns each as a local `agent/<KEY>` branch. **Setup** stays open until the factory is installed, every prerequisite passes and the model and Jira credentials are set; after that it sits behind a **Setup** button.
+
+- **Prerequisites** — macOS, Docker Desktop running, Node 24 or newer, and this JClaw checkout. Each shows ok, missing (with the fix) or unknown when its check could not run.
+- **Credentials** — a Claude OAuth token or an Anthropic API key (saving one removes the other, because Claude Code prefers the API key when both are set), the Jira URL and personal token, and an optional GitHub token. They are written owner-only to `.env`, `jira.env` and `github.env` in the factory home. A saved value is never shown again; enter a new one to replace it.
+- **Run installer** — runs the factory's installer and streams its output, for up to 15 minutes. It cannot start while another install or a harness start/stop is running. The factory counts as installed once its LaunchAgent (`~/Library/LaunchAgents/com.jclaw.factory.plist`) exists.
+
 ## Web Scraping
 
 Every setting the `web_scrape` tool reads, in four groups, except the proxy, which is set in [Proxy Providers](#settings-proxy-providers). Changes apply live; no restart needed.
