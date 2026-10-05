@@ -1,11 +1,17 @@
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.jspecify.annotations.Nullable;
 import play.test.UnitTest;
 import services.factory.FactoryProcess;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /** {@link FactoryProcess}'s real process path, with no runner installed (JCLAW-1392). */
 class FactoryProcessTest extends UnitTest {
@@ -72,5 +78,29 @@ class FactoryProcessTest extends UnitTest {
         var res = FactoryProcess.run(List.of("/nonexistent/jclaw-factory-no-such-binary"), Duration.ofSeconds(5));
         assertEquals(-1, res.exitCode(), res::toString);
         assertFalse(res.timedOut());
+    }
+
+    @Test
+    void aHarnessCommandWhileAnotherRunsIsRefused(@TempDir Path dir) throws Exception {
+        var started = dir.resolve("started");
+        var go = dir.resolve("go");
+        var script = "touch '" + started + "'; while [ ! -f '" + go + "' ]; do sleep 0.05; done; echo done";
+        var first = new CompletableFuture<FactoryProcess.@Nullable ExecResult>();
+        var starter = Thread.ofPlatform().start(() ->
+                first.complete(FactoryProcess.runHarnessCommand(List.of("sh", "-c", script), Duration.ofSeconds(30))));
+        try {
+            long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+            while (!Files.exists(started) && System.nanoTime() < deadline) Thread.sleep(20);
+            assertTrue(Files.exists(started), "the first command never started");
+            assertNull(FactoryProcess.runHarnessCommand(List.of("true"), Duration.ofSeconds(5)),
+                    "a second harness command ran beside the first");
+        } finally {
+            Files.writeString(go, "");
+            starter.join(30_000);
+        }
+        var res = first.get(5, TimeUnit.SECONDS);
+        assertNotNull(res, "the first command was refused");
+        assertTrue(res.ok(), res::toString);
+        assertNotNull(FactoryProcess.runHarnessCommand(List.of("true"), Duration.ofSeconds(5)), "the lock was not released");
     }
 }

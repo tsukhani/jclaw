@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * The one process spawner behind the Software Factory controls (JCLAW-1392): an argument list,
@@ -23,6 +24,7 @@ public final class FactoryProcess {
     static final int TAIL_LINES = 40;
     static final int TAIL_CHARS = 4000;
     private static final long DRAIN_JOIN_MILLIS = 2000;
+    private static final ReentrantLock HARNESS = new ReentrantLock();
 
     /** Runs a command and returns its result. Injectable for tests. */
     @FunctionalInterface
@@ -52,6 +54,19 @@ public final class FactoryProcess {
     public static volatile @Nullable Runner runnerForTest;
 
     private FactoryProcess() {}
+
+    /**
+     * Run a harness command, or return null while another is still running: two would race
+     * launchd's bootout and bootstrap of the harness agent.
+     */
+    public static @Nullable ExecResult runHarnessCommand(List<String> command, Duration timeout) {
+        if (!HARNESS.tryLock()) return null;
+        try {
+            return run(command, timeout);
+        } finally {
+            HARNESS.unlock();
+        }
+    }
 
     /** Run {@code command} with the checkout ({@code Play.applicationPath}) as its working directory. */
     public static ExecResult run(List<String> command, Duration timeout) {

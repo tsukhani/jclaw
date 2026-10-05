@@ -1,6 +1,5 @@
 package services.factory;
 
-import com.google.gson.JsonParser;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 
@@ -42,6 +41,9 @@ public final class FactoryHome {
     private static final Pattern DIGITS = Pattern.compile("[0-9]+");
     // A newline would smuggle a second line into settings.env.
     private static final Pattern WHITESPACE = Pattern.compile("\\s");
+    // Sandcastle names a worktree after its branch, "/" as "-": agent/<KEY> builds, factory/land-<KEY> re-gates.
+    private static final Pattern STORY_WORKTREE =
+            Pattern.compile("/\\.sandcastle/worktrees/(?:agent|factory-land)-([A-Z][A-Z0-9]*-[0-9]+)$");
 
     /** Test seam: when non-null, {@link #home()} returns it. */
     public static volatile @Nullable Path homeForTest;
@@ -63,10 +65,6 @@ public final class FactoryHome {
 
     public static Path settingsFile() {
         return home().resolve("settings.env");
-    }
-
-    public static Path boardFile() {
-        return home().resolve("board.json");
     }
 
     /** The three files {@code install-agent.sh} requires: itself, {@code <home>/.env} and {@code <home>/jira.env}. */
@@ -166,26 +164,15 @@ public final class FactoryHome {
     }
 
     /**
-     * The story whose sandbox {@code name} is, or null when the board is missing, unparseable or
-     * has no entry for it. Expected shape (unknown fields ignored):
-     * {@code {"stories":[{"key":"JCLAW-7","sandbox":"sandcastle-<uuid>"}]}}.
+     * The story whose worktree a sandbox mounts, read from {@code docker inspect}'s mount sources
+     * (one per line), or null when none is a story's: the factory's planning sandbox, say.
      */
-    public static @Nullable String storyForSandbox(Path boardFile, String name) {
-        try {
-            if (!Files.isRegularFile(boardFile)) return null;
-            var root = JsonParser.parseString(Files.readString(boardFile, StandardCharsets.UTF_8)).getAsJsonObject();
-            for (var el : root.getAsJsonArray("stories")) {
-                var story = el.getAsJsonObject();
-                var sandbox = story.get("sandbox");
-                var key = story.get("key");
-                if (sandbox != null && sandbox.isJsonPrimitive() && name.equals(sandbox.getAsString())
-                        && key != null && key.isJsonPrimitive()) {
-                    return key.getAsString();
-                }
-            }
-            return null;
-        } catch (Exception _) {
-            return null;
+    public static @Nullable String storyFromMounts(String mountSources) {
+        for (var line : mountSources.lines().map(String::trim).toList()) {
+            var m = STORY_WORKTREE.matcher(line);
+            if (m.find()) return m.group(1);
         }
+        return null;
     }
+
 }

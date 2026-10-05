@@ -9,10 +9,8 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.OptionalInt;
 
-/** {@link FactoryHome}'s settings grammar, validation, atomic rewrite and board lookup (JCLAW-1392). */
+/** {@link FactoryHome}'s settings grammar, validation, atomic rewrite and sandbox-to-story lookup (JCLAW-1392). */
 class FactorySettingsTest extends UnitTest {
-
-    private static final String SANDBOX = "sandcastle-0b6f1c3e-1d2a-4f5b-9c8d-7e6f5a4b3c2d";
 
     @TempDir
     Path dir;
@@ -110,24 +108,6 @@ class FactorySettingsTest extends UnitTest {
     }
 
     @Test
-    void storyForSandboxReadsTheBoard() throws Exception {
-        var board = dir.resolve("board.json");
-        assertNull(FactoryHome.storyForSandbox(board, SANDBOX));
-
-        Files.writeString(board, """
-                {"stories":[{"key":"JCLAW-6","sandbox":"sandcastle-other"},
-                            {"key":"JCLAW-7","sandbox":"%s","phase":"gate"}]}
-                """.formatted(SANDBOX));
-        assertEquals("JCLAW-7", FactoryHome.storyForSandbox(board, SANDBOX));
-        assertNull(FactoryHome.storyForSandbox(board, "sandcastle-00000000-0000-0000-0000-000000000000"));
-
-        Files.writeString(board, "{not json");
-        assertNull(FactoryHome.storyForSandbox(board, SANDBOX));
-        Files.writeString(board, "[1,2]");
-        assertNull(FactoryHome.storyForSandbox(board, SANDBOX));
-    }
-
-    @Test
     void tailKeepsTheLastFortyLinesWithinFourThousandCharacters() {
         var sb = new StringBuilder();
         for (int i = 1; i <= 100; i++) sb.append("line ").append(i).append('\n');
@@ -138,5 +118,16 @@ class FactorySettingsTest extends UnitTest {
 
         var longTail = new FactoryProcess.ExecResult(0, "x".repeat(10_000), false).tail();
         assertEquals(4000, longTail.length());
+    }
+
+    @Test
+    void theStoryIsReadFromTheWorktreeTheSandboxMounts() {
+        var wt = "/Users/op/.jclaw-factory/jclaw/.sandcastle/worktrees/";
+        assertEquals("JCLAW-1392", FactoryHome.storyFromMounts(wt + "agent-JCLAW-1392\n/Users/op/.jclaw-factory/jclaw/.git\n"));
+        assertEquals("GH-12", FactoryHome.storyFromMounts("/host_mnt" + wt + "factory-land-GH-12\n"));
+        assertNull(FactoryHome.storyFromMounts(wt + "factory-plan\n"), "the planning sandbox holds no story");
+        assertNull(FactoryHome.storyFromMounts(wt + "agent-JCLAW-1392/sub\n"), "only the worktree root counts");
+        assertNull(FactoryHome.storyFromMounts("/elsewhere/agent-JCLAW-1392\n"));
+        assertNull(FactoryHome.storyFromMounts(""));
     }
 }

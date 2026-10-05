@@ -182,41 +182,47 @@ class ApiFactoryControllerTest extends FunctionalTest {
 
     // --- sandboxes ---
 
+    private static FactoryProcess.ExecResult mounts(String worktree) {
+        var clone = "/Users/op/.jclaw-factory/jclaw";
+        return new FactoryProcess.ExecResult(0,
+                clone + "/.sandcastle/worktrees/" + worktree + "\n" + clone + "/.git\n", false);
+    }
+
     @Test
-    void sandboxStopNamesTheStoryFromTheBoard() throws Exception {
+    void sandboxStopNamesTheStoryWhoseWorktreeItMounts() {
         var name = sandboxName();
-        Files.writeString(home.resolve("board.json"),
-                "{\"stories\":[{\"key\":\"JCLAW-7\",\"sandbox\":\"" + name + "\"}]}");
         runner.replies.put("docker ps", new FactoryProcess.ExecResult(0, "  " + name + "\n", false));
+        runner.replies.put("docker inspect", mounts("agent-JCLAW-7"));
         login();
         var resp = POST("/api/factory/sandboxes/" + name + "/stop", "application/json", "{}");
         assertIsOk(resp);
         var body = getContent(resp);
         assertTrue(body.contains("\"story\":\"JCLAW-7\""), body);
         assertTrue(body.contains("Story JCLAW-7 will fail."), body);
+        assertTrue(String.join(" ", runner.calls.get(1)).startsWith("docker inspect"), runner.calls::toString);
         assertEquals(List.of("docker", "stop", name), runner.calls.getLast());
         assertEquals(1, factoryRows("INFO", name));
     }
 
     @Test
-    void sandboxStopWithNoBoardEntryStillStops() {
+    void aSandboxHoldingNoStoryStillStops() {
         var name = sandboxName();
         runner.replies.put("docker ps", new FactoryProcess.ExecResult(0, name + "\n", false));
+        runner.replies.put("docker inspect", mounts("factory-plan"));
         login();
         var resp = POST("/api/factory/sandboxes/" + name + "/stop", "application/json", "{}");
         assertIsOk(resp);
         var body = getContent(resp);
         assertTrue(body.contains("\"story\":null"), body);
-        assertTrue(body.contains("No story on the board ran in this sandbox."), body);
+        assertTrue(body.contains("No story ran in this sandbox."), body);
         assertTrue(runner.ranPrefix("docker stop " + name));
     }
 
     @Test
-    void aFailedSandboxStopSaysSoAndStillNamesTheStory() throws Exception {
+    void aFailedSandboxStopSaysSoAndStillNamesTheStory() {
         var name = sandboxName();
-        Files.writeString(home.resolve("board.json"),
-                "{\"stories\":[{\"key\":\"JCLAW-7\",\"sandbox\":\"" + name + "\"}]}");
         runner.replies.put("docker ps", new FactoryProcess.ExecResult(0, name + "\n", false));
+        runner.replies.put("docker inspect", mounts("factory-land-GH-12"));
         runner.replies.put("docker stop", new FactoryProcess.ExecResult(1, "daemon error\n", false));
         login();
         var resp = POST("/api/factory/sandboxes/" + name + "/stop", "application/json", "{}");
@@ -224,7 +230,7 @@ class ApiFactoryControllerTest extends FunctionalTest {
         var body = getContent(resp);
         assertTrue(body.contains("The command failed with exit code 1."), body);
         assertFalse(body.contains("will fail"), body);
-        assertTrue(body.contains("\"story\":\"JCLAW-7\""), body);
+        assertTrue(body.contains("\"story\":\"GH-12\""), body);
     }
 
     @Test

@@ -52,7 +52,7 @@ public class ApiFactoryController extends Controller {
      */
     public record CommandResult(int exitCode, boolean timedOut, String output, String message) {}
 
-    /** {@link CommandResult} plus the story whose sandbox was stopped, or null when the board names none. */
+    /** {@link CommandResult} plus the story whose sandbox was stopped, or null when it held none. */
     public record SandboxStopResult(int exitCode, boolean timedOut, String output, String message,
                                     @Nullable String story) {}
 
@@ -67,7 +67,7 @@ public class ApiFactoryController extends Controller {
     public static void harnessStart() {
         requireInstalled("start the harness");
         var installer = FactoryHome.installer().toString();
-        renderCommand("harness start", FactoryProcess.run(List.of(installer), INSTALL_TIMEOUT), "");
+        renderCommand("harness start", exclusive("start the harness", List.of(installer), INSTALL_TIMEOUT), "");
     }
 
     /** POST /api/factory/harness/stop — run {@code .sandcastle/install-agent.sh --remove}. */
@@ -76,7 +76,7 @@ public class ApiFactoryController extends Controller {
         requireInstalled("stop the harness");
         var installer = FactoryHome.installer().toString();
         renderCommand("harness stop",
-                FactoryProcess.run(List.of(installer, "--remove"), REMOVE_TIMEOUT), "");
+                exclusive("stop the harness", List.of(installer, "--remove"), REMOVE_TIMEOUT), "");
     }
 
     /** POST /api/factory/gateway/pause — {@code docker stop jclaw-factory-gateway}. */
@@ -102,10 +102,10 @@ public class ApiFactoryController extends Controller {
         if (!isRunning(name)) {
             throw refuse(404, ApiResponses.NOT_FOUND, "stop sandbox " + name, "Docker lists no such running container");
         }
-        var story = FactoryHome.storyForSandbox(FactoryHome.boardFile(), name);
+        var story = storyIn(name);
         var res = FactoryProcess.run(List.of("docker", "stop", name), DOCKER_ACTION_TIMEOUT);
         var message = !res.ok() ? failureMessage(res)
-                : story != null ? "Story " + story + " will fail." : "No story on the board ran in this sandbox.";
+                : story != null ? "Story " + story + " will fail." : "No story ran in this sandbox.";
         log("sandbox stop " + name + (story != null ? " (story " + story + ")" : ""), res);
         renderJSON(GSON.toJson(new SandboxStopResult(res.exitCode(), res.timedOut(), res.tail(), message, story)));
     }
@@ -167,12 +167,25 @@ public class ApiFactoryController extends Controller {
         return out;
     }
 
+    private static FactoryProcess.ExecResult exclusive(String action, List<String> command, Duration timeout) {
+        var res = FactoryProcess.runHarnessCommand(command, timeout);
+        if (res == null) throw refuse(409, ApiResponses.CONFLICT, action, "another harness command is still running");
+        return res;
+    }
+
     private static void requireInstalled(String action) {
         if (!FactoryHome.installed()) {
             throw refuse(409, ApiResponses.CONFLICT, action,
                     "the factory is not installed (it needs .sandcastle/install-agent.sh, "
                             + "<factory home>/.env and <factory home>/jira.env)");
         }
+    }
+
+    private static @Nullable String storyIn(String name) {
+        var res = FactoryProcess.run(
+                List.of("docker", "inspect", "--format", "{{range .Mounts}}{{println .Source}}{{end}}", name),
+                DOCKER_QUERY_TIMEOUT);
+        return res.ok() ? FactoryHome.storyFromMounts(res.output()) : null;
     }
 
     private static boolean isRunning(String name) {
