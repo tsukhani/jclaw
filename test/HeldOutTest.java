@@ -176,7 +176,8 @@ class HeldOutTest extends UnitTest {
                 "test-provider", "test-model").id);
         var foreign = Tx.run(() -> MemoryStoreFactory.get().storeDeferred(other, "The user keeps a ledger.", "fact", 0.5));
         memoryIds.add(foreign);
-        var e = assertThrows(IllegalArgumentException.class, () -> HeldOut.agentName(loaded.apply(memoryIds)));
+        var mixed = loaded.apply(memoryIds);
+        var e = assertThrows(IllegalArgumentException.class, () -> HeldOut.agentName(mixed));
         assertTrue(e.getMessage().contains("more than one agent"), e.getMessage());
     }
 }
