@@ -258,6 +258,46 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
     }
 
     @Test
+    void aTimedOutOrUnstartableInstallIsFailedWithItsReason() throws Exception {
+        login();
+        installer = (c, d, t) -> new FactoryProcess.ExecResult(-1, "", true);
+        var timedOut = awaitDone(startInstall().get("id").getAsString());
+        assertEquals("failed", timedOut.get("state").getAsString(), timedOut.toString());
+        assertTrue(timedOut.get("timedOut").getAsBoolean(), timedOut.toString());
+
+        // As execProcess on a spawn failure: the message is in the result and never reaches the sink.
+        FactoryProcess.setRunnerForTest(new FactoryProcess.Runner() {
+            @Override
+            public FactoryProcess.ExecResult run(List<String> command, File workDir, Duration timeout) {
+                return new FactoryProcess.ExecResult(-1, "Cannot run program", false);
+            }
+
+            @Override
+            public FactoryProcess.ExecResult run(List<String> command, File workDir, Duration timeout,
+                                                 FactoryProcess.OutputSink sink) {
+                return run(command, workDir, timeout);
+            }
+        });
+        var unstartable = awaitDone(startInstall().get("id").getAsString());
+        assertEquals("failed", unstartable.get("state").getAsString(), unstartable.toString());
+        assertFalse(unstartable.get("timedOut").getAsBoolean(), unstartable.toString());
+        assertTrue(unstartable.get("output").getAsString().contains("Cannot run program"), unstartable.toString());
+    }
+
+    @Test
+    void outputOverTheCapKeepsTheTailAndIsTruncated() throws Exception {
+        var big = "x".repeat(600 * 1024) + "THE-END\n";
+        FactoryProcess.setRunnerForTest((c, d, t) -> new FactoryProcess.ExecResult(0, big, false));
+        login();
+        var done = awaitDone(startInstall().get("id").getAsString());
+        assertEquals("succeeded", done.get("state").getAsString());
+        assertTrue(done.get("truncated").getAsBoolean());
+        var output = done.get("output").getAsString();
+        assertEquals(512 * 1024, output.length());
+        assertTrue(output.endsWith("THE-END\n"));
+    }
+
+    @Test
     void aSecondInstallOrAHarnessCommandWhileOneRunsIs409() throws Exception {
         Files.writeString(home.resolve(".env"), "x");
         Files.writeString(home.resolve("jira.env"), "x");

@@ -91,6 +91,11 @@ public final class FactoryInstallJob {
         try {
             var res = FactoryProcess.runStreaming(List.of(FactoryHome.installer().toString()), INSTALL_TIMEOUT,
                     job::append);
+            // A spawn failure never reaches the sink; its message is the result's whole output.
+            if (job.isEmpty() && !res.output().isEmpty()) {
+                var bytes = res.output().getBytes(StandardCharsets.UTF_8);
+                job.append(bytes, 0, bytes.length);
+            }
             state = res.ok() ? SUCCEEDED : FAILED;
             exitCode = res.exitCode();
             timedOut = res.timedOut();
@@ -145,6 +150,10 @@ public final class FactoryInstallJob {
             if (len + n > buf.length) buf = Arrays.copyOf(buf, Math.min(OUTPUT_CAP, Math.max(len + n, buf.length * 2)));
             System.arraycopy(b, off, buf, len, n);
             len += n;
+        }
+
+        synchronized boolean isEmpty() {
+            return len == 0;
         }
 
         synchronized void finish(String state, @Nullable Integer exitCode, boolean timedOut) {

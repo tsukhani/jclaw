@@ -83,11 +83,15 @@ public final class FactorySetup {
                 : new Prerequisite("macos", "macOS", MISSING, "The factory runs only on macOS."));
         out.add(docker());
         out.add(node());
-        out.add(Files.isRegularFile(FactoryHome.installer())
+        out.add(checkout(FactoryHome.installer()));
+        return out;
+    }
+
+    public static Prerequisite checkout(Path installer) {
+        return Files.isRegularFile(installer)
                 ? ok("checkout", "JClaw checkout")
                 : new Prerequisite("checkout", "JClaw checkout", MISSING,
-                        "Run JClaw from a checkout that has .sandcastle/install-agent.sh."));
-        return out;
+                        "Run JClaw from a checkout that has .sandcastle/install-agent.sh.");
     }
 
     private static Prerequisite docker() {

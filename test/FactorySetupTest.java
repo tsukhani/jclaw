@@ -149,6 +149,11 @@ class FactorySetupTest extends UnitTest {
     }
 
     @Test
+    void anAbsentInstallerIsAMissingCheckout() {
+        assertState(FactorySetup.MISSING, FactorySetup.checkout(home.resolve("install-agent.sh")));
+    }
+
+    @Test
     void nodeBoundary() {
         for (var c : List.of(List.of("v24.0.0", FactorySetup.OK), List.of("v25.1.0", FactorySetup.OK),
                 List.of("v23.9.9", FactorySetup.MISSING))) {
