@@ -320,7 +320,10 @@ Jira user.
   The agent's commits are unsigned, because the sandbox holds no key, and GitHub's `main` refuses unsigned commits. So
   re-sign them as you merge: `git rebase --force-rebase --gpg-sign main agent/<KEY>`, then
   `git merge --no-ff agent/<KEY>`. Mark the story Done only once it is merged, because Done is what lets the stories it
-  blocks start. Or label it `afk-merge` and the factory does all of this (see [Auto-merge](#auto-merge)).
+  blocks start. Then delete the branch in both places, since the factory's clone keeps its own copy:
+  `git branch -d agent/<KEY>` and `git -C ~/.jclaw-factory/jclaw branch -D agent/<KEY>` (the re-sign gave the merged
+  commits new hashes, so the clone's copy needs `-D`). Or label it `afk-merge` and the factory does all of this (see
+  [Auto-merge](#auto-merge)).
 - **Reject:** move the story back to To Do with a comment saying what to change. The next round reworks it on the same
   branch. The general rule behind your comment goes into `~/.jclaw-factory/lessons.md`, which every prompt includes.
   Promote a lesson into `AGENTS.md`, or delete it there.
