@@ -692,6 +692,64 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         }
     }
 
+    @Test
+    void aCancelThatLandsAfterTheFinalCheckMarksTheRequestThroughOnComplete() throws Exception {
+        var arrived = new CountDownLatch[]{new CountDownLatch(1)};
+        var release = new CountDownLatch[]{new CountDownLatch(1)};
+        startHeldServer(arrived, release, "late reply");
+        var provider = "jclaw1388-late-" + UUID.randomUUID();
+        configureProvider(provider);
+        var agent = persistAgent("jclaw1388-late-" + UUID.randomUUID(), provider, "test-model");
+        var convo = persistConversation(agent, "web", "u-1388-late");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var cancelled = new AtomicBoolean(false);
+        var turnThread = new AtomicReference<Thread>();
+        var h = new Harness();
+        var cb = new AgentRunner.StreamingCallbacks(
+                c -> { turnThread.set(Thread.currentThread()); h.initConvo.set(c); },
+                h.tokens::add, h.reasoning::add, _ -> {}, _ -> {},
+                content -> { h.completed.set(content); h.terminated.countDown(); },
+                error -> { h.error.set(error); h.terminated.countDown(); },
+                () -> { h.cancelled.set(true); h.terminated.countDown(); });
+        var held = new CountDownLatch(1);
+        var flipped = new java.util.concurrent.CompletableFuture<Boolean>();
+        try {
+            AgentRunner.runStreaming(agent, convo.id, "web", convo.peerId, "long task", cancelled, cb, null);
+            assertTrue(arrived[0].await(30, TimeUnit.SECONDS));
+            long gen = services.ConversationQueue.currentGeneration(convo.id);
+
+            // Hold the queue lock so the turn passes its last cancel check and parks on the reply's
+            // commit; flip its flag only once it is parked there.
+            Thread.ofPlatform().start(() -> flipped.complete(
+                    services.ConversationQueue.commitIfOwner(convo.id, gen, null, () -> {
+                        held.countDown();
+                        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
+                        while (turnThread.get().getState() != Thread.State.BLOCKED && System.nanoTime() < deadline) {
+                            Thread.onSpinWait();
+                        }
+                        cancelled.set(turnThread.get().getState() == Thread.State.BLOCKED);
+                    })));
+            assertTrue(held.await(30, TimeUnit.SECONDS));
+            release[0].countDown();
+            assertTrue(flipped.get(30, TimeUnit.SECONDS));
+            assertTrue(cancelled.get(), "the turn parked on the commit and the flag flipped there");
+
+            assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
+            assertFalse(h.cancelled.get(), "the turn ended through onComplete, not onCancel");
+            assertEquals("late reply", h.completed.get());
+            awaitIdle(convo.id);
+
+            assertEquals(List.of("user:long task", "marker:" + ConversationService.STOP_MARKER_CONTENT),
+                    transcript(convo.id), "one marker, and the refused reply is not saved");
+        } finally {
+            release[0].countDown();
+            services.ConversationQueue.releaseOwnership(convo.id);
+            CircuitBreakers.remove(LlmResilience.breakerName(provider));
+        }
+    }
+
     private static ToolRegistry.Tool holdTool(CountDownLatch entered, CountDownLatch release) {
         return new ToolRegistry.Tool() {
             @Override public String name() { return HOLD_TOOL; }

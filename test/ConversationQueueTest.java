@@ -1083,4 +1083,30 @@ class ConversationQueueTest extends UnitTest {
         assertEquals(1, markers(conv.id));
         ConversationQueue.releaseOwnership(conv.id, gen);
     }
+
+    @Test
+    void aMarkerWriteThatThrowsStillReleasesAndStopStillReportsTrue() {
+        var conv = conversationWithRequest("marker-throws");
+        var em = play.db.jpa.JPA.em();
+        em.getTransaction().commit();
+        var gen = ConversationQueue.tryAcquireOwnership(conv.id, new QueuedMessage("A", "web", "admin", agent),
+                new AtomicBoolean());
+        boolean stopped;
+        try {
+            // The thread's JPA context stays bound with no transaction open, so Tx.run joins it,
+            // the read succeeds and the marker's flush fails with TransactionRequiredException.
+            stopped = ConversationQueue.stop(conv.id);
+        } finally {
+            em.getTransaction().begin();
+        }
+
+        assertTrue(stopped, "a failed marker write does not undo the stop");
+        assertFalse(ConversationQueue.isBusy(conv.id), "ownership was released");
+        assertNotEquals(gen, ConversationQueue.currentGeneration(conv.id));
+        services.EventLogger.flush();
+        em.clear();
+        assertEquals(0, markers(conv.id), "no marker reached the database");
+        assertEquals(1L, models.EventLog.count("category = ?1 AND message LIKE ?2", "queue",
+                "Stop marker not written for conversation " + conv.id + ":%"), "the failure is logged");
+    }
 }
