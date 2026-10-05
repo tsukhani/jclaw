@@ -1,0 +1,112 @@
+package services.factory;
+
+import org.jspecify.annotations.Nullable;
+import play.Play;
+
+import java.io.Closeable;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.TimeUnit;
+
+/**
+ * The one process spawner behind the Software Factory controls (JCLAW-1392): an argument list,
+ * never a shell string, run in the checkout under a timeout.
+ */
+public final class FactoryProcess {
+
+    static final int TAIL_LINES = 40;
+    static final int TAIL_CHARS = 4000;
+    private static final long DRAIN_JOIN_MILLIS = 2000;
+
+    /** Runs a command and returns its result. Injectable for tests. */
+    @FunctionalInterface
+    public interface Runner {
+        ExecResult run(List<String> command, File workDir, Duration timeout);
+    }
+
+    /**
+     * @param exitCode the process's exit code; {@code -1} on a timeout or when it could not start
+     * @param output   stdout and stderr together
+     */
+    public record ExecResult(int exitCode, String output, boolean timedOut) {
+        public boolean ok() {
+            return exitCode == 0 && !timedOut;
+        }
+
+        /** The last {@value #TAIL_LINES} lines of {@link #output}, at most {@value #TAIL_CHARS} characters. */
+        public String tail() {
+            var lines = output.stripTrailing().split("\n", -1);
+            var from = Math.max(0, lines.length - TAIL_LINES);
+            var joined = String.join("\n", Arrays.asList(lines).subList(from, lines.length));
+            return joined.length() > TAIL_CHARS ? joined.substring(joined.length() - TAIL_CHARS) : joined;
+        }
+    }
+
+    /** Test seam: when non-null, every {@link #run} goes here instead of spawning. */
+    public static volatile @Nullable Runner runnerForTest;
+
+    private FactoryProcess() {}
+
+    /** Run {@code command} with the checkout ({@code Play.applicationPath}) as its working directory. */
+    public static ExecResult run(List<String> command, Duration timeout) {
+        var runner = runnerForTest;
+        var dir = Play.applicationPath;
+        return runner != null ? runner.run(command, dir, timeout) : execProcess(command, dir, timeout);
+    }
+
+    private static ExecResult execProcess(List<String> command, File workDir, Duration timeout) {
+        Process proc;
+        try {
+            proc = new ProcessBuilder(command).directory(workDir).redirectErrorStream(true).start();
+        } catch (IOException e) {
+            return new ExecResult(-1, e.getMessage() != null ? e.getMessage() : "exec failed", false);
+        }
+        // StringBuffer: the drainer appends while the timeout path may read.
+        var out = new StringBuffer();
+        var drainer = Thread.ofVirtual().start(() -> drain(proc.getInputStream(), out));
+        boolean finished;
+        try {
+            finished = proc.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+            finished = false;
+        }
+        if (!finished) {
+            proc.destroyForcibly();
+            closeQuietly(proc.getInputStream());
+            joinQuietly(drainer);
+            return new ExecResult(-1, out.toString(), true);
+        }
+        joinQuietly(drainer);
+        return new ExecResult(proc.exitValue(), out.toString(), false);
+    }
+
+    private static void drain(InputStream in, StringBuffer sink) {
+        try (in) {
+            sink.append(new String(in.readAllBytes(), StandardCharsets.UTF_8));
+        } catch (IOException _) {
+            // partial output is enough for the response tail
+        }
+    }
+
+    private static void closeQuietly(Closeable c) {
+        try {
+            c.close();
+        } catch (IOException _) {
+            // best effort
+        }
+    }
+
+    private static void joinQuietly(Thread t) {
+        try {
+            t.join(DRAIN_JOIN_MILLIS);
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        }
+    }
+}

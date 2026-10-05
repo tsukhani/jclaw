@@ -303,6 +303,15 @@ PUT     /api/channels/{channelType}             ApiChannelsController.save
 GET     /api/tailscale                          ApiTailscaleController.status
 POST    /api/tailscale                          ApiTailscaleController.toggle
 
+# Software Factory controls (JCLAW-1392): the AFK harness, its gateway, one sandbox, settings.env
+POST    /api/factory/harness/start              ApiFactoryController.harnessStart
+POST    /api/factory/harness/stop               ApiFactoryController.harnessStop
+POST    /api/factory/gateway/pause              ApiFactoryController.gatewayPause
+POST    /api/factory/gateway/resume             ApiFactoryController.gatewayResume
+POST    /api/factory/sandboxes/{name}/stop      ApiFactoryController.sandboxStop
+GET     /api/factory/settings                   ApiFactoryController.settings
+PUT     /api/factory/settings                   ApiFactoryController.updateSettings
+
 # Instance maintenance. GET is the preflight (what a restart interrupts);
 # POST hands off to jclaw.sh and acks 202 — the JVM it reboots is this one.
 GET     /api/system/restart                     ApiSystemController.restartPreflight
