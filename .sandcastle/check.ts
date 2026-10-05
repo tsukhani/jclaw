@@ -9,7 +9,7 @@ import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { MergeRefused, landBranch, landedAs, mergeVerdict } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
-import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
+import { buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
@@ -38,6 +38,29 @@ check("a file awaiting review blocks", keys(pickNonOverlapping([s("A"), s("B")],
 check("unknown files wait while anything is in flight", keys(pickNonOverlapping([s("A")], new Map(), inFlight)), { picked: [], deferred: ["A"] });
 check("unknown files run alone when nothing is", keys(pickNonOverlapping([s("A"), s("B")], files({ B: ["b"] }), new Map())), { picked: ["A"], deferred: ["B"] });
 console.log(pickNonOverlapping([s("A")], files({ A: ["test/SsrfGuardTest.java"] }), inFlight).deferred[0].reason);
+
+// JCLAW-1402 predicted AGENTS.md, but its implement phase changed only ConfigService and a test.
+const diffs: Record<string, string[]> = { R: ["app/services/ConfigService.java", "test/ConfigServiceTest.java"], E: [] };
+const diffOf = (k: string) => diffs[k] ?? [];
+const predictedR = new Set(["AGENTS.md", "app/services/ConfigService.java"]);
+const heldBy = (k: string, run: { predicted: Set<string> | undefined; built: boolean }) => {
+  const held = heldFiles(k, run, diffOf);
+  return held && [...held];
+};
+const runningAs = (held: string[] | undefined) => new Map((held ?? []).map((f) => [f, "R (in progress)"]));
+check("a running story holds its prediction during the build phase", heldBy("R", { predicted: predictedR, built: false }), ["AGENTS.md", "app/services/ConfigService.java"]);
+check("its real diff replaces the prediction once built", heldBy("R", { predicted: predictedR, built: true }), ["app/services/ConfigService.java", "test/ConfigServiceTest.java"]);
+check("a predicted file blocks another story during the build",
+  keys(pickNonOverlapping([s("B")], files({ B: ["AGENTS.md"] }), runningAs(heldBy("R", { predicted: predictedR, built: false })))), { picked: [], deferred: ["B"] });
+check("a file only predicted no longer blocks once built",
+  keys(pickNonOverlapping([s("B")], files({ B: ["AGENTS.md"] }), runningAs(heldBy("R", { predicted: predictedR, built: true })))), { picked: ["B"], deferred: [] });
+check("a file in the real diff still blocks once built",
+  keys(pickNonOverlapping([s("B")], files({ B: ["test/ConfigServiceTest.java"] }), runningAs(heldBy("R", { predicted: predictedR, built: true })))), { picked: [], deferred: ["B"] });
+check("an unknown prediction holds everything until built", heldBy("R", { predicted: undefined, built: false }), undefined);
+check("an unknown prediction holds the real diff once built", heldBy("R", { predicted: undefined, built: true }), ["app/services/ConfigService.java", "test/ConfigServiceTest.java"]);
+check("a build that changed nothing holds no files", heldBy("E", { predicted: new Set(["a"]), built: true }), []);
+check("implement, build and rework complete the build phase; spec, gates, repairs, review and brief do not",
+  ["implement", "build", "rework", "spec", "gate-1", "repair-1", "review", "gate-review", "brief", "merge"].filter(buildsTheDiff), ["implement", "build", "rework"]);
 
 check("sensitive paths are flagged, ordinary ones are not",
   sensitivePaths([".githooks/pre-push", "app/utils/Filenames.java", "frontend/package.json", "gradle/wrapper/gradle-wrapper.properties", "AGENTS.md", "test/FooTest.java", ".sandcastle/main.ts", "docs/AGENTS.md"]),
