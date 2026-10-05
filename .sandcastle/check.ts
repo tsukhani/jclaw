@@ -8,7 +8,7 @@ import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, 
 import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { MergeRefused, landBranch, landedAs, mergeVerdict } from "./merge.ts";
-import { BACKOFF_MS, Overloads, afterFailure, overloadReason, transientApiFailure } from "./overload.ts";
+import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
 
@@ -275,6 +275,9 @@ overloads.completed("JCLAW-1");
 check("a completed phase resets the count: two overloads, a completion, then one more requeues as the first",
   overloads.failed("JCLAW-1", O0), { requeue: true, count: 1, until: later(BACKOFF_MS) });
 check("…and clears the backoff along with the count", (overloads.completed("JCLAW-1"), overloads.holding("JCLAW-1", O0)), undefined);
+check("every agent phase resets the count; no gate does, or a passing gate-1 would reset a review's overloads forever",
+  ["spec", "build", "implement", "rework", "repair-1", "review", "brief", "gate-1", "gate-2", "gate-review", "gate-merge"].map(resetsOverloads),
+  [true, true, true, true, true, true, true, false, false, false, false]);
 check("completing a story that never overloaded writes nothing", (overloads.completed("JCLAW-9"), JSON.parse(fs.readFileSync(overloadFile, "utf8"))), {});
 check("a missing state file means no overloads", new Overloads(path.join(overloadHome, "absent.json")).holding("JCLAW-1", O0), undefined);
 fs.rmSync(overloadHome, { recursive: true, force: true });

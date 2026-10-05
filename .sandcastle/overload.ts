@@ -23,6 +23,9 @@ export const transientApiFailure = (log: string): string | undefined => {
 // Ten minutes after the first overload, doubling with each consecutive one.
 export const backoffMs = (count: number) => BACKOFF_MS * 2 ** (count - 1);
 
+// Only an agent phase completing resets the count: a gate passes between a requeue and the agent phase that overloaded.
+export const resetsOverloads = (phase: string) => !phase.startsWith("gate-");
+
 export const overloadReason = (until: Date) => `the model API was overloaded; eligible again at ${until.toISOString()}`;
 
 // What a failed phase's log means for its story: undefined blocks it as any failure does; a verdict counts an overload.

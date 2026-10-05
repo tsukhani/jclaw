@@ -330,7 +330,7 @@ Jira user.
   blocked. It goes back to To Do without `afk-blocked`, its branch keeps every commit, and a comment says the model API
   was overloaded and when the factory tries again. No round starts it before then: 10 minutes after the first
   consecutive overload, 20 after the second. The third consecutive overload blocks it as any failure does, with a
-  reason naming the overloads. Any phase that completes resets the count, which lives in `state/overloads.json` so a
+  reason naming the overloads. Any agent phase that completes resets the count (a gate does not), which lives in `state/overloads.json` so a
   restart keeps it; the board shows the story `waiting` until it is eligible again. Every other failure blocks.
 - **Reject:** move the story back to To Do with a comment saying what to change. The next round reworks it on the same
   branch. The general rule behind your comment goes into `~/.jclaw-factory/lessons.md`, which every prompt includes.

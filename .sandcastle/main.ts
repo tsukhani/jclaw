@@ -15,7 +15,7 @@ import { MergeRefused, landBranch, landedAs, mergeVerdict, type Report } from ".
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, type About } from "./board.ts";
-import { MAX_OVERLOADS, Overloads, afterFailure, overloadReason } from "./overload.ts";
+import { MAX_OVERLOADS, Overloads, afterFailure, overloadReason, resetsOverloads } from "./overload.ts";
 
 // Sandcastle's lines too: one log spans every launchd restart. Local time, to read beside `pmset -g log`.
 for (const level of ["log", "error", "warn"] as const) {
@@ -161,7 +161,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     const started = Date.now();
     try {
       const result = await body();
-      overloads.completed(key);
+      if (resetsOverloads(phase)) overloads.completed(key);
       return result;
     } catch (error) {
       failedIn ??= phase;
