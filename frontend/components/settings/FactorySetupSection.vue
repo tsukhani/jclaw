@@ -257,6 +257,12 @@ onBeforeUnmount(() => {
       </form>
 
       <div class="bg-surface-elevated border border-border px-4 py-3 space-y-3">
+        <p
+          class="text-xs text-fg-muted"
+          data-testid="factory-install-note"
+        >
+          The installer restarts the factory: a story it is building is interrupted, keeps its branch and resumes on the next round.
+        </p>
         <div class="flex items-center gap-3">
           <button
             type="button"

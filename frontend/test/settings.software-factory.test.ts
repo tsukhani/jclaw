@@ -145,6 +145,7 @@ describe('Settings — Software Factory setup', () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const component = await mountSuspended(SettingsSoftwareFactoryPanel)
     await flushPromises()
+    expect(component.find('[data-testid="factory-install-note"]').text()).toContain('a story it is building is interrupted')
     const run = component.find('[data-testid="factory-install-run"]')
     await run.trigger('click')
     await flushPromises()
