@@ -24,9 +24,11 @@ import services.Tx;
 import services.scrape.BlockClassifier;
 import services.scrape.ScrapeJobService;
 import services.scrape.ScrapeReason;
+import services.scrape.ScrapeRung;
 import tools.WebScrapeTool;
 import tools.scrape.DataImpulsePlans;
 import tools.scrape.ScrapeJobRequest;
+import tools.scrape.ScrapeOutput;
 import tools.scrape.WebScrapeSettings;
 
 import java.io.IOException;
@@ -454,6 +456,40 @@ class WebScrapeToolTest extends UnitTest {
             AgentService.delete(agent);
             deleteTree(AgentService.workspacePath(name));
         }
+    }
+
+    @Test
+    void aSavedCrawlIsNamedForItsFormat() throws Exception {
+        routes.put("https://site.test/", page("Home"));
+        var name = "scrapeext" + (System.nanoTime() % 1_000_000);
+        var agent = AgentService.create(name, "openrouter", "gpt-4.1");
+        try {
+            for (var format : List.of("markdown", "text")) {
+                var out = new WebScrapeTool().execute("""
+                        {"url": "https://site.test/", "maxDepth": 0, "format": "%s", "save": true}""".formatted(format),
+                        agent);
+                var expected = format.equals("text") ? "txt" : "md";
+                assertTrue(Pattern.compile("workspace file '[^']+\\." + expected + "'").matcher(out).find(),
+                        format + ": " + out);
+            }
+        } finally {
+            AgentService.delete(agent);
+            deleteTree(AgentService.workspacePath(name));
+        }
+    }
+
+    @Test
+    void aSectionHeadingNamesTheRungOnlyWhenItWasNotPlain() {
+        assertEquals("\n\n=== https://site.test/ ===",
+                WebScrapeTool.sectionHeading(ScrapeOutput.Format.TEXT, "https://site.test/", ScrapeRung.PLAIN));
+        assertEquals("\n\n=== https://site.test/ (via BROWSER) ===",
+                WebScrapeTool.sectionHeading(ScrapeOutput.Format.TEXT, "https://site.test/", ScrapeRung.BROWSER));
+        assertEquals("\n\n---\n\n## https://site.test/",
+                WebScrapeTool.sectionHeading(ScrapeOutput.Format.MARKDOWN, "https://site.test/", ScrapeRung.PLAIN));
+        assertEquals("\n\n---\n\n## https://site.test/ _(via IMPERSONATE)_",
+                WebScrapeTool.sectionHeading(ScrapeOutput.Format.MARKDOWN, "https://site.test/", ScrapeRung.IMPERSONATE));
+        assertEquals("\n\n---\n\n## https://site.test/ _(via PROVIDER)_",
+                WebScrapeTool.sectionHeading(ScrapeOutput.Format.JSON, "https://site.test/", ScrapeRung.PROVIDER));
     }
 
     // Background jobs (JCLAW-1272)

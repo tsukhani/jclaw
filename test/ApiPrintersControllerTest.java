@@ -156,6 +156,16 @@ class ApiPrintersControllerTest extends FunctionalTest {
     }
 
     @Test
+    void anOptionsFieldThatIsNotAnObjectSavesNoOptions() {
+        login();
+        var resp = putJson("/api/printers/default",
+                "{\"host\":\"192.0.2.10\",\"options\":\"sides=two-sided-long-edge\"}");
+        assertIsOk(resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"options\":{}"), body);
+    }
+
+    @Test
     void aMalformedBodyIsRejected() {
         login();
         assertEquals(400, putJson("/api/printers/default", "not json").status.intValue());

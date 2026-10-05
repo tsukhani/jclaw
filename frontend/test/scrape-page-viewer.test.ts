@@ -56,6 +56,14 @@ describe('scraped page viewer', () => {
     expect(fromHtml).toContain('Soumission (image)')
   })
 
+  it('carries a link\'s title only when the Markdown gave one', () => {
+    const titled = renderScrapedMarkdown('[Docs](https://docs.example.test/ "The <docs>")')
+    const untitled = renderScrapedMarkdown('[Docs](https://docs.example.test/)')
+    const titledLink = document.createRange().createContextualFragment(titled).querySelector('a')
+    expect(titledLink?.getAttribute('title')).toBe('The <docs>')
+    expect(untitled).not.toContain('title=')
+  })
+
   it('moves the page\'s headings beneath the viewer\'s own, one level at a time', () => {
     const html = renderScrapedMarkdown('# Title\n\n### Skipped a level\n\n### Sibling\n\n## Back up\n\n<h5>Raw</h5>')
 

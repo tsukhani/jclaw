@@ -19,6 +19,15 @@ class MemorySafetyTest extends UnitTest {
     }
 
     @Test
+    void detectsAFineGrainedGithubTokenFromTwentyCharacters() {
+        assertTrue(MemorySafety.looksLikeSecret("token github_pat_11ABCDEFG0_abcdefghijkl"));
+        assertTrue(MemorySafety.looksLikeSecret("github_pat_" + "a".repeat(20)));
+        assertFalse(MemorySafety.looksLikeSecret("github_pat_" + "a".repeat(19)));
+        assertFalse(MemorySafety.looksLikeSecret("github_pat_" + "a".repeat(10) + "-" + "a".repeat(10)));
+        assertFalse(MemorySafety.looksLikeSecret("github_pat_" + "é".repeat(20)));
+    }
+
+    @Test
     void detectsJwtAndPem() {
         assertTrue(MemorySafety.looksLikeSecret("auth eyJhbGciOiJIUzI1.eyJzdWIiOiIxMjM.SflKxwRJSMeKKF2"));
         assertTrue(MemorySafety.looksLikeSecret("-----BEGIN RSA PRIVATE KEY-----\nMIIEvAIBADANBg"));
