@@ -76,7 +76,17 @@ public final class FactoryProcess {
     public static ExecResult run(List<String> command, Duration timeout) {
         var runner = runnerOverride;
         var dir = Play.applicationPath;
-        return runner != null ? runner.run(command, dir, timeout) : execProcess(command, dir, timeout);
+        if (runner != null) return runner.run(command, dir, timeout);
+        // A request left queued after a test cleared its runner once ran the real install-agent.sh --remove.
+        if (Play.runningInTestMode() && reachesTheFactory(command)) {
+            throw new IllegalStateException("refused in test mode with no runner installed: " + String.join(" ", command));
+        }
+        return execProcess(command, dir, timeout);
+    }
+
+    private static boolean reachesTheFactory(List<String> command) {
+        var program = command.isEmpty() ? "" : command.getFirst();
+        return program.equals("docker") || program.endsWith("install-agent.sh");
     }
 
     private static ExecResult execProcess(List<String> command, File workDir, Duration timeout) {

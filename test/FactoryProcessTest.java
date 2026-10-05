@@ -103,4 +103,14 @@ class FactoryProcessTest extends UnitTest {
         assertTrue(res.ok(), res::toString);
         assertNotNull(FactoryProcess.runHarnessCommand(List.of("true"), Duration.ofSeconds(5)), "the lock was not released");
     }
+
+    @Test
+    void inTestModeTheFactoryCommandsAreRefusedWithoutARunner() {
+        for (var command : List.of(List.of("docker", "ps"), List.of("/checkout/.sandcastle/install-agent.sh", "--remove"))) {
+            var e = assertThrows(IllegalStateException.class, () -> FactoryProcess.run(command, Duration.ofSeconds(5)),
+                    command::toString);
+            assertTrue(e.getMessage().contains("refused in test mode"), e.getMessage());
+        }
+        assertEquals(0, FactoryProcess.run(List.of("true"), Duration.ofSeconds(5)).exitCode());
+    }
 }
