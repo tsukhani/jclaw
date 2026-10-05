@@ -357,7 +357,8 @@ class McpConnectionManagerTest extends UnitTest {
         Tx.run(() -> {
             // McpToolAdapter saves this audit row directly, bypassing EventLogger, so only the table holds it.
             var events = EventLog.find(
-                    "category = ?1 AND level = ?2", "MCP_TOOL_INVOKE", "INFO")
+                    "category = ?1 AND level = ?2 AND agentId = ?3", "MCP_TOOL_INVOKE", "INFO",
+                    String.valueOf(agentId))
                     .<EventLog>fetch();
             assertFalse(events.isEmpty(),
                     "successful invoke must log an MCP_TOOL_INVOKE row at INFO");
@@ -394,7 +395,8 @@ class McpConnectionManagerTest extends UnitTest {
         Tx.run(() -> {
             // McpToolAdapter saves this audit row directly, bypassing EventLogger, so only the table holds it.
             var denied = EventLog.find(
-                    "category = ?1 AND level = ?2", "MCP_TOOL_INVOKE", "WARN")
+                    "category = ?1 AND level = ?2 AND agentId = ?3", "MCP_TOOL_INVOKE", "WARN",
+                    String.valueOf(agentId))
                     .<EventLog>fetch();
             assertFalse(denied.isEmpty(),
                     "denied invoke must log MCP_TOOL_INVOKE at WARN");
