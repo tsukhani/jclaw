@@ -281,6 +281,53 @@ public class ConfigService {
      * @return an error message if the key is rejected, or {@code null} on success
      */
     public static @Nullable String setWithSideEffects(String key, String value) {
+        var rejection = rejectionFor(key, value);
+        if (rejection != null) {
+            return rejection;
+        }
+
+        set(key, value);
+
+        for (var effect : SIDE_EFFECTS) {
+            effect.apply(key, value);
+        }
+        return null;
+    }
+
+    /**
+     * The refusal {@link #setWithSideEffects} would answer for this write, without storing it or
+     * running a side effect.
+     *
+     * @return the 403 message, or {@code null} when the write may proceed
+     */
+    public static @Nullable String rejectionFor(String key, String value) {
+        var rejection = guardRejection(key, value);
+        if (rejection != null) {
+            return rejection;
+        }
+        for (var rule : NAMESPACE_RULES) {
+            rejection = rule.rejectionFor(key, value);
+            if (rejection != null) {
+                return rejection;
+            }
+        }
+        return null;
+    }
+
+    /** One namespace's write rule: the refusal for {@code value}, or null when the key is not its own or may be stored. */
+    @FunctionalInterface
+    private interface KeyRule {
+        @Nullable String rejectionFor(String key, String value);
+    }
+
+    /** One namespace's reaction to a stored write; a no-op for a key outside it. */
+    @FunctionalInterface
+    private interface KeyEffect {
+        void apply(String key, String value);
+    }
+
+    /** The guards every key passes before any namespace rule. */
+    private static @Nullable String guardRejection(String key, String value) {
         // JCLAW-1022: a row that would loosen a conf-capped key is already inert at the read.
         // Refusing it here is for the operator: a save that cannot take effect would otherwise
         // answer 200 and then read back as something else.
@@ -288,41 +335,101 @@ public class ConfigService {
         if (capped != null) {
             return capped;
         }
-
         // JCLAW-1330: a secret reads back as its mask, so a client that saves what it read would
         // replace the secret with its first four characters.
         if (isSensitive(key) && value.endsWith(MASK_SUFFIX)) {
             return "That is the saved value's mask, not a new value. Enter the whole new value, or leave "
                     + key + " unchanged.";
         }
+        return null;
+    }
 
-        // Shell exec privileges are restricted to the main agent
-        if (key.matches("agent\\..+\\.shell\\.(bypassAllowlist|allowGlobalPaths)")) {
-            var agentName = key.split("\\.")[1];
-            var agent = Agent.findByName(agentName);
-            if (agent == null || !agent.isMain()) {
-                return "Shell exec privileges can only be set for the main agent.";
-            }
+    // In today's precedence: where two rules match one key, the earlier one answers.
+    private static final List<KeyRule> NAMESPACE_RULES = List.of(
+            ConfigService::rejectShellPrivilege,
+            // JCLAW-1279: a destination that cannot be dispatched would only surface when an alert fails.
+            (key, value) -> key.equals(OperatorAlerts.KEY) ? OperatorAlerts.rejectionFor(value) : null,
+            ConfigService::rejectAppTimezone,
+            ConfigService::rejectProviderKey,
+            ConfigService::rejectMemoryProvider,
+            // JCLAW-970: both keys are writable through POST /api/config, and a bad value is silent
+            // at read — a negative rrfK pins one memory above every other, a non-finite minCosine
+            // drops the vector leg entirely. Rejected here for the reason the timezone guard gives.
+            atLeast(JpaMemoryStore.KEY_RRF_K, 0, " must be a non-negative integer."),
+            (key, value) -> key.equals(JpaMemoryStore.KEY_RECALL_MIN_COSINE) && !isCosine(value)
+                    ? "memory.recall.minCosine must be a finite number between -1.0 and 1.0." : null,
+            under(WebScrapeSettings.PREFIX, WebScrapeSettings::rejectionFor),
+            // JCLAW-1222: a model list naming what is not registered would route to nothing, and silently.
+            under(RouterPolicy.PREFIX, RouterPolicy::rejectionFor),
+            // Each of these readers falls back to its default on a bad value, so without a check
+            // here a typo saves cleanly and silently changes nothing.
+            ConfigService::rejectOcrKey,
+            // No "off" for the event log: JCLAW-1269 kept this refusal, leaving 0 a separate decision.
+            atLeast(EventLogCleanupJob.CONFIG_KEY, 1, " must be a whole number of days, at least 1."),
+            atLeast(TaskFireDeadline.MAX_DURATION_KEY, 0, " must be a whole number of seconds; 0 turns the limit off."),
+            configuredProvider(ProviderRegistry.PRIMARY_PROVIDER_KEY),
+            under(VoiceSettings.PREFIX, VoiceSettings::rejectionFor),
+            // A zero timeout expires an approval prompt before anyone can answer it.
+            atLeast(DangerousActionGate.APPROVAL_TIMEOUT_KEY, 1, " must be a whole number of seconds, at least 1."),
+            atLeast(TokenCoalescer.CONFIG_KEY, 0, " must be a whole number of characters; 0 sends every token at once."),
+            under(TelegramSettings.PREFIX, TelegramSettings::rejectionFor),
+            // A window of 0 makes CircuitBreaker.Config throw when the next breaker is minted.
+            under(LlmResilience.BREAKER_KEY_PREFIX, LlmResilience::rejectionFor),
+            // The coding harness is pointed at this provider's endpoint at spawn time; a name with
+            // no provider behind it would only surface as a refused spawn much later.
+            configuredProvider(SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY),
+            // JCLAW-1165: a schedule that never fires or a retention of zero is silent at read.
+            under("db.backup.", DatabaseService::rejectionFor),
+            // JCLAW-34: a collector URL or sampler ratio that cannot take effect is refused
+            // here, where the write happens, rather than logged at the next export.
+            under(OtelConfig.KEY_PREFIX, OtelConfig::rejectionFor),
+            // JCLAW-1274: an engine the browser tool does not know would read as Playwright without a word.
+            under(JevSettings.KEY_PREFIX, JevSettings::rejectionFor),
+            // JCLAW-1302, JCLAW-1336: the TypeSafe key rides an Authorization header, and the Ollama address is dialled.
+            under(DecisionSettings.KEY_PREFIX, DecisionSettings::rejectionFor));
+
+    private static KeyRule under(String prefix, KeyRule rule) {
+        return (key, value) -> key.startsWith(prefix) ? rule.rejectionFor(key, value) : null;
+    }
+
+    private static KeyRule atLeast(String ownKey, int min, String requirement) {
+        return (key, value) -> key.equals(ownKey) && !isIntAtLeast(value, min) ? key + requirement : null;
+    }
+
+    private static KeyRule configuredProvider(String ownKey) {
+        return (key, value) -> key.equals(ownKey) && value != null && !value.isBlank()
+                && ProviderRegistry.get(value.trim()) == null ? unconfiguredProvider(key, value.trim()) : null;
+    }
+
+    // Shell exec privileges are restricted to the main agent
+    private static @Nullable String rejectShellPrivilege(String key, String value) {
+        if (!key.matches("agent\\..+\\.shell\\.(bypassAllowlist|allowGlobalPaths)")) {
+            return null;
         }
+        var agent = Agent.findByName(key.split("\\.")[1]);
+        return agent == null || !agent.isMain() ? "Shell exec privileges can only be set for the main agent." : null;
+    }
 
-        // JCLAW-1279: a destination that cannot be dispatched would only surface when an alert fails.
-        if (key.equals(OperatorAlerts.KEY)) {
-            var rejection = OperatorAlerts.rejectionFor(value);
-            if (rejection != null) return rejection;
+    // Operator timezone must be a valid IANA zone id. Reject typos here so
+    // the system prompt never injects a bad zone — TimezoneResolver.appZone
+    // would silently fall back to the server default, hiding the mistake.
+    private static @Nullable String rejectAppTimezone(String key, String value) {
+        if (!key.equals(TimezoneResolver.APP_CONFIG_KEY)) {
+            return null;
         }
-
-        // Operator timezone must be a valid IANA zone id. Reject typos here so
-        // the system prompt never injects a bad zone — TimezoneResolver.appZone
-        // would silently fall back to the server default, hiding the mistake.
-        if (key.equals(TimezoneResolver.APP_CONFIG_KEY)) {
-            try {
-                ZoneId.of(value == null ? "" : value.trim());
-            } catch (Exception _) {
-                return "Invalid IANA timezone id '" + value
-                        + "'. Use a value from GET /api/timezones (e.g. 'Asia/Kuala_Lumpur').";
-            }
+        try {
+            ZoneId.of(value == null ? "" : value.trim());
+            return null;
+        } catch (Exception _) {
+            return "Invalid IANA timezone id '" + value
+                    + "'. Use a value from GET /api/timezones (e.g. 'Asia/Kuala_Lumpur').";
         }
+    }
 
+    private static @Nullable String rejectProviderKey(String key, String value) {
+        if (!key.startsWith(PROVIDER_KEY_PREFIX)) {
+            return null;
+        }
         // JCLAW-1102: this classification is what lets memory text reach a host, so a typo
         // must not read as "remote". Boolean.parseBoolean maps anything unrecognized to
         // false, which would leave embeddings refusing a provider the operator declared local.
@@ -334,48 +441,24 @@ public class ConfigService {
                 && !"true".equalsIgnoreCase(value.trim()) && !"false".equalsIgnoreCase(value.trim())) {
             return PROVIDER_KEY_PREFIX + "*" + booleanSuffix + " must be 'true' or 'false'.";
         }
-
-        // JCLAW-939: embedding a memory ships its full text to the provider, so the vector
-        // provider is restricted to one on the operator's own machine or network, or one they
-        // classified as self-hosted (JCLAW-1102). Enforced here rather than only in the
-        // Settings picker: this key is reachable through POST /api/config directly, and a
-        // hidden option is not a disabled one.
-        //
-        // The reranker is held to the same rule for the same reason: it renders the whole
-        // candidate shortlist into its prompt, so whatever serves it sees memory text.
-        if ((key.equals(MemoryVectorSettings.KEY_PROVIDER) || key.equals(MemoryReranker.KEY_PROVIDER))
-                && value != null && !value.isBlank()
-                && !ProviderLocality.isLocal(value)) {
-            var feature = key.equals(MemoryReranker.KEY_PROVIDER) ? "reranking" : "embeddings";
-            return "Provider '" + value + "' is not local. Memory " + feature + " must use a "
-                    + "provider classified as self-hosted in Settings > LLM Providers, so "
-                    + "memory text only goes where you allow it.";
+        var reserved = reservedProviderRejection(key);
+        if (reserved != null) {
+            return reserved;
         }
-
-        // JCLAW-970: both keys are writable through POST /api/config, and a bad value is silent
-        // at read — a negative rrfK pins one memory above every other, a non-finite minCosine
-        // drops the vector leg entirely. Rejected here for the reason the timezone guard gives.
-        if (key.equals(JpaMemoryStore.KEY_RRF_K) && !isIntAtLeast(value, 0)) {
-            return "memory.recall.rrfK must be a non-negative integer.";
-        }
-        if (key.equals(JpaMemoryStore.KEY_RECALL_MIN_COSINE) && !isCosine(value)) {
-            return "memory.recall.minCosine must be a finite number between -1.0 and 1.0.";
-        }
-
-        if (key.startsWith(WebScrapeSettings.PREFIX)) {
-            var rejected = WebScrapeSettings.rejectionFor(key, value);
-            if (rejected != null) {
-                return rejected;
+        // JCLAW-1229: the chat path now dials through the provider-guarded client, so a base URL
+        // in the metadata range fails at connect as an opaque DNS error on the operator's next
+        // turn. Refused at the write, where the message can say which range and why.
+        if (key.endsWith(BASE_URL_SUFFIX) && value != null && !value.isBlank()) {
+            try {
+                SsrfGuard.assertProviderUrlSafe(value.trim());
+            } catch (SecurityException e) {
+                return e.getMessage();
             }
         }
+        return null;
+    }
 
-        // JCLAW-1222: a model list naming what is not registered would route to nothing, and silently.
-        if (key.startsWith(RouterPolicy.PREFIX)) {
-            var rejected = RouterPolicy.rejectionFor(key, value);
-            if (rejected != null) {
-                return rejected;
-            }
-        }
+    private static @Nullable String reservedProviderRejection(String key) {
         // Every model picker lists the router under this name, so no real provider may take it.
         if (key.startsWith(PROVIDER_KEY_PREFIX + ModelRouter.PROVIDER + ".")) {
             return reservedProviderName(ModelRouter.PROVIDER, "the model router");
@@ -387,21 +470,29 @@ public class ConfigService {
         if (key.startsWith(PROVIDER_KEY_PREFIX + OllamaDecision.PROVIDER + ".")) {
             return reservedProviderName(OllamaDecision.PROVIDER, "the model router's Ollama classifier");
         }
+        return null;
+    }
 
-        // JCLAW-1229: the chat path now dials through the provider-guarded client, so a base URL
-        // in the metadata range fails at connect as an opaque DNS error on the operator's next
-        // turn. Refused at the write, where the message can say which range and why.
-        if (key.startsWith(PROVIDER_KEY_PREFIX) && key.endsWith(BASE_URL_SUFFIX)
-                && value != null && !value.isBlank()) {
-            try {
-                SsrfGuard.assertProviderUrlSafe(value.trim());
-            } catch (SecurityException e) {
-                return e.getMessage();
-            }
+    // JCLAW-939: embedding a memory ships its full text to the provider, so the vector
+    // provider is restricted to one on the operator's own machine or network, or one they
+    // classified as self-hosted (JCLAW-1102). Enforced here rather than only in the
+    // Settings picker: this key is reachable through POST /api/config directly, and a
+    // hidden option is not a disabled one.
+    //
+    // The reranker is held to the same rule for the same reason: it renders the whole
+    // candidate shortlist into its prompt, so whatever serves it sees memory text.
+    private static @Nullable String rejectMemoryProvider(String key, String value) {
+        if (!(key.equals(MemoryVectorSettings.KEY_PROVIDER) || key.equals(MemoryReranker.KEY_PROVIDER))
+                || value == null || value.isBlank() || ProviderLocality.isLocal(value)) {
+            return null;
         }
+        var feature = key.equals(MemoryReranker.KEY_PROVIDER) ? "reranking" : "embeddings";
+        return "Provider '" + value + "' is not local. Memory " + feature + " must use a "
+                + "provider classified as self-hosted in Settings > LLM Providers, so "
+                + "memory text only goes where you allow it.";
+    }
 
-        // Each of these readers falls back to its default on a bad value, so without a check
-        // here a typo saves cleanly and silently changes nothing.
+    private static @Nullable String rejectOcrKey(String key, String value) {
         if (key.equals(DocumentsTool.KEY_OCR_LANGUAGES)
                 && (value == null || !TESSERACT_LANGUAGES.matcher(value.trim()).matches())) {
             return key + " must be Tesseract language codes joined by +, such as eng or eng+fra.";
@@ -413,174 +504,107 @@ public class ConfigService {
                 && (value == null || !PDF_STRATEGIES.contains(value.trim().toLowerCase(Locale.ROOT)))) {
             return key + " must be one of auto, no_ocr, ocr_only or ocr_and_text_extraction.";
         }
-        // No "off" for the event log: JCLAW-1269 kept this refusal, leaving 0 a separate decision.
-        if (key.equals(EventLogCleanupJob.CONFIG_KEY) && !isIntAtLeast(value, 1)) {
-            return key + " must be a whole number of days, at least 1.";
-        }
-        if (key.equals(TaskFireDeadline.MAX_DURATION_KEY) && !isIntAtLeast(value, 0)) {
-            return key + " must be a whole number of seconds; 0 turns the limit off.";
-        }
-        if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY) && value != null && !value.isBlank()
-                && ProviderRegistry.get(value.trim()) == null) {
-            return unconfiguredProvider(key, value.trim());
-        }
-        if (key.startsWith(VoiceSettings.PREFIX)) {
-            var rejected = VoiceSettings.rejectionFor(key, value);
-            if (rejected != null) {
-                return rejected;
-            }
-        }
-        // A zero timeout expires an approval prompt before anyone can answer it.
-        if (key.equals(DangerousActionGate.APPROVAL_TIMEOUT_KEY) && !isIntAtLeast(value, 1)) {
-            return key + " must be a whole number of seconds, at least 1.";
-        }
-        if (key.equals(TokenCoalescer.CONFIG_KEY) && !isIntAtLeast(value, 0)) {
-            return key + " must be a whole number of characters; 0 sends every token at once.";
-        }
-        if (key.startsWith(TelegramSettings.PREFIX)) {
-            var rejected = TelegramSettings.rejectionFor(key, value);
-            if (rejected != null) {
-                return rejected;
-            }
-        }
-        // A window of 0 makes CircuitBreaker.Config throw when the next breaker is minted.
-        if (key.startsWith(LlmResilience.BREAKER_KEY_PREFIX)) {
-            var rejected = LlmResilience.rejectionFor(key, value);
-            if (rejected != null) {
-                return rejected;
-            }
-        }
+        return null;
+    }
 
-        // The coding harness is pointed at this provider's endpoint at spawn time; a name with
-        // no provider behind it would only surface as a refused spawn much later.
-        if (key.equals(SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY) && value != null && !value.isBlank()
-                && ProviderRegistry.get(value.trim()) == null) {
-            return unconfiguredProvider(key, value.trim());
-        }
+    // Run in this order after the write is stored, never for a refused one.
+    private static final List<KeyEffect> SIDE_EFFECTS = List.of(
+            (key, _) -> {
+                if (key.startsWith(OtelConfig.KEY_PREFIX)) OtelRuntime.applyConfig();
+            },
+            ConfigService::prewarmTtsModel,
+            // An agent on router/auto is enabled exactly while the router has models to route to.
+            (key, _) -> {
+                if (key.startsWith(PROVIDER_KEY_PREFIX) || key.startsWith(RouterPolicy.PREFIX)) {
+                    AgentService.syncEnabledStates();
+                }
+            },
+            ConfigService::settleOllamaClassifier,
+            // The registry otherwise re-reads the pin only once a minute.
+            (key, _) -> {
+                if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY)) ProviderRegistry.refresh();
+            },
+            // A breaker reads its tuning only when first minted.
+            (key, _) -> {
+                if (key.startsWith(LlmResilience.BREAKER_KEY_PREFIX)) LlmResilience.applyConfig();
+            },
+            // JCLAW-930: JpaMemoryStore reads the vector settings once into final fields and
+            // MemoryStoreFactory caches the instance, so without this the singleton serves the
+            // old provider/model for the life of the process and the settings change looks
+            // like it did nothing. reset() only clears the reference — the rebuild happens on
+            // next use, keeping pgvector re-provisioning off the settings-save path.
+            (key, _) -> {
+                if (key.startsWith(MemoryVectorSettings.KEY_PREFIX)) MemoryStoreFactory.reset();
+            },
+            // JCLAW-172: shell.enabled / playwright.enabled are gone — the tools
+            // register unconditionally now. Only the loadtest mock provider still
+            // toggles a tool registration via this side effect.
+            (key, _) -> {
+                if (key.equals("provider.loadtest-mock.enabled")) ToolRegistrationJob.registerAll();
+            },
+            // Live-apply LLM dispatcher cap changes from Settings without
+            // requiring a restart. HttpFactories.applyDispatcherConfig reads
+            // both keys and pushes them into the live OkHttp dispatcher, so
+            // the next outbound LLM call uses the new cap.
+            (key, _) -> {
+                if (isDispatcherCapKey(key)) HttpFactories.applyDispatcherConfig();
+            },
+            // Per-logger level overrides apply live: the next log statement on the
+            // affected logger uses the new level. The override is layered on top of
+            // the file config, so it wins. See LoggerLevelService.
+            (key, value) -> {
+                if (key.startsWith(LoggerLevelService.PREFIX)) {
+                    LoggerLevelService.apply(key.substring(LoggerLevelService.PREFIX.length()), value);
+                }
+            },
+            ConfigService::mirrorOllamaCloudKeyToSearch);
 
-        // JCLAW-1165: a schedule that never fires or a retention of zero is silent at read.
-        if (key.startsWith("db.backup.")) {
-            var rejected = DatabaseService.rejectionFor(key, value);
-            if (rejected != null) {
-                return rejected;
-            }
-        }
-
-        // JCLAW-34: a collector URL or sampler ratio that cannot take effect is refused
-        // here, where the write happens, rather than logged at the next export.
-        if (key.startsWith(OtelConfig.KEY_PREFIX)) {
-            var rejected = OtelConfig.rejectionFor(key, value);
-            if (rejected != null) {
-                return rejected;
-            }
-        }
-
-        // JCLAW-1274: an engine the browser tool does not know would read as Playwright without a word.
-        if (key.startsWith(JevSettings.KEY_PREFIX)) {
-            var rejected = JevSettings.rejectionFor(key, value);
-            if (rejected != null) {
-                return rejected;
-            }
-        }
-
-        // JCLAW-1302, JCLAW-1336: the TypeSafe key rides an Authorization header, and the Ollama address is dialled.
-        if (key.startsWith(DecisionSettings.KEY_PREFIX)) {
-            var rejected = DecisionSettings.rejectionFor(key, value);
-            if (rejected != null) {
-                return rejected;
-            }
-        }
-
-        set(key, value);
-
-        if (key.startsWith(OtelConfig.KEY_PREFIX)) {
-            OtelRuntime.applyConfig();
-        }
-
-        // JCLAW-863: switching the sidecar TTS model is the moment the operator
-        // declares intent to use it, and the one moment they aren't waiting on a
-        // turn — so pay the load now rather than on their first utterance. Gated
-        // on the sidecar already running: a Settings change should not spawn a
-        // Python process, and a later spawn prewarms on its own.
-        if (key.equals("tts." + TtsEngine.SIDECAR.id() + ".model")
-                && TtsSidecarManager.isRunning()) {
+    // JCLAW-863: switching the sidecar TTS model is the moment the operator
+    // declares intent to use it, and the one moment they aren't waiting on a
+    // turn — so pay the load now rather than on their first utterance. Gated
+    // on the sidecar already running: a Settings change should not spawn a
+    // Python process, and a later spawn prewarms on its own.
+    private static void prewarmTtsModel(String key, String value) {
+        if (key.equals("tts." + TtsEngine.SIDECAR.id() + ".model") && TtsSidecarManager.isRunning()) {
             TtsSidecarManager.prewarmModelAsync();
         }
+    }
 
-        // An agent on router/auto is enabled exactly while the router has models to route to.
-        if (key.startsWith(PROVIDER_KEY_PREFIX) || key.startsWith(RouterPolicy.PREFIX)) {
-            AgentService.syncEnabledStates();
-        }
-        // Choosing an Ollama classifier starts its load now, not at the first routed turn's timeout (JCLAW-1338),
-        // and unloads the decision models it replaced (JCLAW-1339).
-        // Tests point at canned transports, so a write there must never dial a real server.
+    // Choosing an Ollama classifier starts its load now, not at the first routed turn's timeout (JCLAW-1338),
+    // and unloads the decision models it replaced (JCLAW-1339).
+    // Tests point at canned transports, so a write there must never dial a real server.
+    private static void settleOllamaClassifier(String key, String value) {
         if (isOllamaClassifierKey(key) && !Play.runningInTestMode()) {
             RouterClassifier.settleOllamaModelsInBackground();
         } else if (key.equals(OllamaDecision.KEEP_ALIVE_KEY) && !Play.runningInTestMode()) {
             RouterClassifier.keepOllamaModelLoaded(RouterPolicy.load());
         }
-        // The registry otherwise re-reads the pin only once a minute.
-        if (key.equals(ProviderRegistry.PRIMARY_PROVIDER_KEY)) {
-            ProviderRegistry.refresh();
-        }
-        // A breaker reads its tuning only when first minted.
-        if (key.startsWith(LlmResilience.BREAKER_KEY_PREFIX)) {
-            LlmResilience.applyConfig();
-        }
-        // JCLAW-930: JpaMemoryStore reads the vector settings once into final fields and
-        // MemoryStoreFactory caches the instance, so without this the singleton serves the
-        // old provider/model for the life of the process and the settings change looks
-        // like it did nothing. reset() only clears the reference — the rebuild happens on
-        // next use, keeping pgvector re-provisioning off the settings-save path.
-        if (key.startsWith(MemoryVectorSettings.KEY_PREFIX)) {
-            MemoryStoreFactory.reset();
-        }
-        // JCLAW-172: shell.enabled / playwright.enabled are gone — the tools
-        // register unconditionally now. Only the loadtest mock provider still
-        // toggles a tool registration via this side effect.
-        if (key.equals("provider.loadtest-mock.enabled")) {
-            ToolRegistrationJob.registerAll();
-        }
+    }
 
-        // Live-apply LLM dispatcher cap changes from Settings without
-        // requiring a restart. HttpFactories.applyDispatcherConfig reads
-        // both keys and pushes them into the live OkHttp dispatcher, so
-        // the next outbound LLM call uses the new cap.
-        if (isDispatcherCapKey(key)) {
-            HttpFactories.applyDispatcherConfig();
+    // Convenience linkage: when the operator first sets the Ollama Cloud
+    // LLM apiKey, mirror that value into the Ollama search provider's
+    // apiKey AND flip search.ollama.enabled to true — but ONLY if the
+    // search key is currently empty. Both providers authenticate against
+    // the same Ollama account, so the usual case is one key serving
+    // both surfaces; this saves the operator a redundant paste.
+    //
+    // Once the search key has any value (operator-set or previously
+    // mirrored), this branch becomes a no-op — subsequent rotations of
+    // the LLM key don't drag the search key along, preserving the
+    // "set once, owned by you" model that operators expect from
+    // independent settings.
+    private static void mirrorOllamaCloudKeyToSearch(String key, String value) {
+        if (!key.equals("provider.ollama-cloud.apiKey") || value == null || value.isBlank()) {
+            return;
         }
-
-        // Per-logger level overrides apply live: the next log statement on the
-        // affected logger uses the new level. The override is layered on top of
-        // the file config, so it wins. See LoggerLevelService.
-        if (key.startsWith(LoggerLevelService.PREFIX)) {
-            LoggerLevelService.apply(key.substring(LoggerLevelService.PREFIX.length()), value);
+        String existingSearchKey = get("search.ollama.apiKey");
+        if (existingSearchKey == null || existingSearchKey.isBlank()) {
+            set("search.ollama.apiKey", value);
+            set("search.ollama.enabled", "true");
+            EventLogger.info(EVENT_CATEGORY,
+                    "Mirrored ollama-cloud LLM apiKey into search.ollama.apiKey "
+                            + "and enabled web search (search key was empty)");
         }
-
-        // Convenience linkage: when the operator first sets the Ollama Cloud
-        // LLM apiKey, mirror that value into the Ollama search provider's
-        // apiKey AND flip search.ollama.enabled to true — but ONLY if the
-        // search key is currently empty. Both providers authenticate against
-        // the same Ollama account, so the usual case is one key serving
-        // both surfaces; this saves the operator a redundant paste.
-        //
-        // Once the search key has any value (operator-set or previously
-        // mirrored), this branch becomes a no-op — subsequent rotations of
-        // the LLM key don't drag the search key along, preserving the
-        // "set once, owned by you" model that operators expect from
-        // independent settings.
-        if (key.equals("provider.ollama-cloud.apiKey") && value != null && !value.isBlank()) {
-            String existingSearchKey = get("search.ollama.apiKey");
-            if (existingSearchKey == null || existingSearchKey.isBlank()) {
-                set("search.ollama.apiKey", value);
-                set("search.ollama.enabled", "true");
-                EventLogger.info(EVENT_CATEGORY,
-                        "Mirrored ollama-cloud LLM apiKey into search.ollama.apiKey "
-                                + "and enabled web search (search key was empty)");
-            }
-        }
-
-        return null;
     }
 
     private static String unconfiguredProvider(String key, String name) {
