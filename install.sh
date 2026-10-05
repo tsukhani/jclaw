@@ -317,6 +317,8 @@ predates_signing() {
 
 # Proves bundle $1 is the one the Release stage built: SHA256SUMS must verify
 # under RELEASE_PUBKEY and list the bundle's hash. Scratch files go in $2.
+# A machine with no openssl is warned and installs unverified; a signature
+# that is missing or wrong is fatal, since that part an attacker controls.
 verify_bundle() {
     _zip="$1"; _dir="$2"
     if [ -n "$JCLAW_BUNDLE_URL" ]; then
@@ -327,8 +329,10 @@ verify_bundle() {
         warn "release $JCLAW_VERSION predates signed releases — installing it unverified."
         return 0
     fi
-    command -v openssl >/dev/null 2>&1 \
-        || die "openssl is needed to verify the release signature — install it and re-run."
+    if ! command -v openssl >/dev/null 2>&1; then
+        warn "openssl is not installed, so the release signature cannot be checked — installing the bundle unverified."
+        return 0
+    fi
     _base="${URL%/*}"
     { http_get "$_base/SHA256SUMS" >"$_dir/SHA256SUMS" \
         && http_get "$_base/SHA256SUMS.sig" >"$_dir/SHA256SUMS.sig"; } 2>/dev/null \
@@ -339,7 +343,8 @@ verify_bundle() {
         -signature "$_dir/SHA256SUMS.sig" "$_dir/SHA256SUMS" >/dev/null 2>&1 \
         || die "the signature on SHA256SUMS is not valid — refusing to install."
     _want=$(awk -v a="$ASSET" '($2 == a || $2 == "*" a) {print $1; exit}' "$_dir/SHA256SUMS")
-    _got=$(sha256_of "$_zip")
+    # openssl rather than sha256_of: it is known present here, shasum is not.
+    _got=$(openssl dgst -sha256 "$_zip" 2>/dev/null | awk '{print $NF}')
     if [ -z "$_want" ] || [ "$_got" != "$_want" ]; then
         die "$ASSET does not match the signed checksum (wanted ${_want:-none}, got ${_got:-none}) — refusing to install."
     fi
