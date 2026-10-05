@@ -1,5 +1,5 @@
 // Offline checks on synthetic tickets: review feedback, planning, build mode, the GitHub trust rule, Jira's intake and
-// merge queries, the board, and auto-merge, which lands branches between throwaway repos with real signing. `npm run check`.
+// merge queries, the board, model-API overloads, and auto-merge, which lands branches between throwaway repos with real signing. `npm run check`.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -8,6 +8,7 @@ import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, 
 import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { MergeRefused, landBranch, landedAs, mergeVerdict } from "./merge.ts";
+import { BACKOFF_MS, Overloads, afterFailure, overloadReason, transientApiFailure } from "./overload.ts";
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
 
@@ -228,6 +229,55 @@ const raced = JSON.parse(out.slice(out.indexOf("{")));
 check("a reader racing the writer always parses a complete board", [writes > 50, raced.reads > 50, raced.torn], [true, true, 0]);
 check("the temporary file does not outlive the write", fs.readdirSync(home).filter((f) => f.endsWith(".tmp")), []);
 fs.rmSync(home, { recursive: true, force: true });
+
+// Model-API overloads: which phase logs count, the backoff, the third strike, the reset, and a restart in between.
+const run = (...lines: string[]) => `\n--- Run started: 2026-10-05T20:30:00.000Z ---\n${lines.join("\n")}\n`;
+const OVERLOADED = "API Error: Repeated 529 Overloaded errors. The API is at capacity — this is usually temporary.";
+check("Claude Code's 529 line is an overload", transientApiFailure(run("Bash(ls)", "working on it", OVERLOADED)), OVERLOADED);
+check("a 500, 502, 503 or 504, an overloaded_error and a rate limit count, cut before their JSON body",
+  ["API Error: 500 {\"type\":\"error\"}", "API Error: 502 Bad Gateway", "API Error: 503", "API Error: 504 Gateway Timeout",
+    "API Error: 529 {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\"}}", "API Error: Request rejected (429) · rate_limit_error"]
+    .map((l) => transientApiFailure(run(l))),
+  ["API Error: 500", "API Error: 502 Bad Gateway", "API Error: 503", "API Error: 504 Gateway Timeout", "API Error: 529", "API Error: Request rejected (429) · rate_limit_error"]);
+check("a 400, a 401 and an ordinary failure are not",
+  ["API Error: 400 {\"type\":\"invalid_request_error\"}", "API Error: 401 authentication_error", "Error: the implementer made no commits", "the agent wrote about a 503"]
+    .map((l) => transientApiFailure(run(l))), [undefined, undefined, undefined, undefined]);
+check("only the last run counts: an earlier run's overload does not", transientApiFailure(run(OVERLOADED) + run("Edit(app/X.java)", "Error: boom")), undefined);
+check("an overload Claude Code recovered from early in the run does not",
+  transientApiFailure(run(OVERLOADED, ...Array.from({ length: 12 }, (_, i) => `step ${i}`))), undefined);
+
+const overloadHome = fs.mkdtempSync(path.join(os.tmpdir(), "jclaw-overload-check-"));
+const overloadFile = path.join(overloadHome, "overloads.json");
+const O0 = new Date("2026-10-05T20:40:00.000Z"), MIN = 60 * 1000;
+const later = (ms: number) => new Date(O0.getTime() + ms);
+const overloads = new Overloads(overloadFile);
+const first = afterFailure(overloads, "JCLAW-1", run("working", OVERLOADED), O0);
+check("an overload failure requeues the story for 10 minutes", first && [first.verdict, first.line],
+  [{ requeue: true, count: 1, until: later(BACKOFF_MS) }, OVERLOADED]);
+check("a non-overload failure blocks, and is not counted", [afterFailure(overloads, "JCLAW-2", run("Error: boom"), O0), afterFailure(overloads, "JCLAW-2", undefined, O0)],
+  [undefined, undefined]);
+check("…so the story it blocked is not held", overloads.holding("JCLAW-2", O0), undefined);
+const story1 = { key: "JCLAW-1" }, other = { key: "JCLAW-3" };
+const roundAt = (ms: number) => { const r = overloads.split([story1, other], later(ms)); return [r.ready.map((x) => x.key), r.held.map((h) => [h.story.key, h.until.toISOString()])]; };
+check("the backoff keeps the requeued story out of a round 1 ms too soon; others still start",
+  roundAt(BACKOFF_MS - 1), [["JCLAW-3"], [["JCLAW-1", later(BACKOFF_MS).toISOString()]]]);
+check("…and lets it in at 10 minutes, and after", [roundAt(BACKOFF_MS)[0], roundAt(BACKOFF_MS + MIN)[0]], [["JCLAW-1", "JCLAW-3"], ["JCLAW-1", "JCLAW-3"]]);
+check("the board's reason names the overload and when it is eligible again", overloadReason(later(BACKOFF_MS)),
+  "the model API was overloaded; eligible again at 2026-10-05T20:50:00.000Z");
+const restartedOverloads = new Overloads(overloadFile);
+check("a restart keeps the count: the second overload backs off 20 minutes",
+  afterFailure(restartedOverloads, "JCLAW-1", run(OVERLOADED), later(BACKOFF_MS))?.verdict, { requeue: true, count: 2, until: later(3 * BACKOFF_MS) });
+check("the third consecutive overload blocks", afterFailure(restartedOverloads, "JCLAW-1", run(OVERLOADED), later(3 * BACKOFF_MS))?.verdict, { requeue: false, count: 3 });
+check("…and forgets the count, so an operator's retry starts afresh",
+  [overloads.holding("JCLAW-1", later(3 * BACKOFF_MS)), overloads.failed("JCLAW-1", O0)], [undefined, { requeue: true, count: 1, until: later(BACKOFF_MS) }]);
+overloads.failed("JCLAW-1", O0);
+overloads.completed("JCLAW-1");
+check("a completed phase resets the count: two overloads, a completion, then one more requeues as the first",
+  overloads.failed("JCLAW-1", O0), { requeue: true, count: 1, until: later(BACKOFF_MS) });
+check("…and clears the backoff along with the count", (overloads.completed("JCLAW-1"), overloads.holding("JCLAW-1", O0)), undefined);
+check("completing a story that never overloaded writes nothing", (overloads.completed("JCLAW-9"), JSON.parse(fs.readFileSync(overloadFile, "utf8"))), {});
+check("a missing state file means no overloads", new Overloads(path.join(overloadHome, "absent.json")).holding("JCLAW-1", O0), undefined);
+fs.rmSync(overloadHome, { recursive: true, force: true });
 
 // landBranch between a throwaway checkout and its clone, signing with the operator's own git configuration.
 const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "jclaw-land-check-"));

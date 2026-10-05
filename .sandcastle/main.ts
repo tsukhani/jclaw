@@ -15,6 +15,7 @@ import { MergeRefused, landBranch, landedAs, mergeVerdict, type Report } from ".
 import { buildMode, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, type About } from "./board.ts";
+import { MAX_OVERLOADS, Overloads, afterFailure, overloadReason } from "./overload.ts";
 
 // Sandcastle's lines too: one log spans every launchd restart. Local time, to read beside `pmset -g log`.
 for (const level of ["log", "error", "warn"] as const) {
@@ -153,11 +154,18 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
   const gates: string[] = [];
   const environmentFailures = new Set<string>();
   const flakes: { gate: string; failure: string }[] = [];
+  // The phase whose run threw, whose log says whether the model API was overloaded.
+  let failedIn: string | undefined;
   const timed =async <T>(phase: string, body: () => Promise<T>): Promise<T> => {
     board.set(key, { state: "running", phase });
     const started = Date.now();
     try {
-      return await body();
+      const result = await body();
+      overloads.completed(key);
+      return result;
+    } catch (error) {
+      failedIn ??= phase;
+      throw error;
     } finally {
       timings[phase] = Math.round((Date.now() - started) / 1000);
       console.log(`[${key} ${phase}] ${timings[phase]}s`);
@@ -321,7 +329,20 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     board.set(key, { state: "review" });
     console.log(`[${key} done] → Review\n` + execFileSync("/usr/bin/git", ["-C", REPO, "log", "--stat", "--format=%h %an %s", `main..${branch}`], { encoding: "utf8" }));
   } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
+    let reason = error instanceof Error ? error.message : String(error);
+    const log = `${LOGS}/${key}-${failedIn}.log`;
+    const overload = afterFailure(overloads, key, failedIn && fs.existsSync(log) ? fs.readFileSync(log, "utf8") : undefined, new Date());
+    if (overload) {
+      const { line, verdict } = overload;
+      if (verdict.requeue) {
+        console.log(`[${key} requeued] ${failedIn}: ${line} (overload ${verdict.count} of ${MAX_OVERLOADS}); eligible again at ${verdict.until.toISOString()}`);
+        board.set(key, { state: "waiting", reason: overloadReason(verdict.until) });
+        await tracker.requeued(key);
+        await tracker.comment(key, `${tracker.header}: model API overloaded\nThe ${failedIn} phase ended on ${m.code(line)}, so the model API was overloaded rather than the story at fault. Branch ${m.code(branch)} (local) keeps every commit, and the factory will try again after ${verdict.until.toISOString().slice(0, 16).replace("T", " ")} UTC.`);
+        return;
+      }
+      reason = `the model API was overloaded on ${verdict.count} consecutive tries, the last in the ${failedIn} phase: ${line}`;
+    }
     console.log(`[${key} blocked] ${reason}`);
     // The first line only: BMAD's halts append its questions, which quote the ticket.
     board.set(key, { state: "blocked", reason: reason.split("\n")[0] });
@@ -348,6 +369,8 @@ const board = new Board({
   enabled: !process.env.FACTORY_PLAN_ONLY,
 });
 const about = (s: Snapshot): About => ({ summary: s.summary, autoMerge: autoMerges(s) });
+// Consecutive model-API overloads per story, beside the pid file so a restart keeps them.
+const overloads = new Overloads(`${STATE}/overloads.json`);
 
 // A repeated state is logged once, not on every poll.
 const lastSaid = new Map<string, string>();
@@ -526,7 +549,12 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   // A story runs only once every blocker is Done, which must mean merged: its branch then comes off a main that already
   // holds the blocker's code in whatever form it landed, so no branch reaches the reviewer carrying another story's commits.
   const unblocked: Snapshot[] = [];
-  for (const story of candidates.filter((c) => !running.has(c.key))) {
+  const { ready, held } = overloads.split(candidates.filter((c) => !running.has(c.key)), new Date());
+  for (const { story, until } of held) {
+    note(story.key, `[plan] ${story.key} waits: ${overloadReason(until)}`);
+    wait([story], overloadReason(until));
+  }
+  for (const story of ready) {
     if (story.refused) {
       await refuse(story);
       continue;
