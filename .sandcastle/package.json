@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@ai-hero/sandcastle": "0.12.0",
-    "tsx": "4.21.0",
+    "tsx": "4.23.15",
     "zod": "4.1.12"
   },
   "devDependencies": {
