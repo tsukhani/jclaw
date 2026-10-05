@@ -29,8 +29,10 @@ GitHub's `main` refuses unverified commits and Bitbucket does not, so one of the
 ```bash
 /usr/bin/git fetch -q origin && /usr/bin/git fetch -q github
 me=$(/usr/bin/git config user.email)
-for r in origin github; do /usr/bin/git log "$r/main..HEAD" --format='%G? %ce %h %an | %s'; done | grep -v "^G $me " | sort -u
+for r in origin github; do /usr/bin/git log "$r/main..HEAD" --format='%G? %ce %h %an | %s'; done | grep -vE "^(G $me|[GU] renovate@abundent\.com) " | sort -u
 ```
+
+Renovate's own commits pass as `U`: a good signature from the Renovate runner's key, which GitHub verifies but this keyring does not trust.
 
 If that prints anything, stop and list it. The usual sources are an AFK factory branch merged without re-signing, and a factory landing from before the landing committed as the operator (`jclaw-factory-agent@localhost` as committer); `.sandcastle/README.md` gives the signed merge. A listed commit already on `origin` can only be re-signed by a force-push, so that is the user's decision.
 

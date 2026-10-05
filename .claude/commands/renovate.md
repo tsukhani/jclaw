@@ -66,6 +66,7 @@ With `$ARGUMENTS` = `caps`, stop here. Otherwise continue to Phase 1; a stale ca
 3. **Classify each surviving branch by its changed files** (authoritative — branch names are only a hint): `/usr/bin/git diff --name-only main...origin/renovate/<b>`.
    - Touches any `frontend/**` (typically `frontend/package.json`, `frontend/pnpm-lock.yaml`) → **FRONTEND**.
    - Touches `build.gradle.kts`, `settings.gradle.kts`, `gradle/**`, `*.gradle.kts`, or `gradle.properties` → **BACKEND**.
+   - Touches `.sandcastle/**` (the AFK factory's `package.json` / `package-lock.json`) → **FACTORY**.
    - Touches both → **BOTH** (run both suites).
    - Touches neither code path (e.g. only `.github/**` or a renovate config) → **DOCS/CONFIG** (merge, no suite — note it).
 4. Present a **plan table** — branch, ecosystem, what it bumps (read the `package.json` / `build.gradle.kts` hunk to name the dependency + version), already-merged-skips — and get a quick confirmation before any merge.
@@ -78,7 +79,7 @@ With `$ARGUMENTS` = `caps`, stop here. Otherwise continue to Phase 1; a stale ca
 
 **Phase 3 — Merge & validate (backend first, then frontend)**
 
-Process **BACKEND** branches first, then **FRONTEND** — each ecosystem is batch-merged and validated with **one suite run** (dependency bumps within an ecosystem rarely interact; one suite per ecosystem is the cost/confidence sweet spot).
+Process **BACKEND** branches first, then **FRONTEND**, then **FACTORY** — each ecosystem is batch-merged and validated with **one suite run** (dependency bumps within an ecosystem rarely interact; one suite per ecosystem is the cost/confidence sweet spot).
 
 7. **Backend: merge all, then one suite** —
    - Merge every backend branch in sequence: `/usr/bin/git merge --no-edit origin/renovate/<b>`. On a `build.gradle.kts` version-pin conflict, resolve toward the renovate bump (take the higher/incoming version) and note it; on a non-trivial code conflict, stop and surface it.
@@ -103,11 +104,17 @@ Process **BACKEND** branches first, then **FRONTEND** — each ecosystem is batc
 
    Note: the full regen may pick up patches slightly newer than each branch targeted (e.g. a transitive `17.10.0 → 17.11.0`), all within the existing `^x.y.z` ranges — that's the same "latest within range" intent Renovate had, done in one pass. Fine.
 
+   If the regen is red but the merged lockfile (`git checkout HEAD -- pnpm-lock.yaml`, clean `--frozen-lockfile` install) is green, the regen moved a transitive, not a bump. Look for a test or app import of a package `package.json` does not declare: it resolves to whichever copy pnpm hoists, and re-resolution can swap it. On 2026-10-06 that was `h3`, a peer of `@nuxt/test-utils`; declaring it fixed the regen.
+
+9. **Factory: merge, rebuild the npm lockfile by hand, validate in a scratch copy** — `.sandcastle/` is npm, not pnpm, and the factory runs live out of its `node_modules`:
+   - Merge each: `/usr/bin/git merge --no-edit origin/renovate/<b>`. **Never `-X theirs` here**: two bumps edit adjacent lines of `package.json`, and `-X theirs` takes the incoming side whole, reverting the other bump and leaving a lockfile `npm ci` rejects. On a conflict, `git merge --no-commit`, set `package.json` to both bumps, restore the lockfile from `HEAD`, and update it with `npm install --package-lock-only` in a scratch export, which moves only the conflicting package.
+   - Validate in that scratch export (`/usr/bin/git archive HEAD | tar -x -C <scratch>`, with the resolved files copied in): `npm ci && npm run check`. **Never `npm ci` in the checkout's `.sandcastle/`**: it deletes the `node_modules` the running harness and its esbuild service load from. `run.sh` reinstalls on the factory's next idle restart, when the lockfile hash changes.
+
 **Phase 4 — Report & hand off**
 
-9. Summarize in a table: branch · ecosystem · dependency bumped · merged/skipped · test result. State how far `main` is now ahead of `origin/main` (these merge commits are **local and unpushed**).
-10. **Stop here.** Hand off to the user for `/deploy` (the only path that pushes). Do not push, do not run `/deploy` yourself.
-11. **Optional cleanup, only if the user asks:** delete the merged remote branches. Renovate runs as a **weekly** Jenkins job (not continuously), so this is safe immediately and they won't bounce back; once `/deploy` lands the bumps on `origin/main`, Renovate won't recreate them. This is the one push allowed outside `/deploy` (it touches no commits on `main`). The delete-push still fires `.githooks/pre-push` (full suite on HEAD) — since you just validated, pass `JCLAW_SKIP_TESTS=1`:
+10. Summarize in a table: branch · ecosystem · dependency bumped · merged/skipped · test result. State how far `main` is now ahead of `origin/main` (these merge commits are **local and unpushed**).
+11. **Stop here.** Hand off to the user for `/deploy` (the only path that pushes). Do not push, do not run `/deploy` yourself.
+12. **Optional cleanup, only if the user asks:** delete the merged remote branches. Renovate runs as a **weekly** Jenkins job (not continuously), so this is safe immediately and they won't bounce back; once `/deploy` lands the bumps on `origin/main`, Renovate won't recreate them. This is the one push allowed outside `/deploy` (it touches no commits on `main`). The delete-push still fires `.githooks/pre-push` (full suite on HEAD) — since you just validated, pass `JCLAW_SKIP_TESTS=1`:
     ```bash
     JCLAW_SKIP_TESTS=1 /usr/bin/git push origin --delete renovate/<a> renovate/<b> …
     ```
@@ -119,7 +126,7 @@ Process **BACKEND** branches first, then **FRONTEND** — each ecosystem is batc
 - **Never `git push` or run `/deploy`** as part of this command — stop at the local merge commits. The lone exception is the Phase-4 branch-deletion push, and only when the user explicitly asks for cleanup.
 - Never `--no-verify`, `--force`, or any hook/signing bypass (except the documented `JCLAW_SKIP_TESTS=1` on the cleanup delete-push).
 - The frontend **lockfile regen is mandatory** after the merge cascade — a plain `pnpm install` is not sufficient and gives false greens.
-- Validate by ecosystem: backend → `play autotest`; frontend → `pnpm test` + `lint` + `typecheck` + `stylelint` (+ `pnpm install --frozen-lockfile`). A BOTH branch runs both.
+- Validate by ecosystem: backend → `play autotest`; frontend → `pnpm test` + `lint` + `typecheck` + `stylelint` (+ `pnpm install --frozen-lockfile`); factory → `npm ci` + `npm run check` in a scratch export, never in the live `.sandcastle/`. A BOTH branch runs both.
 - Confirm before stopping jclaw for the backend suite; restart it afterward only if it was running.
 - A failing backend bump is undone (`reset --hard HEAD~1`) and skipped, not forced through; a failing frontend batch is reported for the user to triage.
 - **Never lift a version cap without the user choosing it.** Report the verdict and the cost; the decision is theirs. A lift and the upgrade behind it land in one commit, never separately.
