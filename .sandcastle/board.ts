@@ -65,6 +65,10 @@ export const writeAtomically = (file: string, text: string) => {
   fs.renameSync(temporary, file);
 };
 
+// Where a story left running stands once nothing runs it: a landing is back in review, and anything else waits.
+const unattended = (phase: string, reason: string): Exclude<State, { state: "running" }> =>
+  phase === "merge" || phase === "gate-merge" ? { state: "review" } : { state: "waiting", reason };
+
 export class Board {
   // Oldest change first: a change re-inserts its story at the end.
   private readonly entries = new Map<string, Entry>();
@@ -84,15 +88,20 @@ export class Board {
       return;
     }
     if (previous.schema !== BOARD_SCHEMA || !Array.isArray(previous.stories)) return;
+    const since = new Date().toISOString();
     for (const { logs: _, ...entry } of [...previous.stories].reverse()) {
       if (entry.state !== "running") this.entries.set(entry.key, entry);
       else {
         const { phase: _phase, phaseStartedAt: _started, ...rest } = entry;
-        const landing = entry.phase === "merge" || entry.phase === "gate-merge";
-        const since = new Date().toISOString();
-        this.entries.set(entry.key, { ...rest, since, ...(landing ? { state: "review" } : { state: "waiting", reason: "interrupted by the last stop" }) });
+        this.entries.set(entry.key, { ...rest, since, ...unattended(entry.phase, "interrupted by the last stop") });
       }
     }
+  }
+
+  // A story the board shows running whose run has ended without reporting where it got to.
+  abandoned(key: string, reason: string, now = new Date()) {
+    const entry = this.entries.get(key);
+    if (entry?.state === "running") this.set(key, unattended(entry.phase, reason), undefined, now);
   }
 
   has(key: string) {

@@ -323,7 +323,8 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     console.log(`[${key} blocked] ${reason}`);
-    board.set(key, { state: "blocked", reason });
+    // The first line only: BMAD's halts append its questions, which quote the ticket.
+    board.set(key, { state: "blocked", reason: reason.split("\n")[0] });
     await tracker.blocked(key);
     await tracker.comment(key, `${tracker.header} gave up\nBranch ${m.code(branch)} (local). ${reason}\n\nRemove the ${m.code("afk-blocked")} label to let the factory retry.`);
     throw error;
@@ -606,6 +607,8 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
 // and a story in review that is Done was merged by hand.
 const reconcile = async (candidates: Snapshot[], unread: Set<Tracker>) => {
   for (const s of candidates) board.describe(s.key, about(s));
+  // A run that threw before it reported (a failed claim write-back, say) leaves its story shown running.
+  for (const key of board.keys("running")) if (!running.has(key)) board.abandoned(key, "its last run stopped before it finished");
   const source = (key: string) => TRACKERS.find((t) => t.owns(key));
   for (const key of board.keys("waiting")) {
     const tracker = source(key);

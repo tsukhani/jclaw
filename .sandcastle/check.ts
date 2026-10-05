@@ -189,6 +189,14 @@ const restarted = newBoard();
 restarted.load();
 check("a restart keeps the order; a story left running waits, and one left landing is back in review",
   restarted.document(T2).stories.map((s) => [s.key, s.state]), [["JCLAW-3", "review"], ["JCLAW-1", "waiting"], ["JCLAW-10", "waiting"]]);
+restarted.set("JCLAW-4", { state: "running", phase: "implement" }, { summary: "Four" }, T2);
+restarted.abandoned("JCLAW-4", "its last run stopped before it finished", T2);
+restarted.abandoned("JCLAW-3", "not running, so not touched", T2);
+restarted.set("JCLAW-5", { state: "running", phase: "merge" }, { summary: "Five" }, T2);
+restarted.abandoned("JCLAW-5", "a landing goes back to review", T2);
+check("a run that ended without reporting waits, or is back in review from a landing; anything else is left alone",
+  restarted.document(T2).stories.filter((s) => ["JCLAW-3", "JCLAW-4", "JCLAW-5"].includes(s.key)).map((s) => [s.key, s.state, "reason" in s ? s.reason : undefined]),
+  [["JCLAW-5", "review", undefined], ["JCLAW-4", "waiting", "its last run stopped before it finished"], ["JCLAW-3", "review", undefined]]);
 check("a disabled board writes nothing", (() => {
   const other = path.join(home, "plan-only.json");
   new Board({ file: other, logs: boardLogs, pid: 1, startedAt: T0, settings, enabled: false }).set("JCLAW-1", { state: "review" });
