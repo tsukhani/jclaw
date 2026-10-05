@@ -1,4 +1,3 @@
-import models.EventLog;
 import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -23,6 +22,8 @@ import java.util.regex.Pattern;
  */
 class ApiTasksControllerAuditTest extends FunctionalTest {
 
+    private static final String AGENT_NAME = "audit-agent";
+
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
@@ -43,8 +44,8 @@ class ApiTasksControllerAuditTest extends FunctionalTest {
 
     private Long seedAgent() {
         var resp = POST("/api/agents", "application/json", """
-                {"name": "audit-agent", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """);
+                {"name": "%s", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """.formatted(AGENT_NAME));
         assertIsOk(resp);
         return Long.parseLong(extractId(getContent(resp)));
     }
@@ -63,10 +64,12 @@ class ApiTasksControllerAuditTest extends FunctionalTest {
         return m.group(1);
     }
 
-    private static long auditCount(String category, String namePattern) {
-        EventLogger.flush();
-        return EventLog.count("category = ?1 AND message LIKE ?2",
-                category, "%" + namePattern + "%");
+    private static long auditCountOfPost(String url, String category, String namePattern) {
+        var events = EventLogger.captureMatchingForTest(e -> AGENT_NAME.equals(e.agentId()),
+                _ -> assertIsOk(POST(url, "application/json", "")));
+        return events.stream()
+                .filter(e -> e.category().equals(category) && e.message().contains(namePattern))
+                .count();
     }
 
     /**
@@ -100,9 +103,7 @@ class ApiTasksControllerAuditTest extends FunctionalTest {
         var agent = seedAgent();
         var taskId = seedTask(agent, "audit-cancel", "every 1h");
 
-        var resp = POST("/api/tasks/" + taskId + "/cancel", "application/json", "");
-        assertIsOk(resp);
-        assertEquals(1L, auditCount("TASK_MGMT_DELETE", "audit-cancel"));
+        assertEquals(1L, auditCountOfPost("/api/tasks/" + taskId + "/cancel", "TASK_MGMT_DELETE", "audit-cancel"));
     }
 
     @Test
@@ -110,9 +111,7 @@ class ApiTasksControllerAuditTest extends FunctionalTest {
         var agent = seedAgent();
         var taskId = seedTask(agent, "audit-pause", "every 1h");
 
-        var resp = POST("/api/tasks/" + taskId + "/pause", "application/json", "");
-        assertIsOk(resp);
-        assertEquals(1L, auditCount("TASK_MGMT_PAUSE", "audit-pause"));
+        assertEquals(1L, auditCountOfPost("/api/tasks/" + taskId + "/pause", "TASK_MGMT_PAUSE", "audit-pause"));
     }
 
     @Test
@@ -120,9 +119,7 @@ class ApiTasksControllerAuditTest extends FunctionalTest {
         var agent = seedAgent();
         var taskId = seedTask(agent, "audit-resume", "every 1h");
 
-        var resp = POST("/api/tasks/" + taskId + "/resume", "application/json", "");
-        assertIsOk(resp);
-        assertEquals(1L, auditCount("TASK_MGMT_RESUME", "audit-resume"));
+        assertEquals(1L, auditCountOfPost("/api/tasks/" + taskId + "/resume", "TASK_MGMT_RESUME", "audit-resume"));
     }
 
     @Test
@@ -137,12 +134,10 @@ class ApiTasksControllerAuditTest extends FunctionalTest {
             t.lastError = "exhausted";
         });
 
-        var resp = POST("/api/tasks/" + taskId + "/retry", "application/json", "");
-        assertIsOk(resp);
         // /retry shares the MANUAL_RUN category with /run — same operator
         // intent ("re-fire this task"). The category enumeration in the AC
         // is six values, not seven; lumping retry under MANUAL_RUN keeps
         // the timeline coherent.
-        assertEquals(1L, auditCount("TASK_MGMT_MANUAL_RUN", "audit-retry"));
+        assertEquals(1L, auditCountOfPost("/api/tasks/" + taskId + "/retry", "TASK_MGMT_MANUAL_RUN", "audit-retry"));
     }
 }

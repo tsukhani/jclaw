@@ -6,7 +6,6 @@ import com.github.kagkarlsson.scheduler.task.SchedulableInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import llm.LlmResilience;
 import models.Agent;
-import models.EventLog;
 import models.Task;
 import models.TaskRun;
 import org.junit.jupiter.api.AfterEach;
@@ -89,8 +88,6 @@ class TaskRetryRoundtripTest extends UnitTest {
     @BeforeEach
     void setup() throws Exception {
         Thread.sleep(200);
-        // A previous test's buffered TASK_FAILED would otherwise land after the wipe and count here.
-        EventLogger.flush();
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
         llm.ProviderRegistry.refresh();
@@ -129,7 +126,7 @@ class TaskRetryRoundtripTest extends UnitTest {
         var ops = new RecordingExecutionOperations(execution);
 
         var beforeReschedule = Instant.now();
-        new JClawFailureHandler().onFailure(executionComplete, ops);
+        var firstAttempt = EventLogger.captureForTest(() -> new JClawFailureHandler().onFailure(executionComplete, ops));
 
         // The Reschedule path ran, not the Stop path.
         assertEquals(1, ops.reschedules.size(),
@@ -157,15 +154,14 @@ class TaskRetryRoundtripTest extends UnitTest {
 
         // TASK_FAILED must NOT have fired — transient retries emit WARN
         // under the "task" category instead.
-        EventLogger.flush();
-        assertTrue(loadEventsByCategory("TASK_FAILED").isEmpty(),
+        assertTrue(ofCategory(firstAttempt, "TASK_FAILED").isEmpty(),
                 "TASK_FAILED is the permanent-failure lifecycle bookmark; "
                 + "must not fire on a transient retry");
         // Also no TASK_STARTED yet — the first attempt never reached
         // TaskExecutor.runTask (the handler short-circuits would only
         // be invoked AFTER runTask runs; in our scenario db-scheduler
         // didn't even open the lambda body before the transient error).
-        assertTrue(loadEventsByCategory("TASK_STARTED").isEmpty(),
+        assertTrue(ofCategory(firstAttempt, "TASK_STARTED").isEmpty(),
                 "first-attempt did not reach TaskExecutor — no TASK_STARTED");
 
         // === Second attempt: LLM is now up, drive the production lambda ===
@@ -187,15 +183,22 @@ class TaskRetryRoundtripTest extends UnitTest {
         var ctx = new ExecutionContext(null, execution, null, null);
 
         var errorRef = new AtomicReference<Exception>();
-        var thread = Thread.ofVirtual().start(() -> {
+        var secondAttempt = EventLogger.captureMatchingForTest(e -> agent.name.equals(e.agentId()), _ -> {
+            var thread = Thread.ofVirtual().start(() -> {
+                try {
+                    dbTask.execute(taskInstance, ctx);
+                } catch (Exception e) {
+                    errorRef.set(e);
+                }
+            });
             try {
-                dbTask.execute(taskInstance, ctx);
-            } catch (Exception e) {
-                errorRef.set(e);
+                thread.join(30_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new RuntimeException(e);
             }
+            assertFalse(thread.isAlive(), "second-attempt execute should complete within 30s");
         });
-        thread.join(30_000);
-        assertFalse(thread.isAlive(), "second-attempt execute should complete within 30s");
         if (errorRef.get() != null) throw errorRef.get();
 
         JPA.em().clear();
@@ -211,15 +214,15 @@ class TaskRetryRoundtripTest extends UnitTest {
         assertEquals("Task completed on retry.", run.outputSummary);
 
         // Lifecycle: both STARTED and COMPLETED for the successful run.
-        EventLogger.flush();
-        var startedEvents = loadEventsByCategory("TASK_STARTED");
-        var completedEvents = loadEventsByCategory("TASK_COMPLETED");
+        var startedEvents = ofCategory(secondAttempt, "TASK_STARTED");
+        var completedEvents = ofCategory(secondAttempt, "TASK_COMPLETED");
         assertEquals(1, startedEvents.size(),
                 "TASK_STARTED for the successful second attempt");
         assertEquals(1, completedEvents.size(),
                 "TASK_COMPLETED for the successful second attempt");
         // Still no TASK_FAILED — the retry succeeded.
-        assertTrue(loadEventsByCategory("TASK_FAILED").isEmpty(),
+        assertTrue(ofCategory(firstAttempt, "TASK_FAILED").isEmpty()
+                        && ofCategory(secondAttempt, "TASK_FAILED").isEmpty(),
                 "retry succeeded; TASK_FAILED must not appear");
 
         // Task row: retryCount preserved (not reset on success), status
@@ -260,7 +263,7 @@ class TaskRetryRoundtripTest extends UnitTest {
                 execution, Instant.now().minusSeconds(1), Instant.now(), permanent);
         var ops = new RecordingExecutionOperations(execution);
 
-        new JClawFailureHandler().onFailure(executionComplete, ops);
+        var events = EventLogger.captureForTest(() -> new JClawFailureHandler().onFailure(executionComplete, ops));
 
         // Stop path, not reschedule.
         assertEquals(0, ops.reschedules.size(),
@@ -274,20 +277,19 @@ class TaskRetryRoundtripTest extends UnitTest {
         assertEquals("HTTP 401 Unauthorized", fresh.lastError);
 
         // TASK_FAILED lifecycle bookmark fired.
-        EventLogger.flush();
-        var failedEvents = loadEventsByCategory("TASK_FAILED");
+        var failedEvents = ofCategory(events, "TASK_FAILED");
         assertEquals(1, failedEvents.size(),
                 "TASK_FAILED bookmark fires on permanent failure");
         var failed = failedEvents.getFirst();
-        assertEquals("ERROR", failed.level);
-        assertTrue(failed.message.contains("Will fail permanently"));
-        assertTrue(failed.details.contains("\"classification\":\"permanent error\""),
+        assertEquals("ERROR", failed.level());
+        assertTrue(failed.message().contains("Will fail permanently"));
+        assertTrue(failed.details().contains("\"classification\":\"permanent error\""),
                 "TASK_FAILED details include the classification, got: "
-                        + failed.details);
-        assertTrue(failed.details.contains("\"error_message\":\"HTTP 401 Unauthorized\""),
+                        + failed.details());
+        assertTrue(failed.details().contains("\"error_message\":\"HTTP 401 Unauthorized\""),
                 "TASK_FAILED details include the raw error_message, got: "
-                        + failed.details);
-        assertTrue(failed.details.contains("\"run_id\":" + run.id),
+                        + failed.details());
+        assertTrue(failed.details().contains("\"run_id\":" + run.id),
                 "TASK_FAILED links to the open TaskRun via run_id");
     }
 
@@ -298,7 +300,10 @@ class TaskRetryRoundtripTest extends UnitTest {
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();
 
-        var ops = AppClock.callWith(FIXED_NOW, () -> failFire(task, new SocketTimeoutException("read timed out")));
+        var fired = new RecordingExecutionOperations[1];
+        var events = EventLogger.captureForTest(() -> fired[0] =
+                AppClock.callWith(FIXED_NOW, () -> failFire(task, new SocketTimeoutException("read timed out"))));
+        var ops = fired[0];
 
         assertFalse(ops.stopped, "one failed occurrence must not end the task's schedule");
         assertEquals(List.of(Instant.parse("2026-09-22T09:00:00Z")), ops.reschedules,
@@ -308,8 +313,7 @@ class TaskRetryRoundtripTest extends UnitTest {
         assertEquals(Task.Status.ACTIVE, fresh.status);
         assertEquals(0, fresh.retryCount, "the next occurrence starts with a full retry budget");
         assertTrue(fresh.lastError.contains("read timed out"), "lastError keeps the cause, got: " + fresh.lastError);
-        EventLogger.flush();
-        assertEquals(1, loadEventsByCategory("TASK_FAILED").stream().filter(e -> e.message.contains(task.name)).count(),
+        assertEquals(1, ofCategory(events, "TASK_FAILED").stream().filter(e -> e.message().contains(task.name)).count(),
                 "the failed occurrence is still recorded");
     }
 
@@ -514,12 +518,7 @@ class TaskRetryRoundtripTest extends UnitTest {
         });
     }
 
-    private List<EventLog> loadEventsByCategory(String category) {
-        return Tx.run(() -> {
-            var raw = EventLog.find("category = ?1", category).fetch();
-            var typed = new ArrayList<EventLog>(raw.size());
-            for (var r : raw) typed.add((EventLog) r);
-            return typed;
-        });
+    private static List<EventLogger.Captured> ofCategory(List<EventLogger.Captured> events, String category) {
+        return events.stream().filter(e -> category.equals(e.category())).toList();
     }
 }

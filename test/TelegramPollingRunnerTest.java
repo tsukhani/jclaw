@@ -4,7 +4,6 @@ import channels.TelegramPollingRunner;
 import channels.TelegramPollingRunnerTestHooks;
 import channels.TelegramReactionNotifier;
 import models.Agent;
-import models.EventLog;
 import models.TelegramBinding;
 import models.TelegramTopicBinding;
 import org.junit.jupiter.api.AfterEach;
@@ -224,15 +223,14 @@ class TelegramPollingRunnerTest extends FunctionalTest {
 
         Long b = seedPollingBinding("agent-b", "222:tokB", "2", true);
         EventLogger.clear();
-        TelegramPollingRunner.reconcile();
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(TelegramPollingRunner::reconcile);
 
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(b),
                 "the second binding registers");
         assertEquals(0, fakeApp.startInvocations(),
                 "the runner must never call app.start() — the SDK app runs from construction (JCLAW-431)");
-        long startFailures = EventLog.count("category = ?1 AND message LIKE ?2",
-                "channel", "%Failed to start polling app%");
+        long startFailures = logged.stream().filter(e -> e.category().equals("channel")
+                && e.message().contains("Failed to start polling app")).count();
         assertEquals(0L, startFailures, "no app-start error on register");
     }
 
@@ -365,8 +363,7 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         // Telegram rejects this token, then run the probe.
         TelegramPollingRunnerTestHooks.setTokenRejectedCheck(token::equals);
         EventLogger.clear();
-        TelegramPollingRunnerTestHooks.runTokenHealthProbe();
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(TelegramPollingRunnerTestHooks::runTokenHealthProbe);
 
         assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
                 "a binding with a rejected token must be unregistered");
@@ -374,8 +371,8 @@ class TelegramPollingRunnerTest extends FunctionalTest {
                 "a binding with a rejected token must be disabled so reconcile won't re-register it");
         // Keyed to the binding id rather than pinned wording (JCLAW-1135): the operator alert must
         // name the binding it concerns, and a sentence match breaks on any rewording.
-        long alerts = EventLog.count("category = ?1 AND message LIKE ?2",
-                "channel", "%Telegram binding " + id + " was disabled%");
+        long alerts = logged.stream().filter(e -> e.category().equals("channel")
+                && e.message().contains("Telegram binding " + id + " was disabled")).count();
         assertEquals(1L, alerts, "the operator is alerted that Telegram rejected the token");
     }
 

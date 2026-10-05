@@ -1,4 +1,3 @@
-import models.EventLog;
 import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,6 +30,8 @@ import java.util.regex.Pattern;
  */
 class ApiTasksControllerRetryTest extends FunctionalTest {
 
+    private static final String AGENT_NAME = "api-retry-test-agent";
+
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
@@ -53,8 +54,8 @@ class ApiTasksControllerRetryTest extends FunctionalTest {
 
     private Long seedAgent() {
         var resp = POST("/api/agents", "application/json", """
-                {"name": "retry-test-agent", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """);
+                {"name": "%s", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """.formatted(AGENT_NAME));
         assertIsOk(resp);
         return Long.parseLong(extractId(getContent(resp)));
     }
@@ -160,12 +161,12 @@ class ApiTasksControllerRetryTest extends FunctionalTest {
 
         mutateAndCommit(taskId, t -> t.status = Task.Status.LOST);
 
-        assertIsOk(POST("/api/tasks/" + taskId + "/retry", "application/json", ""));
+        var events = EventLogger.captureMatchingForTest(e -> AGENT_NAME.equals(e.agentId()),
+                _ -> assertIsOk(POST("/api/tasks/" + taskId + "/retry", "application/json", "")));
 
-        EventLogger.flush();
-        long count = EventLog.count(
-                "category = ?1 AND message LIKE ?2",
-                "TASK_MGMT_MANUAL_RUN", "%was LOST%");
+        long count = events.stream()
+                .filter(e -> e.category().equals("TASK_MGMT_MANUAL_RUN") && e.message().contains("was LOST"))
+                .count();
         assertEquals(1L, count,
                 "expected one audit row noting the LOST source state");
     }

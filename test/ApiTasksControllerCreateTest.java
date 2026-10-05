@@ -23,6 +23,8 @@ import java.util.regex.Pattern;
  */
 class ApiTasksControllerCreateTest extends FunctionalTest {
 
+    private static final String AGENT_NAME = "task-create-agent";
+
     @BeforeEach
     void setup() {
         Fixtures.deleteDatabase();
@@ -45,8 +47,8 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
 
     private Long seedAgent() {
         var resp = POST("/api/agents", "application/json", """
-                {"name": "task-create-agent", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """);
+                {"name": "%s", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
+                """.formatted(AGENT_NAME));
         assertIsOk(resp);
         var id = extractId(getContent(resp));
         return Long.parseLong(id);
@@ -318,15 +320,14 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
     @Test
     void emitsTaskMgmtCreateEvent() {
         var agentId = seedAgent();
-        var resp = POST("/api/tasks", "application/json", """
-                {"agentId": %d, "name": "audited-task", "schedule": "now"}
-                """.formatted(agentId));
-        assertIsOk(resp);
-        EventLogger.flush();
-        // event_log row with category TASK_MGMT_CREATE should mention the task name.
-        long count = models.EventLog.count(
-                "category = ?1 AND message LIKE ?2",
-                "TASK_MGMT_CREATE", "%audited-task%");
+        var events = EventLogger.captureMatchingForTest(e -> AGENT_NAME.equals(e.agentId()),
+                _ -> assertIsOk(POST("/api/tasks", "application/json", """
+                        {"agentId": %d, "name": "audited-task", "schedule": "now"}
+                        """.formatted(agentId))));
+        // The TASK_MGMT_CREATE event should mention the task name.
+        long count = events.stream()
+                .filter(e -> e.category().equals("TASK_MGMT_CREATE") && e.message().contains("audited-task"))
+                .count();
         assertEquals(1L, count, "expected exactly one TASK_MGMT_CREATE event");
     }
 }

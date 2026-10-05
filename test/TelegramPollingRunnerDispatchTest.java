@@ -6,7 +6,6 @@ import channels.TelegramPollingRunner;
 import channels.TelegramPollingRunnerTestHooks;
 import channels.TelegramReactionNotifier;
 import models.Agent;
-import models.EventLog;
 import models.TelegramBinding;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,7 +24,9 @@ import services.Tx;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -151,8 +152,20 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         return (LongPollingSingleThreadUpdateConsumer) consumer;
     }
 
-    private static long channelEvents(String likePattern) {
-        return EventLog.count("category = ?1 AND message LIKE ?2", "channel", likePattern);
+    /** Channel events whose message contains {@code parts} in this order, as the old {@code LIKE '%a%b%'} did. */
+    private static long channelEvents(List<EventLogger.Captured> logged, String... parts) {
+        return logged.stream().filter(e -> e.category().equals("channel") && containsInOrder(e.message(), parts))
+                .count();
+    }
+
+    private static boolean containsInOrder(String message, String... parts) {
+        int at = 0;
+        for (var part : parts) {
+            at = message.indexOf(part, at);
+            if (at < 0) return false;
+            at += part.length();
+        }
+        return true;
     }
 
     // ===== stop() with live sessions =====
@@ -166,16 +179,15 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
                 "the installed app reports running from construction (SDK contract)");
 
         EventLogger.clear();
-        TelegramPollingRunner.stop();
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(TelegramPollingRunner::stop);
 
         assertTrue(TelegramPollingRunner.activeBindingIds().isEmpty(),
                 "stop() must unregister every active binding");
         assertFalse(TelegramPollingRunner.isRunning(),
                 "stop() nulls the APP reference so isRunning() is false");
-        assertEquals(1L, channelEvents("%Long-polling app closed%"),
+        assertEquals(1L, channelEvents(logged, "Long-polling app closed"),
                 "the successful app close is logged");
-        assertTrue(channelEvents("%Unregistered polling session for binding " + id + "%") >= 1,
+        assertTrue(channelEvents(logged, "Unregistered polling session for binding " + id) >= 1,
                 "the per-binding unregister is logged");
     }
 
@@ -208,12 +220,11 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
 
         EventLogger.clear();
-        TelegramPollingRunner.stop(); // must not throw
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(TelegramPollingRunner::stop); // must not throw
 
         assertTrue(TelegramPollingRunner.activeBindingIds().isEmpty(),
                 "bindings are unregistered even when close() later fails");
-        assertEquals(1L, channelEvents("%Polling app shutdown error: close-boom%"),
+        assertEquals(1L, channelEvents(logged, "Polling app shutdown error: close-boom"),
                 "the close failure is logged at warn, not thrown");
     }
 
@@ -234,13 +245,12 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         Long id = seedPollingBinding("reg-fail-agent", "703:tokRegFail", "1", true);
 
         EventLogger.clear();
-        TelegramPollingRunner.reconcile(); // must not throw
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(TelegramPollingRunner::reconcile); // must not throw
 
         assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
                 "a binding whose registration failed must not be marked active");
-        assertEquals(1L, channelEvents(
-                        "%Failed to register binding " + id + "%[recoverable%"),
+        assertEquals(1L, channelEvents(logged,
+                        "Failed to register binding " + id, "[recoverable"),
                 "a network-ish failure is classified recoverable on the log line");
     }
 
@@ -265,12 +275,11 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         Long id = seedPollingBinding("reg-401-agent", "704:tokReg401", "1", true);
 
         EventLogger.clear();
-        TelegramPollingRunner.reconcile();
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(TelegramPollingRunner::reconcile);
 
         assertFalse(TelegramPollingRunner.activeBindingIds().contains(id));
-        assertEquals(1L, channelEvents(
-                        "%Failed to register binding " + id + "%[non-recoverable%"),
+        assertEquals(1L, channelEvents(logged,
+                        "Failed to register binding " + id, "[non-recoverable"),
                 "an auth failure is classified non-recoverable (operator action)");
     }
 
@@ -302,14 +311,13 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         });
 
         EventLogger.clear();
-        TelegramPollingRunner.reconcile(); // must not throw
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(TelegramPollingRunner::reconcile); // must not throw
 
         assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
                 "the binding must leave the active set even when the SDK unregister throws");
-        assertEquals(1L, channelEvents("%Unregister failed for binding " + id + "%"),
+        assertEquals(1L, channelEvents(logged, "Unregister failed for binding " + id),
                 "the unregister failure is logged at warn");
-        assertEquals(1L, channelEvents("%Unregistered polling session for binding " + id + "%"),
+        assertEquals(1L, channelEvents(logged, "Unregistered polling session for binding " + id),
                 "the unregister completion is still logged after the swallowed failure");
     }
 
@@ -333,11 +341,12 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         play.db.jpa.JPA.em().clear(); // evict the L1-cached (still-enabled) entity
 
         EventLogger.clear();
-        consumer.consume(updateFromJson("{\"update_id\":10,\"message\":{\"message_id\":1,"
+        var logged = new ArrayList<EventLogger.Captured>();
+        logged.addAll(EventLogger.captureForTest(() -> consumer.consume(updateFromJson(
+                "{\"update_id\":10,\"message\":{\"message_id\":1,"
                 + "\"date\":1,\"from\":{\"id\":1,\"is_bot\":false,\"first_name\":\"O\"},"
-                + "\"chat\":{\"id\":1,\"type\":\"private\"},\"text\":\"hi\"}}"));
-        EventLogger.flush();
-        assertEquals(1L, channelEvents("%Dropping update for missing/disabled binding " + id + "%"),
+                + "\"chat\":{\"id\":1,\"type\":\"private\"},\"text\":\"hi\"}}"))));
+        assertEquals(1L, channelEvents(logged, "Dropping update for missing/disabled binding " + id),
                 "an update for a just-disabled binding must be dropped with a warn");
         assertEquals(10, TelegramOffsetStore.load(token),
                 "the offset still advances for a dropped update (it was consumed)");
@@ -349,11 +358,11 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
             return null;
         });
         play.db.jpa.JPA.em().clear();
-        consumer.consume(updateFromJson("{\"update_id\":11,\"message\":{\"message_id\":2,"
+        logged.addAll(EventLogger.captureForTest(() -> consumer.consume(updateFromJson(
+                "{\"update_id\":11,\"message\":{\"message_id\":2,"
                 + "\"date\":1,\"from\":{\"id\":1,\"is_bot\":false,\"first_name\":\"O\"},"
-                + "\"chat\":{\"id\":1,\"type\":\"private\"},\"text\":\"hi\"}}"));
-        EventLogger.flush();
-        assertEquals(2L, channelEvents("%Dropping update for missing/disabled binding " + id + "%"),
+                + "\"chat\":{\"id\":1,\"type\":\"private\"},\"text\":\"hi\"}}"))));
+        assertEquals(2L, channelEvents(logged, "Dropping update for missing/disabled binding " + id),
                 "an update for a deleted binding must be dropped with a warn");
 
         // An update with NO update_id must not move the persisted offset.
@@ -370,17 +379,17 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         var consumer = consumerFor(token);
 
         EventLogger.clear();
-        consumer.consume(updateFromJson("{\"update_id\":20,\"callback_query\":{"
+        var logged = EventLogger.captureForTest(() -> consumer.consume(updateFromJson(
+                "{\"update_id\":20,\"callback_query\":{"
                 + "\"id\":\"cb-1\",\"chat_instance\":\"ci\","
                 + "\"from\":{\"id\":999,\"is_bot\":false,\"first_name\":\"Mallory\",\"username\":\"mallory\"},"
                 + "\"message\":{\"message_id\":5,\"date\":1,\"chat\":{\"id\":100,\"type\":\"private\"}},"
-                + "\"data\":\"model:pick\"}}"));
-        EventLogger.flush();
+                + "\"data\":\"model:pick\"}}")));
 
-        assertEquals(1L, channelEvents(
-                        "%Rejected callback from user 999: binding " + id + " is bound to user 1%"),
+        assertEquals(1L, channelEvents(logged,
+                        "Rejected callback from user 999: binding " + id + " is bound to user 1"),
                 "callbacks stay owner-only: a non-owner tap must be rejected and logged");
-        assertEquals(0L, channelEvents("%Polling update processing error%"),
+        assertEquals(0L, channelEvents(logged, "Polling update processing error"),
                 "the rejection is a clean gate, not an exception");
     }
 
@@ -399,22 +408,23 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
                         + "\"first_name\":\"JClaw\",\"username\":\"jclawbot\"}}");
         try {
             EventLogger.clear();
-            // 1) DM from a stranger (owner is telegram user 5, sender is 999).
-            consumer.consume(updateFromJson("{\"update_id\":30,\"message\":{\"message_id\":7,"
-                    + "\"date\":1,\"from\":{\"id\":999,\"is_bot\":false,\"first_name\":\"Mallory\","
-                    + "\"username\":\"mallory\"},"
-                    + "\"chat\":{\"id\":999,\"type\":\"private\"},\"text\":\"hi\"}}"));
-            // 2) Group message from the OWNER but without addressing the bot —
-            //    groups are served only when the bot is directly addressed.
-            consumer.consume(updateFromJson("{\"update_id\":31,\"message\":{\"message_id\":8,"
-                    + "\"date\":1,\"from\":{\"id\":5,\"is_bot\":false,\"first_name\":\"Owner\","
-                    + "\"username\":\"owner\"},"
-                    + "\"chat\":{\"id\":-100200,\"type\":\"group\"},\"text\":\"hello all\"}}"));
-            EventLogger.flush();
+            var logged = EventLogger.captureForTest(() -> {
+                // 1) DM from a stranger (owner is telegram user 5, sender is 999).
+                consumer.consume(updateFromJson("{\"update_id\":30,\"message\":{\"message_id\":7,"
+                        + "\"date\":1,\"from\":{\"id\":999,\"is_bot\":false,\"first_name\":\"Mallory\","
+                        + "\"username\":\"mallory\"},"
+                        + "\"chat\":{\"id\":999,\"type\":\"private\"},\"text\":\"hi\"}}"));
+                // 2) Group message from the OWNER but without addressing the bot —
+                //    groups are served only when the bot is directly addressed.
+                consumer.consume(updateFromJson("{\"update_id\":31,\"message\":{\"message_id\":8,"
+                        + "\"date\":1,\"from\":{\"id\":5,\"is_bot\":false,\"first_name\":\"Owner\","
+                        + "\"username\":\"owner\"},"
+                        + "\"chat\":{\"id\":-100200,\"type\":\"group\"},\"text\":\"hello all\"}}"));
+            });
 
-            assertEquals(2L, channelEvents("%Rejected inbound from%"),
+            assertEquals(2L, channelEvents(logged, "Rejected inbound from"),
                     "both the DM stranger and the unmentioned group message must be rejected");
-            assertEquals(0L, channelEvents("%Polling received from%"),
+            assertEquals(0L, channelEvents(logged, "Polling received from"),
                     "no rejected message may reach the accepted-dispatch path");
         } finally {
             TelegramChannel.clearForTest(token);
@@ -432,8 +442,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(id));
 
         EventLogger.clear();
-        TelegramPollingRunnerTestHooks.runTokenHealthProbe(); // stub says "accepted"
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(TelegramPollingRunnerTestHooks::runTokenHealthProbe); // stub says "accepted"
 
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
                 "an accepted token's session must stay registered");
@@ -441,7 +450,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
                 "an accepted token's binding must stay enabled");
         // Negative assertion: it must key to the live wording. Against the retired sentence it
         // would pass vacuously — green even if a healthy token did trigger a disable alert.
-        assertEquals(0L, channelEvents("%Telegram binding " + id + " was disabled%"),
+        assertEquals(0L, channelEvents(logged, "Telegram binding " + id + " was disabled"),
                 "no operator alert for a healthy token");
     }
 
@@ -459,8 +468,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         });
 
         EventLogger.clear();
-        TelegramPollingRunnerTestHooks.runTokenHealthProbe(); // must not throw
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(TelegramPollingRunnerTestHooks::runTokenHealthProbe); // must not throw
 
         assertTrue(TelegramBinding.<TelegramBinding>findById(idA).enabled,
                 "a binding whose probe merely errored must NOT be disabled");
@@ -470,7 +478,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
                 "one bad probe must not abort the sweep — the rejected token is still disabled");
         assertFalse(TelegramPollingRunner.activeBindingIds().contains(idB),
                 "the rejected token's session is unregistered");
-        assertEquals(1L, channelEvents("%Token health probe error for binding " + idA + "%"),
+        assertEquals(1L, channelEvents(logged, "Token health probe error for binding " + idA),
                 "the probe error is logged per-binding at warn");
     }
 
@@ -498,14 +506,13 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
             mock.respondWith("getMe", 401,
                     "{\"ok\":false,\"error_code\":401,\"description\":\"Unauthorized\"}");
             EventLogger.clear();
-            TelegramPollingRunnerTestHooks.runTokenHealthProbe();
-            EventLogger.flush();
+            var logged = EventLogger.captureForTest(TelegramPollingRunnerTestHooks::runTokenHealthProbe);
 
             assertFalse(TelegramBinding.<TelegramBinding>findById(id).enabled,
                     "a 401 getMe means a revoked/invalid token → the binding is disabled");
             assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
                     "the live session is unregistered after the disable");
-            assertEquals(1L, channelEvents("%Telegram binding " + id + " was disabled%"),
+            assertEquals(1L, channelEvents(logged, "Telegram binding " + id + " was disabled"),
                     "the operator alert names the binding whose token was rejected");
             assertEquals(2L, mock.countRequests("getMe"),
                     "exactly one getMe per probe run went over the wire");
@@ -582,16 +589,17 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
                 "5", "@ada", java.util.List.of("👍"), java.util.List.of());
 
         EventLogger.clear();
-        // Guards: none of these may throw or notify.
-        TelegramReactionNotifier.handleReaction(null, "711:tokNull", "1", groupDelta);
-        TelegramReactionNotifier.handleReaction(agent, "711:tokNull", "1", null);
-        TelegramReactionNotifier.handleReaction(agent, "711:tokNull", "1", nullChatDelta);
-        // Gate: mode=own + group reaction + no bot-sent cache entry → suppressed
-        // BEFORE any agent dispatch (the never-seen token has no cache).
-        TelegramReactionNotifier.handleReaction(agent, "711:tokNull", "1", groupDelta);
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(() -> {
+            // Guards: none of these may throw or notify.
+            TelegramReactionNotifier.handleReaction(null, "711:tokNull", "1", groupDelta);
+            TelegramReactionNotifier.handleReaction(agent, "711:tokNull", "1", null);
+            TelegramReactionNotifier.handleReaction(agent, "711:tokNull", "1", nullChatDelta);
+            // Gate: mode=own + group reaction + no bot-sent cache entry → suppressed
+            // BEFORE any agent dispatch (the never-seen token has no cache).
+            TelegramReactionNotifier.handleReaction(agent, "711:tokNull", "1", groupDelta);
+        });
 
-        assertEquals(0L, channelEvents("%Reaction notification%"),
+        assertEquals(0L, channelEvents(logged, "Reaction notification"),
                 "guards and the own-group suppression must produce zero notifications");
     }
 

@@ -136,19 +136,20 @@ class McpConnectionManagerTest extends UnitTest {
     @Test
     void connectEmitsMcpConnectEventLog() throws Exception {
         var server = seedStdioServer("fixture", FIXTURE_SCRIPT);
-        McpConnectionManager.connect(server);
-        awaitState("fixture", McpServer.Status.CONNECTED, 10);
 
         // Polled, not read once: the connect path flips status to CONNECTED
         // (McpConnectionManager L385) and only then writes the event (L390), two DB
         // writes later. awaitState returning therefore does not mean the event is
-        // queued, so a single flush-then-read races that window and fails on a loaded
+        // queued, so a single read races that window and fails on a loaded
         // machine. The guarantee the flip does carry is tools + allowlist, not this.
-        var connectEvents = awaitEvents("MCP_CONNECT", 10);
+        var connectEvents = captureServerEvents("MCP_CONNECT", "fixture", 10, () -> {
+            McpConnectionManager.connect(server);
+            awaitState("fixture", McpServer.Status.CONNECTED, 10);
+        });
         assertFalse(connectEvents.isEmpty(),
-                "MCP_CONNECT event must be persisted on successful connection");
-        assertTrue(connectEvents.get(0).message.contains("fixture"),
-                "MCP_CONNECT event must mention server name: " + connectEvents.get(0).message);
+                "MCP_CONNECT event must be logged on successful connection");
+        assertTrue(connectEvents.getLast().message().contains("fixture"),
+                "MCP_CONNECT event must mention server name: " + connectEvents.getLast().message());
     }
 
     // ==================== unhappy paths ====================
@@ -159,17 +160,14 @@ class McpConnectionManagerTest extends UnitTest {
         var cfg = new JsonObject();
         cfg.addProperty("url", "http://127.0.0.1:1/mcp");
         var server = seedServer("dead-http", McpServer.Transport.HTTP, cfg.toString());
-        McpConnectionManager.connect(server);
 
-        // Wait until at least one connect attempt has failed and status is ERROR.
-        awaitState("dead-http", McpServer.Status.ERROR, 5);
+        var attemptLogs = captureServerEvents("MCP_CONNECT", "dead-http", 5, () -> {
+            McpConnectionManager.connect(server);
+            // Wait until at least one connect attempt has failed and status is ERROR.
+            awaitState("dead-http", McpServer.Status.ERROR, 5);
+        });
         assertNotNull(McpConnectionManager.lastError("dead-http"),
                 "lastError must be set after connect failure");
-
-        EventLogger.flush();
-        var attemptLogs = Tx.run(() -> EventLog.find(
-                "category = ?1 AND message LIKE ?2 ORDER BY timestamp DESC",
-                "MCP_CONNECT", "%dead-http%").<EventLog>fetch());
         assertFalse(attemptLogs.isEmpty(),
                 "Failed connect attempts must be logged under MCP_CONNECT");
     }
@@ -305,6 +303,7 @@ class McpConnectionManagerTest extends UnitTest {
             assertEquals(0L, AgentSkillAllowedTool.count(
                     "skillName = ?1", "mcp:fixture"),
                     "allowlist rows must be cleared on stop");
+            // stop() saves this audit row directly, bypassing EventLogger, so only the table holds it.
             var unregEvents = EventLog.find(
                     "category = ?1 ORDER BY timestamp DESC", "MCP_TOOL_UNREGISTER")
                     .<EventLog>fetch();
@@ -356,8 +355,10 @@ class McpConnectionManagerTest extends UnitTest {
         assertEquals("echo:world", result);
 
         Tx.run(() -> {
+            // McpToolAdapter saves this audit row directly, bypassing EventLogger, so only the table holds it.
             var events = EventLog.find(
-                    "category = ?1 AND level = ?2", "MCP_TOOL_INVOKE", "INFO")
+                    "category = ?1 AND level = ?2 AND agentId = ?3", "MCP_TOOL_INVOKE", "INFO",
+                    String.valueOf(agentId))
                     .<EventLog>fetch();
             assertFalse(events.isEmpty(),
                     "successful invoke must log an MCP_TOOL_INVOKE row at INFO");
@@ -392,8 +393,10 @@ class McpConnectionManagerTest extends UnitTest {
                 "denied invoke must return allowlist error: " + result);
 
         Tx.run(() -> {
+            // McpToolAdapter saves this audit row directly, bypassing EventLogger, so only the table holds it.
             var denied = EventLog.find(
-                    "category = ?1 AND level = ?2", "MCP_TOOL_INVOKE", "WARN")
+                    "category = ?1 AND level = ?2 AND agentId = ?3", "MCP_TOOL_INVOKE", "WARN",
+                    String.valueOf(agentId))
                     .<EventLog>fetch();
             assertFalse(denied.isEmpty(),
                     "denied invoke must log MCP_TOOL_INVOKE at WARN");
@@ -678,17 +681,25 @@ class McpConnectionManagerTest extends UnitTest {
                 + ", lastError=" + McpConnectionManager.lastError(name) + ")");
     }
 
-    /** Events for {@code category}, newest first, once any exist — empty if none arrive in time. */
-    private List<EventLog> awaitEvents(String category, long maxSeconds) throws InterruptedException {
-        var deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(maxSeconds);
-        while (System.currentTimeMillis() < deadline) {
-            EventLogger.flush();
-            var found = Tx.run(() -> EventLog.find(
-                    "category = ?1 ORDER BY timestamp DESC", category).<EventLog>fetch());
-            if (!found.isEmpty()) return found;
-            Thread.sleep(50);
-        }
-        return List.of();
+    /** {@code category} events naming server {@code name} that any thread logs while {@code action} runs,
+     *  in record order, polled until one exists — empty if none arrive in time. */
+    private static List<EventLogger.Captured> captureServerEvents(String category, String name, long maxSeconds,
+            InterruptibleAction action) {
+        return EventLogger.captureMatchingForTest(
+                e -> e.category().equals(category) && e.message().contains("'" + name + "'"),
+                live -> {
+                    try {
+                        action.run();
+                        var deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(maxSeconds);
+                        while (live.isEmpty() && System.currentTimeMillis() < deadline) Thread.sleep(50);
+                    } catch (InterruptedException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+    }
+
+    private interface InterruptibleAction {
+        void run() throws InterruptedException;
     }
 
     private static boolean toolRegistered(String name) {

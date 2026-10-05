@@ -3,7 +3,6 @@ import channels.WhatsAppChannel;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.ChannelConfig;
-import models.EventLog;
 import models.WhatsAppBinding;
 import models.WhatsAppConversationWindow;
 import okhttp3.Interceptor;
@@ -36,7 +35,7 @@ import java.util.List;
  * depend on. So every test here drives the channel only down paths that return
  * before a socket would open: missing config, missing file, missing target,
  * and the window-gating decision, whose branch taken is asserted through the
- * {@link EventLog} lines each branch emits.
+ * event lines each branch emits.
  */
 class WhatsAppChannelTest extends UnitTest {
 
@@ -102,8 +101,10 @@ class WhatsAppChannelTest extends UnitTest {
         // any HTTP because effectiveConfig() is null, and the shared retry policy
         // surfaces the terminal per-peer error line.
         var peer = "wa-unconfigured-peer-" + System.nanoTime();
-        assertFalse(new WhatsAppChannel().sendText(peer, "hello").ok());
-        assertTrue(logExists("%Failed to send message to " + peer + " after retries%"),
+        var ok = new boolean[1];
+        var logged = EventLogger.captureForTest(() -> ok[0] = new WhatsAppChannel().sendText(peer, "hello").ok());
+        assertFalse(ok[0]);
+        assertTrue(logExists(logged, "Failed to send message to " + peer + " after retries"),
                 "the retry policy must log the terminal failure for this peer");
     }
 
@@ -161,16 +162,17 @@ class WhatsAppChannelTest extends UnitTest {
         binding.accessToken = "tok";
         var ch = WhatsAppChannel.forBinding(binding);
         EventLogger.clear();
-        assertFalse(ch.sendReaction("15550001111", null, "👍").ok(),
-                "null target message id → FAILED");
-        assertFalse(ch.sendReaction("15550001111", "   ", "👍").ok(),
-                "blank target message id → FAILED");
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(() -> {
+            assertFalse(ch.sendReaction("15550001111", null, "👍").ok(),
+                    "null target message id → FAILED");
+            assertFalse(ch.sendReaction("15550001111", "   ", "👍").ok(),
+                    "blank target message id → FAILED");
+        });
         // The guard's own log line distinguishes "guard fired" from "guard
         // deleted and a live graph.facebook.com call failed" — both would
         // otherwise surface as the same FAILED result.
-        assertEquals(2L, EventLog.count("category = ?1 AND message LIKE ?2",
-                        "channel", "%sendReaction skipped: no target message id%"),
+        assertEquals(2L, logged.stream().filter(e -> e.category().equals("channel")
+                        && e.message().contains("sendReaction skipped: no target message id")).count(),
                 "each guarded call must log the skip, proving no wire attempt was made");
     }
 
@@ -182,11 +184,12 @@ class WhatsAppChannelTest extends UnitTest {
         var ch = WhatsAppChannel.forBinding(binding);
         var peer = "wa-ow-peer-" + System.nanoTime();
 
-        assertFalse(ch.sendText(peer, "reply after 24h").ok(),
-                "unconfigured best-effort send must fail");
-        assertTrue(logExists("%Outbound to " + peer + " is outside the 24h window%"),
+        var ok = new boolean[1];
+        var logged = EventLogger.captureForTest(() -> ok[0] = ch.sendText(peer, "reply after 24h").ok());
+        assertFalse(ok[0], "unconfigured best-effort send must fail");
+        assertTrue(logExists(logged, "Outbound to " + peer + " is outside the 24h window"),
                 "the operator-config gap (no template) must be surfaced as a warning");
-        assertTrue(logExists("%Failed to send message to " + peer + " after retries%"),
+        assertTrue(logExists(logged, "Failed to send message to " + peer + " after retries"),
                 "the free-form fallback must actually attempt the send (retry error proves it)");
     }
 
@@ -200,10 +203,12 @@ class WhatsAppChannelTest extends UnitTest {
         var ch = WhatsAppChannel.forBinding(binding);
         var peer = "wa-tpl-peer-" + System.nanoTime();
 
-        assertFalse(ch.sendText(peer, "reply after 24h").ok());
-        assertFalse(logExists("%Outbound to " + peer + " is outside the 24h window%"),
+        var ok = new boolean[1];
+        var logged = EventLogger.captureForTest(() -> ok[0] = ch.sendText(peer, "reply after 24h").ok());
+        assertFalse(ok[0]);
+        assertFalse(logExists(logged, "Outbound to " + peer + " is outside the 24h window"),
                 "a configured template must not trigger the missing-template warning");
-        assertFalse(logExists("%Failed to send message to " + peer + "%"),
+        assertFalse(logExists(logged, "Failed to send message to " + peer),
                 "the free-form retry path must NOT run when a template opener is configured");
     }
 
@@ -217,11 +222,12 @@ class WhatsAppChannelTest extends UnitTest {
         var peer = "wa-win-peer-" + System.nanoTime();
         WhatsAppConversationWindow.recordInbound(binding.id, peer, Instant.now());
 
-        assertFalse(ch.sendText(peer, "in-window reply").ok(),
-                "unconfigured free-form send must fail");
-        assertFalse(logExists("%Outbound to " + peer + " is outside the 24h window%"),
+        var ok = new boolean[1];
+        var logged = EventLogger.captureForTest(() -> ok[0] = ch.sendText(peer, "in-window reply").ok());
+        assertFalse(ok[0], "unconfigured free-form send must fail");
+        assertFalse(logExists(logged, "Outbound to " + peer + " is outside the 24h window"),
                 "an open window must not route through the out-of-window opener");
-        assertTrue(logExists("%Failed to send message to " + peer + " after retries%"),
+        assertTrue(logExists(logged, "Failed to send message to " + peer + " after retries"),
                 "in-window the free-form send is attempted despite the configured template");
     }
 
@@ -239,12 +245,13 @@ class WhatsAppChannelTest extends UnitTest {
         binding.templateName = "reopen_conversation";
         var body = "{\"error\":{\"message\":\"Re-engagement message\",\"code\":131047}}";
 
-        var result = HttpFactories.callWith(cannedClient(400, body),
-                () -> WhatsAppChannel.forBinding(binding).trySend("447900987654", "hello"));
+        var result = new Channel.SendResult[1];
+        var logged = EventLogger.captureForTest(() -> result[0] = HttpFactories.callWith(cannedClient(400, body),
+                () -> WhatsAppChannel.forBinding(binding).trySend("447900987654", "hello")));
 
-        assertEquals(Channel.SendResult.REJECTED, result);
-        assertTrue(logExists("%binding 987654 held a reply%"), "the rejection is logged");
-        assertFalse(logExists("%binding 987654 held a reply%none configured%"),
+        assertEquals(Channel.SendResult.REJECTED, result[0]);
+        assertTrue(logExists(logged, "binding 987654 held a reply"), "the rejection is logged");
+        assertFalse(logExists(logged, "binding 987654 held a reply", "none configured"),
                 "this binding has a template, so the log must not say it has none");
     }
 
@@ -361,11 +368,17 @@ class WhatsAppChannelTest extends UnitTest {
         return binding;
     }
 
-    /** Flush the async event queue, then check for a persisted log line. Peer ids
-     *  are per-test unique, so LIKE patterns can't match another test's events. */
-    private static boolean logExists(String likePattern) {
-        EventLogger.flush();
-        return EventLog.count("message like ?1", likePattern) > 0;
+    /** Whether a captured message contains {@code parts} in this order, as the old {@code LIKE '%a%b%'} did. */
+    private static boolean logExists(List<EventLogger.Captured> logged, String... parts) {
+        return logged.stream().anyMatch(e -> {
+            int at = 0;
+            for (var part : parts) {
+                at = e.message().indexOf(part, at);
+                if (at < 0) return false;
+                at += part.length();
+            }
+            return true;
+        });
     }
 
     /** A transport whose interceptor answers every request with {@code code} and {@code body}. */

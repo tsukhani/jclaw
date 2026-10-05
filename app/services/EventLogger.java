@@ -7,11 +7,16 @@ import utils.AppClock;
 import utils.GsonHolder;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 
 public class EventLogger {
 
@@ -40,10 +45,22 @@ public class EventLogger {
 
     private static final ConcurrentLinkedQueue<EventLog> pending = new ConcurrentLinkedQueue<>();
 
-    /** One event as {@link #record} received it: what {@link #captureForTest} hands back. */
-    public record Captured(String level, String category, String message) {}
+    /** One event as {@link #record} received it, message untruncated: what the capture seams hand back. */
+    public record Captured(String level, String category, @Nullable String agentId, @Nullable String channel,
+                           String message, @Nullable String details) {}
+
+    /** A class, not a record: two listeners with equal state must stay two entries in the set. */
+    private static final class Listener {
+        final Predicate<Captured> match;
+        final List<Captured> seen = new CopyOnWriteArrayList<>();
+
+        Listener(Predicate<Captured> match) {
+            this.match = match;
+        }
+    }
 
     private static final ScopedValue<List<Captured>> CAPTURE = ScopedValue.newInstance();
+    private static final CopyOnWriteArraySet<Listener> LISTENERS = new CopyOnWriteArraySet<>();
     private static final int BATCH_SIZE = 20;
 
     /** Set at the start of graceful shutdown (by the @OnApplicationStop hooks).
@@ -117,7 +134,11 @@ public class EventLogger {
             default -> Logger.info(logMessage);
         }
 
-        if (CAPTURE.isBound()) CAPTURE.get().add(new Captured(level, category, message));
+        if (CAPTURE.isBound() || !LISTENERS.isEmpty()) {
+            var captured = new Captured(level, category, agentId, channel, message, details);
+            if (CAPTURE.isBound()) CAPTURE.get().add(captured);
+            for (var l : LISTENERS) if (l.match.test(captured)) l.seen.add(captured);
+        }
 
         // During graceful shutdown stay file-only: the JPA layer is closing, so
         // queuing for DB persistence is pointless and would trip the batch flush
@@ -153,6 +174,24 @@ public class EventLogger {
         var seen = new ArrayList<Captured>();
         ScopedValue.where(CAPTURE, seen).run(body);
         return List.copyOf(seen);
+    }
+
+    /**
+     * Test-only: run {@code body} and return every event that {@code match} accepts, recorded on any
+     * thread meanwhile — for an event a background thread logs, which {@link #captureForTest} cannot
+     * reach. {@code body} receives the live, read-only list so it can poll for that event. The listener
+     * is process-global and sees every class's events, so {@code match} must name the caller's own rows
+     * (an agent, task or token it minted). {@link #clear} does not touch it.
+     */
+    public static List<Captured> captureMatchingForTest(Predicate<Captured> match, Consumer<List<Captured>> body) {
+        var listener = new Listener(match);
+        LISTENERS.add(listener);
+        try {
+            body.accept(Collections.unmodifiableList(listener.seen));
+        } finally {
+            LISTENERS.remove(listener);
+        }
+        return List.copyOf(listener.seen);
     }
 
     /**

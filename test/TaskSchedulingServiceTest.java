@@ -4,7 +4,6 @@ import com.github.kagkarlsson.scheduler.exceptions.TaskInstanceNotFoundException
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import models.Agent;
-import models.EventLog;
 import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -203,13 +202,13 @@ class TaskSchedulingServiceTest extends UnitTest {
         var task = persistTask(Task.Type.SCHEDULED, Instant.now().plus(Duration.ofHours(1)), null);
         stub.scheduleIfNotExistsReturns = false; // a row already holds this task
 
-        TaskSchedulingService.register(task);
+        var logged = EventLogger.captureForTest(() -> TaskSchedulingService.register(task));
 
         assertTrue(stub.schedules.isEmpty(), "nothing was created, so nothing is recorded");
         // Paired: this message proves the log is being read, so the zero below is a real zero.
-        assertEquals(1L, loggedLike("Task '" + task.name + "' already has a pending fire%"),
+        assertEquals(1L, loggedLike(logged, "Task '" + task.name + "' already has a pending fire"),
                 "the not-scheduled branch must say what happened");
-        assertEquals(0L, loggedLike("Scheduled Task '" + task.name + "'%"),
+        assertEquals(0L, loggedLike(logged, "Scheduled Task '" + task.name + "'"),
                 "register must not log Scheduled when scheduleIfNotExists created nothing");
     }
 
@@ -217,16 +216,14 @@ class TaskSchedulingServiceTest extends UnitTest {
     void registerLogsScheduledWhenItCreatedTheRow() {
         var task = persistTask(Task.Type.SCHEDULED, Instant.now().plus(Duration.ofHours(1)), null);
 
-        TaskSchedulingService.register(task);
+        var logged = EventLogger.captureForTest(() -> TaskSchedulingService.register(task));
 
-        assertEquals(1L, loggedLike("Scheduled Task '" + task.name + "'%"));
-        assertEquals(0L, loggedLike("Task '" + task.name + "' already has a pending fire%"));
+        assertEquals(1L, loggedLike(logged, "Scheduled Task '" + task.name + "'"));
+        assertEquals(0L, loggedLike(logged, "Task '" + task.name + "' already has a pending fire"));
     }
 
-    /** EventLogger batches writes on a 30s window; flush first. Task names are unique per test. */
-    private static long loggedLike(String pattern) {
-        EventLogger.flush();
-        return EventLog.count("category = ?1 AND message LIKE ?2", "task", pattern);
+    private static long loggedLike(List<EventLogger.Captured> logged, String prefix) {
+        return logged.stream().filter(e -> e.category().equals("task") && e.message().startsWith(prefix)).count();
     }
 
     private Task persistTask(Task.Type type, Instant scheduledAt, String cronExpression) {

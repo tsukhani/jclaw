@@ -1,10 +1,11 @@
 import memory.MemoryAutoCapture;
-import models.EventLog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.EventLogger;
+
+import java.util.List;
 
 /**
  * JCLAW-928: a capture that cannot resolve its context must say so. Exercises
@@ -28,25 +29,26 @@ class MemoryCaptureSkipLoggingTest extends UnitTest {
         return a;
     }
 
-    private static long skipEvents() {
-        EventLogger.flush();
-        return EventLog.count("category = ?1 AND message LIKE ?2", "memory", "Auto-capture skipped:%");
+    private static List<EventLogger.Captured> skipEvents(List<EventLogger.Captured> logged) {
+        return logged.stream()
+                .filter(e -> e.category().equals("memory") && e.message().startsWith("Auto-capture skipped:"))
+                .toList();
     }
 
     @Test
     void missingConversationIsLoggedNotSilentlySwallowed() {
         var a = agent();
 
-        var ctx = MemoryAutoCapture.resolveExtractContext(a, 999_999_999L, a.name);
+        var ctx = new Object[1];
+        var logged = EventLogger.captureForTest(
+                () -> ctx[0] = MemoryAutoCapture.resolveExtractContext(a, 999_999_999L, a.name));
 
-        assertNull(ctx, "a capture with no conversation must not proceed");
-        assertEquals(1, skipEvents(), "the reason must reach the event log — silence is the defect");
-        EventLogger.flush();
-        var ev = EventLog.find("category = ?1 AND message LIKE ?2 ORDER BY id DESC",
-                "memory", "Auto-capture skipped:%").<EventLog>first();
-        assertNotNull(ev);
-        assertTrue(ev.message.contains("999999999"),
-                "the message must name the conversation so the race is diagnosable, got: " + ev.message);
+        assertNull(ctx[0], "a capture with no conversation must not proceed");
+        var skips = skipEvents(logged);
+        assertEquals(1, skips.size(), "the reason must reach the event log — silence is the defect");
+        var ev = skips.getLast();
+        assertTrue(ev.message().contains("999999999"),
+                "the message must name the conversation so the race is diagnosable, got: " + ev.message());
     }
 
     @Test
@@ -57,10 +59,12 @@ class MemoryCaptureSkipLoggingTest extends UnitTest {
         conv.channelType = models.ChannelType.VOICE.value;
         conv.save();
 
-        var ctx = MemoryAutoCapture.resolveExtractContext(a, conv.id, a.name);
+        var ctx = new Object[1];
+        var logged = EventLogger.captureForTest(
+                () -> ctx[0] = MemoryAutoCapture.resolveExtractContext(a, conv.id, a.name));
 
-        assertNull(ctx, "voice turns are deliberately not auto-captured (JCLAW-866)");
-        assertEquals(0, skipEvents(),
+        assertNull(ctx[0], "voice turns are deliberately not auto-captured (JCLAW-866)");
+        assertEquals(0, skipEvents(logged).size(),
                 "an intentional per-turn skip must not log, or voice sessions flood the event log");
     }
 }

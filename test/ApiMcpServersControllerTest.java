@@ -453,6 +453,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
     private static String cleanupDiagnostics() {
         services.EventLogger.flush();
         return commitInFreshTx(() -> {
+            // clearAllowlistAndAudit saves its audit row directly, bypassing EventLogger, so only the table holds it.
             java.util.List<models.EventLog> events = models.EventLog.find("category = ?1 and message like ?2",
                     "MCP_TOOL_UNREGISTER", "%'clean'%").fetch();
             return "rows left %d, unregister events %s".formatted(

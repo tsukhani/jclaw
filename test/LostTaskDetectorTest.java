@@ -1,5 +1,4 @@
 import models.Agent;
-import models.EventLog;
 import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,18 +58,17 @@ class LostTaskDetectorTest extends UnitTest {
         var task = persistTask("running-task", Task.Status.RUNNING);
         var heartbeat = Instant.now().minusSeconds(90);
 
-        int flipped = LostTaskDetector.markLost(
-                List.of(new LostTaskDetector.StaleRow(task.id, heartbeat)));
+        var flipped = new int[1];
+        var logged = EventLogger.captureForTest(() -> flipped[0] = LostTaskDetector.markLost(
+                List.of(new LostTaskDetector.StaleRow(task.id, heartbeat))));
 
-        assertEquals(1, flipped);
+        assertEquals(1, flipped[0]);
         var reloaded = (Task) Task.findById(task.id);
         assertEquals(Task.Status.LOST, reloaded.status,
                 "RUNNING with stale heartbeat must flip to LOST");
 
-        EventLogger.flush();
-        long lostEvents = EventLog.count(
-                "category = ?1 AND message LIKE ?2",
-                "TASK_LOST", "%running-task%");
+        long lostEvents = logged.stream()
+                .filter(e -> e.category().equals("TASK_LOST") && e.message().contains("running-task")).count();
         assertEquals(1L, lostEvents,
                 "expected exactly one TASK_LOST event-log row");
     }

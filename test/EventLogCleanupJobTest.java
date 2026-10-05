@@ -47,6 +47,7 @@ class EventLogCleanupJobTest extends UnitTest {
 
         new EventLogCleanupJob().doJob();
 
+        // The retention delete is the subject, so the table is read directly.
         // Counted, not findById: the job deletes with a bulk JPQL statement, which
         // leaves the persistence context holding the row it just removed.
         assertEquals(0, EventLog.count("message = ?1", "stale-entry"),
@@ -87,6 +88,7 @@ class EventLogCleanupJobTest extends UnitTest {
         try {
             new EventLogCleanupJob().doJob();
 
+            // The retention delete is the subject, so the table is read directly.
             assertEquals(1, EventLog.count("message = ?1", "stale-entry"),
                     "logs.retentionDays=" + retentionDays + " must disable cleanup, not empty the log");
             assertEquals(1, EventLog.count("message = ?1", "fresh-entry"),

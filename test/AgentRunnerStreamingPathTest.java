@@ -3,7 +3,6 @@ import agents.ToolRegistry;
 import llm.LlmResilience;
 import models.Agent;
 import models.Conversation;
-import models.EventLog;
 import models.Message;
 import models.MessageAttachment;
 import models.MessageRole;
@@ -27,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 
 /**
  * JCLAW-318: residual coverage for {@link AgentRunner#runStreaming} —
@@ -325,54 +325,48 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         ToolRegistrySync.withTools(List.of(holdTool(toolEntered, releaseTool)), () -> {
             var stoppedFlag = new AtomicBoolean(false);
             try {
-                var stopped = streamAndAwait(agent, convo.id, "web", convo.peerId, "long task", stoppedFlag);
-                assertTrue(toolEntered.await(30, TimeUnit.SECONDS), "the stopped turn's tool is running");
+                captureEvents(droppedRows(agent), live -> {
+                    var stopped = streamAndAwait(agent, convo.id, "web", convo.peerId, "long task", stoppedFlag);
+                    assertTrue(toolEntered.await(30, TimeUnit.SECONDS), "the stopped turn's tool is running");
 
-                assertTrue(stopLikeTheEndpoint(convo.id));
-                long maxIdAtStop = messages(convo.id).stream().mapToLong(m -> m.id).max().orElse(0);
+                    assertTrue(stopLikeTheEndpoint(convo.id));
+                    long maxIdAtStop = messages(convo.id).stream().mapToLong(m -> m.id).max().orElse(0);
 
-                var fresh = streamAndAwait(agent, convo.id, "web", convo.peerId, "follow-up", new AtomicBoolean(false));
-                assertTrue(secondArrived.await(30, TimeUnit.SECONDS), "the follow-up owns the conversation");
+                    var fresh = streamAndAwait(agent, convo.id, "web", convo.peerId, "follow-up", new AtomicBoolean(false));
+                    assertTrue(secondArrived.await(30, TimeUnit.SECONDS), "the follow-up owns the conversation");
 
-                releaseTool.countDown();
-                assertTrue(stopped.terminated.await(60, TimeUnit.SECONDS), "the stopped turn terminates");
-                assertTrue(services.ConversationQueue.isBusy(convo.id),
-                        "the stopped turn's late release leaves the new turn's ownership intact");
-                // The drop line is written in the stopped turn's finally, after its terminal callback and any capture.
-                List<EventLog> drops = new java.util.ArrayList<>();
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-                while (drops.isEmpty() && System.nanoTime() < deadline) {
-                    EventLogger.flush();
-                    JPA.em().clear();
-                    for (Object o : EventLog.find("category = ?1 AND agentId = ?2 AND message LIKE ?3",
-                            "queue", agent.name, "Dropped%").fetch()) {
-                        drops.add((EventLog) o);
+                    releaseTool.countDown();
+                    assertTrue(stopped.terminated.await(60, TimeUnit.SECONDS), "the stopped turn terminates");
+                    assertTrue(services.ConversationQueue.isBusy(convo.id),
+                            "the stopped turn's late release leaves the new turn's ownership intact");
+                    // The drop line is written in the stopped turn's finally, after its terminal callback and any capture.
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                    while (live.isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+                    var drops = List.copyOf(live);
+                    assertEquals(1, drops.size(), "one drop line per stopped turn");
+                    assertTrue(drops.getFirst().message().contains("Dropped 2 message rows")
+                                    && drops.getFirst().message().contains("conversation " + convo.id),
+                            drops.getFirst().message());
+                    assertFalse(memory.MemoryAutoCapture.captureRequestedForTest(convo.id),
+                            "the stopped exchange is never captured");
+
+                    releaseSecond.countDown();
+                    assertTrue(fresh.terminated.await(60, TimeUnit.SECONDS));
+                    assertEquals("fresh", fresh.completed.get());
+                    deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                    while (services.ConversationQueue.isBusy(convo.id) && System.nanoTime() < deadline) {
+                        Thread.sleep(50);
                     }
-                    if (drops.isEmpty()) Thread.sleep(50);
-                }
-                assertEquals(1, drops.size(), "one drop line per stopped turn");
-                assertTrue(drops.getFirst().message.contains("Dropped 2 message rows")
-                                && drops.getFirst().message.contains("conversation " + convo.id),
-                        drops.getFirst().message);
-                assertFalse(memory.MemoryAutoCapture.captureRequestedForTest(convo.id),
-                        "the stopped exchange is never captured");
+                    assertFalse(services.ConversationQueue.isBusy(convo.id), "the new turn released on completion");
 
-                releaseSecond.countDown();
-                assertTrue(fresh.terminated.await(60, TimeUnit.SECONDS));
-                assertEquals("fresh", fresh.completed.get());
-                deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-                while (services.ConversationQueue.isBusy(convo.id) && System.nanoTime() < deadline) {
-                    Thread.sleep(50);
-                }
-                assertFalse(services.ConversationQueue.isBusy(convo.id), "the new turn released on completion");
-
-                var all = messages(convo.id);
-                var after = all.stream().filter(m -> m.id > maxIdAtStop).toList();
-                assertEquals(List.of("user:follow-up", "assistant:fresh"),
-                        after.stream().map(m -> m.role + ":" + m.content).toList(),
-                        "every row after the stop is the follow-up's");
-                assertTrue(all.stream().noneMatch(m -> MessageRole.TOOL.value.equals(m.role) || m.toolCalls != null),
-                        "no tool-call or tool-result row from the stopped turn");
+                    var all = messages(convo.id);
+                    var after = all.stream().filter(m -> m.id > maxIdAtStop).toList();
+                    assertEquals(List.of("user:follow-up", "assistant:fresh"),
+                            after.stream().map(m -> m.role + ":" + m.content).toList(),
+                            "every row after the stop is the follow-up's");
+                    assertTrue(all.stream().noneMatch(m -> MessageRole.TOOL.value.equals(m.role) || m.toolCalls != null),
+                            "no tool-call or tool-result row from the stopped turn");
+                });
             } finally {
                 releaseTool.countDown();
                 releaseSecond.countDown();
@@ -406,29 +400,29 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         var released = new CountDownLatch(0);
         ToolRegistrySync.withTools(List.of(holdTool(new CountDownLatch(1), released)), () -> {
             try {
-                var h = streamAndAwait(agent, convo.id, "web", convo.peerId, "run it", new AtomicBoolean(false));
-                assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
-                assertEquals("done", h.completed.get());
-                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-                while (services.ConversationQueue.isBusy(convo.id) && System.nanoTime() < deadline) {
-                    Thread.sleep(50);
-                }
-                assertFalse(services.ConversationQueue.isBusy(convo.id));
+                var drops = captureEvents(droppedRows(agent), live -> {
+                    var h = streamAndAwait(agent, convo.id, "web", convo.peerId, "run it", new AtomicBoolean(false));
+                    assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
+                    assertEquals("done", h.completed.get());
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                    while (services.ConversationQueue.isBusy(convo.id) && System.nanoTime() < deadline) {
+                        Thread.sleep(50);
+                    }
+                    assertFalse(services.ConversationQueue.isBusy(convo.id));
 
-                var rows = messages(convo.id);
-                assertTrue(rows.stream().anyMatch(m -> m.toolCalls != null && m.toolCalls.contains(HOLD_TOOL)),
-                        "the tool-call row persists");
-                assertTrue(rows.stream().anyMatch(m -> MessageRole.TOOL.value.equals(m.role)),
-                        "the tool-result row persists");
-                EventLogger.flush();
-                assertEquals(0, EventLog.count("category = ?1 AND agentId = ?2 AND message LIKE ?3",
-                        "queue", agent.name, "Dropped%"), "an unstopped turn drops nothing");
-                // The early release precedes onComplete, and capture follows finalize: wait for it too.
-                while (!memory.MemoryAutoCapture.captureRequestedForTest(convo.id) && System.nanoTime() < deadline) {
-                    Thread.sleep(50);
-                }
-                assertTrue(memory.MemoryAutoCapture.captureRequestedForTest(convo.id),
-                        "the test can see a capture request");
+                    var rows = messages(convo.id);
+                    assertTrue(rows.stream().anyMatch(m -> m.toolCalls != null && m.toolCalls.contains(HOLD_TOOL)),
+                            "the tool-call row persists");
+                    assertTrue(rows.stream().anyMatch(m -> MessageRole.TOOL.value.equals(m.role)),
+                            "the tool-result row persists");
+                    // The early release precedes onComplete, and capture follows finalize: wait for it too.
+                    while (!memory.MemoryAutoCapture.captureRequestedForTest(convo.id) && System.nanoTime() < deadline) {
+                        Thread.sleep(50);
+                    }
+                    assertTrue(memory.MemoryAutoCapture.captureRequestedForTest(convo.id),
+                            "the test can see a capture request");
+                });
+                assertEquals(0, drops.size(), "an unstopped turn drops nothing");
             } finally {
                 services.ConversationQueue.releaseOwnership(convo.id);
                 CircuitBreakers.remove(LlmResilience.breakerName(provider));
@@ -465,24 +459,21 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         JPA.em().getTransaction().begin();
 
         try {
-            var h = streamAndAwait(agent, convo.id, "web", convo.peerId, "question", new AtomicBoolean(false));
-            assertTrue(arrived.await(30, TimeUnit.SECONDS));
-            // Ownership leaves the turn with its flag unset, so only the fence stands between it and a save.
-            services.ConversationQueue.releaseOwnership(convo.id);
-            assertNotEquals(services.ConversationQueue.NOT_ACQUIRED, services.ConversationQueue.tryAcquireOwnership(
-                    convo.id, new services.ConversationQueue.QueuedMessage("other", "web", convo.peerId, agent), null));
-            release.countDown();
-            assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
+            var dropped = captureEvents(droppedRows(agent), live -> {
+                var h = streamAndAwait(agent, convo.id, "web", convo.peerId, "question", new AtomicBoolean(false));
+                assertTrue(arrived.await(30, TimeUnit.SECONDS));
+                // Ownership leaves the turn with its flag unset, so only the fence stands between it and a save.
+                services.ConversationQueue.releaseOwnership(convo.id);
+                assertNotEquals(services.ConversationQueue.NOT_ACQUIRED, services.ConversationQueue.tryAcquireOwnership(
+                        convo.id, new services.ConversationQueue.QueuedMessage("other", "web", convo.peerId, agent), null));
+                release.countDown();
+                assertTrue(h.terminated.await(60, TimeUnit.SECONDS));
 
-            // The dropped-rows line follows the capture decision, so the turn has decided once it appears.
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
-            long dropped = 0;
-            while (dropped == 0 && System.nanoTime() < deadline) {
-                EventLogger.flush();
-                dropped = EventLog.count("category = ?1 AND agentId = ?2 AND message LIKE ?3", "queue", agent.name, "Dropped%");
-                if (dropped == 0) Thread.sleep(50);
-            }
-            assertTrue(dropped > 0, "the reply was dropped by the fence");
+                // The dropped-rows line follows the capture decision, so the turn has decided once it appears.
+                long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+                while (live.isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+            });
+            assertFalse(dropped.isEmpty(), "the reply was dropped by the fence");
             assertTrue(messages(convo.id).stream().noneMatch(m -> "late reply".equals(m.content)));
             assertFalse(memory.MemoryAutoCapture.captureRequestedForTest(convo.id),
                     "a reply the fence dropped is not captured");
@@ -857,10 +848,12 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();
         try {
-            var harness = streamAndAwait(agent, convo, "say hi");
-            assertTrue(harness.terminated.await(60, TimeUnit.SECONDS));
+            var retries = retryLogLines(agent, () -> {
+                var harness = streamAndAwait(agent, convo, "say hi");
+                assertTrue(harness.terminated.await(60, TimeUnit.SECONDS));
+            });
             assertEquals(2, calls.get(), "one attempt and one retry reach the wire");
-            assertEquals(1, retryLogLines(agent), "and the retry is announced once");
+            assertEquals(1, retries, "and the retry is announced once");
         } finally {
             CircuitBreakers.remove(LlmResilience.breakerName("jclaw1188-flaky"));
         }
@@ -877,10 +870,12 @@ class AgentRunnerStreamingPathTest extends UnitTest {
         JPA.em().getTransaction().begin();
         try {
             LlmResilience.breakerFor("jclaw1188-open").trip();
-            var harness = streamAndAwait(agent, convo, "say hi");
-            assertTrue(harness.terminated.await(60, TimeUnit.SECONDS));
+            var retries = retryLogLines(agent, () -> {
+                var harness = streamAndAwait(agent, convo, "say hi");
+                assertTrue(harness.terminated.await(60, TimeUnit.SECONDS));
+            });
             assertEquals(0, calls.get(), "refused before the wire");
-            assertEquals(0, retryLogLines(agent),
+            assertEquals(0, retries,
                     "a refusal is not a transient error: no second refusal, no misleading log line");
         } finally {
             CircuitBreakers.remove(LlmResilience.breakerName("jclaw1188-open"));
@@ -888,17 +883,40 @@ class AgentRunnerStreamingPathTest extends UnitTest {
     }
 
     /**
-     * Event-log rows are batched and the runner flushes its own on the stream thread after the
-     * terminal callback, so the line can be mid-commit when the harness returns; poll briefly.
+     * Retry lines logged for {@code agent} while {@code turn} runs. The runner logs on its stream thread
+     * after the terminal callback, so the line can trail the harness returning; poll briefly.
      */
-    private static long retryLogLines(Agent agent) throws InterruptedException {
-        var deadline = System.nanoTime() + 5_000_000_000L;
-        while (true) {
-            EventLogger.flush();
-            var count = EventLog.count("agentId = ?1 AND message LIKE ?2", agent.name, "Retrying streaming%");
-            if (count > 0 || System.nanoTime() >= deadline) return count;
-            Thread.sleep(100);
-        }
+    private static long retryLogLines(Agent agent, ToolRegistrySync.ThrowingBody turn) throws Exception {
+        return captureEvents(e -> agent.name.equals(e.agentId()) && e.message().startsWith("Retrying streaming"),
+                live -> {
+                    turn.run();
+                    var deadline = System.nanoTime() + 5_000_000_000L;
+                    while (live.isEmpty() && System.nanoTime() < deadline) Thread.sleep(100);
+                }).size();
+    }
+
+    private static Predicate<EventLogger.Captured> droppedRows(Agent agent) {
+        return e -> "queue".equals(e.category()) && agent.name.equals(e.agentId())
+                && e.message().startsWith("Dropped");
+    }
+
+    private interface LiveBody {
+        void run(List<EventLogger.Captured> live) throws Exception;
+    }
+
+    /** {@link EventLogger#captureMatchingForTest} for a body that throws checked exceptions. */
+    private static List<EventLogger.Captured> captureEvents(Predicate<EventLogger.Captured> match, LiveBody body)
+            throws Exception {
+        var failure = new AtomicReference<Exception>();
+        var events = EventLogger.captureMatchingForTest(match, live -> {
+            try {
+                body.run(live);
+            } catch (Exception e) {
+                failure.set(e);
+            }
+        });
+        if (failure.get() != null) throw failure.get();
+        return events;
     }
 
     // ─── Audio-format-rejection → transcript re-stream recovery ─────────

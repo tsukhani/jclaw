@@ -1,7 +1,6 @@
 import channels.TelegramReactionNotifier;
 import channels.TelegramReactionNotifier.ReactionDelta;
 import models.Agent;
-import models.EventLog;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.EventLogger;
@@ -47,15 +46,14 @@ class TelegramReactionNotifierTest extends UnitTest {
         var agent = new Agent();
         agent.name = "jclaw1228-reaction-" + System.nanoTime();
 
-        EventLogger.flush();
-        TelegramReactionNotifier.handleReaction(agent, "1228:tok", OWNER, delta("private", STRANGER));
-        EventLogger.flush();
+        var logged = EventLogger.captureForTest(() -> TelegramReactionNotifier.handleReaction(
+                agent, "1228:tok", OWNER, delta("private", STRANGER)));
 
-        assertEquals(0L, events(agent.name, "%Reaction notification%"),
+        assertEquals(0L, events(logged, agent.name, "Reaction notification"),
                 "a stranger's private reaction must not dispatch a turn");
         // The gate runs before the notify policy is read, so this count is 1 whatever the
         // policy is — it proves the zero above is the gate and not a suppressed policy.
-        assertEquals(1L, events(agent.name, "%Dropped private-chat reaction%"),
+        assertEquals(1L, events(logged, agent.name, "Dropped private-chat reaction"),
                 "the drop is recorded for the operator");
     }
 
@@ -67,7 +65,7 @@ class TelegramReactionNotifierTest extends UnitTest {
         assertTrue(text.startsWith("[reaction] @guest reacted"), text);
     }
 
-    private static long events(String agentName, String messagePattern) {
-        return EventLog.count("agentId = ?1 AND message LIKE ?2", agentName, messagePattern);
+    private static long events(List<EventLogger.Captured> logged, String agentName, String fragment) {
+        return logged.stream().filter(e -> agentName.equals(e.agentId()) && e.message().contains(fragment)).count();
     }
 }

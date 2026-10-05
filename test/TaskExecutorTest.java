@@ -162,7 +162,8 @@ class TaskExecutorTest extends UnitTest {
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();
 
-        var closed = fireOnVirtualThread(task);
+        var events = new java.util.ArrayList<services.EventLogger.Captured>();
+        var closed = fireOnVirtualThread(task, agent.name, events);
         JPA.em().clear();
 
         var fresh = (TaskRun) TaskRun.findById(closed.id);
@@ -191,18 +192,15 @@ class TaskExecutorTest extends UnitTest {
         // JCLAW-21 lifecycle audit: TASK_STARTED + TASK_COMPLETED
         // bookmarks must land in event_log with the agent name and a
         // structured details payload carrying task_id / run_id.
-        services.EventLogger.flush();
-        var events = loadEventsByCategory("TASK_STARTED", "TASK_COMPLETED");
         assertTrue(events.stream().anyMatch(e ->
-                "TASK_STARTED".equals(e.category)
-                && e.message != null
-                && e.message.contains("Daily summary")),
+                "TASK_STARTED".equals(e.category())
+                && e.message().contains("Daily summary")),
                 "TASK_STARTED must reference the task name");
         assertTrue(events.stream().anyMatch(e ->
-                "TASK_COMPLETED".equals(e.category)
-                && e.details != null
-                && e.details.contains("\"task_id\":" + task.id)
-                && e.details.contains("\"run_id\":" + closed.id)),
+                "TASK_COMPLETED".equals(e.category())
+                && e.details() != null
+                && e.details().contains("\"task_id\":" + task.id)
+                && e.details().contains("\"run_id\":" + closed.id)),
                 "TASK_COMPLETED details must carry task_id and run_id");
     }
 
@@ -318,7 +316,8 @@ class TaskExecutorTest extends UnitTest {
         JPA.em().getTransaction().commit();
         JPA.em().getTransaction().begin();
 
-        var closed = fireOnVirtualThread(task);
+        var events = new java.util.ArrayList<services.EventLogger.Captured>();
+        var closed = fireOnVirtualThread(task, agent.name, events);
         JPA.em().clear();
 
         var fresh = (TaskRun) TaskRun.findById(closed.id);
@@ -341,12 +340,11 @@ class TaskExecutorTest extends UnitTest {
         assertEquals("Reminder: brush your teeth.", delivered.content);
         assertEquals("subagent_send", delivered.messageKind);
 
-        services.EventLogger.flush();
-        var events = loadEventsByCategory("TASK_DELIVERED");
         assertTrue(events.stream().anyMatch(e ->
-                        e.details != null
-                        && e.details.contains("\"task_id\":" + task.id)
-                        && e.details.contains("\"run_id\":" + closed.id)),
+                        "TASK_DELIVERED".equals(e.category())
+                        && e.details() != null
+                        && e.details().contains("\"task_id\":" + task.id)
+                        && e.details().contains("\"run_id\":" + closed.id)),
                 "TASK_DELIVERED lifecycle event must carry task_id and run_id");
     }
 
@@ -530,6 +528,22 @@ class TaskExecutorTest extends UnitTest {
         return resultRef.get();
     }
 
+    /** {@link #fireOnVirtualThread(Task)}, adding to {@code events} what the fire logs for {@code agentName}. */
+    private TaskRun fireOnVirtualThread(Task task, String agentName,
+                                        java.util.List<services.EventLogger.Captured> events) throws Exception {
+        var run = new TaskRun[1];
+        var failure = new Exception[1];
+        events.addAll(services.EventLogger.captureMatchingForTest(e -> agentName.equals(e.agentId()), _ -> {
+            try {
+                run[0] = fireOnVirtualThread(task);
+            } catch (Exception e) {
+                failure[0] = e;
+            }
+        }));
+        if (failure[0] != null) throw failure[0];
+        return run[0];
+    }
+
     /** Run {@code r} on a virtual thread (so its inner Tx.run calls don't
      *  collide with the test thread's open transaction) and join. */
     private void onVirtualThread(Runnable r) throws Exception {
@@ -558,16 +572,6 @@ class TaskExecutorTest extends UnitTest {
                     "taskRun.id = ?1 ORDER BY turnIndex ASC", taskRunId).fetch();
             var typed = new java.util.ArrayList<TaskRunMessage>(raw.size());
             for (var row : raw) typed.add((TaskRunMessage) row);
-            return typed;
-        });
-    }
-
-    private java.util.List<models.EventLog> loadEventsByCategory(String... categories) {
-        return Tx.run(() -> {
-            var raw = models.EventLog.find(
-                    "category IN (?1)", java.util.Arrays.asList(categories)).fetch();
-            var typed = new java.util.ArrayList<models.EventLog>(raw.size());
-            for (var row : raw) typed.add((models.EventLog) row);
             return typed;
         });
     }
