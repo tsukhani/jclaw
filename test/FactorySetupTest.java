@@ -204,6 +204,16 @@ class FactorySetupTest extends UnitTest {
     }
 
     @Test
+    void jiraUrlAcceptsHttpAndAnUppercaseSchemeButNeedsAHost() throws Exception {
+        for (var url : List.of("http://jira.local:8080", "HTTPS://jira.example.com/base")) {
+            assertNull(FactorySetup.applyCredentials(json("{\"jiraUrl\":\"" + url + "\"}")), url);
+            assertEquals("JIRA_URL=" + url + "\n", Files.readString(home.resolve("jira.env")), url);
+        }
+        assertNotNull(FactorySetup.applyCredentials(json("{\"jiraUrl\":\"https://\"}")));
+        assertNotNull(FactorySetup.applyCredentials(json("{\"jiraUrl\":\"jira.example.com\"}")));
+    }
+
+    @Test
     void invalidBodiesAreRefusedNamingTheFieldAndWriteNothing() throws Exception {
         Files.writeString(home.resolve(".env"), "ANTHROPIC_API_KEY=keep\n");
         var before = Files.readAllBytes(home.resolve(".env"));
