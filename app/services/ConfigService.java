@@ -60,8 +60,9 @@ public class ConfigService {
 
     private ConfigService() {}
 
-    /** Namespace every per-provider config key lives under: {@code provider.<name>.<field>}. */
     private static final String EVENT_CATEGORY = "config";
+
+    /** Namespace every per-provider config key lives under: {@code provider.<name>.<field>}. */
     private static final String PROVIDER_KEY_PREFIX = "provider.";
 
     /** The per-provider key whose value is an outbound destination. */
