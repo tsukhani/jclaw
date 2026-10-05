@@ -791,6 +791,13 @@ class ApiConversationsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void stopTurnOptsOutOfThePerRequestTransaction() throws NoSuchMethodException {
+        var stopTurn = controllers.ApiConversationsController.class.getDeclaredMethod("stopTurn", Long.class);
+        assertNotNull(stopTurn.getAnnotation(play.db.jpa.NoTransaction.class),
+                "inside a request transaction the stop marker would commit only after the conversation is released");
+    }
+
+    @Test
     void stopTurnForAnUnknownConversationIs404() {
         login();
         assertStatus(404, POST("/api/conversations/999999/stop", "application/json", "{}"));

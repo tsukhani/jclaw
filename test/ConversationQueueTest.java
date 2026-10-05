@@ -1109,4 +1109,33 @@ class ConversationQueueTest extends UnitTest {
         assertEquals(1L, models.EventLog.count("category = ?1 AND message LIKE ?2", "queue",
                 "Stop marker not written for conversation " + conv.id + ":%"), "the failure is logged");
     }
+
+    @Test
+    void aRequestMoreThanFiftyRowsBackStillGetsAMarker() {
+        var conv = conversationWithRequest("marker-long-loop");
+        for (int i = 0; i < 40; i++) {
+            services.ConversationService.appendAssistantMessage(conv, "round " + i,
+                    "[{\"id\":\"c" + i + "\",\"type\":\"function\",\"function\":{\"name\":\"exec\",\"arguments\":\"{}\"}}]");
+            services.ConversationService.appendToolResult(conv, "c" + i, "output " + i);
+        }
+
+        assertTrue(services.ConversationService.appendStopMarkerIfUnanswered(conv.id),
+                "80 tool rows after the request, n=" + rows(conv.id).size());
+        assertEquals("stop_marker", rows(conv.id).getLast().messageKind);
+    }
+
+    @Test
+    void anInlineSubagentsRowsAreNotTheParentsReply() {
+        var conv = conversationWithRequest("marker-inline");
+        services.ConversationService.withSubagentRunIdMarker(424242L, () -> {
+            services.ConversationService.appendAssistantMessage(conv, "Spawning subagent: research — dig", null);
+            services.ConversationService.appendUserMessage(conv, "dig");
+            services.ConversationService.appendAssistantMessage(conv, "the child's reply", null);
+            return null;
+        });
+
+        assertTrue(services.ConversationService.appendStopMarkerIfUnanswered(conv.id),
+                "inline child rows neither answer nor replace the parent's request");
+        assertEquals(1, markers(conv.id));
+    }
 }

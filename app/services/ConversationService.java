@@ -533,7 +533,7 @@ public class ConversationService {
     public static boolean appendStopMarkerIfUnanswered(Long conversationId) {
         return Tx.run(() -> {
             Conversation conversation = Conversation.findById(conversationId);
-            if (conversation == null || !isUnanswered(Message.findRecent(conversation, 50))) return false;
+            if (conversation == null || !isUnanswered(conversation)) return false;
             var msg = appendMessage(conversation, MessageRole.ASSISTANT, STOP_MARKER_CONTENT, null, null, null);
             msg.messageKind = MESSAGE_KIND_STOP_MARKER;
             msg.save();
@@ -541,15 +541,28 @@ public class ConversationService {
         });
     }
 
-    /** Whether the newest user row in {@code newestFirst} has neither a final reply nor a stop marker after it. */
-    static boolean isUnanswered(List<Message> newestFirst) {
-        for (var m : newestFirst) {
+    /**
+     * Whether the newest top-level user row has neither a final reply nor a stop marker after it.
+     * No row window: a stopped tool loop can put its request hundreds of rows back, and an inline
+     * subagent's rows (its start row, its child's reply) never count as the parent's reply.
+     */
+    static boolean isUnanswered(Conversation conversation) {
+        List<Message> newestRequest = Message.find(
+                "conversation = ?1 AND role = ?2 AND subagentRunId IS NULL ORDER BY createdAt DESC, id DESC",
+                conversation, MessageRole.USER.value).fetch(1);
+        if (newestRequest.isEmpty()) return false;
+        Message request = newestRequest.getFirst();
+        List<Message> closers = Message.find(
+                "conversation = ?1 AND (createdAt > ?2 OR (createdAt = ?2 AND id > ?3))"
+                        + " AND (messageKind = ?4 OR (role = ?5 AND subagentRunId IS NULL"
+                        + " AND messageKind IS NULL AND toolCalls IS NULL))",
+                conversation, request.createdAt, request.id, MESSAGE_KIND_STOP_MARKER,
+                MessageRole.ASSISTANT.value).fetch();
+        for (Message m : closers) {
             if (MESSAGE_KIND_STOP_MARKER.equals(m.messageKind)) return false;
-            if (MessageRole.ASSISTANT.value.equals(m.role) && m.messageKind == null && m.toolCalls == null
-                    && m.content != null && !m.content.isBlank()) return false;
-            if (MessageRole.USER.value.equals(m.role)) return true;
+            if (m.content != null && !m.content.isBlank()) return false;
         }
-        return false;
+        return true;
     }
 
     /** Global history-limit fallback, also the default for the per-type key. */
