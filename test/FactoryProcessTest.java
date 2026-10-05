@@ -167,16 +167,20 @@ class FactoryProcessTest extends UnitTest {
 
     @Test
     void theHarnessPermitRefusesASecondHolderUntilReleased() throws Exception {
-        assertTrue(FactoryProcess.tryAcquireHarness());
+        // Release only a permit this test holds: a spare release would leave the global semaphore at 2.
+        var held = FactoryProcess.tryAcquireHarness();
+        assertTrue(held);
         try {
             assertFalse(FactoryProcess.tryAcquireHarness());
             assertNull(FactoryProcess.runHarnessCommand(List.of("true"), Duration.ofSeconds(5)));
             // Released from another thread, as an install job does.
             var other = Thread.ofPlatform().start(FactoryProcess::releaseHarness);
             other.join(5_000);
-            assertTrue(FactoryProcess.tryAcquireHarness(), "the permit was not freed by the other thread");
+            held = false;
+            held = FactoryProcess.tryAcquireHarness();
+            assertTrue(held, "the permit was not freed by the other thread");
         } finally {
-            FactoryProcess.releaseHarness();
+            if (held) FactoryProcess.releaseHarness();
         }
         assertNotNull(FactoryProcess.runHarnessCommand(List.of("true"), Duration.ofSeconds(5)));
     }

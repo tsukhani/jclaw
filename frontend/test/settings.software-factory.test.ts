@@ -29,8 +29,16 @@ let setup: Setup
 let credentialPosts: Record<string, unknown>[] = []
 let jobPolls = 0
 let jobState = 'running'
+let jobGone = false
+let setupGets = 0
 
-registerEndpoint('/api/factory/setup', { method: 'GET', handler: () => setup })
+registerEndpoint('/api/factory/setup', {
+  method: 'GET',
+  handler: () => {
+    setupGets++
+    return setup
+  },
+})
 registerEndpoint('/api/factory/setup/credentials', {
   method: 'POST',
   handler: async (event) => {
@@ -45,8 +53,12 @@ registerEndpoint('/api/factory/setup/install', {
 })
 registerEndpoint('/api/factory/setup/install/job-1', {
   method: 'GET',
-  handler: () => {
+  handler: async () => {
     jobPolls++
+    if (jobGone) {
+      const { createError } = await import('h3')
+      throw createError({ statusCode: 404, data: { error: 'not_found', message: 'no such install job' } })
+    }
     return jobState === 'running'
       ? { id: 'job-1', state: 'running', elapsedMillis: 1500, exitCode: null, timedOut: false, truncated: false, output: 'building image\n' }
       : { id: 'job-1', state: 'succeeded', elapsedMillis: 3000, exitCode: 0, timedOut: false, truncated: false, output: 'building image\nloaded com.jclaw.factory\n' }
@@ -59,6 +71,8 @@ describe('Settings — Software Factory setup', () => {
     credentialPosts = []
     jobPolls = 0
     jobState = 'running'
+    jobGone = false
+    setupGets = 0
     setup = {
       installed: false,
       prerequisites: [...ALL_OK.slice(0, 1), { id: 'docker', label: 'Docker Desktop running', state: 'missing', fix: 'Start Docker Desktop.' }, ...ALL_OK.slice(2)],
@@ -142,11 +156,13 @@ describe('Settings — Software Factory setup', () => {
     expect(jobPolls).toBeGreaterThan(0)
     expect(component.find('[data-testid="factory-install-output"]').text()).toContain('building image')
 
+    const getsWhileRunning = setupGets
     jobState = 'succeeded'
     await vi.advanceTimersByTimeAsync(1600)
     await flushPromises()
     expect(component.find('[data-testid="factory-install-state"]').text()).toContain('succeeded')
     expect(component.find('[data-testid="factory-install-output"]').text()).toContain('loaded com.jclaw.factory')
+    await vi.waitFor(() => expect(setupGets).toBeGreaterThan(getsWhileRunning))
     expect(component.find('[data-testid="factory-install-run"]').attributes('disabled')).toBeUndefined()
     const polls = jobPolls
     await vi.advanceTimersByTimeAsync(3200)
@@ -163,5 +179,25 @@ describe('Settings — Software Factory setup', () => {
     await vi.advanceTimersByTimeAsync(1600)
     await flushPromises()
     expect(component.find('[data-testid="factory-install-state"]').text()).toContain('succeeded')
+  })
+
+  it('drops a job the server no longer knows and stops polling', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const component = await mountSuspended(SettingsSoftwareFactoryPanel)
+    await flushPromises()
+    await component.find('[data-testid="factory-install-run"]').trigger('click')
+    await flushPromises()
+    expect(component.find('[data-testid="factory-install-state"]').exists()).toBe(true)
+    const getsWhileRunning = setupGets
+
+    jobGone = true
+    await vi.advanceTimersByTimeAsync(1600)
+    await flushPromises()
+    await vi.waitFor(() => expect(component.find('[data-testid="factory-install-state"]').exists()).toBe(false))
+    expect(component.find('[data-testid="factory-install-run"]').attributes('disabled')).toBeUndefined()
+    await vi.waitFor(() => expect(setupGets).toBeGreaterThan(getsWhileRunning))
+    const polls = jobPolls
+    await vi.advanceTimersByTimeAsync(3200)
+    expect(jobPolls).toBe(polls)
   })
 })

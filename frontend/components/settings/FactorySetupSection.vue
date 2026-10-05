@@ -90,7 +90,10 @@ async function poll() {
   try {
     job.value = await $fetch<InstallJob>(`/api/factory/setup/install/${encodeURIComponent(id)}`)
   }
-  catch { /* transient: the next poll retries */ }
+  catch (e) {
+    // Jobs live in memory: a 404 means JClaw restarted or evicted it, so stop polling. Anything else is transient.
+    if (apiErrorDetails(e).status === 404) job.value = null
+  }
 }
 
 async function runInstaller() {

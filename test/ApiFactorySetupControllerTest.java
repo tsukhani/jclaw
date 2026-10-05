@@ -298,6 +298,67 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
     }
 
     @Test
+    void streamedOutputOverTheCapKeepsTheTailFromACharacterBoundary() throws Exception {
+        // 3-byte characters, then a 7-byte tail: the cap's cut lands inside a character.
+        var written = ("€".repeat(200_000) + "THE-END").getBytes(StandardCharsets.UTF_8);
+        FactoryProcess.setRunnerForTest(new FactoryProcess.Runner() {
+            @Override
+            public FactoryProcess.ExecResult run(List<String> command, File workDir, Duration timeout) {
+                return new FactoryProcess.ExecResult(0, "", false);
+            }
+
+            @Override
+            public FactoryProcess.ExecResult run(List<String> command, File workDir, Duration timeout,
+                                                 FactoryProcess.OutputSink sink) {
+                for (int off = 0; off < written.length; off += 8192) {
+                    sink.write(written, off, Math.min(8192, written.length - off));
+                }
+                return new FactoryProcess.ExecResult(0, "", false);
+            }
+        });
+        login();
+        var done = awaitDone(startInstall().get("id").getAsString());
+        assertTrue(done.get("truncated").getAsBoolean(), done.get("truncated")::toString);
+        var output = done.get("output").getAsString();
+        var bytes = output.getBytes(StandardCharsets.UTF_8);
+        assertTrue(bytes.length <= 512 * 1024, () -> "length " + bytes.length);
+        assertArrayEquals(java.util.Arrays.copyOfRange(written, written.length - bytes.length, written.length), bytes);
+        assertNotEquals('\uFFFD', output.charAt(0));
+        assertTrue(output.endsWith("THE-END"));
+    }
+
+    @Test
+    void credentialsAnswer500WhenTheFileCannotBeWritten() throws Exception {
+        var notADir = home.resolve("plain-file");
+        Files.writeString(notADir, "x");
+        FactoryHome.setHomeForTest(notADir);
+        login();
+        var resp = POST("/api/factory/setup/credentials", "application/json",
+                "{\"githubToken\":\"" + SECRET + "\"}");
+        assertStatus(500, resp);
+        assertFalse(getContent(resp).contains(SECRET), getContent(resp));
+        assertFalse(getContent(resp).contains("Credentials saved"), getContent(resp));
+        assertEquals(List.of(), eventRowsContaining(SECRET));
+    }
+
+    @Test
+    void aFinishedInstallDropsTheCachedProbes() throws Exception {
+        login();
+        FactoryStatus.current("Mac OS X");
+        awaitDone(startInstall().get("id").getAsString());
+        long before;
+        synchronized (calls) {
+            before = calls.stream().filter(c -> String.join(" ", c).startsWith("docker ps")).count();
+        }
+        FactoryStatus.current("Mac OS X");
+        long after;
+        synchronized (calls) {
+            after = calls.stream().filter(c -> String.join(" ", c).startsWith("docker ps")).count();
+        }
+        assertEquals(before + 1, after, calls::toString);
+    }
+
+    @Test
     void aSecondInstallOrAHarnessCommandWhileOneRunsIs409() throws Exception {
         Files.writeString(home.resolve(".env"), "x");
         Files.writeString(home.resolve("jira.env"), "x");
@@ -312,10 +373,9 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
             var second = POST("/api/factory/setup/install", "application/json", "{}");
             assertStatus(409, second);
             assertTrue(getContent(second).contains("conflict"), getContent(second));
-            if (Files.isRegularFile(FactoryHome.installer())) {
-                assertStatus(409, POST("/api/factory/harness/start", "application/json", "{}"));
-                assertStatus(409, POST("/api/factory/harness/stop", "application/json", "{}"));
-            }
+            assertTrue(Files.isRegularFile(FactoryHome.installer()), FactoryHome.installer()::toString);
+            assertStatus(409, POST("/api/factory/harness/start", "application/json", "{}"));
+            assertStatus(409, POST("/api/factory/harness/stop", "application/json", "{}"));
         } finally {
             release.countDown();
         }

@@ -100,7 +100,9 @@ public final class FactorySetup {
         if (res == null || res.timedOut()) {
             return new Prerequisite("docker", label, UNKNOWN, "Docker did not answer; check Docker Desktop.");
         }
-        if (res.exitCode() == -1) return new Prerequisite("docker", label, MISSING, "Install Docker Desktop.");
+        if (res.exitCode() == -1) {
+            return new Prerequisite("docker", label, MISSING, "Install Docker Desktop, or put docker on JClaw's PATH.");
+        }
         if (res.exitCode() != 0) return new Prerequisite("docker", label, MISSING, "Start Docker Desktop.");
         return ok("docker", label);
     }
@@ -110,7 +112,9 @@ public final class FactorySetup {
         var fix = "Install Node " + MIN_NODE + " or newer.";
         var res = probe(List.of("node", "--version"));
         if (res == null || res.timedOut()) return new Prerequisite("node", label, UNKNOWN, "Node did not answer.");
-        if (res.exitCode() == -1) return new Prerequisite("node", label, MISSING, fix);
+        if (res.exitCode() == -1) {
+            return new Prerequisite("node", label, MISSING, "Install Node " + MIN_NODE + " or newer, or put node on JClaw's PATH.");
+        }
         Integer major = res.exitCode() == 0 ? nodeMajor(res.output()) : null;
         if (major == null) return new Prerequisite("node", label, UNKNOWN, "Could not read the Node version.");
         return major >= MIN_NODE ? ok("node", label) : new Prerequisite("node", label, MISSING, fix);
@@ -161,7 +165,7 @@ public final class FactorySetup {
 
     /**
      * Validate every field of {@code body}, then write them: a model credential replaces the
-     * other kind, since Claude Code prefers {@code ANTHROPIC_API_KEY} when both are set.
+     * other kind, since only one is used and the gateway takes the OAuth token when both are present.
      *
      * @return why nothing was written, naming the field and never its value; null once written
      */

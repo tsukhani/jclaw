@@ -107,8 +107,9 @@ public final class FactoryInstallJob {
             // Released before the state flips, so a poller that sees the end can start the next command.
             FactoryProcess.releaseHarness();
             FactoryStatus.clearCache();
+            // In the finally so an Error cannot leave the job reporting running forever.
+            job.finish(state, exitCode, timedOut);
         }
-        job.finish(state, exitCode, timedOut);
         if (SUCCEEDED.equals(state)) {
             EventLogger.info(CATEGORY, "Factory install finished: exit code 0");
         } else {
