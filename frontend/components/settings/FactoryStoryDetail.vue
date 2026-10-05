@@ -32,7 +32,6 @@ async function load() {
   }
   catch (e) {
     if (!latest.isCurrent(token)) return
-    log.value = null
     error.value = apiErrorDetails(e)
   }
 }
@@ -64,7 +63,23 @@ watch(() => props.story.state === 'running', (running) => {
   else stopPolling()
 })
 
-onBeforeUnmount(stopPolling)
+// A hidden page pauses the status poll too, so the story would never leave `running` there.
+function onVisibility() {
+  if (document.visibilityState !== 'visible') {
+    stopPolling()
+  }
+  else if (props.story.state === 'running') {
+    load()
+    startPolling()
+  }
+}
+
+onMounted(() => document.addEventListener('visibilitychange', onVisibility))
+
+onBeforeUnmount(() => {
+  stopPolling()
+  document.removeEventListener('visibilitychange', onVisibility)
+})
 </script>
 
 <template>
@@ -92,16 +107,12 @@ onBeforeUnmount(stopPolling)
       No logs yet.
     </p>
     <template v-else>
-      <div
-        class="flex flex-wrap gap-1"
-        role="tablist"
-      >
+      <div class="flex flex-wrap gap-1">
         <button
           v-for="f in story.logs"
           :key="f"
           type="button"
-          role="tab"
-          :aria-selected="tab === f"
+          :aria-pressed="tab === f"
           class="px-2 py-1 text-xs font-mono border border-border"
           :class="tab === f ? 'bg-muted text-fg-strong' : 'text-fg-muted hover:bg-muted/40'"
           :data-testid="`factory-log-tab-${f}`"

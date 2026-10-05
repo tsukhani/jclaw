@@ -87,7 +87,7 @@ function onVisibility() {
 }
 
 onMounted(() => {
-  start()
+  if (document.visibilityState === 'visible') start()
   document.addEventListener('visibilitychange', onVisibility)
 })
 
@@ -233,7 +233,7 @@ onBeforeUnmount(() => {
             class="text-xs text-fg-muted"
             role="status"
           >
-            {{ result.message }}
+            {{ result.message || 'Done.' }}
           </p>
           <pre
             v-if="result.exitCode !== 0 && result.output"

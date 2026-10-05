@@ -31,7 +31,7 @@ function stories(): BoardStory[] {
     story({ key: 'JCLAW-1', state: 'waiting', reason: 'blocked by JCLAW-9' }),
     story({ key: 'JCLAW-2', state: 'running', phase: 'implement', autoMerge: true, logs: ['JCLAW-2.log', 'JCLAW-2-review.log'] }),
     story({ key: 'JCLAW-3', state: 'review' }),
-    story({ key: 'JCLAW-4', state: 'blocked', reason: 'won\'t do' }),
+    story({ key: 'JCLAW-4', state: 'blocked', reason: 'won\'t do', logs: ['JCLAW-4.log'] }),
     story({ key: 'JCLAW-5', state: 'refused', reason: 'gate failed', autoMerge: true }),
     story({ key: 'JCLAW-6', state: 'merged', by: 'factory', sha: '0123456789abcdef', autoMerge: true }),
     story({ key: 'JCLAW-7', state: 'merged', by: 'operator', sha: 'fedcba9876543210' }),
@@ -52,7 +52,7 @@ function installed(over: Partial<StatusView> = {}): StatusView {
   return {
     installed: true, supported: true, reason: null,
     harness: { state: 'running', pid: 42 }, gateway: { state: 'running' },
-    sandboxes: [{ name: 'sandcastle-jclaw-2', story: 'JCLAW-2', upTime: '12 minutes' }],
+    sandboxes: [{ name: 'sandcastle-0f8c2a8e-5b1d-4c3a-9e7f-2a6b8c4d1e90', story: 'JCLAW-2', upTime: '12 minutes' }],
     board: { schema: 1, updatedAt: '2026-10-05T10:00:00Z', harness: { pid: 42, startedAt: '2026-10-05T09:00:00Z', main: null }, settings: null, stories: stories() },
     boardReason: null,
     ...over,
@@ -75,6 +75,10 @@ registerEndpoint('/api/factory', { method: 'GET', handler: async () => {
 registerEndpoint('/api/factory/setup', { method: 'GET', handler: () => ({
   installed: true, prerequisites: [], hasModelCredential: true, hasJira: true, hasGithub: false, installJobId: null, message: null,
 }) })
+let postGate: Promise<void> | null = null
+let truncated = false
+let logGate: Promise<void> | null = null
+let logFails = false
 registerEndpoint('/api/factory/settings', { method: 'GET', handler: () => ({ settings: SETTINGS, message: null }) })
 registerEndpoint('/api/factory/settings', { method: 'PUT', handler: async (event) => {
   const { readBody } = await import('h3')
@@ -82,17 +86,24 @@ registerEndpoint('/api/factory/settings', { method: 'PUT', handler: async (event
   if (refuseSettings) throw createError({ statusCode: 400, statusMessage: 'FACTORY_CPUS is more than the 4 CPUs Docker has.' })
   return { settings: SETTINGS, message: 'Saved; applies once the factory is idle.' }
 } })
-for (const path of ['harness/start', 'harness/stop', 'gateway/pause', 'gateway/resume', 'sandboxes/sandcastle-jclaw-2/stop']) {
-  registerEndpoint(`/api/factory/${path}`, { method: 'POST', handler: () => {
+for (const path of ['harness/start', 'harness/stop', 'gateway/pause', 'gateway/resume', 'sandboxes/sandcastle-0f8c2a8e-5b1d-4c3a-9e7f-2a6b8c4d1e90/stop']) {
+  registerEndpoint(`/api/factory/${path}`, { method: 'POST', handler: async () => {
     posts.push(path)
-    return path === 'harness/stop'
-      ? { exitCode: 1, timedOut: false, output: 'launchctl: no such service', message: 'Harness stop failed.' }
-      : { exitCode: 0, timedOut: false, output: '', message: `Done: ${path}.` }
+    if (postGate) await postGate
+    if (path === 'harness/stop') return { exitCode: 1, timedOut: false, output: 'launchctl: no such service', message: 'Harness stop failed.' }
+    // The server sends an empty message for a successful harness start.
+    return { exitCode: 0, timedOut: false, output: '', message: path === 'harness/start' ? '' : `Done: ${path}.` }
   } })
 }
-registerEndpoint('/api/factory/stories/JCLAW-2/logs/JCLAW-2.log', { method: 'GET', handler: () => {
+registerEndpoint('/api/factory/stories/JCLAW-2/logs/JCLAW-2.log', { method: 'GET', handler: async () => {
+  const n = ++logGets
+  if (logGate) await logGate
+  if (logFails) throw createError({ statusCode: 500, statusMessage: 'log read failed' })
+  return { key: 'JCLAW-2', file: 'JCLAW-2.log', size: 10, modifiedAt: '2026-10-05T10:00:00Z', truncated, text: `tail ${n}` }
+} })
+registerEndpoint('/api/factory/stories/JCLAW-4/logs/JCLAW-4.log', { method: 'GET', handler: () => {
   logGets++
-  return { key: 'JCLAW-2', file: 'JCLAW-2.log', size: 10, modifiedAt: '2026-10-05T10:00:00Z', truncated: false, text: `tail ${logGets}` }
+  return { key: 'JCLAW-4', file: 'JCLAW-4.log', size: 10, modifiedAt: '2026-10-05T10:00:00Z', truncated: false, text: 'blocked tail' }
 } })
 
 registerEndpoint('/api/factory/stories/JCLAW-2/logs/JCLAW-2-review.log', { method: 'GET', handler: () => {
@@ -134,6 +145,10 @@ beforeEach(() => {
   statusFails = false
   statusGate = null
   refuseSettings = false
+  postGate = null
+  truncated = false
+  logGate = null
+  logFails = false
 })
 
 afterEach(() => {
@@ -222,7 +237,7 @@ describe('Settings — Software Factory panel', () => {
   it.each([
     ['factory-harness-stop', 'Stop', 'harness/stop', 'Stories running now will fail'],
     ['factory-gateway-pause', 'Pause', 'gateway/pause', 'stories running now will fail'],
-    ['factory-sandbox-stop-sandcastle-jclaw-2', 'Stop', 'sandboxes/sandcastle-jclaw-2/stop', 'JCLAW-2? The story running in it will fail'],
+    ['factory-sandbox-stop-sandcastle-0f8c2a8e-5b1d-4c3a-9e7f-2a6b8c4d1e90', 'Stop', 'sandboxes/sandcastle-0f8c2a8e-5b1d-4c3a-9e7f-2a6b8c4d1e90/stop', 'JCLAW-2? The story running in it will fail'],
   ])('%s asks first: cancel sends nothing, confirm posts', async (testid, confirmLabel, path, warning) => {
     const c = await mount()
     await c.find(`[data-testid="${testid}"]`).trigger('click')
@@ -263,6 +278,14 @@ describe('Settings — Software Factory panel', () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     expect(posts).toEqual(['harness/start', 'gateway/resume'])
     expect(c.text()).toContain('Done: gateway/resume.')
+  })
+
+  it('says Done when a successful action returns an empty message', async () => {
+    status = installed({ harness: { state: 'stopped', pid: null } })
+    const c = await mount()
+    await c.find('[data-testid="factory-harness-start"]').trigger('click')
+    await settle()
+    expect(c.find('[data-testid="factory-action-result"] [role="status"]').text()).toBe('Done.')
   })
 
   it('offers no control for an unknown harness or an absent gateway', async () => {
@@ -319,7 +342,8 @@ describe('Settings — Software Factory panel', () => {
     const c = await mount()
     await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
     await settle()
-    expect(c.findAll('[role="tab"]').map(t => t.text())).toEqual(['JCLAW-2.log', 'JCLAW-2-review.log'])
+    expect(c.findAll('[data-testid^="factory-log-tab-"]').map(t => t.text())).toEqual(['JCLAW-2.log', 'JCLAW-2-review.log'])
+    expect(c.find('[data-testid="factory-log-tab-JCLAW-2.log"]').attributes('aria-pressed')).toBe('true')
     expect(logGets).toBe(1)
     expect(c.find('[data-testid="factory-log-text"]').text()).toBe('tail 1')
 
@@ -424,5 +448,143 @@ describe('Settings — Software Factory panel', () => {
     await vi.advanceTimersByTimeAsync(3_000)
     await settle()
     expect(logGets).toBe(after + 1)
+  })
+
+  it('notes a truncated log tail, and only then', async () => {
+    truncated = true
+    const c = await mount()
+    await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
+    await settle()
+    expect(c.find('[data-testid="factory-story-view"]').text()).toContain('Showing the end of the log only.')
+    await c.find('[data-testid="factory-story-close"]').trigger('click')
+    truncated = false
+    await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
+    await settle()
+    expect(c.find('[data-testid="factory-log-text"]').exists()).toBe(true)
+    expect(c.find('[data-testid="factory-story-view"]').text()).not.toContain('Showing the end of the log only.')
+  })
+
+  it('starts the log poll when a selected story begins running', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const c = await mount()
+    await c.find('[data-testid="factory-story-JCLAW-4"]').trigger('click')
+    await settle()
+    expect(logGets).toBe(1)
+    await vi.advanceTimersByTimeAsync(3_000)
+    await settle()
+    expect(logGets).toBe(1)
+
+    status = installed({ board: { ...installed().board!, stories: stories().map(s => s.key === 'JCLAW-4' ? { ...s, state: 'running' as const, phase: 'implement' } : s) } })
+    await vi.advanceTimersByTimeAsync(2_000)
+    await settle()
+    await vi.advanceTimersByTimeAsync(3_000)
+    await settle()
+    expect(logGets).toBe(2)
+  })
+
+  it('drops a late log response for a story no longer selected', async () => {
+    let release!: () => void
+    logGate = new Promise(r => (release = r))
+    const c = await mount()
+    await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
+    await settle()
+    await c.find('[data-testid="factory-story-JCLAW-4"]').trigger('click')
+    await settle()
+    expect(c.find('[data-testid="factory-log-text"]').text()).toBe('blocked tail')
+    release()
+    await settle()
+    expect(c.find('[data-testid="factory-log-text"]').text()).toBe('blocked tail')
+  })
+
+  it('disables every control while one is in flight', async () => {
+    let release!: () => void
+    postGate = new Promise(r => (release = r))
+    status = installed({ harness: { state: 'stopped', pid: null }, gateway: { state: 'exited' } })
+    const c = await mount()
+    await c.find('[data-testid="factory-harness-start"]').trigger('click')
+    await settle()
+    for (const id of ['factory-harness-start', 'factory-gateway-resume', 'factory-sandbox-stop-sandcastle-0f8c2a8e-5b1d-4c3a-9e7f-2a6b8c4d1e90']) {
+      expect(c.find(`[data-testid="${id}"]`).attributes('disabled'), id).toBeDefined()
+    }
+    await c.find('[data-testid="factory-gateway-resume"]').trigger('click')
+    release()
+    await settle()
+    expect(posts).toEqual(['harness/start'])
+    expect(c.find('[data-testid="factory-gateway-resume"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('closes the detail on Close, and when the story leaves the board without reopening on its return', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const c = await mount()
+    await c.find('[data-testid="factory-story-JCLAW-3"]').trigger('click')
+    await settle()
+    await c.find('[data-testid="factory-story-close"]').trigger('click')
+    await settle()
+    expect(c.find('[data-testid="factory-story-view"]').exists()).toBe(false)
+    expect(c.find('[data-testid="factory-story-JCLAW-3"]').attributes('aria-pressed')).toBe('false')
+
+    await c.find('[data-testid="factory-story-JCLAW-3"]').trigger('click')
+    await settle()
+    status = installed({ board: { ...installed().board!, stories: stories().filter(s => s.key !== 'JCLAW-3') } })
+    await vi.advanceTimersByTimeAsync(5_000)
+    await settle()
+    expect(c.find('[data-testid="factory-story-view"]').exists()).toBe(false)
+
+    status = installed()
+    await vi.advanceTimersByTimeAsync(5_000)
+    await settle()
+    expect(c.find('[data-testid="factory-story-JCLAW-3"]').exists()).toBe(true)
+    expect(c.find('[data-testid="factory-story-view"]').exists()).toBe(false)
+  })
+
+  it('pauses the log poll while the document is hidden and resumes on return', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const c = await mount()
+    await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
+    await settle()
+    expect(logGets).toBe(1)
+    setVisibility('hidden')
+    await vi.advanceTimersByTimeAsync(10_000)
+    await settle()
+    expect(logGets).toBe(1)
+    setVisibility('visible')
+    await settle()
+    expect(logGets).toBe(2)
+    await vi.advanceTimersByTimeAsync(3_000)
+    await settle()
+    expect(logGets).toBe(3)
+  })
+
+  it('does not poll the status when mounted in a hidden document', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' })
+    await mount()
+    const afterMount = statusGets
+    await vi.advanceTimersByTimeAsync(15_000)
+    await settle()
+    expect(statusGets).toBe(afterMount)
+  })
+
+  it('clears the saved note once a field is edited again', async () => {
+    const c = await mount()
+    await c.find('[data-testid="factory-setting-FACTORY_CPUS"]').setValue('4')
+    await c.find('[data-testid="factory-settings"]').trigger('submit')
+    await vi.waitFor(() => expect(c.text()).toContain('Saved; applies once the factory is idle.'))
+    await c.find('[data-testid="factory-setting-FACTORY_CPUS"]').setValue('3')
+    expect(c.text()).not.toContain('Saved; applies once the factory is idle.')
+  })
+
+  it('keeps the last log tail on screen when one poll fails', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const c = await mount()
+    await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
+    await settle()
+    expect(c.find('[data-testid="factory-log-text"]').text()).toBe('tail 1')
+    statusFails = false
+    logFails = true
+    await vi.advanceTimersByTimeAsync(3_000)
+    await settle()
+    expect(c.find('[data-testid="factory-log-text"]').text()).toBe('tail 1')
+    expect(c.find('[data-testid="factory-story-view"]').text()).toContain('log read failed')
   })
 })

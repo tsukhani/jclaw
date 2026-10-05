@@ -43,6 +43,7 @@ const canSave = computed(() =>
   !saving.value && Object.keys(changed.value).length > 0 && Object.values(errors.value).every(e => e === null))
 
 function onInput(key: string, event: Event) {
+  saved.value = ''
   drafts.value = { ...drafts.value, [key]: (event.target as HTMLInputElement).value }
 }
 
