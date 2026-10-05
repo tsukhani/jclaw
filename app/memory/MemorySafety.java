@@ -55,7 +55,7 @@ public final class MemorySafety {
             Pattern.compile("\\bAKIA[0-9A-Z]{16}\\b"),
             // GitHub tokens (ghp_/gho_/ghu_/ghs_/ghr_ and fine-grained github_pat_)
             Pattern.compile("\\bgh[pousr]_[A-Za-z0-9]{20,}\\b"),
-            Pattern.compile("\\bgithub_pat_[A-Za-z0-9_]{20,}\\b"),
+            Pattern.compile("\\bgithub_pat_\\w{20,}\\b"),
             // Slack tokens
             Pattern.compile("\\bxox[baprs]-[A-Za-z0-9-]{10,}\\b"),
             // Google API key

@@ -1124,7 +1124,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         var summary = summary(seed, state, maxDepth, sameHostOnly);
         if (state.save && agent != null) {
             var json = state.output.json();
-            var extension = json ? ".jsonl" : state.output.format() == ScrapeOutput.Format.TEXT ? ".txt" : ".md";
+            var extension = json ? ".jsonl" : documentExtension(state.output.format());
             var content = json ? jsonLines(state) : pagesDocument(summary, state, MAX_SAVED_CHARS);
             var host = seed.getHost() == null ? "site" : seed.getHost().replaceAll("[^a-zA-Z0-9.-]", "_");
             var filename = "scrape-%s-%s%s".formatted(host, SAVE_STAMP.format(AppClock.now()), extension);
@@ -1183,12 +1183,17 @@ public class WebScrapeTool implements ToolRegistry.Tool {
         return sb.toString();
     }
 
+    private static String documentExtension(ScrapeOutput.Format format) {
+        return format == ScrapeOutput.Format.TEXT ? ".txt" : ".md";
+    }
+
     /** How a page's section opens in a crawl written as one document, here and in a background job's combined file. */
     public static String sectionHeading(ScrapeOutput.Format format, String url, ScrapeRung servedBy) {
-        boolean via = servedBy != ScrapeRung.PLAIN;
-        return format == ScrapeOutput.Format.TEXT
-                ? "\n\n=== " + url + (via ? " (via " + servedBy + ")" : "") + " ==="
-                : "\n\n---\n\n## " + url + (via ? " _(via " + servedBy + ")_" : "");
+        boolean plain = servedBy == ScrapeRung.PLAIN;
+        if (format == ScrapeOutput.Format.TEXT) {
+            return "\n\n=== " + url + (plain ? "" : " (via " + servedBy + ")") + " ===";
+        }
+        return "\n\n---\n\n## " + url + (plain ? "" : " _(via " + servedBy + ")_");
     }
 
     private static String pagesDocument(String summary, CrawlState state, int limit) {

@@ -184,10 +184,10 @@ public final class GraphWithdrawal {
                 yield evidence.isEmpty() || removed.contains(r.from()) || removed.contains(r.to()) ? null
                         : new Relation(r.meta(), r.type(), r.from(), r.to(), r.weight(), evidence);
             }
-            case Constraint c -> {
-                var evidence = prune(c.evidenceIds(), removed);
-                yield evidence.isEmpty() || removed.contains(c.termId()) ? null
-                        : new Constraint(c.meta(), c.termId(), c.rule(), evidence);
+            case Constraint(var meta, var termId, var rule, var evidenceIds) -> {
+                var evidence = prune(evidenceIds, removed);
+                yield evidence.isEmpty() || removed.contains(termId) ? null
+                        : new Constraint(meta, termId, rule, evidence);
             }
             case Evidence e -> {
                 var subject = e.subjectId();

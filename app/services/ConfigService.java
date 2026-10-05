@@ -61,6 +61,7 @@ public class ConfigService {
     private ConfigService() {}
 
     /** Namespace every per-provider config key lives under: {@code provider.<name>.<field>}. */
+    private static final String EVENT_CATEGORY = "config";
     private static final String PROVIDER_KEY_PREFIX = "provider.";
 
     /** The per-provider key whose value is an outbound destination. */
@@ -161,7 +162,7 @@ public class ConfigService {
     public static void reportParseFailure(String key, String raw, String expected, String fallback,
                                           @Nullable String fallbackSource) {
         var report = parseFailureReport(key, raw, expected, fallback, fallbackSource);
-        if (report != null) EventLogger.error("config", report);
+        if (report != null) EventLogger.error(EVENT_CATEGORY, report);
     }
 
     /**
@@ -572,7 +573,7 @@ public class ConfigService {
             if (existingSearchKey == null || existingSearchKey.isBlank()) {
                 set("search.ollama.apiKey", value);
                 set("search.ollama.enabled", "true");
-                EventLogger.info("config",
+                EventLogger.info(EVENT_CATEGORY,
                         "Mirrored ollama-cloud LLM apiKey into search.ollama.apiKey "
                                 + "and enabled web search (search key was empty)");
             }
