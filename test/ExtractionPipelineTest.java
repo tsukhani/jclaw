@@ -22,6 +22,7 @@ import services.decision.JevException;
 import services.decision.OllamaDecision;
 import services.grapheval.CandidateGenerator;
 import services.grapheval.CandidateGenerator.Candidate;
+import services.grapheval.EntityResolver;
 import services.grapheval.ExtractionPipeline;
 import services.grapheval.ExtractionPipeline.CaseRun;
 import services.grapheval.ExtractionPipeline.Decider;
@@ -1227,6 +1228,14 @@ class ExtractionPipelineTest extends UnitTest {
         lexicon.add("negation nae");
         assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(questions, lexicon, probes));
         assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(questions, lexicons, probes + "\nx"));
+
+        var shortlist = EntityResolver.fingerprintShortlistQuestion(EntityResolver.SHORTLIST_WORDING).toString();
+        int at = questions.indexOf(shortlist);
+        assertTrue(at >= 0, "the shortlist question is fingerprinted");
+        var reworded = new ArrayList<>(questions);
+        reworded.set(at, EntityResolver.fingerprintShortlistQuestion(
+                EntityResolver.SHORTLIST_WORDING.replace("cannot tell", "are unsure")).toString());
+        assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(reworded, lexicons, probes));
 
         var yaml = Files.readString(Play.applicationPath.toPath().resolve("conf/ontology/seed-schema.yaml"));
         var documentation = yaml.replace("When JClaw recorded the source", "When the source was recorded")

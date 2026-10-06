@@ -9,6 +9,8 @@ import services.grapheval.Certifier;
 import services.grapheval.Configuration;
 import services.grapheval.Configuration.ClassSetting;
 import services.grapheval.Fingerprints;
+import services.grapheval.ResolutionCalibration;
+import services.grapheval.ResolutionCalibration.Counts;
 import services.grapheval.SequenceScorer;
 
 import java.io.IOException;
@@ -47,6 +49,10 @@ class CertificateDocumentTest extends UnitTest {
     }
 
     private static CertificateDocument certificate(String model, int termsK) {
+        return certificate(model, termsK, null);
+    }
+
+    private static CertificateDocument certificate(String model, int termsK, ResolutionCalibration.Walk shortlist) {
         var split = new CertificationSplit("cert-2026-10", "cases", 1356, List.of("c003"), Map.of("c003", "9f1c2a7d4e05"),
                 "cases@111111111111", "sequences@222222222222", "guide@333333333333", SCHEMA, 0.95,
                 List.of("works_at", "kind_of"));
@@ -66,7 +72,7 @@ class CertificateDocumentTest extends UnitTest {
         var lineage = new Certifier.ClassWalk("lineage", 0.90, Certifier.PROVISIONAL, 80, 1, 0.058, List.of());
         var timeline = SequenceScorer.timeline(240, 205, 3, 10, 2, 200);
         return CertificateDocument.of(model, DIGEST, Certifier.CERTIFIED, split, "guide@333333333333", SCHEMA, EXTRACTION,
-                sequencing, lineage, timeline, SequenceScorer.REPORTED, 0.50);
+                sequencing, lineage, timeline, SequenceScorer.REPORTED, 0.50, shortlist);
     }
 
     @Test
@@ -144,5 +150,45 @@ class CertificateDocumentTest extends UnitTest {
         tampered.getAsJsonObject("terms").addProperty("k", 0);
         Files.writeString(file, tampered.toString());
         assertTrue(CertificateDocument.read(root, "tev1", SCHEMA, EXTRACTION, DIGEST).reason().contains("is not its content's"));
+    }
+
+    private static ResolutionCalibration.Walk walk() {
+        var counts = Map.of(0.95, new Counts(60, 0), 0.90, new Counts(74, 0), 0.85, new Counts(100, 9));
+        return ResolutionCalibration.walk(List.of(0.95, 0.90, 0.85), counts::get);
+    }
+
+    @Test
+    void theOptionalResolutionSectionIsReadAndItsKeysAreStillStrict() throws IOException {
+        assertNull(certificate("tev1", 4).shortlistThreshold());
+        assertFalse(certificate("tev1", 4).json().has("resolution"), "written only with a threshold");
+        assertFalse(certificate("tev1", 4, ResolutionCalibration.walk(List.of(0.9), _ -> new Counts(10, 0))).json()
+                .has("resolution"));
+        var cert = certificate("tev1", 4, walk());
+        assertNotEquals(certificate("tev1", 4).id(), cert.id(), "the id covers the section");
+        var shortlist = cert.json().getAsJsonObject("resolution").getAsJsonObject("shortlist");
+        assertEquals(74, shortlist.get("n").getAsInt());
+        assertEquals(0, shortlist.get("k").getAsInt());
+        assertEquals(Certifier.upperBound(0, 74), shortlist.get("bound").getAsDouble());
+        cert.write(root);
+        var read = CertificateDocument.read(root, "tev1", SCHEMA, EXTRACTION, DIGEST).certificate();
+        assertNotNull(read);
+        assertEquals(0.90, read.shortlistThreshold());
+
+        var file = CertificateDocument.path(root, "tev1");
+        var extra = cert.json().deepCopy();
+        extra.getAsJsonObject("resolution").addProperty("fuzzy", 0.9);
+        Files.writeString(file, extra.toString());
+        assertEquals("certificate resolution: unknown key 'fuzzy'",
+                CertificateDocument.read(root, "tev1", SCHEMA, EXTRACTION, DIGEST).reason());
+        var nested = cert.json().deepCopy();
+        nested.getAsJsonObject("resolution").getAsJsonObject("shortlist").addProperty("weight", 1);
+        Files.writeString(file, nested.toString());
+        assertEquals("certificate resolution shortlist: unknown key 'weight'",
+                CertificateDocument.read(root, "tev1", SCHEMA, EXTRACTION, DIGEST).reason());
+        var rootKey = cert.json().deepCopy();
+        rootKey.addProperty("resolutions", 1);
+        Files.writeString(file, rootKey.toString());
+        assertEquals("certificate: unknown key 'resolutions'",
+                CertificateDocument.read(root, "tev1", SCHEMA, EXTRACTION, DIGEST).reason());
     }
 }

@@ -2,6 +2,7 @@ import memory.TemporalExpressions;
 import memory.ontology.OntologySchema;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.grapheval.Certifier;
 import services.grapheval.ExtractionPipeline;
 import services.grapheval.ExtractionPipeline.Decision;
 import services.grapheval.ExtractionPipeline.Overlap;
@@ -11,6 +12,7 @@ import services.grapheval.GraphCases.DateLabel;
 import services.grapheval.GraphCases.Entity;
 import services.grapheval.GraphCases.Relation;
 import services.grapheval.StageScorer;
+import services.grapheval.StageScorer.Scored;
 import services.grapheval.StageScorer.StageRun;
 
 import java.time.LocalDate;
@@ -161,9 +163,39 @@ class StageScorerTest extends UnitTest {
         assertEquals(8, r.mentions());
         // operator x3, harborlight (A), kestrel x2, "Harborlight" (office in B + harborlight in c).
         assertEquals(4, r.clusters());
-        assertEquals(1, r.falseMerges());
+        assertEquals(1, r.falseMerges(), "the second Harborlight attached to the office's Term");
+        assertEquals(4, r.attachments());
+        assertEquals(0.25, r.falseMergeRate());
+        assertEquals(Certifier.upperBound(1, 4), r.falseMergeBound());
         assertTrue(r.bcubedPrecision() < 1.0);
         assertTrue(r.bcubedRecall() < 1.0);
+    }
+
+    @Test
+    void scoredOutcomesReportFalseMergesTheirRateAndBoundAndBcubedAndPairwise() {
+        var r = StageScorer.resolution(List.of(new Scored("1", "a", "T1", false), new Scored("2", "a", "T1", true),
+                new Scored("3", "b", "T1", true), new Scored("4", "c", "T2", false), new Scored("5", "a", "T3", false)));
+        assertEquals(5, r.mentions());
+        assertEquals(3, r.clusters());
+        assertEquals(3, r.goldEntities());
+        assertEquals(2, r.attachments());
+        assertEquals(1, r.falseMerges(), "b attached to a Term whose first mention is a");
+        assertEquals(0.5, r.falseMergeRate());
+        assertEquals(Certifier.upperBound(1, 2), r.falseMergeBound());
+        assertEquals(11.0 / 15, r.bcubedPrecision(), 1e-12);
+        assertEquals(11.0 / 15, r.bcubedRecall(), 1e-12);
+        assertEquals(1.0 / 3, r.pairwisePrecision(), 1e-12);
+        assertEquals(1.0 / 3, r.pairwiseRecall(), 1e-12);
+
+        var firstWrong = StageScorer.resolution(List.of(new Scored("1", "b", "T", false), new Scored("2", "a", "T", true),
+                new Scored("3", "a", "T", true)));
+        assertEquals(2, firstWrong.falseMerges(), "a Term's gold is its first mention's");
+
+        var empty = StageScorer.resolution(List.<Scored>of());
+        assertEquals(0, empty.attachments());
+        assertNull(empty.falseMergeRate());
+        assertEquals(1.0, empty.falseMergeBound());
+        assertNull(empty.bcubedPrecision());
     }
 
     private static Decision asked(String stage, String subject, String from, String to, String choice, double p) {

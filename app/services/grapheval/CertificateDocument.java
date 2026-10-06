@@ -29,7 +29,11 @@ public record CertificateDocument(JsonObject json) {
     public static final String DIR = "certificates";
     private static final Set<String> ROOT_KEYS = Set.of("id", "model", "digest", "status", "schema", "extraction",
             "split", "cases", "sequences", "guide", "startingThreshold", "terms", "relations", "classes", "pooled",
-            "timeline", "recall");
+            "timeline", "recall", "resolution");
+    private static final String RESOLUTION = "resolution";
+    private static final String SHORTLIST = "shortlist";
+    private static final Set<String> RESOLUTION_KEYS = Set.of(SHORTLIST);
+    private static final Set<String> SHORTLIST_KEYS = Set.of("threshold", "n", "k", "bound");
     private static final Set<String> GATE_KEYS = Set.of("state", "threshold", "n", "k", "bound", "recallLower");
     private static final Set<String> CLASS_KEYS = Set.of("state", "threshold", "n", "k", "bound");
     private static final Set<String> POOLED_KEYS = Set.of("n", "k", "bound");
@@ -48,6 +52,19 @@ public record CertificateDocument(JsonObject json) {
                                          String guide, String schema, String extraction, Certifier.Sequencing sequencing,
                                          ClassWalk lineage, Timeline timeline, String timelineResult,
                                          double recallFloor) {
+        return of(model, digest, status, split, guide, schema, extraction, sequencing, lineage, timeline,
+                timelineResult, recallFloor, null);
+    }
+
+    /**
+     * {@link #of(String, String, String, CertificationSplit, String, String, String, Certifier.Sequencing, ClassWalk,
+     * Timeline, String, double)} with the optional {@code resolution} section, written only when the shortlist walk
+     * reached a threshold, from its step there.
+     */
+    public static CertificateDocument of(String model, String digest, String status, CertificationSplit split,
+                                         String guide, String schema, String extraction, Certifier.Sequencing sequencing,
+                                         ClassWalk lineage, Timeline timeline, String timelineResult,
+                                         double recallFloor, ResolutionCalibration.@Nullable Walk shortlist) {
         var o = new JsonObject();
         o.addProperty("model", model);
         o.addProperty("digest", digest);
@@ -90,6 +107,18 @@ public record CertificateDocument(JsonObject json) {
         var recall = new JsonObject();
         recall.addProperty("floor", recallFloor);
         o.add("recall", recall);
+        var threshold = shortlist == null ? null : shortlist.threshold();
+        var step = shortlist == null || threshold == null ? null : shortlist.at(threshold);
+        if (step != null) {
+            var sl = new JsonObject();
+            sl.addProperty("threshold", step.t());
+            sl.addProperty("n", step.attachments());
+            sl.addProperty("k", step.falseMerges());
+            sl.addProperty("bound", step.bound());
+            var resolution = new JsonObject();
+            resolution.add(SHORTLIST, sl);
+            o.add(RESOLUTION, resolution);
+        }
         var canonical = Fingerprints.canonical(o).getAsJsonObject();
         var withId = new JsonObject();
         withId.addProperty("id", Fingerprints.hex12("cert", canonical));
@@ -142,6 +171,14 @@ public record CertificateDocument(JsonObject json) {
 
     public String extraction() {
         return json.get("extraction").getAsString();
+    }
+
+    /** The shortlist threshold of the optional {@code resolution} section; null without one. */
+    public @Nullable Double shortlistThreshold() {
+        var resolution = json.getAsJsonObject(RESOLUTION);
+        var shortlist = resolution == null ? null : resolution.getAsJsonObject(SHORTLIST);
+        var threshold = shortlist == null ? null : shortlist.get("threshold");
+        return threshold == null || threshold.isJsonNull() ? null : threshold.getAsDouble();
     }
 
     /** The canonical JSON, compact, as written. */
@@ -226,7 +263,7 @@ public record CertificateDocument(JsonObject json) {
         }
         GraphCases.onlyKeys(o, ROOT_KEYS, "certificate");
         for (var key : ROOT_KEYS) {
-            if (!o.has(key)) throw new IllegalArgumentException("certificate: '" + key + "' is required");
+            if (!key.equals(RESOLUTION) && !o.has(key)) throw new IllegalArgumentException("certificate: '" + key + "' is required");
         }
         GraphCases.onlyKeys(object(o, "terms"), GATE_KEYS, "certificate terms");
         each(object(o, "relations"), GATE_KEYS, "certificate relation");
@@ -234,6 +271,13 @@ public record CertificateDocument(JsonObject json) {
         each(object(o, "pooled"), POOLED_KEYS, "certificate pooled");
         GraphCases.onlyKeys(object(o, "timeline"), TIMELINE_KEYS, "certificate timeline");
         GraphCases.onlyKeys(object(o, "recall"), RECALL_KEYS, "certificate recall");
+        if (o.has(RESOLUTION)) {
+            var resolution = object(o, RESOLUTION);
+            GraphCases.onlyKeys(resolution, RESOLUTION_KEYS, "certificate resolution");
+            if (resolution.has(SHORTLIST)) {
+                GraphCases.onlyKeys(object(resolution, SHORTLIST), SHORTLIST_KEYS, "certificate resolution shortlist");
+            }
+        }
         var content = o.deepCopy();
         content.remove("id");
         var id = Fingerprints.hex12("cert", content);

@@ -87,6 +87,7 @@ public final class ExtractionPipeline {
     private static final Pattern CLAUSES = Pattern.compile(CLAUSE_BOUNDARY);
     private static final int HTTP_BAD_REQUEST = 400;
     private static final int FINGERPRINT_HEX = 12;
+    private static final String CHOICE_KEY = "choice";
 
     private ExtractionPipeline() {}
     /** One {@code POST /v1/systemone}: the request body in, the provider's whole answer out. May throw. */
@@ -1142,6 +1143,15 @@ public final class ExtractionPipeline {
         }
     }
 
+    /**
+     * One choice {@code question} over {@code ids}, asked with {@code state}; a failure is a decision with no choice,
+     * never an exception.
+     */
+    static Decision choose(String model, JsonObject state, JsonObject question, Set<String> ids, Decider decider) {
+        var answers = ask(model, state, Map.of(CHOICE_KEY, question), decider);
+        return decision(CHOICE_KEY, "", null, null, answers.get(CHOICE_KEY), ids);
+    }
+
     /** A yes/no answer as a decision whose choice is {@code choice} at the yes probability. */
     private static Decision noulDecision(String stage, String subject, String from, String to, String choice,
                                          @Nullable Answer answer, double floor) {
@@ -1207,6 +1217,7 @@ public final class ExtractionPipeline {
         out.add(tenseQuestion("D").toString());
         out.add(occursQuestion("E", "D").toString());
         out.add(lineageQuestion().toString());
+        out.add(EntityResolver.fingerprintShortlistQuestion(EntityResolver.SHORTLIST_WORDING).toString());
         var voices = List.of(new Voice("O", false), new Voice("O", true), new Voice(null, false));
         for (var relation : schema.relations().keySet()) {
             for (var from : schema.termTypes().keySet()) {
