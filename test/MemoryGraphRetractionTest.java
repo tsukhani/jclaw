@@ -1,4 +1,5 @@
 import memory.graph.GraphStore;
+import memory.graph.GraphStore.GraphRefusedException;
 import memory.graph.GraphStore.Retraction;
 import memory.graph.GraphStore.RunRetractedException;
 import memory.graph.RunLedger;
@@ -194,6 +195,21 @@ class MemoryGraphRetractionTest extends UnitTest {
         }
         assertEquals(files, files(A));
         assertEquals(key, dirKey(A), "the directory was not swapped");
+    }
+
+    @Test
+    void aWrittenRunTheValidatorRefusesChangesNothing() throws Exception {
+        twoRunsOnOneTerm(A);
+        var files = files(A);
+        var run = "run@eeeeeeeeeeee";
+
+        var refused = assertThrows(GraphRefusedException.class, () -> store.recordRun(A, entry(A, run, "memory:5"),
+                put(ev(A, "eE", "memory:5", run),
+                        new Term(meta(A, "Q"), "Organization", "Dangling", List.of(), List.of("e-missing")))));
+
+        assertFalse(refused instanceof RunRetractedException, refused.getMessage());
+        assertFalse(refused.violations().isEmpty());
+        assertEquals(files, files(A), "records and ledger alike");
     }
 
     // ---- the write guard ----

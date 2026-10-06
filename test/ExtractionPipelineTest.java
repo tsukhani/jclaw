@@ -41,6 +41,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -1256,7 +1257,7 @@ class ExtractionPipelineTest extends UnitTest {
 
         var harborlight = stage(run, ExtractionPipeline.TERM).stream()
                 .filter(d -> d.subject().equals("Harborlight Analytics")).findFirst().orElseThrow();
-        var options = new java.util.TreeSet<>(SCHEMA.termTypes().keySet());
+        var options = new TreeSet<>(SCHEMA.termTypes().keySet());
         options.add(ExtractionPipeline.NOT_AN_ENTITY);
         assertEquals(List.copyOf(options), List.copyOf(harborlight.probabilities().keySet()),
                 "every option, lexically sorted");

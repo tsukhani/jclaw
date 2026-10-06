@@ -50,7 +50,11 @@ class ApiGraphControllerTest extends FunctionalTest {
 
     /** One run under {@code cert} grounding a Term of its own. */
     private static void seed(long agent, String runId, String cert) throws Exception {
-        var entry = new Entry(runId, agent, "memory:1", "sha256:00", Outcome.WRITTEN, "tev1", "sha256:d1", cert,
+        seed(agent, runId, "tev1", "sha256:d1", cert);
+    }
+
+    private static void seed(long agent, String runId, String model, String digest, String cert) throws Exception {
+        var entry = new Entry(runId, agent, "memory:1", "sha256:00", Outcome.WRITTEN, model, digest, cert,
                 "v3@000000000000", "x@000000000000", false, List.of());
         var evidence = new Evidence(Meta.fresh("e-" + runId, agent, Tier.TENTATIVE), "memory:1", null, null, null,
                 runId, null, null, null, null, null, null, null, null, null, null);
@@ -95,6 +99,53 @@ class ApiGraphControllerTest extends FunctionalTest {
         var json = JsonParser.parseString(getContent(retract(
                 "{\"runIds\": [\"run@b00000000001\", \"run@b00000000002\"]}"))).getAsJsonObject();
         assertEquals(2, json.get("runs").getAsInt());
+        assertEquals(2, json.get("evidence").getAsInt());
+        assertEquals(2, json.get("records").getAsInt());
+        assertEquals(List.of(), GraphStore.get().read(AGENT));
+        assertEquals(List.of(), GraphStore.get().read(OTHER));
+    }
+
+    /** Model names and digests no other class records, since the route sweeps every agent's ledger. */
+    private static final String MODEL = "tev-1371-model";
+    private static final String DIGEST = "sha256:1371digest";
+
+    private static Set<String> ids(long agent) throws Exception {
+        return Set.copyOf(GraphStore.get().read(agent).stream().map(OntologyRecord::id).toList());
+    }
+
+    @Test
+    void aModelRetractionTakesEveryDigestOfThatModelAndNoOtherModel() throws Exception {
+        seed(AGENT, "run@c00000000001", MODEL, DIGEST + "1", CERT + "m");
+        seed(OTHER, "run@c00000000002", MODEL, DIGEST + "2", CERT + "m");
+        seed(OTHER, "run@c00000000003", MODEL + "-other", DIGEST + "1", CERT + "m");
+        login();
+
+        var response = retract("{\"model\": \"" + MODEL + "\"}");
+
+        assertIsOk(response);
+        var json = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertEquals(2, json.get("runs").getAsInt());
+        assertEquals(2, json.get("evidence").getAsInt());
+        assertEquals(2, json.get("records").getAsInt());
+        assertEquals(Set.of(), ids(AGENT));
+        assertEquals(Set.of("e-run@c00000000003", "t-run@c00000000003"), ids(OTHER));
+    }
+
+    @Test
+    void aDigestRetractionTakesOnlyThatDigest() throws Exception {
+        seed(AGENT, "run@d00000000001", MODEL, DIGEST, CERT + "d");
+        seed(OTHER, "run@d00000000002", MODEL, DIGEST + "-other", CERT + "d");
+        login();
+
+        var response = retract("{\"digest\": \"" + DIGEST + "\"}");
+
+        assertIsOk(response);
+        var json = JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertEquals(1, json.get("runs").getAsInt());
+        assertEquals(1, json.get("evidence").getAsInt());
+        assertEquals(1, json.get("records").getAsInt());
+        assertEquals(Set.of(), ids(AGENT));
+        assertEquals(Set.of("e-run@d00000000002", "t-run@d00000000002"), ids(OTHER));
     }
 
     @Test
