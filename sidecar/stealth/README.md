@@ -216,6 +216,16 @@ so a headless Linux server behaves exactly like a developer laptop. That browser
 Google's official **Chrome for Testing** build, not a community Chromium, which is why
 proprietary codecs (H.264, AAC, MP3) and Widevine are present in it.
 
+**Nothing in JClaw runs `patchright install`.** The first `uv run` resolves the `patchright` package, but
+no browser download is triggered by the JVM, `serve.py`, `jclaw.sh`, `install.sh`, `install.ps1` or the
+Dockerfile. The one Chromium JClaw downloads is Playwright Java's (`PlaywrightBrowserTool`, on the first
+`browser` call or Settings → Browser), into `PLAYWRIGHT_BROWSERS_PATH` or the per-OS `ms-playwright`
+cache. The sidecar inherits the JVM's environment and so looks in the same place, but that build serves it only
+when Patchright pins the same revision as Playwright Java `1.63.0` (`pyproject.toml` asks for
+`patchright>=1.52`), which nothing checks. Otherwise run `uv run patchright install chromium` in `sidecar/stealth`.
+Without the full build a render falls back to the headless shell and logs that command; without either,
+`/render` answers 502. `browser_ready` on `/health` means only that Patchright imported.
+
 Measured: 106/150 on the corpus against 107/150 for the operator's installed Chrome —
 a one-entry difference, inside run-to-run noise. The `channel="chrome"` preference was
 removed rather than kept as an optimisation, because a second code path that only some

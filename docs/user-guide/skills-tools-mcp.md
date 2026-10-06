@@ -30,6 +30,8 @@ The [Skills](/skills) page splits into two columns:
 - **Global Skills** (left) — the library you've built. Drag any global skill onto an agent on the right to assign it.
 - **Agents** (right) — every agent, with the skills currently attached to each.
 
+Assigning a skill runs two checks before anything is copied, and a failure shows as a banner on the page. First, every tool the skill's `tools:` frontmatter lists must exist and be enabled for that agent — otherwise you get *Cannot add skill '…' to agent '…': missing tools — disabled: […]; unknown: […]*; enable them on the agent and drag again. Second, every binary file in the skill is malware-scanned by SHA-256 hash with the scanners configured in [Settings → Malware and Virus Scanners](/guide#settings-malware-and-virus-scanners), and a hit refuses with *malware detected*. With no scanner enabled the scan is skipped, and a scanner that errors or times out fails open, so the skill is added; verdicts are logged under category `scanner` in [Logs](/logs).
+
 You can also **promote** an agent-specific skill back into the global library by dragging it from the right column to the left. This is the workflow for refining a skill on one agent first, then making it reusable everywhere. Promotion routes the skill through an LLM sanitization pass — see [Settings → Skills Promotion](/guide#settings) for the provider/model/timeout knobs.
 
 ### Creating a skill

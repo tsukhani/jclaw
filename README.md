@@ -607,7 +607,10 @@ A few more developer commands sit beside it:
 ./jclaw.sh e2e                     # Playwright UAT suite against an already-running server
 ./jclaw.sh loadtest                # in-process load-test harness against /api/chat/stream
 ./jclaw.sh scrapetest              # scrape-ladder access rates over the CF-100 corpus (needs the backend)
+./jclaw.sh grapheval run           # certify local Ollama decision models for graph extraction (needs the backend)
 ```
+
+`grapheval run` scores `evals/graph/cases.json` against an agent's memories (`--agent`), `--set heldout` measures `data/graph-eval/heldout.json` instead, and `--set sequences` replays `evals/graph/sequences.json` with no agent; every run spends model calls. `--decision-model` (repeatable, default the models selected in Settings), `--runs 1-3`, `--recall-floor`, `--concurrency 1-4`, `--timeout` and `--out FILE` tune it. `grapheval blind-sheet` and `grapheval heldout-sample --agent NAME --count N` write labelling inputs under `data/graph-eval/`. See [evals/graph/README.md](evals/graph/README.md).
 
 #### Evals
 

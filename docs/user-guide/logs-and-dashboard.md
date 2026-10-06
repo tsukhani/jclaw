@@ -97,6 +97,8 @@ Latency percentiles per pipeline segment of a turn — queue wait, TTFT, the too
 
 Use this to spot a slow segment or a slow channel before users complain.
 
+The trash icon (**Clear latency metrics**) deletes every recorded latency sample, browser INP rows included — all windows, agents and channels, not just the current filter. It asks no confirmation.
+
 The **browser** channel is different: it measures the JClaw web app itself rather than a chat turn. Each time an interaction in the app — a click, a keypress — becomes the slowest of your session, the page reports its **Interaction to Next Paint (INP)**, and selecting **browser** shows those as one INP row. "All channels" leaves it out, so it never mixes into the turn figures. An interaction slower than 200 ms (Google's "good" limit) also lands in [Logs](/logs) under category **browser**, naming the page, the element, and how the time split between waiting, running handlers, and repainting.
 
 The **Counts** view holds up to six per-turn figures that are counts rather than durations, so they get their own view instead of rows in the latency table. Its columns are Metric / turns / total / p50 / p90 / p99 / max — **total** is the windowed sum, which has no meaning for a duration:
@@ -113,6 +115,19 @@ The **Counts** view holds up to six per-turn figures that are counts rather than
 Only turns with at least one cache-served call contribute to the Cache-served row, so the cache-served *share* is printed as a percentage line under the table — the ratio of the two rows' totals rather than a subtraction of percentiles (percentiles don't subtract).
 
 Watch **LLM calls / turn** when you change agent configuration: it is what tells you whether a change bought its quality with extra model calls.
+
+### Chat Compression
+
+Token savings from [Content Compression](/guide#agents) of large tool results, with the same **7d / 30d / All** window (default 30d), agent and channel selects as Chat Performance. Four tiles head the panel:
+
+- **Tokens saved** — tokens before minus after, over the window.
+- **Reduction** — the saved share, with the before → after totals.
+- **CCR hit rate** — how many `ccr_retrieve` calls found the original they asked for. Retrievals carry no agent or channel, so this tile ignores those filters.
+- **Inflation guards** — compressions discarded because the result was not fewer tokens than the original, beside the count of compressions kept.
+
+Below them, **Saved by content type** and **Algorithm usage**; the table and chart icons in the header switch both between bar charts (the default) and tables — *Type / Saved / Reduction* and *Algorithm / Events / Saved*. Warnings appear at the foot when inflation guards exceed 5% of attempts, when the CCR hit rate falls below 50%, or when a content type keeps under 10% of its tokens while the hit rate is below 90%.
+
+The trash icon (**Reset compression metrics**) deletes every recorded compression event, not just the current window, without confirmation.
 
 ### Recent Activity
 

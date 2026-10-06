@@ -73,6 +73,8 @@ Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIM
 | `maxFileBytes`     | 100 MB  | Every other attachment type (PDFs, text, archives, etc.).      |
 | `maxFiles`         | 5       | Max files per chat message. System-wide ceiling is 5.          |
 
+The panel only lowers a cap: each size is entered in MB from 1 up to its default, and a larger number is saved as the default. `maxFiles` is held between 1 and 5 by the server as well, but a byte cap above its default written with `POST /api/config` is not refused, and uploads are then checked against it.
+
 Takes effect without a restart; raise `play.netty.maxContentLength` in `conf/application.conf` if you need over the bundled 512 MB transport-layer ceiling.
 
 ## Printers
@@ -100,6 +102,8 @@ Exports traces and metrics to an OpenTelemetry collector over OTLP. Off by defau
 | `otel.metrics.interval.seconds` | `60` | Seconds between metric exports. Has no row in the panel and is **read at JVM start only** — set it through `POST /api/config` and restart. |
 
 Changes to the endpoint, headers, protocol and sampling ratio apply live — the exporter is swapped for the next span and the next metric collection, no restart. **Send test span** emits one span and waits for the collector's verdict, so you can tell "saved" from "reaching the collector": it reports **Delivered** with the trace id, or the exporter's own error.
+
+Beside the export switch, the panel shows where export is going — `→ <endpoint> (<protocol>)` — or **not exporting**. When a background export has failed, **Last export failed:** with the exporter's error appears beside **Send test span** until a test result replaces it. The error is kept until the next export setting is saved or a test span is sent, so a later successful export does not clear it.
 
 What leaves the process once enabled: an HTTP server span per request, named from the route (`GET /api/config/{key}` is one name however many keys are read); a `turn` span per agent turn, with each model call beneath it as a GenAI-convention client span carrying provider, model, token counts and cache reads; HTTP-client and JDBC spans under those; the `gen_ai.client.*` histograms (operation duration, token usage, time to first chunk) and `jclaw.turn.segment.duration`, the per-segment turn timings behind the Dashboard's Chat Performance panel; and the `jvm.*` runtime metrics. Prompt and completion text are never exported.
 
@@ -225,12 +229,15 @@ If the new version doesn't answer within four minutes of starting, the upgrade *
 
 ### When the button isn't there
 
-Upgrade only applies to installs made by the one-line installer or from an unzipped release archive. In two cases the panel explains itself instead of offering a button:
+Upgrade only applies to installs made by the one-line installer or from an unzipped release archive. In these cases the panel explains itself instead of offering a button:
 
 - **A source checkout** — update it with `git pull`.
 - **A container** — the image is the upgrade unit; use `docker compose pull && docker compose up -d`. A tree swap inside the container would be thrown away on the next start.
+- **No shell to run `jclaw.sh`** — on Windows, install Git for Windows (which provides Git Bash), or run JClaw under WSL.
+- **`jclaw.sh` missing or not executable** in the install directory — the installation is not managed by `jclaw.sh`.
+- **The install directory, or the directory above it, is not writable** — the upgrade replaces the install directory in place by swapping it within its parent.
 
-Either way the release check still runs, and the explanation only appears when there is a newer release to explain. An install already on the newest release reports just that — **up to date** — with nothing to do.
+Whatever the reason, the release check still runs, and the explanation only appears when there is a newer release to explain. An install already on the newest release reports just that — **up to date** — with nothing to do.
 
 ### From the command line
 
@@ -286,7 +293,11 @@ For each provider you can:
 - Set **subscriptionMonthlyUsd** — shown only when the modality is `SUBSCRIPTION`: the monthly USD you pay the provider, which the Dashboard's Chat Cost **Subscription** block pro-rates to the selected window (`monthly × window_days / 30`).
 - Set **keepAlive** — Ollama Local only (`provider.ollama-local.keepAlive`, default `5m`): how long a model stays loaded between requests. `-1` keeps it loaded for good; longer values hold GPU memory per model.
 - Toggle **useNativeApi** — Ollama providers only (`provider.<name>.useNativeApi`, default off): send chat requests to the daemon's native `/api/chat` instead of the OpenAI-compatible endpoint. Same request semantics; the response adds the daemon's per-request timings (model load, prompt evaluation, generation), shown in each message's [usage popover](/guide#chat-per-message-usage) and as histograms on the Chat Performance dashboard. A local daemon reports all of them; Ollama Cloud reports total duration only. If the address serves no `/api/chat` (a gateway that exposes only the OpenAI surface), the request falls back to the OpenAI-compatible endpoint and the event log says so.
-- **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability pills (thinking, vision, audio, video, and **no tools** for a model that cannot call tools).
+- **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability pills (thinking, vision, audio, video, and **no tools** for a model that cannot call tools). Editing or adding a model also sets:
+  - **Context Window** — the model's context in tokens. `0` means unknown and is flagged, because compaction and `/usage` depend on it; enter it from the provider's docs.
+  - **Max Tokens** — the output cap sent with each request, lowered to what fits in the context window beside the prompt. `0` sends no cap, leaving the provider's default.
+  - **Levels** — shown with **Supports Thinking**: the reasoning-effort levels the model accepts, comma-separated, lowest first (`low, high, max`). Blank means `low`, `medium`, `high`; the first level is what an always-thinking model uses when none is chosen.
+- Set **leaderboardUrl** (`provider.<name>.leaderboardUrl`) — the page whose ranking orders **Discover models** and feeds its leaderboard filter. Seeded as `https://openrouter.ai/rankings` for OpenRouter and blank for Ollama Cloud and TogetherAI; blank, or a page that cannot be fetched, leaves the catalog in name order.
 - **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in. Each catalog entry's capability badges are confirmed by the provider or guessed from the model name (a trailing `?`, e.g. `video?`, marks a guess). Filter the catalog by capability (vision / audio / video / thinking), by cost (free / paid, offered when the provider has free models), and by leaderboard rank.
 
 If no provider is configured, no agent can answer — that's the most common cause of "the agent isn't replying." The [Agents](/agents) page shows a yellow **provider not configured** badge on rows whose provider is missing its key.
@@ -436,9 +447,11 @@ Master toggle, then a backend radio group:
 - **OpenAI** — reuses your OpenAI API key.
 - **Local** — runs a speech-recognition model in the local ASR sidecar (a Python process; needs `uv` on PATH): Whisper **Small**, **Medium**, **Large v3 Turbo** or **Large v3** (all multilingual), or **MERaLiON-3 3B**, tuned for Southeast Asian speech. The chosen model (~950 MB to ~6.6 GB) downloads from Hugging Face on first use with a progress bar. Requires `ffmpeg` on PATH; the page warns inline if it's missing.
 
+With OpenRouter or OpenAI chosen, a **Model** field (`transcription.model`) names the model on that provider's `/audio/transcriptions` endpoint — blank means `whisper-1`, and `gpt-4o-transcribe` and `gpt-4o-mini-transcribe` are suggested.
+
 Cloud backends are disabled in the radio group until their underlying provider key is configured in LLM Providers. An **Active:** status line above the toggle shows the current backend (cloud provider, or Local with the chosen model), or that transcription is off.
 
-Below the backend picker, a **Diarization** subsection covers the who-spoke-when pipeline (independent of the master transcription toggle, since the `diarize_audio` tool runs its own local pipeline):
+Below the backend picker, a **Diarization** subsection covers the who-spoke-when pipeline (independent of the master transcription toggle, since the `diarize_audio` tool runs its own local pipeline). It has its own on/off toggle, which is the `transcription.diarization.provider` key: turning it on picks OpenRouter when its key is set, else OpenAI, and turning it off clears the provider, after which `diarize_audio` reports that no diarization model is configured.
 
 - **Diarization** — who-said-what transcripts come from one of five providers you pick here. Ordinary voice-note transcription stays local (whisper) and works without any of this.
   - **Audio-capable chat model** — pick a provider — **OpenRouter** or **OpenAI** (cloud, using the API keys from LLM Providers), or **llama.cpp** or **vLLM** (local, over their OpenAI-compatible APIs; audio input is experimental upstream) — and one of its audio-capable models (the picker lists only models that accept audio input — the same ones showing an "Audio" badge in the chat model picker). The recording is sent to that model with a verbatim-diarization prompt; tell the agent who the speakers are ("the host is Anthony") and the transcript uses real names.
@@ -449,9 +462,11 @@ Below the backend picker, a **Diarization** subsection covers the who-spoke-when
 
 Text-to-speech for reading replies aloud (the **speaker icon** on a message) and for real-time [Voice mode](/guide#chat). Pick an **engine**, a **model**, and — where the model offers presets — a **voice**. Changes apply on the next read-aloud, no restart.
 
+An **Active:** status line at the top names the selected engine and its state: for the sidecar **running**, **ready — starts on first use**, or that it needs `uv` on PATH, with the reason; for JVM-native **ready**, **downloading model**, or **model downloads on first use**.
+
 Two engines:
 
-- **Sidecar** — quality-first; runs a local Python process (needs `uv` on PATH), and weights download from Hugging Face on first use. Models: **Qwen3-TTS 0.6B** (plus a 4-bit variant), **Kokoro-82M**, and **Chatterbox** (a PyTorch model on Apple Silicon MPS or NVIDIA CUDA — the most natural voice, but noticeably slower than the others).
+- **Sidecar** — quality-first; runs a local Python process (needs `uv` on PATH), and weights download from Hugging Face on first use. Models: **Qwen3-TTS 0.6B** (plus a 4-bit variant), **Kokoro-82M**, and **Chatterbox** (a PyTorch model on Apple Silicon MPS or NVIDIA CUDA — the most natural voice, but noticeably slower than the others). Its radio carries a **quality** badge, which turns to an amber **needs uv** when `uv` isn't found; the radio stays selectable.
 - **JVM-native** — runs in-process via sherpa-onnx, no Python or sidecar. Models: **Piper Amy** (tiny, fast, English) and **Kokoro-82M multilingual**; the chosen voice downloads once (a button in the panel) then synthesizes on CPU.
 
 **Voice** — models with preset speakers show a voice dropdown under the model. The sidecar **Kokoro** offers American and British, male and female voices; **Qwen3-TTS** offers **Voice 1** to **Voice 4**. **Chatterbox** has no preset voices, and both it and **Qwen3-TTS** can take their voice from a reference clip — **Record** a few seconds of clean speech in the panel or **Upload** one (WAV, MP3, FLAC, M4A or OGG, under 10 MB), and **Clear** it to return to the model default. Models with neither (Piper and the JVM-native Kokoro) hide the control, and **Default** keeps the model's own voice. Your choice is remembered per engine.
@@ -615,6 +630,7 @@ Each list is stored as `router.<class>.models` (`chat`, `summarize`, `agentic`, 
 - **Prefer subscription and self-hosted models** (`router.preferPrepaid`, on by default) — a model on a subscription or a self-hosted provider is tried before a per-token one, whatever the order, so included credit is spent before money. A per-token model in a list that also holds a prepaid one is badged **fallback only**. Off, the lists are followed exactly as written; the budget guard applies either way.
 - **Classifier model** (`router.classifier.provider` / `.model`, default **Keyword rules**) — the built-in rules are free and instant but read words rather than intent. A named model is asked for the class and a reasoning effort in one extra call before the reply starts, and sees the first 4000 characters of the prompt. If it is unreachable, slower than **Classifier timeout** (`router.classifier.timeoutSeconds`, 1 to 60 seconds, default 8, shown once a model or JEV is picked) or answers with something else, the keyword rules decide.
 - **JEV (TypeSafe AI)** (stored as provider `jev`, model `jev-latest`) — TypeSafe AI's decision model as the classifier. One request asks the same two questions, class and effort, about the first 4000 characters of the prompt and nothing else, and JEV answers each with a probability per choice. When its top class is below `router.classifier.jev.minConfidence` (0 to 1, default 0.50, no row in the panel), the keyword rules choose the class and its default effort, and the route notes that JEV was unsure. It uses the TypeSafe API key from [Decision Providers](#settings-decision-providers), and the option is disabled until one is set. The request is tried once within `router.classifier.timeoutSeconds`, never retried; a failure, a timeout, an invalid answer or a missing key falls back to the keyword rules. While JEV's circuit breaker is open or isolated, nothing is sent: the keyword rules decide, and the route notes that the JEV breaker is open. TypeSafe may record or retain the prompts it is sent. Measured on 60 prompts, JEV answered in 0.45 s at the median and 1.4 s at worst; earlier, larger browser-step requests saw about one in nine hang, and the timeout is what bounds that wait. Its default of 8 seconds is sized for LLM classifiers; with JEV, a lower value such as 3 bounds a hang sooner. With JEV, a timeout counts toward the circuit breaker the browser engine shares (see [Decision Providers](#settings-decision-providers)), so keep it at 3 seconds or more. The provider name `jev` is reserved, so no LLM provider can take it.
+- **Ollama decision models** (stored as provider `ollama-decision`, model the model's name) — each model ticked on the Ollama card in [Decision Providers](#settings-decision-providers) is listed as **Ollama decision / *model***, and only a ticked one is accepted. It answers the same two questions as JEV, under the same `router.classifier.jev.minConfidence` and classifier timeout, and falls back to the keyword rules the same way; the prompt goes only to your Ollama server. The provider name `ollama-decision` is reserved too.
 - **Reasoning effort** — a thinking model reasons at the effort the router chose for the prompt: the classifier's, or else the class default — low for Chat and Summarize, medium for Agent work and Coding, high for Reasoning. It is fitted to the levels the model offers. A thinking level chosen on the conversation still wins, including off.
 - **Budget guard** — usage is read from each Ollama Cloud provider's quota windows. Past **Downshift at** (`router.budget.downshiftAt`, default 0.75, shown as 75%) the four heavier classes stop using that provider and fall back to the Chat list; past **Exhausted at** (`router.budget.exhaustedAt`, default 0.95) no class uses it. Downshift must stay below Exhausted. Any provider that answers a call with "out of credit" is also benched for a while.
 
@@ -829,6 +845,8 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on each
 |--------------------------------|---------|------------------------------------------------------------------------------------------------------|
 | `shell.allowlist`              | seeded list | Comma-separated command names the agent may run. A command passes when its first word, or that word's file name, is listed; arguments are not checked. First start seeds common commands (`git`, `ls`, `grep`, `curl`, `python3`, `node`, …). |
 | `shell.defaultTimeoutSeconds`  | 30      | Wall-clock budget for a command whose call sets no timeout (1–300 s in the panel). A call may set its own, capped at `shell.maxTimeoutSeconds` (300). |
+| `shell.maxTimeoutSeconds`      | 300     | The longest timeout a call may set; a longer one is cut to this. Has no row in the panel — set it with `POST /api/config`. |
+| `shell.maxOutputBytes`         | 102400  | How much of a command's output reaches the agent (100 KB); the rest is cut, with a note giving the full length. Has no row in the panel — set it with `POST /api/config`. |
 | `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Has no row in the panel — set it with `POST /api/config`. |
 
 :::gotcha

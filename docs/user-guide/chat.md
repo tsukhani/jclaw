@@ -12,6 +12,8 @@ The Chat page has three regions:
 - **Message rail** — the active conversation: your messages, the agent's replies, tool calls, and inline reasoning when the model supports it.
 - **Composer** — at the bottom, where you type, attach, and send.
 
+The context meter appears once a conversation has started. It reads `used / window` — the latest turn's prompt and completion tokens against the model's context window — over a bar that turns amber at 70% and red at 90%. Hover it for **Context usage** as a percentage, **Prompt tokens**, **Thinking tokens** and **Cached tokens** when there are any, **Completion** and **Current context**, then **Conversation total** (every turn's tokens added up), **Compactions** once the conversation has been compacted (each one lowers the current context), and the running **Turns** and **Cost** (when the model has pricing).
+
 Closing or refreshing the page is safe. Your conversation history is server-side; to reopen an earlier thread, click its row on [Conversations](/conversations).
 
 ## Picking an agent
@@ -30,9 +32,15 @@ Replies render as Markdown, and math the model writes in TeX is typeset with KaT
 
 Ask for a Lewis structure and the model writes a fenced code block with the language hint `lewis` holding one SMILES string; the chat draws it as an electron-dot structure, with every atom labeled and its lone pairs and radicals marked. Rings must be in Kekulé form (`C1=CC=CC=C1`, not `c1ccccc1`), and only main-group elements are drawn. The block shows as code until the drawing has loaded, and a SMILES that cannot be drawn keeps its code block with a one-line reason under it.
 
+For a 3D model of a molecule or crystal, the model writes a fenced block with the language hint `structure`, optionally followed by a format — `cif`, `pdb`, `sdf`, `mol`, `xyz` or `mol2` — and a caption (`structure cif Sodium formate`). The body is either the structure text, up to 500,000 characters, or one path to a structure file in the agent's workspace, whose extension names the format; with no format named, the chat recognizes it from the text. The 3D view replaces the code block once the reply is complete: drag to rotate, and switch between **Ball & stick** and **Space-filling**. A crystal adds **1×1×1** to **3×3×3** cell repeats (a repeat over 20,000 atoms is disabled) and a **Unit cell** box, **Coordination polyhedra** appears where the structure has them, and a file-backed structure links the file for download. At most four views are live at once; an older one folds to a **Show 3D view** button. A block that cannot be read keeps its code block with the reason under it.
+
 If a turn fails, the reply says so in three parts — **What broke**, **What to check** and **How to retry** — and when the provider refused the call (a rejected key, an exhausted balance) it names the provider and model. The raw detail is in [Logs](/logs).
 
-If you regret a message, hover over it: you'll see **Copy to clipboard**, **Reply**, **Edit & resubmit** and **Delete message** controls. Editing rewinds the conversation to that point and re-runs from the edited text. A reply has **Copy to clipboard**, **Reply**, **Regenerate response** and **Delete message** on hover; regenerating removes that reply and the message it answered, then sends your message again for a fresh answer. **Reply** quotes that message above the composer for your next one.
+A reply the model cut off at its output-token limit ends with an amber **Reply was truncated by the model** marker, so the partial text isn't mistaken for a complete answer; a subagent's announce card carries the same marker when the child's reply was cut off.
+
+If you regret a message, hover over it: you'll see **Copy to clipboard**, **Reply**, **Edit & resubmit** and **Delete message** controls. Editing rewinds the conversation to that point and re-runs from the edited text. A reply has **Copy to clipboard**, **Reply**, **Regenerate response** and **Delete message** on hover; regenerating removes that reply and the message it answered, then sends your message again for a fresh answer. **Reply** quotes that message above the composer for your next one, and the agent receives the quoted text ahead of yours, so it knows what you are answering. A slash command is never quoted, and a quote keeps its first 16,000 characters.
+
+Replying on a channel does the same. On Telegram, a reply to any message — or a quote of part of one — brings its text, or for a media message with no caption its kind, into the turn, naming who wrote it. Slack and WhatsApp send only the replied-to message's id, so there the quote carries text only for a message JClaw sent outside a conversation, such as a task result or a message the agent sent with the `message` tool: on WhatsApp a reply that quotes one, on Slack the first reply in its thread (later replies find it in the conversation already). A Slack thread reply under such a post reaches the bot without an @mention.
 
 To start over, click **New conversation** (the pencil-and-square icon in the composer footer). The page clears for a fresh thread; the previous one stays saved.
 
@@ -49,6 +57,8 @@ The model picker in the header and the **Think** pill in the composer change the
 - Once the [Model Router](/guide#settings-model-router) lists a model for its Chat class, the picker also offers **Auto (best value)**: each turn goes to the model the router picks for that prompt, at a reasoning effort it picks too, unless you set a Think level on the conversation, which still wins. Every routed reply carries a badge such as `Auto · Coding → <model> · medium effort`, flagged **failover** when the first choice failed and its fallback answered, or **budget** when it moved to a lighter model to save subscription credit; hover it for the router's reason. On Auto, the composer's capability pills, Think included, describe the model the latest routed reply named, so a fresh Auto conversation shows none until its first reply.
 
 Switching to a model that does not offer the current thinking level turns thinking off for the conversation rather than sending a level the model would reject.
+
+A model declared unable to call tools — by its provider, or by clearing **Can call tools** on it in [Settings → LLM Providers](/settings) — carries a **no tools** tag in the model picker. Pick one for an agent that has tools or skills and a **No tools** notice above the conversation says the model can't call tools, so the agent's tools and skills are unavailable in this conversation until you pick a tool-capable model. A model with no declared capability counts as tool-capable.
 
 ## Attachments
 

@@ -9,8 +9,11 @@ Capture is automatic — it happens in the background after a turn completes, so
 1. A cheap **attention gate** skips trivial turns (greetings, bare acknowledgements) so the system doesn't pay an extraction call for "thanks".
 2. An **LLM extractor** reads the turn and proposes candidate memories, each with a category and an importance score. At most 5 are kept per turn.
 3. Each candidate is **deduplicated** against the agent's recent memories — a near-duplicate of something already stored is dropped rather than appended.
+4. A **consolidation judge**, running on the same capture model, compares each new memory with stored ones on the same subject and marks an older memory **superseded** when the new one replaces it — "lives in Porto" supersedes "lives in Berlin". The newer memory always wins, an older one is kept if the newer text would lose its content, and if the judge fails the new memories are simply stored alongside the old.
 
 An explicit instruction takes a different route: the agent's `memory` tool (recall, store, forget) answers "remember that…" and "forget what I told you about…" directly, and reports exactly what it touched — storing something already known is a no-op, not a second row. That tool is also the only way a `core` memory is created: automatic capture never assigns `core`, and a candidate the extractor labels `core` is demoted to `fact`.
+
+The core cap (`memory.coreload.maxCount`, default `20`) applies when storing too: once an agent holds that many core memories, the tool refuses a new one and the agent asks you instead — store it under another category, or name a core memory to forget first.
 
 Capture applies to your operator-facing agents only — [subagents](/subagents) never capture (their work returns to the parent, which captures what matters). Each agent has its own **Memory Autocapture** toggle and an optional extractor-model override on its [Agents](/agents) edit form; point the override at a cheap model to keep extraction costs negligible.
 
@@ -44,6 +47,10 @@ Two paths return memories to the agent:
 
 - **Core auto-load** — `core`-category memories at or above the importance threshold (default 0.8) are injected into every session at start, capped at 20 entries — a count of whole memories, not a token budget (see [Tuning](#memory-tuning)).
 - **Per-turn recall** — each message triggers a relevance search over the agent's store; the best matches (up to 10) are injected for that turn only. Recalled text is framed to the model as stored reference data, **not** instructions — the soft counterpart of the write-time injection guard.
+
+Recall ranking decays with age: a memory's score fades on a 30-day half-life counted from when it was last changed or last recalled, stretched by importance (about 84 days at importance 0.9). Decay bottoms out at a quarter of the score and never deletes anything — an old memory still surfaces when nothing fresher competes.
+
+An agent can end up holding more core memories than the cap — the excess is stored but never auto-loaded. Its edit form on the [Agents](/agents) page shows a **Core memories** card with the count against the cap and, when over it, a **Migrate excess** button. That asks the agent's own model to refile each memory beyond the cap under the category that fits it best; the ones that fit within the cap stay core, nothing is deleted, and a memory it cannot classify stays core so you can run it again.
 
 By default relevance is keyword-based. Enabling **vector search** adds semantic recall — "what did we decide about invoicing?" finds a memory that never uses the word "invoicing" — with the two result lists blended by reciprocal-rank fusion. The backend is picked automatically: `pgvector` on PostgreSQL, an embedded Lucene HNSW index otherwise. See [Tuning](#memory-tuning) below.
 
@@ -83,6 +90,14 @@ The remaining knobs have no Settings section and live in the config store (`POST
 | `memory.autocapture.maxTokens` | `1024` | Output budget for the extractor call. |
 | `memory.autocapture.dedup.threshold` | `0.85` | Similarity above which a candidate is a duplicate. |
 | `memory.autocapture.dedup.scanLimit` | `100` | Recent memories compared during dedup. |
+| `memory.consolidation.enabled` | `true` | Run the consolidation judge after capture. |
+| `memory.consolidation.maxTokens` | `512` | Output budget for the judge call. |
+| `memory.consolidation.shortlist.minJaccard` | `0.2` | Word overlap at which a stored memory is shown to the judge. |
+| `memory.consolidation.shortlist.maxPerCandidate` | `5` | Stored memories shown to the judge per new memory. |
+| `memory.decay.enabled` | `true` | Fade older memories in recall ranking. |
+| `memory.decay.halfLifeDays` | `30` | Decay half-life in days, before the importance stretch. |
+| `memory.decay.importanceBoost` | `2.0` | Half-life stretch per unit of importance: `halfLife × (1 + boost × importance)`. |
+| `memory.decay.floor` | `0.25` | Lowest multiplier decay can reach. |
 
 Vector search is opt-in from **Settings › Memory › Embeddings** — the Vector memory toggle, then a provider and model. It is not a `conf/application.conf` edit and needs no restart; the keys (`memory.jpa.vector.enabled`, `.provider`, `.model`, `.dimensions`) live in the config store like any other setting.
 

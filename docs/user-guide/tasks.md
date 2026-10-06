@@ -47,7 +47,7 @@ For something that should happen **once** on a given day, use the absolute date-
 | `listRecurringTasks`  | List every recurring task currently configured for this agent.                                              |
 | `listReminders`       | List every reminder (`payloadType="reminder"`) currently scheduled for this agent.                          |
 
-`createTask` and `updateTask` also take `enabledToolNames`, a JSON array of the tools a fire may use: the agent's other tools are withheld from that task, and leaving it unset gives the task all of them.
+`createTask` and `updateTask` also take `enabledToolNames`, a JSON array of the tools a fire may use: the agent's other tools are withheld from that task, and leaving it unset gives the task all of them. They also take `modelProvider` and `modelId`, which pin the task to that model (see **Model** under *Editing a task's instructions*); set both, because a pin with only one is ignored.
 
 For the agent to be able to use any of these actions, **Tools → task_manager** must be switched on for that agent on the [Agents](/agents) page.
 

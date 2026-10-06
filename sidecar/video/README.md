@@ -61,5 +61,11 @@ absent key means the default below.
 `LocalSidecarDaemon` also reads `videogen.local.timeoutSeconds` and exports it as `SIDECAR_REQUEST_TIMEOUT_SEC`; this
 sidecar does not read that variable, so the key has no effect here.
 
+The job timeout is JVM-side and covers every provider: `videogen.maxJobMinutes` (seeded `30` by `DefaultConfigJob`;
+Settings → Video Generation → "Job timeout (minutes)") is read by `VideoGenerationJobService.tickOnce`, which
+`jobs.VideoGenerationJobRunner` runs every 5 s. A `RUNNING` job whose age since creation reaches it is marked `FAILED`
+with `video generation timed out after <n> minutes`, before any further poll. The sidecar has no cancel endpoint and is
+not told, so it finishes the job and answers `409 {busy}` to new submissions until then.
+
 `serve.py` flags: `--host` (`127.0.0.1`), `--port` (`9528`), `--model` (engine id), `--cache-dir` (becomes `HF_HOME`),
 `--idle-timeout-min` (`15`), `--no-auth`, `--probe`. `--model` and `--cache-dir` are required unless `--probe` is given.
