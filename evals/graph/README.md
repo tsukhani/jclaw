@@ -451,8 +451,11 @@ written records and on a sample of the agreed ones (written and labelled):
 
 - `record` is the stable key, `term:<span>:<type>` or `rel:<from>:<type>:<to>`; a held-out
   `caseId` is the memory id.
-- `unmatched` takes `wrong` (the model erred) or `label-error` (the label did, which blocks
-  certification until the labels are fixed); `agreed` takes `right` or `wrong`.
+- `side` is optional. A verdict without one is blind, `right` or `wrong` judged from the sheet
+  alone, and takes the side of the record it judges: `right` on an unmatched record is a
+  `label-error`. With a side, `unmatched` takes `wrong` (the model erred) or `label-error` (the
+  label did, which blocks certification until the labels are fixed); `agreed` takes `right` or
+  `wrong`.
 - `adjudicator` is `operator` or `model:<name>`; `check` is the operator's `agree` or
   `disagree` on a model's verdict. Any other key or value is refused with a 400.
 - Only verdicts under the current `guide@` count.
@@ -470,9 +473,10 @@ written records and on a sample of the agreed ones (written and labelled):
 
 Each certification run or re-score writes the blind sheet
 `data/graph-eval/sheets/<split>-<model>.json`: every unmatched written record and every sampled
-agreed record at the configuration reached, each with its memory's text and inclusion
-probability (1 for an unmatched record), the seed and the share. Nothing on it says whether a
-model or a label produced a record, or which model.
+agreed record at the configuration reached, each with its memory's text, and the seed and the
+share. Nothing on it says whether a model or a label produced a record, or which model, so it
+carries no per-record inclusion probability: re-scoring takes each record's side and inclusion
+from the stored run.
 
 ## Held-out set
 

@@ -166,6 +166,20 @@ class CertifierTest extends UnitTest {
     }
 
     @Test
+    void aBlindVerdictTakesTheUnmatchedSide() {
+        var blindWrong = new Adjudications.Verdict("c007", RECORD.record(), null, Certifier.WRONG, "guide@000000000000",
+                Adjudications.OPERATOR, null, null, "");
+        assertEquals(Certifier.CERTIFIED, Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true,
+                List.of(RECORD), List.of(blindWrong), null).status());
+
+        var blindRight = new Adjudications.Verdict("c007", RECORD.record(), null, Adjudications.RIGHT,
+                "guide@000000000000", Adjudications.OPERATOR, null, null, "");
+        var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD),
+                List.of(blindRight), null);
+        assertTrue(c.reasons().contains(Certifier.LABELS_NEED_FIXING), "right on an unmatched record is a label error");
+    }
+
+    @Test
     void oneRunWithoutItsSpotCheckCertifiesNothing() {
         var c = Certifier.certify(List.of(walkDownTo(0.5)), false, true, List.of(), List.of(), null);
         assertEquals(Certifier.NOT_CERTIFIED, c.status());

@@ -47,14 +47,20 @@ public final class Adjudications {
     private Adjudications() {}
 
     /**
-     * One verdict. {@code side} is {@link #UNMATCHED} (verdict {@code wrong} or {@code label-error}) or {@link #AGREED}
-     * ({@code right} or {@code wrong}); {@code adjudicator} is {@link #OPERATOR} or {@code model:<name>}, and
-     * {@code check} the operator's {@code agree} or {@code disagree} on a model's verdict.
+     * One verdict. {@code side} is {@link #UNMATCHED} (verdict {@code wrong} or {@code label-error}),
+     * {@link #AGREED} ({@code right} or {@code wrong}), or null for a blind verdict ({@code right} or {@code wrong}),
+     * which takes the side of the record it judges; {@code adjudicator} is {@link #OPERATOR} or {@code model:<name>},
+     * and {@code check} the operator's {@code agree} or {@code disagree} on a model's verdict.
      */
-    public record Verdict(String caseId, String record, String side, String verdict, String guide, String adjudicator,
-                          @Nullable Double inclusion, @Nullable String check, String note) {
+    public record Verdict(String caseId, String record, @Nullable String side, String verdict, String guide,
+                          String adjudicator, @Nullable Double inclusion, @Nullable String check, String note) {
         public boolean byModel() {
             return adjudicator.startsWith(MODEL_PREFIX);
+        }
+
+        /** This verdict on a record of the given side: a blind {@code right} on an unmatched record is a label error. */
+        public String on(boolean agreed) {
+            return side == null && !agreed && verdict.equals(RIGHT) ? LABEL_ERROR : verdict;
         }
     }
 
@@ -74,9 +80,13 @@ public final class Adjudications {
                 if (!e.isJsonObject()) throw new IllegalArgumentException(where + ": must be an object");
                 var o = e.getAsJsonObject();
                 GraphCases.onlyKeys(o, KEYS, where);
-                var side = GraphCases.text(o, "side", where);
+                var side = o.has("side") ? GraphCases.text(o, "side", where) : null;
                 var verdict = GraphCases.text(o, "verdict", where);
-                if (side.equals(UNMATCHED)) {
+                if (side == null) {
+                    if (!verdict.equals(RIGHT) && !verdict.equals(WRONG)) {
+                        throw new IllegalArgumentException(where + ": a verdict without a side is 'right' or 'wrong'");
+                    }
+                } else if (side.equals(UNMATCHED)) {
                     if (!verdict.equals(WRONG) && !verdict.equals(LABEL_ERROR)) {
                         throw new IllegalArgumentException(where + ": an unmatched verdict is 'wrong' or 'label-error'");
                     }
@@ -198,7 +208,7 @@ public final class Adjudications {
 
         private @Nullable Verdict verdict(GateRecord r) {
             var v = current.get(List.of(r.caseId(), r.record()));
-            return v != null && v.side().equals(r.agreed() ? AGREED : UNMATCHED) ? v : null;
+            return v != null && (v.side() == null || v.side().equals(r.agreed() ? AGREED : UNMATCHED)) ? v : null;
         }
 
         /** The model-verdict check's own draw: the same hash rule over a key the agreed draw never uses. */
@@ -235,7 +245,7 @@ public final class Adjudications {
                     byGate.merge(r.gate(), 1, Integer::sum);
                     continue;
                 }
-                if (v.verdict().equals(LABEL_ERROR)) labelError = true;
+                if (v.on(r.agreed()).equals(LABEL_ERROR)) labelError = true;
                 if (!v.byModel() || !checkMarked(r)) continue;
                 marked++;
                 if (v.check() == null) continue;

@@ -832,15 +832,16 @@ class GraphEvalHarnessTest extends UnitTest {
             for (var e : sheet.getAsJsonArray("records")) {
                 listed.add(e.getAsJsonObject().get("caseId").getAsString() + " " + e.getAsJsonObject().get("record"));
                 var o = e.getAsJsonObject();
-                assertEquals(Set.of("caseId", "record", "text", "inclusion"), o.keySet());
+                assertEquals(Set.of("caseId", "record", "text"), o.keySet(), "nothing on the sheet gives a side away");
                 var c = splitCases.stream().filter(x -> x.id().equals(o.get("caseId").getAsString())).findFirst()
                         .orElseThrow();
                 assertEquals(c.text(), o.get("text").getAsString());
-                boolean agreed = o.get("inclusion").getAsDouble() < 1;
-                verdicts.add(new Adjudications.Verdict(c.id(), o.get("record").getAsString(),
-                        agreed ? Adjudications.AGREED : Adjudications.UNMATCHED,
-                        agreed ? Adjudications.RIGHT : Adjudications.WRONG, source.guide(), Adjudications.OPERATOR,
-                        agreed ? 0.2 : null, null, ""));
+                // Judged blind, as an adjudicator reading the memory would: only the decider's mistyping is wrong.
+                var record = o.get("record").getAsString();
+                boolean wrong = c.id().equals("c015") && record.equals("term:Larchmere House:Organization");
+                verdicts.add(new Adjudications.Verdict(c.id(), record, null,
+                        wrong ? Adjudications.WRONG : Adjudications.RIGHT, source.guide(), Adjudications.OPERATOR,
+                        null, null, ""));
             }
 
             var reuse = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.admit(request(root, split,

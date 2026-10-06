@@ -1105,8 +1105,9 @@ public final class GraphEvalHarness {
 
     /**
      * The blind sheet: every unmatched written record and every sampled agreed record at the configuration reached,
-     * each with its memory's text and its inclusion probability, sorted by case and record. Nothing on it says which
-     * side a record is on or which model wrote it.
+     * each with its memory's text, sorted by case and record. Nothing on it says which side a record is on or which
+     * model wrote it; re-scoring takes each record's side and inclusion from the stored run, so a blind verdict needs
+     * neither.
      */
     private static JsonObject sheet(CertificationSplit split, String guide, Adjudications.Book book, List<Case> cases,
                                     List<GraphEvalScorer.GateRecord> inScope) {
@@ -1124,7 +1125,6 @@ public final class GraphEvalHarness {
             o.addProperty("caseId", r.caseId());
             o.addProperty("record", r.record());
             o.addProperty("text", texts.get(r.caseId()));
-            o.addProperty("inclusion", r.agreed() ? book.share() : 1.0);
             out.add(o);
         }
         var sheet = new JsonObject();

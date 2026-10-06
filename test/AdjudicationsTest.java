@@ -68,6 +68,41 @@ class AdjudicationsTest extends UnitTest {
     }
 
     @Test
+    void aBlindVerdictIsRightOrWrongAndTakesTheSideOfTheRecordItJudges() {
+        var base = "\"caseId\": \"c1\", \"record\": \"term:X:System\", \"guide\": \"" + GUIDE + "\", \"adjudicator\": \"operator\"";
+        var blind = Adjudications.parse("[{" + base + ", \"verdict\": \"right\"}]").getFirst();
+        assertNull(blind.side());
+        var e = assertThrows(IllegalArgumentException.class,
+                () -> Adjudications.parse("[{" + base + ", \"verdict\": \"label-error\"}]"));
+        assertTrue(e.getMessage().contains("a verdict without a side"), e.getMessage());
+
+        var unmatched = new GateRecord("c900", "term:Kestrel:System", GraphEvalScorer.TERMS, false);
+        var records = new ArrayList<>(agreed(100, "uses"));
+        records.add(unmatched);
+        var draw = new Adjudications.Book(List.of(), GUIDE, SEED, 0.2, 0.2);
+        var sampled = records.stream().filter(draw::sampled).toList();
+        var verdicts = new ArrayList<Verdict>();
+        sampled.forEach(r -> verdicts.add(blind(r, Adjudications.RIGHT)));
+        verdicts.add(blind(unmatched, Adjudications.WRONG));
+        var judged = new Adjudications.Book(verdicts, GUIDE, SEED, 0.2, 0.2).judge(records);
+        assertEquals(0, judged.unjudgedCount(), "a blind verdict judges either side");
+        assertFalse(judged.labelError());
+
+        verdicts.set(verdicts.size() - 1, blind(unmatched, Adjudications.RIGHT));
+        assertTrue(new Adjudications.Book(verdicts, GUIDE, SEED, 0.2, 0.2).judge(records).labelError(),
+                "right on an unmatched record says the label missed it");
+
+        var wrongAgreed = new Adjudications.Book(List.of(blind(sampled.getFirst(), Adjudications.WRONG)), GUIDE, SEED,
+                0.2, 0.2);
+        assertEquals(5, RecordBounds.k(GraphEvalHarness.evaluation(configured(agreed(100, "uses")), wrongAgreed)
+                .gates().get("uses").writing()), "a blind wrong on a sampled agreed record weighs as an explicit one");
+    }
+
+    private static Verdict blind(GateRecord r, String verdict) {
+        return new Verdict(r.caseId(), r.record(), null, verdict, GUIDE, Adjudications.OPERATOR, null, null, "");
+    }
+
+    @Test
     void theDrawIsSeededAndASmallerShareDrawsASubset() {
         var records = agreed(400, "uses");
         int atTwenty = 0;

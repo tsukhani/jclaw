@@ -365,11 +365,12 @@ public final class Certifier {
         Set<List<String>> current = new HashSet<>();
         wrongAtThreshold.forEach(w -> current.add(List.of(w.caseId(), w.record())));
         for (var a : adjudications) {
-            if (!a.side().equals(Adjudications.UNMATCHED)) continue;
+            if (a.side() != null && !a.side().equals(Adjudications.UNMATCHED)) continue;
             var key = List.of(a.caseId(), a.record());
             if (!current.contains(key)) continue;
-            if (a.verdict().equals(LABEL_ERROR)) labelError = true;
-            else if (a.verdict().equals(WRONG)) wrongVerdicts.add(key);
+            var verdict = a.on(false);
+            if (verdict.equals(LABEL_ERROR)) labelError = true;
+            else if (verdict.equals(WRONG)) wrongVerdicts.add(key);
         }
         var unadjudicated = wrongAtThreshold.stream()
                 .filter(w -> !wrongVerdicts.contains(List.of(w.caseId(), w.record()))).toList();
