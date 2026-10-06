@@ -527,7 +527,7 @@ class EntityResolverTest extends UnitTest {
         assertEquals(before, graph);
     }
 
-    // ---- review pass 1 ----
+    // ---- edge cases ----
 
     @Test
     void theGateCountsCodePointsNotUtf16Units() {
