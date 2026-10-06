@@ -1,6 +1,6 @@
 ---
 name: docs
-description: Detect and fix documentation drift — realign README.md, CLAUDE.md, AGENTS.md, the user guide, and the sidecar READMEs with the current state of the codebase; report (don't rewrite) drift in the generated architecture docs.
+description: Detect and fix documentation drift — realign README.md, CLAUDE.md, AGENTS.md, the user guide, and the sidecar READMEs with the current state of the codebase; correct wrong facts in place in the architecture snapshot, without expanding it.
 category: Documentation
 tags: [docs, documentation, drift, maintenance]
 argument-hint: "[empty | <path|cluster> | check]"
@@ -14,7 +14,7 @@ Sweep JClaw's hand-maintained documentation and realign it with what the code ac
 
 `$ARGUMENTS` may be one of:
 
-- *(empty)* → full sweep of every **Tier-1** doc, plus a **Tier-2** detect-and-report pass.
+- *(empty)* → full sweep of every **Tier-1** doc, plus a **Tier-2** fact-correction pass.
 - a file path or cluster name (e.g. `AGENTS.md`, `README`, `docs/user-guide/`, `docs/user-guide/agents.md`, `sidecar`) → scope the run to that file or cluster only. Still report Tier-2 drift for awareness.
 - `check` (or `--check` / `dry-run`) → **detect-and-report only**: produce the full drift table and make **no edits and no commit**.
 
@@ -30,8 +30,8 @@ Reject anything else with a clear message; do not guess.
   - `AGENTS.md` (the Codex peer of CLAUDE.md — keep shared facts in sync, preserve its distinct addressee/voice)
   - `docs/user-guide/*.md` (all files)
   - `sidecar/*/README.md` — every sidecar, currently `asr`, `diarize`, `fetch`, `image`, `stealth`, `tts`, `video`. Glob it rather than listing names: the set grows, and a hardcoded list silently drops the newcomers from every sweep.
-- **Tier 2 — detect & report only** (never hand-rewrite):
-  - `docs/architecture/*.md` — generated docs. Collect drift into the report and recommend regenerating `docs/architecture/`; do **not** edit these files. They were produced by `/bmad-document-project`, which is deprecated, so the recommendation names no skill.
+- **Tier 2 — correct wrong facts in place, never expand**:
+  - `docs/architecture/*.md` — a snapshot nothing regenerates (`/bmad-document-project`, which produced it, is deprecated), so AGENTS.md has a wrong fact corrected in place. A wrong fact is one the code now contradicts: a version, a renamed or removed class, path, command or endpoint, a wrong default or count. Omissions are not drift: the snapshot predates later features, so never add coverage, sections or explanation. Skip plan documents (e.g. `jclaw-agentic-refactor.md`): their proposals are history, not a description of the code.
 - **Out of scope — never touch**:
   - `skills/**/SKILL.md` and skill references (skill/tool definitions, mostly vendored)
   - `workspace/main/*.md` (`SOUL.md`, `IDENTITY.md`, `AGENT.md`, `BOOTSTRAP.md`, `USER.md` — runtime agent persona / Standing Orders, not codebase docs)
@@ -63,7 +63,7 @@ For each in-scope file, cross-check its claims against the truth sheet. Look for
 - **Coverage gaps** — shipped capabilities with no doc coverage (e.g. a new channel or feature with no user-guide page). Flag these; do not silently auto-author whole new pages.
 - **Broken internal markdown links** between docs.
 
-Assign each drift item a verdict: **FIX** (Tier-1 file) or **REPORT** (Tier-2 architecture doc). Group by file.
+Assign each drift item a verdict: **FIX** (Tier-1 drift, or a Tier-2 wrong fact) or **REPORT** (a Tier-2 omission, or anything in a plan document). Group by file.
 
 **Phase 3 — Present the drift table & confirm**
 
@@ -74,7 +74,7 @@ Present a table (file · drift item · `current → correct` · tier · FIX/REPO
 7. Edit only the drifted lines, via the Edit tool. Preserve each doc's voice, heading structure, and formatting. Do **not** rewrite whole sections, restyle prose that isn't drifted, or add speculative content. Every changed line must trace to a confirmed drift item.
 8. Keep `CLAUDE.md` and `AGENTS.md` consistent on **shared** facts (versions, commands, framework levels) while preserving each file's distinct addressee ("Claude" vs "Codex") and any intentionally different guidance.
 9. For a genuine **coverage gap** that warrants a new user-guide page or section, confirm scope with the user (in Phase 3) before authoring — don't fabricate a page unprompted.
-10. **Tier 2:** make no edits to `docs/architecture/*.md`. Compile their drift into the final report with the recommendation to regenerate `docs/architecture/`.
+10. **Tier 2:** in `docs/architecture/*.md`, change only the wrong words and numbers, keeping each doc's voice, tables and structure. Re-measure a count rather than copying it from the report.
 
 **Phase 5 — Validate (lightweight; no test suite needed for docs)**
 
@@ -97,7 +97,7 @@ Present a table (file · drift item · `current → correct` · tier · FIX/REPO
     EOF
     )"
     ```
-16. Report: a table of Tier-1 files with their fixed-item counts; the Tier-2 architecture-doc drift list with the regeneration recommendation; the commit hash; and any coverage gaps deferred for a follow-up. **Do not push** — `/deploy` is the only path that ships docs to the remotes; leave the commit for the user to review and release.
+16. Report: a table of Tier-1 files with their fixed-item counts; the Tier-2 facts corrected, and anything reported but left; the commit hash; and any coverage gaps deferred for a follow-up. **Do not push** — `/deploy` is the only path that ships docs to the remotes; leave the commit for the user to review and release.
 
 ---
 
@@ -107,7 +107,7 @@ Present a table (file · drift item · `current → correct` · tier · FIX/REPO
 - Stop at the **local commit**. Never `git push`, tag, or release — `/deploy` owns that.
 - Use `/usr/bin/git` for every git invocation. Never `--no-verify`.
 - **Surgical edits only**: change drifted facts, never rewrite, reflow, or restyle documentation that isn't drifted. Match the surrounding voice.
-- **Never hand-edit `docs/architecture/*.md`** — they're generated; detect & report, then recommend regeneration.
+- **In `docs/architecture/*.md`, correct wrong facts only** — never expand, restructure or add coverage, and never edit a plan document.
 - **Never touch** `skills/**`, `workspace/main/*.md`, or `.claude/commands/*.md`.
 - **Verify before asserting**: confirm a command, script, endpoint, or path exists in the code before writing it into a doc. Never copy a claim from one doc into another without checking the codebase — and treat CLAUDE.md as fallible, not gospel.
 - Don't auto-author entire new pages for coverage gaps without confirming scope first.
