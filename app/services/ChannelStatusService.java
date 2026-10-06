@@ -1,7 +1,9 @@
 package services;
 
 import models.ChannelConfig;
+import models.SlackBinding;
 import models.TelegramBinding;
+import models.WhatsAppBinding;
 
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -13,14 +15,12 @@ import java.util.Set;
  * system:
  *
  * <ul>
- *   <li><b>telegram</b> — per-binding by design (one bot per agent,
- *       JCLAW-89). The bot token + enabled flag live on
- *       {@link TelegramBinding}, NOT {@link ChannelConfig}. The polling
- *       runner reads {@code TelegramBinding} directly.</li>
- *   <li><b>slack / whatsapp / future ChannelConfig-backed transports</b> — bot
- *       token in {@link ChannelConfig#configJson}, enabled flag in
- *       {@link ChannelConfig#enabled}. The transport reads
- *       {@code ChannelConfig.findByType(...)} on each request.</li>
+ *   <li><b>telegram / slack / whatsapp</b> — per-agent bindings
+ *       ({@link TelegramBinding}, {@link SlackBinding}, {@link WhatsAppBinding};
+ *       JCLAW-89, JCLAW-444), each carrying its credentials and enabled flag,
+ *       NOT {@link ChannelConfig}.</li>
+ *   <li><b>any other ChannelConfig-backed transport</b> — enabled flag in
+ *       {@link ChannelConfig#enabled}.</li>
  * </ul>
  *
  * <p>The in-app SPA chat ("web") is intentionally NOT counted here: it
@@ -44,7 +44,7 @@ public final class ChannelStatusService {
 
     /**
      * Set of channel types currently doing work. Insertion order is
-     * telegram, then anything from {@code ChannelConfig} — gives a stable
+     * telegram, slack, whatsapp, then anything from {@code ChannelConfig} — gives a stable
      * order for the dashboard's display purposes. The in-app "web" chat is
      * deliberately excluded (see the class Javadoc).
      */
@@ -58,8 +58,14 @@ public final class ChannelStatusService {
             if (TelegramBinding.count(ENABLED_TRUE) > 0) {
                 active.add("telegram");
             }
+            if (SlackBinding.count(ENABLED_TRUE) > 0) {
+                active.add("slack");
+            }
+            if (WhatsAppBinding.count(ENABLED_TRUE) > 0) {
+                active.add("whatsapp");
+            }
 
-            // Slack / WhatsApp / etc.: each has at most one ChannelConfig
+            // Any other transport has at most one ChannelConfig
             // row whose enabled flag governs whether the transport
             // accepts inbound messages. Trust the channelType column
             // rather than enumerating known kinds — adding a new

@@ -1,7 +1,9 @@
 import channels.ChannelTransport;
 import models.Agent;
 import models.ChannelConfig;
+import models.SlackBinding;
 import models.TelegramBinding;
+import models.WhatsAppBinding;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
@@ -12,7 +14,7 @@ import services.Tx;
 /**
  * Tests for {@link services.ChannelStatusService}'s aggregation across
  * the two transport-backed sources of truth that govern channel activity
- * (telegram from TelegramBinding, slack/whatsapp from ChannelConfig). The
+ * (telegram, slack and whatsapp from their per-agent bindings, anything else from ChannelConfig). The
  * in-app "web" chat is deliberately not counted — enabled agents must not
  * inflate the dashboard's "Channels active" stat above the channel cards
  * the operator sees on the /channels page. The dashboard's stat depends
@@ -123,6 +125,32 @@ class ChannelStatusServiceTest extends UnitTest {
         assertFalse(active.contains("discord"));
     }
 
+    // ─── slack / whatsapp per-agent bindings ─────────────────────────
+
+    @Test
+    void slackAndWhatsAppAreActiveWhenAnEnabledBindingExists() {
+        Tx.run(() -> {
+            seedSlackBinding(seedAgent("slack-agent", true), true);
+            seedWhatsAppBinding(seedAgent("whatsapp-agent", true), true);
+            return null;
+        });
+        var active = ChannelStatusService.activeChannelTypes();
+        assertTrue(active.contains("slack"), "slack should be active: " + active);
+        assertTrue(active.contains("whatsapp"), "whatsapp should be active: " + active);
+    }
+
+    @Test
+    void disabledSlackAndWhatsAppBindingsAreNotActive() {
+        Tx.run(() -> {
+            seedSlackBinding(seedAgent("slack-agent", true), false);
+            seedWhatsAppBinding(seedAgent("whatsapp-agent", true), false);
+            return null;
+        });
+        var active = ChannelStatusService.activeChannelTypes();
+        assertFalse(active.contains("slack"), "a disabled binding is not a channel: " + active);
+        assertFalse(active.contains("whatsapp"), "a disabled binding is not a channel: " + active);
+    }
+
     // ─── combined / regression scenarios ─────────────────────────────
 
     @Test
@@ -177,6 +205,25 @@ class ChannelStatusServiceTest extends UnitTest {
         b.botToken = token;
         b.telegramUserId = tgUserId;
         b.transport = ChannelTransport.POLLING;
+        b.enabled = enabled;
+        b.save();
+        return b;
+    }
+
+    private static SlackBinding seedSlackBinding(Agent agent, boolean enabled) {
+        var b = new SlackBinding();
+        b.agent = agent;
+        b.botToken = "xoxb-" + agent.name;
+        b.signingSecret = "secret";
+        b.enabled = enabled;
+        b.save();
+        return b;
+    }
+
+    private static WhatsAppBinding seedWhatsAppBinding(Agent agent, boolean enabled) {
+        var b = new WhatsAppBinding();
+        b.agent = agent;
+        b.phoneNumberId = "pn-" + agent.name;
         b.enabled = enabled;
         b.save();
         return b;
