@@ -26,6 +26,8 @@ let lib: ThreeDmol | null = null
 /** Imports 3Dmol once. A failed import is not retried, so its fences stay code blocks until a reload. */
 export function load3Dmol(): Promise<ThreeDmol> {
   loading ??= import('3dmol/build/3Dmol.es6-min.js').then((module) => {
+    // The import arms a page-wide autoloader that evals `data-callback` off any `.viewer_3Dmoljs` element, which chat HTML can carry.
+    document.onreadystatechange = null
     lib = module
     return module
   })

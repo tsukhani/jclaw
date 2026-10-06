@@ -4,7 +4,12 @@ import { cellMatrix, mulv, type Cell, type Site, type Vec3 } from '~/utils/struc
 import { buildScene, load3Dmol, type ViewerOptions } from '~/utils/structure/viewer'
 
 const JMOL = { Na: 0xab5cf2, Cl: 0x1ff01f, Co: 0xf090a0, Ag: 0xc0c0c0, N: 0x3050f8 }
-vi.mock('3dmol/build/3Dmol.es6-min.js', () => ({ elementColors: { Jmol: JMOL } }))
+const autoload = vi.hoisted(() => vi.fn())
+// As the real bundle does on import, the mock arms its autoloader on the document.
+vi.mock('3dmol/build/3Dmol.es6-min.js', () => {
+  document.onreadystatechange = autoload
+  return { elementColors: { Jmol: JMOL } }
+})
 
 interface Point { x: number, y: number, z: number }
 // One recorder for every shape method; each call fills only the fields its method takes.
@@ -42,6 +47,19 @@ const rockSalt: Site[] = ([
   ['Na', [0, 0, 0]], ['Na', [0, 0.5, 0.5]], ['Na', [0.5, 0, 0.5]], ['Na', [0.5, 0.5, 0]],
   ['Cl', [0.5, 0.5, 0.5]], ['Cl', [0.5, 0, 0]], ['Cl', [0, 0.5, 0]], ['Cl', [0, 0, 0.5]],
 ] as [string, Vec3][]).map(([elem, f]) => ({ elem, pos: mulv(cellMatrix(ROCK_SALT), f) }))
+
+describe('load3Dmol', () => {
+  it('disarms the autoloader 3Dmol arms on import, so a page finishing its load evals nothing', async () => {
+    const armed = vi.spyOn(document, 'onreadystatechange', 'set')
+    await load3Dmol()
+
+    expect(armed).toHaveBeenCalledWith(autoload)
+    expect(document.onreadystatechange).toBeNull()
+    document.dispatchEvent(new Event('readystatechange'))
+    expect(autoload).not.toHaveBeenCalled()
+    armed.mockRestore()
+  })
+})
 
 describe('buildScene (JCLAW-1321)', () => {
   beforeAll(async () => {
