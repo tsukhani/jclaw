@@ -50,7 +50,7 @@ Two paths return memories to the agent:
 
 Recall ranking decays with age: a memory's score fades on a 30-day half-life counted from when it was last changed or last recalled, stretched by importance (about 84 days at importance 0.9). Decay bottoms out at a quarter of the score and never deletes anything — an old memory still surfaces when nothing fresher competes.
 
-An agent can end up holding more core memories than the cap — the excess is stored but never auto-loaded. Its edit form on the [Agents](/agents) page shows a **Core memories** card with the count against the cap and, when over it, a **Migrate excess** button. That asks the agent's own model to refile each memory beyond the cap under the category that fits it best; the ones that fit within the cap stay core, nothing is deleted, and a memory it cannot classify stays core so you can run it again.
+An agent can end up holding more core memories than the cap — the excess is stored but never auto-loaded. Its edit form on the [Agents](/agents) page shows a **Core memories** card with the count against the cap and a **Migrate excess** button, enabled once the agent is over it. That asks the agent's own model to refile each memory beyond the cap under the category that fits it best; the ones that fit within the cap stay core, nothing is deleted, and a memory it cannot classify stays core so you can run it again.
 
 By default relevance is keyword-based. Enabling **vector search** adds semantic recall — "what did we decide about invoicing?" finds a memory that never uses the word "invoicing" — with the two result lists blended by reciprocal-rank fusion. The backend is picked automatically: `pgvector` on PostgreSQL, an embedded Lucene HNSW index otherwise. See [Tuning](#memory-tuning) below.
 
