@@ -67,7 +67,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - Bulk and cascade deletes skip `@PostRemove` and orphan Lucene docs — evict explicitly. A Lucene codec-boundary bump: wipe `data/jclaw-lucene/` while pre-v1 rather than add backward-codecs, and verify through the live search endpoint.
 - New ArchUnit rules reuse `ArchitectureTest.APP_CLASSES`, which imports `build/classes/java/main` — never the running JVM's `CodeSource`, where stale precompiled bytecode under FirePhoque manufactures violations.
 - "Zero call sites" is not dead code: a retention Javadoc, `@SuppressWarnings("unused")` or a reflection test marks a deliberate keep. Drop an applied `renameKeyIfPresent` call site, keep the helper.
-- `graphify update .` re-clusters and can dissolve curated communities; recover from the dated backup in `graphify-out/<date>/` and delete `.graphify_labels.json.sig`.
+- `graphify update .` re-clusters whenever the code graph changed and names each community after its highest-degree node, so the `community=` in query output is a hub (`.get`, `okhttp3.OkHttpClient`), not a description. Nothing is curated, so nothing is lost by running it.
 - JCLAW acceptance criteria forward-reference helpers and tickets that were never built: verify before designing around them.
 - `memory.jpa.vector.queryPrefix` and `memory.recall.minCosine` move together. A CSP, if enabled, must allow `'unsafe-inline'` for `script-src`; Nuxt inlines `window.__NUXT__`.
 - A task with both `Task.modelProvider` and `Task.modelId` set fires on that model (`AgentRunner.runForTask` applies it as the stub conversation's override); an unpinned task, or one pinning an unconfigured provider, follows its agent's current model.
