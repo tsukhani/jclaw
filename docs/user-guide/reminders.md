@@ -40,7 +40,7 @@ At fire time, JClaw skips the LLM round-trip entirely. The fire path writes a no
 A reminder targeted at the web channel writes a row to your notifications feed, which surfaces two ways:
 
 - **Top-right toast** — the global notification overlay polls for unread notifications every 10 seconds. New reminders fade in at the top of the stack and stay until you act on them.
-- **The [Reminders](/reminders) page** — every reminder you've ever scheduled, with its status, schedule, and last fire time.
+- **The [Reminders](/reminders) page** — every reminder still scheduled or kept, with its status, schedule, and last fire time.
 
 ### Via Telegram
 
@@ -68,7 +68,7 @@ The distinction between **Mark as seen** and **trash** matters most for recurrin
 
 A **one-time reminder cleans itself up** once it has fired successfully — a reminder you asked for on a specific day has served its purpose the moment it nudges you, so JClaw removes the reminder (and its run history) automatically. This is **on by default** for one-off reminders.
 
-- **The notification you received is kept.** Only the scheduled reminder behind it is removed; your toast / Telegram nudge stays put, and the [Reminders](/reminders) feed of past notifications is unaffected.
+- **The notification you received is kept.** Only the scheduled reminder behind it is removed, so it leaves the [Reminders](/reminders) page; your toast / Telegram nudge stays put.
 - **It applies only to one-time reminders.** A **recurring** reminder (cron/interval) never auto-deletes — it keeps firing on its cadence — and regular [tasks](/guide#tasks) are *never* auto-deleted, since their run history is your audit trail.
 - **A reminder that fails to fire is always kept**, so you can see what went wrong.
 
@@ -76,7 +76,7 @@ To **keep** a particular one-off reminder after it fires, untick its **Auto-dele
 
 ## The Reminders page
 
-Lists every reminder you've ever scheduled, with the same row regardless of delivery channel. Above the list, four cards track the lifecycle states that matter for reminders — **Active** (recurring reminders), **Pending** (one-time reminders waiting to fire), **Paused**, and **Failed**. Reminders skip the LLM, so there are no run-rate or success-rate metrics here.
+Lists every reminder still scheduled or kept — auto-deleted one-offs and reminders past task retention are gone — with the same row regardless of delivery channel. Above the list, four cards track the lifecycle states that matter for reminders — **Active** (recurring reminders), **Pending** (one-time reminders waiting to fire), **Paused**, and **Failed**. Reminders skip the LLM, so there are no run-rate or success-rate metrics here.
 
 A reminder can be paused like any task — ask the agent (`task_manager`'s `pause` and `resume`) or call `POST /api/tasks/{id}/pause`; this page has no pause control of its own. A paused reminder skips its fires until resumed, counts under **Paused** rather than **Active** or **Pending**, and keeps showing its underlying status in the table; `status:PAUSED` in the filter bar lists them.
 
@@ -85,7 +85,7 @@ A reminder can be paused like any task — ask the agent (`task_manager`'s `paus
 | **Reminder**  | The reminder's name. Expand the row (the chevron) to read the text you (or the agent) wrote; it falls back to the name when the description is empty. |
 | **Schedule**  | How it's scheduled, humanized — a recurring reminder shows its cadence ("every Tuesday at 5 PM", "every 30 min"); a one-shot shows a live countdown ("in 3 hours"). Never a raw cron or ISO value. |
 | **Status**    | Same enum as tasks — a one-time reminder is `PENDING` (waiting) then `COMPLETED`; a recurring one is `ACTIVE`. |
-| **Channel**   | `web` or `telegram`, including when the agent inferred the route from the calling chat. `web (auto)` means no delivery was stored at all, and such a reminder is delivered nowhere when it fires. A reminder that delivers itself through a tool shows the bare tool name (e.g. `send_gmail_message`). |
+| **Channel**   | `web` or `telegram`, including when the agent inferred the route from the calling chat. `web (auto)` means no delivery was stored at all, and such a reminder is delivered nowhere when it fires. A `tool:` delivery shows the bare tool name (e.g. `send_gmail_message`), but `tool:` delivery does not apply to reminders: the fire skips the agent, so no tool runs and nothing is delivered. |
 | **When**      | The exact wall-clock date and time of the next fire, in the effective timezone ("10 Jun 2026 · 1:15 pm"); `—` once a one-time reminder has `COMPLETED`. |
 | **Fired**     | When the most recent fire happened. The truth-of-record for "did the reminder go off when I said?"             |
 | **Auto-delete** | For a one-time reminder, a checkbox: ticked (the default) means the reminder removes itself after it fires; untick to keep it. Recurring reminders show `—` (not applicable). |

@@ -1,6 +1,6 @@
 # API Contracts — Backend
 
-Every HTTP surface the Play backend exposes, from `conf/routes` (the single source of truth) and the controllers in `app/controllers/`. **210 method-specific routes across 48 controllers** (97 GET, 65 POST, 30 DELETE, 16 PUT, 1 PATCH, 1 WS), plus two `*` wildcard fallbacks.
+Every HTTP surface the Play backend exposes, from `conf/routes` (the single source of truth) and the controllers in `app/controllers/`. **287 method-specific routes across 62 controllers** (130 GET, 96 POST, 38 DELETE, 21 PUT, 1 PATCH, 1 WS), plus two `*` wildcard fallbacks.
 
 Play 1.x maps each route to a `public static void` method on a controller; the method signature *is* the request contract. Path params in `{braces}` bind by name; everything else arrives as query or form params. Responses are JSON via `renderJSON` unless noted. The backend serves `:9000` (and `:9443` when HTTPS is enabled); the frontend reaches it same-origin at `/api/*` in production and through the Nitro dev-proxy in development.
 
@@ -17,9 +17,9 @@ Three gates, by route family:
 
 | Gate | Applied to | Mechanism |
 |---|---|---|
-| `AuthCheck` (`@With`) | 42 controllers — effectively every `/api/**` business endpoint | **Bearer token** (`Authorization: Bearer <plaintext>`, resolved against `api_token`; the token owner becomes the session username) **or** Play's stateless **session cookie**. Bearer wins: a client sending a token expects it to be the identity, so a stale cookie is never silently honoured. The session bit alone is insufficient — Play 1.x sessions are client-held. |
+| `AuthCheck` (`@With`) | 50 controllers — effectively every `/api/**` business endpoint | **Bearer token** (`Authorization: Bearer <plaintext>`, resolved against `api_token`; the token owner becomes the session username) **or** Play's stateless **session cookie**. Bearer wins: a client sending a token expects it to be the identity, so a stale cookie is never silently honoured. The session bit alone is insufficient — Play 1.x sessions are client-held. |
 | `LoadtestAuthCheck` | `ApiMetricsController` loadtest actions, `ApiEvalsController` | Loopback-only **plus** an `X-Loadtest-Auth` header — keeps model-spending and data-mutating harness endpoints off the network. |
-| `WebhookIngressGate` + per-provider signature | `WebhookTelegram/Slack/WhatsApp` | Inbound webhooks authenticate by provider signature or path secret, not operator session. |
+| `WebhookIngressGate` + per-provider signature | `WebhookTelegram/Slack/WhatsApp` | Inbound webhooks authenticate by provider signature or secret token, not operator session. |
 
 Open by design: `Api.status` (liveness/probe, used by the Docker healthcheck), the auth endpoints themselves, and the SPA/static routes (`Application.*`).
 
@@ -29,7 +29,7 @@ Open by design: `Api.status` (liveness/probe, used by the Docker healthcheck), t
 
 | Method | Path | Action |
 |---|---|---|
-| GET | `/api/status` | `Api.status` — `{status, application, mode, version}` plus `spaBuildId`, which diagnoses a stale SPA behind a proxy |
+| GET | `/api/status` | `Api.status` — `{status, application, mode, applicationVersion, frameworkVersion, expectedFrameworkVersion}` plus `spaBuildId`, which diagnoses a stale SPA behind a proxy |
 | GET | `/api/workspace/stats` | `Api.workspaceStats` |
 | GET · POST | `/api/system/restart` | `ApiSystem.restartPreflight` / `.restart` |
 | GET · POST | `/api/tailscale` | `ApiTailscale.status` / `.toggle` |
@@ -205,7 +205,7 @@ A **binding** attaches an agent to an external chat surface. Generic binding end
 
 | Method | Path | Action |
 |---|---|---|
-| POST | `/api/webhooks/telegram/{bindingId}` | `WebhookTelegram.webhook` — path-secret authenticated, per-binding rate limited |
+| POST | `/api/webhooks/telegram/{bindingId}` | `WebhookTelegram.webhook` — authenticated by the `X-Telegram-Bot-Api-Secret-Token` header, per-binding rate limited |
 | POST | `/api/webhooks/slack/{bindingId}` · `/interactive` | `WebhookSlack.webhook` / `.interactive` — request-signature verified against the binding secret |
 | GET · POST | `/api/webhooks/whatsapp` | `WebhookWhatsApp.verify` / `.webhook` — GET is the Cloud API verification handshake |
 
@@ -234,7 +234,7 @@ A **binding** attaches an agent to an external chat surface. Generic binding end
 
 | Method | Path | Action |
 |---|---|---|
-| GET | `/api/imagegen/local/state` · `/models` · `/progress` | `ApiImagegen.state` / `.models` / `.progress` |
+| GET | `/api/imagegen/local/state` · `/api/imagegen/models` · `/progress` | `ApiImagegen.state` / `.models` / `.progress` |
 | POST | `/api/imagegen/local/pull` | `.pull` — weight download |
 | GET · POST | `/api/imagegen/capability[/probe]` | `.capability` / `.probeCapability` — free-VRAM tiering |
 

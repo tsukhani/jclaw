@@ -28,7 +28,8 @@
 ## Quick Install (one-line)
 
 Get JClaw running in one command. The installer downloads the self-contained
-`jclaw-bundle.zip` from the latest GitHub Release, verifies Java 25+ (the bundle's
+`jclaw-bundle.zip` from the latest GitHub Release, checks it against the release's
+signed checksum list, verifies Java 25+ (the bundle's
 **only** prerequisite) — offering to download a self-contained Zulu JRE 25
 into `~/.jclaw/jre` when none is found — extracts it to `~/.jclaw`, and starts JClaw on
 <http://localhost:9000>.
@@ -49,6 +50,10 @@ irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
 > POSIX shell script). The installer prefers Git Bash; if only WSL is present it
 > launches there; if neither is found it installs and prints how to run it.
 
+Releases after 0.19.25 are signed. `install.sh` refuses a bundle whose signature or
+checksum does not verify; on a machine without `openssl` it warns and installs
+unverified. `install.ps1` cannot check the signature yet, and says so after the download.
+
 Once running, manage it with `jclaw status`, `jclaw stop`, `jclaw restart` from
 any new shell — the installer puts the `jclaw` command on your `PATH` (via
 `~/.local/bin`) and wires up `<TAB>` completion for bash and zsh. To remove JClaw
@@ -59,7 +64,9 @@ wiring, and deletes `~/.jclaw`.
 newest release in place. Your database, workspace, credentials, installed apps and
 edited configuration are carried across; the database is backed up first; and a
 release that fails to start is rolled back automatically. The download runs while
-JClaw keeps serving, so only the swap itself is downtime. `jclaw upgrade --check`
+JClaw keeps serving, so only the swap itself is downtime. It refuses a release after
+0.19.25 whose signature or checksum does not verify, or whose version is not the one
+requested. `jclaw upgrade --check`
 reports what's available without installing it; `--version <tag>` installs a
 specific release (including an earlier one), and `--yes` skips the confirmation
 prompt. Re-running the one-line installer
@@ -165,7 +172,7 @@ jclaw/
 │   ├── jobs/                     # Play @Every jobs + db-scheduler handlers
 │   ├── views/                    # Groovy server templates
 │   └── utils/                    # Utility classes
-├── bin/                          # Dev tooling: diagnostics.mjs (+ tests), coverage-blend.mjs, JaCoCo jars
+├── bin/                          # Dev tooling: diagnostics.mjs (+ tests), coverage-blend.mjs, JaCoCo jars, sign-release.sh, verify-debug-stripped.sh
 ├── certs/                        # Generated .env secret + optional TLS cert (gitignored)
 ├── conf/                         # Play configuration
 │   ├── application.conf          # Main app config
@@ -206,7 +213,8 @@ app dependencies, precompiled classes, and the prebuilt SPA all ship **inside**
 `jclaw-bundle.zip`, so a Java 25 runtime is the only thing the host needs to run
 JClaw — see [Quick Install](#quick-install-one-line), which also covers the Node.js and
 Chromium the browser tool downloads on first use. (Building from source instead
-adds a dev toolchain — Node.js, pnpm, and the `play` CLI — which the
+adds a dev toolchain — Node.js 24.11+ or 26+, pnpm 12+ installed standalone rather
+than through corepack, and the `play` CLI — which the
 [Dev Container](#dev-container-recommended) installs for you.)
 
 #### Optional system dependencies
@@ -355,8 +363,10 @@ What happens automatically once you click:
 3. The IDE runs the `postCreateCommand` automatically — `./jclaw.sh setup`, then `./gradlew playClasspath` to resolve the Gradle dependency cache, then a Playwright Chromium install (`com.microsoft.playwright.CLI install chromium`). `setup` itself:
    - Validates all prerequisites (every check passes — they're baked into the image)
    - Wires git hooks (`.githooks/pre-commit`, `.githooks/pre-push`, `.githooks/post-checkout`)
+   - Runs `./jclaw.sh init-worktree` (seeds `certs/.env` and `PLAY_TEST_PORT`)
    - Resolves the pinned pnpm version, which pnpm verifies against the lockfile's signed package-manager record
    - Runs `pnpm install` for the frontend
+   - Installs BMAD into `.claude/skills/` and registers the graphify hook in `.claude/settings.json` when graphify is installed
    - Adds the canonical `github` remote (`https://github.com/tsukhani/jclaw.git`)
 4. Recommended VS Code/Cursor extensions install (Volar, Java Pack, ESLint, Stylelint, YAML).
 5. The IDE attaches to the container — your terminal, file explorer, and editor are now running inside it.
@@ -382,7 +392,7 @@ The pre-commit hook (frontend lint-staged) and pre-push hook (full test suite) w
 - **Signed commits** — `/deploy` produces signed commits and signed tags (`commit -S`, `tag -s`). Your host's GPG/SSH keys aren't visible inside the container by default. Two recovery options:
   1. **Easiest**: do `/deploy` from your host shell (open a host terminal, `cd` into the project, run the slash command). Code inside the container, deploy from outside.
   2. **More setup**: add a `mounts` block to `.devcontainer/devcontainer.json` to bind-mount `~/.ssh` and `~/.gnupg` into the container. Same end result, more configuration.
-- **File ownership** — files written inside the container land on your host with UID 1000 (`ubuntu` user). On macOS this maps to your user automatically; on Linux you may see "owned by 1000" in `ls -l` if your host UID differs. Usually harmless.
+- **File ownership** — files written inside the container land on your host with the UID of the container's `agent` user, 1000 unless the image is built with `AGENT_UID`/`AGENT_GID`. On macOS this maps to your user automatically; on Linux you may see "owned by 1000" in `ls -l` if your host UID differs — rebuild with `AGENT_UID`/`AGENT_GID` set to yours to match. Usually harmless.
 
 #### Rebuilding
 

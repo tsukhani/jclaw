@@ -2,13 +2,13 @@
 
 > Master index — primary AI retrieval entry point. **Full rescan (deep) by `bmad-document-project` on 2026-08-07.** Supersedes the 2026-06-29 generation and the three surgical correction passes that followed it (2026-07-14, 2026-07-23, 2026-08-07). That rescan added a **third part** (`sidecar`) and closed five subsystems the older set never documented: the pyannote diarization sidecar, the MERaLiON ASR engine, the evals harness, printing, and the vector-memory config surface.
 >
-> Regenerate with `/bmad-document-project` when the codebase structure drifts.
+> This is a snapshot nothing regenerates; wrong facts are corrected in place.
 
 ## Project at a glance
 
 - **Name:** JClaw — Abundent's Java-first AI agent & automation platform.
 - **Version:** `application.version` in `conf/application.conf` (source of truth; status: pre-v1 / beta per AGENTS.md).
-- **Repository type:** multi-part monorepo — `backend` (Play 1.x Java), `frontend` (Nuxt 4 SPA), `sidecar` (five on-demand Python ML daemons). Backend + frontend ship as one bundle zip / container image; the sidecars are opt-in and not bundled.
+- **Repository type:** multi-part monorepo — `backend` (Play 1.x Java), `frontend` (Nuxt 4 SPA), `sidecar` (seven on-demand Python daemons). Backend + frontend ship as one bundle zip / container image; the sidecars are opt-in: their scripts ship in the bundle, but `uv`, Python and model weights do not.
 - **License:** dual-licensed — MIT through v0.15.4; source-available (PolyForm Noncommercial 1.0.0) + commercial from v0.16.0 (see `LICENSE.md` / `COMMERCIAL-LICENSE.md`). Not open source: the noncommercial license restricts the field of use.
 - **Upstream:** `bitbucket.abundent.com/scm/jclaw/jclaw` (Bitbucket origin) + `github.com/tsukhani/jclaw` (GitHub Releases + GHCR).
 - **Reference code:** OpenClaw (Node) and JavaClaw (Spring Boot), used for patterns only. No code is shared.
@@ -61,7 +61,7 @@ Browser (Nuxt 4 SPA) ── $fetch + EventSource ──► Play :9000/:9443 ─�
 - **Auth:** cookie session; `AuthCheck @Before` (+ Bearer `ApiToken` for the in-process `jclaw_api` tool); webhooks exempt. Unauthenticated = **HTTP 401**; genuine authorization failures = **403**.
 - **Transactions:** `services.Tx.run(...)` wraps `JPA.withTransaction` (and no-ops if already inside one). Re-fetch entities after nested `Tx.run`.
 - **Outbound HTTP:** single **OkHttp 5** stack via `utils.HttpFactories` (`llmStreaming` / `llmSingleShot` / `general`). No `java.net.http.HttpClient` in `app/`.
-- **JSON:** single `utils.GsonHolder.INSTANCE`.
+- **JSON:** single `utils.GsonHolder.GSON`.
 - **Enums in DB:** string-backed (`@Enumerated(STRING)` or manual conversion) for hot-reload safety.
 - **Full-text search:** **Lucene 10** (`LuceneIndexer` + `DirectLuceneMessageSearchRepository`), synced via JPA `@Post*` hooks. Status/type filters still use LIKE.
 - **Test commands:** `play autotest` (NOT `play test`, which is interactive) + `cd frontend && pnpm test` after every frontend edit.

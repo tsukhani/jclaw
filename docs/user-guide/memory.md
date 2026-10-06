@@ -49,7 +49,7 @@ By default relevance is keyword-based. Enabling **vector search** adds semantic 
 
 ## The Memories page
 
-The [Memories](/memories) page is a cross-agent table: owning agent, memory text, category badge, importance, and created date. The filter bar composes free text with per-field predicates, e.g.:
+The [Memories](/memories) page is a cross-agent table: owning agent, memory text, category badge, importance, created date, and provenance — a trust badge (**Human-reviewed**, **Machine-confirmed** or **Unverified**), a **Firm** or **Tentative** graph badge, and how many times the memory has been corroborated (×N); hover the cell for who wrote it and the conversation it came from. The filter bar composes free text with per-field predicates, e.g.:
 
 ```
 q:invoice category:core importance:>0.8 agent:main status:superseded
@@ -60,6 +60,7 @@ q:invoice category:core importance:>0.8 agent:main status:superseded
 From a row you can:
 
 - **Adjust importance** inline (0–1, in 0.05 steps) — takes effect on the next recall.
+- **Confirm** — records your review, making the memory **Human-reviewed** and **Firm**; the button is gone once it is.
 - **Delete** — select rows with their checkboxes and use **Delete**, or **Delete all matching** to clear everything the active filters match (behind a typed confirmation). Both are permanent. Delete anything wrong or stale; a bad memory recalled into future sessions is worse than no memory.
 
 The table is paginated at 20 rows per page, with sorting and paging done server-side, so a filter applies to the whole store rather than the visible page. The **Export** action downloads the whole matching set (up to 500 entries) as a JSON snapshot — narrow the filters if you're near that cap.

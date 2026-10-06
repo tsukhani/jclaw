@@ -199,11 +199,11 @@ Independently of that day-based TTL, JClaw keeps only the **10 most recent runs 
 
 ## Editing a task's instructions
 
-Expand a task's row to see its **Instructions** — the description the agent runs on. If the description is a list (one step per line), it renders as numbered steps; a plain description renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The owning agent, the inline **Channel** editor, and inline editors for the task's **name** and **timezone** live in the same expanded detail.
+Expand a task's row to see its **Instructions** — the description the agent runs on. If the description is stored as a step list (a JSON array of strings), it renders as numbered steps; a plain description, even one spanning several lines, renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The owning agent, the inline **Channel** editor, and inline editors for the task's **name** and **timezone** live in the same expanded detail.
 
-The same detail has a read-only **Permissions** block:
+The same detail has a **Permissions** block:
 
-- **Origin** — the channel the task was created from, which cannot be raised later. `web` lets a fire's dangerous tools follow the [Tool Approvals](/guide#settings-tool-approvals) policy; any other channel, or `unrecorded`, is untrusted, so they fail closed (for a channel origin, unless that policy is `ask`).
+- **Origin** — the channel the task was created from, which no edit raises; only the **Trust** button beside a non-`web` origin raises it to `web`. `web` lets a fire's dangerous tools follow the [Tool Approvals](/guide#settings-tool-approvals) policy; any other channel, or `unrecorded`, is untrusted, so they fail closed (for a channel origin, unless that policy is `ask`).
 - **Model** — *follows the agent* when nothing is pinned: a fire runs on the owning agent's current model, so changing the agent's model changes the task's too. A task created with its own model shows that model instead and always fires on it; if that model's provider is no longer configured, the fire falls back to the agent's model.
 - **Tools** — the `enabledToolNames` allow-list as pills, or *all the agent's tools* when there is none.
 

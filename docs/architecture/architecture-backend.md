@@ -26,13 +26,13 @@ The architectural style is **service-oriented with a static-method convention** 
 | LLM | OpenAI/Ollama/OpenRouter/TogetherAI | — | Sealed `LlmProvider` hierarchy; OpenAI-compatible wire format. |
 | Full-text search | Apache Lucene | 10 | `services.search.LuceneIndexer` owns per-scope `FSDirectory` under `data/jclaw-lucene/`. |
 | Scheduling | db-scheduler | 16.x | Persistent task scheduling (`scheduled_tasks` table) with atomic row-claim, retries, heartbeat recovery. |
-| Browser automation | Playwright for Java | pinned in `build.gradle.kts` | Chromium installed at `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` in Docker. |
-| Document parsing | Apache Tika | 3 | Tika parsers package with several excludes (lucene, cxf, mail) to slim the deploy; Tesseract OCR subprocess. |
+| Browser automation | Playwright for Java | pinned in `build.gradle.kts` | Chromium downloaded on first browser use into `PLAYWRIGHT_BROWSERS_PATH=/app/data/pw-browsers` in Docker. |
+| Document parsing | Apache Tika | 4 | Tika parsers package with several excludes (lucene, cxf, mail) to slim the deploy; Tesseract OCR subprocess. |
 | Markdown | flexmark | 0.64.x | Plus extensions: tables, strikethrough, tasklist, autolink, typographic. |
 | PDF | flying-saucer | 9 | PDF output for exports. |
 | Tokenization | JTokkit | 1.x | `llm.TokenUsageEstimator`, Caffeine-memoized prompt measurement. |
 | Histograms | HdrHistogram | 2.x | In-memory latency metrics (`/api/metrics/latency`). |
-| JSON | Gson | bundled | Single `GsonHolder.INSTANCE` used everywhere for stable serialization. |
+| JSON | Gson | bundled | Single `GsonHolder.GSON` used everywhere for stable serialization. |
 | Testing | JUnit 6 (Jupiter 6.x) | bundled by the fork (`framework/lib`) | Play `UnitTest`/`FunctionalTest`; runs headless via `play autotest`. |
 
 ## Architecture pattern
@@ -85,9 +85,9 @@ For channel webhooks, the prelude changes: `WebhookXController.webhook` → veri
 
 ### Tool system (`app/tools/`)
 
-~22 built-in tool classes: shell exec, filesystem (Read/Write/List/Delete), web fetch (SSRF-guarded) + web search, Playwright browser, documents (Tika), image/video generation, conversation history/list/send, tasks, subagent spawn/yield, message/reminder dispatch, checklist, datetime, the internal `jclaw_api` tool, plus a load-test sleep tool. Per-agent enablement is controlled by `AgentToolConfig`. `ShellExecTool` consults `AgentSkillAllowedTool` at call time — not the skill's `SKILL.md` file — to prevent allowlist expansion via filesystem-write.
+28 built-in tool classes: shell exec, filesystem (Read/Write/List/Delete), web fetch (SSRF-guarded) + web search, Playwright browser, documents (Tika), image/video generation, conversation history/list/send, tasks, subagent spawn/yield, message/reminder dispatch, checklist, datetime, the internal `jclaw_api` tool, plus a load-test sleep tool. Per-agent enablement is controlled by `AgentToolConfig`. `ShellExecTool` consults `AgentSkillAllowedTool` at call time — not the skill's `SKILL.md` file — to prevent allowlist expansion via filesystem-write.
 
-**`ShellExecTool` security posture (JCLAW-146):** the allowlist validates only the first token of the command string; the rest is handed to `/bin/sh -c`, which means shell composition (`;`, `&&`, `||`, `|`, `$(...)`, redirects) is fully available. This is intentional — the agent runs with the same OS privileges as the Play process, so per-token metacharacter-level gating would only move the goalposts while breaking legitimate composition (`cd build && make`, `git log | head`). Sandboxing lives at the `resolveWorkdir` containment check and the env-variable filter, not at the shell-syntax layer. Operators who need hard isolation wrap the Play process itself (firejail, Docker).
+**`ShellExecTool` security posture (JCLAW-146):** the allowlist validates only the first token of the command string; the rest is handed to `/bin/sh -c`, which means shell composition (`;`, `&&`, `||`, `|`, `$(...)`, redirects) is fully available. This is intentional — the agent runs with the same OS privileges as the Play process, so per-token metacharacter-level gating would only move the goalposts while breaking legitimate composition (`cd build && make`, `git log | head`). Sandboxing lives at the `resolveWorkdir` containment check, the env-variable filter and the opt-in `shell.sandbox` OS sandbox (`HarnessSandbox`), not at the shell-syntax layer. Operators who need hard isolation wrap the Play process itself (firejail, Docker).
 
 ### MCP client (`app/mcp/`)
 
@@ -122,7 +122,7 @@ Single server-push pipe multiplexed over `/api/events`. Controllers publish type
 Serializes message processing per conversation to prevent state corruption under concurrent inbound messages, with eviction of stale entries (`ConversationQueueEvictionJob`). Modes: FIFO `queue` (default), `collect` (batch pending into the next prompt), and `interrupt` (cancel in-flight generation, queue the new message for drain).
 
 ### Local ML sidecars (`app/services/{transcription,tts,imagegen,videogen}/`)
-Five on-demand Python daemons on loopback provide capability the JVM cannot: ASR (9529), diarization (9530), image (9527), TTS (9531), video (9528). `services.LocalSidecarDaemon` is the shared spawn/drain/health-poll/stop mechanism for the imagegen and videogen managers; ASR, diarize and TTS have their own managers plus dedicated clients over `services.sidecar.SidecarHttpClient`. One inference at a time per daemon — concurrent callers get `409` and queue on a JVM-wide fair lock. Nothing silently degrades: a missing sidecar or prerequisite surfaces an actionable error (JCLAW-614). Full detail in [architecture-sidecar.md](architecture-sidecar.md).
+Five on-demand Python daemons on loopback provide capability the JVM cannot: ASR (9529), diarization (9530), image (9527), TTS (9531), video (9528). `services.LocalSidecarDaemon` is the shared spawn/drain/health-poll/stop mechanism for every sidecar manager; ASR, diarize and TTS add dedicated clients over `services.sidecar.SidecarHttpClient`. One inference at a time per daemon — concurrent callers get `409` and queue on a JVM-wide fair lock. Nothing silently degrades: a missing sidecar or prerequisite surfaces an actionable error (JCLAW-614). Full detail in [architecture-sidecar.md](architecture-sidecar.md).
 
 ### Transcription & diarization (`app/services/transcription/`)
 Every uploaded audio attachment gets a text transcript before it reaches the LLM, so text-only models see the content (audio-capable models still receive native audio). Speaker attribution runs through the `diarize_audio` tool on either of two paths: an audio-capable **cloud** chat model, or the fully **on-device** pyannote sidecar whose speaker turns `DiarizationFusion` fuses with the ASR transcript by time. The local path adds optional per-turn emotion from a separate SER pass.
@@ -148,7 +148,7 @@ Agent-behaviour datasets in `evals/suites/<id>.json` with deterministic pass cri
 - **Transactions** — `services.Tx.run(...)` wraps `JPA.withTransaction` and no-ops if already inside a transaction. Always re-fetch entities after a nested `Tx.run` to avoid detached instances.
 - **Logging** — `log4j2.xml` (dev) / `log4j2-prod.xml` (prod) / `log4j2-test.xml` (test). Structured application events written to the `event_log` table via `EventLogger`.
 - **Metrics** — JVM-local `HdrHistogram` buckets keyed by segment (reset on JVM restart, by design); durable cost aggregated from persisted `Message.usageJson`.
-- **JSON** — single `GsonHolder.INSTANCE` with `serializeNulls` and a custom `Instant` adapter (avoids JDK 25 `setAccessible` refusal).
+- **JSON** — single `GsonHolder.GSON` with `serializeNulls` and a custom `Instant` adapter (avoids JDK 25 `setAccessible` refusal).
 - **Outbound HTTP** — single **OkHttp 5** stack via `utils.HttpFactories` (`llmStreaming` / `llmSingleShot` / `general`), sharing two connection pools (LLM 64-slot, general 32-slot). `utils.SsrfGuard` adds a per-request DNS allow-list for tool-fetched URLs.
 - **MIME types** — `mimetype.*` keys in `application.conf` merge into `play.libs.MimeTypes` at startup.
 

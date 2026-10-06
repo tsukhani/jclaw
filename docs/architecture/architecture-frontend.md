@@ -19,17 +19,17 @@ The frontend is a Nuxt 4 SPA (`ssr: false`) serving as the single-page control p
 | Icons / font | Lucide + Heroicons; Inter variable font | — |
 | HTTP | `$fetch` (Nitro/ofetch) | — |
 | Validation | Zod (`types/schemas.ts`, via `useApiParsed`) | 4 |
-| Tables | `@tanstack/vue-table` | 8 |
+| Tables | `@tanstack/vue-table` | 9 |
 | Markdown rendering | `marked` + `dompurify` | 18 / 3 |
-| Package manager | pnpm | pinned in `package.json` `packageManager` (version + `+sha512`) |
-| Unit tests | Vitest (`jsdom` env) | 4 |
+| Package manager | pnpm | pinned in `package.json` `packageManager` (bare version) |
+| Unit tests | Vitest (`jsdom` env) | 5 |
 | Component test utils | `@vue/test-utils` + `@nuxt/test-utils` | 2.x / 4.x |
 | E2E tests | Playwright | pinned in `package.json` |
 | A11y | `vue-axe` / `axe-core` (dev-only runtime scanner) | 3.x / 4.x |
 
 ## File layout
 
-File-based routing (23 page files under `frontend/pages/`, including nested `conversations/` and `channels/`), a single layout, a shadcn-nuxt UI primitive library plus feature components, and a set of composables for cross-page state.
+File-based routing (26 page files under `frontend/pages/`, including nested `conversations/` and `channels/`), a single layout, a shadcn-nuxt UI primitive library plus feature components, and a set of composables for cross-page state.
 
 ```
 frontend/
@@ -39,8 +39,8 @@ frontend/
 ├── pages/                    # File-routed; see list below (incl. conversations/, channels/)
 ├── components/
 │   ├── ui/                   # 74 shadcn-nuxt / Reka UI primitives (auto-imported)
-│   └── *.vue, guide/         # 17 feature components (DataTable, ChatContextMeter, …)
-├── composables/              # Cross-page state & data layer (~17)
+│   └── *.vue, guide/         # 31 feature components (DataTable, ChatContextMeter, …)
+├── composables/              # Cross-page state & data layer (~47)
 ├── plugins/                  # theme.client.ts, axe.client.ts
 ├── utils/                    # Pure helpers (format, usage-cost, tool-calls, schedule, …)
 ├── types/                    # api.ts (wire types) + schemas.ts (Zod) + ambient .d.ts
@@ -61,11 +61,11 @@ Nuxt file-based. Pages (roles):
 | `/conversations/:id` | `conversations/[id].vue` | Single conversation transcript. |
 | `/channels` | `channels/index.vue` | Channel overview. |
 | `/channels/{slack,telegram,whatsapp}` | `channels/*.vue` | Per-channel binding config. |
-| `/agents` | `agents.vue` | Agent CRUD, tool/skill toggles, prompt breakdown, workspace editor. |
+| `/agents` | `agents/[[name]].vue` | Agent CRUD, tool/skill toggles, prompt breakdown, workspace editor. |
 | `/subagents` | `subagents.vue` | Subagent run monitor (kill, read transcripts). |
 | `/tasks` | `tasks.vue` | Task list, cancel, retry, run history. |
 | `/reminders` | `reminders.vue` | Reminder list (web-channel notifications). |
-| `/skills` | `skills.vue` | Skill inventory, file tree, promotion, catalog import. |
+| `/skills` | `skills/[[name]].vue` | Skill inventory, file tree, promotion, catalog import. |
 | `/tools` | `tools.vue` | Tool catalog + per-agent enable. |
 | `/apps` | `apps.vue` | Operator-hosted static mini-apps (home-screen grid; served from `public/apps/`). |
 | `/mcp-servers` | `mcp-servers.vue` | MCP server CRUD + connection test. |
@@ -84,17 +84,17 @@ Login/logout/setup/reset are `POST /api/auth/{login,logout,setup,reset-password}
 
 ## Shared state (no Pinia)
 
-~17 composables form the state + data layer, all `useState`-backed singletons:
+~47 composables form the state + data layer, all `useState`-backed singletons:
 
 - `useAuth()` — `authenticated`, `username`, `login`/`logout`/`checkAuth`/`checkPasswordSet`/`setupPassword`/`resetPassword`. Module-level lock prevents racing `checkAuth` calls.
 - `useEventBus()` — singleton `EventSource` to `/api/events`; reconnect with exponential backoff; survives navigation.
-- `useApiParsed()` — `$fetch` + Zod validation (`types/schemas.ts`); throws a distinct `SchemaParseError` on boundary mismatch.
+- `fetchParsed()` (`useApiParsed.ts`) — `$fetch` + Zod validation (`types/schemas.ts`); throws a distinct `SchemaParseError` on boundary mismatch.
 - `useApiMutation()` — POST/PUT/DELETE wrapper with `loading`/`error` refs.
 - `useConfirm()` + `<ConfirmDialog />` — imperative confirm modal (supports text-confirm for destructive ops).
 - `useTheme()` — light/dark/system, persisted to `localStorage` (`jclaw-theme`) by toggling the `dark` class on `<html>`, with a View Transitions reveal-on-toggle.
 - `useBulkSelect()` — multi-select state for admin list pages (Tasks, Subagent Runs).
 - `useBindingAgents()` — agent-availability filtering for channel bindings.
-- `useProviders()`, `useToolMeta()`, `useModelAutocomplete()` — provider/model/tool catalogs + `/model` completion.
+- `useProviders()`, `useToolMeta()`, `useComposerCompleter()` — provider/model/tool catalogs + `/model` completion.
 - `useGuidedTour()`, `useBreadcrumbExtra()`, `useTailscaleStatus()` — onboarding tour, in-page breadcrumb crumbs, Tailscale Funnel status.
 
 ## API access conventions
@@ -102,7 +102,7 @@ Login/logout/setup/reset are `POST /api/auth/{login,logout,setup,reset-password}
 All backend calls go through these layers:
 
 1. **`$fetch`** directly for one-off reads with page-local state.
-2. **`useApiParsed`** for schema-validated high-risk reads (chat messages, tool calls, conversation rows).
+2. **`fetchParsed`** for schema-validated high-risk reads (chat messages, tool calls, conversation rows).
 3. **`useApiMutation`** for POST/PUT/DELETE operations that need loading/error state.
 4. **SSE** via the singleton `useEventBus` for server-push events.
 
@@ -116,7 +116,7 @@ Compile-time wire shapes live in `frontend/types/api.ts`; runtime-validated shap
 
 ## Testing strategy
 
-- **Vitest** under `frontend/test/` (~69 files). Environment: **`jsdom`** (a `test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Run with `pnpm test` (alias for `vitest run`).
+- **Vitest** under `frontend/test/` (~201 files). Environment: **`jsdom`** (a `test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Run with `pnpm test` (alias for `vitest run`).
 - **Playwright** E2E under `frontend/tests/e2e/` with `playwright.config.ts`. `pnpm test:e2e`, UI mode `test:e2e:ui`, headed-slow `test:e2e:headed`.
 - Any edit under `frontend/` must be validated with `cd frontend && pnpm test` (per user feedback — `play autotest` does NOT cover Vue/Vitest).
 - `plugins/axe.client.ts` runs a vue-axe/axe-core a11y scan in dev only (tree-shaken from production).

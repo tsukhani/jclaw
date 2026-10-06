@@ -9,9 +9,9 @@ Two transports, one origin.
 ### 1. REST over `$fetch` (request/response)
 
 - **Dev:** Nuxt's Nitro `devProxy` forwards `/api/**` from `:3000` to `http://localhost:${JCLAW_BACKEND_PORT||9000}/api` (see `frontend/nuxt.config.ts`). No CORS — same-origin from the browser's perspective.
-- **Prod:** The SPA is built with `nuxi generate` and its `.output/public/` is staged into `public/spa/` (by `jclaw.sh` on bare metal, or baked at image-build time by the Dockerfile). Play maps `/_nuxt/*` → `staticDir:public/spa/_nuxt` and a catch-all `GET /{path}` → `Application.spa` (serves `public/spa/index.html`). Backend + frontend share origin `:9000` / `:9443`.
+- **Prod:** The SPA is built with `nuxi generate` and its `.output/public/` is staged into `public/spa/` (by `jclaw.sh` on bare metal, or baked at image-build time by the Dockerfile). Play maps `/_nuxt/*` → `Application.nuxtAsset` (serves `public/spa/_nuxt`) and a catch-all `GET /{path}` → `Application.spa` (serves `public/spa/index.html`). Backend + frontend share origin `:9000` / `:9443`.
 - **Auth:** Session cookie (`PLAY_SESSION`), set by `POST /api/auth/login`, consulted by `AuthCheck @Before`, surfaced client-side by `useAuth` (which probes the auth-status endpoint). The in-process `jclaw_api` tool authenticates separately with a Bearer `ApiToken`.
-- **Validation:** high-risk reads go through `useApiParsed` (Zod schemas in `types/schemas.ts`); mismatches throw a distinct `SchemaParseError`.
+- **Validation:** high-risk reads go through `fetchParsed` (Zod schemas in `types/schemas.ts`); mismatches throw a distinct `SchemaParseError`.
 - **Unauthenticated:** Backend returns **HTTP 401**; authenticated-but-forbidden actions return **403**. Client middleware treats any non-2xx from the auth check as an invalid session.
 
 ### 2. Server-Sent Events (server-push)
@@ -61,23 +61,23 @@ Play backend
 
 ### Inbound webhooks
 
-- Telegram: path-secret (`/api/webhooks/telegram/{bindingId}/{secret}`) with per-binding rate limiting.
+- Telegram: per-binding secret in the `X-Telegram-Bot-Api-Secret-Token` header (`/api/webhooks/telegram/{bindingId}`) with per-binding rate limiting.
 - Slack: in-controller signature verification (`/api/webhooks/slack/{bindingId}` + `/interactive`).
 - WhatsApp: GET verify handshake + POST webhook.
 
 ### Browser automation
 
-- Microsoft Playwright for Java (version pinned in `build.gradle.kts`). Chromium installed into `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers` during Docker build (no runtime download). Reaped by `BrowserCleanupJob`.
+- Microsoft Playwright for Java (version pinned in `build.gradle.kts`). Chromium downloaded into `PLAYWRIGHT_BROWSERS_PATH=/app/data/pw-browsers` on first browser use (not at Docker build). Reaped by `BrowserCleanupJob`.
 
 ### File / document handling & media
 
-- Apache Tika 3 for text extraction (+ Tesseract OCR) in `app/tools/DocumentsTool.java`.
+- Apache Tika 4 for text extraction (+ Tesseract OCR) in `app/tools/DocumentsTool.java`.
 - `app/services/scanners/` integrations (VirusTotal, MetaDefender, MalwareBazaar, etc.) scan skill binaries before promotion/allowlisting.
 - Local image/video generation runs in Python `sidecar/` daemons launched on demand and reached over `127.0.0.1`.
 
 ### Local ML sidecars (`sidecar/`)
 
-A third internal integration tier, alongside REST and SSE: five Python daemons the JVM launches on demand and reaches over **plain HTTP on `127.0.0.1`** — image `:9527`, video `:9528`, asr `:9529`, diarize `:9530`, tts `:9531`.
+A third internal integration tier, alongside REST and SSE: seven Python daemons the JVM launches on demand and reaches over **plain HTTP on `127.0.0.1`** — image `:9527`, video `:9528`, asr `:9529`, diarize `:9530`, tts `:9531`, stealth `:9532`, fetch `:9533`.
 
 Two properties distinguish it from the external integrations below:
 
@@ -93,7 +93,7 @@ Video generation is the one asynchronous member: `POST /jobs` returns `202 {job_
 
 ## Shared deploy artifact
 
-The 1.13.x `playBundle` task writes a self-contained `dist/jclaw-bundle.zip` containing both the precompiled backend AND the static SPA — `nuxi generate` output is copied into `public/spa/`, which `playBundle` packs along with `precompiled/`, `conf/`, the framework jar + lib, Gradle-resolved deps, and a `./play` launcher. There is no independent frontend release pipeline. The Docker image stages the SPA at image-build time via a multi-stage `COPY` rather than reusing the bundled copy, but the bundle artifact itself carries the SPA bytes.
+The 1.13.x `playBundle` task writes a self-contained `dist/jclaw-bundle.zip` containing both the precompiled backend AND the static SPA — `nuxi generate` output is copied into `public/spa/`, which `playBundle` packs along with `precompiled/`, `conf/`, the framework jar + lib, Gradle-resolved deps, and a `./play` launcher. There is no independent frontend release pipeline. The Docker image builds this same bundle at image-build time and `COPY`s its unpacked tree, so the image reuses the bundled SPA bytes.
 
 ## Failure modes to know about
 

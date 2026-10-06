@@ -12,7 +12,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 ## Policy
 
 - Never `git push` a commit: `/deploy` is the only push, run from the main checkout on `main`, never a worktree; `/renovate` deleting its merged `renovate/*` branches is the one other sanctioned push. Never `--no-verify`, never force. Stop at the local commit and report the hash.
-- Never run a `./jclaw.sh` subcommand that stops the instance (`restart`, `stop`, `restore`, `repair`, `upgrade`, `uninstall`), or kill the server PID, without asking — the instance may be serving live work; a task that mentions a restart is not the approval.
+- Never run a `./jclaw.sh` subcommand that stops the instance (`restart`, `stop`, `restore`, `repair`, `reset`, `upgrade`, `uninstall`), or kill the server PID, without asking — the instance may be serving live work; a task that mentions a restart is not the approval.
 - Never hand-edit the seven upstream-imported skills (`skills/{claude-designer,powerpoint-pptx,humanizer,youtube-transcript,git,frontend-design,ffmpeg-video-processing}`) — a re-import overwrites them; the other skills under `skills/` are local and edited normally. `docs/architecture/` is a snapshot nothing regenerates: correct a wrong fact in place, never expand or restructure it.
 - Commit messages and tags are public on the GitHub mirror: no credentials, customer specifics, or unreleased plans.
 - Don't create worktrees or branches unless asked; work on `main`. Other sessions share this checkout: stage only your own hunks, never `git stash -u`. `/deploy` stages everything (`git add -A`), so check `git status` for other sessions' work before running it.
@@ -33,7 +33,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - Backend tests: `play autotest`, never `play test` (it starts an interactive test server). One class: `./gradlew playAutotest -Ptests=<Class>`, about 30 s; the full suite takes about 9–10 min. `./jclaw.sh test` runs all five checks to the end and prints a pass/fail summary naming each failed check's `logs/test-*.log`.
 - Test sources are the default package: test seams must be `public`. A test class must extend `play.test.UnitTest` or `FunctionalTest`; `TestDiscoveryConformanceTest` fails the build on one that does neither, which the runner would never reach.
 - Never pipe the suite (`| tail` returns tail's exit code); redirect to a file and check `test-result/*.failed.html`. Never compile while a run is in flight; `jcmd -l | grep -E "playAutotest|FirePhoque"` first. A `compileJava` that printed `UP-TO-DATE` measured nothing: `--rerun-tasks` when the compile is the evidence.
-- Test classes run concurrently in one JVM: never flip a process-global without its lock (`LuceneTestSync`, `ShellSandboxSync`, `ToolRegistrySync`, `TelemetryTestSync`, `LoadTestHarnessSync`, `SlackWebApiTestSync`, `JevBreakerTestSync`, `ScrapeClientSwap` for `WebScrapeTool.CLIENT` and `RobotsCache`, and `ScrapeConfigGuard` for the scrape config keys, taken after `ScrapeClientSwap`); scope shared-table assertions to your own rows; a "seeded row missing" red is usually the `Fixtures.deleteDatabase` race, not a regression. Circuit breakers live in a process-global registry keyed by provider or MCP server name, so a test that drives `chat()`, a stream or `callTool` mints its own name and `CircuitBreakers.remove`s it — never `test-provider`, which another class may be tripping.
+- Test classes run concurrently in one JVM: never flip a process-global without its lock (`LuceneTestSync`, `ShellSandboxSync`, `ToolRegistrySync`, `TelemetryTestSync`, `LoadTestHarnessSync`, `SlackWebApiTestSync`, `JevBreakerTestSync`, `FactoryRunnerSync` for `FactoryProcess.setRunnerForTest`, `ScrapeClientSwap` for `WebScrapeTool.CLIENT` and `RobotsCache`, and `ScrapeConfigGuard` for the scrape config keys, taken after `ScrapeClientSwap`); scope shared-table assertions to your own rows; a "seeded row missing" red is usually the `Fixtures.deleteDatabase` race, not a regression. Circuit breakers live in a process-global registry keyed by provider or MCP server name, so a test that drives `chat()`, a stream or `callTool` mints its own name and `CircuitBreakers.remove`s it — never `test-provider`, which another class may be tripping.
 - In a FunctionalTest, seed what your own HTTP request reads with a `commitInFreshTx` helper — each class keeps a private copy (e.g. `ApiAttachmentsControllerTest`) — because the body is already in a transaction and `Tx.run` joins it. Real HTTP against the autotest server 401s `password_unset` until `AuthFixture.seedAdminPassword` runs; the loadtest harness adds a warmup turn.
 - Frontend: `cd frontend && pnpm test` after edits; `pnpm typecheck` is the TS gate, the LSP's `.vue` import errors are false. After a dependency bump, `rm -rf .nuxt node_modules/.vite && pnpm exec nuxi prepare` before believing a green. In a fresh worktree run `pnpm install` first (its postinstall runs `nuxt prepare`); after a lone `rm -rf .nuxt`, run `pnpm exec nuxi prepare` or every vitest file fails at transform.
 - `pnpm test --coverage`, never `pnpm test -- --coverage`, which passes with no coverage. `pnpm test` never runs e2e; `./jclaw.sh e2e` needs a live instance answering `/api/status`.
@@ -237,7 +237,7 @@ bin/diagnostics.test.mjs` its parser tests.
 
 It parses, it does not add builds. It runs `./gradlew compileTestJava` — with `--tests`,
 `play autotest` as well — and reads javac's output plus the xunit reports already on
-disk. Parsing the ~616 reports costs milliseconds against a compile measured in seconds
+disk. Parsing the ~671 reports costs milliseconds against a compile measured in seconds
 and a suite measured in minutes.
 
 Three contracts make the output safe to believe. A clean tree prints `[]`, never nothing:
@@ -433,8 +433,8 @@ force-flushing the meter and tracer providers to the exporter being replaced fir
 that refuses every span plus empty exporter leaves, so the disabled cost is one volatile read per
 span start. The keys — `otel.enabled`, `otel.exporter.endpoint` (default
 `http://localhost:4318`), `otel.exporter.protocol` (`http/protobuf` | `grpc`),
-`otel.exporter.secretHeaders` (masked by the API), `otel.service.name`,
-`otel.traces.sampler.ratio`, and `otel.metrics.interval.seconds`, the one read at init — are
+`otel.exporter.secretHeaders` (masked by the API), `otel.traces.sampler.ratio`,
+`otel.service.name` and `otel.metrics.interval.seconds`, the two read at init — are
 documented in `conf/application.conf` and never seeded.
 
 **Sources.** `OtelPlayPlugin` (`conf/play.plugins` slot 450) opens one SERVER span per action
@@ -546,7 +546,7 @@ an array it goes after the element type (`float @Nullable [] vector` annotates t
 error" — NullAway cannot see that a null `error()` implies a non-null payload. The convention
 here is an accessor that asserts the invariant and names it in one line, rather than a
 suppression: `FsPaths.TargetPath.resolvedTarget()`, `FsSupport.LoadedFile.resolvedContent()`,
-`DeliverySpec.resolvedTool()`, `ScrapeObservation.resolvedError()` and nearly twenty siblings all
+`DeliverySpec.resolvedTool()`, `ScrapeObservation.resolvedError()` and more than twenty siblings all
 follow that shape. Prefer it — a `resolvedX()` throws where a suppression would return null.
 
 **Suppressions.** `@SuppressWarnings("NullAway")` with a one-line reason, and rare — one exists
@@ -655,7 +655,7 @@ test hooks in `app/`, so banning them needs a frozen store rather than this list
 
 | Capability | Holders |
 | --- | --- |
-| Spawn an OS process | 17 files — the sidecar supervisors, media transcoders, harness runners and `tools.ShellExecTool`; enumerated in `archunit_store/shell-process-spawners` |
+| Spawn an OS process | 18 files — the sidecar supervisors, media transcoders, harness runners and `tools.ShellExecTool`; enumerated in `archunit_store/shell-process-spawners` |
 | Resolve a model-controlled path | `tools.FsPaths` → `utils.WorkspacePathGuard`; the sites under `tools..` predating that seam are listed in `archunit_store/filesystem-tool-paths` |
 | Open an outbound connection | `utils.HttpFactories`, plus `utils.SsrfGuard` and `channels.TelegramBotApiHttpClients` for their own tuned clients; raw sockets only in `services.printing..`, `services.LocalSidecarDaemon` and `tools.BrowserScreenProxy` |
 | Reach the database | Everything except the subsystems `jobs.ShutdownJob` stops — teardown that needs a connection has no useful recovery when it cannot get one (JCLAW-1143) |

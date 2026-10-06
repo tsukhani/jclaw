@@ -123,7 +123,7 @@ Isolating a provider yourself (tripping its breaker by hand) sends nothing. A de
 
 ## Database
 
-Everything on this instance — conversations, agents, tasks, memories, config — lives in one H2 data file, `data/jclaw.mv.db`. This section is the place to see how that file is doing and to keep a copy of it. It sits beside Maintenance because two of its actions, restore and repair, take the instance down the way a restart does.
+Everything on this instance — conversations, agents, tasks, memories, config — lives in one H2 data file, `data/jclaw.mv.db`, except each agent's memory graph, which is kept beside it under `data/memory-graph/`. This section is the place to see how that file is doing and to keep a copy of it. It sits beside Maintenance because two of its actions, restore and repair, take the instance down the way a restart does.
 
 ### The health strip
 
@@ -139,19 +139,19 @@ Attention is the state worth knowing about. On 2026-09-09 the live database turn
 
 ### Backups
 
-**Back up now** writes an H2 online backup — a zip containing the data file — to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted.
+**Back up now** writes an H2 online backup — a zip containing the data file and the memory graph — to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted.
 
 **Schedule** sits under the list and takes a time of day, in this instance's timezone (the one set under Timezone, or the server's when none is), for a daily backup. The times in the backup list are shown in that same zone, whatever zone the browser is in. Pick a time and **Save**, and the line beneath says what will happen and when the last scheduled backup ran; **Turn off** goes back to no automatic backup, which is the default. A scheduled backup that fails says so there and is logged to the event log. The schedule counts a day as done once a backup has been written at or after its time, so restarting the instance later that day does not write another; an instance that was down at the scheduled time catches up once, on its first minute back up.
 
 **retention** — how many of the panel's own backups to keep; the oldest is pruned after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
 
-Backups are plain zips: `unzip -l` lists the `jclaw.mv.db` inside, and H2's own tools open it.
+Backups are plain zips: `unzip -l` lists the `jclaw.mv.db` inside, with the memory graph under `memory-graph/`, and H2's own tools open it.
 
 ### Restore
 
 Restore replaces the database with a backup — one from the list, or a zip you pick with **Restore from a file…**. The file is checked first: anything that is not an H2 backup is refused with the reason and nothing on disk changes. The confirmation names the backup's date, because everything written since it is lost.
 
-Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to `jclaw.sh restart`: the instance stops, the file is swapped, the instance starts. The page reconnects on its own, and the strip then says which backup is live. The displaced file is kept as `data/jclaw.mv.db.pre-restore` until the next successful backup, so a restore is itself reversible until you have moved on.
+Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to `jclaw.sh restart`: the instance stops, the file is swapped, the instance starts. The page reconnects on its own, and the strip then says which backup is live. The memory graph is swapped with it. The displaced file is kept as `data/jclaw.mv.db.pre-restore`, and the displaced graph as `data/memory-graph.pre-restore`, until the next successful backup, so a restore is itself reversible until you have moved on.
 
 ### Repair
 
@@ -179,7 +179,7 @@ jclaw db-clean                   # delete what the last successful repair left b
 jclaw db-status                  # the health strip as text
 ```
 
-The CLI and the panel share one implementation. With the instance running, `backup` and `db-status` go through the API — the button's code path — so retention and the health verdict come from the running JVM. With the instance stopped, the same engine runs directly against the file on the H2 jar alone, which is what makes `repair` usable when the database will not open. Helper output goes to `logs/database.log`.
+The CLI and the panel share one implementation. With the instance running, `backup` and `db-status` go through the API — the button's code path — so retention and the health verdict come from the running JVM. With the instance stopped, the same engine runs directly against the file on the H2 and Gson jars and JClaw's compiled classes alone, which is what makes `repair` usable when the database will not open. Helper output goes to `logs/database.log`.
 
 ## Maintenance
 
@@ -281,13 +281,13 @@ For each provider you can:
 - Set the **API key** — stored as plain text in the Config DB, because it is a credential for the provider's API and has to be sent as written, and never shown back once saved.
 - Set the **base URL** (most providers ship with a sensible default).
 - Mark **Enabled / disabled** to hide the provider from the agent picker.
-- Set **local** — the provider's Remote/Local classification. It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp; absent means remote. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.
+- Edit **local** — the provider's Remote/Local classification (`provider.<name>.local`). It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp, so only their cards have a **local** row; absent means remote, and a remote card has no row, so declaring one local takes `POST /api/config`. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.
 - Set the **paymentModality** — how the provider bills you. `PER_TOKEN` estimates cost per turn from model pricing; `SUBSCRIPTION` ignores per-token pricing and pro-rates a flat monthly fee instead. A provider that supports only one billing model shows it locked.
 - Set **subscriptionMonthlyUsd** — shown only when the modality is `SUBSCRIPTION`: the monthly USD you pay the provider, which the Dashboard's Chat Cost **Subscription** block pro-rates to the selected window (`monthly × window_days / 30`).
 - Set **keepAlive** — Ollama Local only (`provider.ollama-local.keepAlive`, default `5m`): how long a model stays loaded between requests. `-1` keeps it loaded for good; longer values hold GPU memory per model.
 - Toggle **useNativeApi** — Ollama providers only (`provider.<name>.useNativeApi`, default off): send chat requests to the daemon's native `/api/chat` instead of the OpenAI-compatible endpoint. Same request semantics; the response adds the daemon's per-request timings (model load, prompt evaluation, generation), shown in each message's [usage popover](/guide#chat-per-message-usage) and as histograms on the Chat Performance dashboard. A local daemon reports all of them; Ollama Cloud reports total duration only. If the address serves no `/api/chat` (a gateway that exposes only the OpenAI surface), the request falls back to the OpenAI-compatible endpoint and the event log says so.
-- **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability badges (vision, audio, video, thinking) confirmed by the provider or guessed from the model name (a trailing `?`, e.g. `video?`, marks a guess).
-- **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in. Filter the catalog by capability (vision / audio / video / thinking), by cost (free / paid, offered when the provider has free models), and by leaderboard rank.
+- **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability pills (thinking, vision, audio, video, and **no tools** for a model that cannot call tools).
+- **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in. Each catalog entry's capability badges are confirmed by the provider or guessed from the model name (a trailing `?`, e.g. `video?`, marks a guess). Filter the catalog by capability (vision / audio / video / thinking), by cost (free / paid, offered when the provider has free models), and by leaderboard rank.
 
 If no provider is configured, no agent can answer — that's the most common cause of "the agent isn't replying." The [Agents](/agents) page shows a yellow **provider not configured** badge on rows whose provider is missing its key.
 
@@ -385,13 +385,13 @@ The card marked **saved** is the one in effect. Whichever card you use, only the
 
 **DataImpulse**
 
-DataImpulse gives each plan type its own login and password, under **Proxy Access** in the [DataImpulse dashboard](https://app.dataimpulse.com/). The card keeps one of each for **Residential**, **Premium Residential**, **Mobile** and **Datacenter**, and the **use** button beside a plan picks the one the proxy connects with. A plan can be picked once it has both a login and a password; switching plans changes only which credentials are sent, and the others stay saved. The country, rotation, session and gateway below are shared by every plan.
+DataImpulse gives each plan type its own login and password, under **Proxy Access** in the [DataImpulse dashboard](https://app.dataimpulse.com/). The card keeps one of each for **Residential**, **Premium Residential**, **Mobile** and **Datacenter**, and the radio button labelled with a plan's name picks the one the proxy connects with. A plan can be picked once it has both a login and a password; switching plans changes only which credentials are sent, and the others stay saved. The country, rotation, session and gateway below are shared by every plan.
 
 | Field             | Meaning                                                                                  |
 |-------------------|------------------------------------------------------------------------------------------|
 | login             | Each plan's proxy login, as the dashboard shows it, without any parameters.              |
 | password          | Each plan's proxy password. A saved one shows as dots with a pencil to change it, and is kept unless you change it. |
-| use               | The plan the proxy uses.                                                                 |
+| plan name         | The radio button beside each plan; the one selected is the plan the proxy uses.          |
 | country           | Two-letter country codes, separated by commas: `de`, or `de,au`. Empty uses any country. |
 | rotation          | **Rotating** gives a new IP address for every request, on port 823. **Sticky** keeps one address for a session, on port 10000. |
 | session minutes   | Sticky only: how long one address is kept, 1 to 120. Empty uses DataImpulse's default of 30. |
@@ -454,7 +454,7 @@ Two engines:
 - **Sidecar** — quality-first; runs a local Python process (needs `uv` on PATH), and weights download from Hugging Face on first use. Models: **Qwen3-TTS 0.6B** (plus a 4-bit variant), **Kokoro-82M**, and **Chatterbox** (a PyTorch model on Apple Silicon MPS or NVIDIA CUDA — the most natural voice, but noticeably slower than the others).
 - **JVM-native** — runs in-process via sherpa-onnx, no Python or sidecar. Models: **Piper Amy** (tiny, fast, English) and **Kokoro-82M multilingual**; the chosen voice downloads once (a button in the panel) then synthesizes on CPU.
 
-**Voice** — models with named speakers show a voice dropdown under the model. **Kokoro** offers American and British, male and female voices. **Qwen3-TTS** and **Chatterbox** have no named voices: their voice is chosen by cloning a reference clip — **Record** a few seconds of clean speech in the panel or **Upload** one (WAV, MP3, FLAC, M4A or OGG, under 10 MB), and **Clear** it to return to the model default. Single-voice models (Piper) hide the control, and **Default** keeps the model's own voice. Your choice is remembered per engine.
+**Voice** — models with preset speakers show a voice dropdown under the model. The sidecar **Kokoro** offers American and British, male and female voices; **Qwen3-TTS** offers **Voice 1** to **Voice 4**. **Chatterbox** has no preset voices, and both it and **Qwen3-TTS** can take their voice from a reference clip — **Record** a few seconds of clean speech in the panel or **Upload** one (WAV, MP3, FLAC, M4A or OGG, under 10 MB), and **Clear** it to return to the model default. Models with neither (Piper and the JVM-native Kokoro) hide the control, and **Default** keeps the model's own voice. Your choice is remembered per engine.
 
 **Keep warm** — sidecar engine only (`tts.local.idleTimeoutMinutes`, default 15, 0–1440): minutes idle before the sidecar unloads its model, `0` never unloads. Longer keeps the first reply fast but holds the model in RAM (Chatterbox is ~3 GB); shorter frees memory but makes the next reply after a gap pay the load again. Takes effect the next time the sidecar starts.
 
@@ -551,16 +551,16 @@ How JClaw makes a video attachment legible to your chat model. The strategy is c
 3. **The chat model has vision** — JClaw samples still frames from the clip and sends them as images.
 4. **Text-only chat model with [Image Captioning](#settings-image-captioning) on** — sampled frames are captioned into a timestamped text summary.
 
-The **dedicated video-interpretation model** has a master toggle, then a provider and a model picker; the picker is live-discovered from the provider and filtered to its **video-capable** models — the same shape as Image Captioning above.
+The **dedicated video-interpretation model** has a master toggle, then a provider — OpenRouter, vLLM (offered only while it answers), Ollama Local or Ollama Cloud — and a model picker; the picker is live-discovered from the provider, the same shape as Image Captioning above. OpenRouter lists its **video-capable** models, which watch the clip; vLLM and Ollama list their **vision-capable** models, which interpret frames sampled from it.
 
-Two knobs govern the frame-sampling fallbacks (strategies 3 and 4):
+Two knobs govern frame sampling, for the fallbacks (strategies 3 and 4) and for a vLLM or Ollama dedicated model:
 
 | Key             | Default | Meaning                                                                                                 |
 |-----------------|---------|---------------------------------------------------------------------------------------------------------|
-| `secondsPerFrame` | 10    | Sampling density — one frame is grabbed per this many seconds of video (1–60). Lower = denser sampling, more detail, higher cost. |
-| `sampleFrames`    | 8     | Hard ceiling on frames extracted from a single clip (2–32), regardless of length.                        |
+| `video.secondsPerFrame` | 10    | Sampling density — one frame is grabbed per this many seconds of video (1–60). Lower = denser sampling, more detail, higher cost. |
+| `video.sampleFrames`    | 8     | Hard ceiling on frames extracted from a single clip (2–32), regardless of length.                        |
 
-The effective frame count is `clamp(round(duration ÷ secondsPerFrame), 2, sampleFrames)`. An **Active:** status line shows which strategy your current main-agent model would use — watch, summarize, sample, or caption. If none apply, the video comes through with a note telling you to enable one of the above.
+The effective frame count is `clamp(round(duration ÷ secondsPerFrame), 2, sampleFrames)`; a captioned summary (strategy 4) also stops at `video.textSummaryMaxFrames` (default 8, no row in the panel). A status line shows which strategy your current main-agent model would use — watch, summarize, sample, or caption. If none apply, the video comes through with a note telling you to enable one of the above.
 
 ## Video Generation
 
@@ -657,6 +657,14 @@ The optional AFK factory builds Jira stories labelled `afk` unattended in sandbo
 - **Credentials** — a Claude OAuth token or an Anthropic API key (saving one removes the other: only one is used, and the factory takes the OAuth token when both are present), the Jira URL and personal token, and an optional GitHub token. They are written owner-only to `.env`, `jira.env` and `github.env` in the factory home. A saved value is never shown again; enter a new one to replace it.
 - **Run installer** — runs the factory's installer and streams its output, for up to 15 minutes. It cannot start while another install or a harness start/stop is running. Running it restarts the factory, so a story being built is interrupted; it keeps its branch and resumes on the next round. The factory counts as installed once its LaunchAgent (`~/Library/LaunchAgents/com.jclaw.factory.plist`) exists.
 
+Below Setup:
+
+- **Status** — **Harness** is the factory process: **Start** runs the installer, and **Stop** unloads and removes its LaunchAgent, so any story it is building fails. **Gateway** is the container the sandboxes' network traffic passes through: **Pause** stops it, so no new story starts and running ones fail, and **Resume** starts it again. **Sandboxes** lists the running sandboxes and the story each is building, each with its own **Stop**. Every stop and pause asks first, and a command that fails shows its output under the rows.
+- **Settings** — **Stories built at once** (default 2), **CPUs per sandbox** (6, and no more than Docker has), **Poll interval (seconds)** (120) and **Model** (`claude-opus-5-5`), saved to `settings.env` in the factory home. The factory reads them when it starts, so after a save it restarts itself as soon as no story is running.
+- **Story board** — every story the factory knows, grouped as **Waiting**, **Running**, **In review**, **Blocked or refused** and **Merged**. A running story shows its phase and how long it has been in it; a blocked or refused one shows why; a merged one shows its commit and whether the factory or a person merged it. A story labelled `afk-merge`, or in an epic so labelled, carries an **Auto-merge** badge: once it passes, the factory merges it, signed, into this checkout's `main` and moves it to Done, without pushing. Select a story to read its logs, one tab per log; a running story's log refreshes as it grows.
+
+The factory home is `~/.jclaw-factory`, unless the `factory.home` key or the `FACTORY_HOME` environment variable names another directory. On a machine that is not a Mac, the panel says the factory cannot run there instead of showing Status.
+
 ## Web Scraping
 
 Every setting the `web_scrape` tool reads, in four groups, except the proxy, which is set in [Proxy Providers](#settings-proxy-providers). Changes apply live; no restart needed.
@@ -746,11 +754,11 @@ The retention TTL is also displayed next to the [Tasks](/tasks) page title so yo
 
 ## Skills Promotion
 
-LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) page. Promoted skills run an LLM pass that strips installation scripts and external network calls.
+LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) page. Promoted skills run an LLM pass that redacts embedded secrets and personal data — API keys, tokens, passwords, webhook URLs, names, emails, phone numbers, usernames — replacing each with a placeholder such as `[API_KEY]`.
 
 | Key                                | Default                    | Meaning                                                                       |
 |------------------------------------|----------------------------|-------------------------------------------------------------------------------|
-| `skillsPromotion.provider`         | (main agent's provider)    | LLM provider for the sanitization pass. Defaults to the main agent's.         |
+| `skillsPromotion.provider`         | (main agent's provider)    | LLM provider for the sanitization pass, and for the pass that conforms a skill imported from GitHub to JClaw's format. Defaults to the main agent's. |
 | `skillsPromotion.model`            | (main agent's model)       | Model id paired with the above.                                               |
 | `skillsPromotion.timeoutSeconds`   | 300                        | Hard timeout for one sanitization pass (30–900 s).                            |
 | `skillsPromotion.batchSizeKb`      | 100                        | Source-text batch size sent to the LLM in one pass (10–1000 KB).              |
@@ -761,7 +769,7 @@ How many memories reach the prompt. These two counts are the *only* bound on the
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `memory.coreload.maxCount` | 20 | Core memories auto-loaded at session start. |
+| `memory.coreload.maxCount` | 20 | Core memories loaded into the prompt on every turn. |
 | `memory.recall.limit` | 10 | Memories recalled per turn. |
 
 ## Memory: Embeddings
@@ -820,7 +828,7 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on each
 | Key                            | Default | Meaning                                                                                              |
 |--------------------------------|---------|------------------------------------------------------------------------------------------------------|
 | `shell.allowlist`              | seeded list | Comma-separated command names the agent may run. A command passes when its first word, or that word's file name, is listed; arguments are not checked. First start seeds common commands (`git`, `ls`, `grep`, `curl`, `python3`, `node`, …). |
-| `shell.defaultTimeoutSeconds`  | 30      | Per-command wall-clock budget (1–300 s).                                                              |
+| `shell.defaultTimeoutSeconds`  | 30      | Wall-clock budget for a command whose call sets no timeout (1–300 s in the panel). A call may set its own, capped at `shell.maxTimeoutSeconds` (300). |
 | `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Has no row in the panel — set it with `POST /api/config`. |
 
 :::gotcha

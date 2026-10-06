@@ -59,8 +59,9 @@ and the error rate stays flat while the work behind them is failing.
 
 The row's reason column says what opened it: **consecutive failures** (three exhausted calls in a
 row, the rule that fires first on a low-traffic install), **failure rate** or **slow call rate**
-(half of the recent window), or **isolated by you**. What each subsystem counts as a failure, and
-the streaming budgets behind a slow call, are described under
+(half of the recent window), **probe failed** or **probe slow** (a probe reopened it), or
+**isolated by you**. A half-open breaker reads **probing** instead. What each subsystem counts as a
+failure, and the streaming budgets behind a slow call, are described under
 [LLM Providers](/guide#settings-when-a-provider-misbehaves) and
 [MCP Servers](/guide#skills-tools-mcp-when-a-server-stops-answering).
 
@@ -98,15 +99,18 @@ Use this to spot a slow segment or a slow channel before users complain.
 
 The **browser** channel is different: it measures the JClaw web app itself rather than a chat turn. Each time an interaction in the app — a click, a keypress — becomes the slowest of your session, the page reports its **Interaction to Next Paint (INP)**, and selecting **browser** shows those as one INP row. "All channels" leaves it out, so it never mixes into the turn figures. An interaction slower than 200 ms (Google's "good" limit) also lands in [Logs](/logs) under category **browser**, naming the page, the element, and how the time split between waiting, running handlers, and repainting.
 
-The **Counts** view holds three per-turn figures that are counts rather than durations, so they get their own view instead of rows in the latency table. Its columns are Metric / turns / total / p50 / p90 / p99 / max — **total** is the windowed sum, which has no meaning for a duration:
+The **Counts** view holds up to six per-turn figures that are counts rather than durations, so they get their own view instead of rows in the latency table. Its columns are Metric / turns / total / p50 / p90 / p99 / max — **total** is the windowed sum, which has no meaning for a duration:
 
 | Row                           | What it counts                                                                                          |
 |-------------------------------|---------------------------------------------------------------------------------------------------------|
-| **Tool rounds / turn**        | Tool-execution rounds. A round can carry several tool calls, and it is not a model call.                  |
 | **LLM calls / turn**          | Chat requests dispatched to a provider during the turn — the first call plus every tool-loop continuation, retry-with-nudge, prologue summarization, and any call a tool makes on the turn's behalf. Transport retries behind one dispatch are not separate calls; a failover to a second provider is. |
 | **Cache-served calls / turn** | How many of those had their prompt served from the provider's cache — a much cheaper call than an uncached one. |
+| **Tool rounds / turn**        | Tool-execution rounds. A round can carry several tool calls, and it is not a model call.                  |
+| **Tool results checked / turn** | Tool results checked before the model reads them. The check only records a verdict; the model still sees the result unchanged. |
+| **Tool results flagged / turn** | How many of those failed the check — blank, an error, or a failure the tool itself reports, such as a non-zero exit code. Only turns with a flagged result contribute. |
+| **Memory recalls / turn**     | Memory recalls during the turn — the one made while assembling the prompt plus any the `memory` tool makes. |
 
-Only turns with at least one cache-served call contribute to the last row, so the cache-served *share* is printed as a percentage line under the table — the ratio of the two rows' totals rather than a subtraction of percentiles (percentiles don't subtract).
+Only turns with at least one cache-served call contribute to the Cache-served row, so the cache-served *share* is printed as a percentage line under the table — the ratio of the two rows' totals rather than a subtraction of percentiles (percentiles don't subtract).
 
 Watch **LLM calls / turn** when you change agent configuration: it is what tells you whether a change bought its quality with extra model calls.
 

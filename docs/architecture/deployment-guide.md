@@ -28,8 +28,8 @@ Key steps:
 - **Test.Backend** — `play autotest` + JaCoCo XML; JUnit XML published from `test-result/*.xml`.
 - **Test.Frontend** — `(cd frontend && pnpm test --coverage)` (Vitest + lcov).
 - **Sonar** — `./gradlew sonar -Dsonar.projectVersion=v${appVersion}` (project key `abundent:jclaw`), with the quality-gate binding.
-- **Package** — `./jclaw.sh dist` + `./gradlew playBundle` write `dist/jclaw.zip` and `dist/jclaw-bundle.zip`, archived as Jenkins artifacts. The SPA **is** baked into the bundle — `nuxi generate` output is copied into `public/spa/` before packaging.
-- **Release** (param `RELEASE=true`): create git tag `v<application.version>`, refresh the GitHub Release with both zips, then multi-arch `buildx` push of `ghcr.io/tsukhani/jclaw:<tag>` + `:latest` for `linux/amd64` + `linux/arm64` (QEMU binfmt for cross-arch).
+- **Package** — `./gradlew playDist playBundle` writes `dist/jclaw.zip` and `dist/jclaw-bundle.zip`, archived as Jenkins artifacts. The SPA **is** baked into the bundle — `nuxi generate` output is copied into `public/spa/` before packaging.
+- **Release** (param `RELEASE=true`): refresh the GitHub Release `v<application.version>` with both zips plus `SHA256SUMS` and `SHA256SUMS.sig`, then multi-arch `buildx` push of `ghcr.io/tsukhani/jclaw:<tag>` + `:latest` for `linux/amd64` + `linux/arm64` (QEMU binfmt for cross-arch).
 - **Publish Dev Container** (param `PUBLISH_DEVCONTAINER=true`): buildx push `ghcr.io/tsukhani/jclaw-devcontainer:latest`.
 - **Cleanup** (on release): keep the 5 most recent GitHub Releases + 5 most recent GHCR versions (never deleting whatever `:latest` points to); prune BuildKit cache older than 30 days.
 
@@ -87,23 +87,22 @@ docker compose logs -f
 docker compose down
 ```
 
-On first boot the entrypoint generates a 64-char `PLAY_SECRET` (persisted to `./data/.play-secret`) and a self-signed TLS cert at `certs/host.cert` if none exists, then runs the backend in prod mode with the 9443 HTTPS listener. The SPA is baked into the image — no Node/pnpm/Play toolchain on the host. For browser-trusted HTTPS + working HTTP/3, sign the cert with mkcert's local CA (`./jclaw.sh https`) and restart.
+On first boot the entrypoint generates a 64-char `PLAY_SECRET` (persisted to `./certs/.env`) and a self-signed TLS cert at `certs/host.cert` if none exists, then runs the backend in prod mode with the 9443 HTTPS listener. The SPA is baked into the image — no Node/pnpm/Play toolchain on the host. For browser-trusted HTTPS + working HTTP/3, sign the cert with mkcert's local CA (`./jclaw.sh https`) and restart.
 
 ### Persisted volumes
 
 | Volume | Purpose |
 |---|---|
-| `./data` | H2 DB file, `attachments/` blobs, `jclaw-lucene/` index, `.play-secret`. |
+| `./data` | H2 DB file, `attachments/` blobs, `jclaw-lucene/` index. |
 | `./logs` | Runtime logs. |
 | `./workspace` | Per-agent workspace files (Standing Orders under `main/`). |
 | `./skills` | Global skills registry (authoring output). |
-| `./certs` | TLS cert + key (`host.cert` / `host.key`). |
+| `./certs` | TLS cert + key (`host.cert` / `host.key`), `.env` (`PLAY_SECRET`). |
 
 ## Dockerfile stages
 
 1. **bundle stage** (`azul/zulu-openjdk:25`) — Node 26 (NodeSource) + standalone pnpm + Gradle 9; downloads the `tsukhani/play1` release pinned in `.play-version`, runs `pnpm install` + `nuxi generate` (SPA → `public/spa/`), `play precompile`, and `gradle playBundle` to produce the self-contained bundle. (Exact base-image tag and Gradle version are pinned in the `Dockerfile`.)
-2. **chromium stage** (`azul/zulu-openjdk:25`) — installs Playwright Chromium into `/opt/pw-browsers`.
-3. **runtime** (`ubuntu:26.04` + Zulu 25 JRE) — copies the unpacked bundle + Chromium libs; bakes `workspace/main/` (SOUL.md, IDENTITY.md, USER.md, BOOTSTRAP.md, AGENT.md) as the main-agent seed (the `./workspace` bind-mount shadows it at runtime); `EXPOSE 9000 9443/tcp 9443/udp`; entrypoint auto-provisions `PLAY_SECRET` + certs, then `./play run --%prod --https.port=9443`.
+2. **runtime** (`ubuntu:26.04` + Zulu 25 JRE) — copies the unpacked bundle and installs Chromium's shared libs (Chromium itself downloads on first browser use into `PLAYWRIGHT_BROWSERS_PATH=/app/data/pw-browsers`); `EXPOSE 9000 9443/tcp 9443/udp`; entrypoint auto-provisions `PLAY_SECRET` + certs, then `./play run --%prod --https.port=9443`.
 
 ## Production configuration
 

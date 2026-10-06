@@ -10,7 +10,7 @@ How to set up, run, test, and iterate on jclaw locally.
 | Play Framework CLI | 1.13.x (custom fork) | Install from [github.com/tsukhani/play1](https://github.com/tsukhani/play1); `play` on `$PATH`. In 1.13.x the `play` CLI is Gradle-driven (PF-90 removed the legacy Python CLI). Exact patch pinned in `.play-version`. |
 | Node.js | 24.11+ or 26+ | For the Nuxt frontend. The range Nuxt 4.5's `engines` allows, intersected with this project's 24 floor; `./jclaw.sh` enforces it. Node 25 is excluded because Nuxt excludes it. |
 | pnpm | 12+ (pinned) | Exact version lives in `frontend/package.json`'s `packageManager` field; pnpm installs standalone and switches to it itself. Integrity is the `packageManagerDependencies` block in `frontend/pnpm-lock.yaml`, not the pin — corepack is no longer used and cannot launch pnpm 12. |
-| Python | 3.10+ (optional) | Only for the local image/video generation sidecars (`sidecar/`); not needed for the `play` CLI. |
+| Python | 3.11+ (optional) | Only for the local sidecars (`sidecar/`); not needed for the `play` CLI. |
 | Tesseract | optional | OCR for the `documents` tool (image / scanned-PDF text). |
 
 > Fastest path: use the **Dev Container** (`.devcontainer/`, Ubuntu 26.04 + Zulu 25 + Node 26 + the Play fork). "Reopen in Container" runs `./jclaw.sh setup` for you.
@@ -75,7 +75,7 @@ Test DB: `%test.db.url=jdbc:h2:mem:play;MODE=MYSQL;LOCK_MODE=0` (set in `conf/ap
 ## Git hooks
 
 `./jclaw.sh setup` wires `core.hooksPath=.githooks`:
-- **`pre-commit`** — `lint-staged` (ESLint + Stylelint `--fix`) on staged `frontend/**` files only; short-circuits for backend-only commits. Also guards the pnpm `packageManager` hash.
+- **`pre-commit`** — `lint-staged` (ESLint + Stylelint `--fix`) on staged `frontend/**` files only; short-circuits for backend-only commits. Also refuses a pnpm `packageManager` pin when `frontend/pnpm-lock.yaml` has no `packageManagerDependencies` block.
 - **`pre-push`** — runs the full backend + frontend suite (`./jclaw.sh test`), cached per-HEAD so the two-remote deploy flow pays the cost once. Bypass a single push with `JCLAW_SKIP_TESTS=1` (sparingly).
 
 Never use `--no-verify`.
@@ -97,7 +97,7 @@ Every code change goes through this order — do not skip steps:
 - **Frontend state:** `useState` + composables. No Pinia.
 - **Transactions:** `services.Tx.run(...)` wraps `JPA.withTransaction` (no-ops if already inside a tx). After a nested `Tx.run`, re-fetch entities — they may be detached.
 - **Outbound HTTP:** use `utils.HttpFactories` (OkHttp 5: `llmStreaming` / `llmSingleShot` / `general`). No `java.net.http.HttpClient`.
-- **JSON:** use `utils.GsonHolder.INSTANCE` — a single project-wide Gson.
+- **JSON:** use `utils.GsonHolder.GSON` — a single project-wide Gson.
 - **Enums in DB:** string-backed (`@Enumerated(STRING)` / manual conversion) — Play 1.x hot-reload clashes with JPA enum classloader identity.
 - **MIME types:** configure via `mimetype.*` in `application.conf` — don't override at the controller level.
 - **Comments:** only for non-obvious WHY (see the javadocs on `AgentSkillAllowedTool` for an exemplar).

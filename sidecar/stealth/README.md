@@ -84,8 +84,8 @@ connection through an in-JVM SOCKS5 proxy, which renders now share with it (laye
 4. **The JVM's network screen.** Each render launches the browser behind a SOCKS5 proxy the JVM
    opens for it (`BrowserScreenProxy`, JCLAW-1315), so every TCP connection is checked by
    `SsrfGuard` before it is made, then carried by the operator's scrape proxy when one is set —
-   as an HTTP `CONNECT` for every port, 80 included, so an HTTP proxy limiting `CONNECT` to 443
-   (Squid's default) fails them.
+   for an `http://` proxy as an HTTP `CONNECT` for every port, 80 included, so one limiting
+   `CONNECT` to 443 (Squid's default) fails them; a `socks5://` proxy gets a SOCKS5 CONNECT.
    It covers what the route gates cannot see: measured, a dedicated Worker's WebSocket and TURN
    over TCP reached a loopback listener with only the gates in place, and nothing reaches it
    through the screen (`StealthNetworkScreenTest`). Patchright adds `<-loopback>` to the bypass

@@ -21,7 +21,7 @@ The filter bar at the top of the page accepts free-text keywords and typed keys:
 | `name:`      | `name:planning`        | Substring match on the conversation preview (the first user message). |
 | `channel:`   | `channel:slack`        | Restrict to one of `web`, `slack`, `telegram`, `whatsapp`, `voice` (voice-mode sessions), or `app` (app invocations). |
 | `agent:`     | `agent:main-bot`       | Conversations served by a specific agent.                           |
-| `peer:`      | `peer:+15551234567`    | The external user id (Telegram handle, Slack user id, phone number). Blank for web chat. |
+| `peer:`      | `peer:123456789`       | The chat the thread belongs to: a Telegram user or group chat id, a Slack DM or channel id, a WhatsApp number or group id, an app's slug, or your username for web chat. |
 | `starred:`   | `starred:true`         | Only starred conversations. `starred:false` shows only unstarred ones.  |
 
 Tokens combine — `q:retro agent:scrum-bot channel:slack` shows Slack conversations from the scrum-bot agent whose messages mention "retro." Clear a filter chip with the **×** on it, or remove the token from the bar.
@@ -33,7 +33,7 @@ Tokens combine — `q:retro agent:scrum-bot channel:slack` shows Slack conversat
 | **Name**              | The conversation's name — its first user message (truncated) until you rename it.    |
 | **Channel**           | Where it came in from.                                                               |
 | **Agent**             | Which agent answered.                                                                |
-| **Peer**              | External user id (blank for in-app web chat).                                        |
+| **Peer**              | The chat the thread belongs to — see `peer:` above.                                  |
 | **Messages**          | How many messages are in the thread.                                                 |
 | **Last Activity**     | When the thread last changed.                                                        |
 | **Actions**           | Rename, Pin, **View details** (a read-only page for the thread) and **Quick preview**. |
@@ -145,20 +145,20 @@ When Meta refuses a Cloud-API reply because the 24-hour window has closed (its e
 
 When a message arrives over an external channel, JClaw:
 
-1. Looks up the channel + peer (external user id) to find or create a conversation.
+1. Looks up the channel + peer (the chat the message came from) to find or create a conversation.
 2. Routes the message to the binding's agent.
 3. Streams the reply back over the same channel.
 
 If the turn fails, the person on the channel gets a generic reply — the message could not be answered, nothing on their side, try again later — that says nothing about your provider or setup. What broke and how to fix it goes to the [Logs](/logs) instead; only the web chat, whose reader is you, shows the full explanation.
 
-The end result: each external user sees a private, persistent thread with the agent, and you see all of it consolidated in [Conversations](/conversations) and [Chat](/chat).
+The end result: each chat — a direct message, or a group or channel the bot is in — has one persistent thread with the agent, and you see all of it consolidated in [Conversations](/conversations) and [Chat](/chat).
 
 :::tip Test in the web app first
 A new agent is much easier to iterate on inside [Chat](/chat) than over Telegram or Slack. Get the system prompt and tools right in-app, then bind a bot to it once you're happy.
 :::
 
 :::note Peer scoping
-Each external user (peer) gets their own conversation thread with the bound agent. Two Telegram users talking to the same bot see independent threads; neither leaks into the other. The same isolation applies to Slack and WhatsApp.
+Conversations are kept per chat, not per person. A direct message gets its own thread, while everyone in a group or channel shares that chat's thread, on Telegram, Slack and WhatsApp alike. A Telegram bot answers direct messages only from its binding's owner (the **telegramUserId**) and ignores anyone else's; in a group it answers any member who addresses it — an @mention, a reply to the bot, or a wake word.
 :::
 
 ## Where to go next

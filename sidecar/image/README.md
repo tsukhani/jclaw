@@ -20,7 +20,7 @@ load — a per-request subprocess would re-pay it every time, and a model server
 - **[uv](https://docs.astral.sh/uv/)** on `PATH`; it provisions Python 3.10+ itself.
   jclaw probes for it (`UvProbe`); if absent, the Settings UI shows a
   banner and cloud image providers remain the working path.
-- A GPU helps a lot: Apple Silicon (MPS) or NVIDIA (CUDA). CPU works but is slow.
+- A GPU: Apple Silicon (MPS) or NVIDIA (CUDA). A CPU-only host reports `runnable: false`, so Settings disables local generation there.
 - Enough memory to hold klein 4B (~13 GB at fp16). On a Mac that is **unified**
   memory shared with the OS + the jclaw JVM, so 24 GB+ is comfortable.
 

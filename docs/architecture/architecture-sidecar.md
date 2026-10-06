@@ -1,6 +1,6 @@
 # Sidecar Architecture — Local Python ML Daemons
 
-The `sidecar/` part holds five Python daemons that give JClaw local, on-device ML capability the JVM cannot provide: speech recognition, speaker diarization, image generation, speech synthesis, and video generation. They are the one place the "no Python on the server" principle is deliberately relaxed — the platform stays Java-first, and these run as **separate, on-demand, loopback-only processes** rather than as part of the runtime.
+The `sidecar/` part holds seven Python daemons; the five covered here give JClaw local, on-device ML capability the JVM cannot provide: speech recognition, speaker diarization, image generation, speech synthesis, and video generation. They are the one place the "no Python on the server" principle is deliberately relaxed — the platform stays Java-first, and these run as **separate, on-demand, loopback-only processes** rather than as part of the runtime.
 
 Each is launched, health-checked and torn down by a JVM-side lifecycle manager. None is required: with a sidecar absent or its prerequisites missing, the corresponding feature reports an actionable error rather than silently degrading (the JCLAW-614 pattern).
 
@@ -40,9 +40,9 @@ Why it is built this way:
 
 ## Shared lifecycle
 
-`services.LocalSidecarDaemon` is the shared mechanism for the imagegen and videogen daemons: spawn `uv run serve.py`, drain stdout/stderr on virtual threads, poll `/health` until ready, and stop with a `destroy()` → `destroyForcibly()` discipline. Only directories, config keys, labels and exception type differ, captured in its `Config`. The closest precedent for the start/drain/graceful-close discipline is `mcp.transport.McpStdioTransport`.
+`services.LocalSidecarDaemon` is the shared mechanism for every sidecar daemon: spawn `uv run serve.py`, drain stdout/stderr on virtual threads, poll `/health` until ready, and stop with a `destroy()` → `destroyForcibly()` discipline. Only directories, config keys, labels and exception type differ, captured in its `Config`. The closest precedent for the start/drain/graceful-close discipline is `mcp.transport.McpStdioTransport`.
 
-The ASR, diarize and TTS managers own their own equivalents alongside dedicated clients (`AsrSidecarClient`, `DiarizeSidecarClient`, `TtsSidecarClient`), with `services.sidecar.SidecarHttpClient` as the shared HTTP surface and `services.SidecarCapabilityProbe` reporting what the host can actually run.
+The ASR, diarize and TTS managers add dedicated clients (`AsrSidecarClient`, `DiarizeSidecarClient`, `TtsSidecarClient`), with `services.sidecar.SidecarHttpClient` as the shared HTTP surface and `services.SidecarCapabilityProbe` reporting what the host can actually run.
 
 **Concurrency.** One inference at a time per daemon. Concurrent callers receive `409` and queue on a JVM-wide fair lock, so a second request never starts a second model load.
 
@@ -102,7 +102,7 @@ Live percent on the MLX path comes from wrapping the sampler's tqdm, since the p
 
 - **`uv` on PATH** — the shared prerequisite for all five. It resolves each PEP 723 env on first launch.
 - **`ffmpeg`** — for the diarize 16 kHz transcode and the MERaLiON ASR path.
-- **A Hugging Face token** — only for gated weights (pyannote diarization). Supplied by the JVM from `imagegen.local.hfToken`. Whisper and MERaLiON ASR weights are ungated.
+- **A Hugging Face token** — only for gated weights (pyannote diarization). Supplied by the JVM from `transcription.diarization.local.hfToken`, falling back to `imagegen.local.hfToken`. Whisper and MERaLiON ASR weights are ungated.
 
 Weights cache under `data/` (`data/asr-models`, `data/diarize-models`, `data/video-models`) via `HF_HOME`, downloaded on first use or ahead of time from the Settings page.
 
@@ -110,7 +110,7 @@ Weights cache under `data/` (`data/asr-models`, `data/diarize-models`, `data/vid
 
 `uv.lock` is **gitignored for every sidecar** — resolution is per-machine, because the right torch build depends on the host (CUDA vs MPS vs CPU). Only `pyproject.toml`, `serve.py` and the worker scripts are tracked.
 
-The sidecars are **not** part of `jclaw-bundle.zip`. The bundle's only runtime dependency is a Java 25 JRE; local ML capability is opt-in on hosts that install `uv` and the weights.
+The sidecar scripts ship in `jclaw-bundle.zip`, but `uv`, Python and the weights are **not** part of it. The bundle's only runtime dependency is a Java 25 JRE; local ML capability is opt-in on hosts that install `uv` and the weights.
 
 ## Licensing note
 

@@ -32,7 +32,7 @@ Ask for a Lewis structure and the model writes a fenced code block with the lang
 
 If a turn fails, the reply says so in three parts — **What broke**, **What to check** and **How to retry** — and when the provider refused the call (a rejected key, an exhausted balance) it names the provider and model. The raw detail is in [Logs](/logs).
 
-If you regret a message, hover over it: you'll see **Copy to clipboard**, **Edit & resubmit** and **Delete message** controls. Editing rewinds the conversation to that point and re-runs from the edited text. A reply has **Copy to clipboard**, **Regenerate response** and **Delete message** on hover; regenerating removes that reply and the message it answered, then sends your message again for a fresh answer.
+If you regret a message, hover over it: you'll see **Copy to clipboard**, **Reply**, **Edit & resubmit** and **Delete message** controls. Editing rewinds the conversation to that point and re-runs from the edited text. A reply has **Copy to clipboard**, **Reply**, **Regenerate response** and **Delete message** on hover; regenerating removes that reply and the message it answered, then sends your message again for a fresh answer. **Reply** quotes that message above the composer for your next one.
 
 To start over, click **New conversation** (the pencil-and-square icon in the composer footer). The page clears for a fresh thread; the previous one stays saved.
 
@@ -46,7 +46,7 @@ The model picker in the header and the **Think** pill in the composer change the
 - With a conversation open, a pick takes effect on the next turn of that conversation.
 - Nothing in the page flags that a conversation is off the agent's defaults; the header simply shows what is in force. To drop picks made on a fresh chat before sending, reload the page. To put an open conversation back on the defaults, use `/model reset` and `/think reset`.
 - A pick the server refuses (a model the provider no longer lists, a level the model does not offer) shows its reason in the composer, where attachment errors appear, rather than failing silently.
-- Once the [Model Router](/guide#settings-model-router) lists a model for its Chat class, the picker also offers **Auto (best value)**: each turn goes to the model the router picks for that prompt, at a reasoning effort it picks too, unless you set a Think level on the conversation, which still wins. Every routed reply carries a badge such as `Auto · Coding → <model> · medium effort`, flagged **failover** when the first choice failed and its fallback answered, or **budget** when it moved to a lighter model to save subscription credit; hover it for the router's reason.
+- Once the [Model Router](/guide#settings-model-router) lists a model for its Chat class, the picker also offers **Auto (best value)**: each turn goes to the model the router picks for that prompt, at a reasoning effort it picks too, unless you set a Think level on the conversation, which still wins. Every routed reply carries a badge such as `Auto · Coding → <model> · medium effort`, flagged **failover** when the first choice failed and its fallback answered, or **budget** when it moved to a lighter model to save subscription credit; hover it for the router's reason. On Auto, the composer's capability pills, Think included, describe the model the latest routed reply named, so a fresh Auto conversation shows none until its first reply.
 
 Switching to a model that does not offer the current thinking level turns thinking off for the conversation rather than sending a level the model would reject.
 
@@ -85,7 +85,7 @@ On an external channel, `/subagent`, `/prompt` and the `/model` forms that chang
 | `/prompt`         | Search your [Prompts Library](/guide#prompts): `/prompt code review`. In the web composer the prompt's text drops straight into the box; on other channels JClaw replies with it so you can copy and edit it (for the binding's owner only). `/prompt` on its own lists what you have saved. |
 
 :::tip /compact when context fills up
-`/usage` will warn you when a conversation is pushing against the context window. `/compact` then summarizes the older parts and keeps the recent turns verbatim, so the agent can keep working without losing the thread. Pass a focus hint when you only care about a specific subtopic — the summarizer keeps that thread tight.
+`/usage` shows how much of the context window a conversation is using. When it is near full, `/compact` summarizes the older parts and keeps the recent turns verbatim, so the agent can keep working without losing the thread. Pass a focus hint when you only care about a specific subtopic — the summarizer keeps that thread tight.
 :::
 
 ## Tool calls and reasoning

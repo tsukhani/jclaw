@@ -1,6 +1,6 @@
 # Frontend Component Inventory
 
-The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for its base UI (auto-imported from `frontend/components/ui/`), with a layer of feature components on top. Pages compose these rather than inlining everything. **136 components total: 74 UI primitives + 62 feature components**, across 23 pages, 35 composables and 20 utility modules.
+The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for its base UI (auto-imported from `frontend/components/ui/`), with a layer of feature components on top. Pages compose these rather than inlining everything. **179 components total: 74 UI primitives + 105 feature components**, across 26 pages, 47 composables and 41 utility modules.
 
 ## UI primitives (`frontend/components/ui/`)
 
@@ -14,22 +14,22 @@ The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for 
 | command | 9 | table | 9 |
 | dialog | 10 | dropdown-menu | 13 |
 
-Variants are composed with `class-variance-authority` + `tailwind-merge` (`utils/ui-utils.ts` exposes the `cn()` helper).
+Variants are composed with `class-variance-authority` + `tailwind-merge` (`composables/ui-utils.ts` exposes the `cn()` helper).
 
 ## Feature components
 
-62 in four families:
+105 in six families:
 
 | Family | Count | Scope |
 |---|---|---|
-| `components/` (root) | 22 | Cross-page components — the table below |
-| `components/settings/` | 26 | One panel per Settings section, registered in `sections.ts` |
-| `components/chat/` | 11 | Chat-surface pieces split out of `chat.vue` (JCLAW-690) |
+| `components/` (root) | 30 | Cross-page components — the table below |
+| `components/settings/` | 49 | One panel per Settings section, registered in `sections.ts` |
+| `components/chat/` | 18 | Chat-surface pieces split out of `chat.vue` (JCLAW-690) |
 | `components/prompts/`, `components/guide/` | 3 | Prompt dialog + the user-guide renderer |
 
 ### Settings panels (`components/settings/`)
 
-26 panels, each rendered by `pages/settings.vue` from the grouped registry in `sections.ts` (groups: System, Providers, Audio, Image, Video, Agents & Automation, Memory, Security):
+36 panels, each rendered by `pages/settings.vue` from the grouped registry in `sections.ts` (groups: System, Providers, Audio, Image, Video, Agents & Automation, Memory, Security):
 
 `Chat` · `ImageCaption` · `ImageGen` · `Logging` · `Malware` · `MemoryEmbeddings` · `MemoryLimits` · `MemoryReranker` · `Ocr` · `Password` · `Performance` · `Printers` · `Providers` · `Restart` · `Search` · `Shell` · `Skills` · `Speech` · `Subagents` · `Tasks` · `Timezone` · `Transcription` · `Uploads` · `VideoGen` · `VideoInterp`, plus `UnmanagedBanner`.
 
@@ -70,19 +70,19 @@ Section **ids are stable across renames** — `memory` still addresses the panel
 
 ## Composables (`frontend/composables/`)
 
-~17 — the `useState`-backed state + data layer (no Pinia):
+~47 — the `useState`-backed state + data layer (no Pinia):
 
 | Composable | Role |
 |---|---|
 | `useAuth` | Session state + login/logout/checkAuth/checkPasswordSet/setupPassword/resetPassword (module-level lock). |
 | `useEventBus` | Singleton `EventSource('/api/events')` with typed `on(event, handler)` fan-out + reconnect backoff. |
-| `useApiParsed` | `$fetch` + Zod validation (`types/schemas.ts`); throws `SchemaParseError` on boundary mismatch. |
+| `fetchParsed` (`useApiParsed.ts`) | `$fetch` + Zod validation (`types/schemas.ts`); throws `SchemaParseError` on boundary mismatch. |
 | `useApiMutation` | POST/PUT/DELETE wrapper returning `{mutate, loading, error}`. |
 | `useConfirm` | Imperative `confirm({title, message, requireText?})` → Boolean, rendered by `<ConfirmDialog />`. |
 | `useTheme` | `themeMode` (system/light/dark), `setTheme`; toggles the `dark` class on `<html>` with a View Transitions reveal. |
 | `useBulkSelect` | Multi-select state for admin list pages. |
 | `useBindingAgents` | Agent-availability filtering for channel bindings. |
-| `useProviders`, `useToolMeta`, `useModelAutocomplete` | Provider/model/tool catalogs + `/model` completion. |
+| `useProviders`, `useToolMeta`, `useComposerCompleter` | Provider/model/tool catalogs + `/model` completion. |
 | `useGuidedTour`, `useBreadcrumbExtra`, `useTailscaleStatus` | Onboarding tour, in-page breadcrumb crumbs, Tailscale Funnel status. |
 
 ## Plugins (`frontend/plugins/`)
@@ -100,7 +100,7 @@ Section **ids are stable across renames** — `memory` still addresses the panel
 
 ## Utilities (`frontend/utils/`)
 
-~13 pure helpers: `format.ts` (date/number/byte), `usage-cost.ts` (token→cost), `tool-calls.ts` + `display-message-filter.ts` (message rendering), `thinking.ts` + `thinking-lock.ts` (reasoning UI), `schedule.ts` + `calendar.ts` + `task-steps.ts` (scheduling), `linkify.ts` + `markdown-links.ts` (link handling), `video-job.ts`, `latency-rows.ts`, and `ui-utils.ts` (`cn()`).
+~41 pure helpers: `format.ts` (date/number/byte), `usage-cost.ts` (token→cost), `tool-calls.ts` + `display-message-filter.ts` (message rendering), `thinking.ts` + `thinking-lock.ts` (reasoning UI), `schedule.ts` + `calendar.ts` + `task-steps.ts` (scheduling), `linkify.ts` + `markdown-links.ts` (link handling), `video-job.ts` and `latency-rows.ts`.
 
 ## Types (`frontend/types/`)
 
@@ -110,7 +110,7 @@ Section **ids are stable across renames** — `memory` still addresses the panel
 
 ## Test coverage
 
-~69 Vitest specs under `frontend/test/` exercise composables and page-level logic under the **`jsdom`** environment (`test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Playwright E2E under `frontend/tests/e2e/` drives the booted stack through the browser.
+~201 Vitest specs under `frontend/test/` exercise composables and page-level logic under the **`jsdom`** environment (`test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Playwright E2E under `frontend/tests/e2e/` drives the booted stack through the browser.
 
 ## Intentional choices
 

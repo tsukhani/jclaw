@@ -105,7 +105,7 @@ By default a child runs on JClaw's own native agent loop. You can instead delega
 
    The command is whitespace-split into an argv, so fixed flags are fine (`/usr/local/bin/pi --headless`). It is read from config **only** — never from the model — so a subagent can't steer JClaw into running arbitrary shell.
 
-   Alongside it, `subagent.acp.harness` names the adapter for that CLI — `pi`, `claude`, `codex`, or `generic` (the default) — and `subagent.acp.mode` picks `batch` (the default), `json`, or `rpc`. Both are checked up front when a spawn is attempted: an unknown value refuses the spawn with a message naming the allowed values rather than silently falling back. Settings → **Coding** can also auto-detect the harnesses installed on the server and fill in the command and adapter for you in one click.
+   Alongside it, `subagent.acp.harness` names the adapter for that CLI — `pi`, `claude`, `codex`, `gemini`, `opencode`, `antigravity`, or `generic` (the default) — and `subagent.acp.mode` picks `batch` (the default), `json`, or `rpc`. Both are checked up front when a spawn is attempted: a value outside those sets refuses the spawn with an error naming the allowed values rather than silently falling back. Settings → **Coding** can also auto-detect the harnesses installed on the server and fill in the command and adapter for you in one click.
 
    **Optionally, pick the model the harness runs with.** By default the harness uses its own default model and its own login. The `acp.model` picker in Settings → **Coding** (`subagent.acp.modelProvider` / `subagent.acp.modelId`) pins it to one of your configured providers' models instead, and a per-spawn `modelProvider` / `modelId` on `subagent_spawn` — "run this through Codex on `ollama` with `qwen3-coder`" — overrides that for one run. How the override reaches the harness depends on the CLI: **Claude Code** gets `--model` plus the `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` environment pointed at the provider (so the endpoint must speak the Anthropic Messages API — Ollama and OpenRouter do); **Codex** gets `-m` plus an inline `model_providers` config block naming the provider's endpoint; **Pi** and **Gemini CLI** take the model only, so a provider override is refused for them; **opencode** and custom commands take neither and refuse any override. Pass `modelId` alone to change only the model and keep the harness's own endpoint and login. The run's transcript records the override as its first step.
 
@@ -168,7 +168,7 @@ Operator surface for subagent runs. `list` covers the current conversation, `his
 |--------------------------|--------------------------------------------------------------------------------|
 | `/subagent list`         | Show running and recently-terminal runs spawned in the current conversation.   |
 | `/subagent info <id>`    | Detail block for one run: status, mode, context, started/ended, outcome.       |
-| `/subagent log <id>`     | Last ~50 events for a run (spawn, complete, error, kill).                      |
+| `/subagent log <id>`     | First ~50 events for a run, oldest first (spawn, complete, error, kill).       |
 | `/subagent kill <id>`    | Cooperatively cancel a running child.                                          |
 | `/subagent history <id>` | Inline render of the child's transcript (capped to ~20 messages, 500 chars).   |
 
@@ -234,7 +234,7 @@ Killed runs don't get an announce card. The `/subagent kill` response *is* your 
 :::
 
 :::tip Scoping
-Every subagent run belongs to you. JClaw Pro has a single **admin** operator, so the [Subagents](/subagents) page and the `/subagent` command show and control every run on the instance.
+Every subagent run belongs to you. JClaw Pro has a single **admin** operator, so the [Subagents](/subagents) page shows and controls every run on the instance, as do `/subagent info`, `log` and `kill`; `/subagent list` stays scoped to the current conversation and `history` to runs the current agent spawned.
 :::
 
 ## Where coding output lands
@@ -263,10 +263,10 @@ Slack, the prompt-injection surface — while your own web-driven runs stay
 unconfined):
 
 * **macOS** wraps the harness in `sandbox-exec` — writes are confined to the
-  session directory, and reads of `~/.ssh`, `~/.aws`, `~/.gnupg`,
-  `~/.config/gcloud`, `~/.kube` and `~/.netrc` are denied; everything else
-  stays readable, so the harness's own config (e.g. `~/.claude`) needs no
-  special grant.
+  session directory, the system temp directories, `/dev`, and the harness's
+  declared state paths (its own config, e.g. `~/.claude`), and reads of
+  `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube` and
+  `~/.netrc` are denied; everything else stays readable.
 * **Linux** wraps it in `bwrap` — the visible filesystem is built from nothing,
   so secrets are absent rather than merely denied; only the session directory
   is writable and only the harness's declared state paths (its own config,

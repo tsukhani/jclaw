@@ -1,6 +1,6 @@
 # Data Models — Backend
 
-JPA classes under `app/models/` — **31 concrete `@Entity` types plus 3 `@MappedSuperclass` bases** — all extending `play.db.jpa.Model` (Play 1.x gives an auto-generated `Long id` plus static finders: `find`, `findById`, `count`, `delete`, `save`). Schema is applied by `jpa.ddl=update` in both dev and prod — a deliberate pre-1.0 tradeoff (additive only; renames/type changes need manual intervention).
+JPA classes under `app/models/` — **36 concrete `@Entity` types plus 3 `@MappedSuperclass` bases** — all extending `play.db.jpa.Model` (Play 1.x gives an auto-generated `Long id` plus static finders: `find`, `findById`, `count`, `delete`, `save`). Schema is applied by `jpa.ddl=update` in both dev and prod — a deliberate pre-1.0 tradeoff (additive only; renames/type changes need manual intervention).
 
 **Dev DB:** H2 file at `./data/jclaw` (`MODE=MYSQL;AUTO_SERVER=TRUE`). **Prod DB:** PostgreSQL (commented template). **L2 cache:** read-mostly entities carry Hibernate `@Cache(READ_WRITE)` backed by Caffeine-JCache (JCLAW-205); a query cache is enabled globally (only `ApiToken` opts in today). **Enums** are string-backed (`@Enumerated(STRING)` or manual conversion) to survive Play 1.x hot-reload classloader identity.
 
@@ -45,7 +45,7 @@ Per-turn transcript of a run (`turn_index`, `role`, `content`, tool calls/result
 | `AgentBinding` | `agent_binding` | Generic `(channel_type, peer_id?) → agent` routing + `priority`. |
 | `ChannelConfig` | `channel_config` | Per-channel `config_json` + `enabled` (named-cache eviction). |
 | `SlackBinding` | `slack_binding` | `bot_token` (unique), `signing_secret`, `app_token` (Socket Mode), 1:1 `agent_id`, `transport` (HTTP/SOCKET), team/bot IDs. |
-| `TelegramBinding` | `telegram_binding` | `bot_token` (unique), 1:1 `agent_id`, `telegram_user_id`, `transport` (POLLING/HTTP), `webhook_secret`, reply/notifier policy. |
+| `TelegramBinding` | `telegram_binding` | `bot_token` (unique), 1:1 `agent_id`, `telegram_user_id`, `transport` (POLLING/WEBHOOK), `webhook_secret`, reply/notifier policy. |
 | `TelegramTopicBinding` | `telegram_topic_binding` | Per-forum-topic agent override (`binding_id`, `chat_id`, `thread_id`, `agent_id`). |
 | `WhatsAppBinding` | `whatsapp_binding` | `transport` (CLOUD_API/WHATSAPP_WEB), Cloud-API creds (`phone_number_id`, `access_token`, …) or `owner_jid` for Web, 1:1 `agent_id`. |
 | `WhatsAppConversationWindow` | `whatsapp_conversation_window` | Tracks the 24h Cloud-API free-form messaging window per peer. |
@@ -100,7 +100,7 @@ Three `@MappedSuperclass` bases carry state that concrete entities were otherwis
 
 ## Enums
 
-String-backed (stored as VARCHAR): `MessageRole` (user/assistant/tool/system), `ChannelType` (web/slack/telegram/whatsapp), `ChannelTransport` (POLLING/HTTP/SOCKET), `WhatsAppTransport` (CLOUD_API/WHATSAPP_WEB), plus the nested entity enums on `Task`, `TaskRun`, `McpServer`, `SubagentRun`, `CompressionMetric`, and `VideoGenerationJob`. `ChannelType.resolve()` returns a `Channel` for outbound-push channels (web persists to `message` instead).
+String-backed (stored as VARCHAR): `MessageRole` (user/assistant/tool/system), `ChannelType` (web/slack/telegram/whatsapp/voice), `ChannelTransport` (POLLING/WEBHOOK/SOCKET/HTTP), `WhatsAppTransport` (CLOUD_API/WHATSAPP_WEB), plus the nested entity enums on `Task`, `TaskRun`, `McpServer`, `SubagentRun`, `CompressionMetric`, and `VideoGenerationJob`. `ChannelRegistry.forConversation` resolves a conversation's `Channel` (a real `WebChannel` for web, which persists to `message`).
 
 ## Search-index integration (Lucene 10)
 
