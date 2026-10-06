@@ -490,7 +490,21 @@ The container runs in production mode — the Nuxt SPA is already built into the
 
 #### Verifying the image
 
-`docker compose up -d` pulls the `latest` tag, and a tag is only a pointer: whoever can push to the registry can move it. A digest cannot be moved, because a pull by digest returns only the content that hashes to it. So every release after v0.19.28 also publishes `IMAGE_DIGEST`, the digest of the image that release built, signed with the key that signs the installer downloads. Check the signature, then pin the digest:
+`docker compose up -d` pulls the `latest` tag, and a tag is only a pointer: whoever can push to the registry can move it. A digest cannot be moved, because a pull by digest returns only the content that hashes to it. So every release after v0.19.28 also publishes `IMAGE_DIGEST`, the digest of the image that release built, signed with the key that signs the installer downloads.
+
+One command checks that signature, pulls exactly that image, and pins it. Run it in the directory holding `docker-compose.yml`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/docker-pull-verified.sh | sh
+docker compose up -d
+
+# A specific release rather than the latest:
+curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/docker-pull-verified.sh | JCLAW_VERSION=vX.Y.Z sh
+```
+
+It writes `JCLAW_IMAGE=ghcr.io/tsukhani/jclaw@sha256:…` to `.env`, which `docker-compose.yml` reads, and it refuses to pull anything if the signature is missing or wrong, if the file names another release, or if `openssl` is not installed. To upgrade a pinned install, run it again.
+
+The same check by hand:
 
 ```bash
 V=vX.Y.Z   # the release you want
@@ -507,7 +521,7 @@ awk '{print "JCLAW_IMAGE=" $2}' IMAGE_DIGEST
 docker compose up -d
 ```
 
-To upgrade a pinned install, repeat with the new release and replace the `JCLAW_IMAGE` line. This is opt-in: without `JCLAW_IMAGE`, Compose still pulls `latest` unchecked.
+Either way this is opt-in: without `JCLAW_IMAGE`, Compose still pulls `latest` unchecked.
 
 ### Telemetry (OpenTelemetry)
 

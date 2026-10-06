@@ -52,9 +52,12 @@ class ReleaseSigningConformanceTest extends UnitTest {
     }
 
     @Test
-    void theKeyFileDockerUsersVerifyWithIsThePinnedKey() throws IOException {
-        assertEquals(pinned("jclaw.sh", UPGRADER_KEY), read("release-signing.pub").strip(),
+    void theKeyDockerUsersVerifyWithIsThePinnedKey() throws IOException {
+        var pinned = pinned("jclaw.sh", UPGRADER_KEY);
+        assertEquals(pinned, read("release-signing.pub").strip(),
                 "release-signing.pub is not the key jclaw.sh pins, so a signed IMAGE_DIGEST would not verify under it");
+        assertEquals(pinned, pinned("docker-pull-verified.sh", INSTALLER_KEY),
+                "docker-pull-verified.sh pins a different key, so it would refuse every release's IMAGE_DIGEST");
     }
 
     @Test
