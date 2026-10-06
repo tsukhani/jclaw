@@ -10,8 +10,8 @@
 #
 #   JCLAW_VERSION   release tag, e.g. v0.20.0 (default: latest)
 #
-# Unlike install.sh, this refuses without openssl: checking the signature is the
-# whole job, and `docker compose pull` already exists for an unverified pull.
+# A machine with no openssl is warned and pulls the published digest unverified, as
+# install.sh does; a signature that is missing or wrong is fatal.
 #
 # POSIX sh — no bashisms; runnable under dash/ash via `| sh`.
 set -eu
@@ -29,6 +29,7 @@ IZGsQ3joF/NEpzn/jTMzI+UT4r/btJ+LTsXpI+pHG+7Rl2VV2mI4dadqSg==
 
 step()    { printf '==> %s\n' "$1"; }
 substep() { printf '    %s\n' "$1"; }
+warn()    { printf 'warning: %s\n' "$1" >&2; }
 die()     { printf 'error: %s\n' "$1" >&2; exit 1; }
 
 http_get() {
@@ -38,8 +39,11 @@ http_get() {
 }
 
 command -v docker >/dev/null 2>&1 || die "docker is not on PATH."
-command -v openssl >/dev/null 2>&1 \
-    || die "openssl is needed to check the release signature. For an unverified pull, use: docker compose pull"
+CHECKED="signature verified"
+if ! command -v openssl >/dev/null 2>&1; then
+    warn "openssl is not installed, so the release signature cannot be checked — pulling the image unverified."
+    CHECKED="signature NOT checked"
+fi
 
 if [ "$JCLAW_VERSION" = "latest" ]; then
     TAG=""
@@ -54,14 +58,17 @@ TMP=$(mktemp -d "${TMPDIR:-/tmp}/jclaw-image.XXXXXX")
 trap 'rm -rf "$TMP"' EXIT
 
 step "Fetching the signed image digest (${TAG:-latest})"
-{ http_get "$BASE/IMAGE_DIGEST" >"$TMP/IMAGE_DIGEST" \
-    && http_get "$BASE/IMAGE_DIGEST.sig" >"$TMP/IMAGE_DIGEST.sig"; } 2>/dev/null \
-    || die "could not fetch a signed image digest for ${TAG:-the latest release} (releases up to v0.19.28 publish none) — nothing was pulled."
-printf '%s\n' "$RELEASE_PUBKEY" >"$TMP/release.pub"
-# Exit status, not output: LibreSSL and OpenSSL word a failed verify differently.
-openssl dgst -sha256 -verify "$TMP/release.pub" \
-    -signature "$TMP/IMAGE_DIGEST.sig" "$TMP/IMAGE_DIGEST" >/dev/null 2>&1 \
-    || die "the signature on IMAGE_DIGEST is not valid — nothing was pulled."
+http_get "$BASE/IMAGE_DIGEST" >"$TMP/IMAGE_DIGEST" 2>/dev/null \
+    || die "could not fetch an image digest for ${TAG:-the latest release} (releases up to v0.19.28 publish none) — nothing was pulled."
+if [ "$CHECKED" = "signature verified" ]; then
+    http_get "$BASE/IMAGE_DIGEST.sig" >"$TMP/IMAGE_DIGEST.sig" 2>/dev/null \
+        || die "the release's IMAGE_DIGEST carries no signature — nothing was pulled."
+    printf '%s\n' "$RELEASE_PUBKEY" >"$TMP/release.pub"
+    # Exit status, not output: LibreSSL and OpenSSL word a failed verify differently.
+    openssl dgst -sha256 -verify "$TMP/release.pub" \
+        -signature "$TMP/IMAGE_DIGEST.sig" "$TMP/IMAGE_DIGEST" >/dev/null 2>&1 \
+        || die "the signature on IMAGE_DIGEST is not valid — nothing was pulled."
+fi
 
 read -r VERSION REF <"$TMP/IMAGE_DIGEST" || true
 HEX="${REF#"$IMAGE@sha256:"}"
@@ -74,7 +81,7 @@ fi
 if [ -n "$TAG" ] && [ "$VERSION" != "$TAG" ]; then
     die "the digest published as $TAG is for $VERSION — nothing was pulled."
 fi
-substep "signature verified: $VERSION"
+substep "$CHECKED: $VERSION"
 
 step "Pulling $REF"
 docker pull "$REF" || die "docker pull failed — see the output above."
@@ -87,10 +94,10 @@ if [ -f docker-compose.yml ]; then
         if [ -s .env ] && [ -n "$(tail -c 1 .env)" ]; then echo >>.env; fi
         printf 'JCLAW_IMAGE=%s\n' "$REF" >>.env
     fi
-    step "Pinned $VERSION in .env"
+    step "Pinned $VERSION in .env ($CHECKED)"
     substep "start it with: docker compose up -d"
 else
-    step "Pulled $VERSION"
+    step "Pulled $VERSION ($CHECKED)"
     substep "no docker-compose.yml here, so nothing was pinned. To pin it, put this in .env beside it:"
     substep "JCLAW_IMAGE=$REF"
 fi

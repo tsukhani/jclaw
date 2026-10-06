@@ -502,7 +502,7 @@ docker compose up -d
 curl -fsSL https://raw.githubusercontent.com/tsukhani/jclaw/main/docker-pull-verified.sh | JCLAW_VERSION=vX.Y.Z sh
 ```
 
-It writes `JCLAW_IMAGE=ghcr.io/tsukhani/jclaw@sha256:…` to `.env`, which `docker-compose.yml` reads, and it refuses to pull anything if the signature is missing or wrong, if the file names another release, or if `openssl` is not installed. To upgrade a pinned install, run it again.
+It writes `JCLAW_IMAGE=ghcr.io/tsukhani/jclaw@sha256:…` to `.env`, which `docker-compose.yml` reads, and it refuses to pull anything if the signature is missing or wrong, or if the file names another release. On a machine with no `openssl` it cannot check the signature: it says so, then pulls and pins the published digest unverified. To upgrade a pinned install, run it again.
 
 The same check by hand:
 
