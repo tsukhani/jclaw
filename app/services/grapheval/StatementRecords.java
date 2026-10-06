@@ -30,8 +30,13 @@ public final class StatementRecords {
 
     private StatementRecords() {}
 
-    /** The memory a batch of facts comes from: its id, system time, anchor day and author. */
-    public record Source(long memoryId, Instant recordedAt, LocalDate anchor, MemoryAuthorType authorType) {}
+    /** The memory a batch of facts comes from: its id, system time, anchor day and author, and the run that read it. */
+    public record Source(long memoryId, Instant recordedAt, LocalDate anchor, MemoryAuthorType authorType,
+                         @Nullable String runId) {
+        public Source(long memoryId, Instant recordedAt, LocalDate anchor, MemoryAuthorType authorType) {
+            this(memoryId, recordedAt, anchor, authorType, null);
+        }
+    }
 
     /** A term; the first fact for a {@code termId} fixes its name and type. */
     public record TermFact(String termId, String name, String type, double confidence,
@@ -123,8 +128,8 @@ public final class StatementRecords {
     private static Evidence evidence(String id, String memory, String subjectId, Source source, double confidence,
                                      @Nullable Status status, @Nullable EdtfInterval valid,
                                      @Nullable EdtfInterval occurs, @Nullable Valence valence) {
-        return new Evidence(Meta.fresh(id, 0L, Tier.FIRM), memory, subjectId, source.authorType(), confidence, null,
-                source.recordedAt(), null, null, null, null, source.anchor(), status, valid, occurs, valence);
+        return new Evidence(Meta.fresh(id, 0L, Tier.FIRM), memory, subjectId, source.authorType(), confidence,
+                source.runId(), source.recordedAt(), null, null, null, null, source.anchor(), status, valid, occurs, valence);
     }
 
     private static List<String> append(List<String> ids, String id) {

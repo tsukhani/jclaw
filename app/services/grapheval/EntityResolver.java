@@ -63,9 +63,14 @@ public final class EntityResolver {
 
     public enum Step { OWNER, IDENTIFIER, CANONICAL, FUZZY, SHORTLIST, SHORT_NAME, NEW }
 
-    /** One typed mention and the memory it came from. */
+    /** One typed mention, the memory it came from and the run that read it. */
     public record Mention(String surface, String type, boolean operator, long memoryId, MemoryAuthorType authorType,
-                          Instant recordedAt, LocalDate anchor, String memoryText) {}
+                          Instant recordedAt, LocalDate anchor, String memoryText, @Nullable String runId) {
+        public Mention(String surface, String type, boolean operator, long memoryId, MemoryAuthorType authorType,
+                       Instant recordedAt, LocalDate anchor, String memoryText) {
+            this(surface, type, operator, memoryId, authorType, recordedAt, anchor, memoryText, null);
+        }
+    }
 
     /** The model a shortlist is asked of, and the code signals that rank it. */
     public record Shortlist(String model, Decider decider, SignalLookup signals) {}
@@ -568,8 +573,8 @@ public final class EntityResolver {
         }
 
         private Evidence evidence(String id, String source, String subjectId, Mention m) {
-            return new Evidence(meta(id), source, subjectId, m.authorType(), null, null, m.recordedAt(), null, null,
-                    null, null, m.anchor(), null, null, null, null);
+            return new Evidence(meta(id), source, subjectId, m.authorType(), null, m.runId(), m.recordedAt(), null,
+                    null, null, null, m.anchor(), null, null, null, null);
         }
     }
 }

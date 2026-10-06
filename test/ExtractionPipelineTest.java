@@ -1247,4 +1247,39 @@ class ExtractionPipelineTest extends UnitTest {
         var gloss = yaml.replace("reads: \"X works at Y\"", "reads: \"X is employed by Y\"");
         assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(OntologySchema.parse(gloss)));
     }
+
+    @Test
+    void aChoiceDecisionKeepsItsWholeSortedDistributionAndNoOtherDecisionHasOne() {
+        var text = "The user works at Harborlight Analytics.";
+        var run = run(text, CandidateGenerator.generate(text), scripted(Map.of(
+                "Harborlight Analytics", "Organization"), Map.of("The user works_at Harborlight Analytics", 0.97)));
+
+        var harborlight = stage(run, ExtractionPipeline.TERM).stream()
+                .filter(d -> d.subject().equals("Harborlight Analytics")).findFirst().orElseThrow();
+        var options = new java.util.TreeSet<>(SCHEMA.termTypes().keySet());
+        options.add(ExtractionPipeline.NOT_AN_ENTITY);
+        assertEquals(List.copyOf(options), List.copyOf(harborlight.probabilities().keySet()),
+                "every option, lexically sorted");
+        assertEquals(0.9, harborlight.probabilities().get("Organization"), 1e-9);
+        assertEquals(0.1 / (options.size() - 1), harborlight.probabilities().get("Person"), 1e-9);
+        assertThrows(UnsupportedOperationException.class, () -> harborlight.probabilities().put("Person", 1.0));
+
+        var operator = run.decisions().getFirst();
+        assertTrue(operator.operator());
+        assertEquals(Map.of(), operator.probabilities());
+        var works = stage(run, ExtractionPipeline.RELATION).getFirst();
+        assertEquals("works_at", works.choice());
+        assertEquals(Map.of(), works.probabilities(), "a yes/no answer has no distribution");
+        var status = stage(run, ExtractionPipeline.STATUS);
+        assertFalse(status.isEmpty(), "works_at is qualified");
+        status.forEach(d -> assertFalse(d.probabilities().isEmpty(), "withFloor carries it: " + d));
+
+        var failed = run(text, CandidateGenerator.generate(text), request -> new JsonObject());
+        var unanswered = stage(failed, ExtractionPipeline.TERM).stream().filter(Decision::failed).toList();
+        assertFalse(unanswered.isEmpty());
+        unanswered.forEach(d -> assertEquals(Map.of(), d.probabilities(), d.toString()));
+
+        var hand = new Decision(ExtractionPipeline.TERM, "x", null, null, "Person", 0.9, false, null);
+        assertEquals(Map.of(), hand.probabilities(), "the eight-argument constructor defaults to empty");
+    }
 }

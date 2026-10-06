@@ -1,4 +1,5 @@
 import com.tngtech.archunit.lang.ArchRule;
+import memory.graph.RunLedger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import play.test.UnitTest;
@@ -221,6 +222,27 @@ class H2MaintenanceTest extends UnitTest {
         assertEquals(List.of(H2Maintenance.DATA_FILE, "memory-graph/12/evidence.jsonl",
                 "memory-graph/12/term.jsonl", "memory-graph/3/term.jsonl"), zipNames(zip));
         assertTrue(H2Maintenance.validateBackup(zip).ok());
+    }
+
+    @Test
+    void aBackupCarriesAnAgentsRunLedgerAndRestoreBringsItBackByteIdentical() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 5);
+        var ledger = RunLedger.document(List.of(new RunLedger.Entry("run@7e3f0a1b2c4d", 12,
+                "memory:506", "sha256:00", RunLedger.Outcome.WRITTEN, "tev1", "sha256:11",
+                "cert@4d2c9a7b1e30", "v3@000000000000", "x@000000000000", true, List.of())));
+        graphFile(dir, "12/term.jsonl", "");
+        graphFile(dir, "12/" + RunLedger.FILE_NAME, ledger);
+
+        var zip = tmp.resolve("b.zip");
+        H2Maintenance.backupOffline(dir, zip);
+        assertTrue(zipNames(zip).contains("memory-graph/12/ledger.jsonl"), zipNames(zip).toString());
+
+        var file = dir.resolve(H2Maintenance.GRAPH_DIR).resolve("12/ledger.jsonl");
+        Files.writeString(file, "after the backup\n");
+        H2Maintenance.restore(zip, dir);
+
+        assertArrayEquals(ledger.getBytes(StandardCharsets.UTF_8), Files.readAllBytes(file));
     }
 
     @Test
