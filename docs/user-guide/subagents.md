@@ -284,7 +284,8 @@ unconfined):
 The sandbox **fails closed**: if enabled where no mechanism is available (native
 Windows, WSL1, or a WSL2 kernel with unprivileged user namespaces disabled),
 the run is aborted with an actionable error rather than launched unsandboxed;
-the **acp.sandbox** control says when this host has no mechanism.
+the **acp.sandbox** control says when this host lacks `sandbox-exec` or `bwrap`
+(it cannot detect a `bwrap` whose namespaces are disabled).
 Network egress stays open — the harness needs its API. Off by default; see the
 JCLAW-671 spike for the measured confinement results and limitations.
 

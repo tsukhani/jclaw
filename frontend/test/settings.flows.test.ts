@@ -1271,6 +1271,11 @@ describe('Settings page — Shell Execution', () => {
     expect(component.find<HTMLSelectElement>('select[aria-label="Shell sandbox"]').element.value).toBe('untrusted')
 
     clearNuxtData()
+    withShellSandbox('TRUE')
+    component = await mountSettingsSection('shell')
+    expect(component.find<HTMLSelectElement>('select[aria-label="Shell sandbox"]').element.value).toBe('true')
+
+    clearNuxtData()
     withShellSandbox('yes')
     component = await mountSettingsSection('shell')
     expect(component.find<HTMLSelectElement>('select[aria-label="Shell sandbox"]').element.value).toBe('false')

@@ -464,7 +464,7 @@ async function saveAcpModel(value: string) {
               label="About acp.sandbox"
               content-class="w-72 font-mono"
             >
-              Confines the coding harness to its session directory with the host's OS sandbox (sandbox-exec on macOS, bwrap on Linux). Untrusted channels only leaves runs from the operator's own web chat unconfined.
+              Confines the coding harness's writes to its session directory with the host's OS sandbox (sandbox-exec on macOS, bwrap on Linux). Untrusted channels only leaves runs from the operator's own web chat unconfined.
             </InfoTip>
           </span>
           <div class="flex-1 min-w-0 space-y-1">
@@ -500,7 +500,7 @@ async function saveAcpModel(value: string) {
               label="About acp.mode"
               content-class="w-72 font-mono"
             >
-              How JClaw talks to the harness: batch sends the task and reads the whole output, json parses a streamed line protocol, rpc holds a two-way session.
+              How JClaw talks to the harness: batch sends the task and reads the whole output, json parses a streamed line protocol, rpc holds a two-way session where the harness supports one, and runs as json otherwise.
             </InfoTip>
           </span>
           <select

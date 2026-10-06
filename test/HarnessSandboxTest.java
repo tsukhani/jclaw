@@ -10,8 +10,10 @@ import tools.GenericAdapter;
 import tools.HarnessSandbox;
 import tools.PiAdapter;
 
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 
@@ -103,6 +105,11 @@ class HarnessSandboxTest extends UnitTest {
         if (os.contains("linux")) assertEquals("bwrap", a.mechanism());
         if (os.contains("mac")) assertEquals("sandbox-exec", a.mechanism());
         if (!a.available()) assertFalse(a.reason().isBlank(), "an unavailable mechanism must say why");
+        if (!a.mechanism().isEmpty()) {
+            var onPath = Arrays.stream(System.getenv().getOrDefault("PATH", "").split(File.pathSeparator))
+                    .anyMatch(dir -> !dir.isEmpty() && Files.isExecutable(Path.of(dir, a.mechanism())));
+            assertEquals(onPath, a.available(), () -> a.mechanism() + " on PATH=" + onPath + ", reported " + a);
+        }
     }
 
     /**

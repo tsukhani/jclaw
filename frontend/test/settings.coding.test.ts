@@ -323,11 +323,15 @@ describe('SettingsCodingPanel — sandbox and mode', () => {
     expect(c.find<HTMLSelectElement>(modeSelect).element.value).toBe('json')
   })
 
-  it('shows batch for a mode the runtime falls back from', async () => {
-    extraEntries = [{ key: 'subagent.acp.mode', value: 'foo' }]
+  it('shows Off and batch for values the runtime falls back from', async () => {
+    extraEntries = [
+      { key: 'subagent.acp.sandbox', value: 'yes' },
+      { key: 'subagent.acp.mode', value: 'foo' },
+    ]
     const c = await mountSuspended(Harness)
     await flushPromises()
 
+    expect(c.find<HTMLSelectElement>(sandboxSelect).element.value).toBe('false')
     expect(c.find<HTMLSelectElement>(modeSelect).element.value).toBe('batch')
   })
 
