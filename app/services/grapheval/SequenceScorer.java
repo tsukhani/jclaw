@@ -106,7 +106,13 @@ public final class SequenceScorer {
 
     /** One run's lineage walk; a run with any failed decision is disabled whatever its counts. */
     public static ClassWalk lineageWalk(List<Judged> judged, boolean anyFailed) {
-        var walk = Certifier.classWalk(LINEAGE, lineageSteps(judged));
+        return lineageWalk(judged, anyFailed, GraphEvalScorer.THRESHOLDS.getFirst());
+    }
+
+    /** {@link #lineageWalk(List, boolean)} over the thresholds at or below {@code start} only. */
+    public static ClassWalk lineageWalk(List<Judged> judged, boolean anyFailed, double start) {
+        var walk = Certifier.classWalk(LINEAGE, lineageSteps(judged).stream().filter(s -> s.t() <= start + 1e-9)
+                .toList());
         if (!anyFailed) return walk;
         return new ClassWalk(LINEAGE, null, Certifier.DISABLED, walk.n(), walk.k(), walk.bound(), walk.steps());
     }

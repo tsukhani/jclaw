@@ -42,6 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -80,10 +81,15 @@ public final class SequenceHarness {
     public record ModelReport(String model, List<RunReport> runs, @Nullable SequenceSpotCheck spotCheck,
                               ClassWalk lineage, String lineageState, String timeline) {}
 
-    /** The set's whole result: counts and fingerprints, never a timing, so the same answers serialize identically. */
+    /**
+     * The set's whole result: counts and fingerprints, never a timing, so the same answers serialize identically.
+     * {@code note} says the set also serves development, since nothing splits it.
+     */
     public record Report(String set, String schema, String extraction, String sequences, int chains, int probes,
                          int runs, String configurationSource, Configuration configuration,
-                         List<ModelReport> models) {}
+                         List<ModelReport> models, String note) {}
+
+    public static final String DEVELOPMENT_NOTE = "the sequences set also serves development: no split keeps it apart";
 
     /** Memory {@code memoryIndex} of chain {@code chainIndex}, both from 0, as the id its records are sourced to. */
     public static long syntheticId(int chainIndex, int memoryIndex) {
@@ -100,6 +106,28 @@ public final class SequenceHarness {
                              int concurrency, Configuration configuration, boolean defaultConfiguration,
                              EvalProgress progress) {
         var zone = TimezoneResolver.appZone();
+        var chains = set.chains();
+        var answers = answers(set, schema, models, runs, concurrency, progress, zone);
+        var reports = new ArrayList<ModelReport>();
+        for (var m : models) {
+            var asked = Objects.requireNonNull(answers.get(m.name()));
+            var spotCheck = runs == 1 ? spotCheck(schema, set, m, asked.getFirst(), concurrency, zone) : null;
+            reports.add(scoreAt(schema, chains, m.name(), asked, configuration, GraphEvalScorer.THRESHOLDS.getFirst(),
+                    spotCheck, zone));
+        }
+        int probes = chains.stream().mapToInt(c -> c.probes().size()).sum();
+        return new Report(SET, schema.fingerprint(), ExtractionPipeline.fingerprint(schema), set.fingerprint(),
+                chains.size(), probes, runs, defaultConfiguration ? DEFAULT_SOURCE : SUPPLIED_SOURCE, configuration,
+                reports, DEVELOPMENT_NOTE);
+    }
+
+    /**
+     * Every model's answers, asked once per run: by model, each run's chains, each chain's memories in order. The
+     * answers depend on no configuration, so a stored set of them scores at any.
+     */
+    public static Map<String, List<List<List<CaseRun>>>> answers(Sequences set, OntologySchema schema,
+                                                                 List<DecisionModel> models, int runs,
+                                                                 int concurrency, EvalProgress progress, ZoneId zone) {
         var chains = set.chains();
         progress.plan(models.stream().map(DecisionModel::name).toList(), runs, chains.size());
         var tasks = new ArrayList<Callable<List<CaseRun>>>();
@@ -120,36 +148,36 @@ public final class SequenceHarness {
             }
         }
         var results = GraphEvalHarness.fanOut(tasks, concurrency);
-        var reports = new ArrayList<ModelReport>();
-        var byModel = new LinkedHashMap<String, List<RunReport>>();
-        var firstRuns = new HashMap<String, List<List<CaseRun>>>();
+        var out = new LinkedHashMap<String, List<List<List<CaseRun>>>>();
         int i = 0;
         for (int r = 0; r < runs; r++) {
             for (var m : models) {
-                var slice = results.subList(i, i + chains.size());
+                out.computeIfAbsent(m.name(), _ -> new ArrayList<>()).add(List.copyOf(results.subList(i,
+                        i + chains.size())));
                 i += chains.size();
-                if (r == 0) firstRuns.put(m.name(), slice);
-                byModel.computeIfAbsent(m.name(), _ -> new ArrayList<>())
-                        .add(score(schema, chains, slice, r, configuration, zone));
             }
         }
-        for (var m : models) {
-            var runReports = Objects.requireNonNull(byModel.get(m.name()));
-            var walks = runReports.stream().map(RunReport::lineage).toList();
-            var lineage = runs == 1 ? walks.getFirst() : SequenceScorer.combineLineage(walks);
-            SequenceSpotCheck spotCheck = null;
-            var state = lineage.state();
-            if (runs == 1) {
-                spotCheck = spotCheck(schema, set, m, Objects.requireNonNull(firstRuns.get(m.name())), concurrency, zone);
-                if (spotCheck.differing() > 0) state = SequenceScorer.UNCONFIRMED;
-            }
-            reports.add(new ModelReport(m.name(), runReports, spotCheck, lineage, state,
-                    SequenceScorer.overall(runReports.stream().map(RunReport::timeline).toList())));
+        return out;
+    }
+
+    /**
+     * Stored answers scored at {@code configuration}: each run's lineage walk from the highest threshold at or below
+     * {@code start}, then its timelines with lineage at its own threshold and state; the runs combined, and a single
+     * run's {@code spotCheck} marking lineage {@code unconfirmed} when it saw a difference. Asks nothing.
+     */
+    public static ModelReport scoreAt(OntologySchema schema, List<Chain> chains, String model,
+                                      List<List<List<CaseRun>>> runs, Configuration configuration, double start,
+                                      @Nullable SequenceSpotCheck spotCheck, ZoneId zone) {
+        var runReports = new ArrayList<RunReport>();
+        for (int r = 0; r < runs.size(); r++) {
+            runReports.add(score(schema, chains, runs.get(r), r, configuration, start, zone));
         }
-        int probes = chains.stream().mapToInt(c -> c.probes().size()).sum();
-        return new Report(SET, schema.fingerprint(), ExtractionPipeline.fingerprint(schema), set.fingerprint(),
-                chains.size(), probes, runs, defaultConfiguration ? DEFAULT_SOURCE : SUPPLIED_SOURCE, configuration,
-                reports);
+        var walks = runReports.stream().map(RunReport::lineage).toList();
+        var lineage = runs.size() == 1 ? walks.getFirst() : SequenceScorer.combineLineage(walks);
+        var state = lineage.state();
+        if (spotCheck != null && spotCheck.differing() > 0) state = SequenceScorer.UNCONFIRMED;
+        return new ModelReport(model, runReports, spotCheck, lineage, state,
+                SequenceScorer.overall(runReports.stream().map(RunReport::timeline).toList()));
     }
 
     /**
@@ -261,7 +289,7 @@ public final class SequenceHarness {
     }
 
     private static RunReport score(OntologySchema schema, List<Chain> chains, List<List<CaseRun>> runs, int run,
-                                   Configuration configuration, ZoneId zone) {
+                                   Configuration configuration, double start, ZoneId zone) {
         var judged = new ArrayList<Judged>();
         boolean anyFailed = false;
         int failedDecisions = 0;
@@ -278,7 +306,7 @@ public final class SequenceHarness {
                 }
             }
         }
-        var walk = SequenceScorer.lineageWalk(judged, anyFailed);
+        var walk = SequenceScorer.lineageWalk(judged, anyFailed, start);
         var threshold = walk.threshold();
         var e2e = timeline(schema, chains, runs, Variant.END_TO_END, configuration, threshold, zone);
         return new RunReport(run, failedDecisions, walk, e2e,
@@ -303,8 +331,9 @@ public final class SequenceHarness {
         return SequenceScorer.timeline(answers);
     }
 
-    private static SequenceSpotCheck spotCheck(OntologySchema schema, Sequences set, DecisionModel m,
-                                               List<List<CaseRun>> first, int concurrency, ZoneId zone) {
+    /** Every {@link GraphEvalHarness#SPOT_CHECK_STRIDE}th chain asked again and compared with {@code first}. */
+    public static SequenceSpotCheck spotCheck(OntologySchema schema, Sequences set, DecisionModel m,
+                                              List<List<CaseRun>> first, int concurrency, ZoneId zone) {
         var sample = new ArrayList<Integer>();
         for (int c = 0; c < set.chains().size(); c += GraphEvalHarness.SPOT_CHECK_STRIDE) sample.add(c);
         var tasks = new ArrayList<Callable<List<CaseRun>>>();

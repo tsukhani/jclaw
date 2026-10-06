@@ -432,6 +432,9 @@ POST    /api/scrape/harness                     ApiScrapeTestController.harness
 POST    /api/graph/eval                         ApiGraphEvalController.run
 POST    /api/graph/eval/blind-sheet             ApiGraphEvalController.blindSheet
 POST    /api/graph/eval/heldout/sample          ApiGraphEvalController.heldOutSample
+# JCLAW-1368: freeze a certification split, and re-score a stored certification run. Same gate.
+POST    /api/graph/eval/split                   ApiGraphEvalController.freezeSplit
+POST    /api/graph/eval/rescore                 ApiGraphEvalController.rescore
 
 # Apps registry (SPEC-apps): operator-hosted mini-apps under public/apps/<slug>/
 GET     /api/apps                               ApiAppsController.list

@@ -226,76 +226,174 @@ The grid scores every threshold from 0.95 to 0.50 by 0.05.
 
 ## Certification
 
-Certification runs in two walks, both on the one-sided 95% Clopper-Pearson upper bound.
+Certification follows protocol v2 (JCLAW-1368). Every bound is the one-sided Clopper-Pearson
+bound at tail 0.05, and every bound goes through one seam, `GateBounds`. Its only
+implementation today, `RecordBounds`, pools records: n is the written records and k the wrong
+ones plus the agreed sample's weighted wrong, rounded up. JCLAW-1369 replaces it with a
+memory-clustered bound.
 
-**Class walks** come first: status, then time with status at its walked threshold, then
-negation. Their items are the qualifier values written on base-right parents in
-`Statements.at(run, 0.50, classes)`, with the class under test set to each t. At t, n is
-those values and k the wrong ones:
+### Gates
 
-- n of at least 250 with a bound of at most 5% is `certified`;
-- n of 29 to 249 with a bound of at most 10% and k of at most 6 is `provisional`
-  (29 values with none wrong just pass; 28 are not evaluable);
-- the walk starts at the highest evaluable t and goes down while the state holds; the class
-  threshold is the lowest t of that run. No evaluable t, or a failure at the first, leaves the
-  class `disabled`: it writes no value and no denial.
+| Gate | n | k | Passes when |
+|---|---|---|---|
+| Terms | decided Terms written at t, noise and rule-written left out | Terms wrong (`match`, `type`, `duplicate`) | bound ≤ 5%, then recall lower bound ≥ the floor at its final threshold |
+| One per relation type | that type's relations written at its threshold, both endpoints written at the Terms threshold | that type's wrong (`relation`, `polarity`, `unasserted`) | as Terms |
+| status, time, negation | values written on base-right parents, each class at the higher of its parent's threshold and its own | wrong values | n ≥ 250 and bound ≤ 5% (`certified`); 29 ≤ n < 250, k ≤ 6, bound ≤ 10% (`provisional`) |
+| `G_written` | every written item but noise over the enabled configuration | those wrong at base or in a written qualifier | bound ≤ 5% |
+| `G_trap` | every gold `ended`, `denied` and `unasserted` relation | violations over the enabled configuration | bound ≤ 5% |
 
-Across runs the highest class threshold wins and a class disabled in any run is disabled.
-Valence is scored but not walked; the walk takes a fourth class when lineage joins it.
+Records written by rule (the owner's Person Term on "The user" or a subject-less memory) count
+in no total; the report gives how many were left out. A memory that rightly writes nothing is
+in no precision denominator and is scored only by the per-stratum false-positive rate.
 
-**The base walk** then scores the grid with those class thresholds (`Statements` applies the
-higher of t and the class's own) and passes t when every gate holds:
+With zero wrong, 59 records pass; with 1, 2, 3 and 5 wrong, 93, 124, 153 and 208. The report
+gives each gate's and class's power: the probability it passes at its n when 1%, 2% or 3% of
+its records are truly wrong (59 records at 1%: 0.553; 124 records allowing 2 wrong: 0.872).
 
-- `G_written`: the bound on wrong / (written - noise) is at most 5%: with no wrong record that
-  takes 59 written, with one 93, two 124, three 153, five 208. A term is wrong if its base or
-  `occurs` is; a positive relation if its base or any written status, `valid` or valence is;
-  a written denial unless gold is `denied`.
-- `G_trap`: the bound on violations / trap gold is at most 5%. The trap set is every gold
-  `ended`, `denied` and `unasserted` relation; a violation is an `ended` written as `holds`, an
-  inadmissible `ended` written at all, a `denied` triple written positive, or an `unasserted`
-  triple written at all. A null status on gold `ended` is none. An empty trap set bounds at
-  1.0. The committed set's 17 traps bound at 0.162 even with no violation, so it certifies
-  nothing on its own.
-- recall at least the floor (default 0.50), unchanged from v2.
+### Sequencing
 
-The walk runs from 0.95 down and stops at the first threshold that fails; `t*` is the lowest
-reached. So a model whose recall at 0.95 is under the floor certifies at nothing, by design.
+Every walk starts at the split's starting threshold (0.95 until a development run fixes one)
+and never evaluates a threshold above it.
 
-Every model carries a `certificate`: `t*`, each class's threshold, state, n, k and bound, and
-the `schema` and `extraction` stamps. The run itself checks neither: a consumer of the
-certificate calls `Certifier.check`, which voids it when either stamp differs from the running
-one (`schema stamp v3@… differs from running v3@…`).
+1. **Terms** first. The walk goes down while the Term bound passes; the Term threshold is the
+   lowest of that run. Recall is checked once, there: recall rises as the threshold falls, so a
+   per-step check would stop a walk before it reached a usable threshold. A Term gate that fails
+   either way ends the walk: no relation gate is evaluated, and nothing is enabled.
+2. **Relations**, one gate per type, in the split's relation order. Each walks the same way but
+   never below the Term threshold, and is recall-checked at its own final threshold. A relation
+   that fails is off; the others are unchanged.
+3. **Classes** over the enabled configuration: status, then time with status at its walked
+   threshold, then negation. Each starts at the highest threshold at or below the start with n
+   of at least 29. A disabled class writes nothing.
+4. **Pooled gates**, `G_written` and `G_trap`, over the enabled configuration with the walked
+   classes. An off relation writes nothing into the classes or the pooled gates.
+5. **Back-off.** While a pooled gate fails and a relation is on, the relation latest in the
+   split order among those on is switched off, and the classes and pooled gates are evaluated
+   again. The report lists each step. Failing with no relation on is `not-certified`, naming the
+   gate and its counts.
 
-A run with any failed decision (a timeout, a request too large for the model's context)
-certifies nowhere: what it would have written is unknown. Every report stamps `extraction: x@…`
-beside `schema`: a hash of every question text, lexicon and temporal probe the pipeline
-renders, so a wording change voids a certificate as a schema change does. A request that times out while the
-model is still loading waits for the load and is sent again, three attempts in all; one that
-times out on a loaded model is not, since it counts against the breaker the router's
-classifier shares. Concurrency defaults to 1: a local Ollama answers one request at a time,
-so a second in flight only waits behind the first, toward the timeout.
+`Certifier` is pure: it re-scores through an evaluator the harness builds over stored
+decisions. With two runs each gate reads the run whose bound is highest, so both must pass.
 
-One run is the default. Local decision models answer the same question the same way, so a
-second full run repeats the first; instead every tenth case, from the first, is asked again,
-and every decision must come back identical. A difference refuses the model and says so;
-certify it with `--runs 2`, where every run must certify and the certified threshold is the
-higher of the runs (`run N did not certify`; for run 2, `second run did not certify`). Then, in
-order:
+### Splits and use-once
+
+A certification run names a frozen split:
+
+```bash
+./jclaw.sh grapheval freeze-split --name cert-2026-10 --set cases --share 0.3 --seed 1356 --starting-threshold 0.95
+./jclaw.sh grapheval run --split cert-2026-10 --agent main --decision-model tev1
+./jclaw.sh grapheval rescore --split cert-2026-10 --decision-model tev1
+```
+
+The manifest, `data/graph-eval/splits/<name>.json`:
+
+```json
+{"split": "cert-2026-10", "set": "cases", "seed": 1356,
+ "ids": ["c003", "c014", "c046"],
+ "hashes": {"c003": "9f1c2a7d4e05", "c014": "03be77a1c9d2", "c046": "e4a0915b7c38"},
+ "cases": "cases@1a2b3c4d5e6f", "sequences": "sequences@6c1d0e9f2b7a",
+ "guide": "guide@0f9e8d7c6b5a", "schema": "v3@...",
+ "startingThreshold": 0.95,
+ "relationOrder": ["uses", "works_at", "..."]}
+```
+
+- `set` is `cases` or `heldout`; a held-out split names memory ids, and its share defaults to 1.
+  Ids are given, or drawn by a seeded shuffle at the share.
+- Each hash is the 12-hex SHA-256 prefix over one case's canonical JSON, or a held-out memory's
+  text and labels; `cases@` is the same over the selected cases, `sequences@` over
+  `sequences.json`, `guide@` over the bytes of `GUIDE.md`, `schema` the seed's fingerprint.
+- The default relation order is each type's gold count in the set's cases outside the split,
+  most first, ties in schema order.
+- Freezing an existing name is refused. A run whose split hash or sequences fingerprint has
+  drifted is refused, naming the id or `sequences`. A run with no `split` over a set with frozen
+  splits leaves their ids out and reports how many.
+
+A split is used once per model version, the Ollama digest. `data/graph-eval/split-uses.jsonl`
+appends one `{split, model, digest, state}` line per run; the latest line is the state:
+
+| State | Next run |
+|---|---|
+| `used` | refused, quoting the line |
+| `needs-second-run` (a single run's spot-check differed, on either set) | only `--runs 2`, as the same use; it replaces the stored decisions and appends `used` |
+| `void` (any failed decision) | a fresh run is accepted |
+
+### One invocation
+
+`run --split` runs the split's set (gold-fed stages, end to end, and a single run's spot-check
+of every tenth case), then the sequence answers with theirs. It stores every decision under
+`data/graph-eval/runs/<split>/<model>.json`, appends the ledger line, and scores the stored
+run: the gates, classes and pooled gates with the back-off, then the sequences at the
+configuration reached (the lineage class walked from at or below the start, the timeline with
+lineage at its own threshold and state). A run with any failed decision is void: its report
+gives the failure counts and questions per memory, and no gate result.
+
+**Re-score** reads the stored run and the adjudications on file and scores again through the
+same path, so it gives the report a full run would. It asks no model and redraws nothing, and
+is refused when the stored schema or extraction fingerprint differs from the running code's or
+a split hash no longer matches. Verdicts can move the configuration lower and bring new records
+into scope; those are listed on the sheet as unjudged until adjudicated and re-scored.
+
+A development run (no `--split`) uses the same sequencing from 0.95 as information under each
+model's `v2`, beside the earlier walk, and never writes a ledger line or a certificate.
+
+### Verdict
+
+In order, the first that applies:
 
 1. any case memory changed by the run → `not-certified`;
-2. any record adjudicated `label-error` → `not-certified`, `labels need fixing`;
-3. second labels missing or short of the blind subset → `pending-agreement`;
-4. a wrong record at the certified threshold with no `wrong` verdict → `pending-adjudication`;
-5. otherwise `certified`, with the noise rate at that threshold.
+2. any failed decision → `not-certified`, `void run`;
+3. a single run whose spot-check differed → `not-certified`, `needs second run`;
+4. any `label-error` verdict on a record in scope → `not-certified`, `labels need fixing`;
+5. the Term gate off, or a pooled gate failing with no relation on → `not-certified`;
+6. the sequence timeline `failed` → `not-certified`;
+7. second labels short of the blind subset of the split's ids → `pending-agreement`;
+8. any unjudged record, or a marked model verdict without its check → `pending-adjudication`;
+9. otherwise `certified`.
 
-The report lists the wrong records of the enabled classes at the certified configuration (at
-0.50 when nothing certified), keyed as in the scoring table. A written set only grows as t falls, so adjudicating those covers every
-threshold above it.
+### Certificate
 
-The report's `schema` is the seed's fingerprint, `v<version>@<12 hex>`: a SHA-256 prefix over
-each term type's name and covers text and each relation's name and endpoints, the parts of
-the schema the questions are built from. A certificate holds only while the loaded seed has
-that fingerprint; any edit to those parts means certifying again.
+A certified model's certificate is written as canonical JSON (keys sorted, compact), one file
+per model, at `data/graph-eval/certificates/<model>.json` (path-unsafe characters replaced):
+
+```json
+{"id": "cert@4d2c9a7b1e30", "model": "tev1", "digest": "sha256:...", "status": "certified",
+ "schema": "v3@...", "extraction": "x@...", "split": "cert-2026-10", "cases": "cases@...",
+ "sequences": "sequences@...", "guide": "guide@...", "startingThreshold": 0.95,
+ "terms": {"state": "on", "threshold": 0.85, "n": 410, "k": 4, "bound": 0.022, "recallLower": 0.71},
+ "relations": {"works_at": {"state": "on", "threshold": 0.90, "n": 71, "k": 0, "bound": 0.041, "recallLower": 0.58},
+               "kind_of": {"state": "off", "threshold": null, "n": 6, "k": 0, "bound": 0.393, "recallLower": 0.12}},
+ "classes": {"status": {"state": "certified", "threshold": 0.85, "n": 262, "k": 5, "bound": 0.040},
+             "time": {"state": "provisional", "threshold": 0.90, "n": 84, "k": 2, "bound": 0.073},
+             "negation": {"state": "disabled"},
+             "lineage": {"state": "provisional", "threshold": 0.90, "n": 80, "k": 1, "bound": 0.058}},
+ "pooled": {"G_written": {"n": 1650, "k": 41, "bound": 0.032}, "G_trap": {"n": 228, "k": 4, "bound": 0.040}},
+ "timeline": {"probes": 240, "definite": 205, "wrong": 3, "bound": 0.041, "result": "reported"},
+ "recall": {"floor": 0.50}}
+```
+
+`id` is `cert@` plus the 12-hex prefix over the canonical JSON without `id`. Its configuration
+enables Terms and Mappings, each `on` relation at its threshold, and each class at its state and
+threshold; a disabled class writes null. `CertificateDocument.read` returns the certificate only
+when its schema and extraction stamps and its digest match the running ones, and refuses an
+unknown key; otherwise it names which differs. Only what passed is enabled.
+
+Every report stamps `extraction: x@…` beside `schema`: a hash of every question text, lexicon
+and temporal probe the pipeline renders, so a wording change voids a certificate as a schema
+change does. The `schema` is the seed's fingerprint, `v<version>@<12 hex>`: a SHA-256 prefix
+over each term type's name and covers text and each relation's name and endpoints, the parts of
+the schema the questions are built from. A request that times out while the model is still
+loading waits for the load and is sent again, three attempts in all; one that times out on a
+loaded model is not, since it counts against the breaker the router's classifier shares.
+Concurrency defaults to 1: a local Ollama answers one request at a time, so a second in flight
+only waits behind the first, toward the timeout.
+
+### The earlier walk
+
+A development run's report still carries the v1 walk beside `v2`, as information: class walks
+at base 0.50, then the base walk from 0.95 down passing t while `G_written`, `G_trap` (pooled
+over every relation) and the recall point estimate hold, stopping at the first failure; its
+`certification` applies the v1 preconditions and lists the wrong records at the threshold
+reached (at 0.50 when nothing passed). Only a split run certifies.
 
 ## Report
 
@@ -309,6 +407,14 @@ rest 66.8%, each case in the first it carries; an empty stratum drops out and th
 rescaled), the time error and the valence error. Every report also carries cue recall, a
 property of the labels rather than the run: the share of gold denials whose memory has a
 negation cue.
+
+Protocol v2 adds, to every report (a development run under each model's `v2`): n, k, the bound,
+the state and the power at 1%, 2% and 3% beside every gate and class verdict; the back-off
+steps; the failed-decision share overall and by questions per memory (1–10, 11–20, 21–40, >40)
+beside the mean; the false-positive rate per stratum tag; the unjudged records per gate; the
+agreed sample's seed and share; the check share and the disagreement rate; and the rule-written
+records left out. A certification report adds the sequences report at the configuration reached
+and a note that the sequences set also serves development, since no split keeps it apart.
 
 ## Second labels and adjudications
 
@@ -332,16 +438,41 @@ blind subset. c061 labels `lantern part_of brightwell` ended: has the old floor'
 ended? c127 keeps `gala involves operator` holds: does the owner's involvement in an
 unconfirmed gala hold?
 
-`evals/graph/adjudications.json` records verdicts on the report's wrong records:
+Adjudication is two-sided. `evals/graph/adjudications.json` (the committed set) and
+`data/graph-eval/adjudications.json` (the held-out set) record verdicts on the unmatched
+written records and on a sample of the agreed ones (written and labelled):
 
 ```json
-[{"caseId": "c042", "record": "term:Kestrel:System", "verdict": "wrong", "note": "partial span"},
- {"caseId": "c018", "record": "rel:Avery Lin:uses:Fenwick", "verdict": "label-error", "note": "missing alias"}]
+[{"caseId": "c042", "record": "rel:Avery Lin:uses:Kestrel CI", "side": "unmatched", "verdict": "wrong",
+  "guide": "guide@0f9e8d7c6b5a", "adjudicator": "operator", "note": "the memory does not relate the pair"},
+ {"caseId": "c018", "record": "term:Fenwick:System", "side": "agreed", "inclusion": 0.2, "verdict": "right",
+  "guide": "guide@0f9e8d7c6b5a", "adjudicator": "model:<name>", "check": "agree"}]
 ```
 
-`record` is the report's stable key, `term:<span>:<type>` or `rel:<from>:<type>:<to>`.
-`wrong` confirms the model erred; `label-error` says the label did, and blocks
-certification until `cases.json` is fixed.
+- `record` is the stable key, `term:<span>:<type>` or `rel:<from>:<type>:<to>`; a held-out
+  `caseId` is the memory id.
+- `unmatched` takes `wrong` (the model erred) or `label-error` (the label did, which blocks
+  certification until the labels are fixed); `agreed` takes `right` or `wrong`.
+- `adjudicator` is `operator` or `model:<name>`; `check` is the operator's `agree` or
+  `disagree` on a model's verdict. Any other key or value is refused with a 400.
+- Only verdicts under the current `guide@` count.
+- **The agreed sample.** A record is drawn when the first 8 bytes of SHA-256 of
+  `seed:id:key`, read as a fraction of 2^64, fall below the share (default 0.2, seed the
+  split's); the draw is over the agreed records written at 0.50, so the sample at any
+  configuration is part of it. Each sampled record judged wrong adds 1 / share to its gate's
+  wrong count: one wrong of 100 agreed records at 0.2 adds 5.
+- **Unjudged** is an unmatched written record, or a sampled agreed one, at the configuration
+  reached with no verdict; an unsampled agreed record never is. The report counts them per
+  gate.
+- **Model verdicts.** The same hash rule at the re-score's check share (default 0.2) marks a
+  model's verdicts for an operator check. The report gives the disagreement rate; a marked
+  verdict without `check` keeps the status pending.
+
+Each certification run or re-score writes the blind sheet
+`data/graph-eval/sheets/<split>-<model>.json`: every unmatched written record and every sampled
+agreed record at the configuration reached, each with its memory's text and inclusion
+probability (1 for an unmatched record), the seed and the share. Nothing on it says whether a
+model or a label produced a record, or which model.
 
 ## Held-out set
 
@@ -369,7 +500,7 @@ files live under `data/graph-eval/`, which is gitignored, and never leave that m
    the owner's voice. A file holding memories of two agents is refused.
 
 The held-out report carries aggregate counts only: no memory id, text, span or per-case
-result. Its walk is information; only the committed set certifies. Its progress lines and a
+result. Without a split its walk is information; a held-out split certifies like the committed set. Its progress lines and a
 failure's message are held to the same rule.
 
 ## Sequences

@@ -236,4 +236,55 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
             else Files.writeString(verdicts, saved);
         }
     }
+
+    // --- JCLAW-1368: certification splits and re-scores -----------------------------------
+
+    private void assertPostRefused(String path, String body, String expected) {
+        var response = POST(authed(), path, "application/json", body);
+        assertEquals(400, response.status.intValue(), getContent(response));
+        assertTrue(getContent(response).contains(expected), getContent(response));
+    }
+
+    @Test
+    void theNewRoutesNeedTheSharedSecret() {
+        for (var path : List.of("/api/graph/eval/split", "/api/graph/eval/rescore")) {
+            var response = POST(loadtestRequest(null), path, "application/json", "{}");
+            assertEquals(403, response.status.intValue(), path);
+        }
+    }
+
+    @Test
+    void aSplitRunRefusesAThresholdASetAndAnUnknownSplit() {
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"split\":\"no-such-split\",\"threshold\":0.8}",
+                "threshold is gone");
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"split\":\"no-such-split\",\"set\":\"cases\"}",
+                "set follows from the split");
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"split\":\"no-such-split\"}", "no split named 'no-such-split'");
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"split\":\"../x\"}", "no split named");
+        assertRefused("{\"agent\":\"" + AGENT + "\",\"agreedShare\":0}", "agreedShare must be in (0, 1]");
+    }
+
+    @Test
+    void freezingASplitValidatesItsRequestBeforeWritingAnything() {
+        var path = "/api/graph/eval/split";
+        assertPostRefused(path, "{\"set\":\"cases\",\"share\":0.3}", "'name' is required");
+        assertPostRefused(path, "{\"name\":\"x\"}", "'set' is required");
+        assertPostRefused(path, "{\"name\":\"x\",\"set\":\"sequences\",\"share\":0.3}",
+                "set must be 'cases' or 'heldout'");
+        assertPostRefused(path, "{\"name\":\"x\",\"set\":\"cases\",\"share\":0.3,\"ids\":[\"c001\"]}",
+                "give share or ids, not both");
+        assertPostRefused(path, "{\"name\":\"x\",\"set\":\"cases\",\"share\":1.5}", "share must be in (0, 1]");
+        assertPostRefused(path, "{\"name\":\"x\",\"set\":\"cases\",\"share\":0.3,\"seed\":\"abc\"}",
+                "seed must be an integer");
+    }
+
+    @Test
+    void aRescoreNeedsAKnownSplitAndAModelAndTakesNoThreshold() {
+        var path = "/api/graph/eval/rescore";
+        assertPostRefused(path, "{\"split\":\"no-such-split\",\"decisionModel\":\"tev1\"}",
+                "no split named 'no-such-split'");
+        assertPostRefused(path, "{\"decisionModel\":\"tev1\"}", "'split' is required");
+        assertPostRefused(path, "{\"split\":\"x\",\"decisionModel\":\"tev1\",\"threshold\":0.8}",
+                "threshold is gone");
+    }
 }

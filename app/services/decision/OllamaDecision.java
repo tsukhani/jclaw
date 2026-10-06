@@ -324,6 +324,33 @@ public final class OllamaDecision {
         }
     }
 
+    /**
+     * {@code model}'s digest as {@code GET /api/tags} at {@code baseUrl} lists it, or null when the server does not
+     * list it, cannot be reached or is refused.
+     */
+    public static @Nullable String digest(String baseUrl, String model) {
+        var base = trimSlash(baseUrl);
+        try {
+            SsrfGuard.assertProviderUrlSafe(base);
+            var models = JsonParser.parseString(get(base, "/api/tags", TAGS_TIMEOUT_SECONDS)).getAsJsonObject()
+                    .getAsJsonArray("models");
+            if (models == null) return null;
+            var wanted = tagged(model);
+            for (var entry : models) {
+                if (!entry.isJsonObject()) continue;
+                var name = entry.getAsJsonObject().get("name");
+                var digest = entry.getAsJsonObject().get("digest");
+                if (name != null && name.isJsonPrimitive() && tagged(name.getAsString()).equals(wanted)
+                        && digest != null && digest.isJsonPrimitive()) {
+                    return digest.getAsString();
+                }
+            }
+            return null;
+        } catch (SecurityException | IOException | JsonParseException | IllegalStateException | ClassCastException _) {
+            return null;
+        }
+    }
+
     static List<String> decisionModels(JsonElement tags) {
         var models = tags.getAsJsonObject().getAsJsonArray("models");
         var out = new ArrayList<String>();

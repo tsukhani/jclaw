@@ -660,4 +660,29 @@ class OllamaDecisionTest extends UnitTest {
         }
         assertEquals(4, requests.size());
     }
+
+    // --- a model's digest (JCLAW-1368) --------------------------------------------------------
+
+    private static final String DIGESTS = """
+            {"models":[
+              {"name":"tev1:latest","digest":"a80c4f17acd5"},
+              {"name":"tev1:0.8b","digest":"0b0b0b0b0b0b"},
+              {"name":"nimble:latest"}
+            ]}""";
+
+    @Test
+    void theDigestIsTheTaggedEntrysAndAnUnlistedModelHasNone() {
+        assertEquals("a80c4f17acd5", withOllama(chain -> reply(chain, 200, DIGESTS),
+                () -> OllamaDecision.digest(BASE, "tev1")));
+        assertEquals(BASE + "/api/tags", requests.getFirst().url().toString());
+        assertEquals("a80c4f17acd5", withOllama(chain -> reply(chain, 200, DIGESTS),
+                () -> OllamaDecision.digest(BASE + "/", "tev1:latest")));
+        assertEquals("0b0b0b0b0b0b", withOllama(chain -> reply(chain, 200, DIGESTS),
+                () -> OllamaDecision.digest(BASE, "tev1:0.8b")));
+        assertNull(withOllama(chain -> reply(chain, 200, DIGESTS), () -> OllamaDecision.digest(BASE, "clef-flash")));
+        assertNull(withOllama(chain -> reply(chain, 200, DIGESTS), () -> OllamaDecision.digest(BASE, "nimble")),
+                "an entry without a digest gives none");
+        assertNull(withOllama(unreachable(), () -> OllamaDecision.digest(BASE, "tev1")));
+        assertNull(withOllama(chain -> reply(chain, 200, "<html/>"), () -> OllamaDecision.digest(BASE, "tev1")));
+    }
 }

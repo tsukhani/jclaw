@@ -1,6 +1,5 @@
 package services.grapheval;
 
-import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParseException;
@@ -13,22 +12,17 @@ import org.jspecify.annotations.Nullable;
 import services.WorkspaceFiles;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 
 /**
  * The superseding-memory chains in {@code evals/graph/sequences.json} (JCLAW-1367): each memory follows the v3 case
@@ -53,7 +47,6 @@ public record Sequences(@Nullable String ownerName, String userMd, List<Chain> c
     static final Set<String> MEMORY_KEYS = Set.of("id", "capturedAt", "text", "entities", "relations", "dates",
             "supersedes", "derivedFrom", "message", "authorType");
     static final Set<String> PROBE_KEYS = Set.of("from", "type", "to", "d", "after", "before", "truth", "assumed");
-    private static final int FINGERPRINT_HEX = 12;
 
     /** One memory: its v3 labels, the earlier memories it supersedes (with gold lineage) and derives from. */
     public record Memory(GraphCases.Case labels, LinkedHashMap<String, OntologyRecord.Lineage> supersedes,
@@ -289,27 +282,6 @@ public record Sequences(@Nullable String ownerName, String userMd, List<Chain> c
 
     /** {@code sequences@<12 hex>}: a SHA-256 prefix over the document with its keys sorted at every level, written compact. */
     static String fingerprint(JsonElement root) {
-        try {
-            var digest = MessageDigest.getInstance("SHA-256")
-                    .digest(canonical(root).toString().getBytes(StandardCharsets.UTF_8));
-            return "sequences@" + HexFormat.of().formatHex(digest).substring(0, FINGERPRINT_HEX);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is unavailable", e);
-        }
-    }
-
-    private static JsonElement canonical(JsonElement e) {
-        if (e.isJsonObject()) {
-            var sorted = new JsonObject();
-            var object = e.getAsJsonObject();
-            for (var key : new TreeSet<>(object.keySet())) sorted.add(key, canonical(object.get(key)));
-            return sorted;
-        }
-        if (e.isJsonArray()) {
-            var out = new JsonArray();
-            e.getAsJsonArray().forEach(x -> out.add(canonical(x)));
-            return out;
-        }
-        return e;
+        return Fingerprints.hex12("sequences", root);
     }
 }
