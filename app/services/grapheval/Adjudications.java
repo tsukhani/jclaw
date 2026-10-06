@@ -10,6 +10,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -147,7 +148,7 @@ public final class Adjudications {
                             boolean labelError, int marked, int checked, int disagreed, int uncheckedMarked,
                             @Nullable Double disagreementRate) {
         public Judgement {
-            unjudgedByGate = java.util.Collections.unmodifiableMap(new TreeMap<>(unjudgedByGate));
+            unjudgedByGate = Collections.unmodifiableMap(new TreeMap<>(unjudgedByGate));
             unjudged = List.copyOf(unjudged);
             sampled = List.copyOf(sampled);
         }

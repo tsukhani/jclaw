@@ -1,9 +1,11 @@
 package services.grapheval;
 
 import memory.graph.GraphView;
+import services.grapheval.Certifier.ClassCounts;
 import services.grapheval.Certifier.ClassStep;
 import services.grapheval.Certifier.ClassWalk;
 import services.grapheval.ExtractionPipeline.Decision;
+import services.grapheval.GateBounds.MemoryCounts;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -111,8 +113,14 @@ public final class SequenceScorer {
 
     /** {@link #lineageWalk(List, boolean)} over the thresholds at or below {@code start} only. */
     public static ClassWalk lineageWalk(List<Judged> judged, boolean anyFailed, double start) {
-        var walk = Certifier.classWalk(LINEAGE, lineageSteps(judged).stream().filter(s -> s.t() <= start + 1e-9)
-                .toList());
+        return lineageWalk(judged, anyFailed, start, RecordBounds.INSTANCE);
+    }
+
+    /** {@link #lineageWalk(List, boolean, double)} with every bound through {@code bounds}. */
+    public static ClassWalk lineageWalk(List<Judged> judged, boolean anyFailed, double start, GateBounds bounds) {
+        var steps = lineageSteps(judged).stream().filter(s -> s.t() <= start + 1e-9)
+                .map(s -> new ClassCounts(s.t(), List.of(new MemoryCounts("", s.n(), s.k(), 0, 0, 0)))).toList();
+        var walk = Certifier.classWalk(LINEAGE, steps, bounds);
         if (!anyFailed) return walk;
         return new ClassWalk(LINEAGE, null, Certifier.DISABLED, walk.n(), walk.k(), walk.bound(), walk.steps());
     }

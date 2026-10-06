@@ -5,6 +5,7 @@ import services.grapheval.Certifier;
 import services.grapheval.Certifier.ClassWalk;
 import services.grapheval.ExtractionPipeline;
 import services.grapheval.ExtractionPipeline.Decision;
+import services.grapheval.GateBounds;
 import services.grapheval.SequenceScorer;
 import services.grapheval.SequenceScorer.Answered;
 import services.grapheval.SequenceScorer.Judged;
@@ -134,5 +135,40 @@ class SequenceScorerTest extends UnitTest {
         assertTrue(walk.threshold() <= 0.85 + 1e-9, walk.toString());
         assertEquals(0.95, SequenceScorer.lineageWalk(judged(60, 0), false).steps().getFirst().t(),
                 "the default start is the top of the grid");
+    }
+
+    @Test
+    void theLineageWalkReadsItsBoundsThroughTheSeam() {
+        GateBounds refuseAll = new GateBounds() {
+            @Override
+            public boolean passes(List<GateBounds.MemoryCounts> writing, double limit, double tail) {
+                return false;
+            }
+
+            @Override
+            public double upper(List<GateBounds.MemoryCounts> writing, double tail) {
+                return 1;
+            }
+
+            @Override
+            public double recallLower(List<GateBounds.MemoryCounts> labelled, double tail) {
+                return 0;
+            }
+
+            @Override
+            public double power(List<GateBounds.MemoryCounts> writing, double trueWrongShare, double limit,
+                                double tail) {
+                return 0;
+            }
+
+            @Override
+            public int recordsNeeded(int wrong, double limit, double tail) {
+                return Integer.MAX_VALUE;
+            }
+        };
+        assertEquals(Certifier.CLASS_CERTIFIED, SequenceScorer.lineageWalk(judged(250, 0), false, 0.95).state());
+        var swapped = SequenceScorer.lineageWalk(judged(250, 0), false, 0.95, refuseAll);
+        assertEquals(Certifier.DISABLED, swapped.state());
+        assertEquals(1.0, swapped.bound());
     }
 }

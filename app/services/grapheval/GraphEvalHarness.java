@@ -909,7 +909,8 @@ public final class GraphEvalHarness {
                                  SequenceHarness.@Nullable SequenceSpotCheck sequenceSpotCheck,
                                  List<JsonElement> stages, Certifier.@Nullable Sequencing sequencing, Tallies tallies,
                                  AgreedSample agreedSample, Map<String, Integer> unjudgedByGate, Checks checks,
-                                 SequenceHarness.@Nullable ModelReport sequences, Certifier.Verdict verdict,
+                                 SequenceHarness.@Nullable ModelReport sequences,
+                                 Certifier.@Nullable Power lineagePower, Certifier.Verdict verdict,
                                  @Nullable String certificate) {}
 
     /** A certification run's or a re-score's report: counts and fingerprints only, never a timing. */
@@ -1072,7 +1073,7 @@ public final class GraphEvalHarness {
         if (sequencing != null) {
             seq = SequenceHarness.scoreAt(schema, sequences.chains(), stored.model(),
                     stored.passes().stream().map(StoredRun.Pass::chains).toList(), sequencing.reached(), start,
-                    stored.sequenceSpotCheck(), zone);
+                    stored.sequenceSpotCheck(), zone, bounds);
         }
         var judgement = v2.judgement();
         var verdict = Certifier.verdict(sequencing, new Certifier.VerdictInputs(stored.memoriesChanged() > 0, failed,
@@ -1089,9 +1090,17 @@ public final class GraphEvalHarness {
         var model = new CertifiedModel(stored.model(), stored.digest(), stored.passes().size(),
                 stored.memoriesChanged(), failed, stored.spotCheck(), stored.sequenceSpotCheck(),
                 stored.passes().stream().map(StoredRun.Pass::stages).toList(), sequencing, v2.tallies(),
-                v2.agreedSample(), judgement.unjudgedByGate(), checks(book, judgement), seq, verdict,
+                v2.agreedSample(), judgement.unjudgedByGate(), checks(book, judgement), seq,
+                seq == null ? null : lineagePower(seq.lineage(), bounds), verdict,
                 certificate == null ? null : certificate.id());
         return new Scored(model, sheet(split, guide, book, cases, v2.inScope()), certificate);
+    }
+
+    /** Lineage's power at its walked n, as {@link Certifier} gives every other class's; 0 when disabled. */
+    private static Certifier.Power lineagePower(ClassWalk lineage, GateBounds bounds) {
+        var at = lineage.threshold() == null ? List.<MemoryCounts>of()
+                : List.of(new MemoryCounts("", lineage.n(), lineage.k(), 0, 0, 0));
+        return Certifier.Power.of(bounds, at);
     }
 
     /**

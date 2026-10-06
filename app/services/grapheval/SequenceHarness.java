@@ -113,7 +113,7 @@ public final class SequenceHarness {
             var asked = Objects.requireNonNull(answers.get(m.name()));
             var spotCheck = runs == 1 ? spotCheck(schema, set, m, asked.getFirst(), concurrency, zone) : null;
             reports.add(scoreAt(schema, chains, m.name(), asked, configuration, GraphEvalScorer.THRESHOLDS.getFirst(),
-                    spotCheck, zone));
+                    spotCheck, zone, RecordBounds.INSTANCE));
         }
         int probes = chains.stream().mapToInt(c -> c.probes().size()).sum();
         return new Report(SET, schema.fingerprint(), ExtractionPipeline.fingerprint(schema), set.fingerprint(),
@@ -167,10 +167,10 @@ public final class SequenceHarness {
      */
     public static ModelReport scoreAt(OntologySchema schema, List<Chain> chains, String model,
                                       List<List<List<CaseRun>>> runs, Configuration configuration, double start,
-                                      @Nullable SequenceSpotCheck spotCheck, ZoneId zone) {
+                                      @Nullable SequenceSpotCheck spotCheck, ZoneId zone, GateBounds bounds) {
         var runReports = new ArrayList<RunReport>();
         for (int r = 0; r < runs.size(); r++) {
-            runReports.add(score(schema, chains, runs.get(r), r, configuration, start, zone));
+            runReports.add(score(schema, chains, runs.get(r), r, configuration, start, zone, bounds));
         }
         var walks = runReports.stream().map(RunReport::lineage).toList();
         var lineage = runs.size() == 1 ? walks.getFirst() : SequenceScorer.combineLineage(walks);
@@ -289,7 +289,7 @@ public final class SequenceHarness {
     }
 
     private static RunReport score(OntologySchema schema, List<Chain> chains, List<List<CaseRun>> runs, int run,
-                                   Configuration configuration, double start, ZoneId zone) {
+                                   Configuration configuration, double start, ZoneId zone, GateBounds bounds) {
         var judged = new ArrayList<Judged>();
         boolean anyFailed = false;
         int failedDecisions = 0;
@@ -306,7 +306,7 @@ public final class SequenceHarness {
                 }
             }
         }
-        var walk = SequenceScorer.lineageWalk(judged, anyFailed, start);
+        var walk = SequenceScorer.lineageWalk(judged, anyFailed, start, bounds);
         var threshold = walk.threshold();
         var e2e = timeline(schema, chains, runs, Variant.END_TO_END, configuration, threshold, zone);
         return new RunReport(run, failedDecisions, walk, e2e,

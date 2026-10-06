@@ -862,6 +862,7 @@ class GraphEvalHarnessTest extends UnitTest {
             var cert = read.certificate();
             assertEquals(judged.certificate(), cert.id());
             assertTrue(cert.json().getAsJsonObject("classes").has("lineage"), cert.json().toString());
+            assertNotNull(judged.lineagePower(), "lineage reports its power like every other class");
             assertEquals(judged.sequences().timeline(),
                     cert.json().getAsJsonObject("timeline").get("result").getAsString());
             assertEquals(sequencing.terms().threshold(), cert.toConfiguration().terms());
