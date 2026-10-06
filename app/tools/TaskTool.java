@@ -16,6 +16,7 @@ import services.DeliverySpec;
 import services.EventLogger;
 import services.ScheduleShorthandParser;
 import services.TaskSchedulingService;
+import services.TaskWriteService;
 import services.Tx;
 import services.search.LuceneIndexer;
 import utils.AppClock;
@@ -97,13 +98,7 @@ public class TaskTool implements ToolRegistry.Tool {
     private static final String KEY_MODEL_PROVIDER = "modelProvider";
     private static final String KEY_MODEL_ID = "modelId";
     private static final String KEY_ENABLED_TOOL_NAMES = "enabledToolNames";
-    private static final String KEY_WORKDIR = "workdir";
-    private static final String KEY_PRE_CHECK = "preCheck";
-    private static final String KEY_SCRIPT = "script";
-    private static final String KEY_NO_AGENT = "noAgent";
     private static final String KEY_AUTO_DELETE = "autoDeleteOnComplete";
-    private static final String KEY_CONTEXT_FROM_TASK_IDS = "contextFromTaskIds";
-    private static final String KEY_REPEAT_LIMIT = "repeatLimit";
     private static final String KEY_TIMEZONE = "timezone";
 
     // --- Common response strings ---
@@ -219,20 +214,8 @@ public class TaskTool implements ToolRegistry.Tool {
                         SchemaKeys.DESCRIPTION, "Override the agent's model id for this task")),
                 Map.entry(KEY_ENABLED_TOOL_NAMES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION, "JSON array of tool names this task may use. Null = full toolset.")),
-                Map.entry(KEY_WORKDIR, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Filesystem cwd for the task fire")),
-                Map.entry(KEY_PRE_CHECK, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Pre-fire condition expression. Falsy skips the fire without consuming retry budget.")),
-                Map.entry(KEY_SCRIPT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "Shell script body — exec instead of the LLM when noAgent=true")),
-                Map.entry(KEY_NO_AGENT, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
-                        SchemaKeys.DESCRIPTION, "Skip the LLM round-trip; runs script if set, otherwise delivers description verbatim")),
                 Map.entry(KEY_AUTO_DELETE, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                         SchemaKeys.DESCRIPTION, "Auto-delete a one-shot reminder after it fires successfully. Defaults true for reminders, false for regular tasks; set false to KEEP a fired reminder. Recurring reminders and regular tasks are never auto-deleted.")),
-                Map.entry(KEY_CONTEXT_FROM_TASK_IDS, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                        SchemaKeys.DESCRIPTION, "JSON array of upstream Task ids whose outputs feed this task's context")),
-                Map.entry(KEY_REPEAT_LIMIT, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
-                        SchemaKeys.DESCRIPTION, "Max fires for a recurring task before auto-cancel. Null = unlimited.")),
                 Map.entry(KEY_TIMEZONE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.DESCRIPTION,
                         "IANA timezone (e.g. 'America/New_York', 'Asia/Tokyo') for CRON / SCHEDULED "
@@ -333,6 +316,8 @@ public class TaskTool implements ToolRegistry.Tool {
     // --- Actions ---
 
     private String createTask(JsonObject args, Agent agent) {
+        var unbuilt = TaskWriteService.unbuiltFieldError(args);
+        if (unbuilt != null) return ERR_PREFIX + unbuilt;
         if (!hasValue(args, KEY_NAME)) {
             return ERR_NAME_REQUIRED;
         }
@@ -467,7 +452,7 @@ public class TaskTool implements ToolRegistry.Tool {
         task.scheduleDisplay = spec.scheduleDisplay();
         task.nextRunAt = spec.scheduledAt() != null ? spec.scheduledAt() : AppClock.now();
 
-        // Plumbing fields (consumed by JCLAW-295/296/297/298).
+        // Plumbing fields (consumed by JCLAW-295/297).
         // Delivery inference (resolveDeliverySpec) exists so a task created from a chat
         // auto-delivers back to it on completion (TaskExecutor.dispatchDelivery →
         // DeliveryDispatcher.dispatchSpec), and so a bare channel name from the LLM is
@@ -486,16 +471,6 @@ public class TaskTool implements ToolRegistry.Tool {
         task.modelProvider = optStr(args, KEY_MODEL_PROVIDER);
         task.modelId = optStr(args, KEY_MODEL_ID);
         task.enabledToolNames = optStr(args, KEY_ENABLED_TOOL_NAMES);
-        task.workdir = optStr(args, KEY_WORKDIR);
-        task.preCheck = optStr(args, KEY_PRE_CHECK);
-        task.script = optStr(args, KEY_SCRIPT);
-        if (hasValue(args, KEY_NO_AGENT)) {
-            task.noAgent = args.get(KEY_NO_AGENT).getAsBoolean();
-        }
-        task.contextFromTaskIds = optStr(args, KEY_CONTEXT_FROM_TASK_IDS);
-        if (hasValue(args, KEY_REPEAT_LIMIT)) {
-            task.repeatLimit = args.get(KEY_REPEAT_LIMIT).getAsInt();
-        }
         // JCLAW-261: optional IANA timezone. Validated in TaskScheduleSupport so
         // an invalid value surfaces as a tool error to the LLM rather than
         // landing in the DB and silently falling through at fire time.
@@ -520,7 +495,7 @@ public class TaskTool implements ToolRegistry.Tool {
 
     /**
      * JCLAW-1021: a patch rewrites the description — which IS the fire's user prompt — plus
-     * its workdir, tools and model, so a turn weaker than the recorded origin repoints the
+     * its tools and model, so a turn weaker than the recorded origin repoints the
      * task's provenance at itself. Trust may fall on mutation; it must never rise, and only
      * the operator origin is permissive, so that is the only fall worth recording.
      */
@@ -541,6 +516,8 @@ public class TaskTool implements ToolRegistry.Tool {
     }
 
     private String updateTask(JsonObject args, Agent agent) {
+        var unbuilt = TaskWriteService.unbuiltFieldError(args);
+        if (unbuilt != null) return ERR_PREFIX + unbuilt;
         if (!hasValue(args, KEY_NAME)) {
             return "Error: 'name' is required to identify the task";
         }
@@ -661,34 +638,18 @@ public class TaskTool implements ToolRegistry.Tool {
         if (args.has(KEY_MODEL_PROVIDER))     { task.modelProvider     = optStr(args, KEY_MODEL_PROVIDER);     anyChange = true; }
         if (args.has(KEY_MODEL_ID))           { task.modelId           = optStr(args, KEY_MODEL_ID);           anyChange = true; }
         if (args.has(KEY_ENABLED_TOOL_NAMES)) { task.enabledToolNames  = optStr(args, KEY_ENABLED_TOOL_NAMES); anyChange = true; }
-        if (args.has(KEY_WORKDIR))            { task.workdir           = optStr(args, KEY_WORKDIR);            anyChange = true; }
-        if (args.has(KEY_PRE_CHECK))          { task.preCheck          = optStr(args, KEY_PRE_CHECK);          anyChange = true; }
-        if (args.has(KEY_SCRIPT))             { task.script            = optStr(args, KEY_SCRIPT);             anyChange = true; }
-        if (args.has(KEY_CONTEXT_FROM_TASK_IDS)) {
-            task.contextFromTaskIds = optStr(args, KEY_CONTEXT_FROM_TASK_IDS);
-            anyChange = true;
-        }
         return anyChange;
     }
 
-    /** Patch the boolean / int fields (paused, noAgent, repeatLimit). */
+    /** Patch the boolean fields and the timezone. */
     private static boolean applyFlagPatches(JsonObject args, Task task) {
         boolean anyChange = false;
         if (hasValue(args, KEY_PAUSED)) {
             task.paused = args.get(KEY_PAUSED).getAsBoolean();
             anyChange = true;
         }
-        if (hasValue(args, KEY_NO_AGENT)) {
-            task.noAgent = args.get(KEY_NO_AGENT).getAsBoolean();
-            anyChange = true;
-        }
         if (hasValue(args, KEY_AUTO_DELETE)) {
             task.autoDeleteOnComplete = args.get(KEY_AUTO_DELETE).getAsBoolean();
-            anyChange = true;
-        }
-        if (args.has(KEY_REPEAT_LIMIT)) {
-            var el = args.get(KEY_REPEAT_LIMIT);
-            task.repeatLimit = el.isJsonNull() ? null : el.getAsInt();
             anyChange = true;
         }
         // JCLAW-261: explicit-null clears the per-task override (falls

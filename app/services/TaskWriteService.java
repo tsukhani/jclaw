@@ -42,6 +42,30 @@ public final class TaskWriteService {
     private static final String KEY_TIMEZONE = "timezone";
 
     /**
+     * Task columns whose fire-time behaviour is not built yet: script mode, pre-check and
+     * noAgent (JCLAW-296), workdir, contextFrom and repeat limit (JCLAW-298). Both write
+     * paths refuse them so a caller cannot believe it bounded or gated a task; each
+     * ticket re-adds its keys here and to {@code TaskTool}'s schema when it builds them.
+     */
+    public static final List<String> UNBUILT_KEYS = List.of(
+            KEY_WORKDIR, KEY_PRE_CHECK, KEY_SCRIPT, KEY_NO_AGENT,
+            KEY_CONTEXT_FROM_TASK_IDS, KEY_REPEAT_LIMIT);
+
+    /**
+     * The refusal for the first {@link #UNBUILT_KEYS} entry {@code body} carries a non-null
+     * value for, or null when it carries none. A JSON null is read as absent.
+     */
+    public static @Nullable String unbuiltFieldError(JsonObject body) {
+        for (var key : UNBUILT_KEYS) {
+            if (body.has(key) && !body.get(key).isJsonNull()) {
+                return ("'%s' is not available yet: nothing reads it when the task fires, "
+                        + "so it would be stored and ignored. Omit it.").formatted(key);
+            }
+        }
+        return null;
+    }
+
+    /**
      * Map a validated create body onto a fresh {@link Task} and persist it. The
      * caller has already validated agent/name/schedule/delivery/timezone and
      * rejected duplicate recurring names, so this is pure field-mapping + save.
@@ -80,12 +104,6 @@ public final class TaskWriteService {
         t.modelProvider = readOptionalString(body, KEY_MODEL_PROVIDER);
         t.modelId = readOptionalString(body, KEY_MODEL_ID);
         t.enabledToolNames = readToolNameList(body, KEY_ENABLED_TOOL_NAMES);
-        t.workdir = readOptionalString(body, KEY_WORKDIR);
-        t.preCheck = readOptionalString(body, KEY_PRE_CHECK);
-        t.script = readOptionalString(body, KEY_SCRIPT);
-        if (body.has(KEY_NO_AGENT) && !body.get(KEY_NO_AGENT).isJsonNull()) {
-            t.noAgent = body.get(KEY_NO_AGENT).getAsBoolean();
-        }
         if (body.has(KEY_PAUSED) && !body.get(KEY_PAUSED).isJsonNull()) {
             t.paused = body.get(KEY_PAUSED).getAsBoolean();
         }
@@ -96,10 +114,6 @@ public final class TaskWriteService {
             t.autoDeleteOnComplete = body.get(KEY_AUTO_DELETE).getAsBoolean();
         } else {
             t.autoDeleteOnComplete = "reminder".equalsIgnoreCase(t.payloadType);
-        }
-        t.contextFromTaskIds = readOptionalString(body, KEY_CONTEXT_FROM_TASK_IDS);
-        if (body.has(KEY_REPEAT_LIMIT) && !body.get(KEY_REPEAT_LIMIT).isJsonNull()) {
-            t.repeatLimit = body.get(KEY_REPEAT_LIMIT).getAsInt();
         }
         // JCLAW-261: optional per-task IANA timezone (already validated by the
         // controller's invalid-timezone guard). Persist the trimmed value for
@@ -151,7 +165,6 @@ public final class TaskWriteService {
         // touched" semantics without short-circuiting.
         boolean changed = applyOptionalStringFields(task, body);
         changed |= applyOptionalBooleanFields(task, body);
-        changed |= applyOptionalIntegerFields(task, body);
         return changed;
     }
 
@@ -172,10 +185,6 @@ public final class TaskWriteService {
         if (body.has(KEY_MODEL_PROVIDER))      { task.modelProvider     = readOptionalString(body, KEY_MODEL_PROVIDER);      changed = true; }
         if (body.has(KEY_MODEL_ID))            { task.modelId           = readOptionalString(body, KEY_MODEL_ID);            changed = true; }
         if (body.has(KEY_ENABLED_TOOL_NAMES))  { task.enabledToolNames  = readToolNameList(body, KEY_ENABLED_TOOL_NAMES);  changed = true; }
-        if (body.has(KEY_WORKDIR))             { task.workdir           = readOptionalString(body, KEY_WORKDIR);             changed = true; }
-        if (body.has(KEY_PRE_CHECK))           { task.preCheck          = readOptionalString(body, KEY_PRE_CHECK);           changed = true; }
-        if (body.has(KEY_SCRIPT))              { task.script            = readOptionalString(body, KEY_SCRIPT);              changed = true; }
-        if (body.has(KEY_CONTEXT_FROM_TASK_IDS)){ task.contextFromTaskIds= readOptionalString(body, KEY_CONTEXT_FROM_TASK_IDS);changed = true; }
         // JCLAW-1106: an explicit null clears the override and returns the task to the
         // default chain. The controller's rejectInvalidTimezone guard covers this path too.
         if (body.has(KEY_TIMEZONE)) {
@@ -196,23 +205,11 @@ public final class TaskWriteService {
             task.paused = body.get(KEY_PAUSED).getAsBoolean();
             changed = true;
         }
-        if (body.has(KEY_NO_AGENT) && !body.get(KEY_NO_AGENT).isJsonNull()) {
-            task.noAgent = body.get(KEY_NO_AGENT).getAsBoolean();
-            changed = true;
-        }
         if (body.has(KEY_AUTO_DELETE) && !body.get(KEY_AUTO_DELETE).isJsonNull()) {
             task.autoDeleteOnComplete = body.get(KEY_AUTO_DELETE).getAsBoolean();
             changed = true;
         }
         return changed;
-    }
-
-    /** Integer fields. Explicit null clears (sets back to unlimited). */
-    private static boolean applyOptionalIntegerFields(Task task, JsonObject body) {
-        if (!body.has(KEY_REPEAT_LIMIT)) return false;
-        var el = body.get(KEY_REPEAT_LIMIT);
-        task.repeatLimit = el.isJsonNull() ? null : el.getAsInt();
-        return true;
     }
 
     /**
