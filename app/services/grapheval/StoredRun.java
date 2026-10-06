@@ -36,11 +36,11 @@ import static utils.GsonHolder.GSON;
 /**
  * A certification run's decisions as stored (JCLAW-1368), so a re-score reads exactly what the run scored and calls no
  * model: every run's case and chain decisions, the scored gold-fed stages, both spot-checks, the agreed sample's seed
- * and share, the model's digest and the fingerprints it ran under. At {@code <root>/runs/<split>/<model>.json}.
+ * and share, the model's digest, the recall floor it was certified against and the fingerprints it ran under. At {@code <root>/runs/<split>/<model>.json}.
  */
 public record StoredRun(String split, String model, String digest, String schema, String extraction,
                         long agreedSeed, double agreedShare, List<Pass> passes, @Nullable SpotCheck spotCheck,
-                        @Nullable SequenceSpotCheck sequenceSpotCheck, int memoriesChanged) {
+                        @Nullable SequenceSpotCheck sequenceSpotCheck, int memoriesChanged, double recallFloor) {
 
     public static final String DIR = "runs";
 
@@ -132,6 +132,7 @@ public record StoredRun(String split, String model, String digest, String schema
         o.add("spotCheck", spotCheck == null ? JsonNull.INSTANCE : GSON.toJsonTree(spotCheck));
         o.add("sequenceSpotCheck", sequenceSpotCheck == null ? JsonNull.INSTANCE : GSON.toJsonTree(sequenceSpotCheck));
         o.addProperty("memoriesChanged", memoriesChanged);
+        o.addProperty("recallFloor", recallFloor);
         return o;
     }
 
@@ -156,7 +157,7 @@ public record StoredRun(String split, String model, String digest, String schema
                 o.get("agreedShare").getAsDouble(), passes,
                 spot == null || spot.isJsonNull() ? null : GSON.fromJson(spot, SpotCheck.class),
                 seqSpot == null || seqSpot.isJsonNull() ? null : GSON.fromJson(seqSpot, SequenceSpotCheck.class),
-                o.get("memoriesChanged").getAsInt());
+                o.get("memoriesChanged").getAsInt(), o.get("recallFloor").getAsDouble());
     }
 
     /** Every field of {@code run} a scorer reads; the schema is re-attached on reading. */

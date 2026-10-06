@@ -24,6 +24,7 @@ import services.grapheval.Configuration;
 import services.grapheval.EvalProgress;
 import services.grapheval.ExtractionPipeline;
 import services.grapheval.ExtractionPipeline.Decider;
+import services.grapheval.GateBounds;
 import services.grapheval.GraphCases;
 import services.grapheval.GraphCases.Case;
 import services.grapheval.GraphEvalHarness;
@@ -38,6 +39,7 @@ import services.grapheval.StoredRun;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDate;
@@ -729,19 +731,44 @@ class GraphEvalHarnessTest extends UnitTest {
         };
     }
 
+    /** {@code decider}, except c015's "Larchmere House" is typed Organization at 0.99, so it writes at every threshold. */
+    private static Decider mistyped(Decider decider, List<Case> cases) {
+        var target = cases.stream().filter(c -> c.id().equals("c015")).findFirst().orElseThrow().text();
+        return request -> {
+            var response = decider.decide(request);
+            if (!request.getAsJsonObject("state").get("memory").getAsString().equals(target)) return response;
+            for (var q : request.getAsJsonObject("questions").entrySet()) {
+                var rules = q.getValue().getAsJsonObject().getAsJsonObject("instructions").get("rules").getAsString();
+                var span = QUOTED.matcher(rules).results().map(m -> m.group(1)).findFirst().orElse("");
+                if (q.getKey().startsWith("m") && span.equals("Larchmere House")) {
+                    response.getAsJsonObject("answers").add(q.getKey(), answer(
+                            q.getValue().getAsJsonObject().getAsJsonObject("criteria").keySet(), "Organization", 0.99));
+                }
+            }
+            return response;
+        };
+    }
+
     private static CertificationSplit.Source source(List<Case> cases, Sequences sequences) throws IOException {
         var json = Files.readString(Play.applicationPath.toPath().resolve(GraphCases.DEFAULT_PATH));
         return CertificationSplit.Source.cases(json, cases, sequences.fingerprint(),
-                "the guide".getBytes(java.nio.charset.StandardCharsets.UTF_8), SCHEMA);
+                "the guide".getBytes(StandardCharsets.UTF_8), SCHEMA);
     }
 
     private GraphEvalHarness.CertifyRequest request(Path root, CertificationSplit split,
                                                     CertificationSplit.Source source, Sequences sequences,
                                                     Decider decider, int runs, List<Case> second,
                                                     List<Adjudications.Verdict> verdicts) {
+        return request(root, split, source, sequences, decider, runs, second, verdicts, Certifier.DEFAULT_RECALL_FLOOR);
+    }
+
+    private GraphEvalHarness.CertifyRequest request(Path root, CertificationSplit split,
+                                                    CertificationSplit.Source source, Sequences sequences,
+                                                    Decider decider, int runs, List<Case> second,
+                                                    List<Adjudications.Verdict> verdicts, double recallFloor) {
         return new GraphEvalHarness.CertifyRequest(root, split, source, SCHEMA, agentId, owner(), Map.of(), sequences,
                 List.of(new DecisionModel("tev1", decider)), Map.of("tev1", DIGEST), runs, 1356, 0.2, 0.2,
-                Certifier.DEFAULT_RECALL_FLOOR, 1, second, null, verdicts);
+                recallFloor, 1, second, null, verdicts);
     }
 
     private static void delete(Path root) throws IOException {
@@ -757,10 +784,15 @@ class GraphEvalHarnessTest extends UnitTest {
             var cases = certifiable();
             var sequences = fixtureSequences();
             var source = source(cases, sequences);
-            var split = CertificationSplit.freeze(root, "cert-t", source, 1356, 0.5, null, 0.95, null, SCHEMA);
+            var ids = new ArrayList<String>();
+            for (int i = 0; i < cases.size(); i++) {
+                var id = cases.get(i).id();
+                if (i % 2 == 0 || id.equals("c015")) ids.add(id);
+            }
+            var split = CertificationSplit.freeze(root, "cert-t", source, 1356, null, ids, 0.95, null, SCHEMA);
             var splitCases = split.casesFrom(source);
             var order = new ArrayList<String>();
-            var golden = both(cases, sequences, order);
+            var golden = mistyped(both(cases, sequences, order), cases);
             var calls = new AtomicInteger();
             Decider counted = request -> {
                 calls.incrementAndGet();
@@ -796,7 +828,9 @@ class GraphEvalHarnessTest extends UnitTest {
             var sheet = JsonParser.parseString(Files.readString(sheetFile)).getAsJsonObject();
             assertFalse(sheet.toString().contains("tev1"), "the sheet never names the model");
             var verdicts = new ArrayList<Adjudications.Verdict>();
+            var listed = new ArrayList<String>();
             for (var e : sheet.getAsJsonArray("records")) {
+                listed.add(e.getAsJsonObject().get("caseId").getAsString() + " " + e.getAsJsonObject().get("record"));
                 var o = e.getAsJsonObject();
                 assertEquals(Set.of("caseId", "record", "text", "inclusion"), o.keySet());
                 var c = splitCases.stream().filter(x -> x.id().equals(o.get("caseId").getAsString())).findFirst()
@@ -813,12 +847,13 @@ class GraphEvalHarnessTest extends UnitTest {
                     source, sequences, both(cases, sequences, new ArrayList<>()), 1, splitCases, List.of())));
             assertTrue(reuse.getMessage().contains(SplitUses.FILE), reuse.getMessage());
 
-            var same = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2,
-                    Certifier.DEFAULT_RECALL_FLOOR, splitCases, null, List.of());
+            assertTrue(listed.contains("c015 \"term:Larchmere House:Organization\""), listed.toString());
+            var same = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases, null,
+                    List.of());
             assertEquals(GSON.toJson(report), GSON.toJson(same), "a re-score gives the full run's report");
 
-            var judged = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2,
-                    Certifier.DEFAULT_RECALL_FLOOR, splitCases, null, verdicts).models().getFirst();
+            var judged = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases,
+                    null, verdicts).models().getFirst();
             assertEquals(Certifier.CERTIFIED, judged.verdict().status(), judged.verdict().reasons().toString());
             assertEquals(asked, calls.get(), "a re-score asks no model");
             var read = CertificateDocument.read(root, "tev1", SCHEMA.fingerprint(), ExtractionPipeline.fingerprint(SCHEMA),
@@ -832,6 +867,34 @@ class GraphEvalHarnessTest extends UnitTest {
             assertEquals(sequencing.terms().threshold(), cert.toConfiguration().terms());
             assertEquals("digest sha256:7e57 differs from running sha256:0000", CertificateDocument.read(root, "tev1",
                     SCHEMA.fingerprint(), ExtractionPipeline.fingerprint(SCHEMA), "sha256:0000").reason());
+
+            var resheet = JsonParser.parseString(Files.readString(sheetFile)).getAsJsonObject();
+            var relisted = new ArrayList<String>();
+            resheet.getAsJsonArray("records").forEach(e -> relisted.add(e.getAsJsonObject().get("caseId").getAsString()
+                    + " " + e.getAsJsonObject().get("record")));
+            assertEquals(listed, relisted, "a judged record stays on the sheet");
+
+            var newGuide = "guide@999999999999";
+            var regraded = new CertificationSplit.Source("cases", source.items(), source.cases(), source.sequences(),
+                    newGuide, source.schema());
+            var restamped = verdicts.stream().map(v -> new Adjudications.Verdict(v.caseId(), v.record(), v.side(),
+                    v.verdict(), newGuide, v.adjudicator(), v.inclusion(), v.check(), v.note())).toList();
+            assertEquals(Certifier.CERTIFIED, GraphEvalHarness.rescore(root, split, regraded, SCHEMA, "tev1", sequences,
+                    0.2, splitCases, null, restamped).models().getFirst().verdict().status());
+            var stamped = CertificateDocument.parse(Files.readString(CertificateDocument.path(root, "tev1")));
+            assertEquals(newGuide, stamped.json().get("guide").getAsString(), "the guide the verdicts were judged under");
+            assertNotEquals(split.guide(), newGuide);
+
+            var pending = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases,
+                    null, List.of()).models().getFirst();
+            assertEquals(Certifier.PENDING_ADJUDICATION, pending.verdict().status());
+            assertEquals("no certificate for tev1", CertificateDocument.read(root, "tev1", SCHEMA.fingerprint(),
+                    ExtractionPipeline.fingerprint(SCHEMA), DIGEST).reason(), "this split's stale certificate is gone");
+            var other = cert.json().deepCopy();
+            other.addProperty("split", "cert-other");
+            Files.writeString(CertificateDocument.path(root, "tev1"), other.toString());
+            GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases, null, List.of());
+            assertTrue(Files.exists(CertificateDocument.path(root, "tev1")), "another split's certificate is left alone");
         } finally {
             delete(root);
         }
@@ -873,11 +936,11 @@ class GraphEvalHarnessTest extends UnitTest {
             var json = Files.readString(stored);
             Files.writeString(stored, json.replace(SCHEMA.fingerprint(), "v0@000000000000"));
             var schema = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.rescore(root, split, source,
-                    SCHEMA, "tev1", sequences, 0.2, Certifier.DEFAULT_RECALL_FLOOR, List.of(), null, List.of()));
+                    SCHEMA, "tev1", sequences, 0.2, List.of(), null, List.of()));
             assertTrue(schema.getMessage().contains("schema"), schema.getMessage());
             Files.writeString(stored, json.replace(ExtractionPipeline.fingerprint(SCHEMA), "x@000000000000"));
             var extraction = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.rescore(root, split,
-                    source, SCHEMA, "tev1", sequences, 0.2, Certifier.DEFAULT_RECALL_FLOOR, List.of(), null, List.of()));
+                    source, SCHEMA, "tev1", sequences, 0.2, List.of(), null, List.of()));
             assertTrue(extraction.getMessage().contains("extraction"), extraction.getMessage());
             Files.writeString(stored, json);
 
@@ -888,7 +951,7 @@ class GraphEvalHarnessTest extends UnitTest {
             var drifted = new CertificationSplit.Source("cases", items, source.cases(), source.sequences(),
                     source.guide(), source.schema());
             var drift = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.rescore(root, split,
-                    drifted, SCHEMA, "tev1", sequences, 0.2, Certifier.DEFAULT_RECALL_FLOOR, List.of(), null, List.of()));
+                    drifted, SCHEMA, "tev1", sequences, 0.2, List.of(), null, List.of()));
             assertEquals("case c002 changed since split 'cert-v' was frozen", drift.getMessage());
             var refused = assertThrows(IllegalArgumentException.class, () -> GraphEvalHarness.admit(
                     request(root, split, drifted, sequences, golden, 1, List.of(), List.of())));
@@ -995,5 +1058,144 @@ class GraphEvalHarnessTest extends UnitTest {
         assertEquals(1356, v2.agreedSample().seed());
         assertEquals(0.2, v2.checks().checkShare());
         assertFalse(v2.tallies().falsePositiveByTag().isEmpty());
+    }
+
+    @Test
+    void twoRunsAreReadAtTheWorseRunSoASecondPassThatErrsTurnsTheTermGateOff() throws Exception {
+        var root = Files.createTempDirectory("grapheval-worst");
+        try {
+            var cases = certifiable();
+            var sequences = fixtureSequences();
+            var source = source(cases, sequences);
+            var ids = new ArrayList<String>();
+            for (int i = 0; i < cases.size(); i += 2) ids.add(cases.get(i).id());
+            var split = CertificationSplit.freeze(root, "cert-w", source, 1, null, ids, 0.95, null, SCHEMA);
+            var splitCases = split.casesFrom(source);
+            var first = splitCases.getFirst().text();
+            var last = splitCases.getLast().text();
+            var golden = both(cases, sequences, new ArrayList<>());
+            var sawLast = new AtomicBoolean();
+            var secondPass = new AtomicBoolean();
+            // Concurrency 1 asks pass 1's cases in split order, then pass 2's: pass 2 mistypes every term it is asked.
+            Decider erring = request -> {
+                var text = request.getAsJsonObject("state").get("memory").getAsString();
+                if (text.equals(last)) sawLast.set(true);
+                else if (text.equals(first) && sawLast.get()) secondPass.set(true);
+                var response = golden.decide(request);
+                if (!secondPass.get()) return response;
+                for (var q : request.getAsJsonObject("questions").entrySet()) {
+                    if (!q.getKey().startsWith("m")) continue;
+                    var ids2 = q.getValue().getAsJsonObject().getAsJsonObject("criteria").keySet();
+                    var given = response.getAsJsonObject("answers").getAsJsonObject(q.getKey()).get("choice")
+                            .getAsString();
+                    if (given.equals(ExtractionPipeline.NOT_AN_ENTITY)) continue;
+                    var wrong = ids2.stream().filter(id -> !id.equals(given)
+                            && !id.equals(ExtractionPipeline.NOT_AN_ENTITY)).findFirst().orElse(given);
+                    response.getAsJsonObject("answers").add(q.getKey(), answer(ids2, wrong, 0.99));
+                }
+                return response;
+            };
+            var model = GraphEvalHarness.certify(request(root, split, source, sequences, erring, 2, splitCases,
+                    List.of(), 0.6), EvalProgress.none()).models().getFirst();
+            assertTrue(secondPass.get(), "the second pass was asked");
+            assertEquals(2, model.runs());
+            var sequencing = model.sequencing();
+            assertNotNull(sequencing);
+            assertEquals(Certifier.OFF, sequencing.terms().state(), sequencing.terms().toString());
+            assertFalse(sequencing.passed());
+            assertTrue(sequencing.terms().k() > 0, "the gate reads the second pass's wrong terms");
+            assertEquals(Certifier.NOT_CERTIFIED, model.verdict().status());
+
+            var rescored = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases,
+                    null, List.of());
+            assertEquals(0.6, rescored.recallFloor(), "a re-score keeps the run's own recall floor");
+            assertEquals(0.6, StoredRun.read(root, "cert-w", "tev1", SCHEMA).recallFloor());
+        } finally {
+            delete(root);
+        }
+    }
+
+    /** Agrees every bound, so a two-memory held-out split gets past its gates to the agreement step. */
+    private static final GateBounds LENIENT = new GateBounds() {
+        @Override
+        public boolean passes(List<GateBounds.MemoryCounts> writing, double limit, double tail) {
+            return true;
+        }
+
+        @Override
+        public double upper(List<GateBounds.MemoryCounts> writing, double tail) {
+            return 0;
+        }
+
+        @Override
+        public double recallLower(List<GateBounds.MemoryCounts> labelled, double tail) {
+            return 1;
+        }
+
+        @Override
+        public double power(List<GateBounds.MemoryCounts> writing, double trueWrongShare,
+                            double limit, double tail) {
+            return 1;
+        }
+
+        @Override
+        public int recordsNeeded(int wrong, double limit, double tail) {
+            return 1;
+        }
+    };
+
+    @Test
+    void aHeldOutSplitCertifiesOverTheMemoriesInPlaceAndStopsAtAgreement() throws Exception {
+        var store = MemoryStoreFactory.get();
+        var texts = List.of("The user works at Harborlight Analytics, which runs Kestrel CI for every release.",
+                "The user uses Kestrel CI at Harborlight Analytics every week.");
+        var memoryIds = new ArrayList<String>();
+        for (var text : texts) memoryIds.add(Tx.run(() -> store.storeDeferred(agentId, text, "fact", 0.5)));
+        var root = Files.createTempDirectory("grapheval-held-cert");
+        try {
+            var entries = new ArrayList<Map<String, Object>>();
+            for (int i = 0; i < texts.size(); i++) {
+                entries.add(Map.of("memoryId", Long.parseLong(memoryIds.get(i)), "labelled", true, "text", texts.get(i),
+                        "capturedAt", "2026-10-03", "authorType", "human_turn",
+                        "entities", List.of(Map.of("id", "operator", "mention", "The user", "type", "Person"),
+                                Map.of("id", "harborlight", "mention", "Harborlight Analytics", "type", "Organization"),
+                                Map.of("id", "kestrel", "mention", "Kestrel CI", "type", "System")),
+                        "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight",
+                                "status", "holds"))));
+            }
+            var file = root.resolve(HeldOut.FILE);
+            Files.writeString(file, GSON.toJson(Map.of("cases", entries)));
+            var loaded = HeldOut.load(file, SCHEMA);
+            var sequences = fixtureSequences();
+            var source = CertificationSplit.Source.heldout(Files.readString(file), loaded, sequences.fingerprint(),
+                    "the guide".getBytes(StandardCharsets.UTF_8), SCHEMA);
+            var split = CertificationSplit.freeze(root, "held-t", source, 1, null, null, 0.95, null, SCHEMA);
+            assertEquals(memoryIds, split.ids());
+            var held = new HashMap<String, HeldOut.HeldCase>();
+            loaded.cases().forEach(h -> held.put(String.valueOf(h.memoryId()), h));
+            var labels = loaded.cases().stream().map(HeldOut.HeldCase::labels).toList();
+            var request = new GraphEvalHarness.CertifyRequest(root, split, source, SCHEMA, null, null, held, sequences,
+                    List.of(new DecisionModel("tev1", both(labels, sequences, new ArrayList<>()))),
+                    Map.of("tev1", DIGEST), 1, 1, 0.2, 0.2, Certifier.DEFAULT_RECALL_FLOOR, 1, List.of(), null,
+                    List.of());
+            var report = GraphEvalHarness.certify(request, EvalProgress.none(), LENIENT);
+            var model = report.models().getFirst();
+            assertEquals("heldout", report.set());
+            assertEquals(0, model.memoriesChanged());
+            assertEquals(0, model.spotCheck().differing());
+            assertTrue(model.spotCheck().decisions() > 0, "the spot-check asked the held-out memory again");
+            assertEquals(0, model.failedDecisions());
+            assertEquals(Certifier.PENDING_AGREEMENT, model.verdict().status(), model.verdict().reasons().toString());
+            for (var text : texts) {
+                assertFalse(GSON.toJson(report).contains(text), "the report carries no memory text");
+            }
+            for (int i = 0; i < texts.size(); i++) {
+                var id = Long.parseLong(memoryIds.get(i));
+                assertEquals(texts.get(i), Tx.run(() -> Memory.<Memory>findById(id)).text);
+            }
+        } finally {
+            delete(root);
+            for (var id : memoryIds) Tx.run(() -> store.delete(id));
+        }
     }
 }

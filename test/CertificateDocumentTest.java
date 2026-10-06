@@ -65,8 +65,8 @@ class CertificateDocumentTest extends UnitTest {
                 new Certifier.Pooled(Certifier.G_TRAP, 228, 4, 0.040, true, POWER), List.of(), reached, true, List.of());
         var lineage = new Certifier.ClassWalk("lineage", 0.90, Certifier.PROVISIONAL, 80, 1, 0.058, List.of());
         var timeline = SequenceScorer.timeline(240, 205, 3, 10, 2, 200);
-        return CertificateDocument.of(model, DIGEST, Certifier.CERTIFIED, split, SCHEMA, EXTRACTION, sequencing, lineage,
-                timeline, SequenceScorer.REPORTED, 0.50);
+        return CertificateDocument.of(model, DIGEST, Certifier.CERTIFIED, split, "guide@333333333333", SCHEMA, EXTRACTION,
+                sequencing, lineage, timeline, SequenceScorer.REPORTED, 0.50);
     }
 
     @Test

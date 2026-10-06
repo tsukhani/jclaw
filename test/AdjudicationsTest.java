@@ -107,6 +107,9 @@ class AdjudicationsTest extends UnitTest {
         var gate = GraphEvalHarness.evaluation(configured(records), book).gates().get("uses");
         assertEquals(100, RecordBounds.n(gate.writing()));
         assertEquals(5, RecordBounds.k(gate.writing()));
+        var pooled = GraphEvalHarness.evaluation(configured(records), book).written();
+        assertEquals(100, RecordBounds.n(pooled));
+        assertEquals(5, RecordBounds.k(pooled), "G_written carries the agreed sample's weighted wrong too");
 
         var outside = verdict(unsampled.getFirst(), Adjudications.WRONG, Adjudications.OPERATOR, null);
         var ignored = new Adjudications.Book(List.of(outside), GUIDE, SEED, 0.2, 0.2);
@@ -145,6 +148,22 @@ class AdjudicationsTest extends UnitTest {
     }
 
     @Test
+    void theCheckIsDrawnApartFromTheAgreedSample() {
+        var records = agreed(3000, "uses");
+        var draw = new Adjudications.Book(List.of(), GUIDE, SEED, 0.2, 0.2);
+        var sampled = records.stream().filter(draw::sampled).toList();
+        var verdicts = sampled.stream().map(r -> verdict(r, Adjudications.RIGHT, "model:clef", null)).toList();
+        var j = new Adjudications.Book(verdicts, GUIDE, SEED, 0.2, 0.2).judge(records);
+        assertEquals(sampled.size(), j.sampled().size());
+        double share = (double) j.marked() / sampled.size();
+        assertTrue(share > 0.12 && share < 0.28, "about a fifth of the sampled verdicts, not all: " + share);
+        var wide = new Adjudications.Book(verdicts, GUIDE, SEED, 0.2, 0.5).judge(records);
+        double wideShare = (double) wide.marked() / sampled.size();
+        assertTrue(wideShare > 0.4 && wideShare < 0.6, "a check share above the agreed share still marks about it: "
+                + wideShare);
+    }
+
+    @Test
     void aSeededShareOfModelVerdictsIsMarkedAndAnUncheckedOneKeepsItPending() {
         var records = agreed(400, "uses");
         var book = new Adjudications.Book(List.of(), GUIDE, SEED, 1.0, 0.2);
@@ -158,7 +177,7 @@ class AdjudicationsTest extends UnitTest {
         var checked = new ArrayList<Verdict>();
         int[] n = {0};
         for (var r : records) {
-            boolean marked = Adjudications.sampled(SEED, r.caseId(), r.record(), 0.2);
+            boolean marked = book.checkMarked(r);
             String check = marked ? (n[0]++ % 4 == 0 ? Adjudications.DISAGREE : Adjudications.AGREE) : null;
             checked.add(verdict(r, Adjudications.RIGHT, "model:clef", check));
         }

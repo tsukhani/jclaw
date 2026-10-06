@@ -1009,9 +1009,6 @@ run             Scores every stage and the end-to-end pipeline over
                 probes; it needs no --agent and writes no memory.
                 Prints a line as each model finishes a run, and every 30 s the
                 runs under way.
-blind-sheet     Writes data/graph-eval/blind-sheet.json: the ids and text of the
-                blind 15% a second labeller labels into
-                evals/graph/second-labels.json.
                 With --split it is a certification run (protocol v2): the
                 split's set, then the sequence harness at the configuration
                 reached, once per model version (Ollama digest). It stores the
@@ -1019,6 +1016,9 @@ blind-sheet     Writes data/graph-eval/blind-sheet.json: the ids and text of the
                 the blind sheet under data/graph-eval/sheets/ and, when
                 certified, data/graph-eval/certificates/<model>.json. Without
                 --split, every frozen split's ids are left out.
+blind-sheet     Writes data/graph-eval/blind-sheet.json: the ids and text of the
+                blind 15% a second labeller labels into
+                evals/graph/second-labels.json.
 freeze-split    Freezes a certification split under data/graph-eval/splits/:
                 --share of the set drawn by --seed (the held-out set defaults to
                 all of it), or the --ids given. Refuses an existing name.

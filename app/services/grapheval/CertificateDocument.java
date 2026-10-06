@@ -40,9 +40,12 @@ public record CertificateDocument(JsonObject json) {
         json = json.deepCopy();
     }
 
-    /** The certificate of a certified sequencing; the sequences' lineage walk joins the qualifier classes. */
+    /**
+     * The certificate of a certified sequencing; the sequences' lineage walk joins the qualifier classes, and
+     * {@code guide} is the guide version its verdicts were judged under.
+     */
     public static CertificateDocument of(String model, String digest, String status, CertificationSplit split,
-                                         String schema, String extraction, Certifier.Sequencing sequencing,
+                                         String guide, String schema, String extraction, Certifier.Sequencing sequencing,
                                          ClassWalk lineage, Timeline timeline, String timelineResult,
                                          double recallFloor) {
         var o = new JsonObject();
@@ -54,7 +57,7 @@ public record CertificateDocument(JsonObject json) {
         o.addProperty("split", split.split());
         o.addProperty("cases", split.cases());
         o.addProperty("sequences", split.sequences());
-        o.addProperty("guide", split.guide());
+        o.addProperty("guide", guide);
         o.addProperty("startingThreshold", split.startingThreshold());
         o.add("terms", gate(sequencing.terms()));
         var relations = new JsonObject();

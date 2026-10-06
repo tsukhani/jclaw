@@ -41,6 +41,7 @@ public final class Adjudications {
     private static final Set<String> KEYS = Set.of("caseId", "record", "side", "verdict", "guide", "adjudicator",
             "inclusion", "check", "note");
     private static final double TWO_TO_64 = 0x1p64;
+    private static final String CHECK_PREFIX = "check:";
 
     private Adjudications() {}
 
@@ -199,6 +200,11 @@ public final class Adjudications {
             return v != null && v.side().equals(r.agreed() ? AGREED : UNMATCHED) ? v : null;
         }
 
+        /** The model-verdict check's own draw: the same hash rule over a key the agreed draw never uses. */
+        public boolean checkMarked(GateRecord r) {
+            return Adjudications.sampled(seed, r.caseId(), CHECK_PREFIX + r.record(), checkShare);
+        }
+
         /** 1 / inclusion when {@code r} is a sampled agreed record judged wrong, else 0. */
         public double agreedWrongWeight(GateRecord r) {
             if (!sampled(r)) return 0;
@@ -229,7 +235,7 @@ public final class Adjudications {
                     continue;
                 }
                 if (v.verdict().equals(LABEL_ERROR)) labelError = true;
-                if (!v.byModel() || !Adjudications.sampled(seed, r.caseId(), r.record(), checkShare)) continue;
+                if (!v.byModel() || !checkMarked(r)) continue;
                 marked++;
                 if (v.check() == null) continue;
                 checked++;

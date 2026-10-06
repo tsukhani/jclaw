@@ -3,6 +3,8 @@ package services.grapheval;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
 import memory.MemoryProvenance;
 import memory.MemoryStoreFactory;
 import memory.TemporalExpressions;
@@ -315,12 +317,17 @@ public final class GraphEvalHarness {
                                            List<DecisionModel> models, int runs, double recallFloor, int concurrency,
                                            EvalProgress progress, boolean pairFilter,
                                            List<Adjudications.Verdict> adjudications, DevOptions options) {
-        var cases = loaded.cases().stream().map(HeldOut.HeldCase::labels).toList();
+        // Cases go by memory id, as held-out verdicts and the agreed draw do; the report carries none of them.
+        var cases = new ArrayList<Case>();
         var memoryIds = new LinkedHashMap<String, String>();
         var held = new HashMap<String, HeldOut.HeldCase>();
         loaded.cases().forEach(h -> {
-            memoryIds.put(h.labels().id(), String.valueOf(h.memoryId()));
-            held.put(h.labels().id(), h);
+            var id = String.valueOf(h.memoryId());
+            var c = h.labels();
+            cases.add(new Case(id, c.tags(), c.text(), c.entities(), c.relations(), c.negatives(), c.capturedAt(),
+                    c.dates()));
+            memoryIds.put(id, id);
+            held.put(id, h);
         });
         var before = snapshot(memoryIds);
         var known = ownerName == null ? List.<String>of() : List.of(ownerName);
@@ -702,7 +709,7 @@ public final class GraphEvalHarness {
 
     /** Stored decisions scored the v2 way; {@code sequencing} is null on a void run. */
     private record V2(Certifier.@Nullable Sequencing sequencing, Tallies tallies, AgreedSample agreedSample,
-                      Adjudications.Judgement judgement) {}
+                      Adjudications.Judgement judgement, List<GraphEvalScorer.GateRecord> inScope) {}
 
     private static Development development(List<Case> cases, List<RunData> data, OntologySchema schema,
                                            List<Adjudications.Verdict> adjudications, DevOptions options,
@@ -762,7 +769,7 @@ public final class GraphEvalHarness {
         }
         return new V2(sequencing, tallies(atReached),
                 new AgreedSample(book.seed(), book.share(), Adjudications.DRAWN_AT, drawn.size()),
-                book.judge(List.copyOf(inScope.values())));
+                book.judge(List.copyOf(inScope.values())), List.copyOf(inScope.values()));
     }
 
     /** One run at one configuration as the certifier reads it: each memory's counts per gate, class and pooled gate. */
@@ -978,7 +985,7 @@ public final class GraphEvalHarness {
                 StoredRun.write(req.root(), new StoredRun(split.split(), m.name(), digest(req, m), schema.fingerprint(),
                         ExtractionPipeline.fingerprint(schema), req.agreedSeed(), req.agreedShare(), passes,
                         measured.spotChecks().get(m.name()), seqSpot, measured.integrity().checked()
-                        - measured.integrity().unchanged()));
+                        - measured.integrity().unchanged(), req.recallFloor()));
                 var stored = StoredRun.read(req.root(), split.split(), m.name(), schema);
                 SplitUses.append(req.root(), split.split(), m.name(), digest(req, m), ledgerState(stored));
                 var scored = scoreStored(stored, split, cases, req.sequences(), schema, guide, req.adjudications(),
@@ -1005,14 +1012,15 @@ public final class GraphEvalHarness {
     }
 
     /**
-     * Scores a stored certification run again under the verdicts on file, asking no model and redrawing nothing.
+     * Scores a stored certification run again under the verdicts on file and its own recall floor, asking no model
+     * and redrawing nothing.
      *
      * @throws IllegalArgumentException when a split hash drifted or the stored schema or extraction fingerprint is
      *                                  not the running one
      */
     public static CertificationReport rescore(Path root, CertificationSplit split, CertificationSplit.Source source,
                                               OntologySchema schema, String model, Sequences sequences,
-                                              double checkShare, double recallFloor, List<Case> secondLabels,
+                                              double checkShare, List<Case> secondLabels,
                                               @Nullable String secondLabelsReason,
                                               List<Adjudications.Verdict> adjudications) {
         var drift = split.verify(source);
@@ -1031,9 +1039,10 @@ public final class GraphEvalHarness {
             var cases = split.casesFrom(source);
             var agreement = Agreement.compare(cases, secondLabels, schema.symmetricSet()).withReason(secondLabelsReason);
             var scored = scoreStored(stored, split, cases, sequences, schema, source.guide(), adjudications,
-                    checkShare, recallFloor, agreement, RecordBounds.INSTANCE, TimezoneResolver.appZone());
+                    checkShare, stored.recallFloor(), agreement, RecordBounds.INSTANCE, TimezoneResolver.appZone());
             writeOutputs(root, split, scored);
-            return report(split, schema, source.guide(), cases.size(), recallFloor, agreement, List.of(scored.model()));
+            return report(split, schema, source.guide(), cases.size(), stored.recallFloor(), agreement,
+                    List.of(scored.model()));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -1073,7 +1082,7 @@ public final class GraphEvalHarness {
         if (verdict.status().equals(Certifier.CERTIFIED) && sequencing != null && seq != null) {
             var timeline = seq.runs().stream().map(SequenceHarness.RunReport::endToEnd)
                     .max((a, b) -> Double.compare(a.bound(), b.bound())).orElseThrow();
-            certificate = CertificateDocument.of(stored.model(), stored.digest(), verdict.status(), split,
+            certificate = CertificateDocument.of(stored.model(), stored.digest(), verdict.status(), split, guide,
                     stored.schema(), stored.extraction(), sequencing, seq.lineage(), timeline, seq.timeline(),
                     recallFloor);
         }
@@ -1082,7 +1091,7 @@ public final class GraphEvalHarness {
                 stored.passes().stream().map(StoredRun.Pass::stages).toList(), sequencing, v2.tallies(),
                 v2.agreedSample(), judgement.unjudgedByGate(), checks(book, judgement), seq, verdict,
                 certificate == null ? null : certificate.id());
-        return new Scored(model, sheet(split, guide, book, cases, judgement), certificate);
+        return new Scored(model, sheet(split, guide, book, cases, v2.inScope()), certificate);
     }
 
     /**
@@ -1091,14 +1100,13 @@ public final class GraphEvalHarness {
      * side a record is on or which model wrote it.
      */
     private static JsonObject sheet(CertificationSplit split, String guide, Adjudications.Book book, List<Case> cases,
-                                    Adjudications.Judgement judgement) {
+                                    List<GraphEvalScorer.GateRecord> inScope) {
         var texts = new HashMap<String, String>();
         cases.forEach(c -> texts.put(c.id(), c.text()));
         var records = new ArrayList<GraphEvalScorer.GateRecord>();
-        judgement.unjudged().forEach(records::add);
-        judgement.sampled().forEach(r -> {
-            if (!records.contains(r)) records.add(r);
-        });
+        for (var r : inScope) {
+            if (!r.agreed() || book.sampled(r)) records.add(r);
+        }
         records.sort((a, b) -> a.caseId().equals(b.caseId()) ? a.record().compareTo(b.record())
                 : a.caseId().compareTo(b.caseId()));
         var out = new JsonArray();
@@ -1129,7 +1137,21 @@ public final class GraphEvalHarness {
         Files.createDirectories(sheet.getParent());
         Files.writeString(sheet, GSON.toJson(scored.sheet()));
         var certificate = scored.certificate();
-        if (certificate != null) certificate.write(root);
+        if (certificate != null) {
+            certificate.write(root);
+            return;
+        }
+        var stale = CertificateDocument.path(root, scored.model().model());
+        if (!Files.exists(stale)) return;
+        try {
+            var held = JsonParser.parseString(Files.readString(stale));
+            var heldSplit = held.isJsonObject() ? held.getAsJsonObject().get("split") : null;
+            if (heldSplit != null && heldSplit.isJsonPrimitive() && heldSplit.getAsString().equals(split.split())) {
+                Files.delete(stale);
+            }
+        } catch (JsonParseException _) {
+            // Not a certificate this split wrote; leave it for the reader to refuse.
+        }
     }
 
     /** A held-out split's memories measured where they live, with a single run's spot-check. */

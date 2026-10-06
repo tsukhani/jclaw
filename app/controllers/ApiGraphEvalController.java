@@ -370,7 +370,7 @@ public class ApiGraphEvalController extends Controller {
         GraphEvalHarness.CertificationReport report;
         try {
             report = GraphEvalHarness.rescore(root(), split, inputs.source(), schema, model, sequences(schema),
-                    checkShare, Certifier.DEFAULT_RECALL_FLOOR, inputs.secondLabels(), inputs.secondLabelsReason(),
+                    checkShare, inputs.secondLabels(), inputs.secondLabelsReason(),
                     inputs.verdicts());
         } catch (IllegalArgumentException e) {
             throw invalid(String.valueOf(e.getMessage()));

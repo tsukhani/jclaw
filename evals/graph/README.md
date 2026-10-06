@@ -500,7 +500,8 @@ files live under `data/graph-eval/`, which is gitignored, and never leave that m
    the owner's voice. A file holding memories of two agents is refused.
 
 The held-out report carries aggregate counts only: no memory id, text, span or per-case
-result. Without a split its walk is information; a held-out split certifies like the committed set. Its progress lines and a
+result. Without a split its walk is information. A held-out split runs like the committed set, but
+no second-label source covers it yet, so it always stops at `pending-agreement`. Its progress lines and a
 failure's message are held to the same rule.
 
 ## Sequences

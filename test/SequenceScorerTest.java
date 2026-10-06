@@ -124,4 +124,15 @@ class SequenceScorerTest extends UnitTest {
                 SequenceScorer.REPORTED)));
         assertEquals(SequenceScorer.PASSED, SequenceScorer.overall(List.of(SequenceScorer.PASSED)));
     }
+
+    @Test
+    void theLineageWalkStartsAtOrBelowTheStartingThreshold() {
+        var walk = SequenceScorer.lineageWalk(judged(60, 0), false, 0.85);
+        assertTrue(walk.steps().stream().allMatch(s -> s.t() <= 0.85 + 1e-9), walk.steps().toString());
+        assertEquals(0.85, walk.steps().getFirst().t());
+        assertNotNull(walk.threshold());
+        assertTrue(walk.threshold() <= 0.85 + 1e-9, walk.toString());
+        assertEquals(0.95, SequenceScorer.lineageWalk(judged(60, 0), false).steps().getFirst().t(),
+                "the default start is the top of the grid");
+    }
 }
