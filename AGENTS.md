@@ -624,7 +624,7 @@ needs a check that Error Prone accepts `@MustBeClosed` on a method implemented t
 Java 25 cannot express a capability in a signature, and JEP 486 removed the
 SecurityManager, so nothing confines one at runtime either — which class may spawn a
 process or reach the database is invisible to both javac and the JVM. `ArchUnit`
-stands in for that at test time: `test/CapabilityRulesTest.java` holds five
+stands in for that at test time: `test/CapabilityRulesTest.java` holds six
 allowlists, one per authority the codebase actually exercises, and a class that picks
 up an authority it was never granted fails `play autotest` with a `because` clause
 naming the capability.
@@ -660,6 +660,7 @@ test hooks in `app/`, so banning them needs a frozen store rather than this list
 | Open an outbound connection | `utils.HttpFactories`, plus `utils.SsrfGuard` and `channels.TelegramBotApiHttpClients` for their own tuned clients; raw sockets only in `services.printing..`, `services.LocalSidecarDaemon` and `tools.BrowserScreenProxy` |
 | Reach the database | Everything except the subsystems `jobs.ShutdownJob` stops — teardown that needs a connection has no useful recovery when it cannot get one (JCLAW-1143) |
 | Act as the agent principal | Every routed `/api` action declares `@AgentAccess`: `OPEN`, `OWN_ONLY` or `OPERATOR_ONLY`, with no annotation meaning `OPERATOR_ONLY` (JCLAW-1270) |
+| Read raw memory-graph records | `memory.graph..` and `services.grapheval..` only: a raw record set reads former, denied, retracted and guest claims as current facts, which `memory.graph.GraphView` combines into one answer (JCLAW-1364) |
 
 Shell and filesystem carry pre-existing holders, so they run as `FreezingArchRule`s
 and the checked-in store under `archunit_store/` *is* the allowlist: a listed site

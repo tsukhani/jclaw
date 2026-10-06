@@ -34,10 +34,10 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 /**
- * The five authorities {@code app/} actually holds, each pinned to the classes allowed to
+ * The six authorities {@code app/} actually holds, each pinned to the classes allowed to
  * exercise it: spawn an OS process, resolve a model-controlled filesystem path, open an
- * outbound connection, reach the database, and mutate state on behalf of the agent
- * principal.
+ * outbound connection, reach the database, mutate state on behalf of the agent
+ * principal, and read raw memory-graph records.
  *
  * <p>Java 25 cannot express a capability in a signature, and JEP 486 removed the SecurityManager
  * so nothing confines one at runtime either — which class holds which authority is invisible to
