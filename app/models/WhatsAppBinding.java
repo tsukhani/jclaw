@@ -99,7 +99,7 @@ public class WhatsAppBinding extends AgentBoundBinding {
      * operator configures the one the agent should proactively reach (typically
      * their own phone for a personal assistant). DESTINATION ONLY, not access
      * control: Cloud-API inbound stays open (see {@link channels.WhatsAppAccessPolicy}).
-     * The WhatsApp-Web analog is {@link #pairedJid}; null for WHATSAPP_WEB. An
+     * The WhatsApp-Web analog is {@link #ownerNumber}; null for WHATSAPP_WEB. An
      * out-of-window proactive send to it uses {@link #templateName}/{@link
      * #templateLanguage}. Nullable, so the ALTER on a populated table needs no
      * {@code @ColumnDefault}.
@@ -203,6 +203,17 @@ public class WhatsAppBinding extends AgentBoundBinding {
     /** JCLAW-730: masked {@link #appSecret} for any display/log path. */
     public String maskedAppSecret() {
         return mask(appSecret);
+    }
+
+    /**
+     * Where a proactive send with no explicit or conversation target goes: for
+     * WhatsApp-Web the owner number as a phone JID, else the paired account itself;
+     * for Cloud-API the {@link #defaultTarget}. Null when none is configured.
+     */
+    public String proactiveTarget() {
+        if (transport != WhatsAppTransport.WHATSAPP_WEB) return defaultTarget;
+        if (ownerNumber == null || ownerNumber.isBlank()) return pairedJid;
+        return ownerNumber.replaceAll("\\D", "") + "@s.whatsapp.net";
     }
 
     /** JCLAW-730: masked {@link #verifyToken} for any display/log path. */

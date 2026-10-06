@@ -207,4 +207,27 @@ class WhatsAppBindingTest extends UnitTest {
         b.enabled = enabled;
         b.save();
     }
+
+    @Test
+    void proactiveTargetPrefersTheWebOwnerNumberOverThePairedAccount() {
+        var web = new WhatsAppBinding();
+        web.transport = WhatsAppTransport.WHATSAPP_WEB;
+        assertNull(web.proactiveTarget(), "unpaired, no owner");
+        web.pairedJid = "15559998888@s.whatsapp.net";
+        assertEquals("15559998888@s.whatsapp.net", web.proactiveTarget(), "no owner: the paired account");
+        web.ownerNumber = " ";
+        assertEquals("15559998888@s.whatsapp.net", web.proactiveTarget(), "a blank owner is no owner");
+        web.ownerNumber = "+15551234567";
+        assertEquals("15551234567@s.whatsapp.net", web.proactiveTarget(), "the owner number as a phone JID");
+    }
+
+    @Test
+    void proactiveTargetOnCloudIsTheDefaultTargetWhateverTheOwnerNumber() {
+        var cloud = new WhatsAppBinding();
+        cloud.transport = WhatsAppTransport.CLOUD_API;
+        cloud.ownerNumber = "+15551234567";
+        assertNull(cloud.proactiveTarget());
+        cloud.defaultTarget = "+15550001111";
+        assertEquals("+15550001111", cloud.proactiveTarget());
+    }
 }

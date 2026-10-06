@@ -11,7 +11,6 @@ import models.Conversation;
 import models.SlackBinding;
 import models.TelegramBinding;
 import models.WhatsAppBinding;
-import models.WhatsAppTransport;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.DeliveryDispatcher;
@@ -507,10 +506,9 @@ public class MessageTool implements ToolRegistry.Tool {
      * <ul>
      *   <li>{@code slack} → {@link SlackBinding#ownerUserId}; a user id, which the send path
      *       resolves to the owner's DM channel via {@code conversations.open} (JCLAW-1018).</li>
-     *   <li>{@code whatsapp} → {@link WhatsAppBinding#pairedJid} for the WhatsApp-Web
-     *       transport (the paired account), {@link WhatsAppBinding#defaultTarget} for
-     *       Cloud-API (the operator-configured recipient — a Cloud-API business
-     *       number has no inherent "owner").</li>
+     *   <li>{@code whatsapp} → {@link WhatsAppBinding#proactiveTarget}: the WhatsApp-Web
+     *       owner number, else the paired account; the Cloud-API
+     *       {@link WhatsAppBinding#defaultTarget} (a business number has no inherent "owner").</li>
      *   <li>anything else (e.g. {@code web}) → {@code null}; web is routed by the
      *       dispatcher to the parent-chain root conversation, not by a peer id.</li>
      * </ul>
@@ -527,10 +525,7 @@ public class MessageTool implements ToolRegistry.Tool {
         }
         if (CHANNEL_WHATSAPP.equalsIgnoreCase(channel)) {
             var binding = WhatsAppBinding.findByAgentOrAncestor(agent);
-            if (binding == null) return null;
-            return binding.transport == WhatsAppTransport.WHATSAPP_WEB
-                    ? binding.pairedJid
-                    : binding.defaultTarget;
+            return binding == null ? null : binding.proactiveTarget();
         }
         return null;
     }

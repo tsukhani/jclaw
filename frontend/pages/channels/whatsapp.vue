@@ -56,7 +56,7 @@ interface BindingForm {
   templateLanguage: string
   // JCLAW-425: Cloud-API proactive-send recipient (E.164). The agent's outbound
   // destination when a send has no explicit target / live conversation peer.
-  // Cloud-API only, optional (WhatsApp-Web uses its paired number instead).
+  // Cloud-API only, optional (WhatsApp-Web uses its owner number, else its paired number).
   defaultTarget: string
   // JCLAW-1408: WhatsApp-Web DM owner (E.164). WhatsApp-Web only, optional.
   ownerNumber: string
