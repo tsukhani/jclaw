@@ -138,7 +138,8 @@ const rows: { field: Field, label: string, hint: string }[] = [
     <p class="text-xs text-fg-muted">
       Export traces and metrics to an OpenTelemetry collector over OTLP. Off by
       default; nothing leaves this instance until you turn it on. Changes apply
-      immediately, including the collector address.
+      immediately, including the collector address; service.name takes effect at
+      the next restart.
     </p>
 
     <div class="bg-surface-elevated border border-border">

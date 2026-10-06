@@ -10,7 +10,8 @@ import services.EventLogger;
  * page isn't empty on first visit. Idempotent "seed if empty": runs at
  * {@code @OnApplicationStart} and no-ops once the {@code prompt} table has any
  * row (including after the operator has added or deleted their own), so it never
- * fights the operator's curation — deleting all sample prompts keeps them gone.
+ * fights the operator's curation — deleted samples stay gone while any prompt remains,
+ * and only a library emptied completely is seeded again at the next start.
  *
  * <p>Categories are the fixed {@link Prompt.Category} enum, so nothing needs
  * seeding for them; only the sample prompts are inserted here.

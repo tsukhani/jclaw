@@ -1531,7 +1531,7 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
         Main Agent
       </h2>
       <p class="text-xs text-fg-muted">
-        The built-in singleton agent. Always enabled, cannot be renamed or deleted. Handles admin chat and acts as the fallback route for channels without an explicit binding.
+        The built-in singleton agent. Always enabled, cannot be renamed or deleted. Chat opens on it; channels reach it only through a binding, like any other agent.
       </p>
       <div
         class="bg-surface-elevated border border-border"

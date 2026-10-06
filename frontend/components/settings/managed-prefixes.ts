@@ -4,8 +4,7 @@
 // exact-key knowledge about other pages' config.
 export const MANAGED_PREFIXES: readonly string[] = [
   'alerts.', // Operator alert destination (alerts.delivery) — Settings (Alerts). JCLAW-1279.
-  'app.', // Operator-wide settings — Settings (Timezone). app.timezone = the
-  // assistant's wall-clock zone injected into the system prompt.
+  'app.', // Operator-wide settings — Settings (Timezone): app.timezone, the prompt's wall-clock zone.
   'provider.', // LLM providers — Settings
   'dispatcher.', // OkHttp dispatcher caps — Settings (Performance)
   'transcription.', // Transcription provider + local model — Settings (Transcription)

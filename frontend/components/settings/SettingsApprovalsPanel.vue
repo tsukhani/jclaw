@@ -108,7 +108,8 @@ async function save(value: string) {
 
       <p class="text-xs text-fg-muted">
         An agent that you have previously granted &ldquo;always allow&rdquo; for a tool
-        runs it without a prompt on any origin, independently of this setting.
+        runs it without a prompt on your own turns — the web UI, or a Telegram/Slack message
+        the channel proves is yours — independently of this setting. Anyone else's turn still asks.
       </p>
 
       <div class="bg-surface-elevated border border-border">

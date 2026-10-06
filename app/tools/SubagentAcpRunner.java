@@ -63,9 +63,9 @@ final class SubagentAcpRunner {
     private static final int ACP_MAX_OUTPUT_BYTES = 400_000;
 
     // Recognized harness ids. "pi"/"claude" have dedicated streaming adapters;
-    // "codex"/"gemini"/"opencode" are valid ids without a dedicated adapter yet —
-    // they run via the batch/generic path (an unregistered id degrades to batch,
-    // never errors) until a bespoke adapter lands. "generic" is the fallback.
+    // the others are valid ids without a dedicated adapter yet and run via the
+    // batch/generic path until a bespoke adapter lands. An id outside this set
+    // refuses the spawn (JCLAW-659). "generic" is the default.
     private static final Set<String> ACP_HARNESS_IDS =
             Set.of("pi", "claude", "codex", "gemini", "opencode", "antigravity",
                     SubagentSpawnTool.DEFAULT_ACP_HARNESS);

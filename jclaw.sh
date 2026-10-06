@@ -771,7 +771,7 @@ Tail the production application log (logs/application.log) — equivalent
 to 'tail -f' on that file. Ctrl+C to exit.
 
 Options:
-  --dev                   Tail the dev-mode backend log instead
+  --dev                   Tail the dev-mode backend and frontend logs instead
 
 Example:
   ${INVOKE} logs
@@ -798,9 +798,10 @@ installs made by the one-line installer or an unzipped release archive —
 a git clone is refused (use 'git pull'), as is a container (upgrade the
 image with 'docker compose pull && docker compose up -d').
 
-The release is downloaded, checksum-verified and unpacked while JClaw is
-still serving, so a network or disk failure costs no downtime at all.
-Only then is the instance stopped and the tree replaced.
+The release is downloaded, verified against its signature and checksum,
+and unpacked while JClaw is still serving, so a network or disk failure
+costs no downtime at all. Only then is the instance stopped and the tree
+replaced.
 
 Kept across the upgrade:
   data/ (database, attachments, search index), workspace/, logs/,
