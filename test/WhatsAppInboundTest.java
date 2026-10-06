@@ -210,6 +210,42 @@ class WhatsAppInboundTest extends UnitTest {
         }
     }
 
+    @Test
+    void dispatchDropsADirectMessageToAnOwnerlessMainWebBinding() {
+        // "MAIN": isMain() is case-insensitive, findByName exact, so the provisioned main row is untouched.
+        var agentId = commitInFreshTx(() -> {
+            var a = new Agent();
+            a.name = "MAIN";
+            a.modelProvider = "test-provider";
+            a.modelId = "test-model";
+            a.enabled = true;
+            a.save();
+            return a.id;
+        });
+        var binding = commitInFreshTx(() -> {
+            var b = new WhatsAppBinding();
+            b.transport = WhatsAppTransport.WHATSAPP_WEB;
+            b.agent = Agent.findById(agentId);
+            b.enabled = false;
+            b.save();
+            return b;
+        });
+        try {
+            var logged = EventLogger.captureForTest(() -> WhatsAppInbound.dispatchMessage(binding, dmFrom(OTHER_JID)));
+            assertTrue(logged.stream().anyMatch(e -> e.message().contains("dropped by access policy")),
+                    logged.toString());
+            assertTrue(logged.stream().noneMatch(e -> e.message().startsWith("Message received")), logged.toString());
+        } finally {
+            commitInFreshTx(() -> {
+                WhatsAppBinding b = WhatsAppBinding.findById(binding.id);
+                if (b != null) b.delete();
+                Agent a = Agent.findById(agentId);
+                if (a != null) a.delete();
+                return null;
+            });
+        }
+    }
+
     private static <T> T commitInFreshTx(Supplier<T> block) {
         var ref = new AtomicReference<T>();
         var err = new AtomicReference<Throwable>();

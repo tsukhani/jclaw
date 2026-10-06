@@ -286,7 +286,9 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
         String raw = readOptionalString(body, KEY_OWNER_NUMBER);
         if (raw == null) return null;
         var digits = raw.replaceAll("\\D", "");
-        if (!OWNER_NUMBER_SHAPE.matcher(raw).matches() || digits.length() < 7 || digits.length() > 15) {
+        // A leading 0 is a trunk or international prefix, never a country code, so it can never match a sender.
+        if (!OWNER_NUMBER_SHAPE.matcher(raw).matches() || digits.length() < 7 || digits.length() > 15
+                || digits.startsWith("0")) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
                     "ownerNumber must be an E.164 phone number, e.g. +15551234567");
         }

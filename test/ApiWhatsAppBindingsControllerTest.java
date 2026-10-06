@@ -286,7 +286,7 @@ class ApiWhatsAppBindingsControllerTest extends FunctionalTest {
         var id = seedDisabledWebBinding(seedAgent("wb-owner-update-bad"));
         assertIsOk(PUT("/api/channels/whatsapp/bindings/" + id, "application/json",
                 "{\"ownerNumber\": \"+15551234567\"}"));
-        for (var bad : new String[] {"+123456", "+1234567890123456", "+1555abc4567"}) {
+        for (var bad : new String[] {"+123456", "+1234567890123456", "+1555abc4567", "0412 345 678"}) {
             var response = PUT("/api/channels/whatsapp/bindings/" + id, "application/json",
                     "{\"ownerNumber\": \"" + bad + "\", \"enabled\": true}");
             assertEquals(400, response.status.intValue(), bad);

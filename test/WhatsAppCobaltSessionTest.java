@@ -72,10 +72,10 @@ class WhatsAppCobaltSessionTest extends UnitTest {
 
     @Test
     void selfOriginatedMessagesAreDroppedBeforeCaching() {
-        // JCLAW-450 C1: Cobalt syncs the paired account's OWN
-        // sent messages back as inbound (fromMe=true). They must be dropped at the
-        // top of the handler — never cached, parsed, or dispatched — or the bot would
-        // loop on its own replies. The drop returns before any DB/connection touch.
+        // JCLAW-450 C1: Cobalt syncs the paired account's OWN sent messages back as
+        // inbound (fromMe=true). They must be dropped at the top of the handler —
+        // never cached, parsed, or dispatched — or the bot would loop on its own
+        // replies. The drop returns before any DB/connection touch.
         var session = new WhatsAppCobaltSession(99L);
         session.onNewChatMessage(info("SELF-1", true));
         assertNull(session.recentMessage("SELF-1"), "a fromMe frame must not be cached (dropped)");
