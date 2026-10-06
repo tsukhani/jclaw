@@ -222,6 +222,94 @@ class ApiWhatsAppBindingsControllerTest extends FunctionalTest {
         assertFalse(obj.get("hasAccessToken").getAsBoolean());
     }
 
+    // ===== JCLAW-1408: WhatsApp-Web owner number =====
+
+    private Long seedDisabledWebBinding(Long agentId) {
+        return commitInFreshTx(() -> {
+            var b = new WhatsAppBinding();
+            b.agent = Agent.findById(agentId);
+            b.transport = WhatsAppTransport.WHATSAPP_WEB;
+            b.enabled = false;
+            b.save();
+            return b.id;
+        });
+    }
+
+    private static String storedOwnerNumber(Long id) {
+        return commitInFreshTx(() -> ((WhatsAppBinding) WhatsAppBinding.findById(id)).ownerNumber);
+    }
+
+    @Test
+    void createStoresTheOwnerNumberAtBothDigitBounds() {
+        login();
+        for (var number : new String[] {"+1234567", "+123456789012345"}) {
+            var agentId = seedAgent("wb-owner-create-" + number.length());
+            var response = POST("/api/channels/whatsapp/bindings", "application/json", """
+                    {"transport": "WHATSAPP_WEB", "agentId": %d, "enabled": false, "ownerNumber": "%s"}
+                    """.formatted(agentId, number));
+            assertIsOk(response);
+            var obj = JsonParser.parseString(getContent(response)).getAsJsonObject();
+            assertEquals(number, obj.get("ownerNumber").getAsString());
+        }
+    }
+
+    @Test
+    void createRejectsAMalformedOwnerNumber() {
+        login();
+        var agentId = seedAgent("wb-owner-create-bad");
+        var response = POST("/api/channels/whatsapp/bindings", "application/json", """
+                {"transport": "WHATSAPP_WEB", "agentId": %d, "enabled": false, "ownerNumber": "+123456"}
+                """.formatted(agentId));
+        assertEquals(400, response.status.intValue());
+        assertTrue(getContent(response).contains("E.164"), getContent(response));
+        assertEquals(0L, (long) commitInFreshTx(() -> WhatsAppBinding.count("agent.id = ?1", agentId)));
+    }
+
+    @Test
+    void updateNormalizesTheOwnerNumberAtBothDigitBounds() {
+        login();
+        var id = seedDisabledWebBinding(seedAgent("wb-owner-update"));
+        var seven = PUT("/api/channels/whatsapp/bindings/" + id, "application/json", "{\"ownerNumber\": \"1234567\"}");
+        assertIsOk(seven);
+        assertEquals("+1234567", JsonParser.parseString(getContent(seven)).getAsJsonObject()
+                .get("ownerNumber").getAsString());
+        var fifteen = PUT("/api/channels/whatsapp/bindings/" + id, "application/json",
+                "{\"ownerNumber\": \"+1 (234) 567-890-12345\"}");
+        assertIsOk(fifteen);
+        assertEquals("+123456789012345", JsonParser.parseString(getContent(fifteen)).getAsJsonObject()
+                .get("ownerNumber").getAsString());
+    }
+
+    @Test
+    void updateRejectsAMalformedOwnerNumberAndKeepsTheStoredOne() {
+        login();
+        var id = seedDisabledWebBinding(seedAgent("wb-owner-update-bad"));
+        assertIsOk(PUT("/api/channels/whatsapp/bindings/" + id, "application/json",
+                "{\"ownerNumber\": \"+15551234567\"}"));
+        for (var bad : new String[] {"+123456", "+1234567890123456", "+1555abc4567", "0412 345 678"}) {
+            var response = PUT("/api/channels/whatsapp/bindings/" + id, "application/json",
+                    "{\"ownerNumber\": \"" + bad + "\", \"enabled\": true}");
+            assertEquals(400, response.status.intValue(), bad);
+            assertEquals("+15551234567", storedOwnerNumber(id), bad);
+        }
+    }
+
+    @Test
+    void updateClearsTheOwnerNumber() {
+        login();
+        var id = seedDisabledWebBinding(seedAgent("wb-owner-clear"));
+        for (var clear : new String[] {"\"\"", "null"}) {
+            assertIsOk(PUT("/api/channels/whatsapp/bindings/" + id, "application/json",
+                    "{\"ownerNumber\": \"+15551234567\"}"));
+            var response = PUT("/api/channels/whatsapp/bindings/" + id, "application/json",
+                    "{\"ownerNumber\": " + clear + "}");
+            assertIsOk(response);
+            assertTrue(JsonParser.parseString(getContent(response)).getAsJsonObject()
+                    .get("ownerNumber").isJsonNull(), clear);
+            assertNull(storedOwnerNumber(id), clear);
+        }
+    }
+
     @Test
     void createRequiresAgentId() {
         login();

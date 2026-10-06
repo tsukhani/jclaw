@@ -56,8 +56,10 @@ interface BindingForm {
   templateLanguage: string
   // JCLAW-425: Cloud-API proactive-send recipient (E.164). The agent's outbound
   // destination when a send has no explicit target / live conversation peer.
-  // Cloud-API only, optional (WhatsApp-Web uses its paired owner instead).
+  // Cloud-API only, optional (WhatsApp-Web uses its owner number, else its paired number).
   defaultTarget: string
+  // JCLAW-1408: WhatsApp-Web DM owner (E.164). WhatsApp-Web only, optional.
+  ownerNumber: string
   agentId: number | null
   agentQuery: string
 }
@@ -71,6 +73,7 @@ const emptyForm = (): BindingForm => ({
   templateName: '',
   templateLanguage: '',
   defaultTarget: '',
+  ownerNumber: '',
   agentId: null,
   agentQuery: '',
 })
@@ -115,6 +118,7 @@ function openEdit(binding: WhatsAppBindingSummary) {
     templateName: binding.templateName ?? '',
     templateLanguage: binding.templateLanguage ?? '',
     defaultTarget: binding.defaultTarget ?? '',
+    ownerNumber: binding.ownerNumber ?? '',
     agentId: binding.agentId,
     agentQuery: binding.agentName ?? '',
   }
@@ -164,8 +168,10 @@ async function save() {
   // (the card toggle is the only control for it).
   if (!editing.value) body.enabled = true
   // Cloud-API fields: send only when provided. phoneNumberId/defaultTarget are
-  // identifiers (sent as-is); secrets blank-to-keep. WhatsApp-Web sends none.
+  // identifiers (sent as-is); secrets blank-to-keep.
   // (JCLAW-445 template + JCLAW-425 default recipient are optional too.)
+  // WhatsApp-Web sends only its owner number, null to clear it.
+  if (!isCloud.value) body.ownerNumber = form.value.ownerNumber.trim() || null
   if (isCloud.value) {
     putTrimmed(body, 'phoneNumberId', form.value.phoneNumberId)
     putTrimmed(body, 'accessToken', form.value.accessToken)
@@ -530,6 +536,29 @@ onBeforeUnmount(stopPoll)
             </li>
           </ul>
         </div>
+
+        <template v-if="!isCloud">
+          <label
+            for="binding-owner-number"
+            class="block"
+          >
+            <span class="block text-xs text-fg-muted mb-1">owner number (optional)</span>
+            <input
+              id="binding-owner-number"
+              v-model="form.ownerNumber"
+              type="text"
+              placeholder="e.g. +15551234567 (E.164)"
+              class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong
+                     focus:outline-hidden focus:border-ring transition-colors"
+            >
+          </label>
+          <p class="text-xs text-fg-muted">
+            With an owner set, only that number gets direct-message replies. With
+            none, anyone does — except on a Main Agent binding, which answers no
+            direct message until one is set. Groups answer any member who
+            @mentions the bot.
+          </p>
+        </template>
 
         <template v-if="isCloud">
           <div class="p-3 border border-border text-xs text-fg-muted space-y-1">

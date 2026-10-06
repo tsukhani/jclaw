@@ -71,7 +71,7 @@ public final class WhatsAppCobaltParser {
      * Translate one Cobalt {@link ChatMessageInfo} into a normalized
      * {@link WhatsAppInboundMessage}, or {@code null} when the message carries no
      * routable content. {@code botJid} is this session's own paired JID (the
-     * binding owner), used only to resolve {@code botMentioned} in groups; null
+     * bot's own identity), used only to resolve {@code botMentioned} in groups; null
      * when unknown (group mentions then never match, which is the safe default —
      * the access gate simply ignores the message rather than over-serving it).
      */

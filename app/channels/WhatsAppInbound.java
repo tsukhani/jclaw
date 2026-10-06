@@ -4,6 +4,7 @@ import agents.AgentRunner;
 import models.Agent;
 import models.DeliveredMessage;
 import models.WhatsAppBinding;
+import models.WhatsAppTransport;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
@@ -57,9 +58,14 @@ public final class WhatsAppInbound {
             dispatchReaction(binding, msg);
             return;
         }
-        // Access gate: owner-in-DM, mention-gated groups; an owner-less (Cloud-API
-        // business) binding serves its DMs openly.
-        if (!WhatsAppAccessPolicy.isAllowed(binding.ownerJid, msg.from(), msg.chatType(), msg.botMentioned())) {
+        var bindingId = binding.id;
+        var agentIsMain = binding.transport == WhatsAppTransport.WHATSAPP_WEB
+                && Boolean.TRUE.equals(Tx.run(() -> {
+                    WhatsAppBinding b = WhatsAppBinding.findById(bindingId);
+                    return b != null && b.agent != null && b.agent.isMain();
+                }));
+        // No DangerousActionGate.withOwnerInitiated here: every WhatsApp sender is a guest.
+        if (!admitted(binding, msg, agentIsMain)) {
             EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
                     "Message from %s in %s (%s) dropped by access policy".formatted(
                             msg.from(), msg.chatId(), msg.chatType()));
@@ -68,8 +74,17 @@ public final class WhatsAppInbound {
         EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
                 "Message received from %s in %s".formatted(msg.from(), msg.chatId()));
 
-        var bindingId = binding.id;
         Thread.ofVirtual().name("whatsapp-inbound").start(() -> processMessage(bindingId, msg));
+    }
+
+    /**
+     * Whether the access policy serves {@code msg}. The owner number and the Main Agent
+     * rule apply to WhatsApp-Web only; a Cloud-API binding keeps its open DMs.
+     */
+    public static boolean admitted(WhatsAppBinding binding, WhatsAppInboundMessage msg, boolean agentIsMain) {
+        var web = binding.transport == WhatsAppTransport.WHATSAPP_WEB;
+        return WhatsAppAccessPolicy.isAllowed(web ? binding.ownerNumber : null, msg.from(), msg.chatType(),
+                msg.botMentioned(), web && agentIsMain);
     }
 
     /**

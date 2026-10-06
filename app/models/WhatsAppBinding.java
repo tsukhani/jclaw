@@ -75,13 +75,21 @@ public class WhatsAppBinding extends AgentBoundBinding {
     public String verifyToken;
 
     /**
-     * The WhatsApp JID of the user who paired a WhatsApp-Web binding (JCLAW-450),
-     * used by {@link channels.WhatsAppAccessPolicy} as the DM owner. Null for
-     * Cloud-API bindings (a business number has no single "owner" — its DMs are
-     * open) and until pairing completes.
+     * The JID of the account a WhatsApp-Web binding paired as — the bot's own
+     * identity, used for group mention-gating, paired state and proactive sends;
+     * never an owner. Null for Cloud-API bindings and until pairing completes. The
+     * column keeps its pre-JCLAW-1408 name: every value in it was written by pairing.
      */
     @Column(name = "owner_jid")
-    public String ownerJid;
+    public String pairedJid;
+
+    /**
+     * WhatsApp-Web DM owner (E.164, {@code +<digits>}): with it set only that number
+     * gets direct-message replies (see {@link channels.WhatsAppAccessPolicy}). Ignored
+     * on Cloud-API bindings. Nullable.
+     */
+    @Column(name = "owner_number")
+    public String ownerNumber;
 
     /**
      * Cloud-API proactive-send recipient (E.164), the agent's per-agent outbound
@@ -91,7 +99,7 @@ public class WhatsAppBinding extends AgentBoundBinding {
      * operator configures the one the agent should proactively reach (typically
      * their own phone for a personal assistant). DESTINATION ONLY, not access
      * control: Cloud-API inbound stays open (see {@link channels.WhatsAppAccessPolicy}).
-     * The WhatsApp-Web analog is {@link #ownerJid}; null for WHATSAPP_WEB. An
+     * The WhatsApp-Web analog is {@link #ownerNumber}; null for WHATSAPP_WEB. An
      * out-of-window proactive send to it uses {@link #templateName}/{@link
      * #templateLanguage}. Nullable, so the ALTER on a populated table needs no
      * {@code @ColumnDefault}.
@@ -195,6 +203,17 @@ public class WhatsAppBinding extends AgentBoundBinding {
     /** JCLAW-730: masked {@link #appSecret} for any display/log path. */
     public String maskedAppSecret() {
         return mask(appSecret);
+    }
+
+    /**
+     * Where a proactive send with no explicit or conversation target goes: for
+     * WhatsApp-Web the owner number as a phone JID, else the paired account itself;
+     * for Cloud-API the {@link #defaultTarget}. Null when none is configured.
+     */
+    public String proactiveTarget() {
+        if (transport != WhatsAppTransport.WHATSAPP_WEB) return defaultTarget;
+        if (ownerNumber == null || ownerNumber.isBlank()) return pairedJid;
+        return ownerNumber.replaceAll("\\D", "") + "@s.whatsapp.net";
     }
 
     /** JCLAW-730: masked {@link #verifyToken} for any display/log path. */

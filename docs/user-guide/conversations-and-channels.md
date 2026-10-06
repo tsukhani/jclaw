@@ -137,9 +137,9 @@ Cloud-API integration via Meta's WhatsApp Business Platform. Like Slack and Tele
 
 Save, enable, and point Meta's webhook at JClaw per the WhatsApp Cloud API docs.
 
-A Cloud-API binding takes two optional extras: a pre-approved **messaging template** (name + language) used for replies sent outside WhatsApp's 24-hour window, and a **default target** (an E.164 number) the agent sends to proactively when a send names no recipient and there is no live conversation peer. The binding's **transport** is **Cloud API (official)** by default and can instead be **WhatsApp-Web (unofficial)** — a QR-paired session through the Cobalt bridge that needs no Cloud-API credentials at all; proactive sends go to the paired owner.
+A Cloud-API binding takes two optional extras: a pre-approved **messaging template** (name + language) used for replies sent outside WhatsApp's 24-hour window, and a **default target** (an E.164 number) the agent sends to proactively when a send names no recipient and there is no live conversation peer. The binding's **transport** is **Cloud API (official)** by default and can instead be **WhatsApp-Web (unofficial)** — a QR-paired session through the Cobalt bridge that needs no Cloud-API credentials at all; proactive sends go to the owner number when one is set, otherwise to the paired number itself.
 
-The form warns before you save a WhatsApp-Web binding: the client is unofficial and numbers get banned, so use a dedicated secondary number. To link it, save and enable the binding, then click **Pair** on its card. On the phone, open WhatsApp → Settings → Linked Devices → Link a Device and scan the code; it refreshes every few seconds until you do, and the panel shows **Connected ✓** once the session is paired. The account that scanned becomes the binding's owner, and it is also the bot's own number, so the binding answers group mentions but no direct messages (see the table below). The QR code is drawn in your browser — the pairing string is never sent to an outside service.
+The form warns before you save a WhatsApp-Web binding: the client is unofficial and numbers get banned, so use a dedicated secondary number. To link it, save and enable the binding, then click **Pair** on its card. On the phone, open WhatsApp → Settings → Linked Devices → Link a Device and scan the code; it refreshes every few seconds until you do, and the panel shows **Connected ✓** once the session is paired. The account that scanned is the bot's own number, not its owner, and its own messages are ignored. To restrict direct messages to you, set the WhatsApp-Web binding's optional **owner number** (E.164, e.g. `+15551234567`) to your own phone; without one, anyone may message the bot directly, except on a Main Agent binding (see the table below). The QR code is drawn in your browser — the pairing string is never sent to an outside service.
 
 WhatsApp has no **Test** button. Instead, saving a Cloud-API binding checks its credentials with Meta and refuses ones that fail, and the card then shows **Verified** with Meta's business name and number.
 
@@ -155,11 +155,12 @@ Each binding decides who reaches its agent; any other message is dropped without
 | Slack, owner user id set | Only the owner. | Only the owner, with an @mention. |
 | Slack, no owner | Anyone in the workspace, except on a Main Agent binding, which answers no one until an owner is set. | Any member, with an @mention; on a Main Agent binding, no one. |
 | WhatsApp Cloud API | Anyone. | — the Cloud API has no groups. |
-| WhatsApp-Web | No one. Only the owner passes, and the owner is the paired number itself, whose own messages are ignored. | Any member who @mentions the bot. |
+| WhatsApp-Web, owner number set | Only the owner. | Any member who @mentions the bot. |
+| WhatsApp-Web, no owner | Anyone, except on a Main Agent binding, which answers no direct message until an owner is set. | Any member who @mentions the bot. |
 
 On Slack, a reply in the thread of a post JClaw delivered, such as a task result, counts as an @mention (see [Sending a message](/guide#chat-sending-a-message)). Wake words are Telegram only.
 
-Being answered is not being trusted. A turn is yours — it can spend a standing approval granted with **✓ Always** and use `/subagent`, `/prompt` and the `/model` switch — only when its sender is the binding's owner, on Telegram or on a Slack binding with an owner set. Everyone else the bot answers is a guest: their dangerous-tool requests wait for your approval or fall to the [off-channel policy](/guide#settings-tool-approvals), and those commands are refused. Every WhatsApp sender is a guest, the paired owner included. On Telegram, only the owner's taps on an inline keyboard count.
+Being answered is not being trusted. A turn is yours — it can spend a standing approval granted with **✓ Always** and use `/subagent`, `/prompt` and the `/model` switch — only when its sender is the binding's owner, on Telegram or on a Slack binding with an owner set. Everyone else the bot answers is a guest: their dangerous-tool requests wait for your approval or fall to the [off-channel policy](/guide#settings-tool-approvals), and those commands are refused. Every WhatsApp sender is a guest, the owner number included. On Telegram, only the owner's taps on an inline keyboard count.
 
 ## How channels and conversations connect
 

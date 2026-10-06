@@ -308,3 +308,70 @@ describe('WhatsApp page — a failed binding switch (JCLAW-1221)', () => {
     }
   })
 })
+
+describe('WhatsApp-Web owner number (JCLAW-1408)', () => {
+  it('shows the owner field on WhatsApp-Web only', async () => {
+    const c = await mountSuspended(WhatsApp)
+    await c.findAll('button').find(b => b.text() === '+ New binding')!.trigger('click')
+    await nextTick()
+    expect(c.find('#binding-owner-number').exists()).toBe(false)
+    await c.find('#binding-transport').setValue('WHATSAPP_WEB')
+    await nextTick()
+    expect(c.find('#binding-owner-number').exists()).toBe(true)
+    expect(c.text()).toContain('Main Agent binding')
+  })
+
+  it('pre-fills the owner number on edit and sends it on save', async () => {
+    bindingsResponse = [binding({ id: 11, transport: 'WHATSAPP_WEB', phoneNumberId: null, ownerNumber: '+15551234567' })]
+    let sent: Record<string, unknown> | null = null
+    const off = registerEndpoint('/api/channels/whatsapp/bindings/11', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent = await readBody(event)
+        return binding({ id: 11, transport: 'WHATSAPP_WEB', ownerNumber: sent!.ownerNumber })
+      },
+    })
+    try {
+      const c = await mountSuspended(WhatsApp)
+      await flushPromises()
+      await c.find('[aria-label="Edit binding"]').trigger('click')
+      await nextTick()
+      const owner = c.find('#binding-owner-number')
+      expect((owner.element as HTMLInputElement).value).toBe('+15551234567')
+      await owner.setValue(' +15559990000 ')
+      await c.findAll('button').find(b => b.text() === 'Save')!.trigger('click')
+      await vi.waitFor(() => expect(sent).not.toBeNull())
+      expect(sent!.ownerNumber).toBe('+15559990000')
+    }
+    finally {
+      off()
+    }
+  })
+
+  it('sends null to clear the owner number', async () => {
+    bindingsResponse = [binding({ id: 12, transport: 'WHATSAPP_WEB', phoneNumberId: null, ownerNumber: '+15551234567' })]
+    let sent: Record<string, unknown> | null = null
+    const off = registerEndpoint('/api/channels/whatsapp/bindings/12', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent = await readBody(event)
+        return binding({ id: 12, transport: 'WHATSAPP_WEB', ownerNumber: null })
+      },
+    })
+    try {
+      const c = await mountSuspended(WhatsApp)
+      await flushPromises()
+      await c.find('[aria-label="Edit binding"]').trigger('click')
+      await nextTick()
+      await c.find('#binding-owner-number').setValue('')
+      await c.findAll('button').find(b => b.text() === 'Save')!.trigger('click')
+      await vi.waitFor(() => expect(sent).not.toBeNull())
+      expect(sent).toHaveProperty('ownerNumber', null)
+    }
+    finally {
+      off()
+    }
+  })
+})

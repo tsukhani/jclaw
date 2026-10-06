@@ -328,14 +328,14 @@ class MessageToolTest extends UnitTest {
 
     @Test
     void whatsappWebProactiveSendResolvesDestinationFromOwnerJid() throws Exception {
-        // WhatsApp-Web binding: its per-agent destination is the paired owner's JID.
+        // WhatsApp-Web binding: its per-agent destination is the paired account's JID.
         // A proactive send with no conversation resolves the target from
-        // WhatsAppBinding.ownerJid (JCLAW-425). Disabled to short-circuit dispatch.
+        // WhatsAppBinding.pairedJid (JCLAW-425). Disabled to short-circuit dispatch.
         Tx.run(() -> {
             var b = new WhatsAppBinding();
             b.agent = agent;
             b.transport = WhatsAppTransport.WHATSAPP_WEB;
-            b.ownerJid = "15559998888@s.whatsapp.net";
+            b.pairedJid = "15559998888@s.whatsapp.net";
             b.enabled = false;
             b.save();
         });
@@ -343,7 +343,7 @@ class MessageToolTest extends UnitTest {
                 "{\"action\":\"send\",\"message\":\"briefing\",\"channel\":\"whatsapp\"}");
         assertTrue(result.startsWith("Error: "), result);
         assertFalse(result.contains("no WhatsApp destination"),
-                "the WhatsApp-Web target must resolve from ownerJid, not the no-destination error: " + result);
+                "the WhatsApp-Web target must resolve from pairedJid, not the no-destination error: " + result);
         assertTrue(result.contains("disabled"),
                 "with the target resolved, dispatch proceeds and hits the disabled-binding branch: " + result);
     }

@@ -18,6 +18,7 @@ import services.EventLogger;
 import utils.ApiResponses;
 
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
@@ -55,6 +56,8 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     private static final String KEY_TEMPLATE_NAME = "templateName";
     private static final String KEY_TEMPLATE_LANGUAGE = "templateLanguage";
     private static final String KEY_DEFAULT_TARGET = "defaultTarget";
+    private static final String KEY_OWNER_NUMBER = "ownerNumber";
+    private static final Pattern OWNER_NUMBER_SHAPE = Pattern.compile("^\\+?[0-9 ()\\-]+$");
 
     private static final String CHANNEL_WHATSAPP = "whatsapp";
 
@@ -69,7 +72,7 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
                                 boolean hasVerifyToken,
                                 String verifiedName, String displayPhoneNumber,
                                 String templateName, String templateLanguage,
-                                String defaultTarget,
+                                String defaultTarget, String ownerNumber,
                                 boolean enabled, @Nullable String createdAt, @Nullable String updatedAt) {
         static BindingView of(WhatsAppBinding b) {
             return new BindingView(b.id,
@@ -85,6 +88,7 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
                     b.templateName,
                     b.templateLanguage,
                     b.defaultTarget,
+                    b.ownerNumber,
                     b.enabled,
                     b.createdAt != null ? b.createdAt.toString() : null,
                     b.updatedAt != null ? b.updatedAt.toString() : null);
@@ -124,6 +128,7 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
 
         String phoneNumberId = readOptionalString(body, KEY_PHONE_NUMBER_ID);
         String accessToken = readOptionalString(body, KEY_ACCESS_TOKEN);
+        String ownerNumber = readOwnerNumber(body);
         // The Cloud API needs an outbound sender (phoneNumberId) + auth (accessToken)
         // at minimum; appSecret/verifyToken are required for inbound but may be
         // filled in later (save-then-complete, mirroring Slack). WhatsApp-Web has
@@ -153,6 +158,7 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
         binding.templateLanguage = readOptionalString(body, KEY_TEMPLATE_LANGUAGE);
         // JCLAW-425: Cloud-API proactive-send recipient. An identifier, not a secret.
         binding.defaultTarget = readOptionalString(body, KEY_DEFAULT_TARGET);
+        binding.ownerNumber = ownerNumber;
         binding.enabled = !body.has(KEY_ENABLED) || body.get(KEY_ENABLED).getAsBoolean();
 
         // JCLAW-445: verify the Cloud-API credentials against the Graph API BEFORE
@@ -194,10 +200,12 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
         // edit (enable/disable, verifyToken) must not pay a Graph round-trip.
         String prevPhoneNumberId = binding.phoneNumberId;
         String prevAccessToken = binding.accessToken;
+        String ownerNumber = readOwnerNumber(body);
 
         applyPhoneNumberIdUpdate(binding, body);
         applyAgentUpdate(binding, body, WhatsAppBinding::findByAgent, "WhatsApp", "agent_already_bound");
         applyOptionalFieldUpdates(binding, body);
+        if (body.has(KEY_OWNER_NUMBER)) binding.ownerNumber = ownerNumber;
 
         boolean credentialsChanged =
                 !Objects.equals(prevPhoneNumberId, binding.phoneNumberId)
@@ -272,6 +280,20 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
     }
 
     // ── update helpers ──
+
+    /** The WhatsApp-Web DM owner normalized to {@code +<digits>}, null when absent or blank; 400 when not E.164. */
+    private static @Nullable String readOwnerNumber(JsonObject body) {
+        String raw = readOptionalString(body, KEY_OWNER_NUMBER);
+        if (raw == null) return null;
+        var digits = raw.replaceAll("\\D", "");
+        // A leading 0 is a trunk or international prefix, never a country code, so it can never match a sender.
+        if (!OWNER_NUMBER_SHAPE.matcher(raw).matches() || digits.length() < 7 || digits.length() > 15
+                || digits.startsWith("0")) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "ownerNumber must be an E.164 phone number, e.g. +15551234567");
+        }
+        return "+" + digits;
+    }
 
     /** phoneNumberId is an identifier (not a secret): always editable, with the
      *  same cross-binding uniqueness guard as create. */
