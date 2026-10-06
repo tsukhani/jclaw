@@ -155,7 +155,7 @@ class McpConnectionManagerTest extends UnitTest {
     // ==================== unhappy paths ====================
 
     @Test
-    void unreachableHttpServerSurfacesErrorAndRetriesWithBackoff() throws Exception {
+    void unreachableHttpServerSurfacesErrorAndRetriesWithBackoff() {
         // Point at a port that is almost certainly not listening.
         var cfg = new JsonObject();
         cfg.addProperty("url", "http://127.0.0.1:1/mcp");

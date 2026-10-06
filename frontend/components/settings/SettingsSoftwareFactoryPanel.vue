@@ -31,9 +31,10 @@ const harnessState = computed(() => status.value?.harness.state ?? 'unknown')
 const gatewayState = computed(() => status.value?.gateway.state ?? 'unknown')
 // Pause is `docker stop`, so a paused gateway reports Docker's `exited`.
 const gatewayPaused = computed(() => ['exited', 'paused', 'created'].includes(gatewayState.value))
-const gatewayLabel = computed(() => gatewayState.value === 'running'
-  ? 'running'
-  : gatewayPaused.value ? 'paused' : gatewayState.value)
+const gatewayLabel = computed(() => {
+  if (gatewayState.value === 'running') return 'running'
+  return gatewayPaused.value ? 'paused' : gatewayState.value
+})
 
 const result = ref<CommandResult | null>(null)
 

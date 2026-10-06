@@ -113,7 +113,10 @@ public final class FactoryInstallJob {
         if (SUCCEEDED.equals(state)) {
             EventLogger.info(CATEGORY, "Factory install finished: exit code 0");
         } else {
-            var why = timedOut ? "timed out" : exitCode != null ? "failed with exit code " + exitCode : "could not run";
+            String why;
+            if (timedOut) why = "timed out";
+            else if (exitCode != null) why = "failed with exit code " + exitCode;
+            else why = "could not run";
             EventLogger.warn(CATEGORY, "Factory install " + why, new FactoryProcess.ExecResult(
                     exitCode != null ? exitCode : -1, job.view().output(), timedOut).tail());
         }

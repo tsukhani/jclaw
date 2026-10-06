@@ -236,7 +236,7 @@ class ApiFactorySetupControllerTest extends FunctionalTest {
 
         var running = json(GET("/api/factory/setup/install/" + id));
         assertEquals("running", running.get("state").getAsString(), running.toString());
-        assertTrue(json(GET("/api/factory/setup")).get("installJobId").getAsString().equals(id));
+        assertEquals(id, json(GET("/api/factory/setup")).get("installJobId").getAsString());
 
         release.countDown();
         var done = awaitDone(id);

@@ -224,7 +224,7 @@ public final class FactoryStatus {
         Board board;
         try {
             board = GSON.fromJson(text, Board.class);
-        } catch (JsonParseException | IllegalStateException e) {
+        } catch (JsonParseException | IllegalStateException _) {
             return new BoardRead(null, "board.json is not valid JSON.");
         }
         if (board == null) return new BoardRead(null, "board.json is empty.");
