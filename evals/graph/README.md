@@ -153,9 +153,10 @@ the cl100k estimate is inflated by 1.25 since it is not the models' tokenizer), 
 never truncated. A request refused with HTTP 400 is split in half and retried; a question
 that cannot fit alone fails with `exceeds context`.
 
-Mentions are clustered by `ExactMatchResolver` (case-folded, a leading "the" and a
-possessive stripped). A Person whose surface normalizes to the declared owner name joins the
-operator's cluster.
+Mentions are clustered by `ExactMatchResolver` on the canonical key (lower case, a leading
+"the", "a" or "an" and a possessive stripped, punctuation removed, a Topic's last token made
+singular), or on the identifier key for a URL, path, ticket key or email. A Person whose
+surface normalizes to the declared owner name joins the operator's cluster.
 
 ## Scoring
 
@@ -167,7 +168,9 @@ operator's cluster.
 - relation: labelled pairs whose kept relation is the label, in its direction, at yes of at
   least 0.5; no-relation: unlabelled pairs, and pairs whose only label is denied, unasserted or
   an `ended` the type does not admit, whose kept relation is below 0.5;
-- resolution: B-cubed and pairwise precision and recall, and false merges, over gold mentions;
+- resolution: B-cubed and pairwise precision and recall over gold mentions, and false merges:
+  attached mentions whose gold differs from that of their Term's first mention, with their rate
+  over attachments and its Clopper-Pearson bound (reported, never gated);
 - dates (no model): date-finder recall over gold `dates` with a value, against
   `TemporalExpressions.find(text, capturedAt)`, and normalizer accuracy, the found spans with
   a reading equal to the label;
@@ -370,6 +373,20 @@ per model, at `data/graph-eval/certificates/<model>.json` (path-unsafe character
  "timeline": {"probes": 240, "definite": 205, "wrong": 3, "bound": 0.041, "result": "reported"},
  "recall": {"floor": 0.50}}
 ```
+
+An optional `resolution` section carries the entity-resolution shortlist threshold
+(JCLAW-1370), written only when a calibration walk reached one, from its step there:
+
+```json
+{"resolution": {"shortlist": {"threshold": 0.90, "n": 74, "k": 0, "bound": 0.040}}}
+```
+
+`n` is the attachments at the threshold, `k` the false merges among them and `bound` their
+Clopper-Pearson bound. The walk (`ResolutionCalibration`) goes from the strictest threshold
+down and stops at the first whose bound fails, so with no false merge it needs 59 attachments.
+Without the section the resolver never asks the decision model. Its keys are strict like the
+rest: `certificate resolution: unknown key '<k>'` and `certificate resolution shortlist:
+unknown key '<k>'`.
 
 `id` is `cert@` plus the 12-hex prefix over the canonical JSON without `id`. Its configuration
 enables Terms and Mappings, each `on` relation at its threshold, and each class at its state and

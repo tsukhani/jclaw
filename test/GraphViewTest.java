@@ -438,6 +438,24 @@ class GraphViewTest extends UnitTest {
     }
 
     @Test
+    void aCandidateSameAsWithNoStatusIsUndeterminedAndAStatedOneHolds() {
+        clocked(() -> {
+            var candidate = new Graph().rel(R, "same_as", "topic-a", "topic-b",
+                    bare("memory:1").anchor("2026-10-03").author(MemoryAuthorType.HUMAN_TURN),
+                    bare("memory:2").anchor("2026-10-04").author(MemoryAuthorType.HUMAN_TURN));
+            unknown(row(candidate, "2026-10-04"));
+            var c = current(candidate, "2026-10-04");
+            assertEquals(List.of(R), ids(c.undetermined()));
+            assertEquals(List.of(), c.current());
+
+            var stated = new Graph().rel(R, "same_as", "topic-a", "topic-b",
+                    holds("memory:1").anchor("2026-10-03").author(MemoryAuthorType.HUMAN_TURN));
+            yes(row(stated, "2026-10-04"));
+            assertEquals(List.of(R), ids(current(stated, "2026-10-04").current()));
+        });
+    }
+
+    @Test
     void aTimelessDenialFollowsTheDeniedTableAndIsNotCurrent() {
         clocked(() -> {
             var g = new Graph().rel(R, "same_as", "topic-a", "topic-b",

@@ -4336,8 +4336,9 @@ for m in r["models"]:
         print("  run %d stages: candidates %s | overlap %s | typing %s | rejection %s | relation %s | no-relation %s | failures %d"
               % (run["run"], ratio(s["candidateRecall"]), ratio(s["overlap"]), ratio(s["typing"]), ratio(s["rejection"]),
                  ratio(s["relation"]), ratio(s["noRelation"]), s["failures"]))
-        print("        resolution: %d mentions -> %d clusters (%d gold), %d false merges, B3 P/R %s/%s, pairwise P/R %s/%s"
-              % (res["mentions"], res["clusters"], res["goldEntities"], res["falseMerges"],
+        print("        resolution: %d mentions -> %d clusters (%d gold), %d false merges of %d attachments (%s, bound %s), B3 P/R %s/%s, pairwise P/R %s/%s"
+              % (res["mentions"], res["clusters"], res["goldEntities"], res["falseMerges"], res["attachments"],
+                 pct(res.get("falseMergeRate")), pct(res.get("falseMergeBound")),
                  pct(res.get("bcubedPrecision")), pct(res.get("bcubedRecall")),
                  pct(res.get("pairwisePrecision")), pct(res.get("pairwiseRecall"))))
         print("        %5s %7s %6s %5s %5s %5s %5s %5s %7s %7s %8s %s" % ("t", "written", "wrong", "match", "type",

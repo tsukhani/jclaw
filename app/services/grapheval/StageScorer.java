@@ -14,6 +14,7 @@ import services.grapheval.GraphCases.Entity;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -62,12 +63,18 @@ public final class StageScorer {
     }
 
     /**
-     * Exact-match resolution over the gold mentions: {@code falseMerges} counts clusters spanning more than one gold
-     * id; precision and recall are null when nothing could be measured.
+     * Resolution over scored mentions: {@code clusters} are the Terms, {@code falseMerges} the attachments whose gold
+     * differs from their Term's, {@code falseMergeRate} that share of {@code attachments} (null with none) and
+     * {@code falseMergeBound} its {@link Certifier#upperBound}. Precision and recall are null when nothing could be
+     * measured.
      */
-    public record Resolution(int mentions, int clusters, int goldEntities, int falseMerges,
+    public record Resolution(int mentions, int clusters, int goldEntities, int falseMerges, int attachments,
+                             @Nullable Double falseMergeRate, double falseMergeBound,
                              @Nullable Double bcubedPrecision, @Nullable Double bcubedRecall,
                              @Nullable Double pairwisePrecision, @Nullable Double pairwiseRecall) {}
+
+    /** One resolved mention: its gold entity, the Term it resolved to, and whether it attached to an existing one. */
+    public record Scored(String ref, String gold, String termId, boolean attached) {}
 
     /**
      * {@code overlap} counts the overlap groups settled on a gold span, or on neither when no span is gold;
@@ -369,7 +376,10 @@ public final class StageScorer {
         return Ratio.of(hit, total);
     }
 
-    /** {@link ExactMatchResolver} over every gold entity's mention, scored against the gold ids. */
+    /**
+     * {@link ExactMatchResolver} over every gold entity's mention, scored against the gold ids; a mention that is not
+     * the first of its cluster counts as attached.
+     */
     public static Resolution resolution(List<Case> cases, @Nullable String ownerName) {
         var mentions = new ArrayList<Mention>();
         var gold = new HashMap<String, String>();
@@ -380,19 +390,47 @@ public final class StageScorer {
                 gold.put(ref, e.id());
             }
         }
+        var clusterOf = new HashMap<String, Integer>();
         var clusters = ExactMatchResolver.resolve(mentions, ownerName);
-        var goldSize = new HashMap<String, Integer>();
-        gold.values().forEach(id -> goldSize.merge(id, 1, Integer::sum));
+        for (int i = 0; i < clusters.size(); i++) {
+            for (var ref : clusters.get(i)) clusterOf.put(ref, i);
+        }
+        var seen = new HashSet<Integer>();
+        var scored = new ArrayList<Scored>();
+        for (var m : mentions) {
+            int cluster = Objects.requireNonNull(clusterOf.get(m.ref()));
+            scored.add(new Scored(m.ref(), Objects.requireNonNull(gold.get(m.ref())), Integer.toString(cluster),
+                    !seen.add(cluster)));
+        }
+        return resolution(scored);
+    }
 
+    /**
+     * Scores resolved mentions. A Term's gold is the gold of its first mention in list order; a false merge is an
+     * attached mention whose gold differs from its Term's.
+     */
+    public static Resolution resolution(List<Scored> scored) {
+        var clusters = new LinkedHashMap<String, List<String>>();
+        var termGold = new HashMap<String, String>();
+        var goldSize = new HashMap<String, Integer>();
         int falseMerges = 0;
+        int attachments = 0;
+        for (var s : scored) {
+            clusters.computeIfAbsent(s.termId(), _ -> new ArrayList<>()).add(s.gold());
+            termGold.putIfAbsent(s.termId(), s.gold());
+            goldSize.merge(s.gold(), 1, Integer::sum);
+            if (s.attached()) {
+                attachments++;
+                if (!s.gold().equals(termGold.get(s.termId()))) falseMerges++;
+            }
+        }
         double precision = 0;
         double recall = 0;
         long samePredicted = 0;
         long sameBoth = 0;
-        for (var cluster : clusters) {
+        for (var cluster : clusters.values()) {
             var counts = new HashMap<String, Integer>();
-            cluster.forEach(ref -> counts.merge(gold.getOrDefault(ref, ""), 1, Integer::sum));
-            if (counts.size() > 1) falseMerges++;
+            cluster.forEach(g -> counts.merge(g, 1, Integer::sum));
             samePredicted += pairs(cluster.size());
             for (var entry : counts.entrySet()) {
                 int overlap = entry.getValue();
@@ -402,8 +440,10 @@ public final class StageScorer {
             }
         }
         long sameGold = goldSize.values().stream().mapToLong(StageScorer::pairs).sum();
-        int n = mentions.size();
-        return new Resolution(n, clusters.size(), goldSize.size(), falseMerges,
+        int n = scored.size();
+        return new Resolution(n, clusters.size(), goldSize.size(), falseMerges, attachments,
+                attachments == 0 ? null : (double) falseMerges / attachments,
+                Certifier.upperBound(falseMerges, attachments),
                 n == 0 ? null : precision / n, n == 0 ? null : recall / n,
                 samePredicted == 0 ? null : (double) sameBoth / samePredicted,
                 sameGold == 0 ? null : (double) sameBoth / sameGold);
