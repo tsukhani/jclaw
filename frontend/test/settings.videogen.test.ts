@@ -6,11 +6,10 @@ import { clearNuxtData } from '#app'
 import Settings from '~/pages/settings.vue'
 
 /**
- * JCLAW-236 — Video Generation settings section. Toggle gating on the Replicate API key, the Replicate
- * backend radio, the maxJobMinutes persist round-trip, and the model dropdown — which is populated from
- * GET /api/videogen/models (Replicate's curated text-to-video collection) with no free-text entry, and
- * still surfaces a saved model that discovery didn't return. Replicate-only (SV-1); self-hosted is a
- * disabled "coming soon" placeholder.
+ * JCLAW-236 — Video Generation settings section. The enable toggle, the Replicate backend radio, the
+ * maxJobMinutes persist round-trip, and the model dropdown — which is populated from GET
+ * /api/videogen/models (Replicate's curated text-to-video collection) with no free-text entry, and
+ * still surfaces a saved model that discovery didn't return.
  */
 
 const MODELS = '[{"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535}]'
@@ -65,14 +64,12 @@ async function mountSettingsSection(sectionId: string) {
 describe('Settings — Video Generation (JCLAW-236)', () => {
   beforeEach(() => clearNuxtData())
 
-  it('renders the section; the enable toggle is disabled when no Replicate key is set', async () => {
+  it('renders the section with the enable toggle', async () => {
     setupApi()
     const c = await mountSettingsSection('video-generation')
 
     expect(c.text()).toContain('Video Generation')
-    const toggle = c.find<HTMLButtonElement>('button[aria-label="Enable video generation"]')
-    expect(toggle.exists()).toBe(true)
-    expect(toggle.element.disabled).toBe(true)
+    expect(c.find('button[aria-label="Enable video generation"]').exists()).toBe(true)
   })
 
   it('with a Replicate key + provider set, shows the checked radio, the model select, and the timeout', async () => {
@@ -396,5 +393,58 @@ describe('Settings — a Video Generation engine switch whose provider write fai
     const component = await mountSettingsSection('video-generation')
     await vi.waitFor(() => expect(component.find('#videogen-engine-ltx-int8').exists()).toBe(true))
     await chooseAndExpectLanded(component, '#videogen-engine-ltx-int8')
+  })
+})
+
+describe('Settings — Video Generation without a Replicate key', () => {
+  let unregister: Array<() => void> = []
+
+  beforeEach(() => clearNuxtData())
+
+  afterEach(() => {
+    unregister.forEach(off => off())
+    unregister = []
+  })
+
+  function capability(models: Array<{ id: string, provider: string, runnable: boolean }>) {
+    unregister.push(registerEndpoint('/api/videogen/capability', () => ({
+      uvAvailable: true,
+      uvReason: null,
+      state: 'READY',
+      capability: {
+        kind: 'cuda',
+        gpu: 'Test GPU',
+        freeVramGb: 24,
+        totalVramGb: 24,
+        models: models.map(m => ({
+          ...m, label: m.id, minVramGb: 8, tier: m.runnable ? 'ready' : 'no', reason: m.runnable ? null : 'too little VRAM',
+        })),
+      },
+      error: null,
+    })))
+  }
+
+  it('enabling selects the best self-hosted engine this machine runs', async () => {
+    const posts: Array<{ key?: string, value?: string }> = []
+    setupApi({ capturePost: b => posts.push(b) })
+    capability([{ id: 'ltx', provider: 'ltx-local', runnable: true }])
+    const c = await mountSettingsSection('video-generation')
+
+    const toggle = c.find<HTMLButtonElement>('button[aria-label="Enable video generation"]')
+    await vi.waitFor(() => expect(toggle.element.disabled).toBe(false))
+    await toggle.trigger('click')
+
+    await vi.waitFor(() => expect(posts).toContainEqual({ key: 'videogen.provider', value: 'ltx-local' }))
+    expect(posts).toContainEqual({ key: 'videogen.local.model', value: 'ltx' })
+  })
+
+  it('the toggle is disabled and says why when no self-hosted engine can run either', async () => {
+    setupApi()
+    capability([{ id: 'ltx', provider: 'ltx-local', runnable: false }])
+    const c = await mountSettingsSection('video-generation')
+
+    await vi.waitFor(() => expect(c.find('[data-testid="videogen-no-backend"]').exists()).toBe(true))
+    expect(c.find('[data-testid="videogen-no-backend"]').text()).toContain('cannot run a self-hosted engine')
+    expect(c.find<HTMLButtonElement>('button[aria-label="Enable video generation"]').element.disabled).toBe(true)
   })
 })

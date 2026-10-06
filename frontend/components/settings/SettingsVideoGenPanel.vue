@@ -32,8 +32,10 @@ async function setVideogenProvider(value: string) {
   saving.value = false
 }
 async function toggleVideogenEnabled() {
-  // Only Replicate is wired today; enabling selects it (its API key gates the toggle).
-  await setVideogenProvider(videogenEnabled.value ? '' : 'replicate')
+  if (videogenEnabled.value) return setVideogenProvider('')
+  if (replicateApiKeyConfigured.value) return setVideogenProvider('replicate')
+  // No Replicate key: Self-Hosted is the only backend, so enabling picks the best engine this machine runs.
+  await selectSelfHosted()
 }
 // Model dropdown: Replicate curates a `text-to-video` collection; GET /api/videogen/models returns its
 // owner/model slugs (server-discovered, not hardcoded). The dropdown is the only way to pick a model —
@@ -181,6 +183,15 @@ function putBackVideogenChoice() {
 const videoLocalUnsupported = computed(() =>
   videoCapState.value === 'READY' && !videoEngines.value.some(e => e.runnable),
 )
+// Why the toggle cannot turn on: no Replicate key, and no self-hosted engine this machine can run.
+const noBackendReason = computed(() => {
+  if (videogenEnabled.value || replicateApiKeyConfigured.value) return ''
+  const fix = 'Set a Replicate API key in Image Generation above'
+  if (videoCapability.value && !videoCapability.value.uvAvailable) return `${fix}, or install uv to run a self-hosted engine.`
+  if (videoLocalUnsupported.value) return `${fix}: this machine cannot run a self-hosted engine.`
+  if (videoCapState.value === 'ERROR' || videoCapState.value === 'UNAVAILABLE') return `${fix}: the self-hosted GPU probe failed.`
+  return ''
+})
 // Picking "Self-Hosted" needs a concrete engine, which needs a probe first. If engines are already known,
 // select the best runnable one immediately; otherwise probe and auto-select once it settles.
 const pendingLocalAutoSelect = ref(false)
@@ -241,21 +252,21 @@ onUnmounted(() => stopVideoCapPolling())
       </template>
     </div>
 
-    <!-- Master toggle: ON when videogen.provider is non-empty (mirrors Image Generation). Gated on
-           the Replicate API key since that's the only backend today. -->
+    <!-- Master toggle: ON when videogen.provider is non-empty (mirrors Image Generation). Disabled only
+           when neither backend can run (noBackendReason). -->
     <div class="bg-surface-elevated border border-border">
       <div class="px-4 py-2.5 flex items-center gap-3">
         <button
           type="button"
           :aria-pressed="videogenEnabled"
           aria-label="Enable video generation"
-          :disabled="!videogenEnabled && !replicateApiKeyConfigured"
+          :aria-describedby="noBackendReason ? 'videogen-no-backend' : undefined"
+          :disabled="!!noBackendReason"
           :class="[
             videogenEnabled ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600' : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0',
-            (!videogenEnabled && !replicateApiKeyConfigured) ? 'opacity-50 cursor-not-allowed' : '',
+            noBackendReason ? 'opacity-50 cursor-not-allowed' : '',
           ]"
           class="relative w-9 h-5 rounded-full transition-colors"
-          :title="(!videogenEnabled && !replicateApiKeyConfigured) ? 'Set a Replicate API key in Image Generation above first.' : ''"
           @click="toggleVideogenEnabled"
         >
           <span
@@ -266,6 +277,14 @@ onUnmounted(() => stopVideoCapPolling())
         <span class="text-sm font-medium text-fg-strong">Enable video generation</span>
         <span class="ml-auto text-xs text-fg-muted">{{ videogenEnabled ? 'on' : 'off' }}</span>
       </div>
+      <p
+        v-if="noBackendReason"
+        id="videogen-no-backend"
+        class="px-4 pb-2.5 text-xs text-fg-muted"
+        data-testid="videogen-no-backend"
+      >
+        {{ noBackendReason }}
+      </p>
     </div>
     <ApiErrorAlert :error="videogenBackendError" />
 
