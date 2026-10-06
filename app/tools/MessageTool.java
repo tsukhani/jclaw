@@ -507,8 +507,8 @@ public class MessageTool implements ToolRegistry.Tool {
      * <ul>
      *   <li>{@code slack} → {@link SlackBinding#ownerUserId}; a user id, which the send path
      *       resolves to the owner's DM channel via {@code conversations.open} (JCLAW-1018).</li>
-     *   <li>{@code whatsapp} → {@link WhatsAppBinding#ownerJid} for the WhatsApp-Web
-     *       transport (the paired user), {@link WhatsAppBinding#defaultTarget} for
+     *   <li>{@code whatsapp} → {@link WhatsAppBinding#pairedJid} for the WhatsApp-Web
+     *       transport (the paired account), {@link WhatsAppBinding#defaultTarget} for
      *       Cloud-API (the operator-configured recipient — a Cloud-API business
      *       number has no inherent "owner").</li>
      *   <li>anything else (e.g. {@code web}) → {@code null}; web is routed by the
@@ -529,7 +529,7 @@ public class MessageTool implements ToolRegistry.Tool {
             var binding = WhatsAppBinding.findByAgentOrAncestor(agent);
             if (binding == null) return null;
             return binding.transport == WhatsAppTransport.WHATSAPP_WEB
-                    ? binding.ownerJid
+                    ? binding.pairedJid
                     : binding.defaultTarget;
         }
         return null;
@@ -550,7 +550,7 @@ public class MessageTool implements ToolRegistry.Tool {
         }
         if (CHANNEL_WHATSAPP.equalsIgnoreCase(channel)) {
             return "Error: no WhatsApp destination configured for agent '" + agent.name
-                    + "'. Set the WhatsApp-Web owner, or the Cloud-API default recipient, "
+                    + "'. Pair the WhatsApp-Web binding, or set the Cloud-API default recipient "
                     + "on the agent's WhatsApp binding (Channels settings), or pass an "
                     + "explicit 'target' (E.164 phone).";
         }

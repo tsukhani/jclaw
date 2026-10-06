@@ -129,8 +129,10 @@ export interface WhatsAppBindingSummary {
   /** JCLAW-425: Cloud-API proactive-send recipient (E.164) — the agent's
    *  per-agent outbound destination when a `message(channel="whatsapp")` has no
    *  explicit target and no live conversation peer. An identifier, not a secret.
-   *  Cloud-API only (WhatsApp-Web uses its paired owner); null when unset. */
+   *  Cloud-API only (WhatsApp-Web uses its paired number); null when unset. */
   defaultTarget: string | null
+  /** JCLAW-1408: WhatsApp-Web DM owner (E.164, `+<digits>`); null when unset. */
+  ownerNumber: string | null
   enabled: boolean
   createdAt: string | null
   updatedAt: string | null

@@ -42,7 +42,7 @@ import java.util.function.Consumer;
  *
  * <p><b>Disconnect handling.</b> Cobalt owns transient reconnection internally; on
  * {@link DisconnectReason#LOGGED_OUT} we surface the binding as needing re-pair
- * (clear {@code ownerJid}); on {@link DisconnectReason#BANNED} we disable the
+ * (clear {@code pairedJid}); on {@link DisconnectReason#BANNED} we disable the
  * binding in a Tx so the runner stops trying to reconnect a banned number.
  *
  * <p><b>Inbound.</b> A new-chat-message listener parses via
@@ -73,7 +73,7 @@ public final class WhatsAppCobaltSession {
 
     private final Long bindingId;
     private volatile @Nullable Whatsapp whatsapp;
-    private volatile @Nullable Jid ownerJid;
+    private volatile @Nullable Jid pairedJid;
 
     /** message id → live Cobalt object, LRU-bounded, access-synchronized. */
     private final Map<String, ChatMessageInfo> recentMessages =
@@ -98,17 +98,17 @@ public final class WhatsAppCobaltSession {
         return wa != null && wa.isConnected();
     }
 
-    /** The paired user's JID (the binding owner), or null before pairing. */
-    public @Nullable Jid ownerJid() {
-        return ownerJid;
+    /** The paired account's JID (the bot's own identity), or null before pairing. */
+    public @Nullable Jid pairedJid() {
+        return pairedJid;
     }
 
-    /** This session's own JID for group mention-gating: the cached owner JID, or
+    /** This session's own JID for group mention-gating: the cached paired JID, or
      *  — on a resumed session whose logged-in event hasn't (re)fired — the JID the
      *  Cobalt store already holds. Null when neither is available (pre-pairing);
      *  the parser then treats group mentions as non-matching, the safe default. */
     private @Nullable Jid botJid() {
-        if (ownerJid != null) return ownerJid;
+        if (pairedJid != null) return pairedJid;
         var wa = whatsapp;
         return wa != null ? wa.store().jid().orElse(null) : null;
     }
@@ -130,7 +130,7 @@ public final class WhatsAppCobaltSession {
      * Connect an UNPAIRED binding: show a QR. Each QR string Cobalt emits is
      * passed to {@code qrConsumer} (the runner stores the latest for the QR
      * endpoint). On successful login the paired JID is captured and persisted to
-     * {@code binding.ownerJid}. Idempotent-ish: a second call rebuilds.
+     * {@code binding.pairedJid}. Idempotent-ish: a second call rebuilds.
      */
     public void connect(WhatsAppBinding binding, Consumer<String> qrConsumer) {
         try {
@@ -148,7 +148,7 @@ public final class WhatsAppCobaltSession {
 
     /**
      * Resume an already-paired binding without a QR. If Cobalt has no serialized
-     * session on disk for this binding (e.g. the {@code ownerJid} is persisted but
+     * session on disk for this binding (e.g. the {@code pairedJid} is persisted but
      * the data dir was wiped), {@code registered()} is empty — we fall back to
      * {@link #connect} so a fresh QR surfaces and the operator can re-pair, rather
      * than silently doing nothing. {@code qrConsumer} receives that fallback QR.
@@ -223,8 +223,8 @@ public final class WhatsAppCobaltSession {
         if (wa == null) return;
         var jid = wa.store().jid().orElse(null);
         if (jid == null) return;
-        this.ownerJid = jid;
-        persistOwnerJid(jid.toString());
+        this.pairedJid = jid;
+        persistPairedJid(jid.toString());
         EventLogger.info(LOG_CATEGORY, null, LOG_SOURCE,
                 "WhatsApp-Web paired for binding %s as %s".formatted(bindingId, jid));
     }
@@ -235,11 +235,9 @@ public final class WhatsAppCobaltSession {
     public void onNewChatMessage(ChatMessageInfo info) {
         try {
             if (info == null) return;
-            // JCLAW-450: drop self-originated frames. WhatsApp-Web is self-paired, so
-            // the bot's identity IS the owner's account and Cobalt syncs the account's
-            // OWN sent messages back as inbound (fromMe=true, from=ownerJid). Without
-            // this guard the bot's own reply re-enters the pipeline, passes the
-            // owner-DM gate, and loops unbounded. This is the WhatsApp-Web analog of
+            // JCLAW-450: drop self-originated frames. Cobalt syncs the paired account's
+            // OWN sent messages back as inbound (fromMe=true, from=pairedJid). Without
+            // this guard the bot's own reply re-enters the pipeline and loops unbounded. This is the WhatsApp-Web analog of
             // the Cloud API never redelivering your own sends. Drop before caching.
             if (info.fromMe()) return;
             if (info.id() != null) {
@@ -265,7 +263,7 @@ public final class WhatsAppCobaltSession {
      * act on the terminal reasons:
      * <ul>
      *   <li>{@link DisconnectReason#LOGGED_OUT} — the session is invalid (the user
-     *       unlinked the device). Clear {@code ownerJid} so the card shows
+     *       unlinked the device). Clear {@code pairedJid} so the card shows
      *       "needs re-pair"; the runner's next reconcile re-opens with a QR.</li>
      *   <li>{@link DisconnectReason#BANNED} — the number was banned. Disable the
      *       binding so we stop hammering a dead account.</li>
@@ -276,8 +274,8 @@ public final class WhatsAppCobaltSession {
     void onDisconnected(DisconnectReason reason) {
         switch (reason) {
             case LOGGED_OUT -> {
-                this.ownerJid = null;
-                persistOwnerJid(null);
+                this.pairedJid = null;
+                persistPairedJid(null);
                 EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
                         "WhatsApp-Web binding %s logged out; awaiting re-pair".formatted(bindingId));
             }
@@ -291,18 +289,18 @@ public final class WhatsAppCobaltSession {
         }
     }
 
-    private void persistOwnerJid(@Nullable String jid) {
+    private void persistPairedJid(@Nullable String jid) {
         try {
             Tx.run(() -> {
                 WhatsAppBinding b = WhatsAppBinding.findById(bindingId);
                 if (b != null) {
-                    b.ownerJid = jid;
+                    b.pairedJid = jid;
                     b.save();
                 }
             });
         } catch (Exception e) {
             EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE,
-                    "Failed to persist ownerJid for binding %s: %s".formatted(bindingId, e.getMessage()));
+                    "Failed to persist pairedJid for binding %s: %s".formatted(bindingId, e.getMessage()));
         }
     }
 

@@ -91,7 +91,7 @@ public final class WhatsAppCobaltRunner {
      *  socket — i.e. paired and online. */
     public static boolean isPaired(Long bindingId) {
         var session = HANDLES.get(bindingId);
-        return session != null && session.isConnected() && session.ownerJid() != null;
+        return session != null && session.isConnected() && session.pairedJid() != null;
     }
 
     /**
@@ -115,11 +115,11 @@ public final class WhatsAppCobaltRunner {
         try {
             var session = new WhatsAppCobaltSession(bindingId);
             HANDLES.put(bindingId, session);
-            // An already-paired binding (ownerJid persisted) resumes silently; a
+            // An already-paired binding (pairedJid persisted) resumes silently; a
             // fresh one shows a QR. Resume is attempted first; if there's no stored
             // session, the session logs "awaiting re-pair" and we fall to a QR open.
             Consumer<String> qrConsumer = qr -> PENDING_QR.put(bindingId, qr);
-            if (binding.ownerJid != null && !binding.ownerJid.isBlank()) {
+            if (binding.pairedJid != null && !binding.pairedJid.isBlank()) {
                 session.resume(binding, qrConsumer);
             } else {
                 session.connect(binding, qrConsumer);

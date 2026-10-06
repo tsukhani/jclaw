@@ -47,7 +47,7 @@ Per-turn transcript of a run (`turn_index`, `role`, `content`, tool calls/result
 | `SlackBinding` | `slack_binding` | `bot_token` (unique), `signing_secret`, `app_token` (Socket Mode), 1:1 `agent_id`, `transport` (HTTP/SOCKET), team/bot IDs. |
 | `TelegramBinding` | `telegram_binding` | `bot_token` (unique), 1:1 `agent_id`, `telegram_user_id`, `transport` (POLLING/WEBHOOK), `webhook_secret`, reply/notifier policy. |
 | `TelegramTopicBinding` | `telegram_topic_binding` | Per-forum-topic agent override (`binding_id`, `chat_id`, `thread_id`, `agent_id`). |
-| `WhatsAppBinding` | `whatsapp_binding` | `transport` (CLOUD_API/WHATSAPP_WEB), Cloud-API creds (`phone_number_id`, `access_token`, …) or `owner_jid` for Web, 1:1 `agent_id`. |
+| `WhatsAppBinding` | `whatsapp_binding` | `transport` (CLOUD_API/WHATSAPP_WEB), Cloud-API creds (`phone_number_id`, `access_token`, …) or, for Web, `owner_jid` (the paired account) and `owner_number` (the DM owner), 1:1 `agent_id`. |
 | `WhatsAppConversationWindow` | `whatsapp_conversation_window` | Tracks the 24h Cloud-API free-form messaging window per peer. |
 
 ## Skills, tools & MCP (L2-cached)
