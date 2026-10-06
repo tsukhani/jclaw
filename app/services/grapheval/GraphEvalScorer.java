@@ -11,13 +11,16 @@ import services.grapheval.GraphCases.Case;
 import services.grapheval.GraphCases.Relation;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 
 /**
  * Strict end-to-end scoring of extraction runs against the case labels (JCLAW-1356, JCLAW-1366), from what
@@ -46,6 +49,8 @@ public final class GraphEvalScorer {
     /** A denial written where the labels deny nothing on that triple. */
     public static final String NEGATIVE = "negative";
     public static final String VALENCE = "valence";
+    /** The Term gate's name; every relation gate is named by its relation type. */
+    public static final String TERMS = "terms";
 
     private GraphEvalScorer() {}
 
@@ -96,6 +101,116 @@ public final class GraphEvalScorer {
         }
     }
 
+    /**
+     * One written base record, {@code term:<span>:<type>} or {@code rel:<from>:<type>:<to>}, under its gate
+     * ({@link #TERMS} or the relation type): {@code agreed} when the labels support it, else unmatched.
+     */
+    public record GateRecord(String caseId, String record, String gate, boolean agreed) {}
+
+    /** One gate in one memory: records written but noise, of them wrong and right, and its gold. */
+    public record GateTally(int written, int wrong, int gold, int right) {}
+
+    /**
+     * One memory at a configuration. {@code gates} holds {@link #TERMS} and each relation type with written records
+     * or gold; {@code classes} the status, time and negation values written on base-right parents; {@code gWritten},
+     * {@code gWrong}, {@code trapGold} and {@code trapViolations} its share of the pooled gates. {@code unsupported}
+     * is whether it wrote a record the labels do not support, or, with no gold, any record.
+     */
+    public record MemoryScore(String caseId, List<String> tags, Map<String, GateTally> gates,
+                              Map<String, ClassTally> classes, int gWritten, int gWrong, int trapGold,
+                              int trapViolations, int ruleWritten, int failedDecisions, int questions,
+                              boolean unsupported) {
+        public MemoryScore {
+            tags = List.copyOf(tags);
+            gates = Collections.unmodifiableMap(new TreeMap<>(gates));
+            classes = Collections.unmodifiableMap(new TreeMap<>(classes));
+        }
+    }
+
+    /** Every memory at a configuration, and every base record written there. */
+    public record Configured(List<MemoryScore> memories, List<GateRecord> records) {
+        public Configured {
+            memories = List.copyOf(memories);
+            records = List.copyOf(records);
+        }
+    }
+
+    /** {@link Statements#at}, or a memoizing stand-in for it. */
+    @FunctionalInterface
+    public interface StatementsAt {
+        Statements.Outcome at(CaseRun run, double t, Statements.Classes classes);
+    }
+
+    /**
+     * What a run writes at {@code configuration}: its terms at the term threshold, and each enabled relation type's
+     * relations and denials at that type's own threshold, kept only between terms written at the term threshold. A
+     * qualifier class writes at the higher of its parent's threshold and its own; an absent type writes nothing.
+     */
+    public static Statements.Outcome configured(CaseRun run, Configuration configuration, StatementsAt at) {
+        var classes = configuration.statementClasses();
+        var terms = at.at(run, configuration.terms(), classes);
+        if (terms.failed()) return terms;
+        var spans = new HashSet<String>();
+        terms.terms().forEach(t -> spans.add(t.span()));
+        var relations = new ArrayList<Statements.Claim>();
+        var denials = new ArrayList<Statements.Claim>();
+        int conflict = terms.conflict();
+        for (var entry : configuration.relations().entrySet()) {
+            var type = entry.getKey();
+            var outcome = at.at(run, entry.getValue(), classes);
+            for (var c : outcome.relations()) {
+                if (c.type().equals(type) && spans.contains(c.from()) && spans.contains(c.to())) relations.add(c);
+            }
+            for (var c : outcome.denials()) {
+                if (c.type().equals(type) && spans.contains(c.from()) && spans.contains(c.to())) denials.add(c);
+            }
+        }
+        return new Statements.Outcome(false, terms.terms(), relations, denials, conflict);
+    }
+
+    public static Configured score(List<Case> cases, List<CaseRun> runs, Set<String> symmetric,
+                                   Configuration configuration) {
+        return score(cases, runs, symmetric, configuration, Statements::at);
+    }
+
+    /**
+     * Every case at {@code configuration}, memory by memory: the per-gate counts, the class and pooled tallies, and
+     * the base records written, unmatched and agreed. Only enabled relation types write; rule-written records count
+     * nowhere.
+     */
+    public static Configured score(List<Case> cases, List<CaseRun> runs, Set<String> symmetric,
+                                   Configuration configuration, StatementsAt at) {
+        var byId = new HashMap<String, CaseRun>();
+        runs.forEach(r -> byId.put(r.caseId(), r));
+        var schema = runs.stream().map(CaseRun::schema).filter(Objects::nonNull).findFirst().orElse(null);
+        var memories = new ArrayList<MemoryScore>();
+        var records = new ArrayList<GateRecord>();
+        for (var c : cases) {
+            var tally = new Tally();
+            tally.addGold(c, schema);
+            var run = byId.get(c.id());
+            int questions = 0;
+            if (run != null) {
+                questions = run.questionsByStage().values().stream().mapToInt(Integer::intValue).sum();
+                scoreCase(c, run, symmetric, configuration.terms(), configured(run, configuration, at), tally);
+            }
+            records.addAll(tally.records);
+            var classes = new HashMap<String, ClassTally>();
+            classes.put(Configuration.STATUS, tally.status.done());
+            classes.put(Configuration.TIME, tally.time.done());
+            classes.put(Configuration.NEGATION, tally.negation.done());
+            var gates = new HashMap<String, GateTally>();
+            tally.gates.forEach((gate, g) -> gates.put(gate, new GateTally(g[0], g[1], g[2], g[3])));
+            boolean goldEmpty = gold(c, schema) == 0;
+            boolean unsupported = !tally.base.isEmpty()
+                    || goldEmpty && tally.written + tally.negation.n > 0;
+            memories.add(new MemoryScore(c.id(), c.tags(), gates, classes, tally.written - tally.noise
+                    + tally.negation.n, tally.gWrong, tally.trapGold, tally.trapViolations, tally.ruleWritten,
+                    tally.failures, questions, unsupported));
+        }
+        return new Configured(memories, records);
+    }
+
     /** The grid: one point per {@link #THRESHOLDS} entry, in that order, each at {@code classes}. */
     public static List<Point> grid(List<Case> cases, List<CaseRun> runs, Set<String> symmetric,
                                    Statements.Classes classes) {
@@ -112,7 +227,7 @@ public final class GraphEvalScorer {
         for (var c : cases) tally.addGold(c, schema);
         for (var run : runs) {
             var c = byId.get(run.caseId());
-            if (c != null) scoreCase(c, run, symmetric, t, classes, tally);
+            if (c != null) scoreCase(c, run, symmetric, t, Statements.at(run, t, classes), tally);
         }
         int denominator = tally.written - tally.noise;
         int baseWrong = tally.base.size();
@@ -176,6 +291,13 @@ public final class GraphEvalScorer {
         final Counter valence = new Counter();
         final List<WrongRecord> base = new ArrayList<>();
         final List<WrongRecord> qualified = new ArrayList<>();
+        /** Per gate: written but noise, wrong, gold, right. */
+        final Map<String, int[]> gates = new HashMap<>();
+        final List<GateRecord> records = new ArrayList<>();
+
+        int[] gate(String name) {
+            return gates.computeIfAbsent(name, _ -> new int[4]);
+        }
 
         int count(String kind) {
             return (int) base.stream().filter(w -> w.kind().equals(kind)).count();
@@ -185,12 +307,14 @@ public final class GraphEvalScorer {
             gold += GraphEvalScorer.gold(c, schema);
             for (var e : c.entities()) {
                 if (!e.noise() && e.occurs() != null) time.gold++;
+                if (!e.noise() && !e.ruleWritten()) gate(TERMS)[2]++;
             }
             for (var r : c.relations()) {
                 if (r.noise()) continue;
                 if (r.denied()) negation.gold++;
                 if (!r.status().equals(GraphCases.HOLDS)) trapGold++;
                 if (!baseGold(c, r, schema)) continue;
+                gate(r.type())[2]++;
                 var from = c.entity(r.from());
                 if (schema != null && from != null
                         && schema.effectiveStatuses(r.type(), from.type()).contains(ExtractionPipeline.ENDED)) {
@@ -202,9 +326,8 @@ public final class GraphEvalScorer {
         }
     }
 
-    private static void scoreCase(Case c, CaseRun run, Set<String> symmetric, double t, Statements.Classes classes,
+    private static void scoreCase(Case c, CaseRun run, Set<String> symmetric, double t, Statements.Outcome outcome,
                                   Tally tally) {
-        var outcome = Statements.at(run, t, classes);
         if (outcome.failed()) {
             tally.failures += (int) run.decisions().stream().filter(Decision::failed).count();
             return;
@@ -236,11 +359,11 @@ public final class GraphEvalScorer {
             var key = "term:" + term.span() + ":" + term.type();
             var entity = c.entityAt(term.span());
             if (entity == null) {
-                base(c, tally, key, MATCH);
+                base(c, tally, key, MATCH, TERMS);
             } else if (!seen.add(entity.id())) {
-                base(c, tally, key, DUPLICATE);
+                base(c, tally, key, DUPLICATE, TERMS);
             } else if (!entity.type().equals(term.type())) {
-                base(c, tally, key, TYPE);
+                base(c, tally, key, TYPE, TERMS);
             } else {
                 ids.put(term.span(), entity.id());
                 if (entity.noise()) {
@@ -248,6 +371,7 @@ public final class GraphEvalScorer {
                     continue;
                 }
                 tally.right++;
+                agreed(c, tally, key, TERMS);
                 var occurs = term.occurs();
                 if (occurs != null && !qualifier(c, tally, tally.time, "occurs:" + term.span() + ":" + occurs,
                         TIME, same(entity.occurs(), occurs))) {
@@ -279,7 +403,7 @@ public final class GraphEvalScorer {
             if (positive != null && positive.type().equals(type) && matched.add(positive)) {
                 var gold = c.scoredStatus(positive, schema);
                 if (gold.equals(GraphCases.UNASSERTED)) {
-                    base(c, tally, "rel:" + triple, UNASSERTED);
+                    base(c, tally, "rel:" + triple, UNASSERTED, type);
                     violated.add(positive);
                     continue;
                 }
@@ -288,6 +412,7 @@ public final class GraphEvalScorer {
                     continue;
                 }
                 tally.right++;
+                agreed(c, tally, "rel:" + triple, type);
                 boolean wrong = false;
                 var status = claim.status();
                 if (decidedStatus && status != null) {
@@ -309,10 +434,10 @@ public final class GraphEvalScorer {
                 }
                 if (wrong) tally.gWrong++;
             } else if (denied != null && denied.type().equals(type)) {
-                base(c, tally, "rel:" + triple, POLARITY);
+                base(c, tally, "rel:" + triple, POLARITY, type);
                 violated.add(denied);
             } else {
-                base(c, tally, "rel:" + triple, RELATION);
+                base(c, tally, "rel:" + triple, RELATION, type);
             }
         }
 
@@ -342,9 +467,20 @@ public final class GraphEvalScorer {
         }
     }
 
-    private static void base(Case c, Tally tally, String key, String kind) {
+    private static void base(Case c, Tally tally, String key, String kind, String gate) {
         tally.base.add(new WrongRecord(c.id(), key, kind));
         tally.gWrong++;
+        var g = tally.gate(gate);
+        g[0]++;
+        g[1]++;
+        tally.records.add(new GateRecord(c.id(), key, gate, false));
+    }
+
+    private static void agreed(Case c, Tally tally, String key, String gate) {
+        var g = tally.gate(gate);
+        g[0]++;
+        g[3]++;
+        tally.records.add(new GateRecord(c.id(), key, gate, true));
     }
 
     /** Counts a qualifier value written on a base-right parent; returns whether it was right. */

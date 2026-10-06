@@ -987,6 +987,9 @@ usage_grapheval() {
     cat <<'USAGE'
 Usage: ./jclaw.sh grapheval run --agent NAME [options]
        ./jclaw.sh grapheval run --set sequences [options]
+       ./jclaw.sh grapheval run --split NAME [--agent NAME] [options]
+       ./jclaw.sh grapheval freeze-split --name NAME --set cases|heldout (--share S | --ids A,B) [options]
+       ./jclaw.sh grapheval rescore --split NAME --decision-model ID [--check-share S]
        ./jclaw.sh grapheval blind-sheet
        ./jclaw.sh grapheval heldout-sample --agent NAME --count N [--seed S]
 
@@ -1006,9 +1009,21 @@ run             Scores every stage and the end-to-end pipeline over
                 probes; it needs no --agent and writes no memory.
                 Prints a line as each model finishes a run, and every 30 s the
                 runs under way.
+                With --split it is a certification run (protocol v2): the
+                split's set, then the sequence harness at the configuration
+                reached, once per model version (Ollama digest). It stores the
+                decisions, appends data/graph-eval/split-uses.jsonl, writes
+                the blind sheet under data/graph-eval/sheets/ and, when
+                certified, data/graph-eval/certificates/<model>.json. Without
+                --split, every frozen split's ids are left out.
 blind-sheet     Writes data/graph-eval/blind-sheet.json: the ids and text of the
                 blind 15% a second labeller labels into
                 evals/graph/second-labels.json.
+freeze-split    Freezes a certification split under data/graph-eval/splits/:
+                --share of the set drawn by --seed (the held-out set defaults to
+                all of it), or the --ids given. Refuses an existing name.
+rescore         Scores a stored certification run again under the current
+                adjudications. Asks no model.
 heldout-sample  Copies --count of the agent's memories, read-only, into
                 data/graph-eval/heldout.json for labelling. Refuses to
                 overwrite an existing file.
@@ -1031,9 +1046,30 @@ Options for run:
   --concurrency N          Parallel cases, 1-4 (default 1: a local Ollama
                            answers one request at a time).
   --timeout SECONDS        Per-decision timeout, 1-300 (default 30).
-  --out FILE               Write the full JSON report to FILE.
+  --split NAME             Certify on this frozen split; its set follows from it.
+  --agreed-share S         Share of agreed records drawn for adjudication (default 0.2).
+  --seed S                 The agreed sample's seed (default the split's).
+  --out FILE               Write the full JSON report to FILE (run, rescore).
+
+Options for freeze-split:
+  --name NAME              The split's name (required).
+  --set cases|heldout      The set it is drawn from (required).
+  --share S | --ids A,B    Draw a share by seed, or name the ids.
+  --seed S                 Shuffle seed (default 1356).
+  --starting-threshold T   Where every walk starts (default 0.95).
+  --relation-order A,B     Relation gate order (default: gold count outside
+                           the split, most first).
+
+Options for rescore:
+  --split NAME             The split the stored run used (required).
+  --decision-model ID      The model whose stored run to score (required).
+  --check-share S          Share of model verdicts marked for an operator
+                           check (default 0.2).
 
 Examples:
+  ./jclaw.sh grapheval freeze-split --name cert-2026-10 --set cases --share 0.3 --seed 1356 --starting-threshold 0.95
+  ./jclaw.sh grapheval run --split cert-2026-10 --agent main --decision-model tev1
+  ./jclaw.sh grapheval rescore --split cert-2026-10 --decision-model tev1
   ./jclaw.sh grapheval run --set sequences --decision-model tev1
   ./jclaw.sh grapheval run --set sequences --decision-model tev1 --configuration config.json --runs 2
 USAGE
@@ -3957,11 +3993,12 @@ PYSUM
 do_grapheval() {
     local sub="${1:-}"
     case "$sub" in
-        run|blind-sheet|heldout-sample) shift ;;
+        run|blind-sheet|heldout-sample|freeze-split|rescore) shift ;;
         --help|-h) usage_grapheval; exit 0 ;;
-        *) echo "Error: grapheval needs a subcommand: run, blind-sheet or heldout-sample."; usage_grapheval; exit 2 ;;
+        *) echo "Error: grapheval needs a subcommand: run, freeze-split, rescore, blind-sheet or heldout-sample."; usage_grapheval; exit 2 ;;
     esac
     local agent="" set="" runs="" floor="" concurrency="" timeout="" out="" count="" seed="" configuration=""
+    local name="" share="" ids="" starting="" order="" split="" agreed_share="" check_share=""
     local -a models=()
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -3976,11 +4013,35 @@ do_grapheval() {
             --out)            out="${2:-}";         shift 2 ;;
             --count)          count="${2:-}";       shift 2 ;;
             --seed)           seed="${2:-}";        shift 2 ;;
+            --name)           name="${2:-}";        shift 2 ;;
+            --share)          share="${2:-}";       shift 2 ;;
+            --ids)            ids="${2:-}";         shift 2 ;;
+            --starting-threshold) starting="${2:-}"; shift 2 ;;
+            --relation-order) order="${2:-}";       shift 2 ;;
+            --split)          split="${2:-}";       shift 2 ;;
+            --agreed-share)   agreed_share="${2:-}"; shift 2 ;;
+            --check-share)    check_share="${2:-}"; shift 2 ;;
             --help|-h)        usage_grapheval; exit 0 ;;
             *) echo "Error: unknown option for grapheval $sub: $1"; usage_grapheval; exit 2 ;;
         esac
     done
-    if [[ "$sub" != "blind-sheet" && -z "$agent" && ! ( "$sub" == "run" && "$set" == "sequences" ) ]]; then
+    if [[ "$sub" == "freeze-split" && ( -z "$name" || -z "$set" ) ]]; then
+        echo "Error: grapheval freeze-split needs --name and --set."
+        usage_grapheval
+        exit 2
+    fi
+    if [[ "$sub" == "rescore" && ( -z "$split" || ${#models[@]} -ne 1 ) ]]; then
+        echo "Error: grapheval rescore needs --split and one --decision-model."
+        usage_grapheval
+        exit 2
+    fi
+    if [[ -n "$split" && -n "$set" ]]; then
+        echo "Error: --split fixes the set; leave --set out."
+        exit 2
+    fi
+    # A run with --split leaves the agent check to the server: only a split over the cases set needs one.
+    if [[ -z "$agent" && ( "$sub" == "heldout-sample" \
+            || ( "$sub" == "run" && -z "$split" && "$set" != "sequences" ) ) ]]; then
         echo "Error: grapheval $sub needs --agent."
         usage_grapheval
         exit 2
@@ -4021,20 +4082,50 @@ do_grapheval() {
         run)            path="/api/graph/eval" ;;
         blind-sheet)    path="/api/graph/eval/blind-sheet" ;;
         heldout-sample) path="/api/graph/eval/heldout/sample" ;;
+        freeze-split)   path="/api/graph/eval/split" ;;
+        rescore)        path="/api/graph/eval/rescore" ;;
     esac
     body=$(python3 - "$sub" "$agent" "$set" "$runs" "$floor" "$concurrency" "$timeout" "$count" "$seed" \
-        "$configuration" ${models[@]+"${models[@]}"} <<'PYBODY'
+        "$configuration" "$name" "$share" "$ids" "$starting" "$order" "$split" "$agreed_share" "$check_share" \
+        ${models[@]+"${models[@]}"} <<'PYBODY'
 import json, sys
 sub, agent, set_, runs, floor, concurrency, timeout, count, seed, configuration = sys.argv[1:11]
-models = sys.argv[11:]
+name, share, ids, starting, order, split, agreed_share, check_share = sys.argv[11:19]
+models = sys.argv[19:]
+def csv(v):
+    return [x.strip() for x in v.split(",") if x.strip()]
 body = {}
 if agent:
     body["agent"] = agent
-if sub == "run":
+if sub == "freeze-split":
+    body["name"] = name
+    body["set"] = set_
+    if share:
+        body["share"] = float(share)
+    if ids:
+        body["ids"] = csv(ids)
+    if seed:
+        body["seed"] = int(seed)
+    if starting:
+        body["startingThreshold"] = float(starting)
+    if order:
+        body["relationOrder"] = csv(order)
+elif sub == "rescore":
+    body["split"] = split
+    body["decisionModel"] = models[0]
+    if check_share:
+        body["checkShare"] = float(check_share)
+elif sub == "run":
     if models:
         body["decisionModels"] = models
     if set_:
         body["set"] = set_
+    if split:
+        body["split"] = split
+    if agreed_share:
+        body["agreedShare"] = float(agreed_share)
+    if seed:
+        body["agreedSeed"] = int(seed)
     if runs:
         body["runs"] = int(runs)
     if floor:
@@ -4058,7 +4149,7 @@ print(json.dumps(body))
 PYBODY
 ) || {
         # Exit 2 is the configuration file's own error, already printed.
-        [[ $? -eq 2 ]] || echo "Error: --recall-floor must be a number; --runs, --concurrency, --timeout, --count and --seed integers."
+        [[ $? -eq 2 ]] || echo "Error: --recall-floor, --share, --starting-threshold, --agreed-share and --check-share must be numbers; --runs, --concurrency, --timeout, --count and --seed integers."
         exit 2
     }
 
@@ -4132,7 +4223,7 @@ PYSTREAM
         exit 1
     fi
 
-    if [[ "$sub" != "run" ]]; then
+    if [[ "$sub" != "run" && "$sub" != "rescore" ]]; then
         python3 -c 'import json,sys; [print("  %s: %s" % kv) for kv in json.load(open(sys.argv[1])).items()]' "$tmp"
         rm -f "$tmp"
         return 0
@@ -4154,6 +4245,63 @@ def pct(v):
 def ratio(x):
     return "%d/%d %s" % (x["hit"], x["total"], pct(x.get("rate")))
 print()
+if r.get("kind") == "certification":
+    print("  certification on split %s (%s set, %d memories), start %.2f, %s, %s, %s"
+          % (r["split"], r["set"], r["memories"], r["startingThreshold"], r["cases"], r["guide"], r["schema"]))
+    a = r["agreement"]
+    print("  agreement: %d/%d blind cases labelled%s" % (a["covered"], a["selected"],
+          "" if a["complete"] else " (incomplete)"))
+    def power(p):
+        return "power 1%%/2%%/3%%: %.3f/%.3f/%.3f" % (p["at1"], p["at2"], p["at3"])
+    for m in r["models"]:
+        print()
+        print("  == %s (%s), %d run(s), %d failed decisions" % (m["model"], m["digest"], m["runs"],
+              m["failedDecisions"]))
+        t = m["tallies"]
+        print("  questions per memory %s; failed-decision share %s" % (
+              "-" if t["questionsPerMemory"] is None else "%.1f" % t["questionsPerMemory"], pct(t["failedShare"])))
+        for b in t["byQuestions"]:
+            print("    %-6s questions: %d memories, %d with a failed decision (%s)" % (b["questions"], b["memories"],
+                  b["failed"], pct(b["share"])))
+        for tag, x in sorted(t["falsePositiveByTag"].items()):
+            print("    false-positive rate %-20s %s" % (tag, ratio(x)))
+        print("  rule-written records left out: %d" % t["ruleWrittenLeftOut"])
+        s = m.get("sequencing")
+        if s:
+            for g in [s["terms"]] + s["relations"]:
+                th = "-" if g["threshold"] is None else "%.2f" % g["threshold"]
+                rl = "-" if g["recallLower"] is None else "%.3f" % g["recallLower"]
+                print("    %-16s %-3s at %-4s n %4d k %3d bound %s recall>= %s %s" % (g["name"], g["state"], th,
+                      g["n"], g["k"], pct(g["bound"]), rl, power(g["power"])))
+            for c in s["classes"]:
+                th = "-" if c["threshold"] is None else "%.2f" % c["threshold"]
+                print("    class %-10s %-12s at %-4s n %4d k %3d bound %s %s" % (c["name"], c["state"], th, c["n"],
+                      c["k"], pct(c["bound"]), power(c["power"])))
+            for p in (s.get("written"), s.get("trap")):
+                if p:
+                    print("    %-16s %s n %4d k %3d bound %s %s" % (p["name"], "pass" if p["passes"] else "FAIL",
+                          p["n"], p["k"], pct(p["bound"]), power(p["power"])))
+            for b in s["backOff"]:
+                print("    back-off %d: %s off (%s %d wrong of %d)" % (b["step"], b["relation"], b["gate"], b["k"],
+                      b["n"]))
+        sq = m.get("sequences")
+        if sq:
+            print("  sequences: lineage %s, timeline %s" % (sq["lineageState"], sq["timeline"]))
+        ag = m["agreedSample"]
+        ch = m["checks"]
+        print("  agreed sample: seed %d, share %.2f, %d drawn at %.2f; checks at %.2f: %d marked, %d checked, "
+              "disagreement %s" % (ag["seed"], ag["share"], ag["drawn"], ag["drawnAt"], ch["checkShare"],
+              ch["marked"], ch["checked"], pct(ch["disagreementRate"])))
+        for gate, n in sorted(m["unjudgedByGate"].items()):
+            print("    unjudged %-16s %d" % (gate, n))
+        v = m["verdict"]
+        print("  verdict: %s%s" % (v["status"], "" if not m.get("certificate") else " (%s)" % m["certificate"]))
+        for reason in v["reasons"]:
+            print("    - %s" % reason)
+    print()
+    print("  note: %s" % r["sequencesNote"])
+    print()
+    sys.exit(0)
 if r["set"] == "sequences":
     print("  set sequences: %d chains, %d probes, %d runs, configuration %s, %s, schema %s"
           % (r["chains"], r["probes"], r["runs"], r["configurationSource"], r["sequences"], r["schema"]))

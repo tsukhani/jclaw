@@ -1,17 +1,33 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.grapheval.Adjudications;
 import services.grapheval.Certifier;
-import services.grapheval.Certifier.Adjudication;
 import services.grapheval.Certifier.ClassStep;
+import services.grapheval.Certifier.Evaluation;
+import services.grapheval.Certifier.GateCounts;
 import services.grapheval.Certifier.Walk;
+import services.grapheval.Configuration;
+import services.grapheval.GateBounds;
+import services.grapheval.GateBounds.MemoryCounts;
 import services.grapheval.GraphEvalScorer;
 import services.grapheval.GraphEvalScorer.ClassTally;
 import services.grapheval.GraphEvalScorer.Point;
 import services.grapheval.GraphEvalScorer.WrongRecord;
+import services.grapheval.RecordBounds;
+import services.grapheval.SequenceScorer;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.function.DoubleFunction;
 
-/** JCLAW-1356: the Clopper-Pearson bound, the threshold walk and the certification preconditions, per the I/O matrix. */
+/**
+ * JCLAW-1356, JCLAW-1368: the Clopper-Pearson bound, the threshold walk, the certification preconditions and the v2
+ * gate sequencing, per the I/O matrices.
+ */
 class CertifierTest extends UnitTest {
 
     private static final int[][] BOUNDARY = {{0, 59}, {1, 93}, {2, 124}, {3, 153}, {5, 208}};
@@ -43,6 +59,11 @@ class CertifierTest extends UnitTest {
     }
 
     private static final WrongRecord RECORD = new WrongRecord("c007", "term:Meridian:Project", GraphEvalScorer.MATCH);
+
+    private static Adjudications.Verdict unmatched(String record, String verdict) {
+        return new Adjudications.Verdict("c007", record, Adjudications.UNMATCHED, verdict, "guide@000000000000",
+                Adjudications.OPERATOR, null, null, "");
+    }
 
     @Test
     void theBoundaryRowsPass() {
@@ -128,7 +149,7 @@ class CertifierTest extends UnitTest {
 
     @Test
     void everyWrongRecordAdjudicatedWrongCertifies() {
-        var verdict = new Adjudication("c007", RECORD.record(), Certifier.WRONG, "a real miss");
+        var verdict = unmatched(RECORD.record(), Certifier.WRONG);
         var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of(verdict), null);
         assertEquals(Certifier.CERTIFIED, c.status());
         assertEquals(0.5, c.threshold());
@@ -137,7 +158,7 @@ class CertifierTest extends UnitTest {
 
     @Test
     void aLabelErrorVerdictMeansTheLabelsNeedFixing() {
-        var verdict = new Adjudication("c007", RECORD.record(), Certifier.LABEL_ERROR, "gold missed an alias");
+        var verdict = unmatched(RECORD.record(), Certifier.LABEL_ERROR);
         var c = Certifier.certify(List.of(walkDownTo(0.5), walkDownTo(0.5)), false, true, List.of(RECORD), List.of(verdict), null);
         assertEquals(Certifier.NOT_CERTIFIED, c.status());
         assertTrue(c.reasons().contains(Certifier.LABELS_NEED_FIXING), c.reasons().toString());
@@ -185,16 +206,6 @@ class CertifierTest extends UnitTest {
         var c = Certifier.certify(List.of(walkDownTo(0.95), walkDownTo(0.95)), true, true, List.of(), List.of(), null);
         assertEquals(Certifier.NOT_CERTIFIED, c.status());
         assertNull(c.threshold());
-    }
-
-    @Test
-    void adjudicationsParseAndRefuseAnUnknownVerdict() {
-        var parsed = Certifier.parseAdjudications(
-                "[{\"caseId\":\"c007\",\"record\":\"term:Meridian:Project\",\"verdict\":\"wrong\",\"note\":\"n\"}]");
-        assertEquals(List.of(new Adjudication("c007", "term:Meridian:Project", "wrong", "n")), parsed);
-        var e = assertThrows(IllegalArgumentException.class, () -> Certifier.parseAdjudications(
-                "[{\"caseId\":\"c007\",\"record\":\"r\",\"verdict\":\"maybe\"}]"));
-        assertTrue(e.getMessage().contains("verdict"), e.getMessage());
     }
 
     private static List<ClassStep> classSteps(int... nk) {
@@ -289,5 +300,271 @@ class CertifierTest extends UnitTest {
         assertNull(Certifier.check(cert, "v3@aaa", "x@111"));
         assertEquals("schema stamp v3@aaa differs from running v3@bbb", Certifier.check(cert, "v3@bbb", "x@111"));
         assertEquals("extraction stamp x@111 differs from running x@222", Certifier.check(cert, "v3@aaa", "x@222"));
+    }
+
+    // ---- Protocol v2 (JCLAW-1368) ----
+
+    private static final double START = 0.95;
+
+    /** A synthetic world: each gate's {written, wrong, gold, right} at threshold t, the trap set and its violators. */
+    private static final class World {
+        DoubleFunction<int[]> terms = _ -> new int[] {200, 0, 200, 200};
+        final Map<String, int[]> relations = new LinkedHashMap<>();
+        int trapGold = 100;
+        final Map<String, Integer> violations = new HashMap<>();
+        int extraWrong;
+        final List<Configuration> seen = new ArrayList<>();
+
+        World relation(String name, int written, int wrong, int gold, int right) {
+            relations.put(name, new int[] {written, wrong, gold, right});
+            return this;
+        }
+
+        private static GateCounts counts(int[] w) {
+            var mc = new MemoryCounts("m1", w[0], w[1], 0, w[2], w[3]);
+            return new GateCounts(w[0] > 0 ? List.of(mc) : List.of(), w[2] > 0 ? List.of(mc) : List.of());
+        }
+
+        Evaluation evaluate(Configuration c) {
+            seen.add(c);
+            var gates = new HashMap<String, GateCounts>();
+            var t = terms.apply(c.terms());
+            gates.put(Certifier.TERMS, counts(t));
+            int written = t[0];
+            int wrong = t[1] + extraWrong;
+            int violated = 0;
+            for (var r : c.relations().keySet()) {
+                var w = relations.get(r);
+                gates.put(r, counts(w));
+                written += w[0];
+                wrong += w[1];
+                violated += violations.getOrDefault(r, 0);
+            }
+            return new Evaluation(gates, Map.of(), List.of(new MemoryCounts("m1", written, wrong, 0, 0, 0)),
+                    List.of(new MemoryCounts("m1", trapGold, violated, 0, 0, 0)));
+        }
+
+        Certifier.Sequencing sequence(double start, GateBounds bounds) {
+            return Certifier.sequence(bounds, start, List.copyOf(relations.keySet()), Certifier.DEFAULT_RECALL_FLOOR,
+                    this::evaluate);
+        }
+
+        Certifier.Sequencing sequence() {
+            return sequence(START, RecordBounds.INSTANCE);
+        }
+    }
+
+    private static Certifier.Gate gate(Certifier.Sequencing s, String name) {
+        return s.relations().stream().filter(g -> g.name().equals(name)).findFirst().orElseThrow();
+    }
+
+    private static final Certifier.VerdictInputs CLEAN = new Certifier.VerdictInputs(false, 0, false, false,
+            SequenceScorer.REPORTED, true, 0, 0);
+
+    @Test
+    void aFailingTermGateEvaluatesNoRelationAndEnablesNothing() {
+        var world = new World().relation("uses", 200, 0, 200, 200);
+        world.terms = _ -> new int[] {58, 0, 100, 100};
+        var s = world.sequence();
+        assertEquals(Certifier.OFF, s.terms().state());
+        assertEquals(List.of(), s.relations());
+        assertTrue(world.seen.stream().allMatch(c -> c.relations().isEmpty()), "no relation gate was evaluated");
+        assertEquals(Map.of(), s.reached().relations());
+        assertFalse(s.passed());
+        var v = Certifier.verdict(s, CLEAN);
+        assertEquals(Certifier.NOT_CERTIFIED, v.status());
+        assertTrue(v.reasons().getFirst().contains("Terms") && v.reasons().getFirst().contains("0 wrong of 58"),
+                v.reasons().toString());
+
+        var passing = new World().relation("uses", 200, 0, 200, 200);
+        passing.terms = _ -> new int[] {59, 0, 100, 100};
+        assertEquals(Certifier.ON, passing.sequence().terms().state(), "59 Terms with none wrong pass");
+    }
+
+    @Test
+    void aTermGateWhoseRecallLowerBoundIsUnderTheFloorIsNotCertified() {
+        var world = new World().relation("uses", 200, 0, 200, 200);
+        world.terms = _ -> new int[] {200, 0, 200, 80};
+        var s = world.sequence();
+        assertEquals(Certifier.OFF, s.terms().state());
+        assertTrue(s.terms().recallLower() < Certifier.DEFAULT_RECALL_FLOOR);
+        assertTrue(s.terms().reason().contains("recall lower bound"), s.terms().reason());
+        assertEquals(Certifier.NOT_CERTIFIED, Certifier.verdict(s, CLEAN).status());
+        world.terms = _ -> new int[] {200, 0, 200, 140};
+        assertEquals(Certifier.ON, world.sequence().terms().state(), "a recall lower bound over the floor passes");
+    }
+
+    @Test
+    void aRelationOfFiftyEightRecordsStaysOffAndFiftyNineSwitchOn() {
+        var s = new World().relation("kind_of", 58, 0, 58, 58).relation("uses", 59, 0, 59, 59).sequence();
+        assertEquals(Certifier.OFF, gate(s, "kind_of").state());
+        assertNull(gate(s, "kind_of").threshold());
+        assertEquals(Certifier.ON, gate(s, "uses").state());
+        assertEquals(0.50, gate(s, "uses").threshold());
+        assertEquals(Map.of("uses", 0.50), s.reached().relations());
+        assertTrue(s.passed());
+    }
+
+    @Test
+    void oneFailingRelationLeavesEveryOtherAsItWas() {
+        var failing = new World().relation("a", 100, 0, 100, 100).relation("b", 100, 10, 100, 100)
+                .relation("c", 100, 0, 100, 100);
+        failing.trapGold = 200;
+        var passing = new World().relation("a", 100, 0, 100, 100).relation("b", 100, 0, 100, 100)
+                .relation("c", 100, 0, 100, 100);
+        passing.trapGold = 200;
+        var s = failing.sequence();
+        var t = passing.sequence();
+        assertEquals(Certifier.OFF, gate(s, "b").state());
+        assertEquals(Certifier.ON, gate(t, "b").state());
+        for (var name : List.of("a", "c")) assertEquals(gate(t, name), gate(s, name), name);
+        assertEquals(List.of(), s.backOff());
+    }
+
+    @Test
+    void aRelationWhoseRecallLowerBoundIsUnderTheFloorIsOffAndTheRestUnchanged() {
+        var s = new World().relation("a", 100, 0, 100, 20).relation("b", 100, 0, 100, 100).sequence();
+        assertEquals(Certifier.OFF, gate(s, "a").state());
+        assertTrue(gate(s, "a").reason().contains("recall lower bound"), gate(s, "a").reason());
+        assertNotNull(gate(s, "a").recallLower());
+        assertEquals(Certifier.ON, gate(s, "b").state());
+        assertTrue(s.passed());
+    }
+
+    @Test
+    void theLastEnabledRelationThatPushesGTrapOverIsBackedOffAndTheEarlierStayOn() {
+        var world = new World().relation("a", 100, 0, 100, 100).relation("b", 100, 0, 100, 100)
+                .relation("c", 100, 0, 100, 100);
+        world.violations.put("c", 5);
+        var s = world.sequence();
+        assertEquals(Certifier.ON, gate(s, "a").state());
+        assertEquals(Certifier.ON, gate(s, "b").state());
+        assertEquals(Certifier.OFF, gate(s, "c").state());
+        assertTrue(gate(s, "c").reason().contains("back-off"), gate(s, "c").reason());
+        assertEquals(1, s.backOff().size());
+        var step = s.backOff().getFirst();
+        assertEquals("c", step.relation());
+        assertEquals(Certifier.G_TRAP, step.gate());
+        assertEquals(100, step.n());
+        assertEquals(5, step.k());
+        assertTrue(s.passed());
+        assertTrue(s.trap().passes());
+
+        world.violations.clear();
+        var none = world.sequence();
+        assertEquals(List.of(), none.backOff(), "no violation, no back-off");
+        assertEquals(Certifier.ON, gate(none, "c").state());
+    }
+
+    @Test
+    void termsAloneFailingGWrittenAreNotCertifiedNamingTheGateAndItsCounts() {
+        var world = new World();
+        world.extraWrong = 20;
+        var s = world.sequence();
+        assertEquals(Certifier.ON, s.terms().state());
+        assertFalse(s.passed());
+        var v = Certifier.verdict(s, CLEAN);
+        assertEquals(Certifier.NOT_CERTIFIED, v.status());
+        assertEquals(List.of("G_written fails with no relation on: 20 wrong of 200, bound "
+                + String.format(Locale.ROOT, "%.3f", Certifier.upperBound(20, 200))), v.reasons());
+        world.extraWrong = 0;
+        assertTrue(world.sequence().passed(), "with no wrong, Terms alone pass the pooled gates");
+    }
+
+    @Test
+    void noWalkEvaluatesAThresholdAboveTheStartOrARelationBelowTheTerms() {
+        var world = new World().relation("a", 100, 0, 100, 100).relation("b", 100, 0, 100, 100);
+        world.terms = t -> t >= 0.80 - 1e-9 ? new int[] {200, 0, 200, 200} : new int[] {200, 30, 200, 200};
+        var s = world.sequence(0.85, RecordBounds.INSTANCE);
+        assertEquals(0.80, s.terms().threshold());
+        assertEquals(0.85, s.terms().steps().getFirst().t(), "the walk starts at the start");
+        for (var c : world.seen) {
+            assertTrue(c.terms() <= 0.85 + 1e-9, c.toString());
+            for (var t : c.relations().values()) assertTrue(t <= 0.85 + 1e-9 && t >= 0.80 - 1e-9, c.toString());
+            for (var cls : c.classes().values()) {
+                assertTrue(cls.threshold() == null || cls.threshold() <= 0.85 + 1e-9, c.toString());
+            }
+        }
+        assertEquals(0.80, gate(s, "a").threshold(), "a relation never walks below the Term threshold");
+    }
+
+    /** Passes everything: a stand-in that shows every verdict reads the seam, not the record bound. */
+    private static final GateBounds LENIENT = new GateBounds() {
+        @Override
+        public boolean passes(List<MemoryCounts> writing, double limit, double tail) {
+            return true;
+        }
+
+        @Override
+        public double upper(List<MemoryCounts> writing, double tail) {
+            return 0;
+        }
+
+        @Override
+        public double recallLower(List<MemoryCounts> labelled, double tail) {
+            return 1;
+        }
+
+        @Override
+        public double power(List<MemoryCounts> writing, double trueWrongShare, double limit, double tail) {
+            return 1;
+        }
+
+        @Override
+        public int recordsNeeded(int wrong, double limit, double tail) {
+            return 1;
+        }
+    };
+
+    @Test
+    void swappingTheBoundsChangesTheVerdictWithoutTouchingACaller() {
+        var world = new World().relation("a", 10, 5, 10, 5);
+        world.terms = _ -> new int[] {10, 5, 10, 5};
+        var strict = world.sequence(START, RecordBounds.INSTANCE);
+        var lenient = world.sequence(START, LENIENT);
+        assertEquals(Certifier.NOT_CERTIFIED, Certifier.verdict(strict, CLEAN).status());
+        assertEquals(Certifier.CERTIFIED, Certifier.verdict(lenient, CLEAN).status());
+        assertEquals(Certifier.ON, gate(lenient, "a").state());
+    }
+
+    @Test
+    void theVerdictTakesTheFirstPreconditionThatApplies() {
+        var good = new World().relation("a", 100, 0, 100, 100).sequence();
+        var bad = new World();
+        bad.terms = _ -> new int[] {10, 0, 10, 10};
+        var off = bad.sequence();
+        assertEquals(Certifier.CERTIFIED, Certifier.verdict(good, CLEAN).status());
+        var everything = new Certifier.VerdictInputs(true, 3, true, true, SequenceScorer.FAILED, false, 4, 2);
+        assertEquals(List.of("a case memory changed during the run"), Certifier.verdict(good, everything).reasons());
+        var failed = new Certifier.VerdictInputs(false, 3, true, true, SequenceScorer.FAILED, false, 4, 2);
+        var voided = Certifier.verdict(null, failed);
+        assertEquals(Certifier.NOT_CERTIFIED, voided.status());
+        assertEquals(Certifier.VOID_RUN, voided.reasons().getFirst());
+        var spot = new Certifier.VerdictInputs(false, 0, true, true, SequenceScorer.FAILED, false, 4, 2);
+        assertEquals(Certifier.NEEDS_SECOND_RUN, Certifier.verdict(good, spot).reasons().getFirst());
+        var label = new Certifier.VerdictInputs(false, 0, false, true, SequenceScorer.FAILED, false, 4, 2);
+        assertEquals(List.of(Certifier.LABELS_NEED_FIXING), Certifier.verdict(good, label).reasons());
+        var timeline = new Certifier.VerdictInputs(false, 0, false, false, SequenceScorer.FAILED, false, 4, 2);
+        assertTrue(Certifier.verdict(off, timeline).reasons().getFirst().startsWith("Terms gate"));
+        assertEquals(List.of("the sequence timeline failed"), Certifier.verdict(good, timeline).reasons());
+        var agreement = new Certifier.VerdictInputs(false, 0, false, false, SequenceScorer.REPORTED, false, 4, 2);
+        assertEquals(Certifier.PENDING_AGREEMENT, Certifier.verdict(good, agreement).status());
+        var unjudged = new Certifier.VerdictInputs(false, 0, false, false, SequenceScorer.PASSED, true, 4, 0);
+        assertEquals(Certifier.PENDING_ADJUDICATION, Certifier.verdict(good, unjudged).status());
+        var unchecked = new Certifier.VerdictInputs(false, 0, false, false, SequenceScorer.PASSED, true, 0, 1);
+        assertEquals(Certifier.PENDING_ADJUDICATION, Certifier.verdict(good, unchecked).status());
+        assertEquals(List.of("1 model verdicts await an operator check"), Certifier.verdict(good, unchecked).reasons());
+    }
+
+    @Test
+    void everyGateReportsItsPowerBesideItsVerdict() {
+        var s = new World().relation("uses", 59, 0, 59, 59).sequence();
+        var g = gate(s, "uses");
+        assertEquals(59, g.n());
+        assertEquals(0, g.k());
+        assertEquals(0.553, g.power().at1(), 5e-4);
+        assertTrue(g.power().at3() < g.power().at2() && g.power().at2() < g.power().at1());
+        assertNotNull(s.written());
+        assertTrue(s.written().power().at1() > 0);
     }
 }

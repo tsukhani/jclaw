@@ -113,7 +113,7 @@ class SequenceHarnessTest extends UnitTest {
      * A decider answering each fixture memory's own labels — types, holding and denied relations, statuses, slots,
      * lineage — keyed by the memory's text, since one relation can hold in one memory and end in the next.
      */
-    private static Decider gold(Sequences set, List<JsonObject> requests) {
+    static Decider gold(Sequences set, List<JsonObject> requests) {
         var byText = new HashMap<String, Decider>();
         for (var chain : set.chains()) {
             for (var memory : chain.memories()) {

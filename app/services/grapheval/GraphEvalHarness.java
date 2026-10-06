@@ -1,5 +1,10 @@
 package services.grapheval;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
 import memory.MemoryProvenance;
 import memory.MemoryStoreFactory;
 import memory.TemporalExpressions;
@@ -10,8 +15,8 @@ import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.EventLogger;
+import services.TimezoneResolver;
 import services.Tx;
-import services.grapheval.Certifier.Adjudication;
 import services.grapheval.Certifier.Certificate;
 import services.grapheval.Certifier.Certification;
 import services.grapheval.Certifier.ClassStep;
@@ -22,6 +27,7 @@ import services.grapheval.Certifier.Walk;
 import services.grapheval.ExtractionPipeline.CaseRun;
 import services.grapheval.ExtractionPipeline.Decider;
 import services.grapheval.ExtractionPipeline.Decision;
+import services.grapheval.GateBounds.MemoryCounts;
 import services.grapheval.GraphCases.Case;
 import services.grapheval.GraphEvalScorer.Point;
 import services.grapheval.GraphEvalScorer.WrongRecord;
@@ -31,13 +37,18 @@ import services.grapheval.StageScorer.Stages;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -48,6 +59,8 @@ import java.util.concurrent.Future;
 import java.util.function.DoubleFunction;
 import java.util.function.Function;
 import java.util.stream.Stream;
+
+import static utils.GsonHolder.GSON;
 
 /**
  * Certifies decision models for graph extraction (JCLAW-1344, JCLAW-1356): every stage and the end-to-end pipeline
@@ -107,28 +120,32 @@ public final class GraphEvalHarness {
     /**
      * One model over the committed set. {@code spotCheck} is a single run's cases asked again, null for several runs.
      * {@code wrongRecords} are every run's wrong records at the certified threshold, or at {@code wrongRecordsAt} 0.50
-     * when nothing certified, for adjudication. {@code certificate} carries the combined class walks.
+     * when nothing certified, for adjudication. {@code certificate} carries the combined class walks. {@code v2} is
+     * the protocol v2 sequencing at the development start, information only: a development run never certifies.
      */
     public record ModelReport(String model, List<RunReport> runs, @Nullable SpotCheck spotCheck,
                               Certification certification, double wrongRecordsAt, List<WrongRecord> wrongRecords,
-                              Certificate certificate) {}
+                              Certificate certificate, Development v2) {}
 
     /**
      * The committed set's whole result. It carries no timings, so a rerun with the same answers is identical.
      * {@code schema} is the seed's {@link OntologySchema#fingerprint()} and {@code extraction} the questions'
      * {@link ExtractionPipeline#fingerprint(OntologySchema)}: a certificate is void under any other.
+     * {@code excludedSplitIds} counts the cases left out because a frozen split holds them.
      */
     public record Report(String set, String schema, String extraction, boolean pairFilter, int cases, int runs,
                          double recallFloor,
-                         Agreement.Result agreement, List<ModelReport> models, MemoryIntegrity memoryIntegrity) {}
+                         Agreement.Result agreement, List<ModelReport> models, MemoryIntegrity memoryIntegrity,
+                         int excludedSplitIds) {}
 
-    /** One model over the held-out set; the walks are information only, since only the committed set certifies. */
-    public record HeldOutModel(String model, List<RunReport> runs, Combined walk, Certificate certificate) {}
+    /** One model over the held-out set; the walks are information only: a held-out set certifies only through a split. */
+    public record HeldOutModel(String model, List<RunReport> runs, Combined walk, Certificate certificate,
+                               Development v2) {}
 
     /** The held-out set's result: aggregate counts only, never an id, a text or a span. */
     public record HeldOutReport(String set, String schema, String extraction, boolean pairFilter, int cases,
                                 int unlabelled, int runs, double recallFloor,
-                                List<HeldOutModel> models, HeldOutIntegrity memoryIntegrity) {}
+                                List<HeldOutModel> models, HeldOutIntegrity memoryIntegrity, int excludedSplitIds) {}
 
     /** The columns a decision must never touch. */
     private record Snapshot(String text, @Nullable String retrievalKey, Instant updatedAt,
@@ -149,7 +166,7 @@ public final class GraphEvalHarness {
      */
     public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,
                              List<DecisionModel> models, int runs, double recallFloor, int concurrency,
-                             List<Case> secondLabels, List<Adjudication> adjudications) {
+                             List<Case> secondLabels, List<Adjudications.Verdict> adjudications) {
         return run(agentId, cases, ownerName, schema, models, runs, recallFloor, concurrency, secondLabels,
                 adjudications, EvalProgress.none());
     }
@@ -157,7 +174,7 @@ public final class GraphEvalHarness {
     /** {@link #run} reporting each case to {@code progress}; the report is the same either way. */
     public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,
                              List<DecisionModel> models, int runs, double recallFloor, int concurrency,
-                             List<Case> secondLabels, List<Adjudication> adjudications, EvalProgress progress) {
+                             List<Case> secondLabels, List<Adjudications.Verdict> adjudications, EvalProgress progress) {
         return run(agentId, cases, ownerName, schema, models, runs, recallFloor, concurrency, secondLabels,
                 adjudications, progress, false);
     }
@@ -165,7 +182,7 @@ public final class GraphEvalHarness {
     /** {@link #run} with the extraction pair filter (JCLAW-1380) on or off. */
     public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,
                              List<DecisionModel> models, int runs, double recallFloor, int concurrency,
-                             List<Case> secondLabels, List<Adjudication> adjudications, EvalProgress progress,
+                             List<Case> secondLabels, List<Adjudications.Verdict> adjudications, EvalProgress progress,
                              boolean pairFilter) {
         return run(agentId, cases, ownerName, schema, models, runs, recallFloor, concurrency, secondLabels,
                 adjudications, progress, pairFilter, null);
@@ -177,8 +194,53 @@ public final class GraphEvalHarness {
      */
     public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,
                              List<DecisionModel> models, int runs, double recallFloor, int concurrency,
-                             List<Case> secondLabels, List<Adjudication> adjudications, EvalProgress progress,
+                             List<Case> secondLabels, List<Adjudications.Verdict> adjudications, EvalProgress progress,
                              boolean pairFilter, @Nullable String secondLabelsReason) {
+        return run(agentId, cases, ownerName, schema, models, runs, recallFloor, concurrency, secondLabels,
+                adjudications, progress, pairFilter, secondLabelsReason, DevOptions.NONE);
+    }
+
+    /** {@link #run} with the v2 development options: the guide, the agreed sample and the split ids left out. */
+    public static Report run(String agentId, List<Case> cases, @Nullable String ownerName, OntologySchema schema,
+                             List<DecisionModel> models, int runs, double recallFloor, int concurrency,
+                             List<Case> secondLabels, List<Adjudications.Verdict> adjudications, EvalProgress progress,
+                             boolean pairFilter, @Nullable String secondLabelsReason, DevOptions options) {
+        var stored = measureStored(agentId, cases, ownerName, schema, models, runs, concurrency, progress, pairFilter);
+        var measured = stored.measured();
+        var spotChecks = stored.spotChecks();
+        var integrity = stored.integrity();
+        var changed = integrity.changed();
+        var symmetric = schema.symmetricSet();
+        var agreement = Agreement.compare(cases, secondLabels, symmetric).withReason(secondLabelsReason);
+        var reports = new ArrayList<ModelReport>();
+        for (var m : models) {
+            var data = measured.getOrDefault(m.name(), List.of());
+            var scoring = scoring(cases, data, schema, recallFloor);
+            var walks = scoring.reports().stream().map(RunReport::walk).toList();
+            var threshold = scoring.threshold();
+            var wrong = GraphEvalScorer.union(data.stream().map(d -> GraphEvalScorer.score(cases, d.e2e(), symmetric,
+                    scoring.listedAt(), scoring.config()).wrong()).toList());
+            var spot = spotChecks.get(m.name());
+            var certification = Certifier.certify(walks, !changed.isEmpty(), agreement.complete(),
+                    threshold == null ? List.of() : wrong, adjudications, spot);
+            reports.add(new ModelReport(m.name(), scoring.reports(), spot, certification, scoring.listedAt(), wrong,
+                    scoring.certificate(), development(cases, data, schema, adjudications, options, recallFloor)));
+        }
+        return new Report("cases", schema.fingerprint(), ExtractionPipeline.fingerprint(schema), pairFilter,
+                cases.size(), runs, recallFloor, agreement, reports, integrity, options.excludedSplitIds());
+    }
+
+    /** What a committed-set measurement leaves: every run's data by model, a single run's spot-checks, and integrity. */
+    private record MeasuredCases(Map<String, List<RunData>> measured, Map<String, SpotCheck> spotChecks,
+                                 MemoryIntegrity integrity) {}
+
+    /**
+     * Stores each case as a memory of the agent, runs every model over them, spot-checks a single run, then deletes
+     * them and checks every row was unchanged.
+     */
+    private static MeasuredCases measureStored(String agentId, List<Case> cases, @Nullable String ownerName,
+                                               OntologySchema schema, List<DecisionModel> models, int runs,
+                                               int concurrency, EvalProgress progress, boolean pairFilter) {
         var store = MemoryStoreFactory.get();
         var provenance = new MemoryProvenance(null, null, MemoryProvenance.process(CATEGORY),
                 MemoryAuthorType.AGENT_SYNTHESIZED, List.of());
@@ -202,7 +264,7 @@ public final class GraphEvalHarness {
                     var data = measured.getOrDefault(m.name(), List.of());
                     if (!data.isEmpty()) {
                         spotChecks.put(m.name(), spotCheck(cases, schema, m, data.getFirst().e2e(), known,
-                                ownerName, pairFilter, concurrency));
+                                ownerName, pairFilter, concurrency, Map.of()));
                     }
                 }
             }
@@ -222,27 +284,8 @@ public final class GraphEvalHarness {
             if (snapshot == null || !snapshot.equals(after.get(caseId))) changed.add(caseId);
         });
         int deleted = (int) snapshot(memoryIds).values().stream().filter(s -> s == null).count();
-        var integrity = new MemoryIntegrity(before.size(), before.size() - changed.size(), List.copyOf(changed),
-                deleted);
-
-        var symmetric = schema.symmetricSet();
-        var agreement = Agreement.compare(cases, secondLabels, symmetric).withReason(secondLabelsReason);
-        var reports = new ArrayList<ModelReport>();
-        for (var m : models) {
-            var data = measured.getOrDefault(m.name(), List.of());
-            var scoring = scoring(cases, data, schema, recallFloor);
-            var walks = scoring.reports().stream().map(RunReport::walk).toList();
-            var threshold = scoring.threshold();
-            var wrong = GraphEvalScorer.union(data.stream().map(d -> GraphEvalScorer.score(cases, d.e2e(), symmetric,
-                    scoring.listedAt(), scoring.config()).wrong()).toList());
-            var spot = spotChecks.get(m.name());
-            var certification = Certifier.certify(walks, !changed.isEmpty(), agreement.complete(),
-                    threshold == null ? List.of() : wrong, adjudications, spot);
-            reports.add(new ModelReport(m.name(), scoring.reports(), spot, certification, scoring.listedAt(), wrong,
-                    scoring.certificate()));
-        }
-        return new Report("cases", schema.fingerprint(), ExtractionPipeline.fingerprint(schema), pairFilter,
-                cases.size(), runs, recallFloor, agreement, reports, integrity);
+        return new MeasuredCases(measured, spotChecks, new MemoryIntegrity(before.size(),
+                before.size() - changed.size(), List.copyOf(changed), deleted));
     }
 
     /**
@@ -265,12 +308,26 @@ public final class GraphEvalHarness {
     public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, @Nullable String ownerName, OntologySchema schema,
                                            List<DecisionModel> models, int runs, double recallFloor, int concurrency,
                                            EvalProgress progress, boolean pairFilter) {
-        var cases = loaded.cases().stream().map(HeldOut.HeldCase::labels).toList();
+        return runHeldOut(loaded, ownerName, schema, models, runs, recallFloor, concurrency, progress, pairFilter,
+                List.of(), DevOptions.NONE);
+    }
+
+    /** {@link #runHeldOut} with the held-out verdicts and the v2 development options. */
+    public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, @Nullable String ownerName, OntologySchema schema,
+                                           List<DecisionModel> models, int runs, double recallFloor, int concurrency,
+                                           EvalProgress progress, boolean pairFilter,
+                                           List<Adjudications.Verdict> adjudications, DevOptions options) {
+        // Cases go by memory id, as held-out verdicts and the agreed draw do; the report carries none of them.
+        var cases = new ArrayList<Case>();
         var memoryIds = new LinkedHashMap<String, String>();
         var held = new HashMap<String, HeldOut.HeldCase>();
         loaded.cases().forEach(h -> {
-            memoryIds.put(h.labels().id(), String.valueOf(h.memoryId()));
-            held.put(h.labels().id(), h);
+            var id = String.valueOf(h.memoryId());
+            var c = h.labels();
+            cases.add(new Case(id, c.tags(), c.text(), c.entities(), c.relations(), c.negatives(), c.capturedAt(),
+                    c.dates()));
+            memoryIds.put(id, id);
+            held.put(id, h);
         });
         var before = snapshot(memoryIds);
         var known = ownerName == null ? List.<String>of() : List.of(ownerName);
@@ -286,14 +343,15 @@ public final class GraphEvalHarness {
         }
         var reports = new ArrayList<HeldOutModel>();
         for (var m : models) {
-            var scoring = scoring(cases, measured.getOrDefault(m.name(), List.of()), schema, recallFloor);
+            var data = measured.getOrDefault(m.name(), List.<RunData>of());
+            var scoring = scoring(cases, data, schema, recallFloor);
             reports.add(new HeldOutModel(m.name(), scoring.reports(),
                     Certifier.combine(scoring.reports().stream().map(RunReport::walk).toList()),
-                    scoring.certificate()));
+                    scoring.certificate(), development(cases, data, schema, adjudications, options, recallFloor)));
         }
         return new HeldOutReport("heldout", schema.fingerprint(), ExtractionPipeline.fingerprint(schema), pairFilter,
                 cases.size(), loaded.unlabelled(), runs, recallFloor,
-                reports, new HeldOutIntegrity(before.size(), unchanged, present));
+                reports, new HeldOutIntegrity(before.size(), unchanged, present), options.excludedSplitIds());
     }
 
     /**
@@ -488,14 +546,14 @@ public final class GraphEvalHarness {
      */
     private static SpotCheck spotCheck(List<Case> cases, OntologySchema schema, DecisionModel m, List<CaseRun> first,
                                        List<String> knownNames, @Nullable String ownerName, boolean pairFilter,
-                                       int concurrency) {
+                                       int concurrency, Map<String, HeldOut.HeldCase> held) {
         var sample = new ArrayList<Case>();
         for (int i = 0; i < cases.size(); i += SPOT_CHECK_STRIDE) sample.add(cases.get(i));
         var tasks = new ArrayList<Callable<CaseRun>>();
         for (var c : sample) {
             tasks.add(() -> ExtractionPipeline.run(schema, c.id(), c.text(),
                     CandidateGenerator.generate(c.text(), knownNames), m.name(), m.decider(),
-                    inputs(c, ownerName, pairFilter, null)));
+                    inputs(c, ownerName, pairFilter, held.get(c.id()))));
         }
         var byId = new HashMap<String, CaseRun>();
         first.forEach(r -> byId.put(r.caseId(), r));
@@ -602,6 +660,535 @@ public final class GraphEvalHarness {
         }
         var author = c.tags().contains(GraphCases.GUEST) ? MemoryAuthorType.GUEST_TURN : MemoryAuthorType.HUMAN_TURN;
         return ExtractionPipeline.Inputs.of(c.text(), ownerName, author, c.capturedAt(), List.of(), pairFilter);
+    }
+
+    // ---- Protocol v2 (JCLAW-1368): gate sequencing, frozen splits, two-sided adjudication, certificates. ----
+
+    public static final long DEFAULT_AGREED_SEED = 1356;
+    /** Where a development run starts its v2 walk until a development run sets a starting threshold. */
+    public static final double DEVELOPMENT_START = 0.95;
+    public static final String SHEETS = "sheets";
+    public static final String CERTIFICATION = "certification";
+    private static final List<String> QUESTION_BUCKETS = List.of("1-10", "11-20", "21-40", ">40");
+
+    /**
+     * What a development run's v2 sequencing reads beside its decisions: the running {@code guide@} the verdicts
+     * must carry, the agreed sample's seed and share, the model-verdict check share, and how many cases were left out
+     * because a frozen split holds them.
+     */
+    public record DevOptions(String guide, long agreedSeed, double agreedShare, double checkShare,
+                             int excludedSplitIds) {
+        public static final DevOptions NONE = new DevOptions("", DEFAULT_AGREED_SEED, Adjudications.DEFAULT_SHARE,
+                Adjudications.DEFAULT_CHECK_SHARE, 0);
+    }
+
+    /** Memories whose questions fall in one bucket, how many of them had a failed decision, and that share. */
+    public record FailureShare(String questions, int memories, int failed, @Nullable Double share) {}
+
+    /**
+     * Report-side counts at the configuration reached, summed over runs: questions per memory, the share of memories
+     * with any failed decision overall and by questions per memory, per stratum tag the share of memories writing a
+     * record the labels do not support (any record, for a memory with no gold), and the rule-written records left out.
+     */
+    public record Tallies(int memories, @Nullable Double questionsPerMemory, int failedMemories,
+                          @Nullable Double failedShare, List<FailureShare> byQuestions,
+                          Map<String, Ratio> falsePositiveByTag, int ruleWrittenLeftOut) {}
+
+    /** The agreed sample: drawn by hash at {@code seed} and {@code share} over the agreed records written at 0.50. */
+    public record AgreedSample(long seed, double share, double drawnAt, int drawn) {}
+
+    /** Model verdicts marked for an operator check at {@code checkShare}, and how the checked ones came out. */
+    public record Checks(double checkShare, int marked, int checked, int disagreed, @Nullable Double disagreementRate) {}
+
+    /**
+     * A development run's v2 sequencing, information only: no ledger line and no certificate. {@code sequencing} is
+     * null on a run with a failed decision.
+     */
+    public record Development(double startingThreshold, Certifier.@Nullable Sequencing sequencing, Tallies tallies,
+                              AgreedSample agreedSample, Map<String, Integer> unjudgedByGate, Checks checks) {}
+
+    /** Stored decisions scored the v2 way; {@code sequencing} is null on a void run. */
+    private record V2(Certifier.@Nullable Sequencing sequencing, Tallies tallies, AgreedSample agreedSample,
+                      Adjudications.Judgement judgement, List<GraphEvalScorer.GateRecord> inScope) {}
+
+    private static Development development(List<Case> cases, List<RunData> data, OntologySchema schema,
+                                           List<Adjudications.Verdict> adjudications, DevOptions options,
+                                           double recallFloor) {
+        var book = new Adjudications.Book(adjudications, options.guide(), options.agreedSeed(), options.agreedShare(),
+                options.checkShare());
+        var v2 = v2(cases, data.stream().map(RunData::e2e).toList(), schema, book, DEVELOPMENT_START,
+                CertificationSplit.relationOrder(cases, schema), recallFloor, RecordBounds.INSTANCE);
+        return new Development(DEVELOPMENT_START, v2.sequencing(), v2.tallies(), v2.agreedSample(),
+                v2.judgement().unjudgedByGate(), checks(book, v2.judgement()));
+    }
+
+    private static Checks checks(Adjudications.Book book, Adjudications.Judgement j) {
+        return new Checks(book.checkShare(), j.marked(), j.checked(), j.disagreed(), j.disagreementRate());
+    }
+
+    /**
+     * Sequences {@code runs}' stored decisions over {@code cases} through a memoized pure evaluator; several runs are
+     * read gate by gate at the run with the highest bound (the lowest recall bound for recall), so every run must pass.
+     */
+    private static V2 v2(List<Case> cases, List<List<CaseRun>> runs, OntologySchema schema, Adjudications.Book book,
+                         double start, List<String> relationOrder, double recallFloor, GateBounds bounds) {
+        var symmetric = schema.symmetricSet();
+        var outcomes = new IdentityHashMap<CaseRun, Map<List<Object>, Statements.Outcome>>();
+        // Statements.at reads a class only as max(t, its threshold), so classes equal under that share one outcome.
+        GraphEvalScorer.StatementsAt at = (run, t, classes) -> outcomes.computeIfAbsent(run, _ -> new HashMap<>())
+                .computeIfAbsent(List.of(t, new Statements.Classes(Statements.at(t, classes.status()),
+                        Statements.at(t, classes.time()), Statements.at(t, classes.negation()), null)),
+                        _ -> Statements.at(run, t, classes));
+        var scored = new HashMap<Configuration, List<GraphEvalScorer.Configured>>();
+        Function<Configuration, List<GraphEvalScorer.Configured>> scoreAt = c -> {
+            var hit = scored.get(c);
+            if (hit != null) return hit;
+            var out = runs.stream().map(r -> GraphEvalScorer.score(cases, r, symmetric, c, at)).toList();
+            scored.put(c, out);
+            return out;
+        };
+        int failed = (int) runs.stream().flatMap(List::stream).flatMap(r -> r.decisions().stream())
+                .filter(Decision::failed).count();
+        Certifier.Sequencing sequencing = null;
+        Configuration reached = new Configuration(start, new TreeMap<>(), new TreeMap<>());
+        if (failed == 0 && !runs.isEmpty()) {
+            sequencing = Certifier.sequence(bounds, start, relationOrder, recallFloor,
+                    c -> worst(scoreAt.apply(c).stream().map(cf -> evaluation(cf, book)).toList(), bounds));
+            reached = sequencing.reached();
+        }
+        var atReached = scoreAt.apply(reached);
+        var inScope = new LinkedHashMap<List<String>, GraphEvalScorer.GateRecord>();
+        atReached.forEach(cf -> cf.records().forEach(r -> inScope.putIfAbsent(List.of(r.caseId(), r.record()), r)));
+        var widest = new TreeMap<String, Double>();
+        relationOrder.forEach(r -> widest.put(r, Adjudications.DRAWN_AT));
+        var drawn = new HashSet<List<String>>();
+        for (var cf : scoreAt.apply(new Configuration(Adjudications.DRAWN_AT, widest, new TreeMap<>()))) {
+            for (var r : cf.records()) {
+                if (book.sampled(r)) drawn.add(List.of(r.caseId(), r.record()));
+            }
+        }
+        return new V2(sequencing, tallies(atReached),
+                new AgreedSample(book.seed(), book.share(), Adjudications.DRAWN_AT, drawn.size()),
+                book.judge(List.copyOf(inScope.values())), List.copyOf(inScope.values()));
+    }
+
+    /** One run at one configuration as the certifier reads it: each memory's counts per gate, class and pooled gate. */
+    public static Certifier.Evaluation evaluation(GraphEvalScorer.Configured cf, Adjudications.Book book) {
+        var weights = new HashMap<List<String>, Double>();
+        var memoryWeight = new HashMap<String, Double>();
+        for (var r : cf.records()) {
+            double w = book.agreedWrongWeight(r);
+            if (w <= 0) continue;
+            weights.merge(List.of(r.caseId(), r.gate()), w, Double::sum);
+            memoryWeight.merge(r.caseId(), w, Double::sum);
+        }
+        var writing = new TreeMap<String, List<MemoryCounts>>();
+        var labelled = new TreeMap<String, List<MemoryCounts>>();
+        var classes = new TreeMap<String, List<MemoryCounts>>();
+        var written = new ArrayList<MemoryCounts>();
+        var trap = new ArrayList<MemoryCounts>();
+        for (var m : cf.memories()) {
+            m.gates().forEach((gate, t) -> {
+                var mc = new MemoryCounts(m.caseId(), t.written(), t.wrong(),
+                        weights.getOrDefault(List.of(m.caseId(), gate), 0.0), t.gold(), t.right());
+                if (t.written() > 0) writing.computeIfAbsent(gate, _ -> new ArrayList<>()).add(mc);
+                if (t.gold() > 0) labelled.computeIfAbsent(gate, _ -> new ArrayList<>()).add(mc);
+            });
+            for (var name : Certifier.V2_CLASSES) {
+                var c = m.classes().get(name);
+                if (c != null && c.n() > 0) {
+                    classes.computeIfAbsent(name, _ -> new ArrayList<>())
+                            .add(new MemoryCounts(m.caseId(), c.n(), c.wrong(), 0, c.gold(), c.right()));
+                }
+            }
+            if (m.gWritten() > 0) {
+                written.add(new MemoryCounts(m.caseId(), m.gWritten(), m.gWrong(),
+                        memoryWeight.getOrDefault(m.caseId(), 0.0), 0, 0));
+            }
+            if (m.trapGold() > 0) trap.add(new MemoryCounts(m.caseId(), m.trapGold(), m.trapViolations(), 0, 0, 0));
+        }
+        var gates = new HashMap<String, Certifier.GateCounts>();
+        var names = new TreeSet<>(writing.keySet());
+        names.addAll(labelled.keySet());
+        for (var g : names) {
+            gates.put(g, new Certifier.GateCounts(writing.getOrDefault(g, List.of()),
+                    labelled.getOrDefault(g, List.of())));
+        }
+        return new Certifier.Evaluation(gates, classes, written, trap);
+    }
+
+    /** Each gate at the run whose bound is highest, its recall at the run whose recall bound is lowest. */
+    static Certifier.Evaluation worst(List<Certifier.Evaluation> runs, GateBounds bounds) {
+        if (runs.size() == 1) return runs.getFirst();
+        var tail = Certifier.CONFIDENCE_TAIL;
+        Function<List<List<MemoryCounts>>, List<MemoryCounts>> highest = lists -> lists.stream()
+                .max((a, b) -> Double.compare(bounds.upper(a, tail), bounds.upper(b, tail))).orElse(List.of());
+        var names = new TreeSet<String>();
+        runs.forEach(e -> names.addAll(e.gates().keySet()));
+        var gates = new HashMap<String, Certifier.GateCounts>();
+        for (var g : names) {
+            var counts = runs.stream().map(e -> e.gates().getOrDefault(g, Certifier.GateCounts.EMPTY)).toList();
+            var labelled = counts.stream().map(Certifier.GateCounts::labelled)
+                    .min((a, b) -> Double.compare(bounds.recallLower(a, tail), bounds.recallLower(b, tail)))
+                    .orElse(List.of());
+            gates.put(g, new Certifier.GateCounts(highest.apply(counts.stream().map(Certifier.GateCounts::writing)
+                    .toList()), labelled));
+        }
+        var classes = new HashMap<String, List<MemoryCounts>>();
+        for (var name : Certifier.V2_CLASSES) {
+            classes.put(name, highest.apply(runs.stream().map(e -> e.classes().getOrDefault(name, List.of())).toList()));
+        }
+        return new Certifier.Evaluation(gates, classes,
+                highest.apply(runs.stream().map(Certifier.Evaluation::written).toList()),
+                highest.apply(runs.stream().map(Certifier.Evaluation::trap).toList()));
+    }
+
+    private static Tallies tallies(List<GraphEvalScorer.Configured> runs) {
+        int memories = 0;
+        int questions = 0;
+        int failed = 0;
+        int ruleWritten = 0;
+        var bucketMemories = new int[QUESTION_BUCKETS.size()];
+        var bucketFailed = new int[QUESTION_BUCKETS.size()];
+        var tagUnsupported = new TreeMap<String, Integer>();
+        var tagMemories = new TreeMap<String, Integer>();
+        for (var cf : runs) {
+            for (var m : cf.memories()) {
+                memories++;
+                questions += m.questions();
+                ruleWritten += m.ruleWritten();
+                boolean anyFailed = m.failedDecisions() > 0;
+                if (anyFailed) failed++;
+                int bucket = m.questions() <= 10 ? 0 : m.questions() <= 20 ? 1 : m.questions() <= 40 ? 2 : 3;
+                bucketMemories[bucket]++;
+                if (anyFailed) bucketFailed[bucket]++;
+                for (var tag : m.tags()) {
+                    tagMemories.merge(tag, 1, Integer::sum);
+                    if (m.unsupported()) tagUnsupported.merge(tag, 1, Integer::sum);
+                }
+            }
+        }
+        var byQuestions = new ArrayList<FailureShare>();
+        for (int i = 0; i < QUESTION_BUCKETS.size(); i++) {
+            byQuestions.add(new FailureShare(QUESTION_BUCKETS.get(i), bucketMemories[i], bucketFailed[i],
+                    bucketMemories[i] == 0 ? null : (double) bucketFailed[i] / bucketMemories[i]));
+        }
+        var falsePositive = new TreeMap<String, Ratio>();
+        tagMemories.forEach((tag, n) -> falsePositive.put(tag, Ratio.of(tagUnsupported.getOrDefault(tag, 0), n)));
+        return new Tallies(memories, memories == 0 ? null : (double) questions / memories, failed,
+                memories == 0 ? null : (double) failed / memories, byQuestions, falsePositive, ruleWritten);
+    }
+
+    /**
+     * One certification invocation's inputs. {@code agentId} holds the committed cases as memories for the run and is
+     * null for a held-out split, whose cases {@code held} maps by memory id; {@code digests} is each model's Ollama
+     * digest.
+     */
+    public record CertifyRequest(Path root, CertificationSplit split, CertificationSplit.Source source,
+                                 OntologySchema schema, @Nullable String agentId, @Nullable String ownerName,
+                                 Map<String, HeldOut.HeldCase> held, Sequences sequences, List<DecisionModel> models,
+                                 Map<String, String> digests, int runs, long agreedSeed, double agreedShare,
+                                 double checkShare, double recallFloor, int concurrency, List<Case> secondLabels,
+                                 @Nullable String secondLabelsReason, List<Adjudications.Verdict> adjudications) {
+        public CertifyRequest {
+            held = Map.copyOf(held);
+            models = List.copyOf(models);
+            digests = Map.copyOf(digests);
+            secondLabels = List.copyOf(secondLabels);
+            adjudications = List.copyOf(adjudications);
+        }
+    }
+
+    /**
+     * One model's certification result. {@code stages} are each run's gold-fed stage scores as stored;
+     * {@code sequencing} and {@code sequences} are null on a void run; {@code certificate} is the written
+     * certificate's id when the status is certified.
+     */
+    public record CertifiedModel(String model, String digest, int runs, int memoriesChanged, int failedDecisions,
+                                 @Nullable SpotCheck spotCheck,
+                                 SequenceHarness.@Nullable SequenceSpotCheck sequenceSpotCheck,
+                                 List<JsonElement> stages, Certifier.@Nullable Sequencing sequencing, Tallies tallies,
+                                 AgreedSample agreedSample, Map<String, Integer> unjudgedByGate, Checks checks,
+                                 SequenceHarness.@Nullable ModelReport sequences,
+                                 Certifier.@Nullable Power lineagePower, Certifier.Verdict verdict,
+                                 @Nullable String certificate) {}
+
+    /** A certification run's or a re-score's report: counts and fingerprints only, never a timing. */
+    public record CertificationReport(String kind, String set, String split, String schema, String extraction,
+                                      String cases, String sequences, String guide, double startingThreshold,
+                                      List<String> relationOrder, int memories, double recallFloor,
+                                      Agreement.Result agreement, String sequencesNote, List<CertifiedModel> models) {}
+
+    /** One model scored from its stored run, with the blind sheet and, when certified, the certificate. */
+    private record Scored(CertifiedModel model, JsonObject sheet, @Nullable CertificateDocument certificate) {}
+
+    /**
+     * Refuses a certification run before it asks anything: a split hash or the sequences fingerprint drifted, or a
+     * model's ledger state does not admit {@code runs}.
+     *
+     * @throws IllegalArgumentException naming the drifted id, or quoting the refusing ledger line
+     */
+    public static void admit(CertifyRequest req) {
+        var drift = req.split().verify(req.source());
+        if (drift != null) throw new IllegalArgumentException(drift);
+        try {
+            for (var m : req.models()) {
+                SplitUses.admit(req.root(), req.split().split(), m.name(), digest(req, m), req.runs());
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static String digest(CertifyRequest req, DecisionModel m) {
+        var digest = req.digests().get(m.name());
+        if (digest == null) throw new IllegalArgumentException("no digest for model " + m.name());
+        return digest;
+    }
+
+    public static CertificationReport certify(CertifyRequest req, EvalProgress progress) {
+        return certify(req, progress, RecordBounds.INSTANCE);
+    }
+
+    /**
+     * One certification invocation: refuses a reuse or a drift, runs the split's set (gold-fed stages, end to end and
+     * a single run's spot-check), then the sequence answers with theirs, stores each model's run and appends its
+     * ledger line, and scores the stored run: gates, classes and pooled gates with the back-off, the sequences at the
+     * configuration reached, the verdict, the blind sheet and, when certified, the certificate.
+     */
+    public static CertificationReport certify(CertifyRequest req, EvalProgress progress, GateBounds bounds) {
+        admit(req);
+        var split = req.split();
+        var schema = req.schema();
+        var cases = split.casesFrom(req.source());
+        var measured = split.set().equals(CertificationSplit.HELDOUT)
+                ? measureHeld(cases, req.held(), req.ownerName(), schema, req.models(), req.runs(), req.concurrency(),
+                        progress)
+                : measureStored(Objects.requireNonNull(req.agentId(), "the cases set needs an agent"), cases,
+                        req.ownerName(), schema, req.models(), req.runs(), req.concurrency(), progress, false);
+        var zone = TimezoneResolver.appZone();
+        var answers = SequenceHarness.answers(req.sequences(), schema, req.models(), req.runs(), req.concurrency(),
+                progress, zone);
+        var agreement = Agreement.compare(cases, req.secondLabels(), schema.symmetricSet())
+                .withReason(req.secondLabelsReason());
+        var guide = req.source().guide();
+        var models = new ArrayList<CertifiedModel>();
+        try {
+            for (var m : req.models()) {
+                var data = measured.measured().getOrDefault(m.name(), List.of());
+                var chains = Objects.requireNonNull(answers.get(m.name()));
+                var seqSpot = req.runs() == 1 ? SequenceHarness.spotCheck(schema, req.sequences(), m,
+                        chains.getFirst(), req.concurrency(), zone) : null;
+                var passes = new ArrayList<StoredRun.Pass>();
+                for (int r = 0; r < data.size(); r++) {
+                    passes.add(new StoredRun.Pass(data.get(r).e2e(), chains.get(r), GSON.toJsonTree(data.get(r).stages())));
+                }
+                StoredRun.write(req.root(), new StoredRun(split.split(), m.name(), digest(req, m), schema.fingerprint(),
+                        ExtractionPipeline.fingerprint(schema), req.agreedSeed(), req.agreedShare(), passes,
+                        measured.spotChecks().get(m.name()), seqSpot, measured.integrity().checked()
+                        - measured.integrity().unchanged(), req.recallFloor()));
+                var stored = StoredRun.read(req.root(), split.split(), m.name(), schema);
+                SplitUses.append(req.root(), split.split(), m.name(), digest(req, m), ledgerState(stored));
+                var scored = scoreStored(stored, split, cases, req.sequences(), schema, guide, req.adjudications(),
+                        req.checkShare(), req.recallFloor(), agreement, bounds, zone);
+                writeOutputs(req.root(), split, scored);
+                models.add(scored.model());
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return report(split, schema, guide, cases.size(), req.recallFloor(), agreement, models);
+    }
+
+    private static String ledgerState(StoredRun stored) {
+        if (stored.failedDecisions() > 0) return SplitUses.VOID;
+        return spotCheckDiffered(stored) ? SplitUses.NEEDS_SECOND_RUN : SplitUses.USED;
+    }
+
+    private static boolean spotCheckDiffered(StoredRun stored) {
+        var spot = stored.spotCheck();
+        var seq = stored.sequenceSpotCheck();
+        return stored.passes().size() == 1
+                && (spot != null && spot.differing() > 0 || seq != null && seq.differing() > 0);
+    }
+
+    /**
+     * Scores a stored certification run again under the verdicts on file and its own recall floor, asking no model
+     * and redrawing nothing.
+     *
+     * @throws IllegalArgumentException when a split hash drifted or the stored schema or extraction fingerprint is
+     *                                  not the running one
+     */
+    public static CertificationReport rescore(Path root, CertificationSplit split, CertificationSplit.Source source,
+                                              OntologySchema schema, String model, Sequences sequences,
+                                              double checkShare, List<Case> secondLabels,
+                                              @Nullable String secondLabelsReason,
+                                              List<Adjudications.Verdict> adjudications) {
+        var drift = split.verify(source);
+        if (drift != null) throw new IllegalArgumentException(drift);
+        try {
+            var stored = StoredRun.read(root, split.split(), model, schema);
+            if (!stored.schema().equals(schema.fingerprint())) {
+                throw new IllegalArgumentException("the stored run's schema %s differs from the running %s"
+                        .formatted(stored.schema(), schema.fingerprint()));
+            }
+            var extraction = ExtractionPipeline.fingerprint(schema);
+            if (!stored.extraction().equals(extraction)) {
+                throw new IllegalArgumentException("the stored run's extraction %s differs from the running %s"
+                        .formatted(stored.extraction(), extraction));
+            }
+            var cases = split.casesFrom(source);
+            var agreement = Agreement.compare(cases, secondLabels, schema.symmetricSet()).withReason(secondLabelsReason);
+            var scored = scoreStored(stored, split, cases, sequences, schema, source.guide(), adjudications,
+                    checkShare, stored.recallFloor(), agreement, RecordBounds.INSTANCE, TimezoneResolver.appZone());
+            writeOutputs(root, split, scored);
+            return report(split, schema, source.guide(), cases.size(), stored.recallFloor(), agreement,
+                    List.of(scored.model()));
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    private static CertificationReport report(CertificationSplit split, OntologySchema schema, String guide,
+                                              int memories, double recallFloor, Agreement.Result agreement,
+                                              List<CertifiedModel> models) {
+        return new CertificationReport(CERTIFICATION, split.set(), split.split(), schema.fingerprint(),
+                ExtractionPipeline.fingerprint(schema), split.cases(), split.sequences(), guide,
+                split.startingThreshold(), split.relationOrder(), memories, recallFloor, agreement,
+                SequenceHarness.DEVELOPMENT_NOTE, models);
+    }
+
+    /** The one scoring path both a full run and a re-score take, from the stored form. */
+    private static Scored scoreStored(StoredRun stored, CertificationSplit split, List<Case> cases, Sequences sequences,
+                                      OntologySchema schema, String guide, List<Adjudications.Verdict> adjudications,
+                                      double checkShare, double recallFloor, Agreement.Result agreement,
+                                      GateBounds bounds, ZoneId zone) {
+        var book = new Adjudications.Book(adjudications, guide, stored.agreedSeed(), stored.agreedShare(), checkShare);
+        var start = split.startingThreshold();
+        var v2 = v2(cases, stored.passes().stream().map(StoredRun.Pass::cases).toList(), schema, book, start,
+                split.relationOrder(), recallFloor, bounds);
+        int failed = stored.failedDecisions();
+        var sequencing = failed > 0 ? null : v2.sequencing();
+        SequenceHarness.ModelReport seq = null;
+        if (sequencing != null) {
+            seq = SequenceHarness.scoreAt(schema, sequences.chains(), stored.model(),
+                    stored.passes().stream().map(StoredRun.Pass::chains).toList(), sequencing.reached(), start,
+                    stored.sequenceSpotCheck(), zone, bounds);
+        }
+        var judgement = v2.judgement();
+        var verdict = Certifier.verdict(sequencing, new Certifier.VerdictInputs(stored.memoriesChanged() > 0, failed,
+                spotCheckDiffered(stored), judgement.labelError(), seq == null ? null : seq.timeline(),
+                agreement.complete(), judgement.unjudgedCount(), judgement.uncheckedMarked()));
+        CertificateDocument certificate = null;
+        if (verdict.status().equals(Certifier.CERTIFIED) && sequencing != null && seq != null) {
+            var timeline = seq.runs().stream().map(SequenceHarness.RunReport::endToEnd)
+                    .max((a, b) -> Double.compare(a.bound(), b.bound())).orElseThrow();
+            certificate = CertificateDocument.of(stored.model(), stored.digest(), verdict.status(), split, guide,
+                    stored.schema(), stored.extraction(), sequencing, seq.lineage(), timeline, seq.timeline(),
+                    recallFloor);
+        }
+        var model = new CertifiedModel(stored.model(), stored.digest(), stored.passes().size(),
+                stored.memoriesChanged(), failed, stored.spotCheck(), stored.sequenceSpotCheck(),
+                stored.passes().stream().map(StoredRun.Pass::stages).toList(), sequencing, v2.tallies(),
+                v2.agreedSample(), judgement.unjudgedByGate(), checks(book, judgement), seq,
+                seq == null ? null : lineagePower(seq.lineage(), bounds), verdict,
+                certificate == null ? null : certificate.id());
+        return new Scored(model, sheet(split, guide, book, cases, v2.inScope()), certificate);
+    }
+
+    /** Lineage's power at its walked n, as {@link Certifier} gives every other class's; 0 when disabled. */
+    private static Certifier.Power lineagePower(ClassWalk lineage, GateBounds bounds) {
+        var at = lineage.threshold() == null ? List.<MemoryCounts>of()
+                : List.of(new MemoryCounts("", lineage.n(), lineage.k(), 0, 0, 0));
+        return Certifier.Power.of(bounds, at);
+    }
+
+    /**
+     * The blind sheet: every unmatched written record and every sampled agreed record at the configuration reached,
+     * each with its memory's text and its inclusion probability, sorted by case and record. Nothing on it says which
+     * side a record is on or which model wrote it.
+     */
+    private static JsonObject sheet(CertificationSplit split, String guide, Adjudications.Book book, List<Case> cases,
+                                    List<GraphEvalScorer.GateRecord> inScope) {
+        var texts = new HashMap<String, String>();
+        cases.forEach(c -> texts.put(c.id(), c.text()));
+        var records = new ArrayList<GraphEvalScorer.GateRecord>();
+        for (var r : inScope) {
+            if (!r.agreed() || book.sampled(r)) records.add(r);
+        }
+        records.sort((a, b) -> a.caseId().equals(b.caseId()) ? a.record().compareTo(b.record())
+                : a.caseId().compareTo(b.caseId()));
+        var out = new JsonArray();
+        for (var r : records) {
+            var o = new JsonObject();
+            o.addProperty("caseId", r.caseId());
+            o.addProperty("record", r.record());
+            o.addProperty("text", texts.get(r.caseId()));
+            o.addProperty("inclusion", r.agreed() ? book.share() : 1.0);
+            out.add(o);
+        }
+        var sheet = new JsonObject();
+        sheet.addProperty("split", split.split());
+        sheet.addProperty("guide", guide);
+        sheet.addProperty("agreedSeed", book.seed());
+        sheet.addProperty("agreedShare", book.share());
+        sheet.addProperty("drawnAt", Adjudications.DRAWN_AT);
+        sheet.add("records", out);
+        return sheet;
+    }
+
+    public static Path sheetPath(Path root, String split, String model) {
+        return root.resolve(SHEETS).resolve(split + "-" + StoredRun.fileName(model) + ".json");
+    }
+
+    private static void writeOutputs(Path root, CertificationSplit split, Scored scored) throws IOException {
+        var sheet = sheetPath(root, split.split(), scored.model().model());
+        Files.createDirectories(sheet.getParent());
+        Files.writeString(sheet, GSON.toJson(scored.sheet()));
+        var certificate = scored.certificate();
+        if (certificate != null) {
+            certificate.write(root);
+            return;
+        }
+        var stale = CertificateDocument.path(root, scored.model().model());
+        if (!Files.exists(stale)) return;
+        try {
+            var held = JsonParser.parseString(Files.readString(stale));
+            var heldSplit = held.isJsonObject() ? held.getAsJsonObject().get("split") : null;
+            if (heldSplit != null && heldSplit.isJsonPrimitive() && heldSplit.getAsString().equals(split.split())) {
+                Files.delete(stale);
+            }
+        } catch (JsonParseException _) {
+            // Not a certificate this split wrote; leave it for the reader to refuse.
+        }
+    }
+
+    /** A held-out split's memories measured where they live, with a single run's spot-check. */
+    private static MeasuredCases measureHeld(List<Case> cases, Map<String, HeldOut.HeldCase> held,
+                                             @Nullable String ownerName, OntologySchema schema,
+                                             List<DecisionModel> models, int runs, int concurrency,
+                                             EvalProgress progress) {
+        var memoryIds = new LinkedHashMap<String, String>();
+        cases.forEach(c -> memoryIds.put(c.id(), c.id()));
+        var before = snapshot(memoryIds);
+        var known = ownerName == null ? List.<String>of() : List.of(ownerName);
+        var measured = measure(cases, schema, models, runs, concurrency, known, ownerName, progress, false, held);
+        var spotChecks = new HashMap<String, SpotCheck>();
+        if (runs == 1) {
+            for (var m : models) {
+                var data = measured.getOrDefault(m.name(), List.of());
+                if (!data.isEmpty()) {
+                    spotChecks.put(m.name(), spotCheck(cases, schema, m, data.getFirst().e2e(), known, ownerName,
+                            false, concurrency, held));
+                }
+            }
+        }
+        var after = snapshot(memoryIds);
+        int unchanged = 0;
+        for (var entry : before.entrySet()) {
+            if (entry.getValue() != null && entry.getValue().equals(after.get(entry.getKey()))) unchanged++;
+        }
+        return new MeasuredCases(measured, spotChecks, new MemoryIntegrity(before.size(), unchanged, List.of(), 0));
     }
 
     /** Runs {@code tasks} on at most {@code concurrency} threads, returning results in task order. */
