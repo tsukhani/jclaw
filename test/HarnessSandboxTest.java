@@ -13,6 +13,7 @@ import tools.PiAdapter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Locale;
 
 
 /**
@@ -95,20 +96,20 @@ class HarnessSandboxTest extends UnitTest {
         assertTrue(e.getMessage().contains("session working directory"), e.getMessage());
     }
 
-    /**
-     * bwrap applies mounts in argument order and a tmpfs over an ancestor hides every earlier
-     * bind beneath it, so a write root under $HOME is reachable only if it is bound after the
-     * $HOME tmpfs. Pinned on every host because no Linux test can run the real thing here.
-     */
     @Test
     void availabilityNamesThePlatformsMechanism() {
         var a = HarnessSandbox.availability();
-        var os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (os.contains("linux")) assertEquals("bwrap", a.mechanism());
         if (os.contains("mac")) assertEquals("sandbox-exec", a.mechanism());
         if (!a.available()) assertFalse(a.reason().isBlank(), "an unavailable mechanism must say why");
     }
 
+    /**
+     * bwrap applies mounts in argument order and a tmpfs over an ancestor hides every earlier
+     * bind beneath it, so a write root under $HOME is reachable only if it is bound after the
+     * $HOME tmpfs. Pinned on every host because no Linux test can run the real thing here.
+     */
     @Test
     void linuxBindsTheWriteRootAfterTheHomeTmpfs() {
         var home = System.getProperty("user.home");
