@@ -237,8 +237,9 @@ public final class WhatsAppCobaltSession {
             if (info == null) return;
             // JCLAW-450: drop self-originated frames. Cobalt syncs the paired account's
             // OWN sent messages back as inbound (fromMe=true, from=pairedJid). Without
-            // this guard the bot's own reply re-enters the pipeline and loops unbounded. This is the WhatsApp-Web analog of
-            // the Cloud API never redelivering your own sends. Drop before caching.
+            // this guard the bot's own reply re-enters the pipeline and loops unbounded.
+            // This is the WhatsApp-Web analog of the Cloud API never redelivering your
+            // own sends. Drop before caching.
             if (info.fromMe()) return;
             if (info.id() != null) {
                 recentMessages.put(info.id(), info);

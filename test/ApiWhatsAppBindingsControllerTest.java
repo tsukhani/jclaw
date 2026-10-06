@@ -262,7 +262,7 @@ class ApiWhatsAppBindingsControllerTest extends FunctionalTest {
                 """.formatted(agentId));
         assertEquals(400, response.status.intValue());
         assertTrue(getContent(response).contains("E.164"), getContent(response));
-        assertEquals(0L, (long) commitInFreshTx(() -> WhatsAppBinding.count()));
+        assertEquals(0L, (long) commitInFreshTx(() -> WhatsAppBinding.count("agent.id = ?1", agentId)));
     }
 
     @Test
