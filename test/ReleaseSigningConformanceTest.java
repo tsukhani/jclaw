@@ -52,6 +52,12 @@ class ReleaseSigningConformanceTest extends UnitTest {
     }
 
     @Test
+    void theKeyFileDockerUsersVerifyWithIsThePinnedKey() throws IOException {
+        assertEquals(pinned("jclaw.sh", UPGRADER_KEY), read("release-signing.pub").strip(),
+                "release-signing.pub is not the key jclaw.sh pins, so a signed IMAGE_DIGEST would not verify under it");
+    }
+
+    @Test
     void theInstallerAndTheUpgraderAgreeOnTheLastUnsignedRelease() throws IOException {
         assertEquals(pinned("jclaw.sh", UPGRADER_FLOOR), pinned("install.sh", INSTALLER_FLOOR),
                 "jclaw.sh and install.sh disagree on which releases must carry a signature");
@@ -72,5 +78,16 @@ class ReleaseSigningConformanceTest extends UnitTest {
                 "the Release stage no longer signs SHA256SUMS");
         assertTrue(Pattern.compile("gh release create [^\\n]*dist/SHA256SUMS\\.sig").matcher(jenkinsfile).find(),
                 "the Release stage no longer attaches SHA256SUMS.sig, so every installed client would refuse the release");
+    }
+
+    @Test
+    void theReleaseStageSignsTheDigestOfTheImageItPushed() throws IOException {
+        var jenkinsfile = read("Jenkinsfile");
+        assertTrue(jenkinsfile.contains("--metadata-file dist/image-metadata.json"),
+                "the image push no longer records its digest, so IMAGE_DIGEST would be read from a tag anyone with push access can move");
+        assertTrue(jenkinsfile.contains("bin/sign-release.sh dist/IMAGE_DIGEST"),
+                "the Release stage no longer signs IMAGE_DIGEST");
+        assertTrue(Pattern.compile("gh release upload [^\\n]*dist/IMAGE_DIGEST\\.sig").matcher(jenkinsfile).find(),
+                "the Release stage no longer attaches IMAGE_DIGEST.sig");
     }
 }

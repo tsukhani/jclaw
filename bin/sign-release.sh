@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
-# Sign a release's SHA256SUMS with the private key file named by $SIGNING_KEY, then
+# Sign a release file (SHA256SUMS, IMAGE_DIGEST) with the private key file named by $SIGNING_KEY, then
 # verify the result under the public key jclaw.sh pins, with both verifiers a client
 # uses: openssl (install.sh) and the precompiled utils.ReleaseSignature this build is
 # about to ship (jclaw.sh upgrade). A credential that no longer matches the pinned key,
 # or a verifier class that cannot run on the JDK alone, fails the release here rather
 # than on every installed client — those refuse a signature they cannot verify.
 #
-# Usage: SIGNING_KEY=<private key file> sign-release.sh <SHA256SUMS>   (writes <SHA256SUMS>.sig)
+# Usage: SIGNING_KEY=<private key file> sign-release.sh <file>   (writes <file>.sig)
 # Run after the bundle is built: it reads precompiled/java.
 set -euo pipefail
 
-SUMS="${1:?usage: sign-release.sh <SHA256SUMS>}"
+SUMS="${1:?usage: sign-release.sh <file>}"
 : "${SIGNING_KEY:?sign-release: SIGNING_KEY must name the private key file}"
 [ -f "$SUMS" ] || { echo "sign-release: no such file: $SUMS" >&2; exit 2; }
 command -v openssl >/dev/null || { echo "sign-release: openssl not on PATH" >&2; exit 2; }

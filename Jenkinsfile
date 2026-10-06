@@ -485,9 +485,23 @@ pipeline {
                                     --platform linux/amd64,linux/arm64 \\
                                     -t ghcr.io/tsukhani/jclaw:${version} \\
                                     -t ghcr.io/tsukhani/jclaw:latest \\
+                                    --metadata-file dist/image-metadata.json \\
                                     --push .
                             """
                         }
+
+                        // Whoever holds the push credential can repoint a tag; nobody can change what a
+                        // digest names. So the digest goes on the release, signed, for a pull by digest.
+                        // It is read from buildx's record of this push, not asked of the registry by tag,
+                        // which would sign whatever the tag pointed at by then.
+                        sh '''
+                            digest=$(jq -er '."containerimage.digest"' dist/image-metadata.json)
+                            printf 'v%s  ghcr.io/tsukhani/jclaw@%s\\n' "$APP_VERSION" "$digest" > dist/IMAGE_DIGEST
+                        '''
+                        withCredentials([file(credentialsId: 'jclaw-release-signing-key', variable: 'SIGNING_KEY')]) {
+                            sh 'bin/sign-release.sh dist/IMAGE_DIGEST'
+                        }
+                        sh "gh release upload ${version} dist/IMAGE_DIGEST dist/IMAGE_DIGEST.sig --repo tsukhani/jclaw --clobber"
                     }
                 }
             }

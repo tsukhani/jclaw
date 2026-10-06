@@ -1,6 +1,8 @@
 services:
   jclaw:
-    image: ghcr.io/tsukhani/jclaw:latest
+    # JCLAW_IMAGE pins a release by digest (README, "Verifying the image"): a tag can be
+    # repointed by whoever can push to the registry, a digest cannot.
+    image: ${JCLAW_IMAGE:-ghcr.io/tsukhani/jclaw:latest}
     pull_policy: always
     # PLAY_SECRET is forwarded from the host environment (or the project's
     # auto-loaded .env, if one exists) via Compose's variable substitution.

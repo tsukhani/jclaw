@@ -488,6 +488,27 @@ You can also set `JCLAW_PORT` and `JCLAW_HTTPS_PORT` in `.env` alongside `docker
 
 The container runs in production mode — the Nuxt SPA is already built into the image, so no local Node.js, pnpm, or Play toolchain is required on the host. Open `http://localhost:9000` (or your custom port) once the container is healthy.
 
+#### Verifying the image
+
+`docker compose up -d` pulls the `latest` tag, and a tag is only a pointer: whoever can push to the registry can move it. A digest cannot be moved, because a pull by digest returns only the content that hashes to it. So every release after v0.19.28 also publishes `IMAGE_DIGEST`, the digest of the image that release built, signed with the key that signs the installer downloads. Check the signature, then pin the digest:
+
+```bash
+V=vX.Y.Z   # the release you want
+curl -fsSLO "https://github.com/tsukhani/jclaw/releases/download/$V/IMAGE_DIGEST"
+curl -fsSLO "https://github.com/tsukhani/jclaw/releases/download/$V/IMAGE_DIGEST.sig"
+curl -fsSLO https://raw.githubusercontent.com/tsukhani/jclaw/main/release-signing.pub
+
+# Must print "Verified OK". Then read the file: it must name the release you asked for.
+openssl dgst -sha256 -verify release-signing.pub -signature IMAGE_DIGEST.sig IMAGE_DIGEST
+cat IMAGE_DIGEST
+
+# Put the line this prints in .env beside docker-compose.yml, then start.
+awk '{print "JCLAW_IMAGE=" $2}' IMAGE_DIGEST
+docker compose up -d
+```
+
+To upgrade a pinned install, repeat with the new release and replace the `JCLAW_IMAGE` line. This is opt-in: without `JCLAW_IMAGE`, Compose still pulls `latest` unchecked.
+
 ### Telemetry (OpenTelemetry)
 
 JClaw exports traces and metrics over OTLP from inside the process: HTTP server spans named from the route, one `turn` span per agent turn with the model call (GenAI semantic conventions), its HTTP call and every JDBC statement beneath it, plus `gen_ai.client.*`, `jclaw.turn.segment.duration` and `jvm.*` metrics. Nothing leaves the process until you turn it on.
