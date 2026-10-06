@@ -96,7 +96,7 @@ You'll need:
 - Your numeric Telegram user id (**telegramUserId**) — DM `@userinfobot` and it replies with it. Save stays disabled until it's filled in.
 - An [agent](/agents) you want this bot to run as.
 
-The bot starts receiving messages as soon as you save and enable the binding. Telegram surfaces JClaw's [slash commands](/guide#chat) (`/new`, `/reset`, `/compact`, …) in its native autocomplete dropdown automatically.
+The bot starts receiving messages as soon as you save and enable the binding. **Test** on a binding's card checks its token against Telegram right away: it reports **OK — connected as @**_bot username_ or Telegram's error, and for a webhook binding also the pending-update count and the last webhook delivery error, if any. Telegram surfaces JClaw's [slash commands](/guide#chat) (`/new`, `/reset`, `/compact`, …) in its native autocomplete dropdown automatically.
 
 Each binding also picks a **transport**: **Polling** (the default — JClaw pulls updates from Telegram, nothing to expose) or **Webhook**, which needs a public HTTPS **webhookBaseUrl** (pre-filled from a live Tailscale Funnel, or the page's own origin when that is already public). The webhook path is fixed — `/api/webhooks/telegram/{bindingId}` — and the secret is generated for you and checked from Telegram's `X-Telegram-Bot-Api-Secret-Token` header, so the base URL is the only part you enter.
 
@@ -123,7 +123,7 @@ Click the **Slack** card to open its per-app binding list, then **+ New binding*
 
 The binding's **transport** decides how messages reach JClaw. **Events API** (the default) is a webhook: it needs the signing secret and a public HTTPS **webhookBaseUrl** for the app's Request URL (pre-filled from a live Tailscale Funnel, or the page's own origin when that is already public). **Socket Mode** opens a WebSocket from JClaw instead — no public URL and no signing secret, just the app-level **appToken** (`xapp-…`).
 
-Save and toggle **Enabled** on; the bot starts serving immediately.
+Save and toggle **Enabled** on; the bot starts serving immediately. **Test** on the binding's card checks the bot token against Slack (`auth.test`) and reports **OK — connected as** the bot user id and workspace, or Slack's error; a pass also fills in the card's **Bot user**.
 
 ### WhatsApp
 
@@ -139,7 +139,27 @@ Save, enable, and point Meta's webhook at JClaw per the WhatsApp Cloud API docs.
 
 A Cloud-API binding takes two optional extras: a pre-approved **messaging template** (name + language) used for replies sent outside WhatsApp's 24-hour window, and a **default target** (an E.164 number) the agent sends to proactively when a send names no recipient and there is no live conversation peer. The binding's **transport** is **Cloud API (official)** by default and can instead be **WhatsApp-Web (unofficial)** — a QR-paired session through the Cobalt bridge that needs no Cloud-API credentials at all; proactive sends go to the paired owner.
 
+The form warns before you save a WhatsApp-Web binding: the client is unofficial and numbers get banned, so use a dedicated secondary number. To link it, save and enable the binding, then click **Pair** on its card. On the phone, open WhatsApp → Settings → Linked Devices → Link a Device and scan the code; it refreshes every few seconds until you do, and the panel shows **Connected ✓** once the session is paired. The account that scanned becomes the binding's owner. The QR code is drawn in your browser — the pairing string is never sent to an outside service.
+
+WhatsApp has no **Test** button. Instead, saving a Cloud-API binding checks its credentials with Meta and refuses ones that fail, and the card then shows **Verified** with Meta's business name and number.
+
 When Meta refuses a Cloud-API reply because the 24-hour window has closed (its error 131047), JClaw doesn't retry it: the refusal is logged at `INFO` under `channel`, saying whether the binding has a template and what to do next.
+
+### Who a bot answers
+
+Each binding decides who reaches its agent; any other message is dropped without a reply.
+
+| Binding | Direct messages | Groups and channels |
+|---|---|---|
+| Telegram | Only the owner (**telegramUserId**). | Any member who addresses the bot: an @mention, a reply to one of its messages, or a wake word (**mentionPatterns** in **Channel defaults**). |
+| Slack, owner user id set | Only the owner. | Only the owner, with an @mention. |
+| Slack, no owner | Anyone in the workspace. | Any member, with an @mention. A Main Agent binding with no owner answers no one. |
+| WhatsApp Cloud API | Anyone. | — the Cloud API has no groups. |
+| WhatsApp-Web | Only the paired owner. | Any member who @mentions the bot. |
+
+On Slack, a reply in the thread of a post JClaw delivered, such as a task result, counts as an @mention (see [Sending a message](/guide#chat-sending-a-message)). Wake words are Telegram only.
+
+Being answered is not being trusted. A turn is yours — it can spend a standing approval granted with **✓ Always** and use `/subagent`, `/prompt` and the `/model` switch — only when its sender is the binding's owner, on Telegram or on a Slack binding with an owner set. Everyone else the bot answers is a guest: their dangerous-tool requests wait for your approval or fall to the [off-channel policy](/guide#settings-tool-approvals), and those commands are refused. Every WhatsApp sender is a guest, the paired owner included. On Telegram, only the owner's taps on an inline keyboard count.
 
 ## How channels and conversations connect
 
@@ -158,7 +178,7 @@ A new agent is much easier to iterate on inside [Chat](/chat) than over Telegram
 :::
 
 :::note Peer scoping
-Conversations are kept per chat, not per person. A direct message gets its own thread, while everyone in a group or channel shares that chat's thread, on Telegram, Slack and WhatsApp alike. A Telegram bot answers direct messages only from its binding's owner (the **telegramUserId**) and ignores anyone else's; in a group it answers any member who addresses it — an @mention, a reply to the bot, or a wake word.
+Conversations are kept per chat, not per person. A direct message gets its own thread, while everyone in a group or channel shares that chat's thread, on Telegram, Slack and WhatsApp alike. Who may start a turn is in [Who a bot answers](/guide#conversations-and-channels-who-a-bot-answers).
 :::
 
 ## Where to go next

@@ -32,6 +32,10 @@ the defaults below. Engine and model selection (`tts.engine`, `tts.sidecar.model
 | `tts.local.idleTimeoutMinutes` | `15` | `LocalSidecarDaemon.spawnNow` | passed as `--idle-timeout-min`; the daemon self-evicts after that long without a request |
 | `tts.local.timeoutSeconds` | `1800` | `TtsSidecarClient` (per-call deadline) and `LocalSidecarDaemon.spawnNow` | the JVM's `/synthesize` call timeout; also exported as `SIDECAR_REQUEST_TIMEOUT_SEC = max(60, n − 60)`, the sidecar's own request ceiling, so it gives up before the JVM's socket does |
 | `tts.local.startupTimeoutSeconds` | `300` | `LocalSidecarDaemon.awaitHealthy` | how long `/health` may go unanswered after spawn before the launch fails |
+| `tts.sidecar.voice` | blank | `TtsRouter.voiceFor` | sent as `voice`: a Kokoro voice name (the eight in `TtsVoiceCatalog`, e.g. `af_bella`), or for Qwen3-TTS an integer that seeds mlx's RNG to a stable speaker (Settings offers `1`–`4`; blank or non-numeric seeds `42`); Chatterbox ignores it. Settings › Speech blanks it whenever the model changes |
+| `tts.sidecar.refAudio` | unset | `TtsRouter.refAudioFor` → `TtsReferenceVoice.activePath` | absolute path of the clone clip, sent as `ref_audio` only for the cloning models (`chatterbox`, `qwen3-0.6b`, `qwen3-0.6b-4bit`) and dropped if the file is gone; see [Voice cloning](#voice-cloning) |
+
+`tts.jvm.voice` is the in-JVM engine's twin (a sherpa speaker index, `0` when blank) and never reaches this sidecar.
 
 `serve.py` flags: `--host` (`127.0.0.1`), `--port` (required), `--model` (`tts`, the identity
 echoed on `/health`), `--cache-dir` (`data/tts-models`), `--idle-timeout-min` (`15`), `--no-auth`.
@@ -69,6 +73,15 @@ Selection is `tts.engine=sidecar` + `tts.sidecar.model=<id>` (Settings › Speec
 The mlx-audio models raise on non-Apple platforms (the NVIDIA Qwen backend is
 deferred, JCLAW-788). **Chatterbox is the cross-platform option** — a PyTorch
 model, so its branch in `synth.py` bypasses the Apple-only gate.
+
+## Voice cloning
+
+Chatterbox and Qwen3-TTS (`qwen3-0.6b`, `qwen3-0.6b-4bit`) clone their speaker from a reference clip.
+Settings › Speech records or uploads one (`POST /api/tts/reference-voice`; `wav`/`mp3`/`flac`/`m4a`/`ogg`,
+at most 10 MB), stored as `data/tts-models/refs/reference.<ext>` with its absolute path in
+`tts.sidecar.refAudio`, and prewarms the model with it; `DELETE` removes both and returns to the model's default speaker.
+`synth.py` hands the path to Chatterbox as `audio_prompt_path` and to mlx-audio Qwen3-TTS as `ref_audio`. No
+transcript is sent, which per `TtsSidecarClient` keeps Qwen3-TTS on speaker-embedding cloning rather than ICL (JCLAW-867).
 
 ## Chatterbox (JCLAW-814)
 

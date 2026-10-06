@@ -89,6 +89,10 @@ For long-running async work where the parent eventually needs the child's reply,
 Without `subagent_yield`, the parent never gets to use the child's reply — the outcome surfaces to *you* in the chat's subagent list, not back into the parent. With yield, the reply arrives as an announce card in the conversation, and that card is the parent's next input. Use yield when you want the parent to keep working with the result.
 :::
 
+**Batch fan-out.** `tasks` starts one async child per entry in a single call. An entry is a task string, or an object `{task, label, agentId}` that gives that child its own label and agent. Mode, context, runtime, model and run timeout apply to the whole batch. The call returns `run_ids` at once, plus `skipped` for any child that failed to start. Collect the batch with one `subagent_yield`: pass `runIds`, or `all: true` for every uncollected batch child in this conversation. A batch collect doesn't suspend the turn. It waits for every child and returns `{results: [...]}` inline, with each child's `run_id`, `status` and `reply`, and posts no announce card. A run id that was already collected comes back as `UNKNOWN` without failing the rest.
+
+**Inside a task fire.** A fire has no conversation to resume, so an `async` spawn there is collected inline too: `subagent_yield` with its `runId` waits for the child and returns the same result a blocking spawn would, and the fire carries on without an announce card. A task fire refuses `conversationId`, and `all: true` collects every uncollected async child of the fire. Neither inline collect uses yield's `timeoutSeconds`; each child is bounded by its own run timeout.
+
 ## External coding harness (`runtime=acp`) {#acp-harness}
 
 By default a child runs on JClaw's own native agent loop. You can instead delegate the child to an **external coding harness** — a standalone CLI agent such as [Pi](https://github.com/pi-labs/pi), Claude Code, or the Codex CLI — by passing `runtime:"acp"`. JClaw launches the operator-configured harness command as a subprocess and captures its output as the child's reply. How the two talk is set by `subagent.acp.mode`: **batch** (the default) hands the `task` over on stdin and reads stdout when the harness exits; **json** streams the harness's line protocol as it runs; **rpc** opens a bidirectional session so the harness's mid-run permission prompts are routed through JClaw's approval gate (a harness that can't do that falls back to one-way streaming). A harness that speaks ACP natively over stdio is driven over that protocol directly, whichever mode is set.
@@ -105,7 +109,9 @@ By default a child runs on JClaw's own native agent loop. You can instead delega
 
    The command is whitespace-split into an argv, so fixed flags are fine (`/usr/local/bin/pi --headless`). It is read from config **only** — never from the model — so a subagent can't steer JClaw into running arbitrary shell.
 
-   Alongside it, `subagent.acp.harness` names the adapter for that CLI — `pi`, `claude`, `codex`, `gemini`, `opencode`, `antigravity`, or `generic` (the default) — and `subagent.acp.mode` picks `batch` (the default), `json`, or `rpc`. Both are checked up front when a spawn is attempted: a value outside those sets refuses the spawn with an error naming the allowed values rather than silently falling back. Settings → **Coding** can also auto-detect the harnesses installed on the server and fill in the command and adapter for you in one click.
+   Alongside it, `subagent.acp.harness` names the adapter for that CLI — `pi`, `claude`, `codex`, `gemini`, `opencode`, `antigravity`, or `generic` (the default) — and `subagent.acp.mode` picks `batch` (the default), `json`, or `rpc`. Both are checked up front when a spawn is attempted: a value outside those sets refuses the spawn with an error naming the allowed values rather than silently falling back. Settings → **Coding** can also auto-detect the harnesses installed on the server and fill in the command and adapter for you in one click. `subagent.acp.mode` has no field in Settings; set it with `POST /api/config`.
+
+   **Permission flags.** In `json` and `rpc` modes JClaw appends the adapter's default permission flags to the command. Only Claude Code has defaults, `--allowedTools Read,Edit,Write,Glob,Grep`, which keep file editing and search but leave out the shell. `subagent.acp.permissionArgs` replaces the defaults with its own flags, split on whitespace; `none` sends no flags at all. It has no Settings field either. `batch` mode and harnesses driven over native ACP get no permission flags.
 
    **Optionally, pick the model the harness runs with.** By default the harness uses its own default model and its own login. The `acp.model` picker in Settings → **Coding** (`subagent.acp.modelProvider` / `subagent.acp.modelId`) pins it to one of your configured providers' models instead, and a per-spawn `modelProvider` / `modelId` on `subagent_spawn` — "run this through Codex on `ollama` with `qwen3-coder`" — overrides that for one run. How the override reaches the harness depends on the CLI: **Claude Code** gets `--model` plus the `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` environment pointed at the provider (so the endpoint must speak the Anthropic Messages API — Ollama and OpenRouter do); **Codex** gets `-m` plus an inline `model_providers` config block naming the provider's endpoint; **Pi** and **Gemini CLI** take the model only, so a provider override is refused for them; **opencode** and custom commands take neither and refuse any override. Pass `modelId` alone to change only the model and keep the harness's own endpoint and login. The run's transcript records the override as its first step.
 
@@ -187,7 +193,7 @@ A shade under the chat header, headed *N subagents · N running*, lists the runs
 ```text
 subagent_spawn
   task              string   instruction for the child (required unless tasks is given)
-  tasks             string[] batch fan-out — one async child per string, returns run_ids (session mode only)
+  tasks             array    batch fan-out — one async child per entry (a string or {task, label, agentId}), returns run_ids (session mode only)
   label             string   short display name
   agentId           int      use an existing agent row instead of cloning current
   mode              string   "session" (default) | "inline" | (async via async=true)
@@ -200,8 +206,8 @@ subagent_spawn
 
 subagent_yield
   runId             string   the run id from a prior async spawn
-  runIds            string[] collect a whole batch — waits for all of them
-  all               bool     wait for every outstanding async child you spawned
+  runIds            string[] collect a whole batch — waits for all of them, returns results inline
+  all               bool     collect every uncollected batch child (in a task fire, every async child)
   conversationId    string   alternative to runId — the child conversation id
   timeoutSeconds    int      resume budget, default subagent.defaultYieldTimeoutSeconds (300); 0 disables
 
