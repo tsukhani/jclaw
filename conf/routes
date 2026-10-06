@@ -385,6 +385,9 @@ POST    /api/subagents/acp-harnesses            ApiAcpHarnessController.add
 DELETE  /api/subagents/acp-harnesses            ApiAcpHarnessController.remove
 GET     /api/subagents/acp-command              ApiAcpHarnessController.commandPreview
 
+# OS sandbox availability (Settings → Shell Execution, Settings → Coding)
+GET     /api/sandbox                            ApiSandboxController.availability
+
 # Subagent Runs API (JCLAW-271)
 GET     /api/subagent-runs                      ApiSubagentRunsController.list
 GET     /api/subagent-runs/{id}/steps           ApiSubagentRunsController.steps

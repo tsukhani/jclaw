@@ -101,6 +101,15 @@ class HarnessSandboxTest extends UnitTest {
      * $HOME tmpfs. Pinned on every host because no Linux test can run the real thing here.
      */
     @Test
+    void availabilityNamesThePlatformsMechanism() {
+        var a = HarnessSandbox.availability();
+        var os = System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT);
+        if (os.contains("linux")) assertEquals("bwrap", a.mechanism());
+        if (os.contains("mac")) assertEquals("sandbox-exec", a.mechanism());
+        if (!a.available()) assertFalse(a.reason().isBlank(), "an unavailable mechanism must say why");
+    }
+
+    @Test
     void linuxBindsTheWriteRootAfterTheHomeTmpfs() {
         var home = System.getProperty("user.home");
         var writeRoot = Path.of(home, "workspace", "agent").toFile();

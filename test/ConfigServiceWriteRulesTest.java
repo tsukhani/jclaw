@@ -12,9 +12,13 @@ import services.database.DatabaseService;
 import services.decision.DecisionSettings;
 import services.telemetry.OtelConfig;
 import services.voice.VoiceSettings;
+import tools.HarnessSandbox;
+import tools.SubagentSpawnTool;
 import tools.jev.JevSettings;
 import tools.scrape.WebScrapeSettings;
 import utils.SsrfGuard;
+
+import java.util.List;
 
 /**
  * Pins every refusal {@link ConfigService#setWithSideEffects} can answer, the precedence between
@@ -229,6 +233,32 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     void decisionKeysAnswerTheirOwnersRule() {
         assertRefusedAsOwnerSays(DecisionSettings.rejectionFor("decision.jclaw1402", "3"), "decision.jclaw1402",
                 "3");
+    }
+
+    @Test
+    void eitherSandboxKeyAcceptsOnlyWhatTheReaderUnderstands() {
+        for (var key : List.of(HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.ACP_SANDBOX_KEY)) {
+            for (var value : List.of("false", "true", "untrusted", "UNTRUSTED", "True", " untrusted ", "")) {
+                assertAccepted(key, value);
+            }
+            for (var value : List.of("untrsuted", "yes", "on", "1", "truee", "untrusted2")) {
+                assertRefused(key + " must be 'false', 'untrusted' or 'true' (any case); blank means off.", key, value);
+            }
+        }
+    }
+
+    @Test
+    void anAcpModeOutsideBatchJsonRpcIsRefused() {
+        for (var value : List.of("batch", "json", "rpc", "RPC", " json ", "")) {
+            assertAccepted(SubagentSpawnTool.ACP_MODE_KEY, value);
+        }
+        for (var value : List.of("stream", "batched", "jsonrpc")) {
+            assertRefused("subagent.acp.mode must be 'batch', 'json' or 'rpc'; blank means batch.",
+                    SubagentSpawnTool.ACP_MODE_KEY, value);
+        }
+        // The neighbouring subagent.acp. rule still answers.
+        assertRefused("Provider 'jclaw1406-none' is not configured. subagent.acp.modelProvider must name a "
+                + "provider from Settings > LLM Providers.", SubagentSpawnTool.ACP_MODEL_PROVIDER_KEY, "jclaw1406-none");
     }
 
     // --- a refused write stores nothing and applies nothing ---

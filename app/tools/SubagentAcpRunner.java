@@ -69,7 +69,6 @@ final class SubagentAcpRunner {
     private static final Set<String> ACP_HARNESS_IDS =
             Set.of("pi", "claude", "codex", "gemini", "opencode", "antigravity",
                     SubagentSpawnTool.DEFAULT_ACP_HARNESS);
-    private static final Set<String> ACP_MODES = Set.of(SubagentSpawnTool.DEFAULT_ACP_MODE, "json", "rpc");
 
     /** JCLAW-499: the per-spawn external-harness launch for a run, set when
      *  runtime=acp, consumed once by {@link #executeChildRun}. */
@@ -901,8 +900,8 @@ final class SubagentAcpRunner {
         }
         var mode = ConfigService.get(SubagentSpawnTool.ACP_MODE_KEY, SubagentSpawnTool.DEFAULT_ACP_MODE);
         if (mode != null && !mode.isBlank()
-                && !ACP_MODES.contains(mode.strip().toLowerCase(Locale.ROOT))) {
-            return "Error: '" + SubagentSpawnTool.ACP_MODE_KEY + "' must be one of " + ACP_MODES
+                && !SubagentSpawnTool.ACP_MODES.contains(mode.strip().toLowerCase(Locale.ROOT))) {
+            return "Error: '" + SubagentSpawnTool.ACP_MODE_KEY + "' must be one of " + SubagentSpawnTool.ACP_MODES
                     + SubagentSpawnTool.GOT_LITERAL + mode.strip() + "').";
         }
         return harnessModelError(args);
@@ -1005,7 +1004,7 @@ final class SubagentAcpRunner {
         var configured = ConfigService.get(SubagentSpawnTool.ACP_MODE_KEY, SubagentSpawnTool.DEFAULT_ACP_MODE);
         if (configured == null || configured.isBlank()) return SubagentSpawnTool.DEFAULT_ACP_MODE;
         var mode = configured.strip().toLowerCase(Locale.ROOT);
-        return ACP_MODES.contains(mode) ? mode : SubagentSpawnTool.DEFAULT_ACP_MODE;
+        return SubagentSpawnTool.ACP_MODES.contains(mode) ? mode : SubagentSpawnTool.DEFAULT_ACP_MODE;
     }
 
     /** JCLAW-659: the {@link HarnessAdapter} for the configured harness, falling

@@ -116,7 +116,7 @@ Two toggles that govern how strictly the Main Agent's shell tools enforce safety
 **Bypass allowlist** removes the safety floor. Only enable it on a Main Agent you trust on a machine where you're comfortable letting the model run arbitrary commands. The system-wide allowlist itself is edited in [Settings → Shell Execution](/guide#settings).
 :::
 
-Neither toggle loosens the OS sandbox: with `shell.sandbox` set under [Settings → Security → Shell Execution](/guide#settings-shell-execution), a confined `exec` run can write only inside the agent's workspace, whatever these privileges say.
+Neither toggle loosens the OS sandbox: with `shell.sandbox` set by the **sandbox** control in [Settings → Security → Shell Execution](/guide#settings-shell-execution), a confined `exec` run can write only inside the agent's workspace, whatever these privileges say.
 
 ### Shell Allowlist (effective view)
 

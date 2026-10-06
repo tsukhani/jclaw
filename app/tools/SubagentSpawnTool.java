@@ -231,6 +231,16 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     public static final String DEFAULT_ACP_HARNESS = "generic";
     /** JCLAW-659: default mode when {@link #ACP_MODE_KEY} is unset. */
     public static final String DEFAULT_ACP_MODE = "batch";
+    /** The values {@link #ACP_MODE_KEY} accepts, lower-case. */
+    public static final Set<String> ACP_MODES = Set.of(DEFAULT_ACP_MODE, "json", "rpc");
+
+    /** The refusal for a write of {@code value} to {@link #ACP_MODE_KEY}, or null when it is blank or a known mode. */
+    public static @Nullable String modeRejectionFor(@Nullable String value) {
+        if (value == null || value.isBlank() || ACP_MODES.contains(value.strip().toLowerCase(Locale.ROOT))) {
+            return null;
+        }
+        return ACP_MODE_KEY + " must be 'batch', 'json' or 'rpc'; blank means batch.";
+    }
 
     /** JCLAW-657 (finding A): working directory the acp harness process runs in.
      *  Operator-configured (Config DB); when unset, defaults to the child agent's

@@ -36,6 +36,7 @@ import services.tts.TtsEngine;
 import services.tts.TtsSidecarManager;
 import services.voice.VoiceSettings;
 import tools.DocumentsTool;
+import tools.HarnessSandbox;
 import tools.SubagentSpawnTool;
 import tools.jev.JevSettings;
 import tools.scrape.WebScrapeSettings;
@@ -386,7 +387,12 @@ public class ConfigService {
             // JCLAW-1274: an engine the browser tool does not know would read as Playwright without a word.
             under(JevSettings.KEY_PREFIX, JevSettings::rejectionFor),
             // JCLAW-1302, JCLAW-1336: the TypeSafe key rides an Authorization header, and the Ollama address is dialled.
-            under(DecisionSettings.KEY_PREFIX, DecisionSettings::rejectionFor));
+            under(DecisionSettings.KEY_PREFIX, DecisionSettings::rejectionFor),
+            // A typo in either sandbox key reads as off and leaves processes unconfined.
+            (key, value) -> key.equals(HarnessSandbox.SHELL_SANDBOX_KEY) || key.equals(HarnessSandbox.ACP_SANDBOX_KEY)
+                    ? HarnessSandbox.rejectionFor(key, value) : null,
+            // An unknown mode silently falls back to batch.
+            (key, value) -> key.equals(SubagentSpawnTool.ACP_MODE_KEY) ? SubagentSpawnTool.modeRejectionFor(value) : null);
 
     private static KeyRule under(String prefix, KeyRule rule) {
         return (key, value) -> key.startsWith(prefix) ? rule.rejectionFor(key, value) : null;

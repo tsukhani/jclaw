@@ -658,6 +658,8 @@ Delegating a subagent to an **external coding harness** (such as Claude Code, Co
 |------------------------|------------|-----------------------------------------------------------------------------------------------------|
 | `subagent.acp.command` | *(unset)*  | The harness command line run for `subagent_spawn { runtime:"acp" }` (e.g. `claude -p` or `codex exec`). Empty refuses every `runtime:"acp"` spawn. Read from config only, never the model. |
 | `subagent.acp.modelProvider` / `subagent.acp.modelId` | *(unset)* | Provider/model the harness runs with instead of its own default (the `acp.model` picker). Claude Code and Codex are pointed at the provider's endpoint and model; Pi and Gemini CLI take the model only; opencode and custom harnesses refuse the override. A per-spawn `modelProvider` / `modelId` wins over it. |
+| `subagent.acp.sandbox` | `false`    | OS-level confinement for harness runs, set with the **acp.sandbox** control: *Off* (`false`), *Untrusted channels only* (`untrusted`) or *Every run* (`true`). A save of any other value is refused, and the control says when this host has no `sandbox-exec`/`bwrap`. See [Sandboxing coding runs](/guide#subagents-sandboxing-coding-runs-opt-in). |
+| `subagent.acp.mode`    | `batch`    | How JClaw talks to the harness, set with the **acp.mode** control: `batch` (send the task, read the whole output), `json` (parse a streamed line protocol) or `rpc` (a two-way session). A save of any other value is refused. |
 
 The **detected** row lists the harness CLIs found on this host's PATH — one click fills `subagent.acp.command` and `subagent.acp.harness` — and accepts a custom command, which is probed before it is stored.
 
@@ -847,7 +849,7 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on each
 | `shell.defaultTimeoutSeconds`  | 30      | Wall-clock budget for a command whose call sets no timeout (1–300 s in the panel). A call may set its own, capped at `shell.maxTimeoutSeconds` (300). |
 | `shell.maxTimeoutSeconds`      | 300     | The longest timeout a call may set; a longer one is cut to this. Has no row in the panel — set it with `POST /api/config`. |
 | `shell.maxOutputBytes`         | 102400  | How much of a command's output reaches the agent (100 KB); the rest is cut, with a note giving the full length. Has no row in the panel — set it with `POST /api/config`. |
-| `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Has no row in the panel — set it with `POST /api/config`. |
+| `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Set it with the **sandbox** control: *Off*, *Untrusted channels only* or *Every run*. A save of any other value is refused. When this host has no `sandbox-exec` (macOS) or `bwrap` (Linux), the control says so: with the key on, runs are then refused rather than run unconfined. |
 
 :::gotcha
 The allowlist is the safety floor for shell access, and the seeded list is broad: it includes interpreters and network tools such as `python3`, `node`, `curl` and `wget`. Trim it to what your agents need, and be deliberate about what you add. Emptying it, with no per-agent **Bypass allowlist**, means agents can't run anything via the shell tool.
