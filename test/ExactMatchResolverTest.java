@@ -42,17 +42,20 @@ class ExactMatchResolverTest extends UnitTest {
 
     @Test
     void anIdentifierKeyIsTheIdentifierTrimmedWithEmailAndUrlSchemeAndHostWithoutCase() {
-        assertTrue(ExactMatchResolver.isIdentifier(" https://Example.com/a "));
-        assertTrue(ExactMatchResolver.isIdentifier("~/notes/plan.md"));
-        assertTrue(ExactMatchResolver.isIdentifier("JCLAW-1370"));
-        assertTrue(ExactMatchResolver.isIdentifier("Dana@Example.com"));
-        assertFalse(ExactMatchResolver.isIdentifier("see https://example.com"), "wholly, not containing");
-        assertFalse(ExactMatchResolver.isIdentifier("Harborlight Analytics"));
+        assertTrue(ExactMatchResolver.isIdentifier(" https://Example.com/a ", "System"));
+        assertTrue(ExactMatchResolver.isIdentifier("~/notes/plan.md", "Topic"));
+        assertTrue(ExactMatchResolver.isIdentifier("JCLAW-1370", "Artifact"));
+        assertTrue(ExactMatchResolver.isIdentifier("Dana@Example.com", "Person"));
+        assertFalse(ExactMatchResolver.isIdentifier("see https://example.com", "Artifact"), "wholly, not containing");
+        assertFalse(ExactMatchResolver.isIdentifier("Harborlight Analytics", "Artifact"));
+        for (var name : List.of("SHA-256", "UTF-8", "GPT-4", "COVID-19")) {
+            assertFalse(ExactMatchResolver.isIdentifier(name, "Topic"), name + " has a ticket key's shape but not its type");
+        }
         assertEquals("https://example.com/A?q=B", ExactMatchResolver.identifierKey(" https://Example.COM/A?q=B "));
         assertEquals("dana@example.com", ExactMatchResolver.identifierKey("Dana@Example.com"));
         assertEquals("JCLAW-1370", ExactMatchResolver.identifierKey("JCLAW-1370"));
         assertEquals("~/Notes/plan.md", ExactMatchResolver.identifierKey("~/Notes/plan.md"));
-        assertTrue(ExactMatchResolver.isIdentifier("/node_modules/@Types/X.d.ts"));
+        assertTrue(ExactMatchResolver.isIdentifier("/node_modules/@Types/X.d.ts", "Artifact"));
         assertEquals("/node_modules/@Types/X.d.ts", ExactMatchResolver.identifierKey("/node_modules/@Types/X.d.ts"),
                 "a path that also reads as an email keeps its case");
     }

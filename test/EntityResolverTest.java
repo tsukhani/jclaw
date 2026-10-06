@@ -132,7 +132,10 @@ class EntityResolverTest extends UnitTest {
         assertEquals("Artifact", term(a.termId()).type());
         var path = run(m("https://example.com/A", "Artifact", 3));
         assertNotEquals(a.termId(), path.termId(), "a URL's path keeps its case");
-        assertEquals(run(m("JCLAW-1370", "Artifact", 4)).termId(), run(m("JCLAW-1370", "Project", 5)).termId());
+        assertEquals(run(m("JCLAW-1370", "Artifact", 4)).termId(), run(m("JCLAW-1370", "Artifact", 5)).termId());
+        var sha = run(m("SHA-256", "Topic", 10));
+        assertNotEquals(Step.IDENTIFIER, sha.step(), "a ticket key's shape typed otherwise is a name");
+        assertEquals("Topic", term(sha.termId()).type());
         assertEquals(run(m("~/notes/plan.md", "Artifact", 6)).termId(), run(m("~/notes/plan.md", "Artifact", 7)).termId());
         assertEquals(run(m("Dana@Example.com", "Artifact", 8)).termId(),
                 run(m("dana@example.com", "Person", 9)).termId(), "an email without case");

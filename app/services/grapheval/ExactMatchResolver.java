@@ -67,11 +67,15 @@ public final class ExactMatchResolver {
         return token;
     }
 
-    /** Whether the trimmed surface is wholly a URL, path, ticket key or email. */
-    public static boolean isIdentifier(String surface) {
+    /**
+     * Whether the trimmed surface is wholly a URL, path or email, whatever its type, or a ticket key typed Artifact:
+     * SHA-256, UTF-8 and GPT-4 have a ticket key's shape, so only the decided type tells them apart.
+     */
+    public static boolean isIdentifier(String surface, String type) {
         var s = surface.strip();
         return LiteralSpans.URL.matcher(s).matches() || LiteralSpans.PATH.matcher(s).matches()
-                || LiteralSpans.TICKET.matcher(s).matches() || EMAIL.matcher(s).matches();
+                || EMAIL.matcher(s).matches()
+                || (type.equals(TermIds.ARTIFACT) && LiteralSpans.TICKET.matcher(s).matches());
     }
 
     /** The identifier as found, trimmed; an email, and a URL's scheme and host, in lower case. A path keeps its case. */
@@ -105,7 +109,7 @@ public final class ExactMatchResolver {
                     && normalize(m.surface()).equals(owner);
             String key;
             if (m.operator() || named) key = OPERATOR_KEY;
-            else if (isIdentifier(m.surface())) key = IDENTIFIER_KEY + identifierKey(m.surface());
+            else if (isIdentifier(m.surface(), m.type())) key = IDENTIFIER_KEY + identifierKey(m.surface());
             else key = m.type() + "\u0000" + normalize(m.surface(), m.type());
             clusters.computeIfAbsent(key, _ -> new ArrayList<>()).add(m.ref());
         }

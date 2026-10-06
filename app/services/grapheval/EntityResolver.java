@@ -168,7 +168,7 @@ public final class EntityResolver {
             return g.resolved(ownerId, Step.OWNER, existed, List.of());
         }
 
-        if (ExactMatchResolver.isIdentifier(m.surface())) {
+        if (ExactMatchResolver.isIdentifier(m.surface(), m.type())) {
             var id = g.end(TermIds.identifier(agentId, ExactMatchResolver.identifierKey(m.surface())));
             boolean existed = g.term(id) != null;
             if (!existed) g.put(new Term(g.meta(id), TermIds.ARTIFACT, m.surface().strip(), List.of(), List.of()));
@@ -201,7 +201,7 @@ public final class EntityResolver {
             // Mirrors the fuzzy gate, so a short-name or identifier Term never takes a model attach.
             var pool = g.terms().stream().filter(t -> t.type().equals(m.type()) && !t.id().equals(ownerId)
                     && t.mergedInto() == null && distinctive(ExactMatchResolver.normalize(t.name(), t.type()))
-                    && !ExactMatchResolver.isIdentifier(t.name())).toList();
+                    && !ExactMatchResolver.isIdentifier(t.name(), t.type())).toList();
             if (!pool.isEmpty()) {
                 var chosen = choose(g, pool, m, shortlist, threshold);
                 if (chosen != null) return g.attached(chosen, m, Step.SHORTLIST);

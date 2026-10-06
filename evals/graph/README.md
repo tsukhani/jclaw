@@ -155,7 +155,8 @@ that cannot fit alone fails with `exceeds context`.
 
 Mentions are clustered by `ExactMatchResolver` on the canonical key (lower case, a leading
 "the", "a" or "an" and a possessive stripped, punctuation removed, a Topic's last token made
-singular), or on the identifier key for a URL, path, ticket key or email. A Person whose
+singular), or on the identifier key for a URL, path or email of any type, or a ticket key typed
+`Artifact` (`SHA-256`, `UTF-8` and `GPT-4` share a ticket key's shape). A Person whose
 surface normalizes to the declared owner name joins the operator's cluster.
 
 ## Scoring
