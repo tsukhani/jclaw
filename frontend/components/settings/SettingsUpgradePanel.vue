@@ -43,7 +43,7 @@ const { mutate, error: mutationError } = useApiMutation()
 
 // useLazyFetch, not useFetch: a top-level `await` here suspends the whole
 // settings panel behind a request that may be waiting on GitHub.
-const { data: preflight, refresh } = useLazyFetch<UpgradePreflight>('/api/system/upgrade')
+const { data: preflight } = useLazyFetch<UpgradePreflight>('/api/system/upgrade')
 
 // Reported by the helper. Present on mount when a previous upgrade ran here —
 // including the one that installed the version now serving this page.
@@ -77,11 +77,23 @@ async function fetchStatus(): Promise<UpgradeStatus | null> {
   return res && typeof res === 'object' ? res : null
 }
 
+// refresh() would read the server's hour-long release cache; refresh=true asks GitHub again.
+async function fetchFreshPreflight(): Promise<boolean> {
+  try {
+    preflight.value = await $fetch<UpgradePreflight>('/api/system/upgrade', { query: { refresh: true } })
+    return true
+  }
+  catch (e) {
+    failure.value = apiErrorDetails(e).message
+    return false
+  }
+}
+
 async function checkAgain() {
   mode.value = 'checking'
   failure.value = null
   try {
-    await refresh()
+    await fetchFreshPreflight()
   }
   finally {
     mode.value = 'idle'
@@ -106,7 +118,7 @@ async function handleUpgrade() {
 
   // Fresh counts and a fresh release check — the panel may have been open for
   // a while, and the confirmation is about what is true now.
-  await refresh()
+  if (!await fetchFreshPreflight()) return
   const p = preflight.value
   if (!p || !p.available || !p.upgradeAvailable) return
 

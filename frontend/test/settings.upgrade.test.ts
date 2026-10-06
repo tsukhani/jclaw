@@ -25,10 +25,15 @@ const Harness = defineComponent({
 let preflight: Record<string, unknown>
 let status: Record<string, unknown> | null
 let upgradePosts = 0
+let preflightQueries: Record<string, unknown>[] = []
 
 registerEndpoint('/api/system/upgrade', {
   method: 'GET',
-  handler: () => preflight,
+  handler: (event) => {
+    const url = new URL(String(event.node?.req?.url ?? event.path ?? ''), 'http://localhost')
+    preflightQueries.push(Object.fromEntries(url.searchParams))
+    return preflight
+  },
 })
 registerEndpoint('/api/system/upgrade', {
   method: 'POST',
@@ -74,6 +79,7 @@ function panelButton(c: { findAll: (s: string) => { text: () => string, trigger:
 beforeEach(() => {
   clearNuxtData()
   upgradePosts = 0
+  preflightQueries = []
   preflight = available()
   status = null
   document.body.innerHTML = ''
@@ -141,6 +147,20 @@ describe('SettingsUpgradePanel — availability', () => {
     expect(panelButton(c, /Upgrade to/)).toBeFalsy()
   })
 
+  it('Check again bypasses the cached release check and shows the new answer', async () => {
+    preflight = available({ latestVersion: '0.17.49', upgradeAvailable: false })
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(preflightQueries.every(q => q.refresh === undefined)).toBe(true)
+
+    preflight = available()
+    await panelButton(c, /Check again/)!.trigger('click')
+    await flushPromises()
+
+    expect(preflightQueries.at(-1)).toEqual({ refresh: 'true' })
+    expect(panelButton(c, /Upgrade to 0\.17\.50/)).toBeTruthy()
+  })
+
   it('names the target version on the button when one is available', async () => {
     const c = await mountSuspended(Harness)
     await flushPromises()
@@ -179,6 +199,8 @@ describe('SettingsUpgradePanel — confirmation', () => {
     expect(dialog).toContain('backed up')
     expect(dialog).toContain('rolled back automatically')
     expect(upgradePosts).toBe(0)
+    // The dialog confirms against a release check made just now, not the cached one.
+    expect(preflightQueries.at(-1)).toEqual({ refresh: 'true' })
   })
 
   it('says the instance keeps running during the download', async () => {
