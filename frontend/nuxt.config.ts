@@ -82,6 +82,19 @@ export default defineNuxtConfig({
 
   vite: {
     plugins: [tailwindcss()],
+    build: {
+      // 3Dmol ships as one pre-minified 534 kB file that cannot be split; it loads only when a structure fence is drawn.
+      chunkSizeWarningLimit: 600,
+      rolldownOptions: {
+        // Times Nuxt's and Tailwind's own plugin hooks, which nothing in this repo can tune.
+        checks: { bundlerTimings: false },
+        onwarn(warning, defaultHandler) {
+          // 3Dmol's one eval is its string-callback helper; load3Dmol disarms the autoloader that could reach it.
+          if (warning.code === 'EVAL' && warning.id?.includes('/3dmol/')) return
+          defaultHandler(warning)
+        },
+      },
+    },
     // The User Guide imports `../../docs/user-guide/*.md?raw` so the
     // canonical operator-facing copy can live next to the rest of the
     // repo's docs. Vite's default fs.allow root is the frontend/ folder;
