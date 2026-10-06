@@ -35,8 +35,8 @@ import java.util.List;
  *       TASK_MGMT_RESUME audit emissions.</li>
  *   <li>runNow forces immediate fire (reschedules existing or
  *       schedules fresh row, revives CANCELLED).</li>
- *   <li>updateTask: description, delivery, payloadType, noAgent,
- *       repeatLimit, schedule re-parse.</li>
+ *   <li>updateTask: description, delivery, payloadType, schedule re-parse.</li>
+ *   <li>The six unbuilt arguments (JCLAW-1407) refused on create and update.</li>
  *   <li>cancelTask: PENDING → CANCELLED, scheduler row removed.</li>
  *   <li>Agent-scoping: addressing another agent's Task by name
  *       reports "not found" (does not leak the row).</li>
@@ -94,6 +94,21 @@ class TaskToolTest extends UnitTest {
         @SuppressWarnings("unchecked")
         var required = (java.util.List<String>) tool.parameters().get("required");
         assertTrue(required.contains("action"));
+    }
+
+    @Test
+    void schemaOffersExactlyTheseArguments() {
+        @SuppressWarnings("unchecked")
+        var props = (java.util.Map<String, Object>) tool.parameters().get("properties");
+        assertEquals(java.util.Set.of("action", "name", "description", "schedule", "paused",
+                        "delivery", "payloadType", "modelProvider", "modelId", "enabledToolNames",
+                        "autoDeleteOnComplete", "timezone"),
+                props.keySet());
+        var text = tool.description() + props;
+        for (var key : services.TaskWriteService.UNBUILT_KEYS) {
+            assertFalse(java.util.regex.Pattern.compile("\\b" + key + "\\b").matcher(text).find(),
+                    "schema or description still mentions " + key);
+        }
     }
 
     @Test
@@ -521,28 +536,68 @@ class TaskToolTest extends UnitTest {
         assertEquals("markdown", fresh.payloadType);
     }
 
-    @Test
-    void updateTaskNoAgentFlag() {
-        tool.execute("""
-                {"action":"createTask","name":"u-na","schedule":"now"}""", agent);
-        var taskId = findTaskByName("u-na").id;
+    // === JCLAW-1407: arguments whose fire-time behaviour is not built ===
 
+    private static final java.util.Map<String, String> UNBUILT_VALUES = java.util.Map.of(
+            "repeatLimit", "3", "preCheck", "\"true\"", "contextFromTaskIds", "\"[1]\"",
+            "workdir", "\"/tmp\"", "script", "\"echo hi\"", "noAgent", "true");
+
+    @Test
+    void createTaskRefusesEachUnbuiltArgumentAndStoresNothing() {
+        assertEquals(java.util.Set.copyOf(services.TaskWriteService.UNBUILT_KEYS), UNBUILT_VALUES.keySet());
+        for (var e : UNBUILT_VALUES.entrySet()) {
+            var name = "c-" + e.getKey().toLowerCase();
+            var reply = tool.execute("""
+                    {"action":"createTask","name":"%s","schedule":"every 1h","%s":%s}"""
+                    .formatted(name, e.getKey(), e.getValue()), agent);
+            assertEquals("Error: '%s' is not available yet: nothing reads it when the task fires, "
+                    .formatted(e.getKey()) + "so it would be stored and ignored. Omit it.", reply);
+            assertNull(findTaskByName(name), e.getKey() + " refusal must not create the task");
+        }
+    }
+
+    @Test
+    void updateTaskRefusesEachUnbuiltArgumentAndKeepsTheStoredValue() {
         tool.execute("""
-                {"action":"updateTask","name":"u-na","noAgent":true}""", agent);
+                {"action":"createTask","name":"u-unbuilt","schedule":"every 1h"}""", agent);
+        var taskId = findTaskByName("u-unbuilt").id;
+        Tx.run(() -> {
+            Task t = Task.findById(taskId);
+            t.repeatLimit = 7;
+            t.noAgent = true;
+            t.save();
+        });
+
+        for (var e : UNBUILT_VALUES.entrySet()) {
+            var reply = tool.execute("""
+                    {"action":"updateTask","name":"u-unbuilt","description":"changed","%s":%s}"""
+                    .formatted(e.getKey(), e.getValue()), agent);
+            assertTrue(reply.startsWith("Error: '%s' is not available yet".formatted(e.getKey())), reply);
+        }
         var fresh = (Task) Tx.run(() -> Task.findById(taskId));
+        assertEquals("", fresh.description, "a refused patch must not apply its other fields");
+        assertEquals(7, fresh.repeatLimit.intValue());
         assertTrue(fresh.noAgent);
     }
 
     @Test
-    void updateTaskRepeatLimit() {
+    void anExplicitNullUnbuiltArgumentIsIgnoredAndKeepsTheStoredValue() {
         tool.execute("""
-                {"action":"createTask","name":"u-rl","schedule":"every 1h"}""", agent);
-        var taskId = findTaskByName("u-rl").id;
+                {"action":"createTask","name":"u-null","schedule":"every 1h","repeatLimit":null,
+                 "noAgent":null}""", agent);
+        var taskId = findTaskByName("u-null").id;
+        Tx.run(() -> {
+            Task t = Task.findById(taskId);
+            t.repeatLimit = 7;
+            t.save();
+        });
 
-        tool.execute("""
-                {"action":"updateTask","name":"u-rl","repeatLimit":5}""", agent);
+        var reply = tool.execute("""
+                {"action":"updateTask","name":"u-null","description":"changed","repeatLimit":null}""", agent);
+        assertTrue(reply.contains("updated"), reply);
         var fresh = (Task) Tx.run(() -> Task.findById(taskId));
-        assertEquals(5, fresh.repeatLimit.intValue());
+        assertEquals("changed", fresh.description);
+        assertEquals(7, fresh.repeatLimit.intValue(), "null must not clear an existing value");
     }
 
     @Test
@@ -914,16 +969,14 @@ class TaskToolTest extends UnitTest {
     void updateTaskExplicitNullClearsField() {
         tool.execute("""
                 {"action":"createTask","name":"clearme","schedule":"every 1h",
-                 "delivery":"telegram:1","repeatLimit":3}""", agent);
+                 "delivery":"telegram:1"}""", agent);
         var taskId = findTaskByName("clearme").id;
 
         var reply = tool.execute("""
-                {"action":"updateTask","name":"clearme","delivery":null,
-                 "repeatLimit":null}""", agent);
+                {"action":"updateTask","name":"clearme","delivery":null}""", agent);
         assertTrue(reply.contains("updated"), reply);
         var fresh = (Task) Tx.run(() -> Task.findById(taskId));
         assertNull(fresh.delivery, "explicit null should clear delivery");
-        assertNull(fresh.repeatLimit, "explicit null should clear repeatLimit");
     }
 
     /**

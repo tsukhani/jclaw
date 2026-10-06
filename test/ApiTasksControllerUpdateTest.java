@@ -1,13 +1,19 @@
+import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import play.mvc.Http.Request;
 import play.mvc.Http.Response;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.EventLogger;
+import services.Tx;
 
 import java.io.ByteArrayInputStream;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
@@ -149,17 +155,13 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
 
         var resp = PATCH("/api/tasks/" + taskId, "application/json", """
                 {"delivery": "slack:#ops", "payloadType": "markdown",
-                 "modelProvider": "openrouter", "modelId": "claude-haiku-4-5",
-                 "workdir": "/tmp/x", "noAgent": true, "repeatLimit": 10}
+                 "modelProvider": "openrouter", "modelId": "claude-haiku-4-5"}
                 """);
         assertIsOk(resp);
         assertContentMatch("\"delivery\":\"slack:#ops\"", resp);
         assertContentMatch("\"payloadType\":\"markdown\"", resp);
         assertContentMatch("\"modelProvider\":\"openrouter\"", resp);
         assertContentMatch("\"modelId\":\"claude-haiku-4-5\"", resp);
-        assertContentMatch("\"workdir\":\"/tmp/x\"", resp);
-        assertContentMatch("\"noAgent\":true", resp);
-        assertContentMatch("\"repeatLimit\":10", resp);
     }
 
     @Test
@@ -167,21 +169,17 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
         var agent = seedAgent();
         var taskId = seedTask(agent, "cleartest", "every 1h");
 
-        // First set a delivery + repeatLimit
         assertIsOk(PATCH("/api/tasks/" + taskId, "application/json", """
-                {"delivery": "telegram:1", "repeatLimit": 5}
+                {"delivery": "telegram:1"}
                 """));
 
-        // Then clear them via explicit null.
         var resp = PATCH("/api/tasks/" + taskId, "application/json", """
-                {"delivery": null, "repeatLimit": null}
+                {"delivery": null}
                 """);
         assertIsOk(resp);
         var body = getContent(resp);
         assertTrue(body.contains("\"delivery\":null"),
                 "delivery should clear to null; got: " + body);
-        assertTrue(body.contains("\"repeatLimit\":null"),
-                "repeatLimit should clear to null; got: " + body);
     }
 
     // --- 400 / 404 paths ---
@@ -260,57 +258,99 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
         assertContentMatch("\"enabledToolNames\":\"filesystem,exec\"", resp);
     }
 
-    @Test
-    void updatesPreCheck() {
+    /** JCLAW-1407: a refused patch leaves a value an older write stored, and applies nothing else. */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "repeatLimit        | 5",
+            "preCheck           | \"exit 0\"",
+            "contextFromTaskIds | \"1,2,3\"",
+            "workdir            | \"/tmp/x\"",
+            "script             | \"echo hello\"",
+            "noAgent            | false"
+    })
+    void refusesAnArgumentWhoseBehaviourIsNotBuilt(String key, String value) {
         var agent = seedAgent();
-        var taskId = seedTask(agent, "precheck-task", "now");
+        var taskId = seedTask(agent, "unbuilt-task", "every 1h");
+        seedUnbuiltValues(taskId);
 
         var resp = PATCH("/api/tasks/" + taskId, "application/json", """
-                {"preCheck": "exit 0"}
-                """);
-        assertIsOk(resp);
-        assertContentMatch("\"preCheck\":\"exit 0\"", resp);
+                {"description": "changed", "%s": %s}
+                """.formatted(key, value));
+        assertStatus(400, resp);
+        assertContentMatch("'" + key + "' is not available yet", resp);
+
+        var body = getContent(PATCH("/api/tasks/" + taskId, "application/json", """
+                {"paused": false}
+                """));
+        assertTrue(body.contains("\"description\":\"\""), body);
+        assertTrue(body.contains("\"repeatLimit\":7"), body);
+        assertTrue(body.contains("\"preCheck\":\"exit 1\""), body);
+        assertTrue(body.contains("\"noAgent\":true"), body);
     }
 
     @Test
-    void updatesScript() {
+    void anExplicitNullUnbuiltArgumentIsIgnoredAndKeepsTheStoredValue() {
         var agent = seedAgent();
-        var taskId = seedTask(agent, "script-task", "now");
+        var taskId = seedTask(agent, "unbuilt-null", "every 1h");
+        seedUnbuiltValues(taskId);
 
         var resp = PATCH("/api/tasks/" + taskId, "application/json", """
-                {"script": "echo hello"}
+                {"description": "changed", "repeatLimit": null, "preCheck": null}
                 """);
         assertIsOk(resp);
-        assertContentMatch("\"script\":\"echo hello\"", resp);
+        var body = getContent(resp);
+        assertTrue(body.contains("\"description\":\"changed\""), body);
+        assertTrue(body.contains("\"repeatLimit\":7"), body);
+        assertTrue(body.contains("\"preCheck\":\"exit 1\""), body);
     }
 
-    @Test
-    void updatesContextFromTaskIds() {
-        var agent = seedAgent();
-        var taskId = seedTask(agent, "ctx-task", "now");
+    /** Stands in for a task written before JCLAW-1407, when the API still stored these. */
+    private static void seedUnbuiltValues(Long taskId) {
+        commitInFreshTx(() -> {
+            Task t = Task.findById(taskId);
+            t.repeatLimit = 7;
+            t.preCheck = "exit 1";
+            t.noAgent = true;
+            t.save();
+            return null;
+        });
+    }
 
-        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
-                {"contextFromTaskIds": "1,2,3"}
-                """);
-        assertIsOk(resp);
-        assertContentMatch("\"contextFromTaskIds\":\"1,2,3\"", resp);
+    private static <T> T commitInFreshTx(Supplier<T> block) {
+        var ref = new AtomicReference<T>();
+        var err = new AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(Tx.run(block::get));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return ref.get();
     }
 
     @Test
     void updatesMultipleOptionalStringFieldsInOnePatch() {
-        // One PATCH carries enabledToolNames + preCheck + script — exercises
+        // One PATCH carries enabledToolNames + payloadType + modelId — exercises
         // multiple sequential body.has() branches in the same request.
         var agent = seedAgent();
         var taskId = seedTask(agent, "multi-field-task", "now");
 
         var resp = PATCH("/api/tasks/" + taskId, "application/json", """
-                {"enabledToolNames": "filesystem", "preCheck": "test -d /tmp", "script": "ls"}
+                {"enabledToolNames": "filesystem", "payloadType": "markdown", "modelId": "m1"}
                 """);
         assertIsOk(resp);
         var body = getContent(resp);
         assertTrue(body.contains("\"enabledToolNames\":\"filesystem\""));
-        assertTrue(body.contains("\"preCheck\":\"test -d /tmp\""));
-        assertTrue(body.contains("\"script\":\"ls\""));
+        assertTrue(body.contains("\"payloadType\":\"markdown\""));
+        assertTrue(body.contains("\"modelId\":\"m1\""));
     }
 
     // --- JCLAW-426: name rename ---

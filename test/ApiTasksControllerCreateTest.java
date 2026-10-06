@@ -120,24 +120,40 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
     @Test
     void createWithPlumbingFieldsRoundTrips() {
         var agentId = seedAgent();
-        // Plumbing-ahead fields land verbatim (JCLAW-294 doesn't read them at fire time;
-        // future stories consume).
         var resp = POST("/api/tasks", "application/json", """
                 {"agentId": %d, "name": "full-task", "schedule": "@hourly",
                  "delivery": "telegram:12345", "payloadType": "json",
                  "modelProvider": "openrouter", "modelId": "claude-sonnet-4-6",
-                 "enabledToolNames": "[\\"web_search\\"]", "workdir": "/tmp/wd",
-                 "preCheck": "true", "script": "echo hi", "noAgent": true,
-                 "contextFromTaskIds": "[1,2]", "repeatLimit": 5}
+                 "enabledToolNames": "[\\"web_search\\"]",
+                 "workdir": null, "noAgent": null, "repeatLimit": null}
                 """.formatted(agentId));
         assertIsOk(resp);
         assertContentMatch("\"delivery\":\"telegram:12345\"", resp);
         assertContentMatch("\"payloadType\":\"json\"", resp);
         assertContentMatch("\"modelProvider\":\"openrouter\"", resp);
         assertContentMatch("\"modelId\":\"claude-sonnet-4-6\"", resp);
-        assertContentMatch("\"workdir\":\"/tmp/wd\"", resp);
-        assertContentMatch("\"noAgent\":true", resp);
-        assertContentMatch("\"repeatLimit\":5", resp);
+        assertContentMatch("\"noAgent\":false", resp);
+    }
+
+    /** JCLAW-1407: nothing at fire time reads these, so the write refuses rather than stores them. */
+    @ParameterizedTest(name = "{0}")
+    @CsvSource(delimiter = '|', value = {
+            "repeatLimit        | 5",
+            "preCheck           | \"true\"",
+            "contextFromTaskIds | \"[1,2]\"",
+            "workdir            | \"/tmp/wd\"",
+            "script             | \"echo hi\"",
+            "noAgent            | true",
+            "noAgent            | false"
+    })
+    void rejectsAnArgumentWhoseBehaviourIsNotBuilt(String key, String value) {
+        var agentId = seedAgent();
+        var resp = POST("/api/tasks", "application/json", """
+                {"agentId": %d, "name": "unbuilt", "schedule": "@hourly", "%s": %s}
+                """.formatted(agentId, key, value));
+        assertStatus(400, resp);
+        assertContentMatch("'" + key + "' is not available yet", resp);
+        assertEquals(0L, (long) services.Tx.run(() -> Task.count("name = ?1", "unbuilt")));
     }
 
     @Test

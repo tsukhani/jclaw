@@ -67,9 +67,7 @@ public class ApiTasksController extends Controller {
 
     public record TaskRequest(String name, Long agentId, String schedule, String description,
                               String delivery, String payloadType, String modelProvider, String modelId,
-                              List<String> enabledToolNames, String workdir, String preCheck,
-                              String script, Boolean noAgent, Boolean autoDeleteOnComplete,
-                              List<Long> contextFromTaskIds, Integer repeatLimit,
+                              List<String> enabledToolNames, Boolean autoDeleteOnComplete,
                               Boolean paused, String timezone) {}
 
     /** Asserted after a mutation re-reads the row it just wrote. */
@@ -239,6 +237,7 @@ public class ApiTasksController extends Controller {
             badRequest();
             throw ApiResponses.unreachable();
         }
+        rejectUnbuiltFields(body);
 
         var agent = requireAgentFromBody(body);
         var name = requireTaskName(body);
@@ -296,6 +295,11 @@ public class ApiTasksController extends Controller {
             throw ApiResponses.unreachable();
         }
         return name;
+    }
+
+    private static void rejectUnbuiltFields(JsonObject body) {
+        var err = TaskWriteService.unbuiltFieldError(body);
+        if (err != null) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, err);
     }
 
     /**
@@ -403,6 +407,7 @@ public class ApiTasksController extends Controller {
             throw ApiResponses.unreachable();
         }
 
+        rejectUnbuiltFields(body);
         rejectInvalidDelivery(body);
         rejectInvalidTimezone(body);
 
