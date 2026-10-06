@@ -43,6 +43,21 @@ const subagentAcpCommand = computed(() => {
   return entries.find(e => e.key === 'subagent.acp.command')?.value ?? ''
 })
 
+// Both normalized the way the backend reads them, so an unknown value shows what actually runs.
+const acpSandboxValue = computed(() => {
+  const raw = configData.value?.entries?.find(e => e.key === 'subagent.acp.sandbox')?.value
+  const v = (raw ?? '').trim().toLowerCase()
+  return v === 'true' || v === 'untrusted' ? v : 'false'
+})
+const acpModeValue = computed(() => {
+  const raw = configData.value?.entries?.find(e => e.key === 'subagent.acp.mode')?.value
+  const v = (raw ?? '').trim().toLowerCase()
+  return v === 'json' || v === 'rpc' ? v : 'batch'
+})
+
+// Lazy: the backend probes the sandbox binary, which must not suspend the panel.
+const { data: sandboxData } = useLazyFetch<{ available: boolean, mechanism: string, reason: string }>('/api/sandbox')
+
 const editingField = ref<string | null>(null)
 const fieldEdit = ref('')
 
@@ -216,7 +231,10 @@ async function saveAcpModel(value: string) {
       refuses every <span class="font-mono">runtime="acp"</span> spawn),
       <span class="font-mono">detected</span> fills it from what's installed, and
       <span class="font-mono">acp.model</span> points the harness at a JClaw
-      provider instead of its own login. Recursion caps and the native subagent
+      provider instead of its own login. <span class="font-mono">acp.sandbox</span>
+      confines a run's writes to its session directory, and
+      <span class="font-mono">acp.mode</span> picks how JClaw talks to the
+      harness. Recursion caps and the native subagent
       model live in Subagents. Changes apply live; no restart needed.
     </p>
     <div class="bg-surface-elevated border border-border">
@@ -436,6 +454,69 @@ async function saveAcpModel(value: string) {
               :value="o.value"
             >
               {{ o.label }}
+            </option>
+          </select>
+        </div>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-start gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5 pt-1">
+            acp.sandbox
+            <InfoTip
+              label="About acp.sandbox"
+              content-class="w-72 font-mono"
+            >
+              Confines the coding harness's writes to its session directory with the host's OS sandbox (sandbox-exec on macOS, bwrap on Linux). Untrusted channels only leaves runs from the operator's own web chat unconfined.
+            </InfoTip>
+          </span>
+          <div class="flex-1 min-w-0 space-y-1">
+            <select
+              :value="acpSandboxValue"
+              aria-label="Coding harness sandbox"
+              class="w-full px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              @change="saveField('subagent.acp.sandbox', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="false">
+                Off
+              </option>
+              <option value="untrusted">
+                Untrusted channels only
+              </option>
+              <option value="true">
+                Every run
+              </option>
+            </select>
+            <p
+              v-if="sandboxData?.available === false"
+              data-testid="sandbox-unavailable"
+              class="text-xs text-amber-800 dark:text-amber-400"
+            >
+              This host has no sandbox mechanism ({{ sandboxData.reason }}). With this on, runs are refused rather than run unconfined.
+            </p>
+          </div>
+        </div>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
+            acp.mode
+            <InfoTip
+              label="About acp.mode"
+              content-class="w-72 font-mono"
+            >
+              How JClaw talks to the harness: batch sends the task and reads the whole output, json parses a streamed line protocol, rpc holds a two-way session where the harness supports one, and runs as json otherwise.
+            </InfoTip>
+          </span>
+          <select
+            :value="acpModeValue"
+            aria-label="Coding harness mode"
+            class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+            @change="saveField('subagent.acp.mode', ($event.target as HTMLSelectElement).value)"
+          >
+            <option value="batch">
+              batch (default)
+            </option>
+            <option value="json">
+              json
+            </option>
+            <option value="rpc">
+              rpc
             </option>
           </select>
         </div>

@@ -16,7 +16,7 @@ const { configData, saving, refresh } = useSettingsConfig()
 // Shell allowlist + timeouts remain operator-tunable below.
 
 // Shell execution config
-const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.maxTimeoutSeconds', 'shell.maxOutputBytes'] as const
+const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.maxTimeoutSeconds', 'shell.maxOutputBytes', 'shell.sandbox'] as const
 
 const shellConfig = computed(() => {
   const entries = configData.value?.entries ?? []
@@ -31,8 +31,18 @@ const shellConfig = computed(() => {
     defaultTimeout: map.get('shell.defaultTimeoutSeconds') ?? '30',
     maxTimeout: map.get('shell.maxTimeoutSeconds') ?? '300',
     maxOutput: map.get('shell.maxOutputBytes') ?? '102400',
+    sandbox: sandboxChoice(map.get('shell.sandbox')),
   }
 })
+
+// Normalized the way HarnessSandbox.scope reads it, so an unknown value shows Off, as it runs.
+function sandboxChoice(raw: string | undefined): string {
+  const v = (raw ?? '').trim().toLowerCase()
+  return v === 'true' || v === 'untrusted' ? v : 'false'
+}
+
+// Lazy: the backend probes the sandbox binary, which must not suspend the panel.
+const { data: sandboxData } = useLazyFetch<{ available: boolean, mechanism: string, reason: string }>('/api/sandbox')
 
 const shellAllowlistEdit = ref('')
 const shellTimeoutEdit = ref('')
@@ -67,7 +77,8 @@ async function saveShellField(configKey: string, value: string) {
     <p class="text-xs text-fg-muted">
       Allowlist and timeout for the shell tool. Per-agent enable/disable
       lives on the Tools page; this section configures the shared
-      execution policy.
+      execution policy. <span class="font-mono">sandbox</span> confines what a
+      command can write to the agent's workspace.
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
@@ -164,6 +175,43 @@ async function saveShellField(configKey: string, value: string) {
               />
             </button>
           </template>
+        </div>
+        <!-- Sandbox -->
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-start gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5 pt-1">
+            sandbox
+            <InfoTip
+              label="About sandbox"
+              content-class="w-72 font-mono"
+            >
+              Confines what exec can write to the agent's workspace, and the audio ffmpeg runs to the temp directory, with the host's OS sandbox (sandbox-exec on macOS, bwrap on Linux). Untrusted channels only leaves the operator's own web chat unconfined.
+            </InfoTip>
+          </span>
+          <div class="flex-1 min-w-0 space-y-1">
+            <select
+              :value="shellConfig.sandbox"
+              aria-label="Shell sandbox"
+              class="w-full px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              @change="saveShellField('shell.sandbox', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="false">
+                Off
+              </option>
+              <option value="untrusted">
+                Untrusted channels only
+              </option>
+              <option value="true">
+                Every run
+              </option>
+            </select>
+            <p
+              v-if="sandboxData?.available === false"
+              data-testid="sandbox-unavailable"
+              class="text-xs text-amber-800 dark:text-amber-400"
+            >
+              This host has no sandbox mechanism ({{ sandboxData.reason }}). With this on, runs are refused rather than run unconfined.
+            </p>
+          </div>
         </div>
       </div>
       <ApiErrorAlert

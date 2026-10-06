@@ -75,6 +75,7 @@ public final class HarnessSandbox {
     public static final String SHELL_SANDBOX_KEY = "shell.sandbox";
 
     private static final String BWRAP = "bwrap";
+    private static final String SANDBOX_EXEC = "sandbox-exec";
 
     /** Secret paths a coding run never needs to read (relative to $HOME). */
     private static final List<String> DENY_READ_HOME = List.of(
@@ -184,7 +185,7 @@ public final class HarnessSandbox {
         }
         var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (os.contains("mac") || os.contains("darwin")) {
-            requireBinary("sandbox-exec", configKey);
+            requireBinary(SANDBOX_EXEC, configKey);
             return macos(argv, writeRoot, allowances);
         }
         if (os.contains("linux")) {
@@ -198,12 +199,53 @@ public final class HarnessSandbox {
                         .formatted(configKey, System.getProperty("os.name")));
     }
 
-    private static void requireBinary(String binary, String configKey) {
+    /** Whether this host has the OS sandbox mechanism {@link #wrap} would use, and why not when it lacks one. */
+    public record Availability(boolean available, String mechanism, String reason) {}
+
+    /** Probe the platform's sandbox binary the way {@link #wrap} does, without wrapping anything. */
+    public static Availability availability() {
+        var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
+        String binary;
+        if (os.contains("mac") || os.contains("darwin")) {
+            binary = SANDBOX_EXEC;
+        } else if (os.contains("linux")) {
+            binary = BWRAP;
+        } else {
+            return new Availability(false, "",
+                    "this platform (%s) has no supported sandbox".formatted(System.getProperty("os.name")));
+        }
+        var missing = missingBinary(binary);
+        return missing == null
+                ? new Availability(true, binary, "")
+                : new Availability(false, binary, "'%s' is not available: %s".formatted(binary, missing.reason()));
+    }
+
+    /**
+     * The refusal for a write of {@code value} to one of the two sandbox keys, or null when the key is
+     * neither or the value is one {@link #scope(String)} reads as intended.
+     */
+    public static @Nullable String rejectionFor(String key, @Nullable String value) {
+        if (!key.equals(SHELL_SANDBOX_KEY) && !key.equals(ACP_SANDBOX_KEY)) return null;
+        if (value == null || value.isBlank()) return null;
+        var v = value.strip();
+        if (v.equalsIgnoreCase("false") || v.equalsIgnoreCase("true") || v.equalsIgnoreCase("untrusted")) {
+            return null;
+        }
+        return key + " must be 'false', 'untrusted' or 'true' (any case); blank means off.";
+    }
+
+    /** The failed probe when {@code binary} is missing from PATH, or null when it is present. */
+    private static ExecutableProbeSupport.@Nullable Result missingBinary(String binary) {
         var probe = ExecutableProbeSupport.probeOnPath(
                 binary, binary.equals(BWRAP) ? "--version" : "-p", "harness-sandbox", "");
         // sandbox-exec has no --version and exits non-zero on a bare -p; treat a
         // clean "not found on PATH" as the only fatal signal for it.
-        if (!probe.available() && probe.reason().contains("not found on PATH")) {
+        return !probe.available() && probe.reason().contains("not found on PATH") ? probe : null;
+    }
+
+    private static void requireBinary(String binary, String configKey) {
+        var probe = missingBinary(binary);
+        if (probe != null) {
             throw new SandboxUnavailableException(
                     ("%s is enabled but '%s' is not available (%s). On WSL2 this often "
                             + "means unprivileged user namespaces are disabled (kernel.unprivileged_userns_clone). "

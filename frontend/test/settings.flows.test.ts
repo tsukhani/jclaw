@@ -151,6 +151,7 @@ function setupDefaultApi(opts?: { capturePost?: (body: { key?: string, value?: s
   registerEndpoint('/api/providers', () => DEFAULT_PROVIDERS_INFO)
   registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
   registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
+  registerEndpoint('/api/sandbox', () => ({ available: true, mechanism: 'bwrap', reason: '' }))
   registerEndpoint('/api/config', {
     method: 'GET',
     handler: () => ({ entries: defaultConfigEntries() }),
@@ -1248,6 +1249,61 @@ describe('Settings page — Shell Execution', () => {
     const hit = captured.find(b => b.key === 'shell.defaultTimeoutSeconds')
     expect(hit).toBeTruthy()
     expect(String(hit!.value)).toBe('60')
+  })
+
+  function withShellSandbox(value: string) {
+    registerEndpoint('/api/config', {
+      method: 'GET',
+      handler: () => ({ entries: [...defaultConfigEntries(), { key: 'shell.sandbox', value, updatedAt: '2026-10-06T10:00:00Z' }] }),
+    })
+  }
+
+  it('shows Off for an unset shell.sandbox', async () => {
+    setupDefaultApi()
+    const component = await mountSettingsSection('shell')
+    expect(component.find<HTMLSelectElement>('select[aria-label="Shell sandbox"]').element.value).toBe('false')
+  })
+
+  it('shows the saved shell.sandbox, and Off for a value the runtime reads as off', async () => {
+    setupDefaultApi()
+    withShellSandbox(' UNTRUSTED ')
+    let component = await mountSettingsSection('shell')
+    expect(component.find<HTMLSelectElement>('select[aria-label="Shell sandbox"]').element.value).toBe('untrusted')
+
+    clearNuxtData()
+    withShellSandbox('TRUE')
+    component = await mountSettingsSection('shell')
+    expect(component.find<HTMLSelectElement>('select[aria-label="Shell sandbox"]').element.value).toBe('true')
+
+    clearNuxtData()
+    withShellSandbox('yes')
+    component = await mountSettingsSection('shell')
+    expect(component.find<HTMLSelectElement>('select[aria-label="Shell sandbox"]').element.value).toBe('false')
+  })
+
+  it('POSTs shell.sandbox=true when Every run is chosen', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupDefaultApi({ capturePost: b => captured.push(b) })
+    const component = await mountSettingsSection('shell')
+
+    await component.find('select[aria-label="Shell sandbox"]').setValue('true')
+    await flushPromises()
+
+    expect(captured).toContainEqual({ key: 'shell.sandbox', value: 'true' })
+  })
+
+  it('says when the host has no sandbox mechanism, and only then', async () => {
+    setupDefaultApi()
+    let component = await mountSettingsSection('shell')
+    expect(component.find('[data-testid="sandbox-unavailable"]').exists()).toBe(false)
+
+    clearNuxtData()
+    registerEndpoint('/api/sandbox', () => ({ available: false, mechanism: 'bwrap', reason: '\'bwrap\' is not available: bwrap not found on PATH' }))
+    component = await mountSettingsSection('shell')
+    await flushPromises()
+    const note = component.find('[data-testid="sandbox-unavailable"]')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('bwrap not found on PATH')
   })
 })
 

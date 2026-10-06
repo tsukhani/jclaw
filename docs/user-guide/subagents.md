@@ -262,7 +262,8 @@ session to the configured directory.
 By default a coding harness runs with the operator's own account permissions,
 scoped only by its `coding/<slug>/` working directory (which organizes output
 but confines nothing) and by the harness's permission flags. For a real OS
-boundary, set `subagent.acp.sandbox`. It takes three values: `false` (the
+boundary, set `subagent.acp.sandbox` with the **acp.sandbox** control in
+[Settings → Coding](/guide#settings-coding). It takes three values: `false` (the
 default — never confine), `true` (confine every run), or `untrusted` (confine
 only runs whose origin channel is not your own web chat — inbound Telegram or
 Slack, the prompt-injection surface — while your own web-driven runs stay
@@ -282,7 +283,9 @@ unconfined):
 
 The sandbox **fails closed**: if enabled where no mechanism is available (native
 Windows, WSL1, or a WSL2 kernel with unprivileged user namespaces disabled),
-the run is aborted with an actionable error rather than launched unsandboxed.
+the run is aborted with an actionable error rather than launched unsandboxed;
+the **acp.sandbox** control says when this host lacks `sandbox-exec` or `bwrap`
+(it cannot detect a `bwrap` whose namespaces are disabled).
 Network egress stays open — the harness needs its API. Off by default; see the
 JCLAW-671 spike for the measured confinement results and limitations.
 

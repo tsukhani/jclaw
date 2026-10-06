@@ -53,6 +53,8 @@ let addedCommands: string[] = []
 let removedCommands: string[] = []
 
 let configDeletes: string[] = []
+let extraEntries: { key: string, value: string }[] = []
+let sandbox = { available: true, mechanism: 'bwrap', reason: '' }
 
 // One configured provider so the acp.model picker has a provider::model option.
 registerEndpoint('/api/config', {
@@ -62,6 +64,7 @@ registerEndpoint('/api/config', {
       { key: 'subagent.acp.command', value: 'claude -p' },
       { key: 'provider.ollama.baseUrl', value: 'http://localhost:11434/v1' },
       { key: 'provider.ollama.models', value: JSON.stringify([{ id: 'qwen3.5:9b', name: 'Qwen 3.5 9B' }]) },
+      ...extraEntries,
     ],
   }),
 })
@@ -88,6 +91,7 @@ registerEndpoint('/api/config', {
   },
 })
 registerEndpoint('/api/providers', () => [])
+registerEndpoint('/api/sandbox', () => sandbox)
 registerEndpoint('/api/subagents/acp-harnesses', { method: 'GET', handler: () => ({ harnesses }) })
 registerEndpoint('/api/subagents/acp-command', { method: 'GET', handler: () => preview })
 registerEndpoint('/api/subagents/acp-harnesses', {
@@ -123,6 +127,8 @@ beforeEach(() => {
   configDeletes = []
   addedCommands = []
   removedCommands = []
+  extraEntries = []
+  sandbox = { available: true, mechanism: 'bwrap', reason: '' }
   harnesses = [
     { id: 'claude', name: 'Claude Code', command: 'claude -p', harness: 'claude', available: true, reason: 'available', custom: false, acpSupport: 'adapter-missing', acpDetail: 'Needs the claude-code-acp adapter' },
     { id: 'codex', name: 'Codex', command: 'codex exec', harness: 'codex', available: false, reason: 'codex not found on PATH', custom: false, acpSupport: 'none', acpDetail: 'No ACP — runs via the stdin/stdout wrapper' },
@@ -290,5 +296,69 @@ describe('SettingsCodingPanel — effective launch preview', () => {
     await flushPromises()
 
     expect(c.find('[data-testid="acp-launch-preview"]').text()).toContain('takes no model override')
+  })
+})
+
+describe('SettingsCodingPanel — sandbox and mode', () => {
+  const sandboxSelect = 'select[aria-label="Coding harness sandbox"]'
+  const modeSelect = 'select[aria-label="Coding harness mode"]'
+
+  it('shows Off and batch when neither key is set', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find<HTMLSelectElement>(sandboxSelect).element.value).toBe('false')
+    expect(c.find<HTMLSelectElement>(modeSelect).element.value).toBe('batch')
+  })
+
+  it('shows the saved values, normalized as the backend reads them', async () => {
+    extraEntries = [
+      { key: 'subagent.acp.sandbox', value: 'TRUE' },
+      { key: 'subagent.acp.mode', value: 'JSON' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find<HTMLSelectElement>(sandboxSelect).element.value).toBe('true')
+    expect(c.find<HTMLSelectElement>(modeSelect).element.value).toBe('json')
+  })
+
+  it('shows Off and batch for values the runtime falls back from', async () => {
+    extraEntries = [
+      { key: 'subagent.acp.sandbox', value: 'yes' },
+      { key: 'subagent.acp.mode', value: 'foo' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find<HTMLSelectElement>(sandboxSelect).element.value).toBe('false')
+    expect(c.find<HTMLSelectElement>(modeSelect).element.value).toBe('batch')
+  })
+
+  it('POSTs the chosen sandbox and mode', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    await c.find(sandboxSelect).setValue('untrusted')
+    await flushPromises()
+    await c.find(modeSelect).setValue('rpc')
+    await flushPromises()
+
+    expect(configPosts).toContainEqual({ key: 'subagent.acp.sandbox', value: 'untrusted' })
+    expect(configPosts).toContainEqual({ key: 'subagent.acp.mode', value: 'rpc' })
+  })
+
+  it('says when the host has no sandbox mechanism, and only then', async () => {
+    let c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(c.find('[data-testid="sandbox-unavailable"]').exists()).toBe(false)
+
+    clearNuxtData()
+    sandbox = { available: false, mechanism: 'sandbox-exec', reason: '\'sandbox-exec\' is not available' }
+    c = await mountSuspended(Harness)
+    await flushPromises()
+    const note = c.find('[data-testid="sandbox-unavailable"]')
+    expect(note.exists()).toBe(true)
+    expect(note.text()).toContain('\'sandbox-exec\' is not available')
   })
 })
