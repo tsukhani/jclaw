@@ -1365,7 +1365,7 @@ async function saveAgent() {
   if (editing.value && form.value.serviceAgent && !editing.value.serviceAgent) {
     const confirmed = await confirm({
       title: 'Change to a service agent',
-      message: `Change "${editing.value.name}" to a service agent? Its USER.md and BOOTSTRAP.md will be deleted. This cannot be undone.`,
+      message: `Change "${editing.value.name}" to a service agent? Its USER.md and BOOTSTRAP.md will be deleted. This cannot be undone. The memories it already holds are kept.`,
       confirmText: 'Change and delete',
       variant: 'danger',
     })

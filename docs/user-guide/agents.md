@@ -77,7 +77,7 @@ A small workspace of named markdown files the platform reads into every turn's s
 | `BOOTSTRAP.md`    | First-run scaffolding the agent re-reads at the start of every fresh conversation. Until `USER.md` has your name, it asks for it once, in a direct chat. |
 | `AGENT.md`        | Project / repo / workspace notes you want the agent to carry into every turn. |
 
-A **Service** agent has no `USER.md` or `BOOTSTRAP.md`, and its tab strip shows only the other three. Nothing tells it who it works for, it is not prompted to ask anyone's name, and a name someone gives it is never recorded as its owner's.
+A **Service** agent has no `USER.md` or `BOOTSTRAP.md`, and its tab strip shows only the other three. Nothing tells it who it works for, it is not prompted to ask anyone's name, and a name someone gives it is never recorded as its owner's. Changing a personal agent to Service deletes the two files but keeps the memories it already holds; review them on [Memories](/memories) if they should not carry over.
 
 These files are read on every turn when the system prompt is assembled, through a 30-second cache that is invalidated the moment you save, so an edit is picked up on the agent's next turn without a conversation reset or a restart.
 

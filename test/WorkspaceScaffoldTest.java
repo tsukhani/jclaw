@@ -200,6 +200,26 @@ class WorkspaceScaffoldTest extends UnitTest {
     }
 
     @Test
+    void anOwnerFileLeftInAServiceWorkspaceIsNeitherReadNorKept() throws Exception {
+        var agent = AgentService.createServiceAgent("service-leftover-" + System.nanoTime(), "openrouter", "gpt-4.1", null, null);
+        try {
+            // What a switch whose delete failed leaves behind.
+            var dir = WorkspaceFiles.workspacePath(agent.name);
+            Files.writeString(dir.resolve("USER.md"), "# User Information\n\nName: Ada\n");
+            Files.writeString(dir.resolve("BOOTSTRAP.md"), "# Bootstrap\n");
+
+            assertNull(WorkspaceFiles.ownerName(agent.name), "a service agent has no owner, whatever a leftover file says");
+
+            WorkspaceFiles.addOwnerNamePrompts(agent.name);
+            assertFalse(Files.exists(dir.resolve("USER.md")), "the pass every start runs finishes the delete");
+            assertFalse(Files.exists(dir.resolve("BOOTSTRAP.md")));
+            assertTrue(Files.exists(dir.resolve("AGENT.md")), "and touches nothing else");
+        } finally {
+            AgentService.delete(agent);
+        }
+    }
+
+    @Test
     void aPersonalAgentStillGetsBothOwnerFiles() {
         var agent = AgentService.create("personal-scaffold-" + System.nanoTime(), "openrouter", "gpt-4.1");
         try {

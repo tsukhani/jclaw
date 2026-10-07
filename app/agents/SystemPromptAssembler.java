@@ -15,6 +15,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.LoadTestRunner;
+import services.WorkspaceFiles;
 import utils.AppClock;
 import utils.GsonHolder;
 import utils.LatencyTrace;
@@ -332,11 +333,14 @@ public class SystemPromptAssembler {
         b.startSection("IDENTITY.md");
         appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "IDENTITY.md"));
 
-        b.startSection("USER.md");
-        appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "USER.md"));
+        // A service agent has no owner: a copy left on disk, or still in the file cache, must not reach its prompt.
+        if (!WorkspaceFiles.ownedByServiceAgent(agent)) {
+            b.startSection("USER.md");
+            appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "USER.md"));
 
-        b.startSection("BOOTSTRAP.md");
-        appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "BOOTSTRAP.md"));
+            b.startSection("BOOTSTRAP.md");
+            appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "BOOTSTRAP.md"));
+        }
 
         b.startSection("AGENT.md");
         appendSection(b.sb, AgentService.readWorkspaceFile(agent.name, "AGENT.md"));

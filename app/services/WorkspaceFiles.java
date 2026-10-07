@@ -357,6 +357,28 @@ public final class WorkspaceFiles {
     }
 
     /**
+     * Whether the workspace {@code agent} uses belongs to a service agent. The agent's type, not what is on
+     * disk, is what keeps USER.md and BOOTSTRAP.md from being read: a delete can fail, this cannot.
+     */
+    public static boolean ownedByServiceAgent(Agent agent) {
+        return agent.parentAgent == null ? agent.serviceAgent : ownedByServiceAgent(agent.name);
+    }
+
+    // Each file on its own, so one that cannot be deleted does not keep the other.
+    private static void removeOwnerFiles(Path dir, String agentName) {
+        for (var file : List.of(USER_MD, BOOTSTRAP_MD)) {
+            try {
+                Files.deleteIfExists(dir.resolve(file));
+            } catch (IOException e) {
+                EventLogger.error(LOG_CATEGORY, "Failed to delete %s from the workspace of service agent %s: %s"
+                        .formatted(file, agentName, e.getMessage()));
+            }
+            fileCache.invalidate(agentName + "/" + file);
+        }
+        invalidateWorkspaceSize();
+    }
+
+    /**
      * Resolve {@code relativePath} inside {@code root}, rejecting any target
      * that would escape the root. Thin delegate to
      * {@link WorkspacePathGuard#resolveContained} — the general
@@ -560,8 +582,12 @@ public final class WorkspaceFiles {
     private static final Pattern NAME_LINE =
             Pattern.compile("(?im)^[ \\t]*(?:[-*][ \\t]+)?[*_]*name[*_]*[ \\t]*:[ \\t]*(.*)$");
 
-    /** The owner's name from the agent's USER.md, or null when the file is missing or its Name line is empty. */
+    /**
+     * The owner's name from the agent's USER.md, or null when the file is missing, its Name line is empty, or
+     * the agent is a service agent, which has no owner whatever a leftover file says.
+     */
     public static @Nullable String ownerName(String agentName) {
+        if (ownedByServiceAgent(agentName)) return null;
         if (!Files.isRegularFile(workspacePath(agentName).resolve(USER_MD))) return null;
         var text = readWorkspaceFile(agentName, USER_MD);
         return text == null ? null : ownerNameIn(text);
@@ -626,11 +652,15 @@ public final class WorkspaceFiles {
      * Brings a workspace created before USER.md had a Name line up to date: adds an empty Name line
      * to USER.md, and the ask-for-the-name step to BOOTSTRAP.md, each only when it is missing. An
      * untouched BOOTSTRAP.md template is replaced whole; an edited one keeps its text. Idempotent.
-     * A service agent's workspace is left without either file.
+     * A service agent's workspace is cleared of both instead, which finishes a switch whose delete failed.
      */
     public static void addOwnerNamePrompts(String agentName) {
         var dir = workspacePath(agentName);
-        if (!Files.isDirectory(dir) || ownedByServiceAgent(agentName)) return;
+        if (!Files.isDirectory(dir)) return;
+        if (ownedByServiceAgent(agentName)) {
+            removeOwnerFiles(dir, agentName);
+            return;
+        }
         var user = Files.isRegularFile(dir.resolve(USER_MD)) ? readWorkspaceFile(agentName, USER_MD) : null;
         if (user == null) {
             writeWorkspaceFile(agentName, USER_MD, USER_TEMPLATE);
@@ -655,16 +685,15 @@ public final class WorkspaceFiles {
         // Read here, not in the callback: after the commit there is no transaction left to query in.
         boolean serviceAgent = ownedByServiceAgent(agentName);
         Tx.afterCommit(() -> {
+            if (serviceAgent) {
+                removeOwnerFiles(dir, agentName);
+                return;
+            }
             try {
-                if (serviceAgent) {
-                    Files.deleteIfExists(dir.resolve(USER_MD));
-                    Files.deleteIfExists(dir.resolve(BOOTSTRAP_MD));
-                } else {
-                    writeFile(dir.resolve(USER_MD), USER_TEMPLATE, false);
-                    writeFile(dir.resolve(BOOTSTRAP_MD), BOOTSTRAP_TEMPLATE, false);
-                }
+                writeFile(dir.resolve(USER_MD), USER_TEMPLATE, false);
+                writeFile(dir.resolve(BOOTSTRAP_MD), BOOTSTRAP_TEMPLATE, false);
             } catch (IOException e) {
-                EventLogger.error(LOG_CATEGORY, "Failed to bring USER.md and BOOTSTRAP.md in line with agent %s: %s"
+                EventLogger.error(LOG_CATEGORY, "Failed to add USER.md and BOOTSTRAP.md to the workspace of agent %s: %s"
                         .formatted(agentName, e.getMessage()));
             }
             fileCache.invalidate(agentName + "/" + USER_MD);

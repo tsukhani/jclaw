@@ -1636,6 +1636,7 @@ describe('Agents page — personal and service agents', () => {
     await component.findAll('button').find(b => b.attributes('title') === 'Save')!.trigger('click')
     await vi.waitFor(() => expect(dialogButton('Change and delete')).toBeTruthy())
     expect(document.body.textContent).toContain('Its USER.md and BOOTSTRAP.md will be deleted')
+    expect(document.body.textContent).toContain('The memories it already holds are kept')
     expect(sent.body, 'nothing is sent until the operator confirms').toBeNull()
 
     dialogButton('Change and delete')!.click()

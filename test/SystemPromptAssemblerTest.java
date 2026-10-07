@@ -120,6 +120,24 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     @Test
+    void aServiceAgentsPromptLeavesOutOwnerFilesThatAreStillOnDisk() throws Exception {
+        var agent = AgentService.createServiceAgent("spa-service-leftover", "openrouter", "gpt-4.1", null, null);
+        var child = AgentService.create("spa-service-leftover-child", "openrouter", "gpt-4.1", null, null, false, agent);
+        // What a delete that failed leaves behind: the agent's type decides, not the directory.
+        writeWorkspaceFile(agent.name, "USER.md", "MARKER_USER_SVC");
+        writeWorkspaceFile(agent.name, "BOOTSTRAP.md", "MARKER_BOOTSTRAP_SVC");
+        writeWorkspaceFile(agent.name, "AGENT.md", "MARKER_AGENT_SVC");
+
+        // The subagent reads its root's workspace, so it must be held to its root's type.
+        for (var reader : List.of(agent, child)) {
+            var prompt = SystemPromptAssembler.assemble(reader, null, null, "web").systemPrompt();
+            assertTrue(prompt.contains("MARKER_AGENT_SVC"), reader.name + " still gets AGENT.md");
+            assertFalse(prompt.contains("MARKER_USER_SVC"), reader.name + " must not be shown a leftover USER.md");
+            assertFalse(prompt.contains("MARKER_BOOTSTRAP_SVC"), reader.name + " must not be shown a leftover BOOTSTRAP.md");
+        }
+    }
+
+    @Test
     void blankWorkspaceFileIsDroppedSilently() throws Exception {
         var agent = newAgent("spa-blank-drop");
         writeWorkspaceFile(agent.name, "USER.md", "   \n  \n");
