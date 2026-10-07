@@ -238,29 +238,56 @@ The grid scores every threshold from 0.95 to 0.50 by 0.05.
 
 ## Certification
 
-Certification follows protocol v2 (JCLAW-1368). Every bound is the one-sided Clopper-Pearson
-bound at tail 0.05, and every bound goes through one seam, `GateBounds`. Its only
-implementation today, `RecordBounds`, pools records: n is the written records and k the wrong
-ones plus the agreed sample's weighted wrong, rounded up. JCLAW-1369 replaces it with a
-memory-clustered bound.
+Certification follows protocol v2 (JCLAW-1368, JCLAW-1369). Every bound is a one-sided
+Clopper-Pearson bound and goes through one seam, `GateBounds`, which has two implementations:
+
+- `MemoryBounds` serves Terms, the relation gates and `G_written`. The sampled unit is the
+  memory, since one memory that confuses two entities writes several wrong records at once, so
+  n is the writing memories (those that wrote at least one of the gate's records) and k the
+  memories counted wrong. A memory counts wrong when it has an unmatched record judged wrong.
+  Each sampled agreed record judged wrong in a memory not already counted adds 1 over its
+  inclusion probability; that sum is rounded up and the total capped at n. Recall's lower bound
+  is a cluster bootstrap over the memories with gold: sorted by memory id, resampled 10,000
+  times with replacement from the fixed seed 1369, and read at the ascending resample ratio at
+  index floor(tail × 10,000), never above the point estimate.
+- `RecordBounds` pools records: n is the written records and k the wrong ones plus the agreed
+  sample's weighted wrong, rounded up. It serves the rules sized in values: the qualifier
+  classes, `G_trap` and lineage.
+
+**Tails.** Terms and the 12 relation gates are one Bonferroni family over the three candidate
+models: each is bounded, passed, walked and given its power at tail 0.05 / 39 (about 0.00128).
+`G_written`, the classes, `G_trap` and the recall lower bound stay at 0.05. Two runs are read
+gate by gate at the run whose bound at that gate's tail is highest.
+
+**Certifying sets.** The live sample (`heldout`) certifies Terms, every relation, `G_written`
+and recall; synthetic strata (`cases`) certify the status, time and negation classes and
+`G_trap`; the sequences certify lineage and the timeline. In a certification run or a re-score a
+gate reads counts only when the split's set is its own, else it is **not evaluable**: a Term or
+relation gate is `off` with the reason `<gate> not evaluable: its certifying set <set> has no
+data in this run` (as is one whose set is present but holds no writing memory), a class is
+`disabled`, and a pooled gate fails the sequencing at once with that reason and no back-off. One
+run reads one split, so no run certifies until a run reads both sets (JCLAW-1380): a `heldout`
+run has no `G_trap` and a `cases` run no Terms. A development run routes nothing.
 
 ### Gates
 
 | Gate | n | k | Passes when |
 |---|---|---|---|
-| Terms | decided Terms written at t, noise and rule-written left out | Terms wrong (`match`, `type`, `duplicate`) | bound ≤ 5%, then recall lower bound ≥ the floor at its final threshold |
-| One per relation type | that type's relations written at its threshold, both endpoints written at the Terms threshold | that type's wrong (`relation`, `polarity`, `unasserted`) | as Terms |
+| Terms | memories writing a decided Term at t, noise and rule-written left out | those memories counted wrong (`match`, `type`, `duplicate`) | bound ≤ 5% at 0.05 / 39, then recall lower bound ≥ the floor at its final threshold |
+| One per relation type | memories writing that type's relations at its threshold, both endpoints written at the Terms threshold | those memories counted wrong (`relation`, `polarity`, `unasserted`) | as Terms |
 | status, time, negation | values written on base-right parents, each class at the higher of its parent's threshold and its own | wrong values | n ≥ 250 and bound ≤ 5% (`certified`); 29 ≤ n < 250, k ≤ 6, bound ≤ 10% (`provisional`) |
-| `G_written` | every written item but noise over the enabled configuration | those wrong at base or in a written qualifier | bound ≤ 5% |
+| `G_written` | memories writing any item but noise over the enabled configuration | memories with an item wrong at base or in a written qualifier | bound ≤ 5% |
 | `G_trap` | every gold `ended`, `denied` and `unasserted` relation | violations over the enabled configuration | bound ≤ 5% |
 
 Records written by rule (the owner's Person Term on "The user" or a subject-less memory) count
 in no total; the report gives how many were left out. A memory that rightly writes nothing is
 in no precision denominator and is scored only by the per-stratum false-positive rate.
 
-With zero wrong, 59 records pass; with 1, 2, 3 and 5 wrong, 93, 124, 153 and 208. The report
-gives each gate's and class's power: the probability it passes at its n when 1%, 2% or 3% of
-its records are truly wrong (59 records at 1%: 0.553; 124 records allowing 2 wrong: 0.872).
+At tail 0.05, with zero wrong 59 records (or writing memories) pass; with 1, 2, 3 and 5 wrong,
+93, 124, 153 and 208. At 0.05 / 39 a Term or relation gate needs 130, 176, 215, 251 and 317
+writing memories. The report gives each gate's and class's power: the probability it passes at
+its n when 1%, 2% or 3% of its units are truly wrong (59 at 1% and 0.05: 0.553; 130 memories at
+1% and 0.05 / 39: 0.271).
 
 ### Sequencing
 
@@ -282,7 +309,9 @@ and never evaluates a threshold above it.
 5. **Back-off.** While a pooled gate fails and a relation is on, the relation latest in the
    split order among those on is switched off, and the classes and pooled gates are evaluated
    again. The report lists each step. Failing with no relation on is `not-certified`, naming the
-   gate and its counts.
+   gate and its counts. A pooled gate that is not evaluable fails at once, with no back-off:
+   switching relations off cannot give it data. If the other pooled gate has data and fails its
+   bound, that failure is listed beside it.
 
 `Certifier` is pure: it re-scores through an evaluator the harness builds over stored
 decisions. With two runs each gate reads the run whose bound is highest, so both must pass.
@@ -356,7 +385,8 @@ In order, the first that applies:
 2. any failed decision → `not-certified`, `void run`;
 3. a single run whose spot-check differed → `not-certified`, `needs second run`;
 4. any `label-error` verdict on a record in scope → `not-certified`, `labels need fixing`;
-5. the Term gate off, or a pooled gate failing with no relation on → `not-certified`;
+5. the Term gate off, a pooled gate not evaluable, or a pooled gate failing with no relation on
+   → `not-certified`;
 6. the sequence timeline `failed` → `not-certified`;
 7. second labels short of the blind subset of the split's ids → `pending-agreement`;
 8. any unjudged record, or a marked model verdict without its check → `pending-adjudication`;
@@ -380,7 +410,9 @@ per model, at `data/graph-eval/certificates/<model>.json` (path-unsafe character
              "lineage": {"state": "provisional", "threshold": 0.90, "n": 80, "k": 1, "bound": 0.058}},
  "pooled": {"G_written": {"n": 1650, "k": 41, "bound": 0.032}, "G_trap": {"n": 228, "k": 4, "bound": 0.040}},
  "timeline": {"probes": 240, "definite": 205, "wrong": 3, "bound": 0.041, "result": "reported"},
- "recall": {"floor": 0.50}}
+ "recall": {"floor": 0.50},
+ "sets": {"terms": "heldout", "relations": "heldout", "G_written": "heldout", "recall": "heldout",
+          "classes": "cases", "G_trap": "cases", "lineage": "sequences", "timeline": "sequences"}}
 ```
 
 An optional `resolution` section carries the entity-resolution shortlist threshold
@@ -397,7 +429,9 @@ Without the section the resolver never asks the decision model. Its keys are str
 rest: `certificate resolution: unknown key '<k>'` and `certificate resolution shortlist:
 unknown key '<k>'`.
 
-`id` is `cert@` plus the 12-hex prefix over the canonical JSON without `id`. Its configuration
+`id` is `cert@` plus the 12-hex prefix over the canonical JSON without `id`. `sets` states which
+set certified each part, so a certificate says its qualifier classes and `G_trap` were certified
+on synthetic strata, not on data drawn as deployment is. Its configuration
 enables Terms and Mappings, each `on` relation at its threshold, and each class at its state and
 threshold; a disabled class writes null. `CertificateDocument.read` returns the certificate only
 when its schema and extraction stamps and its digest match the running ones, and refuses an
@@ -441,6 +475,30 @@ beside the mean; the false-positive rate per stratum tag; the unjudged records p
 agreed sample's seed and share; the check share and the disagreement rate; and the rule-written
 records left out. A certification report adds the sequences report at the configuration reached
 and a note that the sequences set also serves development, since no split keeps it apart.
+
+A certification report also carries the recall bootstrap's `bootstrapSeed` (1369) and
+`bootstrapResamples` (10,000), and each model its `requirements`, from which JCLAW-1375 sizes the
+live sample. They list every gate, always in this order: Terms, each relation in the split's
+order, status, time, negation, `G_written`, `G_trap` (empty only on a void run). Each gives:
+
+- `name`, `set` (its certifying set) and `tail`;
+- `writtenRecords`, `writingMemories` and `goldMemories`, observed where the gate reads its n and
+  k: its last passing step when its walk passed anywhere, else its first step (a class's
+  threshold, else its first evaluable step). A gate the sequencing never walked, which is every
+  gate after Terms once the Term gate is off, is observed with Terms at the starting threshold:
+  a relation or class with every relation at the starting threshold, `G_written` and `G_trap`
+  with nothing else enabled;
+- `goldMemories` is the gate's memories with gold. `G_written`'s are those with gold for any gate;
+  `G_trap`'s are the memories holding a gold trap relation, since a trap entry's written records
+  are its gold trap relations; a class's are the memories in its observed values with a gold
+  value;
+- `needed`, one row per 0, 1, 2, 3 and 5 wrong: `records`, the record-level minimum at the gate's
+  tail, and `memories`, the writing memories its bound needs, null for a record-level gate;
+- `reachable`: whether `goldMemories` reaches the zero-wrong minimum of memories (at zero wrong
+  every writing memory holds a right record, so holds gold); null for a record-level gate. It
+  means something only on a run of the gate's own certifying set: on the other set the gate's
+  counts are empty and it reads false. On a `heldout` run, a relation with `reachable` false can
+  never certify on the live sample as drawn.
 
 ## Second labels and adjudications
 

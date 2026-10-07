@@ -17,6 +17,7 @@ import java.util.Set;
 import java.util.TreeMap;
 import java.util.function.DoubleFunction;
 import java.util.function.Function;
+import java.util.function.ToIntFunction;
 
 /**
  * Certifies a decision model from its end-to-end grids (JCLAW-1356, JCLAW-1366): a threshold passes when the one-sided
@@ -413,14 +414,40 @@ public final class Certifier {
     /** The qualifier classes v2 walks over the enabled configuration, in order, under {@link Configuration}'s names. */
     public static final List<String> V2_CLASSES = List.of(Configuration.STATUS, Configuration.TIME,
             Configuration.NEGATION);
+    /** Bonferroni over Terms and the 12 relation gates for each of the 3 candidate models: 39 tests (JCLAW-1369). */
+    public static final double BASE_GATE_TAIL = CONFIDENCE_TAIL / 39;
+    /** The wrong counts each {@link Requirement} gives the records and memories needed at. */
+    public static final List<Integer> NEEDED_WRONG = List.of(0, 1, 2, 3, 5);
 
     /** P(pass) at the gate's n when 1%, 2% and 3% of its records are truly wrong. */
     public record Power(double at1, double at2, double at3) {
         static Power of(GateBounds bounds, List<MemoryCounts> writing) {
-            return new Power(bounds.power(writing, 0.01, LIMIT, CONFIDENCE_TAIL),
-                    bounds.power(writing, 0.02, LIMIT, CONFIDENCE_TAIL),
-                    bounds.power(writing, 0.03, LIMIT, CONFIDENCE_TAIL));
+            return of(bounds, writing, CONFIDENCE_TAIL);
         }
+
+        static Power of(GateBounds bounds, List<MemoryCounts> writing, double tail) {
+            return new Power(bounds.power(writing, 0.01, LIMIT, tail), bounds.power(writing, 0.02, LIMIT, tail),
+                    bounds.power(writing, 0.03, LIMIT, tail));
+        }
+    }
+
+    /** The units a bound counts n and k in: writing memories for {@link MemoryBounds}, records for any other. */
+    private record Units(ToIntFunction<List<MemoryCounts>> n, ToIntFunction<List<MemoryCounts>> k, boolean memories) {
+        static final Units RECORDS = new Units(RecordBounds::n, RecordBounds::k, false);
+        static final Units MEMORIES = new Units(MemoryBounds::n, MemoryBounds::k, true);
+
+        static Units of(GateBounds bounds) {
+            return bounds instanceof MemoryBounds ? MEMORIES : RECORDS;
+        }
+    }
+
+    /** The set that certifies {@code gate} (JCLAW-1369): synthetic strata for the classes and G_trap, else live. */
+    public static String certifyingSet(String gate) {
+        return V2_CLASSES.contains(gate) || gate.equals(G_TRAP) ? CertificationSplit.CASES : CertificationSplit.HELDOUT;
+    }
+
+    static String notEvaluable(String gate) {
+        return "%s not evaluable: its certifying set %s has no data in this run".formatted(gate, certifyingSet(gate));
     }
 
     /**
@@ -479,19 +506,38 @@ public final class Certifier {
     /** One back-off step: {@code relation} switched off because {@code gate} failed with {@code k} of {@code n}. */
     public record BackOff(int step, String relation, String gate, int n, int k, double bound) {}
 
+    /** What passes with {@code wrong} wrong: {@code memories} is null for a record-level gate. */
+    public record Needed(int wrong, int records, @Nullable Integer memories) {}
+
+    /**
+     * One gate on its certifying {@code set} at its {@code tail}, for JCLAW-1375 to size the live sample from: what it
+     * observed where its n and k are read, and what it needs at each of {@link #NEEDED_WRONG}. {@code reachable} says
+     * whether its memories with gold reach the zero-wrong minimum, null for a record-level gate.
+     */
+    public record Requirement(String name, String set, double tail, int writtenRecords, int writingMemories,
+                              int goldMemories, List<Needed> needed, @Nullable Boolean reachable) {
+        public Requirement {
+            needed = List.copyOf(needed);
+        }
+    }
+
     /**
      * The v2 sequencing. {@code reached} is the configuration it ends at: Terms at the starting threshold alone when
      * the Term gate is off. {@code written} and {@code trap} are null when the Term gate is off, since nothing after
-     * it is evaluated. {@code passed} is false when the Term gate is off or a pooled gate fails with no relation on.
+     * it is evaluated. {@code passed} is false when the Term gate is off, a pooled gate is not evaluable, or a pooled
+     * gate fails with no relation on. {@code requirements} has one entry per gate, always every gate: Terms, the
+     * relations in order, the classes, G_written and G_trap.
      */
     public record Sequencing(double startingThreshold, Gate terms, List<Gate> relations, List<ClassGate> classes,
                              @Nullable Pooled written, @Nullable Pooled trap, List<BackOff> backOff,
-                             Configuration reached, boolean passed, List<String> reasons) {
+                             Configuration reached, boolean passed, List<String> reasons,
+                             List<Requirement> requirements) {
         public Sequencing {
             relations = List.copyOf(relations);
             classes = List.copyOf(classes);
             backOff = List.copyOf(backOff);
             reasons = List.copyOf(reasons);
+            requirements = List.copyOf(requirements);
         }
     }
 
@@ -500,23 +546,37 @@ public final class Certifier {
         return GraphEvalScorer.THRESHOLDS.stream().filter(t -> t <= start + 1e-9 && t >= floor - 1e-9).toList();
     }
 
-    /**
-     * Sequences the gates: Terms walked from {@code start} down while their bound passes and recall-checked once at
-     * the bottom of that run; each relation in {@code relationOrder} walked the same way, never below the Term
-     * threshold; then the classes from the highest threshold at or below {@code start} with n of at least
-     * {@link #MIN_CLASS_N}, and {@code G_written} and {@code G_trap}. While a pooled gate fails, the relation latest in
-     * {@code relationOrder} among those on is switched off and the classes and pooled gates evaluated again.
-     * {@code evaluate} is pure: it re-scores stored decisions at a configuration.
-     */
+    /** {@link #sequence(GateBounds, String, double, List, double, Function)} for a development run: nothing routed. */
     public static Sequencing sequence(GateBounds bounds, double start, List<String> relationOrder, double recallFloor,
                                       Function<Configuration, Evaluation> evaluate) {
+        return sequence(bounds, null, start, relationOrder, recallFloor, evaluate);
+    }
+
+    /**
+     * Sequences the gates: Terms walked from {@code start} down while their bound passes at {@link #BASE_GATE_TAIL}
+     * and recall-checked once at the bottom of that run; each relation in {@code relationOrder} walked the same way,
+     * never below the Term threshold; then the classes from the highest threshold at or below {@code start} with n of
+     * at least {@link #MIN_CLASS_N}, and {@code G_written} and {@code G_trap}. While a pooled gate fails, the relation
+     * latest in {@code relationOrder} among those on is switched off and the classes and pooled gates evaluated again.
+     * {@code set} is the run's certifying set, null for a development run: with one, a Term or relation gate with no
+     * writing memory is off and a pooled gate with no data fails at once, each as not evaluable. {@code evaluate} is
+     * pure: it re-scores stored decisions at a configuration.
+     */
+    public static Sequencing sequence(GateBounds bounds, @Nullable String set, double start,
+                                      List<String> relationOrder, double recallFloor,
+                                      Function<Configuration, Evaluation> evaluate) {
+        boolean routed = set != null;
         var reasons = new ArrayList<String>();
-        var terms = walkGate(TERMS, grid(start, 0), t -> gateAt(evaluate, new Configuration(t, new TreeMap<>(),
-                new TreeMap<>()), TERMS), bounds, recallFloor);
+        var requirements = new ArrayList<Requirement>();
+        var termsWalk = walkGate(TERMS, grid(start, 0), t -> gateAt(evaluate, new Configuration(t, new TreeMap<>(),
+                new TreeMap<>()), TERMS), bounds, recallFloor, routed);
+        var terms = termsWalk.gate();
+        requirements.add(termsWalk.requirement());
         if (terms.state().equals(OFF)) {
             reasons.add("Terms gate: " + terms.reason());
+            requirements.addAll(unwalkedRequirements(bounds, start, relationOrder, evaluate));
             return new Sequencing(start, terms, List.of(), List.of(), null, null, List.of(),
-                    new Configuration(start, new TreeMap<>(), new TreeMap<>()), false, reasons);
+                    new Configuration(start, new TreeMap<>(), new TreeMap<>()), false, reasons, requirements);
         }
         double termsAt = Objects.requireNonNull(terms.threshold());
         // A relation gate counts only its own type's records, so one evaluation at t serves every relation.
@@ -528,8 +588,10 @@ public final class Certifier {
         });
         var relations = new ArrayList<Gate>();
         for (var type : relationOrder) {
-            relations.add(walkGate(type, grid(start, termsAt),
-                    t -> relationsAt.apply(t).gates().getOrDefault(type, GateCounts.EMPTY), bounds, recallFloor));
+            var walked = walkGate(type, grid(start, termsAt),
+                    t -> relationsAt.apply(t).gates().getOrDefault(type, GateCounts.EMPTY), bounds, recallFloor, routed);
+            relations.add(walked.gate());
+            requirements.add(walked.requirement());
         }
         var backOff = new ArrayList<BackOff>();
         while (true) {
@@ -538,15 +600,30 @@ public final class Certifier {
                 if (g.state().equals(ON)) enabled.put(g.name(), Objects.requireNonNull(g.threshold()));
             }
             var base = new Configuration(termsAt, enabled, new TreeMap<>());
-            var classes = walkClasses(base, grid(start, 0), evaluate, bounds);
+            var walkedClasses = walkClasses(base, grid(start, 0), evaluate);
+            var classes = walkedClasses.gates();
             var settings = new TreeMap<String, ClassSetting>();
             for (var c : classes) settings.put(c.name(), new ClassSetting(c.state(), c.threshold()));
             var reached = new Configuration(termsAt, enabled, settings);
             var at = evaluate.apply(reached);
             var written = pooled(G_WRITTEN, at.written(), bounds);
-            var trap = pooled(G_TRAP, at.trap(), bounds);
+            var trap = pooled(G_TRAP, at.trap(), RecordBounds.INSTANCE);
+            var all = new ArrayList<>(requirements);
+            all.addAll(walkedClasses.requirements());
+            all.addAll(pooledRequirements(at, bounds));
+            if (routed && (written.n() == 0 || trap.n() == 0)) {
+                // No back-off: switching a relation off cannot give a pooled gate data.
+                for (var p : List.of(written, trap)) {
+                    if (p.n() == 0) reasons.add(notEvaluable(p.name()));
+                    else if (!p.passes()) reasons.add("%s fails: %d wrong of %d, bound %s".formatted(p.name(), p.k(),
+                            p.n(), fmt(p.bound())));
+                }
+                return new Sequencing(start, terms, relations, classes, written, trap, backOff, reached, false,
+                        reasons, all);
+            }
             if (written.passes() && trap.passes()) {
-                return new Sequencing(start, terms, relations, classes, written, trap, backOff, reached, true, reasons);
+                return new Sequencing(start, terms, relations, classes, written, trap, backOff, reached, true, reasons,
+                        all);
             }
             var failing = written.passes() ? trap : written;
             String last = null;
@@ -557,7 +634,7 @@ public final class Certifier {
                 reasons.add("%s fails with no relation on: %d wrong of %d, bound %s".formatted(failing.name(),
                         failing.k(), failing.n(), fmt(failing.bound())));
                 return new Sequencing(start, terms, relations, classes, written, trap, backOff, reached, false,
-                        reasons);
+                        reasons, all);
             }
             backOff.add(new BackOff(backOff.size() + 1, last, failing.name(), failing.n(), failing.k(),
                     failing.bound()));
@@ -574,43 +651,121 @@ public final class Certifier {
         return evaluate.apply(c).gates().getOrDefault(gate, GateCounts.EMPTY);
     }
 
-    private static Gate walkGate(String name, List<Double> grid, DoubleFunction<GateCounts> at, GateBounds bounds,
-                                 double recallFloor) {
+    private record Walked(Gate gate, Requirement requirement) {}
+
+    /** A Term or relation gate: bound, pass, steps and power at {@link #BASE_GATE_TAIL}, recall at 0.05. */
+    private static Walked walkGate(String name, List<Double> grid, DoubleFunction<GateCounts> at, GateBounds bounds,
+                                   double recallFloor, boolean routed) {
+        var units = Units.of(bounds);
+        double tail = BASE_GATE_TAIL;
+        @Nullable GateBounds memoryLevel = memoryLevel(bounds);
         var steps = new ArrayList<GateStep>();
         GateCounts first = null;
         GateCounts last = null;
         Double threshold = null;
         for (var t : grid) {
             var c = at.apply(t);
-            boolean passes = bounds.passes(c.writing(), LIMIT, CONFIDENCE_TAIL);
-            steps.add(new GateStep(t, RecordBounds.n(c.writing()), RecordBounds.k(c.writing()),
-                    bounds.upper(c.writing(), CONFIDENCE_TAIL), passes));
-            if (first == null) first = c;
+            boolean passes = bounds.passes(c.writing(), LIMIT, tail);
+            steps.add(new GateStep(t, units.n().applyAsInt(c.writing()), units.k().applyAsInt(c.writing()),
+                    bounds.upper(c.writing(), tail), passes));
+            if (first == null) {
+                first = c;
+                if (routed && MemoryBounds.n(c.writing()) == 0) break;
+            }
             if (!passes) break;
             threshold = t;
             last = c;
         }
         if (first == null) {
-            return new Gate(name, OFF, null, 0, 0, 1.0, null, Power.of(bounds, List.of()), steps,
-                    "no threshold at or below the starting threshold to evaluate");
+            return new Walked(new Gate(name, OFF, null, 0, 0, 1.0, null, Power.of(bounds, List.of(), tail), steps,
+                    "no threshold at or below the starting threshold to evaluate"),
+                    requirement(name, tail, List.of(), 0, memoryLevel));
+        }
+        var atFirst = requirement(name, tail, first.writing(), goldMemories(first.labelled()), memoryLevel);
+        if (routed && MemoryBounds.n(first.writing()) == 0) {
+            var step = steps.getFirst();
+            return new Walked(new Gate(name, OFF, null, step.n(), step.k(), step.bound(), null,
+                    Power.of(bounds, List.of(), tail), steps, notEvaluable(name)), atFirst);
         }
         if (threshold == null || last == null) {
             var step = steps.getFirst();
-            return new Gate(name, OFF, null, step.n(), step.k(), step.bound(),
-                    bounds.recallLower(first.labelled(), CONFIDENCE_TAIL), Power.of(bounds, first.writing()), steps,
-                    "%s fails its bound at %s: %d wrong of %d, bound %s".formatted(name, fmt(step.t()), step.k(),
-                            step.n(), fmt(step.bound())));
+            return new Walked(new Gate(name, OFF, null, step.n(), step.k(), step.bound(),
+                    bounds.recallLower(first.labelled(), CONFIDENCE_TAIL), Power.of(bounds, first.writing(), tail),
+                    steps, "%s fails its bound at %s: %d wrong of %d, bound %s".formatted(name, fmt(step.t()),
+                            step.k(), step.n(), fmt(step.bound()))), atFirst);
         }
         double recall = bounds.recallLower(last.labelled(), CONFIDENCE_TAIL);
         var step = steps.get(steps.size() - (steps.getLast().passes() ? 1 : 2));
-        var power = Power.of(bounds, last.writing());
+        var power = Power.of(bounds, last.writing(), tail);
+        var atLast = requirement(name, tail, last.writing(), goldMemories(last.labelled()), memoryLevel);
         if (recall < recallFloor) {
-            return new Gate(name, OFF, null, step.n(), step.k(), step.bound(), recall, power, steps,
+            return new Walked(new Gate(name, OFF, null, step.n(), step.k(), step.bound(), recall, power, steps,
                     "%s recall lower bound %s is below the floor %s at %s (%d right of %d)".formatted(name,
                             fmt(recall), fmt(recallFloor), fmt(threshold), right(last.labelled()),
-                            gold(last.labelled())));
+                            gold(last.labelled()))), atLast);
         }
-        return new Gate(name, ON, threshold, step.n(), step.k(), step.bound(), recall, power, steps, null);
+        return new Walked(new Gate(name, ON, threshold, step.n(), step.k(), step.bound(), recall, power, steps, null),
+                atLast);
+    }
+
+    /**
+     * The requirements of every gate after Terms when the Term gate is off, so none was walked: each observed with
+     * Terms at {@code start}, the relations and classes with every relation at {@code start}, the pooled gates with
+     * nothing else enabled.
+     */
+    private static List<Requirement> unwalkedRequirements(GateBounds bounds, double start, List<String> relationOrder,
+                                                          Function<Configuration, Evaluation> evaluate) {
+        var out = new ArrayList<Requirement>();
+        var all = new TreeMap<String, Double>();
+        relationOrder.forEach(r -> all.put(r, start));
+        var atStart = evaluate.apply(new Configuration(start, all, new TreeMap<>()));
+        for (var type : relationOrder) {
+            var g = atStart.gates().getOrDefault(type, GateCounts.EMPTY);
+            out.add(requirement(type, BASE_GATE_TAIL, g.writing(), goldMemories(g.labelled()), memoryLevel(bounds)));
+        }
+        for (var name : V2_CLASSES) {
+            var c = atStart.classes().getOrDefault(name, List.of());
+            out.add(requirement(name, CONFIDENCE_TAIL, c, goldMemories(c), null));
+        }
+        out.addAll(pooledRequirements(evaluate.apply(new Configuration(start, new TreeMap<>(), new TreeMap<>())),
+                bounds));
+        return out;
+    }
+
+    /** G_written's and G_trap's: a trap entry's {@code written} is its gold trap relations, so its memories hold gold. */
+    private static List<Requirement> pooledRequirements(Evaluation at, GateBounds bounds) {
+        return List.of(requirement(G_WRITTEN, CONFIDENCE_TAIL, at.written(), goldMemories(at), memoryLevel(bounds)),
+                requirement(G_TRAP, CONFIDENCE_TAIL, at.trap(), MemoryBounds.n(at.trap()), null));
+    }
+
+    private static @Nullable GateBounds memoryLevel(GateBounds bounds) {
+        return Units.of(bounds).memories() ? bounds : null;
+    }
+
+    /** {@code memoryLevel} is the gate's bounds when they count memories, null for a record-level gate. */
+    private static Requirement requirement(String name, double tail, List<MemoryCounts> writing, int goldMemories,
+                                           @Nullable GateBounds memoryLevel) {
+        var needed = new ArrayList<Needed>();
+        for (int wrong : NEEDED_WRONG) {
+            needed.add(new Needed(wrong, RecordBounds.INSTANCE.recordsNeeded(wrong, LIMIT, tail),
+                    memoryLevel == null ? null : memoryLevel.recordsNeeded(wrong, LIMIT, tail)));
+        }
+        var atZero = needed.getFirst().memories();
+        return new Requirement(name, certifyingSet(name), tail, RecordBounds.n(writing), MemoryBounds.n(writing),
+                goldMemories, needed, atZero == null ? null : goldMemories >= atZero);
+    }
+
+    private static int goldMemories(List<MemoryCounts> counts) {
+        return (int) counts.stream().filter(m -> m.gold() > 0).count();
+    }
+
+    /** G_written's memories with gold: every memory with gold for any gate. */
+    private static int goldMemories(Evaluation at) {
+        var ids = new HashSet<String>();
+        at.gates().values().forEach(g -> g.labelled().forEach(m -> {
+            if (m.gold() > 0) ids.add(m.memoryId());
+        }));
+        return ids.size();
     }
 
     private static int right(List<MemoryCounts> labelled) {
@@ -621,11 +776,18 @@ public final class Certifier {
         return labelled.stream().mapToInt(MemoryCounts::gold).sum();
     }
 
-    /** Status, then time with status at its walked threshold, then negation with both, over {@code base}. */
-    private static List<ClassGate> walkClasses(Configuration base, List<Double> grid,
-                                               Function<Configuration, Evaluation> evaluate, GateBounds bounds) {
+    private record ClassesWalked(List<ClassGate> gates, List<Requirement> requirements) {}
+
+    /**
+     * Status, then time with status at its walked threshold, then negation with both, over {@code base}; each
+     * record-level at 0.05.
+     */
+    private static ClassesWalked walkClasses(Configuration base, List<Double> grid,
+                                             Function<Configuration, Evaluation> evaluate) {
+        var bounds = RecordBounds.INSTANCE;
         var settings = new TreeMap<String, ClassSetting>();
         var out = new ArrayList<ClassGate>();
+        var requirements = new ArrayList<Requirement>();
         for (var name : V2_CLASSES) {
             var steps = new ArrayList<ClassCounts>();
             var counts = new HashMap<Double, List<MemoryCounts>>();
@@ -642,13 +804,20 @@ public final class Certifier {
             var power = Power.of(bounds, at == null ? List.of() : counts.getOrDefault(at, List.of()));
             out.add(new ClassGate(name, walk.state(), at, walk.n(), walk.k(), walk.bound(), power, walk.steps()));
             settings.put(name, new ClassSetting(walk.state(), at));
+            // Observed where the walk reads n and k: its threshold, else its first evaluable step.
+            var observed = at != null ? counts.getOrDefault(at, List.of()) : steps.stream()
+                    .filter(s -> RecordBounds.n(s.counts()) >= MIN_CLASS_N)
+                    .max((a, b) -> Double.compare(a.t(), b.t())).map(ClassCounts::counts).orElse(List.of());
+            requirements.add(requirement(name, CONFIDENCE_TAIL, observed, goldMemories(observed), null));
         }
-        return out;
+        return new ClassesWalked(out, requirements);
     }
 
     private static Pooled pooled(String name, List<MemoryCounts> counts, GateBounds bounds) {
-        return new Pooled(name, RecordBounds.n(counts), RecordBounds.k(counts), bounds.upper(counts, CONFIDENCE_TAIL),
-                bounds.passes(counts, LIMIT, CONFIDENCE_TAIL), Power.of(bounds, counts));
+        var units = Units.of(bounds);
+        return new Pooled(name, units.n().applyAsInt(counts), units.k().applyAsInt(counts),
+                bounds.upper(counts, CONFIDENCE_TAIL), bounds.passes(counts, LIMIT, CONFIDENCE_TAIL),
+                Power.of(bounds, counts));
     }
 
     /**

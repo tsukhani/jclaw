@@ -27,9 +27,10 @@ import java.util.TreeMap;
 public record CertificateDocument(JsonObject json) {
 
     public static final String DIR = "certificates";
+    private static final String SEQUENCES = "sequences";
     private static final Set<String> ROOT_KEYS = Set.of("id", "model", "digest", "status", "schema", "extraction",
             "split", "cases", "sequences", "guide", "startingThreshold", "terms", "relations", "classes", "pooled",
-            "timeline", "recall", "resolution");
+            "timeline", "recall", "resolution", "sets");
     private static final String RESOLUTION = "resolution";
     private static final String SHORTLIST = "shortlist";
     private static final Set<String> RESOLUTION_KEYS = Set.of(SHORTLIST);
@@ -39,6 +40,13 @@ public record CertificateDocument(JsonObject json) {
     private static final Set<String> POOLED_KEYS = Set.of("n", "k", "bound");
     private static final Set<String> TIMELINE_KEYS = Set.of("probes", "definite", "wrong", "bound", "result");
     private static final Set<String> RECALL_KEYS = Set.of("floor");
+    /** The set that certified each part (JCLAW-1369): the classes and G_trap on synthetic strata, not the live sample. */
+    static final Map<String, String> SETS = Map.of("terms", Certifier.certifyingSet(Certifier.TERMS),
+            "relations", Certifier.certifyingSet("relations"),
+            Certifier.G_WRITTEN, Certifier.certifyingSet(Certifier.G_WRITTEN),
+            "recall", Certifier.certifyingSet(Certifier.TERMS),
+            "classes", Certifier.certifyingSet(Certifier.V2_CLASSES.getFirst()),
+            Certifier.G_TRAP, Certifier.certifyingSet(Certifier.G_TRAP), "lineage", SEQUENCES, "timeline", SEQUENCES);
 
     public CertificateDocument {
         json = json.deepCopy();
@@ -119,6 +127,9 @@ public record CertificateDocument(JsonObject json) {
             resolution.add(SHORTLIST, sl);
             o.add(RESOLUTION, resolution);
         }
+        var sets = new JsonObject();
+        SETS.forEach(sets::addProperty);
+        o.add("sets", sets);
         var canonical = Fingerprints.canonical(o).getAsJsonObject();
         var withId = new JsonObject();
         withId.addProperty("id", Fingerprints.hex12("cert", canonical));
@@ -278,6 +289,7 @@ public record CertificateDocument(JsonObject json) {
                 GraphCases.onlyKeys(object(resolution, SHORTLIST), SHORTLIST_KEYS, "certificate resolution shortlist");
             }
         }
+        GraphCases.onlyKeys(object(o, "sets"), SETS.keySet(), "certificate sets");
         var content = o.deepCopy();
         content.remove("id");
         var id = Fingerprints.hex12("cert", content);

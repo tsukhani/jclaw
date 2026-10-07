@@ -6,6 +6,7 @@ import services.grapheval.GraphEvalHarness;
 import services.grapheval.GraphEvalScorer;
 import services.grapheval.GraphEvalScorer.GateRecord;
 import services.grapheval.GraphEvalScorer.GateTally;
+import services.grapheval.MemoryBounds;
 import services.grapheval.RecordBounds;
 
 import java.util.ArrayList;
@@ -145,6 +146,9 @@ class AdjudicationsTest extends UnitTest {
         var pooled = GraphEvalHarness.evaluation(configured(records), book).written();
         assertEquals(100, RecordBounds.n(pooled));
         assertEquals(5, RecordBounds.k(pooled), "G_written carries the agreed sample's weighted wrong too");
+        assertEquals(100, MemoryBounds.n(gate.writing()), "one memory per record: as many memories as records");
+        assertEquals(5, MemoryBounds.k(gate.writing()), "the weight counts in memories as well");
+        assertEquals(5, MemoryBounds.k(pooled));
 
         var outside = verdict(unsampled.getFirst(), Adjudications.WRONG, Adjudications.OPERATOR, null);
         var ignored = new Adjudications.Book(List.of(outside), GUIDE, SEED, 0.2, 0.2);

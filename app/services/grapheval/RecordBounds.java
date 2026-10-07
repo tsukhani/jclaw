@@ -3,8 +3,9 @@ package services.grapheval;
 import java.util.List;
 
 /**
- * The placeholder {@link GateBounds} (JCLAW-1368): every memory's records pooled into one binomial count, n the
- * written records and k the wrong ones plus the agreed sample's weighted wrong, rounded up. Pure.
+ * The record-level {@link GateBounds} (JCLAW-1368): every memory's records pooled into one binomial count, n the
+ * written records and k the wrong ones plus the agreed sample's weighted wrong, rounded up. It serves the rules decided
+ * in values rather than memories (JCLAW-1369): the qualifier classes, {@code G_trap} and lineage. Pure.
  */
 public final class RecordBounds implements GateBounds {
 

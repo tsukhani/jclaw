@@ -32,6 +32,7 @@ import services.grapheval.GraphEvalHarness.DecisionModel;
 import services.grapheval.GraphEvalScorer;
 import services.grapheval.GraphEvalScorer.WrongRecord;
 import services.grapheval.HeldOut;
+import services.grapheval.MemoryBounds;
 import services.grapheval.Sequences;
 import services.grapheval.SplitUses;
 import services.grapheval.StageScorer;
@@ -389,6 +390,13 @@ class GraphEvalHarnessTest extends UnitTest {
             if (c.text().startsWith("The user") || CandidateGenerator.subjectless(c.text())) ruleWritten++;
         }
         var model = report.models().getFirst();
+        var dev = model.v2().sequencing();
+        assertNotNull(dev);
+        assertEquals(Certifier.ON, dev.terms().state(), dev.terms().toString());
+        assertNotNull(dev.trap(), "a development run routes nothing: the Terms and G_trap read one set");
+        assertTrue(dev.trap().n() > 0, dev.trap().toString());
+        assertEquals(cases.size(), dev.terms().n(), "Terms n counts writing memories");
+        assertTrue(dev.requirements().getFirst().writtenRecords() > cases.size());
         assertEquals(2, model.runs().size());
         for (var run : model.runs()) {
             var s = run.stages();
@@ -802,7 +810,7 @@ class GraphEvalHarnessTest extends UnitTest {
     }
 
     @Test
-    void oneInvocationCertifiesOnceItsSheetIsJudgedAndARescoreEqualsTheFullRun() throws Exception {
+    void aCasesSplitRunsOnceLeavesTheTermGateUnevaluableAndARescoreEqualsTheFullRun() throws Exception {
         var root = Files.createTempDirectory("grapheval-cert");
         try {
             var cases = certifiable();
@@ -830,16 +838,30 @@ class GraphEvalHarnessTest extends UnitTest {
                     "the certifying set runs first, then the sequence harness");
             assertEquals("certification", report.kind());
             assertEquals(splitCases.size(), report.memories());
+            assertEquals(MemoryBounds.BOOTSTRAP_SEED, report.bootstrapSeed());
+            assertEquals(10_000, report.bootstrapResamples());
             var model = report.models().getFirst();
             var sequencing = model.sequencing();
             assertNotNull(sequencing);
-            assertEquals(Certifier.ON, sequencing.terms().state(), sequencing.terms().toString());
-            assertTrue(sequencing.passed(), sequencing.reasons().toString());
+            // Decision 2: Terms are certified on the live sample, so a cases split cannot certify until JCLAW-1380.
+            assertEquals(Certifier.OFF, sequencing.terms().state(), sequencing.terms().toString());
+            assertEquals(TERMS_NOT_EVALUABLE, sequencing.terms().reason());
+            assertFalse(sequencing.passed());
             assertNotNull(model.sequences(), "the sequences were scored at the configuration reached");
+            var lineage = model.sequences().lineage();
+            assertTrue(lineage.steps().stream().anyMatch(st -> st.n() > 1),
+                    "lineage counts its decisions, not the one memory they share: " + lineage);
             assertEquals(0, model.failedDecisions());
             assertEquals(0, model.spotCheck().differing());
             assertEquals(0, model.sequenceSpotCheck().differing());
-            assertEquals(Certifier.PENDING_ADJUDICATION, model.verdict().status(), model.verdict().reasons().toString());
+            assertEquals(Certifier.NOT_CERTIFIED, model.verdict().status(), model.verdict().reasons().toString());
+            assertEquals(List.of("Terms gate: " + TERMS_NOT_EVALUABLE), model.verdict().reasons());
+            var terms = model.requirements().getFirst();
+            assertEquals(Certifier.TERMS, terms.name());
+            assertEquals(CertificationSplit.HELDOUT, terms.set());
+            assertEquals(Certifier.BASE_GATE_TAIL, terms.tail());
+            assertEquals(0, terms.writingMemories(), "a cases split holds no live Term data");
+            assertEquals(false, terms.reachable());
             assertTrue(model.unjudgedByGate().values().stream().mapToInt(Integer::intValue).sum() > 0);
             assertEquals(1356, model.agreedSample().seed());
             assertEquals(0.2, model.agreedSample().share());
@@ -879,20 +901,10 @@ class GraphEvalHarnessTest extends UnitTest {
 
             var judged = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases,
                     null, verdicts).models().getFirst();
-            assertEquals(Certifier.CERTIFIED, judged.verdict().status(), judged.verdict().reasons().toString());
+            assertEquals(Certifier.NOT_CERTIFIED, judged.verdict().status(), judged.verdict().reasons().toString());
+            assertNull(judged.certificate());
             assertEquals(asked, calls.get(), "a re-score asks no model");
-            var read = CertificateDocument.read(root, "tev1", SCHEMA.fingerprint(), ExtractionPipeline.fingerprint(SCHEMA),
-                    DIGEST);
-            assertNull(read.reason());
-            var cert = read.certificate();
-            assertEquals(judged.certificate(), cert.id());
-            assertTrue(cert.json().getAsJsonObject("classes").has("lineage"), cert.json().toString());
             assertNotNull(judged.lineagePower(), "lineage reports its power like every other class");
-            assertEquals(judged.sequences().timeline(),
-                    cert.json().getAsJsonObject("timeline").get("result").getAsString());
-            assertEquals(sequencing.terms().threshold(), cert.toConfiguration().terms());
-            assertEquals("digest sha256:7e57 differs from running sha256:0000", CertificateDocument.read(root, "tev1",
-                    SCHEMA.fingerprint(), ExtractionPipeline.fingerprint(SCHEMA), "sha256:0000").reason());
 
             var resheet = JsonParser.parseString(Files.readString(sheetFile)).getAsJsonObject();
             var relisted = new ArrayList<String>();
@@ -900,25 +912,15 @@ class GraphEvalHarnessTest extends UnitTest {
                     + " " + e.getAsJsonObject().get("record")));
             assertEquals(listed, relisted, "a judged record stays on the sheet");
 
-            var newGuide = "guide@999999999999";
-            var regraded = new CertificationSplit.Source("cases", source.items(), source.cases(), source.sequences(),
-                    newGuide, source.schema());
-            var restamped = verdicts.stream().map(v -> new Adjudications.Verdict(v.caseId(), v.record(), v.side(),
-                    v.verdict(), newGuide, v.adjudicator(), v.inclusion(), v.check(), v.note())).toList();
-            assertEquals(Certifier.CERTIFIED, GraphEvalHarness.rescore(root, split, regraded, SCHEMA, "tev1", sequences,
-                    0.2, splitCases, null, restamped).models().getFirst().verdict().status());
-            var stamped = CertificateDocument.parse(Files.readString(CertificateDocument.path(root, "tev1")));
-            assertEquals(newGuide, stamped.json().get("guide").getAsString(), "the guide the verdicts were judged under");
-            assertNotEquals(split.guide(), newGuide);
-
-            var pending = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases,
-                    null, List.of()).models().getFirst();
-            assertEquals(Certifier.PENDING_ADJUDICATION, pending.verdict().status());
+            var certificate = CertificateDocument.path(root, "tev1");
+            Files.createDirectories(certificate.getParent());
+            Files.writeString(certificate, "{\"split\":\"cert-t\"}");
+            GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases, null, List.of());
             assertEquals("no certificate for tev1", CertificateDocument.read(root, "tev1", SCHEMA.fingerprint(),
                     ExtractionPipeline.fingerprint(SCHEMA), DIGEST).reason(), "this split's stale certificate is gone");
-            var other = cert.json().deepCopy();
+            var other = new JsonObject();
             other.addProperty("split", "cert-other");
-            Files.writeString(CertificateDocument.path(root, "tev1"), other.toString());
+            Files.writeString(certificate, other.toString());
             GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases, null, List.of());
             assertTrue(Files.exists(CertificateDocument.path(root, "tev1")), "another split's certificate is left alone");
         } finally {
@@ -1084,10 +1086,41 @@ class GraphEvalHarnessTest extends UnitTest {
         assertEquals(1356, v2.agreedSample().seed());
         assertEquals(0.2, v2.checks().checkShare());
         assertFalse(v2.tallies().falsePositiveByTag().isEmpty());
+        var terms = v2.sequencing().requirements().getFirst();
+        assertEquals(6, v2.sequencing().terms().n(), "Terms n counts the writing memories");
+        assertEquals(6, terms.writingMemories());
+        assertTrue(terms.writtenRecords() > 6, "not the records they write: " + terms);
+    }
+
+    private static final String TERMS_NOT_EVALUABLE =
+            "terms not evaluable: its certifying set heldout has no data in this run";
+
+    @Test
+    void theWorseRunIsPickedPerGateAtThatGatesTail() {
+        // At 0.05 / 39 none wrong of 100 bounds higher than one of 150; at 0.05 it bounds lower.
+        var oneOf150 = spread(150, 1);
+        var noneOf100 = spread(100, 0);
+        double base = Certifier.BASE_GATE_TAIL;
+        assertTrue(MemoryBounds.INSTANCE.upper(noneOf100, base) > MemoryBounds.INSTANCE.upper(oneOf150, base));
+        assertTrue(MemoryBounds.INSTANCE.upper(noneOf100, 0.05) < MemoryBounds.INSTANCE.upper(oneOf150, 0.05));
+        var a = new Certifier.Evaluation(Map.of("uses", new Certifier.GateCounts(oneOf150, List.of())), Map.of(),
+                oneOf150, List.of());
+        var b = new Certifier.Evaluation(Map.of("uses", new Certifier.GateCounts(noneOf100, List.of())), Map.of(),
+                noneOf100, List.of());
+        var worst = GraphEvalHarness.worst(List.of(a, b), MemoryBounds.INSTANCE);
+        assertEquals(noneOf100, worst.gates().get("uses").writing(), "a relation gate is read at its corrected tail");
+        assertEquals(oneOf150, worst.written(), "G_written at 0.05");
+        assertEquals(worst, GraphEvalHarness.worst(List.of(b, a), MemoryBounds.INSTANCE));
+    }
+
+    private static List<GateBounds.MemoryCounts> spread(int n, int wrong) {
+        var out = new ArrayList<GateBounds.MemoryCounts>();
+        for (int i = 0; i < n; i++) out.add(new GateBounds.MemoryCounts("m" + i, 1, i < wrong ? 1 : 0, 0, 0, 0));
+        return out;
     }
 
     @Test
-    void twoRunsAreReadAtTheWorseRunSoASecondPassThatErrsTurnsTheTermGateOff() throws Exception {
+    void twoRunsOfACasesSplitLeaveTheTermGateUnevaluable() throws Exception {
         var root = Files.createTempDirectory("grapheval-worst");
         try {
             var cases = certifiable();
@@ -1128,8 +1161,8 @@ class GraphEvalHarnessTest extends UnitTest {
             var sequencing = model.sequencing();
             assertNotNull(sequencing);
             assertEquals(Certifier.OFF, sequencing.terms().state(), sequencing.terms().toString());
+            assertEquals(TERMS_NOT_EVALUABLE, sequencing.terms().reason());
             assertFalse(sequencing.passed());
-            assertTrue(sequencing.terms().k() > 0, "the gate reads the second pass's wrong terms");
             assertEquals(Certifier.NOT_CERTIFIED, model.verdict().status());
 
             var rescored = GraphEvalHarness.rescore(root, split, source, SCHEMA, "tev1", sequences, 0.2, splitCases,
@@ -1141,7 +1174,7 @@ class GraphEvalHarnessTest extends UnitTest {
         }
     }
 
-    /** Agrees every bound, so a two-memory held-out split gets past its gates to the agreement step. */
+    /** Agrees every bound, so a two-memory held-out split gets past its gates to the pooled ones. */
     private static final GateBounds LENIENT = new GateBounds() {
         @Override
         public boolean passes(List<GateBounds.MemoryCounts> writing, double limit, double tail) {
@@ -1171,7 +1204,7 @@ class GraphEvalHarnessTest extends UnitTest {
     };
 
     @Test
-    void aHeldOutSplitCertifiesOverTheMemoriesInPlaceAndStopsAtAgreement() throws Exception {
+    void aHeldOutSplitScoresTheMemoriesInPlaceAndCannotCertifyWithoutItsTrapSet() throws Exception {
         var store = MemoryStoreFactory.get();
         var texts = List.of("The user works at Harborlight Analytics, which runs Kestrel CI for every release.",
                 "The user uses Kestrel CI at Harborlight Analytics every week.");
@@ -1211,7 +1244,14 @@ class GraphEvalHarnessTest extends UnitTest {
             assertEquals(0, model.spotCheck().differing());
             assertTrue(model.spotCheck().decisions() > 0, "the spot-check asked the held-out memory again");
             assertEquals(0, model.failedDecisions());
-            assertEquals(Certifier.PENDING_AGREEMENT, model.verdict().status(), model.verdict().reasons().toString());
+            var sequencing = model.sequencing();
+            assertNotNull(sequencing);
+            assertEquals(Certifier.ON, sequencing.terms().state(), sequencing.terms().toString());
+            for (var c : sequencing.classes()) assertEquals(Certifier.DISABLED, c.state(), c.name());
+            assertEquals(List.of(), sequencing.backOff());
+            assertEquals(Certifier.NOT_CERTIFIED, model.verdict().status());
+            assertEquals(List.of("G_trap not evaluable: its certifying set cases has no data in this run"),
+                    model.verdict().reasons());
             for (var text : texts) {
                 assertFalse(GSON.toJson(report).contains(text), "the report carries no memory text");
             }

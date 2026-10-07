@@ -23,6 +23,8 @@ import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
 import services.AgentService;
+import services.grapheval.GateBounds.MemoryCounts;
+import services.grapheval.MemoryBounds;
 import services.printing.LpdClient;
 import tools.FileSystemTools;
 import utils.Filenames;
@@ -403,6 +405,26 @@ class PropertyBasedTest extends UnitTest {
             case EdtfInterval.Point(var d) when interval.single() -> EdtfInterval.of(d.plusYears(1));
             default -> throw new AssertionError("a relative probe read as a range: " + interval);
         };
+    }
+
+    /** Memories with distinct ids and gold: 1-5 gold records each, any number of them right. */
+    @Provide
+    Arbitrary<List<MemoryCounts>> labelledMemories() {
+        var memory = Arbitraries.integers().between(0, 999).flatMap(id -> Arbitraries.integers().between(1, 5)
+                .flatMap(gold -> Arbitraries.integers().between(0, gold)
+                        .map(right -> new MemoryCounts("m" + id, 0, 0, 0, gold, right))));
+        return memory.list().ofMinSize(1).ofMaxSize(40).uniqueElements(MemoryCounts::memoryId);
+    }
+
+    // tries=30: two 10,000-resample bootstraps over at most 40 memories per try (~2 ms) — under 100 ms.
+    @Property(tries = 30)
+    void theClusteredRecallBoundIsRepeatableAndNeverAboveTheEstimate(
+            @ForAll("labelledMemories") List<MemoryCounts> labelled) {
+        double lower = MemoryBounds.INSTANCE.recallLower(labelled, 0.05);
+        double point = (double) labelled.stream().mapToInt(MemoryCounts::right).sum()
+                / labelled.stream().mapToInt(MemoryCounts::gold).sum();
+        assertTrue(lower <= point, () -> "lower " + lower + " above the estimate " + point + " for " + labelled);
+        assertEquals(lower, MemoryBounds.INSTANCE.recallLower(labelled, 0.05), () -> "a repeat differed for " + labelled);
     }
 
     /** Renders control characters so a shrunk counterexample survives the XML report legibly. */
