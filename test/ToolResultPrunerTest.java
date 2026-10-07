@@ -56,11 +56,28 @@ class ToolResultPrunerTest extends UnitTest {
     }
 
     @Test
-    void smallResultsStubsAndTheRetrieveToolsOwnOutputAreLeftAlone() {
+    void anEarlierTurnsRetrievedCopyIsStubbedAndTheCurrentTurnsIsSentWhole() {
+        var messages = List.of(
+                ChatMessage.user("first ask"),
+                tool("c1", "ccr_retrieve", BIG),
+                ChatMessage.assistant("answered"),
+                ChatMessage.user("second ask"),
+                tool("c2", "ccr_retrieve", BIG));
+
+        var pruned = ToolResultPruner.prune(messages, 4_000, 1, null, null);
+
+        var stub = (String) pruned.get(1).content();
+        assertTrue(stub.startsWith(ToolResultPruner.STUB_MARKER), stub);
+        assertTrue(stub.contains("ccr_retrieve(\"" + ContentHash.handle(BIG) + "\")"),
+                "its handle is the original's, so the copy can be fetched again");
+        assertSame(BIG, pruned.get(4).content(), "a copy fetched this turn is what the model asked to read");
+    }
+
+    @Test
+    void smallResultsAndExistingStubsAreLeftAlone() {
         var messages = List.of(
                 ChatMessage.user("first ask"),
                 tool("c1", "web_fetch", "short"),
-                tool("c2", "ccr_retrieve", BIG),
                 tool("c3", "web_fetch", ToolResultPruner.STUB_MARKER + ": already stubbed]"),
                 ChatMessage.user("second ask"),
                 ChatMessage.assistant("done"));

@@ -30,8 +30,6 @@ public final class ToolResultPruner {
     static final int DEFAULT_PROTECT_RECENT = 12;
     /** Prefix of every stub; also what stops a stub from being stubbed again. */
     public static final String STUB_MARKER = "[tool result elided";
-    // Literal rather than tools.CcrRetrieveTool.TOOL_NAME to avoid an agents <-> tools package cycle.
-    private static final String CCR_RETRIEVE_TOOL = "ccr_retrieve";
 
     /** Config-driven entry point; returns the same list instance when nothing changed. */
     public static List<ChatMessage> prune(List<ChatMessage> messages, Agent agent, @Nullable Conversation conversation) {
@@ -43,7 +41,8 @@ public final class ToolResultPruner {
     /**
      * Pure core (test seam). Eligible: TOOL-role messages before the last user message and
      * outside the last {@code protectRecent} messages, with a String body of at least
-     * {@code minChars} that is not already a stub and not the retrieve tool's own output.
+     * {@code minChars} that is not already a stub. That includes {@code ccr_retrieve}'s own
+     * output: exempt, a fetched copy stayed in every later call of the conversation.
      */
     public static List<ChatMessage> prune(List<ChatMessage> messages, int minChars, int protectRecent,
                                           @Nullable Agent agent, @Nullable Conversation conversation) {
@@ -53,7 +52,7 @@ public final class ToolResultPruner {
         long elided = 0;
         for (int i = 0; i < cutoff; i++) {
             var m = messages.get(i);
-            if (!MessageRole.TOOL.value.equals(m.role()) || CCR_RETRIEVE_TOOL.equals(m.toolName())) continue;
+            if (!MessageRole.TOOL.value.equals(m.role())) continue;
             if (!(m.content() instanceof String body) || body.length() < minChars || body.startsWith(STUB_MARKER)) continue;
             if (out == null) out = new ArrayList<>(messages);
             out.set(i, new ChatMessage(m.role(), stub(m.toolName(), body), m.toolCalls(), m.toolCallId(), m.toolName()));
