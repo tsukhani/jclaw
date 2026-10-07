@@ -57,9 +57,23 @@ export const followMain = (clone: string) => {
 // the main it was cut from; one a worktree holds is left for Sandcastle to reuse. Returns the commits ahead of main.
 export const restartEmptyBranch = (clone: string, branch: string): number => {
   const ahead = Number(git(clone, "rev-list", "--count", `main..${branch}`));
-  const held = git(clone, "worktree", "list", "--porcelain").split("\n").includes(`branch refs/heads/${branch}`);
-  if (ahead === 0 && !held) git(clone, "branch", "--force", branch, "main");
+  if (ahead === 0 && !worktreeHolding(clone, branch)) git(clone, "branch", "--force", branch, "main");
   return ahead;
+};
+
+const worktreeHolding = (clone: string, branch: string): string | undefined =>
+  git(clone, "worktree", "list", "--porcelain")
+    .split("\n\n")
+    .find((block) => block.split("\n").includes(`branch refs/heads/${branch}`))
+    ?.split("\n")[0]
+    .replace(/^worktree /, "");
+
+// Uncommitted changes in a worktree an earlier run left holding the branch. Sandcastle would resume it as it is, but a
+// run cut off mid-edit can leave anything there, a fault injected to test a test included, so a human decides first.
+export const leftoverChanges = (clone: string, branch: string): { path: string; files: string[] } | undefined => {
+  const holder = worktreeHolding(clone, branch);
+  const files = holder ? git(holder, "diff", "--name-only", "HEAD").split("\n").filter(Boolean) : [];
+  return holder && files.length > 0 ? { path: holder, files } : undefined;
 };
 
 export type Landed = { merge: string; regated: boolean };

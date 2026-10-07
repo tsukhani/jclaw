@@ -7,7 +7,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, type Entry, type State, type Story } from "./board.ts";
 import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
-import { MergeRefused, followMain, landBranch, landedAs, mergeVerdict, restartEmptyBranch } from "./merge.ts";
+import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
@@ -442,4 +442,11 @@ check("a retried story's empty branch restarts from main; a held one and one wit
     restartEmptyBranch(mirror, "agent/T-8"), g(mirror, "rev-parse", "agent/T-8") === stale,
     restartEmptyBranch(mirror, "agent/T-9"), g(mirror, "rev-parse", "agent/T-9") === worked],
   [0, true, 0, true, 1, true]);
+
+// A worktree an earlier run left: clean, it resumes; with an edit to a tracked file, it is named for a human.
+const cleanHeld = leftoverChanges(mirror, "agent/T-8");
+write(path.join(sandbox, "held"), "base.txt", "if (true) return text;\n");
+const dirtyHeld = leftoverChanges(mirror, "agent/T-8");
+check("a clean or absent worktree leaves nothing; an edited one names its files",
+  [cleanHeld, leftoverChanges(mirror, "agent/T-7"), dirtyHeld?.files, dirtyHeld?.path.endsWith("held")], [undefined, undefined, ["base.txt"], true]);
 fs.rmSync(sandbox, { recursive: true, force: true });

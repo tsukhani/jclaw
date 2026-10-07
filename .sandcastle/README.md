@@ -146,7 +146,8 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
 - **When it fails:** a story the factory gives up on gets the `afk-blocked` label and a comment saying why. Remove the
   label to retry. A model API overload is the exception (see [Operating](#operating)).
 - **When the harness stops:** an interrupted story still has `afk-running`. The next start sends it back to To Do,
-  and its branch keeps what it had committed.
+  and its branch keeps what it had committed. If a run left uncommitted changes in its worktree, the story is blocked
+  before anything else runs, and the comment names the files and the worktree: commit or discard them there first.
 
 ### A whole epic
 

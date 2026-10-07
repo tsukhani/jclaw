@@ -11,7 +11,7 @@ import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, facto
 import { githubTracker } from "./github.ts";
 import { jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
-import { MergeRefused, followMain, landBranch, landedAs, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
+import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, type About } from "./board.ts";
@@ -182,6 +182,10 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
       git("branch", branch, "main");
     }
     const alreadyAhead = restartEmptyBranch(REPO, branch);
+    const leftover = leftoverChanges(REPO, branch);
+    if (leftover) {
+      throw new Error(`An earlier run left uncommitted changes to ${leftover.files.join(", ")} in ${leftover.path}. Commit or discard them, then retry.`);
+    }
 
     await using sandbox = await sandcastle.createSandbox({ cwd: REPO, branch, sandbox: factorySandbox(), hooks: factoryHooks });
     await assertReady(sandbox);
