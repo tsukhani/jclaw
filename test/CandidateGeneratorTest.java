@@ -424,6 +424,18 @@ class CandidateGeneratorTest extends UnitTest {
     }
 
     @Test
+    void aPhoneInsideParenthesesIsStillAPhone() {
+        assertOnly("Her cell (+1 202 555 0142) is new.", Source.PHONE, "+1 202 555 0142");
+        assertOnly("The desk (555-0142) answers.", Source.PHONE, "555-0142");
+        assertOnly("The office ((415) 555-0137) answers.", Source.PHONE, "(415) 555-0137");
+        for (var s : List.of("(2019-2022)", "(2026-12-12)", "(12/06/2027)", "(v2.4.1)", "(192.168.10.12)",
+                "(1,250,000)", "(14:30)")) {
+            var text = "The user noted " + s + " in the log.";
+            assertEquals(List.of(), withSource(text, Source.PHONE), text);
+        }
+    }
+
+    @Test
     void aRecurringOwnerKeepsTheOccurrenceThatReallyOverlaps() {
         var candidates = CandidateGenerator.generate("Avery Lin's son met staff at Avery Lin Studio.", List.of(), OWNER);
         var owner = candidates.stream().filter(c -> c.span().equals(OWNER)).findFirst().orElseThrow();

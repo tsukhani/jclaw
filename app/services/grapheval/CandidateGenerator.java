@@ -74,7 +74,7 @@ public final class CandidateGenerator {
      * every group after the first has two digits or more, so a version or a trailing count is not one.
      */
     private static final Pattern PHONE = Pattern.compile(
-            "(?<![\\w+(),.:/@\\-])\\+?(?:\\(\\d++\\)|\\d++)(?:(?:(?<=\\))[ .\\-]?|[ .\\-])(?:\\(\\d{2,}+\\)|\\d{2,}+))++");
+            "(?<![\\w+),.:/@\\-])\\+?(?:\\(\\d++\\)|\\d++)(?:(?:(?<=\\))[ .\\-]?|[ .\\-])(?:\\(\\d{2,}+\\)|\\d{2,}+))++");
     private static final Pattern PHONE_DATE = Pattern.compile(
             "\\d{4}([.\\-])\\d{1,2}\\1\\d{1,2}|\\d{1,2}([.\\-])\\d{1,2}\\2\\d{2,4}");
     private static final Pattern PHONE_YEAR_RANGE = Pattern.compile("(?:19|20)\\d\\d[ .\\-]+(?:19|20)\\d\\d");
