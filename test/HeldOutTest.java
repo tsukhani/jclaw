@@ -1,3 +1,4 @@
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import memory.MemoryStoreFactory;
@@ -179,5 +180,92 @@ class HeldOutTest extends UnitTest {
         var mixed = loaded.apply(memoryIds);
         var e = assertThrows(IllegalArgumentException.class, () -> HeldOut.agentName(mixed));
         assertTrue(e.getMessage().contains("more than one agent"), e.getMessage());
+    }
+
+    // ---- JCLAW-1374: coverage labels ----
+
+    /** A one-case file whose labelled case carries {@code extra}'s keys beside its labels. */
+    private Path labelledWith(Consumer<JsonObject> extra) throws Exception {
+        var file = dir.resolve("coverage-" + UUID.randomUUID() + ".json");
+        HeldOut.sample(file, agentId, 1, 7);
+        var root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
+        var first = root.getAsJsonArray("cases").get(0).getAsJsonObject();
+        first.addProperty("labelled", true);
+        var operator = new JsonObject();
+        operator.addProperty("id", "operator");
+        operator.addProperty("mention", "The user");
+        operator.addProperty("type", "Person");
+        first.getAsJsonArray("entities").add(operator);
+        extra.accept(first);
+        Files.writeString(file, root.toString());
+        return file;
+    }
+
+    private static JsonArray array(String... values) {
+        var a = new JsonArray();
+        for (var v : values) a.add(v);
+        return a;
+    }
+
+    @Test
+    void allThreeCoverageFieldsLoadAndFewerLoadAsUncounted() throws Exception {
+        var all = labelledWith(o -> {
+            o.add("notRepresentable", array("quantity", "instruction"));
+            o.add("numbers", array("identifier", "quantity"));
+            o.addProperty("backReference", true);
+        });
+        assertEquals(new HeldOut.Coverage(List.of("quantity", "instruction"), List.of("identifier", "quantity"), true),
+                HeldOut.load(all, OntologySchema.seed()).cases().getFirst().coverage());
+
+        var empty = labelledWith(o -> {
+            o.add("notRepresentable", array());
+            o.add("numbers", array());
+            o.addProperty("backReference", false);
+        });
+        assertEquals(new HeldOut.Coverage(List.of(), List.of(), false),
+                HeldOut.load(empty, OntologySchema.seed()).cases().getFirst().coverage());
+
+        var none = labelledWith(o -> {});
+        assertNull(HeldOut.load(none, OntologySchema.seed()).cases().getFirst().coverage(), "an older file loads");
+        var some = labelledWith(o -> o.add("numbers", array("date")));
+        assertNull(HeldOut.load(some, OntologySchema.seed()).cases().getFirst().coverage(), "one field is not enough");
+    }
+
+    @Test
+    void aBadCoverageValueIsRefusedByPositionWithoutQuotingIt() throws Exception {
+        List<Consumer<JsonObject>> breaks = List.of(
+                o -> o.add("notRepresentable", array("zeppelin")),
+                o -> o.add("numbers", array("quantity", "quantity")),
+                o -> o.addProperty("numbers", "zeppelin"),
+                o -> {
+                    var a = array("date");
+                    a.add(7);
+                    o.add("numbers", a);
+                },
+                o -> o.addProperty("backReference", "zeppelin"),
+                o -> o.addProperty("backReference", "yes"));
+        for (var breakIt : breaks) {
+            var file = labelledWith(o -> {
+                o.add("notRepresentable", array());
+                o.add("numbers", array());
+                o.addProperty("backReference", false);
+                breakIt.accept(o);
+            });
+            var e = assertThrows(IllegalArgumentException.class, () -> HeldOut.load(file, OntologySchema.seed()));
+            assertTrue(e.getMessage().startsWith("case h0: "), e.getMessage());
+            assertFalse(e.getMessage().contains("zeppelin") || e.getMessage().contains("yes"),
+                    "a refusal never quotes the value: " + e.getMessage());
+            assertFalse(e.getMessage().contains("notebook"), "a refusal never quotes the memory: " + e.getMessage());
+        }
+    }
+
+    @Test
+    void aCommittedCaseTakesNoCoverageField() {
+        var json = "{\"userMd\": \"Name: Avery Lin\", \"capturedAt\": \"2026-02-15\", \"cases\": [{\"id\": \"c1\","
+                + " \"tags\": [\"plain\"], \"text\": \"Avery Lin keeps a ledger.\", \"entities\": [{\"id\": \"operator\","
+                + " \"mention\": \"Avery Lin\", \"type\": \"Person\"}], \"relations\": [], \"negatives\": [],"
+                + " \"numbers\": []}]}";
+        var e = assertThrows(IllegalArgumentException.class, () -> GraphCases.parse(json, OntologySchema.seed()));
+        assertEquals("case c1: unknown key 'numbers'", e.getMessage());
     }
 }

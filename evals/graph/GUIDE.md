@@ -273,3 +273,46 @@ valid by status and slot
 ```
 
 Rule 11 is deliberately unused: other tickets cite the status rule as 12 and the dates rule as 13.
+
+## 14. Coverage fields (held-out only)
+
+A held-out case may carry three more labels, which measure what the schema covers (JCLAW-1374).
+Label all three or none: the coverage report counts only a case carrying all three. They are never
+labelled in `cases.json`.
+
+**`notRepresentable`**: each kind of fact the memory states that the schema cannot store, each
+kind at most once, empty when there is none:
+
+```
+quantity           an amount the memory states (money, count, measure, percentage)
+role               a job title or role
+kin-word           a kinship word beyond "is family of"
+plan               a plan, wish or intention
+belief-or-report   a belief, guess or someone else's report
+relation           a relation the twelve lack (membership, education, social tie, pet, ...)
+type               a thing no term type covers
+condition          a condition inside an instruction or fact
+comparison         a comparison ("faster than", "prefers X over Y" for Y)
+cause              a causal link
+goal               a goal
+health             a health detail
+routine            a habit or recurring practice
+instruction        an instruction to the agent
+other              anything else
+```
+
+A plan or a report labelled as an unasserted relation still counts here: the schema cannot store
+it as asserted. "Avery Lin plans to join the Quillon Summit and wants the agent to remind them a
+week before" is `["plan", "instruction"]`.
+
+**`numbers`**: each kind of number present, each at most once, empty when there is none. A number
+is a numeral or a spelled-out amount. Kinds: `date` (a year or calendar date), `duration`,
+`clock-time`, `identifier` (ticket key, version, port, phone, account or model number), `quantity`
+(money, count, measure, percentage), `other`. "Kestrel CI 4.2 runs on port 8443 for three teams"
+is `["identifier", "quantity"]`.
+
+**`backReference`**: true when a pronoun or demonstrative ("it", "they", "them", "their", "she",
+"her", "he", "his", "this", "that", "the latter") refers to something named earlier in the same
+memory, the owner included. Relative pronouns opening a clause ("which", "who", "that"),
+expletive "it" and "there", and generic "you" do not count. "Avery Lin uses Fenwick and likes it"
+is true; "Avery Lin uses Fenwick, which the team chose" is false.

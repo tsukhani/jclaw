@@ -42,6 +42,9 @@ public final class HeldOut {
     /** The held-out author type for a memory with none. */
     public static final String UNATTRIBUTED = "unattributed";
 
+    private static final String NOT_REPRESENTABLE = "notRepresentable";
+    private static final String NUMBERS = "numbers";
+    private static final String BACK_REFERENCE = "backReference";
     private static final Set<String> CASE_KEYS = heldKeys();
     private static final Set<String> AUTHOR_TYPES = Set.of("human_turn", "guest_turn", "agent_synthesized",
             "consolidation_derived", UNATTRIBUTED);
@@ -50,9 +53,25 @@ public final class HeldOut {
      * A labelled held-out case; {@code memoryId} stays inside the harness and never reaches a report. A null
      * {@code authorType} is an unattributed memory.
      */
-    public record HeldCase(long memoryId, Case labels, @Nullable MemoryAuthorType authorType) {
+    public record HeldCase(long memoryId, Case labels, @Nullable MemoryAuthorType authorType,
+                           @Nullable Coverage coverage) {
+        public HeldCase(long memoryId, Case labels, @Nullable MemoryAuthorType authorType) {
+            this(memoryId, labels, authorType, null);
+        }
+
         public HeldCase(long memoryId, Case labels) {
             this(memoryId, labels, MemoryAuthorType.HUMAN_TURN);
+        }
+    }
+
+    /**
+     * A case's coverage labels (JCLAW-1374): the {@link CompetencyQuestions#NOT_REPRESENTABLE} kinds it expresses, the
+     * {@link CompetencyQuestions#NUMBER_KINDS} it holds, and whether a pronoun refers back within it.
+     */
+    public record Coverage(List<String> notRepresentable, List<String> numbers, boolean backReference) {
+        public Coverage {
+            notRepresentable = List.copyOf(notRepresentable);
+            numbers = List.copyOf(numbers);
         }
     }
 
@@ -166,17 +185,47 @@ public final class HeldOut {
                 // parseCase quotes spans, and a held-out span is real memory text.
                 throw new IllegalArgumentException("case " + id + ": labels break the v3 rules in evals/graph/README.md");
             }
+            var coverage = coverage(o, "case " + id);
             var raw = author.getAsString();
             cases.add(new HeldCase(memoryId, labels,
-                    raw.equals(UNATTRIBUTED) ? null : MemoryAuthorType.valueOf(raw.toUpperCase(Locale.ROOT))));
+                    raw.equals(UNATTRIBUTED) ? null : MemoryAuthorType.valueOf(raw.toUpperCase(Locale.ROOT)),
+                    coverage));
         }
         return new Loaded(cases, unlabelled);
+    }
+
+    /** The case's coverage labels, null unless it carries all three; a present one is checked even so. */
+    private static @Nullable Coverage coverage(JsonObject o, String where) {
+        var notRepresentable = o.has(NOT_REPRESENTABLE)
+                ? kinds(o, NOT_REPRESENTABLE, CompetencyQuestions.NOT_REPRESENTABLE, where) : null;
+        var numbers = o.has(NUMBERS) ? kinds(o, NUMBERS, CompetencyQuestions.NUMBER_KINDS, where) : null;
+        boolean backReference = GraphCases.flag(o, BACK_REFERENCE, where);
+        if (notRepresentable == null || numbers == null || !o.has(BACK_REFERENCE)) return null;
+        return new Coverage(notRepresentable, numbers, backReference);
+    }
+
+    /** Refusals never quote the value: an unknown kind could be the memory's own words. */
+    private static List<String> kinds(JsonObject o, String key, List<String> allowed, String where) {
+        var value = o.get(key);
+        if (!value.isJsonArray()) throw new IllegalArgumentException(where + ": '" + key + "' must be an array");
+        var out = new ArrayList<String>();
+        for (var e : value.getAsJsonArray()) {
+            if (!e.isJsonPrimitive() || !e.getAsJsonPrimitive().isString()) {
+                throw new IllegalArgumentException(where + ": '" + key + "' must hold strings");
+            }
+            var kind = e.getAsString();
+            if (!allowed.contains(kind)) throw new IllegalArgumentException(where + ": '" + key + "' holds an unknown kind");
+            if (out.contains(kind)) throw new IllegalArgumentException(where + ": '" + key + "' repeats a kind");
+            out.add(kind);
+        }
+        return out;
     }
 
     private static Set<String> heldKeys() {
         var keys = new HashSet<>(GraphCases.CASE_KEYS);
         keys.remove("id");
-        keys.addAll(List.of("memoryId", "labelled", "candidates", "authorType"));
+        keys.addAll(List.of("memoryId", "labelled", "candidates", "authorType", NOT_REPRESENTABLE, NUMBERS,
+                BACK_REFERENCE));
         return Set.copyOf(keys);
     }
 }

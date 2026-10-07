@@ -437,6 +437,8 @@ POST    /api/scrape/harness                     ApiScrapeTestController.harness
 POST    /api/graph/eval                         ApiGraphEvalController.run
 POST    /api/graph/eval/blind-sheet             ApiGraphEvalController.blindSheet
 POST    /api/graph/eval/heldout/sample          ApiGraphEvalController.heldOutSample
+# JCLAW-1374: the coverage report's label sections over the held-out file. Model-free. Same gate.
+POST    /api/graph/eval/heldout/coverage        ApiGraphEvalController.coverage
 # JCLAW-1368: freeze a certification split, and re-score a stored certification run. Same gate.
 POST    /api/graph/eval/split                   ApiGraphEvalController.freezeSplit
 POST    /api/graph/eval/rescore                 ApiGraphEvalController.rescore

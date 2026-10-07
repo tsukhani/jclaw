@@ -1,4 +1,4 @@
-# Graph-extraction cases (JCLAW-1356, JCLAW-1358, JCLAW-1366, JCLAW-1367, JCLAW-1379)
+# Graph-extraction cases (JCLAW-1356, JCLAW-1358, JCLAW-1366, JCLAW-1367, JCLAW-1374, JCLAW-1379)
 
 `cases.json` is the labelled set that certifies a local Ollama decision model for graph
 extraction (`POST /api/graph/eval`, `./jclaw.sh grapheval run`). It is not an
@@ -588,10 +588,107 @@ files live under `data/graph-eval/`, which is gitignored, and never leave that m
    as the operator. Each case runs with its own anchor and author type, `unattributed` read in
    the owner's voice. A file holding memories of two agents is refused.
 
+A labelled held-out case may also carry the three coverage fields (JCLAW-1374), labelled under
+`GUIDE.md` rule 14: `notRepresentable` (the kinds of fact the schema cannot hold), `numbers` (the
+kinds of number present) and `backReference` (a boolean). Each is optional, but the coverage report
+counts only a case carrying all three; a case with fewer loads and is counted as lacking them. A
+kind is refused when unknown or repeated, as is a non-array or a non-boolean, naming the case as
+`case h<N>` and quoting neither the text nor the value. The committed `cases.json` takes none of
+them, and a frozen split's hash does not cover them, so labelling them changes no split.
+
+```json
+{"memoryId": 412, "labelled": true, "capturedAt": "2026-09-14", "authorType": "human_turn",
+ "text": "real memory text, never committed", "entities": [], "relations": [],
+ "notRepresentable": ["quantity", "instruction"],
+ "numbers": ["identifier", "quantity"],
+ "backReference": true}
+```
+
 The held-out report carries aggregate counts only: no memory id, text, span or per-case
 result. Without a split its walk is information. A held-out split runs like the committed set, but
 no second-label source covers it yet, so it always stops at `pending-agreement`. Its progress lines and a
 failure's message are held to the same rule.
+
+## Competency questions
+
+`evals/graph/competency-questions.json` (JCLAW-1374) holds the operator's competency questions:
+what the graph should be able to answer, each tied to what the schema needs to answer it. The
+operator writes them; none is committed yet. `services.grapheval.CompetencyQuestions` loads them,
+and the coverage report counts each against the held-out labels.
+
+```json
+{"questions": [
+  {"id": "q01", "text": "Where does the owner work now, and where did they work before?",
+   "types": ["Person", "Organization"], "relation": "works_at", "facet": "status"},
+  {"id": "q02", "text": "Which systems does a project use?",
+   "types": ["Project", "System"], "relation": "uses", "facet": null},
+  {"id": "q03", "text": "What does the owner dislike?",
+   "types": ["Person", "Topic"], "relation": "holds_view_on", "facet": "valence"},
+  {"id": "q04", "text": "What does the owner plan to do?",
+   "types": ["Person"], "relation": null, "facet": "plan"}
+]}
+```
+
+- The root holds `questions` only: 20 to 40 of them, or the file is refused stating the count.
+- `id` is unique, `q` plus digits. `text` is not blank, and is written generically ("the owner",
+  "a project"), never with a real name, since `evals/graph/` is public.
+- `types` holds declared term types: one when `relation` is null, two (From, To) when it is set.
+- `relation` and `facet` are required keys and may be null. A relation must be declared and allow
+  the two types in that direction.
+- `facet` is null; a schema v3 claim the relation admits: `status` (any relation), `valid` (where
+  the relation takes valid time from its From type), `valence` (`holds_view_on`), or `occurs` (an
+  Event among the types, with or without a relation); or one not-representable kind from
+  `GUIDE.md` rule 14, with or without a relation.
+
+Any other key or value is refused, naming `question <id>`, or `question #N` by position when the
+id itself is bad.
+
+## Coverage report
+
+A held-out run without a split carries `coverage` in its report (JCLAW-1374): the label sections
+once, and one type-confusion matrix per model, both over the cases left after frozen-split ids are
+excluded. A certification run over a held-out split carries none. `./jclaw.sh grapheval coverage
+[--out FILE]` (`POST /api/graph/eval/heldout/coverage`) gives the label sections alone and is
+model-free: it reads `data/graph-eval/heldout.json` and the question file when there is one, asks
+no model, reads no decision-model setting and no memory row, and covers every labelled case,
+frozen splits included. Without a question file `questions` is null and no grid cell lists a
+question.
+
+Every section counts only the labelled cases carrying all three coverage fields. Counts are
+memories, each counted at most once per bucket; a share is the count over the counted cases, null
+when none is counted. In the Questions and Grid sections a relation counts only when not noise and
+labelled `holds`, `ended` or `denied` (asserted), and an implicit operator is a Person endpoint as
+labelled; the strata read the raw labels.
+
+| Section | Definition |
+|---|---|
+| Questions | Per question id, by its facet. Facet null or a schema claim: `represented` is the memories holding a non-noise asserted relation of the question's relation from an entity of its first type to one of its second, with the claim's value present when the facet is `valid`, `valence` or `occurs` (the Event endpoint's `occurs`); with no relation, memories holding a non-noise entity of its type other than the operator (with `occurs` for an `occurs` facet). Facet a not-representable kind: `represented` is null, and `unrepresented` is the memories whose `notRepresentable` holds that kind. |
+| Grid | Every (From type, relation, To type) cell the schema allows, 43 under schema v3. Per cell: the memories holding such a non-noise, asserted relation, and the ids of the questions that need the cell. Covered cells over allowed cells. |
+| Type confusions | Per model, from every run's gold-fed typing stage of a held-out run: gold Project, System and Artifact mentions against the chosen Project, System, Artifact, `other` type, `notAnEntity`, or a `failed` decision. Not computed by the model-free path. |
+| Not representable | Memories per kind, memories with any, and that share. |
+| Numbers | Memories per number kind, memories with any, and that share. |
+| Back reference | The memories with `backReference` true, and their share. |
+| Strata | Each stratum below: its count and its share of the counted memories. |
+| Coverage-labelled | Labelled cases `counted`, and labelled cases left out for `lackingFields`. |
+
+| Stratum | A memory is in it when |
+|---|---|
+| `zero-named` | it has no entity other than the operator |
+| `one-named` | exactly one entity other than the operator |
+| `two-named` | exactly two |
+| `three-or-more-named` | three or more |
+| `owner-not-named` | its operator entity is implicit (no mention) |
+| `negation` | it is tagged `negated` or holds a denied relation |
+| `plans-or-uncertainty` | it is tagged `unasserted` or holds an unasserted relation |
+| `numbers` | its `numbers` is not empty |
+| `quantity` | its `numbers` holds quantity |
+| `agent-instruction` | its `notRepresentable` holds instruction |
+| `ended` | it is tagged `ended` or holds an ended relation |
+| `guest` | its `authorType` is `guest_turn` |
+
+The named strata count noise entities; the operator is never counted. These rates replace the
+regex estimates the case-set quotas cite (zero named 27%, negation 11.5%, plans or uncertainty
+10.7%, numbers 29%, agent instruction 8.8%).
 
 ## Sequences
 
