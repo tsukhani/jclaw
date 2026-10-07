@@ -20,7 +20,9 @@ import services.grapheval.CandidateGenerator;
 import services.grapheval.CertificateDocument;
 import services.grapheval.CertificationSplit;
 import services.grapheval.Certifier;
+import services.grapheval.CompetencyQuestions;
 import services.grapheval.Configuration;
+import services.grapheval.CoverageReport;
 import services.grapheval.EvalProgress;
 import services.grapheval.ExtractionPipeline;
 import services.grapheval.ExtractionPipeline.Decider;
@@ -700,7 +702,8 @@ class GraphEvalHarnessTest extends UnitTest {
                                     Map.of("id", "harborlight", "mention", "Harborlight Analytics", "type", "Organization"),
                                     Map.of("id", "kestrel", "mention", "Kestrel CI", "type", "System")),
                             "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight", "status", "holds"),
-                                    Map.of("from", "harborlight", "type", "uses", "to", "kestrel", "status", "holds"))),
+                                    Map.of("from", "harborlight", "type", "uses", "to", "kestrel", "status", "holds")),
+                            "notRepresentable", List.of("instruction"), "numbers", List.of(), "backReference", false),
                     Map.of("memoryId", 1, "labelled", false, "text", "unlabelled", "entities", List.of(),
                             "relations", List.of())));
             Files.writeString(file, GSON.toJson(labelled));
@@ -712,8 +715,11 @@ class GraphEvalHarnessTest extends UnitTest {
                 progress.heartbeat();
                 return golden.decide(request);
             };
+            var questions = List.of(new CompetencyQuestions.Question("q01", "Which systems does an organization use?",
+                    List.of("Organization", "System"), "uses", null));
             var report = GraphEvalHarness.runHeldOut(loaded, null, SCHEMA, List.of(new DecisionModel("tev1", beating)),
-                    2, Certifier.DEFAULT_RECALL_FLOOR, 1, progress);
+                    2, Certifier.DEFAULT_RECALL_FLOOR, 1, progress, false, List.of(),
+                    GraphEvalHarness.DevOptions.NONE, questions);
 
             assertTrue(events.stream().anyMatch(e -> e.get("event").getAsString().equals(EvalProgress.HEARTBEAT)),
                     events.toString());
@@ -724,6 +730,14 @@ class GraphEvalHarnessTest extends UnitTest {
                 assertFalse(json.contains(secret), "the report names " + secret + ": " + json);
             }
             assertEquals(1, report.cases());
+            var sections = report.coverage().sections();
+            assertEquals(new CoverageReport.Labelled(1, 0), sections.labelled());
+            assertEquals(List.of(new CoverageReport.QuestionCount("q01", null, 1, null)), sections.questions());
+            assertEquals(1, sections.notRepresentable().byKind().get("instruction"));
+            var confusions = report.coverage().confusions();
+            assertEquals(List.of("tev1"), confusions.stream().map(CoverageReport.Confusion::model).toList());
+            assertEquals(2, confusions.getFirst().rows().get("System").get("System"),
+                    "the gold System, typed as labelled in each of the two runs");
             assertEquals(ExtractionPipeline.fingerprint(SCHEMA), report.extraction());
             assertEquals(1, report.unlabelled());
             assertEquals(new GraphEvalHarness.HeldOutIntegrity(1, 1, 1), report.memoryIntegrity());

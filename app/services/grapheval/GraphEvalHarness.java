@@ -142,10 +142,21 @@ public final class GraphEvalHarness {
     public record HeldOutModel(String model, List<RunReport> runs, Combined walk, Certificate certificate,
                                Development v2) {}
 
-    /** The held-out set's result: aggregate counts only, never an id, a text or a span. */
+    /**
+     * The held-out set's result: aggregate counts only, never an id, a text or a span. {@code coverage} holds the label
+     * sections once and one confusion matrix per model (JCLAW-1374).
+     */
     public record HeldOutReport(String set, String schema, String extraction, boolean pairFilter, int cases,
                                 int unlabelled, int runs, double recallFloor,
-                                List<HeldOutModel> models, HeldOutIntegrity memoryIntegrity, int excludedSplitIds) {}
+                                List<HeldOutModel> models, HeldOutIntegrity memoryIntegrity, int excludedSplitIds,
+                                HeldOutCoverage coverage) {}
+
+    /** The coverage report over a held-out run: the label sections, and each model's typing confusions. */
+    public record HeldOutCoverage(CoverageReport.Sections sections, List<CoverageReport.Confusion> confusions) {
+        public HeldOutCoverage {
+            confusions = List.copyOf(confusions);
+        }
+    }
 
     /** The columns a decision must never touch. */
     private record Snapshot(String text, @Nullable String retrievalKey, Instant updatedAt,
@@ -153,7 +164,7 @@ public final class GraphEvalHarness {
 
     private record CaseResult(StageRun stages, CaseRun e2e) {}
 
-    private record RunData(Stages stages, List<CaseRun> e2e, List<ClassWalk> classWalks) {}
+    private record RunData(Stages stages, List<CaseRun> e2e, List<ClassWalk> classWalks, List<StageRun> stageRuns) {}
 
     /** A model's runs scored: each run's report, the combined class walks and the configuration they give. */
     private record Scoring(List<RunReport> reports, List<ClassWalk> classes, Statements.Classes config,
@@ -312,11 +323,21 @@ public final class GraphEvalHarness {
                 List.of(), DevOptions.NONE);
     }
 
-    /** {@link #runHeldOut} with the held-out verdicts and the v2 development options. */
+    /** {@link #runHeldOut} with the held-out verdicts and the v2 development options, and no competency questions. */
     public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, @Nullable String ownerName, OntologySchema schema,
                                            List<DecisionModel> models, int runs, double recallFloor, int concurrency,
                                            EvalProgress progress, boolean pairFilter,
                                            List<Adjudications.Verdict> adjudications, DevOptions options) {
+        return runHeldOut(loaded, ownerName, schema, models, runs, recallFloor, concurrency, progress, pairFilter,
+                adjudications, options, null);
+    }
+
+    /** {@link #runHeldOut} with the operator's competency questions, null when there is no question file. */
+    public static HeldOutReport runHeldOut(HeldOut.Loaded loaded, @Nullable String ownerName, OntologySchema schema,
+                                           List<DecisionModel> models, int runs, double recallFloor, int concurrency,
+                                           EvalProgress progress, boolean pairFilter,
+                                           List<Adjudications.Verdict> adjudications, DevOptions options,
+                                           @Nullable List<CompetencyQuestions.Question> questions) {
         // Cases go by memory id, as held-out verdicts and the agreed draw do; the report carries none of them.
         var cases = new ArrayList<Case>();
         var memoryIds = new LinkedHashMap<String, String>();
@@ -342,8 +363,10 @@ public final class GraphEvalHarness {
             if (entry.getValue() != null && entry.getValue().equals(now)) unchanged++;
         }
         var reports = new ArrayList<HeldOutModel>();
+        var typing = new LinkedHashMap<String, List<StageRun>>();
         for (var m : models) {
             var data = measured.getOrDefault(m.name(), List.<RunData>of());
+            typing.put(m.name(), data.stream().flatMap(d -> d.stageRuns().stream()).toList());
             var scoring = scoring(cases, data, schema, recallFloor);
             reports.add(new HeldOutModel(m.name(), scoring.reports(),
                     Certifier.combine(scoring.reports().stream().map(RunReport::walk).toList()),
@@ -351,7 +374,9 @@ public final class GraphEvalHarness {
         }
         return new HeldOutReport("heldout", schema.fingerprint(), ExtractionPipeline.fingerprint(schema), pairFilter,
                 cases.size(), loaded.unlabelled(), runs, recallFloor,
-                reports, new HeldOutIntegrity(before.size(), unchanged, present), options.excludedSplitIds());
+                reports, new HeldOutIntegrity(before.size(), unchanged, present), options.excludedSplitIds(),
+                new HeldOutCoverage(CoverageReport.sections(loaded.cases(), questions, schema),
+                        CoverageReport.confusions(loaded.cases(), typing)));
     }
 
     /**
@@ -391,7 +416,8 @@ public final class GraphEvalHarness {
                 var stages = StageScorer.score(cases, slice.stream().map(CaseResult::stages).toList(), ownerName,
                         schema);
                 out.computeIfAbsent(m.name(), _ -> new ArrayList<>()).add(
-                        new RunData(stages, e2e, classWalks(cases, e2e, schema.symmetricSet())));
+                        new RunData(stages, e2e, classWalks(cases, e2e, schema.symmetricSet()),
+                                slice.stream().map(CaseResult::stages).toList()));
             }
         }
         return out;

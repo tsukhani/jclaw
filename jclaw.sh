@@ -992,6 +992,7 @@ Usage: ./jclaw.sh grapheval run --agent NAME [options]
        ./jclaw.sh grapheval rescore --split NAME --decision-model ID [--check-share S]
        ./jclaw.sh grapheval blind-sheet
        ./jclaw.sh grapheval heldout-sample --agent NAME --count N [--seed S]
+       ./jclaw.sh grapheval coverage [--out FILE]
 
 Certifies local Ollama decision models for graph extraction (JCLAW-1356).
 Needs the backend running. evals/graph/README.md is the contract.
@@ -1027,6 +1028,13 @@ rescore         Scores a stored certification run again under the current
 heldout-sample  Copies --count of the agent's memories, read-only, into
                 data/graph-eval/heldout.json for labelling. Refuses to
                 overwrite an existing file.
+coverage        Model-free coverage report (JCLAW-1374): reads
+                data/graph-eval/heldout.json and, when present,
+                evals/graph/competency-questions.json, calls no model, reads
+                no memory, and prints counts only: per question, the schema
+                grid, not-representable kinds, numbers, back references,
+                strata and the labelled cases counted. --out also writes it
+                to FILE.
 
 Options for run:
   --agent NAME             Agent whose memories hold the cases (required,
@@ -1049,7 +1057,8 @@ Options for run:
   --split NAME             Certify on this frozen split; its set follows from it.
   --agreed-share S         Share of agreed records drawn for adjudication (default 0.2).
   --seed S                 The agreed sample's seed (default the split's).
-  --out FILE               Write the full JSON report to FILE (run, rescore).
+  --out FILE               Write the full JSON report to FILE (run, rescore,
+                           coverage).
 
 Options for freeze-split:
   --name NAME              The split's name (required).
@@ -3993,9 +4002,9 @@ PYSUM
 do_grapheval() {
     local sub="${1:-}"
     case "$sub" in
-        run|blind-sheet|heldout-sample|freeze-split|rescore) shift ;;
+        run|blind-sheet|heldout-sample|freeze-split|rescore|coverage) shift ;;
         --help|-h) usage_grapheval; exit 0 ;;
-        *) echo "Error: grapheval needs a subcommand: run, freeze-split, rescore, blind-sheet or heldout-sample."; usage_grapheval; exit 2 ;;
+        *) echo "Error: grapheval needs a subcommand: run, freeze-split, rescore, blind-sheet, heldout-sample or coverage."; usage_grapheval; exit 2 ;;
     esac
     local agent="" set="" runs="" floor="" concurrency="" timeout="" out="" count="" seed="" configuration=""
     local name="" share="" ids="" starting="" order="" split="" agreed_share="" check_share=""
@@ -4084,6 +4093,7 @@ do_grapheval() {
         heldout-sample) path="/api/graph/eval/heldout/sample" ;;
         freeze-split)   path="/api/graph/eval/split" ;;
         rescore)        path="/api/graph/eval/rescore" ;;
+        coverage)       path="/api/graph/eval/heldout/coverage" ;;
     esac
     body=$(python3 - "$sub" "$agent" "$set" "$runs" "$floor" "$concurrency" "$timeout" "$count" "$seed" \
         "$configuration" "$name" "$share" "$ids" "$starting" "$order" "$split" "$agreed_share" "$check_share" \
@@ -4221,6 +4231,17 @@ PYSTREAM
         echo "Error: grapheval $sub failed (HTTP $status)"
         cat "$tmp"; echo; rm -f "$tmp"
         exit 1
+    fi
+
+    if [[ "$sub" == "coverage" ]]; then
+        python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])), indent=2))' "$tmp"
+        if [[ -n "$out" ]]; then
+            mkdir -p "$(dirname "$out")"
+            cp "$tmp" "$out"
+            echo "==> Coverage report written to $out"
+        fi
+        rm -f "$tmp"
+        return 0
     fi
 
     if [[ "$sub" != "run" && "$sub" != "rescore" ]]; then

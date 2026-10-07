@@ -19,7 +19,9 @@ import services.grapheval.Adjudications;
 import services.grapheval.Agreement;
 import services.grapheval.CertificationSplit;
 import services.grapheval.Certifier;
+import services.grapheval.CompetencyQuestions;
 import services.grapheval.Configuration;
+import services.grapheval.CoverageReport;
 import services.grapheval.EvalProgress;
 import services.grapheval.ExtractionPipeline.Decider;
 import services.grapheval.GraphCases;
@@ -182,8 +184,9 @@ public class ApiGraphEvalController extends Controller {
             var options = new GraphEvalHarness.DevOptions(guide(), agreedSeed, agreedShare,
                     Adjudications.DEFAULT_CHECK_SHARE, loaded.cases().size() - kept.size());
             var verdicts = verdicts(root().resolve(Adjudications.HELDOUT_FILE));
+            var questions = questions(schema);
             stream(progress -> GraphEvalHarness.runHeldOut(unsplit, ownerName, schema, models, runs, floor,
-                    concurrency, progress, filter, verdicts, options), true);
+                    concurrency, progress, filter, verdicts, options, questions), true);
             return;
         }
 
@@ -480,6 +483,39 @@ public class ApiGraphEvalController extends Controller {
         out.addProperty("sampled", sampled.sampled());
         out.addProperty("available", sampled.available());
         renderJSON(GSON.toJson(out));
+    }
+
+    /**
+     * {@code POST /api/graph/eval/heldout/coverage}: the coverage report's label sections over the held-out file and
+     * the competency questions (JCLAW-1374). Model-free: it asks no model, reads no decision setting and no memory, and
+     * covers every labelled case, frozen splits included.
+     */
+    @NoTransaction
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "measurement harness -- loopback plus X-Loadtest-Auth; reads data/graph-eval/heldout.json and returns counts only")
+    public static void coverage() {
+        var schema = schema();
+        var file = HeldOut.defaultPath();
+        if (!Files.exists(file)) throw invalid("no held-out file; run grapheval heldout-sample first");
+        HeldOut.Loaded loaded;
+        try {
+            loaded = HeldOut.load(file, schema);
+        } catch (IOException | RuntimeException e) {
+            throw invalid("invalid held-out set: " + e.getMessage());
+        }
+        var questions = questions(schema);
+        renderJSON(GSON.toJson(CoverageReport.sections(loaded.cases(), questions, schema)));
+    }
+
+    /** The operator's competency questions, null when there is no question file. */
+    private static @Nullable List<CompetencyQuestions.Question> questions(OntologySchema schema) {
+        var file = appPath(CompetencyQuestions.DEFAULT_PATH);
+        if (!Files.exists(file)) return null;
+        try {
+            return CompetencyQuestions.load(file, schema);
+        } catch (IOException | RuntimeException e) {
+            throw invalid("invalid competency questions: " + e.getMessage());
+        }
     }
 
     private static String agentId(JsonObject body) {

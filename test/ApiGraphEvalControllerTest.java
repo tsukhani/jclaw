@@ -1,20 +1,31 @@
 import com.google.gson.JsonParser;
+import memory.MemoryStoreFactory;
 import memory.ontology.OntologySchema;
 import models.Agent;
+import models.Memory;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.mvc.Http;
 import play.test.FunctionalTest;
+import services.AgentService;
 import services.grapheval.Agreement;
+import services.grapheval.CompetencyQuestions;
 import services.grapheval.GraphCases;
 import services.grapheval.HeldOut;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
+
+import static utils.GsonHolder.GSON;
 
 /**
  * JCLAW-1344, JCLAW-1356: the graph eval endpoints' gate, validation and blind sheet. No request here reaches a model
@@ -286,5 +297,127 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
         assertPostRefused(path, "{\"decisionModel\":\"tev1\"}", "'split' is required");
         assertPostRefused(path, "{\"split\":\"x\",\"decisionModel\":\"tev1\",\"threshold\":0.8}",
                 "threshold is gone");
+    }
+
+    // --- JCLAW-1374: the model-free coverage report ----------------------------------------
+
+    private static final String COVERAGE = "/api/graph/eval/heldout/coverage";
+
+    private static <T> T commitInFreshTx(Supplier<T> block) {
+        var ref = new AtomicReference<T>();
+        var err = new AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(services.Tx.run(block::get));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+        if (err.get() != null) throw new IllegalStateException(err.get());
+        return ref.get();
+    }
+
+    /** Runs {@code body} with {@code content} over the file at {@code path} (absent when null), then restores it. */
+    private static void withFile(Path path, @Nullable String content, ThrowingRunnable body) throws Exception {
+        var saved = Files.exists(path) ? Files.readString(path) : null;
+        try {
+            if (content == null) {
+                Files.deleteIfExists(path);
+            } else {
+                Files.createDirectories(path.getParent());
+                Files.writeString(path, content);
+            }
+            body.run();
+        } finally {
+            if (saved == null) Files.deleteIfExists(path);
+            else Files.writeString(path, saved);
+        }
+    }
+
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
+    }
+
+    @Test
+    void theCoverageRouteNeedsTheSharedSecret() {
+        var response = POST(loadtestRequest(null), COVERAGE, "application/json", "{}");
+        assertEquals(403, response.status.intValue());
+    }
+
+    @Test
+    void theCoverageRouteWithoutAHeldOutFileIs400() throws Exception {
+        withFile(HeldOut.defaultPath(), null, () ->
+                assertPostRefused(COVERAGE, "{}", "no held-out file; run grapheval heldout-sample first"));
+    }
+
+    /** Sent with no decision model in the request, and the test DB configures none: the route asks for none. */
+    @Test
+    void theCoverageReportCountsLabelsWithoutAModelOrAMemoryRead() throws Exception {
+        var text = "The user works at Harborlight Analytics and keeps port 8443 open for it.";
+        LuceneTestSync.closedForTest();
+        String memoryId = null;
+        try {
+            memoryId = commitInFreshTx(() -> {
+                var agent = AgentService.create("grapheval-coverage-" + UUID.randomUUID().toString().substring(0, 8),
+                        "test-provider", "test-model");
+                return MemoryStoreFactory.get().storeDeferred(String.valueOf(agent.id), text, "fact", 0.5);
+            });
+            long id = Long.parseLong(memoryId);
+            Supplier<String> row = () -> commitInFreshTx(() -> {
+                Memory m = Memory.findById(id);
+                return m.text + "|" + m.updatedAt;
+            });
+            var before = row.get();
+            var heldout = GSON.toJson(Map.of("cases", List.of(Map.of("memoryId", id, "labelled", true, "text", text,
+                    "capturedAt", "2026-10-03", "authorType", "human_turn",
+                    "entities", List.of(Map.of("id", "operator", "mention", "The user", "type", "Person"),
+                            Map.of("id", "harborlight", "mention", "Harborlight Analytics", "type", "Organization")),
+                    "relations", List.of(Map.of("from", "operator", "type", "works_at", "to", "harborlight",
+                            "status", "holds")),
+                    "notRepresentable", List.of("instruction"), "numbers", List.of("identifier"),
+                    "backReference", true))));
+            var questions = Play.applicationPath.toPath().resolve(CompetencyQuestions.DEFAULT_PATH);
+            withFile(HeldOut.defaultPath(), heldout, () -> withFile(questions, null, () -> {
+                var response = POST(authed(), COVERAGE, "application/json", "{}");
+                assertEquals(200, response.status.intValue(), getContent(response));
+                var content = getContent(response);
+                var body = JsonParser.parseString(content).getAsJsonObject();
+                assertEquals(Set.of("questions", "grid", "notRepresentable", "numbers", "backReference", "strata",
+                        "labelled"), body.keySet(), "every label section and no confusions");
+                assertTrue(body.get("questions").isJsonNull(), "no question file, no questions");
+                assertTrue(body.getAsJsonObject("grid").getAsJsonArray("cells").asList().stream()
+                        .allMatch(c -> c.getAsJsonObject().getAsJsonArray("questions").isEmpty()));
+                assertEquals(1, body.getAsJsonObject("labelled").get("counted").getAsInt());
+                assertEquals(1, body.getAsJsonObject("numbers").getAsJsonObject("byKind").get("identifier").getAsInt());
+                assertEquals(1, body.getAsJsonObject("backReference").get("count").getAsInt());
+                for (var secret : List.of("memoryId", text, "Harborlight", "The user", "8443")) {
+                    assertFalse(content.contains(secret), "the report names " + secret);
+                }
+
+                Files.writeString(questions, "{\"questions\": []}");
+                var broken = POST(authed(), COVERAGE, "application/json", "{}");
+                assertEquals(400, broken.status.intValue(), getContent(broken));
+                assertTrue(getContent(broken).contains("invalid competency questions"), getContent(broken));
+            }));
+            withFile(HeldOut.defaultPath(), "{\"cases\": 3}", () ->
+                    assertPostRefused(COVERAGE, "{}", "invalid held-out set"));
+            assertEquals(before, row.get(), "the memory row is unchanged");
+        } finally {
+            var stored = memoryId;
+            if (stored != null) {
+                commitInFreshTx(() -> {
+                    MemoryStoreFactory.get().delete(stored);
+                    return null;
+                });
+            }
+            LuceneTestSync.release();
+        }
     }
 }
