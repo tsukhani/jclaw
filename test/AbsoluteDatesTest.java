@@ -80,6 +80,13 @@ class AbsoluteDatesTest extends UnitTest {
     @Test
     void aStretchAfterTheIsLeftAloneButTheCalendarPeriodIsNot() {
         unchanged("Over the last year the user ran daily.");
+        unchanged("The user ran daily for the last month.");
+        unchanged("The user hit target the last quarter.");
+        unchanged("The user booked the next June.");
+        unchanged("The last year was hard.");
+        rewrites("The user ran daily last month.", "The user ran daily in September 2026.");
+        rewrites("The user hit target last quarter.", "The user hit target in Q3 2026.");
+        rewrites("The user booked next June.", "The user booked in June 2027.");
         rewrites("Has run daily since last year.", "Has run daily since 2025.");
     }
 

@@ -78,7 +78,7 @@ public final class AbsoluteDates {
         if (span.start() > 0 && text.charAt(span.start() - 1) == '-') return null;
         if (followedByJoin(text, span.end())) return null;
         var previous = previousToken(text, span.start());
-        if (previous != null && possessive(previous)) return null;
+        if (previous != null && (previous.equalsIgnoreCase("the") || possessive(previous))) return null;
         var form = written(date);
         if (form == null) return null;
         if (previous != null && PREPOSITIONS.contains(previous.toLowerCase(Locale.ROOT))) {
