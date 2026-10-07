@@ -157,7 +157,13 @@ public final class McpServerTool implements ToolRegistry.Tool {
         // No `tool` → discovery catalog; the model builds its populated calls from the schemas.
         if (!args.has("tool") || args.get("tool").isJsonNull()
                 || args.get("tool").getAsString().isBlank()) {
-            return enumerateActions();
+            // A whole envelope wrapped once more also has no outer `tool`, and the catalog
+            // does not correct it: the model re-sends the same shape.
+            var nested = nestedEnvelopeHint(args);
+            return nested.isEmpty()
+                    ? enumerateActions()
+                    : ToolRegistry.ToolResult.text(
+                            "MCP server '" + serverName + "' was called with no `tool`. " + nested.strip());
         }
 
         var actionName = args.get("tool").getAsString();
@@ -194,6 +200,16 @@ public final class McpServerTool implements ToolRegistry.Tool {
      *         unknown action (typo, stale tool list).
      */
     private String envelopeHint(String actionName, JsonObject args) {
+        var nested = nestedEnvelopeHint(args);
+        if (!nested.isEmpty()) return nested;
+        if (actionName.equals(serverName) || actionName.equals(name())) {
+            return "That is this server's own name, not an action — `tool` takes the action name. ";
+        }
+        return "";
+    }
+
+    /** The corrective sentence when {@code args.tool} names a registered action, else empty. */
+    private String nestedEnvelopeHint(JsonObject args) {
         if (args.has("args") && args.get("args").isJsonObject()) {
             var inner = args.getAsJsonObject("args");
             if (inner.has("tool") && inner.get("tool").isJsonPrimitive()) {
@@ -204,9 +220,6 @@ public final class McpServerTool implements ToolRegistry.Tool {
                             + "\", \"args\": {...}} with the action's own arguments at the top of `args`. ";
                 }
             }
-        }
-        if (actionName.equals(serverName) || actionName.equals(name())) {
-            return "That is this server's own name, not an action — `tool` takes the action name. ";
         }
         return "";
     }

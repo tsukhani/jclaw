@@ -358,6 +358,32 @@ class McpServerToolTest extends UnitTest {
     }
 
     @Test
+    void nestedEnvelopeWithNoOuterToolGetsTheHintInsteadOfTheCatalog() {
+        // A whole envelope wrapped once more has no outer `tool`, so it read as a discovery
+        // call: one model got the full catalog back three times before it sent the flat shape.
+        var serverName = "academy";
+        var adapter = recordingAdapter("mcp_" + serverName + "_list_popular_courses");
+        ToolRegistry.publish(List.of(adapter));
+
+        var result = new McpServerTool(serverName).executeRich(
+                "{\"args\":{\"args\":{},\"tool\":\"list_popular_courses\"}}", null);
+
+        assertTrue(result.text().contains("nested one level too deep"), result.text());
+        assertTrue(result.text().contains("{\"tool\": \"list_popular_courses\""),
+                "the hint quotes the corrected call: " + result.text());
+        assertNull(adapter.lastArgs, "still a hint, never a silent dispatch");
+    }
+
+    @Test
+    void aDiscoveryCallWithAnUnregisteredInnerToolStillEnumerates() {
+        var result = new McpServerTool("absent-" + System.nanoTime()).executeRich(
+                "{\"args\":{\"tool\":\"not_a_real_action\"}}", null);
+        assertFalse(result.text().contains("nested one level too deep"), result.text());
+        assertTrue(result.text().contains("not currently connected"),
+                "anything else with no outer `tool` is still a discovery call: " + result.text());
+    }
+
+    @Test
     void serverNameInTheActionSlotIsCalledOutAsSuch() {
         var serverName = "github";
         var result = new McpServerTool(serverName).executeRich(
