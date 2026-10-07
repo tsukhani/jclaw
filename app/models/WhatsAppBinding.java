@@ -8,6 +8,7 @@ import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.jspecify.annotations.Nullable;
+import play.db.jpa.JPA;
 
 import java.time.Instant;
 import java.util.List;
@@ -159,18 +160,21 @@ public class WhatsAppBinding extends AgentBoundBinding {
 
     /**
      * Record a delivery failure on the binding, unless the stored one is newer: the time never
-     * moves backwards, so a replayed or late status cannot regress the card. The caller supplies
-     * the transaction.
+     * moves backwards, so a replayed or late status cannot regress the card. Bulk JPQL, so it
+     * neither overwrites a concurrent operator edit with a stale row nor bumps {@code updatedAt}.
+     * The caller supplies the transaction.
      */
     public static void recordDeliveryFailure(Long bindingId, Instant at,
                                              @Nullable Integer code, @Nullable String title) {
-        WhatsAppBinding binding = WhatsAppBinding.findById(bindingId);
-        if (binding == null) return;
-        if (binding.lastDeliveryFailureAt != null && binding.lastDeliveryFailureAt.isAfter(at)) return;
-        binding.lastDeliveryFailureAt = at;
-        binding.lastDeliveryFailureCode = code;
-        binding.lastDeliveryFailureTitle = title != null && title.length() > 255 ? title.substring(0, 255) : title;
-        binding.save();
+        JPA.em().createQuery("""
+                        UPDATE WhatsAppBinding b SET b.lastDeliveryFailureAt = :at,
+                            b.lastDeliveryFailureCode = :code, b.lastDeliveryFailureTitle = :title
+                        WHERE b.id = :id AND (b.lastDeliveryFailureAt IS NULL OR b.lastDeliveryFailureAt <= :at)""")
+                .setParameter("at", at)
+                .setParameter("code", code)
+                .setParameter("title", title != null && title.length() > 255 ? title.substring(0, 255) : title)
+                .setParameter("id", bindingId)
+                .executeUpdate();
     }
 
     public static WhatsAppBinding findByAgent(Agent agent) {

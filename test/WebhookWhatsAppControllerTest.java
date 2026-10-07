@@ -279,6 +279,7 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
     void signedFailedStatusIsLoggedOnceAndRecordedOnTheBinding() {
         var bindingId = seedBinding(APP_SECRET);
         var agentId = agentIdOf(bindingId);
+        var updatedBefore = reload(bindingId).updatedAt;
         var body = failedStatusBody(uniqueWamid(), "1751142888");
 
         assertIsOk(postWithSig(body, sign(body)));
@@ -300,6 +301,9 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         assertEquals(131049, b.lastDeliveryFailureCode);
         assertEquals("This message was not delivered to maintain healthy ecosystem engagement.",
                 b.lastDeliveryFailureTitle);
+        // H2 keeps microseconds; the cached seed copy carried nanoseconds.
+        assertTrue(java.time.Duration.between(updatedBefore, b.updatedAt).abs().toMillis() < 1,
+                () -> "a delivery failure is not an edit to the binding: " + updatedBefore + " -> " + b.updatedAt);
     }
 
     @Test
@@ -356,6 +360,13 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         var older = failedStatusBody(uniqueWamid(), "1751000000");
         assertIsOk(postWithSig(older, sign(older)));
         assertEquals(java.time.Instant.ofEpochSecond(1751142888L), reload(bindingId).lastDeliveryFailureAt);
+        assertEquals(131049, reload(bindingId).lastDeliveryFailureCode);
+
+        var sameSecond = statusesBody("""
+                [{"id":"%s","status":"failed","timestamp":"1751142888","errors":[{"code":131042,"title":"pay"}]}]
+                """.formatted(uniqueWamid()));
+        assertIsOk(postWithSig(sameSecond, sign(sameSecond)));
+        assertEquals(131042, reload(bindingId).lastDeliveryFailureCode, "a failure in the same second replaces");
 
         var later = failedStatusBody(uniqueWamid(), "1751200000");
         assertIsOk(postWithSig(later, sign(later)));

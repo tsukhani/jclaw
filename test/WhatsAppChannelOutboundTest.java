@@ -10,6 +10,7 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 import okio.Buffer;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.UnitTest;
 import services.Tx;
 import utils.HttpFactories;
@@ -260,7 +261,11 @@ class WhatsAppChannelOutboundTest extends UnitTest {
             var client = new OkHttpClient.Builder().addInterceptor(canned).build();
             HttpFactories.callWith(client,
                     () -> WhatsAppChannel.forBinding(binding).trySend("447900000001", "hi"));
-            return Tx.run(() -> WhatsAppBinding.<WhatsAppBinding>findById(binding.id));
+            return Tx.run(() -> {
+                WhatsAppBinding b = WhatsAppBinding.findById(binding.id);
+                JPA.em().refresh(b); // the failure is a bulk update, which a managed copy does not see
+                return b;
+            });
         } finally {
             Tx.run(() -> {
                 WhatsAppBinding b = WhatsAppBinding.findById(binding.id);
