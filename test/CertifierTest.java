@@ -691,12 +691,15 @@ class CertifierTest extends UnitTest {
 
     @Test
     void aRelationWithNoWritingMemoryOnItsSetIsNotEvaluable() {
-        var world = new World().relation("a", 0, 0, 50, 0).relation("b", 200, 0, 200, 200);
+        var world = new World().relation("a", 0, 0, 50, 0).relation("b", 200, 0, 200, 200)
+                .relation("c", 1, 0, 1, 1);
         world.set = CertificationSplit.HELDOUT;
         var s = world.sequence();
         assertEquals(Certifier.OFF, gate(s, "a").state());
         assertEquals("a not evaluable: its certifying set heldout has no data in this run", gate(s, "a").reason());
         assertEquals(Certifier.ON, gate(s, "b").state());
+        assertEquals(Certifier.OFF, gate(s, "c").state());
+        assertTrue(gate(s, "c").reason().startsWith("c fails its bound at 0.950: 0 wrong of 1,"), gate(s, "c").reason());
     }
 
     @Test
