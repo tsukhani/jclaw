@@ -36,6 +36,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -208,6 +209,21 @@ class RunLedgerTest extends UnitTest {
                 .findFirst().orElseThrow();
         assertEquals("works_at", relation.relation());
         assertEquals(0.97, relation.yes(), 1e-9);
+    }
+
+    @Test
+    void reExtractingARetractedUnchangedMemoryIsRefusedNamingItsRunAndWritesNothing() throws Exception {
+        var first = record(506, TEXT);
+        assertEquals(1, store.retract(AGENT, Set.of(first.runId())).runs());
+        var after = files();
+
+        var refused = assertThrows(GraphStore.RunRetractedException.class, () -> record(506, TEXT));
+
+        assertEquals(first.runId(), refused.runId());
+        assertTrue(refused.getMessage().contains("run retracted: " + first.runId()), refused.getMessage());
+        assertEquals(after, files());
+        var changed = record(506, TEXT + " Still.");
+        assertNotEquals(first.runId(), changed.runId(), "changed text is a new run, and it writes");
     }
 
     @Test
