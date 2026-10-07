@@ -228,7 +228,17 @@ function subscriptionUrl(id: number) {
   return `/api/channels/whatsapp/bindings/${id}/subscription`
 }
 
+// A newer read, a forget or a Subscribe supersedes a read still in flight for the same binding.
+const subscriptionReads = new Map<number, ReturnType<typeof useLatestRequest>>()
+function beginSubscriptionRead(id: number): () => boolean {
+  const reads = subscriptionReads.get(id) ?? useLatestRequest()
+  subscriptionReads.set(id, reads)
+  const token = reads.begin()
+  return () => reads.isCurrent(token)
+}
+
 function forgetSubscription(id: number) {
+  beginSubscriptionRead(id)
   const { [id]: _state, ...states } = subscriptions.value
   const { [id]: _error, ...errors } = subscribeErrors.value
   subscriptions.value = states
@@ -237,7 +247,7 @@ function forgetSubscription(id: number) {
 
 watch(bindings, (list) => {
   const listed = new Set((list ?? []).map(b => b.id))
-  for (const id of Object.keys(subscriptions.value).map(Number)) {
+  for (const id of [...subscriptionReads.keys()]) {
     if (!listed.has(id)) forgetSubscription(id)
   }
   for (const b of list ?? []) {
@@ -245,9 +255,10 @@ watch(bindings, (list) => {
       forgetSubscription(b.id)
       continue
     }
+    const isCurrent = beginSubscriptionRead(b.id)
     $fetch<WhatsAppSubscriptionState>(subscriptionUrl(b.id))
-      .then((state) => { subscriptions.value[b.id] = state })
-      .catch(() => forgetSubscription(b.id))
+      .then((state) => { if (isCurrent()) subscriptions.value[b.id] = state })
+      .catch(() => { if (isCurrent()) forgetSubscription(b.id) })
   }
 }, { immediate: true })
 
@@ -260,6 +271,7 @@ async function subscribe(binding: WhatsAppBindingSummary) {
     subscribeErrors.value[binding.id] = subscriptionError.value?.message ?? 'Subscribe failed.'
     return
   }
+  beginSubscriptionRead(binding.id)
   subscriptions.value[binding.id] = result
 }
 

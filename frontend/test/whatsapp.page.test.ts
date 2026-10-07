@@ -381,6 +381,8 @@ describe('Meta app subscription (JCLAW-1410)', () => {
   const URL = '/api/channels/whatsapp/bindings/7/subscription'
   let state: Record<string, unknown> = {}
   let getCount = 0
+  let getHeld: Promise<void> | null = null
+  let getServed = 0
   let postHandler: (event: H3Event) => unknown = () => ({})
 
   function sub(overrides: Record<string, unknown>) {
@@ -389,9 +391,12 @@ describe('Meta app subscription (JCLAW-1410)', () => {
 
   registerEndpoint(URL, {
     method: 'GET',
-    handler: () => {
+    handler: async () => {
       getCount++
-      return state
+      const answer = state
+      if (getHeld) await getHeld
+      getServed++
+      return answer
     },
   })
   registerEndpoint(URL, {
@@ -402,6 +407,8 @@ describe('Meta app subscription (JCLAW-1410)', () => {
   beforeEach(() => {
     state = sub({ state: 'NOT_SUBSCRIBED', wabaId: '222', appId: '444' })
     getCount = 0
+    getHeld = null
+    getServed = 0
     postHandler = () => sub({ state: 'SUBSCRIBED', wabaId: '222', appId: '444' })
   })
 
@@ -474,6 +481,24 @@ describe('Meta app subscription (JCLAW-1410)', () => {
     bindingsResponse = [binding({ enabled: false })]
     await refreshNuxtData()
     await vi.waitFor(() => expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false))
+  })
+
+  it('ignores a read that lands after a refresh showed the binding disabled', async () => {
+    let release: () => void = () => {}
+    getHeld = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(getCount).toBeGreaterThan(0))
+    bindingsResponse = [binding({ enabled: false })]
+    await refreshNuxtData()
+    await flushPromises()
+    release()
+    await vi.waitFor(() => expect(getServed).toBeGreaterThan(0))
+    await new Promise(resolve => setTimeout(resolve, 50))
+    await flushPromises()
+    expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false)
   })
 
   it('clears the warning after a successful Subscribe', async () => {
