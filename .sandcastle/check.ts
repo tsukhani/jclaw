@@ -18,8 +18,11 @@ const ticket = (...bodies: string[]): Snapshot => ({
 });
 const OFFER = "h3. AFK factory: ready for review\nbrief", GAVE_UP = "h3. AFK factory gave up\nboom";
 const feedbackOf = (t: Snapshot) => rejectionFeedback(t, "h3. AFK factory");
-const check = (name: string, got: unknown, want: unknown) =>
-  console.log(`${JSON.stringify(got) === JSON.stringify(want) ? "ok  " : "FAIL"} ${name}: ${JSON.stringify(got)}`);
+const check = (name: string, got: unknown, want: unknown) => {
+  const ok = JSON.stringify(got) === JSON.stringify(want);
+  if (!ok) process.exitCode = 1;
+  console.log(`${ok ? "ok  " : "FAIL"} ${name}: ${JSON.stringify(got)}`);
+};
 
 check("never offered", feedbackOf(ticket("a human note")), undefined);
 check("failed before any offer", feedbackOf(ticket(GAVE_UP)), undefined);
