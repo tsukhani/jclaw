@@ -340,6 +340,7 @@ class CertifierTest extends UnitTest {
         int perMemory = 1;
         int packed = 1;
         int classValues;
+        int classWrong;
         String set;
         final List<Configuration> seen = new ArrayList<>();
 
@@ -387,7 +388,7 @@ class CertifierTest extends UnitTest {
                 violated += violations.getOrDefault(r, 0);
             }
             var classes = new HashMap<String, List<MemoryCounts>>();
-            for (var name : Certifier.V2_CLASSES) classes.put(name, spread(classValues, 0));
+            for (var name : Certifier.V2_CLASSES) classes.put(name, spread(classValues, classWrong));
             boolean live = set == null || set.equals(CertificationSplit.HELDOUT);
             boolean synthetic = set == null || set.equals(CertificationSplit.CASES);
             return new Evaluation(live ? gates : Map.of(), synthetic ? classes : Map.of(),
@@ -744,6 +745,17 @@ class CertifierTest extends UnitTest {
         }
         assertEquals(40, requirement(s, "status").writtenRecords());
         assertEquals(100, requirement(s, Certifier.G_TRAP).writtenRecords());
+        assertEquals(100, requirement(s, Certifier.G_TRAP).goldMemories());
+    }
+
+    @Test
+    void aDisabledClassWithEvaluableValuesIsObservedAtItsHighestEvaluableThreshold() {
+        var world = new World().relation("a", 200, 0, 200, 200);
+        world.classValues = 40;
+        world.classWrong = 10;
+        var s = world.sequence();
+        assertEquals(Certifier.DISABLED, s.classes().getFirst().state(), "10 wrong of 40 fails the class bound");
+        assertEquals(40, requirement(s, "status").writtenRecords());
     }
 
     @Test
@@ -811,6 +823,13 @@ class CertifierTest extends UnitTest {
         all.put("b", START);
         assertTrue(heldout.seen.contains(new Configuration(START, all, new TreeMap<>())),
                 "the relations are observed with every relation at the start");
+        var provisional = new TreeMap<String, Configuration.ClassSetting>();
+        for (var name : Certifier.V2_CLASSES) {
+            provisional.put(name, new Configuration.ClassSetting(Certifier.PROVISIONAL, START));
+        }
+        assertTrue(heldout.seen.contains(new Configuration(START, all, provisional)),
+                "the classes are observed provisional at the start");
+        assertEquals(300, requirement(c, "status").writtenRecords(), "a class observed at the start writes values");
         assertEquals(129, requirement(h, Certifier.G_WRITTEN).writtenRecords(), "Terms alone at the start");
         assertEquals(0, requirement(h, "status").writtenRecords(), "a held-out run reads no class");
         assertEquals(0, requirement(h, Certifier.G_TRAP).writtenRecords());

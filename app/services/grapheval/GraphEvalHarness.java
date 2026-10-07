@@ -753,8 +753,8 @@ public final class GraphEvalHarness {
         Configuration reached = new Configuration(start, new TreeMap<>(), new TreeMap<>());
         if (failed == 0 && !runs.isEmpty()) {
             sequencing = Certifier.sequence(bounds, set, start, relationOrder, recallFloor,
-                    c -> routed(worst(scoreAt.apply(c).stream().map(cf -> evaluation(cf, book)).toList(), bounds),
-                            set));
+                    c -> worst(scoreAt.apply(c).stream().map(cf -> routed(evaluation(cf, book), set)).toList(),
+                            bounds));
             reached = sequencing.reached();
         }
         var atReached = scoreAt.apply(reached);

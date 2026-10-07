@@ -710,8 +710,8 @@ public final class Certifier {
 
     /**
      * The requirements of every gate after Terms when the Term gate is off, so none was walked: each observed with
-     * Terms at {@code start}, the relations and classes with every relation at {@code start}, the pooled gates with
-     * nothing else enabled.
+     * Terms at {@code start}, the relations with every relation at {@code start}, the classes as well with each
+     * provisional at {@code start}, the pooled gates with nothing else enabled.
      */
     private static List<Requirement> unwalkedRequirements(GateBounds bounds, double start, List<String> relationOrder,
                                                           Function<Configuration, Evaluation> evaluate) {
@@ -723,8 +723,11 @@ public final class Certifier {
             var g = atStart.gates().getOrDefault(type, GateCounts.EMPTY);
             out.add(requirement(type, BASE_GATE_TAIL, g.writing(), goldMemories(g.labelled()), memoryLevel(bounds)));
         }
+        var provisional = new TreeMap<String, ClassSetting>();
+        V2_CLASSES.forEach(name -> provisional.put(name, new ClassSetting(PROVISIONAL, start)));
+        var classesAtStart = evaluate.apply(new Configuration(start, all, provisional));
         for (var name : V2_CLASSES) {
-            var c = atStart.classes().getOrDefault(name, List.of());
+            var c = classesAtStart.classes().getOrDefault(name, List.of());
             out.add(requirement(name, CONFIDENCE_TAIL, c, goldMemories(c), null));
         }
         out.addAll(pooledRequirements(evaluate.apply(new Configuration(start, new TreeMap<>(), new TreeMap<>())),

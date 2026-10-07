@@ -486,8 +486,9 @@ order, status, time, negation, `G_written`, `G_trap` (empty only on a void run).
   k: its last passing step when its walk passed anywhere, else its first step (a class's
   threshold, else its first evaluable step). A gate the sequencing never walked, which is every
   gate after Terms once the Term gate is off, is observed with Terms at the starting threshold:
-  a relation or class with every relation at the starting threshold, `G_written` and `G_trap`
-  with nothing else enabled;
+  a relation with every relation at the starting threshold, a class with every relation and
+  every class provisional at the starting threshold, `G_written` and `G_trap` with nothing else
+  enabled;
 - `goldMemories` is the gate's memories with gold. `G_written`'s are those with gold for any gate;
   `G_trap`'s are the memories holding a gold trap relation, since a trap entry's written records
   are its gold trap relations; a class's are the memories in its observed values with a gold
