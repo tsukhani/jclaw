@@ -3,6 +3,7 @@ import channels.TelegramOutboundPlanner.FileSegment;
 import channels.TelegramOutboundPlanner.MediaGroupSegment;
 import channels.TelegramOutboundPlanner.TextSegment;
 import com.google.gson.JsonObject;
+import memory.AbsoluteDates;
 import memory.TemporalExpressions;
 import memory.ontology.EdtfDate;
 import memory.ontology.EdtfInterval;
@@ -13,6 +14,7 @@ import net.jqwik.api.Combinators;
 import net.jqwik.api.ForAll;
 import net.jqwik.api.Property;
 import net.jqwik.api.Provide;
+import net.jqwik.api.Tuple;
 import net.jqwik.api.constraints.AlphaChars;
 import net.jqwik.api.constraints.IntRange;
 import net.jqwik.api.constraints.Size;
@@ -425,6 +427,77 @@ class PropertyBasedTest extends UnitTest {
                 / labelled.stream().mapToInt(MemoryCounts::gold).sum();
         assertTrue(lower <= point, () -> "lower " + lower + " above the estimate " + point + " for " + labelled);
         assertEquals(lower, MemoryBounds.INSTANCE.recallLower(labelled, 0.05), () -> "a repeat differed for " + labelled);
+    }
+
+    /** A sentence holding one in-set relative phrase at {@code [phraseStart, phraseEnd)}, maybe one out-of-set phrase. */
+    record DatedSentence(String text, int phraseStart, int phraseEnd) {}
+
+    private static final List<String> TICKET_PREPOSITIONS = List.of("in", "on", "at", "by", "since", "until", "from",
+            "before", "after", "during", "early", "late", "mid");
+
+    private static final List<String> OUT_OF_SET = List.of("two years ago", "this spring", "every June", "in March",
+            "on 12 December", "last week", "tonight", "recently", "on Monday", "next Jan", "for three years");
+
+    @Provide
+    Arbitrary<DatedSentence> datedSentences() {
+        var units = Stream.concat(Stream.of("year", "month", "quarter"), TemporalExpressions.MONTH_NAMES.stream()
+                .map(m -> Character.toUpperCase(m.charAt(0)) + m.substring(1))).toList();
+        var deictic = Combinators.combine(Arbitraries.of("this", "last", "next"), Arbitraries.of(units))
+                .as((w, u) -> w + " " + u);
+        var phrase = Arbitraries.oneOf(Arbitraries.of("today", "yesterday", "tomorrow"), deictic);
+        var preposition = Arbitraries.of(TICKET_PREPOSITIONS).injectNull(0.3);
+        var extra = Arbitraries.of(OUT_OF_SET).injectNull(0.5);
+        return Combinators.combine(Arbitraries.of(true, false), preposition, phrase, Arbitraries.of(true, false), extra)
+                .as((atEnd, prep, ph, upper, other) -> {
+                    var x = prep == null ? ph : prep + " " + ph;
+                    if (upper) x = Character.toUpperCase(x.charAt(0)) + x.substring(1);
+                    var tail = other == null ? "." : " and " + other + ".";
+                    var lead = atEnd ? "The user moved to Porto " : "";
+                    var text = atEnd ? lead + x + tail : x + " the user joined Vela" + tail;
+                    int end = lead.length() + x.length();
+                    return new DatedSentence(text, end - ph.length(), end);
+                });
+    }
+
+    /** 1990-2090, one try in five a leap day. */
+    @Provide
+    Arbitrary<LocalDate> centuryAnchors() {
+        var first = LocalDate.of(1990, 1, 1);
+        var any = Arbitraries.integers().between(0, (int) (LocalDate.of(2091, 1, 1).toEpochDay() - first.toEpochDay() - 1))
+                .map(first::plusDays);
+        var leap = Arbitraries.integers().between(0, 24).map(i -> LocalDate.of(1992 + 4 * i, 2, 29));
+        return Arbitraries.frequencyOf(Tuple.of(4, any), Tuple.of(1, leap));
+    }
+
+    // tries=150: four finder runs per try, plus class-load and JIT warmup; measured 210 ms — under 250 ms.
+    @Property(tries = 150)
+    void anAbsoluteDateReadsBackToTheRelativeValueAtAnyLaterAnchor(@ForAll("datedSentences") DatedSentence s,
+            @ForAll("centuryAnchors") LocalDate a, @ForAll("centuryAnchors") LocalDate b) {
+        var original = TemporalExpressions.find(s.text(), a).found().stream()
+                .filter(d -> d.start() == s.phraseStart() && d.end() == s.phraseEnd()).toList();
+        assertEquals(1, original.size(), () -> quote(s.text()) + " @" + a + " found " + original);
+        var rewritten = AbsoluteDates.rewrite(s.text(), a);
+        var suffix = s.text().substring(s.phraseEnd());
+        var prefix = s.text().substring(0, s.phraseStart());
+        assertTrue(rewritten.endsWith(suffix) && rewritten.length() > suffix.length(),
+                () -> quote(s.text()) + " @" + a + " became " + quote(rewritten));
+        int formEnd = rewritten.length() - suffix.length();
+        var read = TemporalExpressions.find(rewritten, b).found().stream().filter(d -> d.end() == formEnd).toList();
+        assertEquals(1, read.size(), () -> quote(s.text()) + " @" + a + " became " + quote(rewritten) + ", read @" + b
+                + " as " + TemporalExpressions.find(rewritten, b).found());
+        assertFalse(read.getFirst().relative(), () -> quote(rewritten) + " still relative @" + b);
+        assertEquals(original.getFirst().readings(), read.getFirst().readings(),
+                () -> quote(s.text()) + " @" + a + " became " + quote(rewritten) + ", read @" + b);
+        assertTrue(rewritten.startsWith(prefix),
+                () -> quote(s.text()) + " lost its prefix in " + quote(rewritten));
+    }
+
+    // tries=300: two rewrites per try; measured 75 ms — under 100 ms.
+    @Property(tries = 300)
+    void rewritingTwiceIsRewritingOnce(@ForAll("datedSentences") DatedSentence s,
+            @ForAll("centuryAnchors") LocalDate a) {
+        var once = AbsoluteDates.rewrite(s.text(), a);
+        assertEquals(once, AbsoluteDates.rewrite(once, a), () -> quote(s.text()) + " @" + a);
     }
 
     /** Renders control characters so a shrunk counterexample survives the XML report legibly. */
