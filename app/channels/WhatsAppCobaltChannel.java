@@ -72,6 +72,14 @@ public final class WhatsAppCobaltChannel implements Channel {
         return WHATSAPP;
     }
 
+    /** Converts the model's Markdown with {@link WhatsAppMarkdownFormatter}, then sends with the shared retry. */
+    @Override
+    public SendResult sendText(String peerId, String text) {
+        if (text == null || text.isEmpty()) return SendResult.OK;
+        var sent = sendWithRetryResult(peerId, WhatsAppMarkdownFormatter.format(text));
+        return sent.ok() ? sent : SendResult.FAILED;
+    }
+
     @Override
     public SendResult trySend(String peerId, String text) {
         var wa = liveSession();

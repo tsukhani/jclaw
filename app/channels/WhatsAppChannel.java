@@ -129,7 +129,8 @@ public class WhatsAppChannel implements Channel {
      * Generic cross-channel text send. WhatsApp's Cloud API caps a text body at
      * {@value #MAX_TEXT_CHARS} chars, so a longer reply is split into ordered
      * chunks (JCLAW-447) and sent sequentially, each through the shared single-
-     * retry policy. WhatsApp text carries no markup, so no formatter runs.
+     * retry policy. The model's Markdown is converted to WhatsApp formatting by
+     * {@link WhatsAppMarkdownFormatter} once, before the window check and the chunking.
      *
      * <p>24h customer-service window: on a per-binding instance, when the peer is
      * OUTSIDE the window free-form text is NOT permitted — Meta requires a
@@ -144,15 +145,16 @@ public class WhatsAppChannel implements Channel {
     @Override
     public SendResult sendText(String peerId, String text) {
         if (text == null || text.isEmpty()) return SendResult.OK;
+        var formatted = WhatsAppMarkdownFormatter.format(text);
 
         if (!isWithinWindow(peerId)) {
             // Out of window: a template (its own body) re-opens the conversation;
             // the agent's reply text can't go free-form until the user replies.
-            return sendOutOfWindowOpener(peerId, text);
+            return sendOutOfWindowOpener(peerId, formatted);
         }
 
         // In window: free-form, chunked at the 4096 cap.
-        return sendChunks(peerId, text);
+        return sendChunks(peerId, formatted);
     }
 
     private SendResult sendChunks(String peerId, String text) {
@@ -252,7 +254,7 @@ public class WhatsAppChannel implements Channel {
             EventLogger.error(CHANNEL, null, WHATSAPP, "WhatsApp not configured");
             return false;
         }
-        return new WhatsAppChannel().sendWithRetry(to, text);
+        return new WhatsAppChannel().sendText(to, text).ok();
     }
 
     @Override

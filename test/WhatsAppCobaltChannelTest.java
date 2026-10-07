@@ -88,6 +88,12 @@ class WhatsAppCobaltChannelTest extends UnitTest {
     }
 
     @Test
+    void sendTextConvertsThenFailsQuietlyWithoutALiveSession() {
+        assertFalse(channelFor(UNREGISTERED_ID).sendText("447911111111@s.whatsapp.net", "**hi**").ok(),
+                "the formatted send still degrades to FAILED, never a throw");
+    }
+
+    @Test
     void sendPhotoFailsWithoutALiveSession() throws Exception {
         Path tmp = Files.createTempFile("wa-cobalt-photo-", ".png");
         Files.write(tmp, new byte[]{(byte) 0x89, 'P', 'N', 'G'});
