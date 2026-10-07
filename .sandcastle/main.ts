@@ -12,7 +12,7 @@ import { githubTracker } from "./github.ts";
 import { jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
 import { MergeRefused, followMain, landBranch, landedAs, mergeVerdict, type Report } from "./merge.ts";
-import { buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
+import { bmadOutcome, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, type About } from "./board.ts";
 import { MAX_OVERLOADS, Overloads, afterFailure, overloadReason, resetsOverloads } from "./overload.ts";
@@ -211,7 +211,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
       const outcome = async (file: string) => {
         const text = (await sandbox.exec(`cat '${file}'`)).stdout;
         fs.writeFileSync(`${LOGS}/${key}-spec.md`, text);
-        return { status: text.match(/^status:\s*['"]?([\w-]+)/m)?.[1] ?? "missing", result: text.split("## Auto Run Result")[1]?.trim() ?? "" };
+        return bmadOutcome(text);
       };
       await timed("spec", () =>
         sandbox.run({ name: `spec ${key}`, agent, promptFile: `${HERE}/prompts/bmad-spec.md`, promptArgs, idleTimeoutSeconds: 1200, logging: logTo("spec") }),

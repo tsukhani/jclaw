@@ -9,7 +9,7 @@ import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, mergeVerdict } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
-import { buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
+import { bmadOutcome, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
@@ -79,6 +79,14 @@ check("a bmad label forces BMAD", buildMode(["afk", "bmad"], { ...verdict, bmad:
 check("a no-bmad label forbids it", buildMode(["afk", "no-bmad"], verdict), { bmad: false, why: "labelled no-bmad" });
 check("no-bmad wins over a bmad the harness wrote", buildMode(["afk", "bmad", "no-bmad"], verdict), { bmad: false, why: "labelled no-bmad" });
 check("no verdict runs plain", buildMode(["afk"], undefined), { bmad: false, why: "the planner gave no verdict" });
+
+// BMAD's two halt shapes, as bmad-build-auto's workflow.md writes them.
+check("a halt in a spec reads its Auto Run Result",
+  bmadOutcome("---\nstatus: blocked\n---\n\n# Story 7\n\n## Auto Run Result\n\nStatus: blocked\nBlocking condition: no epic spec found\n"),
+  { status: "blocked", result: "Status: blocked\nBlocking condition: no epic spec found" });
+check("a halt before any spec reads its result file, so the ticket gets the reason",
+  bmadOutcome("---\nstatus: blocked\n---\n\n# BMad Build Auto Result\n\nStatus: blocked\nBlocking condition: unresolved review decisions\n"),
+  { status: "blocked", result: "Status: blocked\nBlocking condition: unresolved review decisions" });
 
 const OWNER = "tsukhani";
 const BEFORE = "2026-10-01T09:00:00Z", LABELLED = "2026-10-01T10:00:00Z", LATER = "2026-10-01T11:00:00Z";

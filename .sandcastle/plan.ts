@@ -38,6 +38,13 @@ export const buildMode = (labels: string[], plan: StoryPlan | undefined): BuildM
   return { bmad: false, why: "the planner gave no verdict" };
 };
 
+// A BMAD halt's status and reason, read from a spec's `## Auto Run Result`, or from the `# BMad Build Auto Result` file
+// bmad-build-auto writes instead when it stopped before writing a spec.
+export const bmadOutcome = (text: string): { status: string; result: string } => ({
+  status: text.match(/^status:\s*['"]?([\w-]+)/m)?.[1] ?? "missing",
+  result: text.split(/^(?:## Auto Run Result|# BMad Build Auto Result)$/m)[1]?.trim() ?? "",
+});
+
 // Two stories that change the same file conflict at merge time even when each passes its own gate. In board order, a
 // story is picked unless its files meet those of a branch awaiting review (`owners`) or of a story picked before it.
 // A story whose files are unknown (absent from `files`) runs only when nothing else is in flight, and then alone.
