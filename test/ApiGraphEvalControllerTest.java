@@ -16,6 +16,7 @@ import services.grapheval.HeldOut;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -324,20 +325,26 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
         return ref.get();
     }
 
-    /** Runs {@code body} with {@code content} over the file at {@code path} (absent when null), then restores it. */
+    /**
+     * Runs {@code body} with {@code content} over the file at {@code path} (absent when null), then restores it. The
+     * original is moved aside on disk, not held in memory: heldout.json is the operator's live labelling, and a suite
+     * killed mid-test must leave it recoverable.
+     */
     private static void withFile(Path path, @Nullable String content, ThrowingRunnable body) throws Exception {
-        var saved = Files.exists(path) ? Files.readString(path) : null;
+        var saved = path.resolveSibling(path.getFileName() + ".saved-by-test");
+        assertFalse(Files.exists(saved), saved + " is left from an interrupted run: move it back over "
+                + path.getFileName() + " first");
+        boolean existed = Files.exists(path);
+        if (existed) Files.move(path, saved);
         try {
-            if (content == null) {
-                Files.deleteIfExists(path);
-            } else {
+            if (content != null) {
                 Files.createDirectories(path.getParent());
                 Files.writeString(path, content);
             }
             body.run();
         } finally {
-            if (saved == null) Files.deleteIfExists(path);
-            else Files.writeString(path, saved);
+            if (existed) Files.move(saved, path, StandardCopyOption.REPLACE_EXISTING);
+            else Files.deleteIfExists(path);
         }
     }
 
