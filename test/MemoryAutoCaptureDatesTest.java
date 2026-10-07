@@ -118,6 +118,19 @@ class MemoryAutoCaptureDatesTest extends UnitTest {
     }
 
     @Test
+    void aSourceMessageIdWithNoRowFallsBackToTheClocksDay() {
+        var a = agent("anchor-missing");
+        var conv = ConversationService.create(a, "web", "u-dates");
+        var result = at(appZoneInstant(D.plusDays(1), LocalTime.of(0, 30)), () -> MemoryAutoCapture.capture(
+                agentId("anchor-missing"), a.name, "Worth remembering: I moved to Porto yesterday.", "Noted.",
+                msgs -> extractorJson("The user moved to Porto yesterday."), null, freshBreaker(),
+                MemoryProvenance.extractor("m1").withSource(conv.id, Long.MAX_VALUE)));
+
+        assertEquals(1, result.captured());
+        assertEquals("The user moved to Porto on 3 October 2026.", only("anchor-missing").text);
+    }
+
+    @Test
     void theTableFormsAreStoredWithEveryOtherCharacterUnchanged() {
         on(D, () -> capture("table", "Last year the user joined Vela; the retreat is this June.", null));
         assertEquals("In 2025 the user joined Vela; the retreat is in June 2026.", only("table").text);

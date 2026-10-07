@@ -471,7 +471,7 @@ class PropertyBasedTest extends UnitTest {
 
     // tries=150: four finder runs per try, plus class-load and JIT warmup; measured 210 ms — under 250 ms.
     @Property(tries = 150)
-    void anAbsoluteDateReadsBackToTheRelativeValueAtAnyLaterAnchor(@ForAll("datedSentences") DatedSentence s,
+    void anAbsoluteDateReadsBackToTheRelativeValueAtAnyOtherAnchor(@ForAll("datedSentences") DatedSentence s,
             @ForAll("centuryAnchors") LocalDate a, @ForAll("centuryAnchors") LocalDate b) {
         var original = TemporalExpressions.find(s.text(), a).found().stream()
                 .filter(d -> d.start() == s.phraseStart() && d.end() == s.phraseEnd()).toList();

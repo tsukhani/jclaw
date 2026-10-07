@@ -46,6 +46,17 @@ class AbsoluteDatesTest extends UnitTest {
     }
 
     @Test
+    void aRewriteThatReadsBackAsARangeIsDropped() {
+        unchanged("The user moved last year – 2027.");
+    }
+
+    @Test
+    void aDroppedRewriteLeavesTheOthersInPlace() {
+        rewrites("Moved yesterday and lived there last year – 2027.",
+                "Moved on 2 October 2026 and lived there last year – 2027.");
+    }
+
+    @Test
     void aMonth() {
         rewrites("Started the course last month.", "Started the course in September 2026.");
     }

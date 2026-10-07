@@ -524,7 +524,7 @@ public final class MemoryAutoCapture {
 
         final List<Candidate> filtered =
                 applySafetyFilters(deduped, agentKey, agentName, userMessage, assistantResponse);
-        // JCLAW-1383: after the filters, so they judge the extractor's own words; before dedup and the judge.
+        // JCLAW-1383: after the filters, so they judge the extractor's own words; before semantic dedup, plan and the judge.
         final List<Candidate> kept;
         if (filtered.isEmpty()) {
             kept = filtered;
