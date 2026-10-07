@@ -618,6 +618,10 @@ describe('this month\'s replies against Meta\'s free allowance (JCLAW-1412)', ()
     usageGets++
     return usage
   })
+  registerEndpoint('/api/channels/whatsapp/bindings/8/usage', () => {
+    usageGets++
+    return usage
+  })
 
   beforeEach(() => {
     usage = counted(412)

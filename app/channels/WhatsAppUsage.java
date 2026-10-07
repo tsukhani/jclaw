@@ -48,7 +48,7 @@ public final class WhatsAppUsage {
     }
 
     /**
-     * Test override honoured by {@link #read(String, String, String)}. Not replaceable by
+     * Test override honored by {@link #read(String, String, String)}. Not replaceable by
      * {@code HttpFactories.runWith}: the callers are {@code FunctionalTest}s driving a
      * controller, and a {@code ScopedValue} binding does not reach Play's request thread.
      */
@@ -64,7 +64,7 @@ public final class WhatsAppUsage {
         readOverride = null;
     }
 
-    /** Read from the live Graph API, honouring an {@link #installForTest} override. Never throws. */
+    /** Read from the live Graph API, honoring an {@link #installForTest} override. Never throws. */
     public static Usage read(String phoneNumberId, String accessToken, String displayNumber) {
         var override = readOverride;
         if (override != null) {
