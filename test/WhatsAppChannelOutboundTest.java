@@ -1,8 +1,18 @@
 import channels.WhatsAppChannel;
+import com.google.gson.JsonParser;
+import models.WhatsAppBinding;
+import okhttp3.Interceptor;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
+import okio.Buffer;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import utils.HttpFactories;
 
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Unit coverage for {@link WhatsAppChannel}'s pure outbound helpers (JCLAW-447):
@@ -102,5 +112,60 @@ class WhatsAppChannelOutboundTest extends UnitTest {
                 "the window-edge space must start the next chunk, not overflow this one");
         assertTrue(chunks.stream().allMatch(c -> c.length() <= 4),
                 "no chunk may ever exceed the limit");
+    }
+
+    // ── JCLAW-1409: Markdown converted before it reaches the wire ──
+
+    @Test
+    void aMarkdownReplyReachesTheWireConverted() {
+        var bodies = sendCapturing("Status: **green**, see [docs](https://d.io).\n\n- one\n- two");
+        assertEquals(List.of("Status: *green*, see docs (https://d.io).\n\n- one\n- two"), bodies);
+    }
+
+    @Test
+    void aReplyThatFitsOnlyAfterConversionGoesAsOneMessage() {
+        // "**ab** " is 7 chars raw, "*ab* " 5 converted: 5732 raw, 4094 converted.
+        var md = "**ab** ".repeat(819);
+        assertTrue(md.length() > WhatsAppChannel.MAX_TEXT_CHARS);
+        var bodies = sendCapturing(md);
+        assertEquals(1, bodies.size(), "chunking must measure the converted text");
+        assertEquals(4094, bodies.get(0).length());
+    }
+
+    @Test
+    void aReplyOverTheCapAfterConversionIsChunkedWithinIt() {
+        var bodies = sendCapturing("**ab** ".repeat(820));
+        assertEquals(2, bodies.size());
+        for (var b : bodies) {
+            assertTrue(b.length() <= WhatsAppChannel.MAX_TEXT_CHARS, "chunk length " + b.length());
+            assertFalse(b.contains("**"), "every chunk carries converted text");
+        }
+        assertEquals("*ab* ".repeat(820).stripTrailing(), String.join("", bodies));
+    }
+
+    /** Send {@code text} through a binding with no window context, returning each posted text body. */
+    private static List<String> sendCapturing(String text) {
+        var binding = new WhatsAppBinding();
+        binding.phoneNumberId = "1550001";
+        binding.accessToken = "EAAG-tok";
+        var bodies = new CopyOnWriteArrayList<String>();
+        Interceptor canned = chain -> {
+            var buf = new Buffer();
+            chain.request().body().writeTo(buf);
+            bodies.add(JsonParser.parseString(buf.readUtf8()).getAsJsonObject()
+                    .getAsJsonObject("text").get("body").getAsString());
+            return new Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("canned")
+                    .body(ResponseBody.create("{\"messages\":[{\"id\":\"wamid.X\"}]}", null))
+                    .build();
+        };
+        var client = new OkHttpClient.Builder().addInterceptor(canned).build();
+        var result = HttpFactories.callWith(client,
+                () -> WhatsAppChannel.forBinding(binding).sendText("447900000001", text));
+        assertTrue(result.ok());
+        return bodies;
     }
 }

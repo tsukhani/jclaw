@@ -141,6 +141,8 @@ A Cloud-API binding takes two optional extras: a pre-approved **messaging templa
 
 The form warns before you save a WhatsApp-Web binding: the client is unofficial and numbers get banned, so use a dedicated secondary number. To link it, save and enable the binding, then click **Pair** on its card. On the phone, open WhatsApp → Settings → Linked Devices → Link a Device and scan the code; it refreshes every few seconds until you do, and the panel shows **Connected ✓** once the session is paired. The account that scanned is the bot's own number, not its owner, and its own messages are ignored. To restrict direct messages to you, set the WhatsApp-Web binding's optional **owner number** (E.164, e.g. `+15551234567`) to your own phone; without one, anyone may message the bot directly, except on a Main Agent binding (see the table below). The QR code is drawn in your browser — the pairing string is never sent to an outside service.
 
+Replies are converted from the agent's Markdown to WhatsApp formatting on both transports: bold, italics, strikethrough, code, lists and quotes use WhatsApp's own markers, and a heading becomes a bold line. WhatsApp has no table or link syntax, so a table arrives as one line per row, each cell labelled with its column header, and a link shows its address in parentheses after its text.
+
 WhatsApp has no **Test** button. Instead, saving a Cloud-API binding checks its credentials with Meta and refuses ones that fail, and the card then shows **Verified** with Meta's business name and number.
 
 When Meta refuses a Cloud-API reply because the 24-hour window has closed (its error 131047), JClaw doesn't retry it: the refusal is logged at `INFO` under `channel`, saying whether the binding has a template and what to do next.
