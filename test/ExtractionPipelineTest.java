@@ -29,6 +29,7 @@ import services.grapheval.ExtractionPipeline.Decider;
 import services.grapheval.ExtractionPipeline.Decision;
 import services.grapheval.ExtractionPipeline.Inputs;
 import services.grapheval.ExtractionPipeline.Records;
+import services.grapheval.StoredRun;
 import utils.HttpFactories;
 
 import java.nio.file.Files;
@@ -1282,5 +1283,44 @@ class ExtractionPipelineTest extends UnitTest {
 
         var hand = new Decision(ExtractionPipeline.TERM, "x", null, null, "Person", 0.9, false, null);
         assertEquals(Map.of(), hand.probabilities(), "the eight-argument constructor defaults to empty");
+    }
+
+    // --- JCLAW-1372: a kin candidate and its possessor ---
+
+    @Test
+    void aKinCandidateAndItsPossessorAreBothTypedWithoutAnOverlapQuestion() {
+        var text = "Avery Lin's son starts at Harborlight Academy.";
+        var owner = "Avery Lin";
+        var candidates = CandidateGenerator.generate(text, List.of(), owner);
+        assertTrue(candidates.stream().anyMatch(c -> "son".equals(c.kin())), candidates.toString());
+        var run = ExtractionPipeline.run(SCHEMA, "c", text, candidates, "clef-flash", scripted(Map.of(
+                "Avery Lin", "Person", "Avery Lin's son", "Person", "Harborlight Academy", "Organization"),
+                Map.of()), inputs(text, owner, MemoryAuthorType.HUMAN_TURN, false));
+        assertTrue(asked("o").stream().noneMatch(q -> {
+            var ids = q.getAsJsonObject("criteria").keySet();
+            return ids.contains("Avery Lin") && ids.contains("Avery Lin's son");
+        }), asked("o").toString());
+        var terms = stage(run, ExtractionPipeline.TERM).stream().map(Decision::subject).toList();
+        assertTrue(terms.containsAll(List.of("Avery Lin", "Avery Lin's son")), terms.toString());
+        var relations = asked("r").stream().map(ExtractionPipelineTest::relationKey).toList();
+        assertTrue(relations.contains("Avery Lin family_of Avery Lin's son")
+                || relations.contains("Avery Lin's son family_of Avery Lin"), relations.toString());
+        assertEquals(List.of(ExtractionPipeline.OVERLAP, ExtractionPipeline.LINEAGE, ExtractionPipeline.TERM,
+                ExtractionPipeline.TENSE, ExtractionPipeline.RELATION, ExtractionPipeline.NEGATION,
+                ExtractionPipeline.OCCURS, ExtractionPipeline.STATUS, ExtractionPipeline.SLOT),
+                List.copyOf(run.questionsByStage().keySet()));
+
+        var json = StoredRun.toJson(run);
+        assertEquals(run.candidates(), StoredRun.caseRun(json, SCHEMA).candidates());
+        for (var c : json.getAsJsonArray("candidates")) {
+            var o = c.getAsJsonObject();
+            o.remove("sources");
+            o.remove("kin");
+            o.remove("possessorStart");
+            o.remove("possessorEnd");
+        }
+        var older = StoredRun.caseRun(json, SCHEMA).candidates();
+        assertTrue(older.stream().allMatch(c -> c.sources().isEmpty() && c.kin() == null && c.possessorStart() == -1),
+                older.toString());
     }
 }

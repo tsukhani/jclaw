@@ -204,7 +204,7 @@ public final class SequenceHarness {
             var inputs = new ExtractionPipeline.Inputs(ownerName, memory.authorType(), labels.capturedAt(),
                     dates(resolver, id, labels.text(), labels.capturedAt()), predecessors, false, id);
             var run = ExtractionPipeline.run(schema, memory.id(), labels.text(),
-                    CandidateGenerator.generate(labels.text(), known), model, decider, inputs);
+                    CandidateGenerator.generate(labels.text(), known, ownerName), model, decider, inputs);
             for (var d : run.stage(ExtractionPipeline.TERM)) {
                 if (d.writes(ExtractionPipeline.KEPT)) known.add(d.subject());
             }

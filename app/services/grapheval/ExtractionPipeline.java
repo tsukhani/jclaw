@@ -576,7 +576,7 @@ public final class ExtractionPipeline {
     }
 
     /** The spans of each connected set of two or more overlapping candidates, in text order. */
-    private static List<List<String>> overlapGroups(List<Candidate> candidates) {
+    static List<List<String>> overlapGroups(List<Candidate> candidates) {
         int n = candidates.size();
         var parent = new int[n];
         for (int i = 0; i < n; i++) parent[i] = i;

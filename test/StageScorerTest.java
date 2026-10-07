@@ -2,6 +2,7 @@ import memory.TemporalExpressions;
 import memory.ontology.OntologySchema;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.grapheval.CandidateGenerator.Source;
 import services.grapheval.Certifier;
 import services.grapheval.ExtractionPipeline;
 import services.grapheval.ExtractionPipeline.Decision;
@@ -12,10 +13,13 @@ import services.grapheval.GraphCases.DateLabel;
 import services.grapheval.GraphCases.Entity;
 import services.grapheval.GraphCases.Relation;
 import services.grapheval.StageScorer;
+import services.grapheval.StageScorer.Load;
+import services.grapheval.StageScorer.Ratio;
 import services.grapheval.StageScorer.Scored;
 import services.grapheval.StageScorer.StageRun;
 
 import java.time.LocalDate;
+import java.util.EnumMap;
 import java.util.List;
 
 /** JCLAW-1356, JCLAW-1357, JCLAW-1358: each gold-fed stage scored on its own answers. Pure, so no fixtures. */
@@ -35,6 +39,12 @@ class StageScorerTest extends UnitTest {
             List.of(Entity.implicitOperator(), Entity.of("kestrel", "Kestrel CI", "System"),
                     Entity.of("office", "Harborlight", "Organization")),
             List.of(Relation.of("operator", "uses", "kestrel")), List.of());
+
+    /** Rule 2a: an unnamed relative named by an owner-possessive kin phrase. */
+    private static final Case KIN = new Case("k", List.of("plain"), "Avery Lin's son starts at Harborlight Academy.",
+            List.of(Entity.of("operator", "Avery Lin", "Person"), Entity.of("operator-son", "Avery Lin's son", "Person"),
+                    Entity.of("academy", "Harborlight Academy", "Organization")),
+            List.of(Relation.of("operator", "family_of", "operator-son")), List.of());
 
     private static Decision term(String span, String choice) {
         return new Decision(ExtractionPipeline.TERM, span, null, null, choice, 0.9, false, null);
@@ -151,6 +161,47 @@ class StageScorerTest extends UnitTest {
         var r = StageScorer.candidateRecall(List.of(A, B), null);
         assertEquals(5, r.total());
         assertEquals(5, r.hit());
+    }
+
+    @Test
+    void aKinPhraseIsAKinHitThatOnlyTheNewSourcesFind() {
+        var c = StageScorer.coverage(List.of(KIN), "Avery Lin");
+        assertEquals(Ratio.of(1, 3), c.bySource().get(Source.KIN));
+        assertEquals(Ratio.of(2, 3), c.before(), "operator-son is missed before");
+        assertEquals(Ratio.of(3, 3), c.after());
+        assertEquals(new Load(2.0, 0.0, 2.0), c.loadBefore());
+        assertEquals(new Load(3.0, 0.0, 3.0), c.loadAfter(), "the kin phrase overlaps only its own possessor");
+    }
+
+    @Test
+    void coverageIsPinnedPerSourceBeforeAndAfter() {
+        var c = StageScorer.coverage(List.of(A, B, KIN), "Avery Lin");
+        var expected = new EnumMap<Source, Ratio>(Source.class);
+        for (var s : Source.values()) if (s != Source.OPERATOR) expected.put(s, Ratio.of(0, 8));
+        expected.put(Source.KNOWN, Ratio.of(1, 8));
+        expected.put(Source.CAPITALIZED, Ratio.of(6, 8));
+        expected.put(Source.KIN, Ratio.of(1, 8));
+        assertEquals(expected, c.bySource());
+        assertEquals(List.copyOf(expected.keySet()), List.copyOf(c.bySource().keySet()), "enum order, no OPERATOR");
+        assertEquals(Ratio.of(7, 8), c.before());
+        assertEquals(Ratio.of(8, 8), c.after());
+        assertEquals(new Load(2.0, 0.0, 2.0), c.loadBefore());
+        assertEquals(new Load(7.0 / 3, 0.0, 7.0 / 3), c.loadAfter());
+        assertEquals(c.after(), StageScorer.candidateRecall(List.of(A, B, KIN), "Avery Lin"));
+        assertEquals(new Load(null, null, null), StageScorer.coverage(List.of(), null).loadAfter());
+
+        var s = StageScorer.score(List.of(A, B, KIN), List.of(), "Avery Lin", SCHEMA);
+        assertEquals(c, s.coverage());
+    }
+
+    @Test
+    void anOverlapGroupIsOneOverlapQuestionAndOneTypingQuestion() {
+        var c = new Case("o1", List.of("plain"), "The user prefers Kestrel CI pipelines.",
+                List.of(Entity.of("operator", "The user", "Person"), Entity.of("kestrel", "Kestrel CI", "System")),
+                List.of(), List.of());
+        var coverage = StageScorer.coverage(List.of(c), "Avery Lin");
+        assertEquals(new Load(2.0, 1.0, 1.0), coverage.loadBefore());
+        assertEquals(new Load(2.0, 1.0, 1.0), coverage.loadAfter());
     }
 
     @Test
