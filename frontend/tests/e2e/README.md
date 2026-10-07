@@ -26,6 +26,7 @@ Never added to this suite:
 | Pausing/resuming a real schedule | Silently changes what runs tonight |
 | `POST /api/system/{restart,upgrade}` | Stops the JVM under test |
 | Binding **Test** buttons, Tailscale Funnel toggle | Sends real messages; changes public reachability |
+| **Subscribe** on a real WhatsApp binding | Subscribes the Meta app to a business account, a write to Meta |
 | Clicking **Generate** in the new-prompt dialog | Bills a model call and returns nondeterministic text |
 | `GET /api/printers` | Live mDNS browse, seconds per call |
 
@@ -41,7 +42,7 @@ and the eval suites.
 | UAT-1 Authentication | `auth.uat.spec.ts` | Runs unauthenticated; session gate, bad password, sign-out |
 | UAT-2 Read-side API contract | `api-contract.uat.spec.ts` | 38 endpoints + 404 shape + SPA fallback |
 | UAT-3 Navigation | `navigation.uat.spec.ts` | Sidebar routing, deep links, command palette |
-| UAT-4 Agent lifecycle | `agents.uat.spec.ts` | Create/read/update/delete + 409 conflict paths |
+| UAT-4 Agent lifecycle | `agents.uat.spec.ts` | Create/read/update/delete + 409 conflict paths; agent type: a service agent has no USER.md or BOOTSTRAP.md, and the editor's switch asks before deleting them |
 | UAT-5 Prompts library | `prompts.uat.spec.ts` | Create via API, UI for search/filter/edit/delete |
 | UAT-6 Tasks & reminders | `tasks.uat.spec.ts` | Read-only over the live schedule |
 | UAT-7 Memories | `memories.uat.spec.ts` | Importance save answered by a stub; writes nothing |
@@ -60,6 +61,7 @@ and the eval suites.
 | UAT-20 Workspace manager | `workspace.uat.spec.ts` | Throwaway agent; tree, filter, colours, download, backup zip, protected refusal, delete; folder and symlink cases seed on disk and skip on a remote instance |
 | UAT-21 Error page | `error-page.uat.spec.ts` | Branded 404 with a way home |
 | UAT-23 Decision Providers | `decision-providers.uat.spec.ts` | JEV portrait and clip served as media (not the SPA fallback), clip fetched only on click and played, badge on hover, keyboard focus and no-hover screens; writes blocked |
+| UAT-24 WhatsApp cards | `whatsapp.uat.spec.ts` | Stubbed bindings: Meta subscription warning and Subscribe, this month's replies bar, delivery-failure line; writes blocked. The two routes' 401 and 404 run live |
 | Page smoke | `pages.smoke.spec.ts` | Pre-existing; ten top-level pages |
 | Prompt caching | `prompt-caching.uat.spec.ts` | Pre-existing; cached-token badge |
 

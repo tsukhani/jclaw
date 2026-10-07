@@ -1,7 +1,7 @@
 import type { Page } from '@playwright/test'
 import type { Agent, ConfigResponse, ProviderModelDef } from '~/types/api'
 import { ROUTER_MODEL_ID, ROUTER_PROVIDER } from '../../utils/model-route'
-import { test, expect, gotoPage, json } from './helpers'
+import { test, expect, gotoPage, json, E2E_PREFIX } from './helpers'
 
 /**
  * UAT-15 — Chat, the core product path.
@@ -113,7 +113,10 @@ test.describe('UAT-15 chat', () => {
   test('a model picked on a fresh chat rides with the first message and leaves the agent untouched', async ({ page, request }) => {
     // JCLAW-1196: the pick is a conversation override the first message carries, not
     // a write to the agent row — compare the agents list before and after.
-    const before = await (await request.get('/api/agents')).json()
+    // Other specs create, change and delete their fixture agents while this runs, so those are left out.
+    const agents = async () =>
+      (await (await request.get('/api/agents')).json() as Agent[]).filter(a => !a.name.startsWith(E2E_PREFIX))
+    const before = await agents()
     let sent: Record<string, unknown> | null = null
     await page.route('**/api/chat/stream', (route) => {
       sent = route.request().postDataJSON()
@@ -149,8 +152,7 @@ test.describe('UAT-15 chat', () => {
 
     await expect.poll(() => sent).not.toBeNull()
     expect(sent).toMatchObject({ conversationId: null, modelId: picked })
-    const after = await (await request.get('/api/agents')).json()
-    expect(after).toEqual(before)
+    expect(await agents()).toEqual(before)
   })
 
   test('the sent message appears in the transcript', async ({ page }) => {

@@ -1,3 +1,4 @@
+import type { APIRequestContext, Page } from '@playwright/test'
 import { test, expect, gotoPage, uniqueName, borrowModelConfig, E2E_PREFIX } from './helpers'
 
 /**
@@ -9,9 +10,44 @@ import { test, expect, gotoPage, uniqueName, borrowModelConfig, E2E_PREFIX } fro
  * every field re-layout. The UI half asserts the created agent surfaces in
  * the list, which is the operator-visible outcome that matters.
  *
+ * The agent-type steps are the exception and drive the editor's one control:
+ * the confirmation before a switch to Service exists nowhere else. They live
+ * here rather than in a spec of their own because the last test fails on any
+ * prefixed agent, and a second spec's fixture would be alive while it runs.
+ *
  * Serial because the lifecycle steps share one fixture agent.
  */
 test.describe.configure({ mode: 'serial' })
+
+/** The two files only a personal agent's workspace holds. */
+const OWNER_FILES = ['USER.md', 'BOOTSTRAP.md']
+const SHARED_FILES = ['SOUL.md', 'IDENTITY.md', 'AGENT.md']
+
+async function workspaceHas(request: APIRequestContext, id: number, file: string) {
+  return (await request.get(`/api/agents/${id}/workspace/${file}`)).status() === 200
+}
+
+function ownerFiles(request: APIRequestContext, id: number) {
+  return Promise.all(OWNER_FILES.map(file => workspaceHas(request, id, file)))
+}
+
+async function isServiceAgent(request: APIRequestContext, id: number) {
+  return (await (await request.get(`/api/agents/${id}`)).json()).serviceAgent
+}
+
+function kindRadio(page: Page, kind: 'Personal' | 'Service') {
+  return page.getByTestId('agent-kind').getByRole('radio', { name: new RegExp(`^${kind}`) })
+}
+
+/** A workspace editor tab. The tree's controls are named "Download USER.md" and the like, never the bare name. */
+function fileTab(page: Page, file: string) {
+  return page.getByRole('button', { name: file, exact: true })
+}
+
+/** The agent form's save button, which carries this title only while the form is dirty. */
+function saveAgent(page: Page) {
+  return page.getByTitle('Save', { exact: true })
+}
 
 test.describe('UAT-4 agent lifecycle', () => {
   let agentId: number | null = null
@@ -33,6 +69,14 @@ test.describe('UAT-4 agent lifecycle', () => {
     await gotoPage(page, '/agents')
     await expect(page.getByRole('heading', { name: 'Main Agent' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'New Agent' })).toBeVisible()
+  })
+
+  test('the new-agent form offers both agent types and starts on Personal', async ({ page }) => {
+    await gotoPage(page, '/agents')
+    await page.getByRole('button', { name: 'New Agent' }).click()
+    await expect(page.getByTestId('agent-kind').getByRole('radio')).toHaveCount(2)
+    await expect(kindRadio(page, 'Personal')).toBeChecked()
+    await expect(kindRadio(page, 'Service')).not.toBeChecked()
   })
 
   test('create an agent', async ({ request }) => {
@@ -140,6 +184,95 @@ test.describe('UAT-4 agent lifecycle', () => {
     const saved = await res.json()
     expect(saved.fallbackProvider).toBeNull()
     expect(saved.fallbackModelId).toBeNull()
+  })
+
+  test('an agent created without a type is personal, with both owner files and their tabs', async ({ page, request }) => {
+    expect(await isServiceAgent(request, agentId!)).toBe(false)
+    expect(await ownerFiles(request, agentId!)).toEqual([true, true])
+
+    await gotoPage(page, `/agents/${agentName}`)
+    await expect(kindRadio(page, 'Personal')).toBeChecked()
+    for (const file of OWNER_FILES) {
+      await expect(fileTab(page, file)).toBeVisible()
+      await expect(page.getByTestId('workspace-manager').getByTestId(`ws-row-${file}`)).toBeVisible()
+    }
+  })
+
+  test('changing to Service asks first, and Cancel changes nothing', async ({ page, request }) => {
+    // Counted on the page: a read of the agent straight after Cancel could run ahead of a save sent in error.
+    const saves: string[] = []
+    page.on('request', (req) => {
+      if (req.method() === 'PUT') saves.push(new URL(req.url()).pathname)
+    })
+    await gotoPage(page, `/agents/${agentName}`)
+    await expect(kindRadio(page, 'Personal')).toBeChecked()
+    await kindRadio(page, 'Service').check()
+    await saveAgent(page).click()
+
+    const dialog = page.getByRole('dialog')
+    await expect(dialog).toContainText('USER.md and BOOTSTRAP.md will be deleted')
+    await expect(dialog).toContainText('The memories it already holds are kept')
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toHaveCount(0)
+
+    expect(saves).toEqual([])
+    expect(await isServiceAgent(request, agentId!)).toBe(false)
+    expect(await ownerFiles(request, agentId!)).toEqual([true, true])
+  })
+
+  test('confirming the change deletes both owner files and their tabs, and keeps the rest', async ({ page, request }) => {
+    await gotoPage(page, `/agents/${agentName}`)
+    await expect(kindRadio(page, 'Personal')).toBeChecked()
+    await kindRadio(page, 'Service').check()
+    await saveAgent(page).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Change and delete' }).click()
+
+    for (const file of OWNER_FILES) await expect(fileTab(page, file)).toHaveCount(0)
+    await expect(fileTab(page, 'AGENT.md')).toBeVisible()
+    // The files follow the type only once the save's transaction has committed.
+    await expect.poll(() => ownerFiles(request, agentId!)).toEqual([false, false])
+    expect(await isServiceAgent(request, agentId!)).toBe(true)
+    for (const file of SHARED_FILES) expect(await workspaceHas(request, agentId!, file), file).toBe(true)
+
+    // A reload reads the type back from the server rather than from the form that set it.
+    await gotoPage(page, `/agents/${agentName}`)
+    await expect(kindRadio(page, 'Service')).toBeChecked()
+    const tree = page.getByTestId('workspace-manager')
+    await expect(tree.getByTestId('ws-row-AGENT.md')).toBeVisible()
+    for (const file of OWNER_FILES) await expect(tree.getByTestId(`ws-row-${file}`)).toHaveCount(0)
+  })
+
+  test('changing back to Personal asks nothing and restores both owner files', async ({ page, request }) => {
+    await gotoPage(page, `/agents/${agentName}`)
+    await expect(kindRadio(page, 'Service')).toBeChecked()
+    await kindRadio(page, 'Personal').check()
+    await saveAgent(page).click()
+
+    // The tabs return only when the save has gone through, which a confirmation would have held up.
+    for (const file of OWNER_FILES) await expect(fileTab(page, file)).toBeVisible()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expect.poll(() => ownerFiles(request, agentId!)).toEqual([true, true])
+    expect(await isServiceAgent(request, agentId!)).toBe(false)
+  })
+
+  test('an agent created as a service agent never gets the owner files', async ({ request }) => {
+    const { modelProvider, modelId } = await borrowModelConfig(request)
+    const res = await request.post('/api/agents', {
+      data: {
+        name: uniqueName('service'), modelProvider, modelId, serviceAgent: true,
+        description: 'Service-agent fixture for the JClaw UAT suite.',
+      },
+    })
+    expect(res.status(), await res.text()).toBe(200)
+    const created = await res.json()
+    try {
+      expect(created.serviceAgent).toBe(true)
+      expect(await ownerFiles(request, created.id)).toEqual([false, false])
+      for (const file of SHARED_FILES) expect(await workspaceHas(request, created.id, file), file).toBe(true)
+    }
+    finally {
+      await request.delete(`/api/agents/${created.id}`)
+    }
   })
 
   test('delete the agent and confirm it is gone', async ({ request }) => {
