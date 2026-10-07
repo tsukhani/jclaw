@@ -1,6 +1,5 @@
 package memory.graph;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
@@ -10,6 +9,7 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import com.google.gson.stream.JsonWriter;
 import org.jspecify.annotations.Nullable;
+import utils.GsonHolder;
 
 import java.io.IOException;
 import java.io.StringReader;
@@ -58,7 +58,7 @@ public final class RunLedger {
             KEY_MODEL, KEY_DIGEST, KEY_CERTIFICATE, KEY_SCHEMA, KEY_EXTRACTION, KEY_RETRACTED, KEY_DECISIONS);
     private static final Set<String> DECISION_KEYS = Set.of(KEY_STAGE, KEY_SUBJECT, KEY_RELATION, KEY_PROBABILITIES,
             KEY_YES, KEY_FAILURE, KEY_OPERATOR);
-    private static final TypeAdapter<JsonElement> ELEMENT = new Gson().getAdapter(JsonElement.class);
+    private static final TypeAdapter<JsonElement> ELEMENT = GsonHolder.GSON.getAdapter(JsonElement.class);
 
     private RunLedger() {}
 
