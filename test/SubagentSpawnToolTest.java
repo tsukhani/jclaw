@@ -1791,10 +1791,7 @@ class SubagentSpawnToolTest extends UnitTest {
                 assertEquals(SubagentRun.Status.TIMEOUT, run.status);
                 assertNotNull(run.endedAt);
 
-                java.util.List<Message> announces = Message.find(
-                        "conversation = ?1 AND messageKind = ?2",
-                        Conversation.findById(parentConv.id),
-                        SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
+                var announces = awaitAnnounces(parentConv.id, 1, 5_000);
                 assertEquals(1, announces.size(),
                         "TIMEOUT path must still post an announce");
                 var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
@@ -1859,11 +1856,7 @@ class SubagentSpawnToolTest extends UnitTest {
 
         awaitTerminalStatus(runId, SubagentRun.Status.COMPLETED, 10_000);
 
-        JPA.em().clear();
-        java.util.List<Message> announces = Message.find(
-                "conversation = ?1 AND messageKind = ?2",
-                Conversation.findById(parentConv.id),
-                SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
+        var announces = awaitAnnounces(parentConv.id, 1, 5_000);
         assertEquals(1, announces.size());
         var payload = JsonParser.parseString(((Message) announces.getFirst()).metadata).getAsJsonObject();
         var announceReply = payload.get("reply").getAsString();
@@ -1903,6 +1896,8 @@ class SubagentSpawnToolTest extends UnitTest {
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
         var runId = Long.parseLong(parsed.get("run_id").getAsString());
         awaitTerminalStatus(runId, SubagentRun.Status.COMPLETED, 10_000);
+        assertEquals(1, awaitAnnounces(parentConv.id, 1, 5_000).size(),
+                "the announce must land before its absence from the LLM context means anything");
 
         JPA.em().clear();
         var conv = (Conversation) Conversation.findById(parentConv.id);
@@ -2333,6 +2328,21 @@ class SubagentSpawnToolTest extends UnitTest {
         }
         fail("SubagentRun " + runId + " did not reach " + expected
                 + " within " + timeoutMillis + "ms (last seen: " + seen + ")");
+    }
+
+    /** The announce commits in its own transaction after the terminal status, so a status wait alone can read before it. */
+    private static java.util.List<Message> awaitAnnounces(Long parentConvId, int expected, long timeoutMillis) {
+        var deadline = System.currentTimeMillis() + timeoutMillis;
+        java.util.List<Message> seen = java.util.List.of();
+        while (System.currentTimeMillis() < deadline) {
+            JPA.em().clear();
+            seen = Message.find("conversation = ?1 AND messageKind = ?2",
+                    Conversation.findById(parentConvId), SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE).fetch();
+            if (seen.size() >= expected) return seen;
+            try { Thread.sleep(50); }
+            catch (InterruptedException _) { Thread.currentThread().interrupt(); return seen; }
+        }
+        return seen;
     }
 
     @FunctionalInterface
