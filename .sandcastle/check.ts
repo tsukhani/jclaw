@@ -9,7 +9,7 @@ import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, mergeVerdict, restartEmptyBranch } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
-import { bmadOutcome, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
+import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
@@ -90,6 +90,11 @@ check("a halt in a spec reads its Auto Run Result",
 check("a halt before any spec reads its result file, so the ticket gets the reason",
   bmadOutcome("---\nstatus: blocked\n---\n\n# BMad Build Auto Result\n\nStatus: blocked\nBlocking condition: unresolved review decisions\n"),
   { status: "blocked", result: "Status: blocked\nBlocking condition: unresolved review decisions" });
+const specPhaseResult = "Status: ready-for-dev\nBlocking condition: none — halted after planning as instructed.";
+check("a build that finished gives the reason it wrote",
+  buildHaltReason("Status: blocked\nBlocking condition: tests red", true), "Status: blocked\nBlocking condition: tests red");
+check("a build cut off before its completion signal says so, not the spec phase's stale result",
+  buildHaltReason(specPhaseResult, false).includes("ready-for-dev"), false);
 
 const OWNER = "tsukhani";
 const BEFORE = "2026-10-01T09:00:00Z", LABELLED = "2026-10-01T10:00:00Z", LATER = "2026-10-01T11:00:00Z";

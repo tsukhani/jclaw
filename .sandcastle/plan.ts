@@ -45,6 +45,11 @@ export const bmadOutcome = (text: string): { status: string; result: string } =>
   result: text.split(/^(?:## Auto Run Result|# BMad Build Auto Result)$/m)[1]?.trim() ?? "",
 });
 
+// Why a BMAD build stopped short of done. A run cut off before its completion signal never rewrote the result the spec
+// phase left in the file, so that text is not the reason.
+export const buildHaltReason = (result: string, completed: boolean): string =>
+  completed ? result : "The build agent's run ended before BMAD finished, so it recorded no reason; its commits stay on the branch.";
+
 // Two stories that change the same file conflict at merge time even when each passes its own gate. In board order, a
 // story is picked unless its files meet those of a branch awaiting review (`owners`) or of a story picked before it.
 // A story whose files are unknown (absent from `files`) runs only when nothing else is in flight, and then alone.

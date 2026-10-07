@@ -12,7 +12,7 @@ import { githubTracker } from "./github.ts";
 import { jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
 import { MergeRefused, followMain, landBranch, landedAs, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
-import { bmadOutcome, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
+import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, type About } from "./board.ts";
 import { MAX_OVERLOADS, Overloads, afterFailure, overloadReason, resetsOverloads } from "./overload.ts";
@@ -224,7 +224,9 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
         sandbox.run({ name: `build ${key}`, agent, promptFile: `${HERE}/prompts/bmad-build.md`, promptArgs: { KEY: key, SPEC: spec }, idleTimeoutSeconds: 1200, logging: logTo("build") }),
       );
       const built = await outcome(spec);
-      if (built.status !== "done") throw new Error(`BMAD stopped building (${built.status}):\n${built.result}`);
+      if (built.status !== "done") {
+        throw new Error(`BMAD stopped building (${built.status}):\n${buildHaltReason(built.result, current.completionSignal !== undefined)}`);
+      }
       if (current.commits.length === 0) throw new Error("the BMAD build made no commits");
     } else {
       freshBuild = true;
