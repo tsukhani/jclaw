@@ -114,17 +114,18 @@ Process **BACKEND** branches first, then **FRONTEND**, then **FACTORY** — each
 
 10. Summarize in a table: branch · ecosystem · dependency bumped · merged/skipped · test result. State how far `main` is now ahead of `origin/main` (these merge commits are **local and unpushed**).
 11. **Stop here.** Hand off to the user for `/deploy` (the only path that pushes). Do not push, do not run `/deploy` yourself.
-12. **Optional cleanup, only if the user asks:** delete the merged remote branches. Renovate runs as a **weekly** Jenkins job (not continuously), so this is safe immediately and they won't bounce back; once `/deploy` lands the bumps on `origin/main`, Renovate won't recreate them. This is the one push allowed outside `/deploy` (it touches no commits on `main`). The delete-push still fires `.githooks/pre-push` (full suite on HEAD) — since you just validated, pass `JCLAW_SKIP_TESTS=1`:
+12. **Optional cleanup, only if the user asks:** delete the merged remote branches. Renovate runs as a **weekly** Jenkins job (not continuously), so this is safe immediately and they won't bounce back; once `/deploy` lands the bumps on `origin/main`, Renovate won't recreate them. Otherwise they stay until Renovate's next Monday run, which deletes each merged branch as an orphan: one with no pending update and no commit off `main` (`pruneStaleBranches`, on by default); a newer version of the same dependency reuses the branch instead. The main JClaw pipeline never touches `renovate/*`. This is the one push allowed outside `/deploy` (it touches no commits on `main`). `.githooks/pre-push` skips the suite on a push that only deletes refs, so it needs no bypass:
     ```bash
-    JCLAW_SKIP_TESTS=1 /usr/bin/git push origin --delete renovate/<a> renovate/<b> …
+    /usr/bin/git push origin --delete renovate/<a> renovate/<b> …
     ```
+    The Bash tool runs zsh, which does not word-split an unquoted variable: build the list as an array (`B=(${(f)"$(…)"})`, then `"${B[@]}"`), or the whole list goes as one ref name.
 
 ---
 
 **Hard rules**
 - Merge onto `main` directly — never a worktree (the bumps must land on main).
 - **Never `git push` or run `/deploy`** as part of this command — stop at the local merge commits. The lone exception is the Phase-4 branch-deletion push, and only when the user explicitly asks for cleanup.
-- Never `--no-verify`, `--force`, or any hook/signing bypass (except the documented `JCLAW_SKIP_TESTS=1` on the cleanup delete-push).
+- Never `--no-verify`, `--force`, `JCLAW_SKIP_TESTS=1`, or any other hook/signing bypass.
 - The frontend **lockfile regen is mandatory** after the merge cascade — a plain `pnpm install` is not sufficient and gives false greens.
 - Validate by ecosystem: backend → `play autotest`; frontend → `pnpm test` + `lint` + `typecheck` + `stylelint` (+ `pnpm install --frozen-lockfile`); factory → `pnpm install --frozen-lockfile` + `pnpm run check` in a scratch export, never in the live `.sandcastle/`. A BOTH branch runs both.
 - Confirm before stopping jclaw for the backend suite; restart it afterward only if it was running.
