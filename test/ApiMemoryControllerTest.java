@@ -246,6 +246,28 @@ class ApiMemoryControllerTest extends FunctionalTest {
         assertTrue(all.contains("Berlin") && all.contains("Porto"), "status=all shows both");
     }
 
+    // ─── Agent type switch ───────────────────────────────────────────────────
+
+    @Test
+    void switchingAnAgentsTypeEitherWayKeepsItsMemories() {
+        seedMemory("typed", "Ada takes her tea without milk", "preference", 0.7);
+        seedMemory("typed", "The launch is planned for March", "fact", 0.6);
+        long id = agentIdFor("typed");
+        login();
+        assertIsOk(GET("/api/agents/" + id + "/workspace/USER.md"));
+
+        for (boolean serviceAgent : new boolean[] {true, false}) {
+            assertIsOk(PUT("/api/agents/" + id, "application/json", "{\"serviceAgent\": " + serviceAgent + "}"));
+            // USER.md follows the type, which is what shows the switch took effect rather than being refused.
+            assertEquals(serviceAgent ? 404 : 200,
+                    GET("/api/agents/" + id + "/workspace/USER.md").status.intValue());
+
+            var listed = getContent(GET("/api/memories?agent=typed"));
+            assertTrue(listed.contains("tea without milk"), "serviceAgent=" + serviceAgent + ": " + listed);
+            assertTrue(listed.contains("planned for March"), "serviceAgent=" + serviceAgent + ": " + listed);
+        }
+    }
+
     // ─── Pagination (X-Total-Count) ──────────────────────────────────────────
 
     @Test
