@@ -91,6 +91,7 @@ public final class ApiResponses {
     public static final String BOT_TOKEN_CONFLICT = "bot_token_conflict";
     public static final String PHONE_NUMBER_CONFLICT = "phone_number_conflict";
     public static final String CLOUD_API_VERIFICATION_FAILED = "cloud_api_verification_failed";
+    public static final String CLOUD_API_SUBSCRIBE_FAILED = "cloud_api_subscribe_failed";
 
     // Request shape and limits.
     public static final String NO_INPUT = "no_input";

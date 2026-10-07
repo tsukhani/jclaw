@@ -296,6 +296,9 @@ PUT     /api/channels/whatsapp/bindings/{id}    ApiWhatsAppBindingsController.up
 DELETE  /api/channels/whatsapp/bindings/{id}    ApiWhatsAppBindingsController.delete
 # WhatsApp-Web (Cobalt) QR pairing status (JCLAW-448)
 GET     /api/channels/whatsapp/bindings/{id}/qr  WhatsAppQrController.status
+# Cloud API: Meta app subscription to the number's WhatsApp Business Account (JCLAW-1410)
+GET     /api/channels/whatsapp/bindings/{id}/subscription  WhatsAppSubscriptionController.status
+POST    /api/channels/whatsapp/bindings/{id}/subscription  WhatsAppSubscriptionController.subscribe
 GET     /api/channels/{channelType}             ApiChannelsController.get
 PUT     /api/channels/{channelType}             ApiChannelsController.save
 

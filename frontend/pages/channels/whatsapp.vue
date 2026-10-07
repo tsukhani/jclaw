@@ -8,7 +8,7 @@ import {
 // Privacy: the QR is rendered locally with the qrcode lib. The raw pairing
 // string is NEVER sent to any third-party/external QR service or URL.
 import QRCode from 'qrcode'
-import type { Agent, WhatsAppBindingSummary } from '~/types/api'
+import type { Agent, WhatsAppBindingSummary, WhatsAppSubscriptionState } from '~/types/api'
 
 const [{ data: bindings, refresh }, { data: agents }] = await Promise.all([
   useFetch<WhatsAppBindingSummary[]>('/api/channels/whatsapp/bindings'),
@@ -214,6 +214,65 @@ async function remove(binding: WhatsAppBindingSummary) {
   if (!ok) return
   const result = await mutateBinding(`/api/channels/whatsapp/bindings/${binding.id}`, { method: 'DELETE' })
   if (result !== null) refresh()
+}
+
+// ── JCLAW-1410: Meta app subscription to the number's business account ────
+// Read per enabled Cloud API binding without awaiting, so the page never waits on Meta.
+// JClaw writes to Meta only on the Subscribe click.
+const subscriptions = ref<Record<number, WhatsAppSubscriptionState>>({})
+const subscribeErrors = ref<Record<number, string>>({})
+const subscribingId = ref<number | null>(null)
+const { mutate: mutateSubscription, errorDetails: subscriptionError } = useApiMutation()
+
+function subscriptionUrl(id: number) {
+  return `/api/channels/whatsapp/bindings/${id}/subscription`
+}
+
+// A newer read, a forget or a Subscribe supersedes a read still in flight for the same binding.
+const subscriptionReads = new Map<number, ReturnType<typeof useLatestRequest>>()
+function beginSubscriptionRead(id: number): () => boolean {
+  const reads = subscriptionReads.get(id) ?? useLatestRequest()
+  subscriptionReads.set(id, reads)
+  const token = reads.begin()
+  return () => reads.isCurrent(token)
+}
+
+function forgetSubscription(id: number) {
+  beginSubscriptionRead(id)
+  const { [id]: _state, ...states } = subscriptions.value
+  const { [id]: _error, ...errors } = subscribeErrors.value
+  subscriptions.value = states
+  subscribeErrors.value = errors
+}
+
+watch(bindings, (list) => {
+  const listed = new Set((list ?? []).map(b => b.id))
+  for (const id of [...subscriptionReads.keys()]) {
+    if (!listed.has(id)) forgetSubscription(id)
+  }
+  for (const b of list ?? []) {
+    if (!b.enabled || b.transport === 'WHATSAPP_WEB') {
+      forgetSubscription(b.id)
+      continue
+    }
+    const isCurrent = beginSubscriptionRead(b.id)
+    $fetch<WhatsAppSubscriptionState>(subscriptionUrl(b.id))
+      .then((state) => { if (isCurrent()) subscriptions.value[b.id] = state })
+      .catch(() => { if (isCurrent()) forgetSubscription(b.id) })
+  }
+}, { immediate: true })
+
+async function subscribe(binding: WhatsAppBindingSummary) {
+  subscribingId.value = binding.id
+  subscribeErrors.value[binding.id] = ''
+  const result = await mutateSubscription<WhatsAppSubscriptionState>(subscriptionUrl(binding.id), { method: 'POST' })
+  subscribingId.value = null
+  if (result === null) {
+    subscribeErrors.value[binding.id] = subscriptionError.value?.message ?? 'Subscribe failed.'
+    return
+  }
+  beginSubscriptionRead(binding.id)
+  subscriptions.value[binding.id] = result
 }
 
 function transportLabel(t: string | null): string {
@@ -425,6 +484,47 @@ onBeforeUnmount(stopPoll)
             </dd>
           </div>
         </dl>
+
+        <div
+          v-if="subscriptions[b.id]?.state === 'NOT_SUBSCRIBED'"
+          data-testid="subscription-warning"
+          class="border border-amber-500/60 bg-amber-500/10 p-3 mb-4 text-xs text-amber-700 dark:text-amber-300 space-y-2"
+        >
+          <p class="flex items-start gap-1.5">
+            <ExclamationTriangleIcon
+              class="h-4 w-4 shrink-0"
+              aria-hidden="true"
+            />
+            <span>
+              Meta will not deliver this number's messages to JClaw until the app is
+              subscribed to business account
+              <span class="font-mono">{{ subscriptions[b.id]?.wabaId }}</span>.
+            </span>
+          </p>
+          <p
+            v-if="subscribeErrors[b.id]"
+            data-testid="subscription-error"
+            class="text-red-700 dark:text-red-400"
+          >
+            {{ subscribeErrors[b.id] }}
+          </p>
+          <button
+            type="button"
+            class="px-2 py-1 border border-amber-500/60 text-amber-800 dark:text-amber-200
+                   hover:bg-amber-500/20 transition-colors disabled:cursor-not-allowed disabled:opacity-60"
+            :disabled="subscribingId === b.id"
+            @click="subscribe(b)"
+          >
+            Subscribe
+          </button>
+        </div>
+        <p
+          v-else-if="subscriptions[b.id]?.state === 'UNKNOWN'"
+          data-testid="subscription-unknown"
+          class="text-xs text-fg-muted mb-4"
+        >
+          Couldn't check the Meta app subscription: {{ subscriptions[b.id]?.reason }}
+        </p>
 
         <div class="flex justify-end items-center gap-1">
           <!-- JCLAW-448: open the QR-pairing panel for an unofficial

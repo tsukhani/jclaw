@@ -101,6 +101,16 @@ export interface SlackBindingSummary {
   deliveryScopeWarning?: string | null
 }
 
+/** JCLAW-1410: whether a Cloud API binding's Meta app is subscribed to the number's
+ *  WhatsApp Business Account — without it Meta delivers no webhook. Identifiers only. */
+export interface WhatsAppSubscriptionState {
+  bindingId: number
+  state: 'SUBSCRIBED' | 'NOT_SUBSCRIBED' | 'UNKNOWN' | 'NOT_APPLICABLE'
+  wabaId: string | null
+  appId: string | null
+  reason: string | null
+}
+
 /** One WhatsApp presence bound to one agent (JCLAW-444). The transport picks the
  *  integration stack: CLOUD_API (official Cloud API) or WHATSAPP_WEB (unofficial
  *  QR-paired Cobalt, ban-warned). Secrets are write-only — only presence flags
