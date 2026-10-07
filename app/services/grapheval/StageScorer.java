@@ -5,6 +5,8 @@ import memory.TemporalExpressions.DateSpan;
 import memory.ontology.EdtfInterval;
 import memory.ontology.OntologySchema;
 import org.jspecify.annotations.Nullable;
+import services.grapheval.CandidateGenerator.Candidate;
+import services.grapheval.CandidateGenerator.Source;
 import services.grapheval.ExactMatchResolver.Mention;
 import services.grapheval.ExtractionPipeline.Decision;
 import services.grapheval.ExtractionPipeline.Overlap;
@@ -12,10 +14,14 @@ import services.grapheval.GraphCases.Case;
 import services.grapheval.GraphCases.Entity;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.EnumMap;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -88,7 +94,26 @@ public final class StageScorer {
     public record Stages(Ratio candidateRecall, Ratio overlap, Ratio typing, Ratio rejection, Ratio relation, Ratio noRelation,
                          Resolution resolution, int failures, Ratio dateRecall, Ratio normalizer, Ratio tense,
                          Ratio occurs, Ratio status, Ratio slot, Ratio negationYes, Ratio negationNo,
-                         Ratio vetoRate) {}
+                         Ratio vetoRate, Coverage coverage) {}
+
+    /** The sources before JCLAW-1372, named rather than complemented so a later source never joins the baseline. */
+    public static final Set<Source> BEFORE_SOURCES = Collections.unmodifiableSet(EnumSet.of(Source.OPERATOR,
+            Source.KNOWN, Source.URL, Source.PATH, Source.FILE, Source.TICKET, Source.PREFERENCE, Source.VIEW,
+            Source.KIND_OF, Source.CAPITALIZED));
+
+    /**
+     * Candidate recall per source (OPERATOR left out), over the {@link #BEFORE_SOURCES} and over every source, and the
+     * question load those candidates imply before and after.
+     */
+    public record Coverage(Map<Source, Ratio> bySource, Ratio before, Ratio after, Load loadBefore, Load loadAfter) {
+        public Coverage {
+            bySource = Collections.unmodifiableMap(new EnumMap<>(bySource));
+        }
+    }
+
+    /** Means per memory: non-operator candidates, the overlap questions they form and the typing questions left. */
+    public record Load(@Nullable Double candidates, @Nullable Double overlapQuestions,
+                       @Nullable Double typingQuestions) {}
 
     /**
      * The spans the typing stage is asked about, in question order: gold mentions, the named owner's included, then
@@ -178,7 +203,7 @@ public final class StageScorer {
                 Ratio.of(typedRight, typedTotal), Ratio.of(rejected, negatives), Ratio.of(relationRight, relationTotal),
                 Ratio.of(noneRight, noneTotal), resolution(cases, ownerName), failures, dateRecall(cases),
                 normalizer(cases), q.tense.done(), q.occurs.done(), q.status.done(), q.slot.done(), q.yes.done(),
-                q.no.done(), q.veto.done());
+                q.no.done(), q.veto.done(), coverage(cases, ownerName));
     }
 
     private static final class Count {
@@ -358,22 +383,62 @@ public final class StageScorer {
 
     /**
      * Gold non-implicit entities whose mention or an alias is one of the case's candidates, generated with
-     * {@code ownerName} as a known name.
+     * {@code ownerName} as the owner: {@link #coverage}'s {@code after}.
      */
     public static Ratio candidateRecall(List<Case> cases, @Nullable String ownerName) {
-        var known = ownerName == null ? List.<String>of() : List.of(ownerName);
-        int hit = 0;
-        int total = 0;
+        return coverage(cases, ownerName).after();
+    }
+
+    /**
+     * Each case's candidates, generated with {@code ownerName} as the owner and no other known name. A source hits a
+     * gold non-implicit entity when the entity answers to the span of a candidate that source proposed; every source
+     * is scored over all such entities.
+     */
+    public static Coverage coverage(List<Case> cases, @Nullable String ownerName) {
+        var bySource = new EnumMap<Source, Count>(Source.class);
+        for (var s : Source.values()) if (s != Source.OPERATOR) bySource.put(s, new Count());
+        var before = new Count();
+        var after = new Count();
+        var loadBefore = new Tally();
+        var loadAfter = new Tally();
         for (var c : cases) {
-            var spans = new HashSet<String>();
-            CandidateGenerator.generate(c.text(), known).forEach(k -> spans.add(k.span()));
+            var candidates = CandidateGenerator.generate(c.text(), List.of(), ownerName);
             for (var e : c.entities()) {
                 if (e.implicit()) continue;
-                total++;
-                if (spans.stream().anyMatch(e::answersTo)) hit++;
+                var sources = EnumSet.noneOf(Source.class);
+                candidates.stream().filter(k -> e.answersTo(k.span())).forEach(k -> sources.addAll(k.sources()));
+                bySource.forEach((s, count) -> count.add(sources.contains(s)));
+                before.add(sources.stream().anyMatch(BEFORE_SOURCES::contains));
+                after.add(!sources.isEmpty());
             }
+            var asked = candidates.stream().filter(k -> !k.operator()).toList();
+            loadAfter.add(asked);
+            loadBefore.add(asked.stream().filter(k -> k.sources().stream().anyMatch(BEFORE_SOURCES::contains)).toList());
         }
-        return Ratio.of(hit, total);
+        var ratios = new EnumMap<Source, Ratio>(Source.class);
+        bySource.forEach((s, count) -> ratios.put(s, count.done()));
+        return new Coverage(ratios, before.done(), after.done(), loadBefore.done(), loadAfter.done());
+    }
+
+    /** Per-memory sums of candidates and the overlap and typing questions they imply. */
+    private static final class Tally {
+        int memories;
+        int candidates;
+        int overlap;
+        int typing;
+
+        void add(List<Candidate> asked) {
+            memories++;
+            candidates += asked.size();
+            var groups = ExtractionPipeline.overlapGroups(asked);
+            overlap += groups.size();
+            typing += asked.size() - groups.stream().mapToInt(List::size).sum() + groups.size();
+        }
+
+        Load done() {
+            return memories == 0 ? new Load(null, null, null)
+                    : new Load((double) candidates / memories, (double) overlap / memories, (double) typing / memories);
+        }
     }
 
     /**

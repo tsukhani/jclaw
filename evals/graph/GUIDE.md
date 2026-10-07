@@ -25,6 +25,25 @@ label that breaks one of them is a label error, not a model error. The format it
 goes in Kestrel CI's `aliases`; it is never an entity of its own. A model that writes both the
 name and the description has written one entity twice, and the second is a `duplicate`.
 
+## 2a. An unnamed relative is one Person per kin word
+
+When a memory names a relative of the owner only by a kin phrase (the owner's name or "The
+user", a possessive 's, at most one modifier, one singular kin word: "Avery Lin's son", "The
+user's younger sister"), label one Person whose mention is the phrase from the possessor through
+the kin word, modifier included, and relate it to the owner with `operator family_of`. Its id is
+`operator-` plus the kin word without the modifier (`operator-son`, `operator-sister`), the same in
+every case that names an unnamed relative by that kin word. Like the operator, it is an exception
+to rule 8's same-mention requirement.
+
+- A name in apposition ("Avery Lin's sister Wren Castillo", "Wren Castillo, Avery Lin's sister")
+  makes the name the Person, and the kin phrase is its alias (rule 2), never a second entity.
+- A relative named through a pronoun ("their sister") or through another person's name ("Dana
+  Reyes's son") is labelled the same way, keyed by whose relative it is (`operator-sister` when
+  "their" is the owner, `dana-son`), although no candidate source proposes it yet: candidate
+  recall is what measures that miss.
+- A plural ("Avery Lin's parents", "their kids") names a group, not one Person, and is not
+  labelled.
+
 ## 3. A true but trivial fact is noise
 
 A record that is true but adds nothing a graph needs carries `"noise": true`: a generic place

@@ -101,12 +101,17 @@ term type and relation used, and entity ids recurring across cases.
 Decision-only: code finds every candidate and the decision model only chooses
 (`CandidateGenerator`, `ExtractionPipeline`).
 
-1. **Candidates**, all spans of the memory: the operator, the agent's known Term names and
-   the set's declared owner name
-   (matched case-insensitively on word boundaries; a Term has no aliases), capitalized runs
-   split at time words (weekdays, months, today, morning, weekend and the like, which never
-   stand as candidates), URLs, file paths, ticket keys, the object of a stated preference,
-   and the Topic frames "thinks that X" and "X is a kind of Y".
+1. **Candidates**, all spans of the memory, each recording every source that proposed it: the
+   operator, every known Term's name and aliases and the set's declared owner name (matched
+   case-insensitively on word boundaries), capitalized runs split at time words (weekdays,
+   months, today, morning, weekend and the like, which never stand as candidates), URLs, file
+   paths, ticket keys, email addresses, @handles, phone numbers (never a date, year range, IP
+   address, version, clock time, an amount with commas or digits inside a literal), the
+   object of a stated preference, the Topic frames "thinks that X" and "X is a kind of Y",
+   and the owner-possessive kin frame ("Avery Lin's son", "The user's younger sister"; GUIDE
+   rule 2a) unless a capitalized name stands in apposition (right after the kin word, or set
+   off by a comma and closing its clause), and never for a plural or a pronoun. A kin
+   candidate does not overlap its own possessor, so both are typed.
 2. **Operator.** An implicit operator or "the user" is written by rule as a Person at
    confidence 1 and never asked. The owner's name is an ordinary candidate, decided and typed.
 3. **Overlap.** Each set of candidates whose spans overlap gets one choice over its spans
@@ -164,6 +169,9 @@ surface normalizes to the declared owner name joins the operator's cluster.
 **Stages**, each with gold swapped in for the stages before it, so a stage's score is its own:
 
 - candidate recall: gold mentions (or an alias) among the generated candidates;
+- coverage (no model): candidate recall per source, before (the sources preceding JCLAW-1372,
+  named explicitly: no email, handle, phone or kin) and after, and the candidates per memory
+  with the overlap and typing questions they imply, before and after;
 - overlap: overlap sets settled on a gold span, or on `neither` when no span is gold;
 - typing: gold spans typed as labelled; rejection: negatives answered `not_an_entity`;
 - relation: labelled pairs whose kept relation is the label, in its direction, at yes of at

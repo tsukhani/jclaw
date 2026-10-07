@@ -7,22 +7,27 @@ import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * The spans of a memory that may name a term, found by fixed rules rather than a model (JCLAW-1356, JCLAW-1357): the
- * operator when the memory says "the user" or states no subject, capitalized runs less their time words, URLs, file
- * paths, ticket keys, the object of a stated preference or view, both sides of "X is a kind of Y", and the agent's
- * known Term names, the owner's name among them. Deterministic, so a run's candidates never vary between runs or
- * models. Spans may overlap; the decision model settles which one stands.
+ * The spans of a memory that may name a term, found by fixed rules rather than a model (JCLAW-1356, JCLAW-1357,
+ * JCLAW-1372): the operator when the memory says "the user" or states no subject, capitalized runs less their time
+ * words, URLs, file paths, ticket keys, email addresses, @handles, phone numbers, the object of a stated preference or
+ * view, both sides of "X is a kind of Y", the agent's known Term names and aliases, the owner's name among them, and
+ * an owner-possessive kin phrase ("Avery Lin's son") with no name in apposition. Each candidate records the
+ * {@link Source}s that proposed it. Deterministic, so a run's candidates never vary between runs or models. Spans may
+ * overlap; the decision model settles which one stands.
  */
 public final class CandidateGenerator {
 
@@ -60,16 +65,78 @@ public final class CandidateGenerator {
             "(?i)(?:^|[,;:!?.]\\s|\\bthat\\s|\\bthinks\\s|\\bbelieves\\s|\\bconsiders\\s)");
     private static final Pattern SENTENCE_END = Pattern.compile("[.!?][\"'\u201d\u2019)]*$");
 
+    /** Email: a local part, "@", and a domain with at least one dot. */
+    private static final Pattern EMAIL = Pattern.compile(
+            "(?<![\\w.+\\-])[\\w][\\w.+\\-]*@[A-Za-z0-9](?:[A-Za-z0-9\\-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9\\-]*[A-Za-z0-9])?)+");
+    private static final Pattern HANDLE = Pattern.compile("(?<![\\w.@])@[A-Za-z_]\\w++");
+    /**
+     * At least two digit groups, joined by single spaces, hyphens or dots, or by nothing after a parenthesised group;
+     * every group after the first has two digits or more, so a version or a trailing count is not one.
+     */
+    private static final Pattern PHONE = Pattern.compile(
+            "(?<![\\w+(),.:/@\\-])\\+?(?:\\(\\d++\\)|\\d++)(?:(?:(?<=\\))[ .\\-]?|[ .\\-])(?:\\(\\d{2,}+\\)|\\d{2,}+))++");
+    private static final Pattern PHONE_DATE = Pattern.compile(
+            "\\d{4}([.\\-])\\d{1,2}\\1\\d{1,2}|\\d{1,2}([.\\-])\\d{1,2}\\2\\d{2,4}");
+    private static final Pattern PHONE_YEAR_RANGE = Pattern.compile("(?:19|20)\\d\\d[ .\\-]+(?:19|20)\\d\\d");
+    private static final Pattern PHONE_QUAD = Pattern.compile("\\d{1,3}(?:\\.\\d{1,3}){3}");
+    private static final int PHONE_MIN_DIGITS = 7;
+    private static final int PHONE_MAX_DIGITS = 15;
+
+    /** Modifiers a kin phrase may carry before its kin word. A closed list: extend it only by a reviewed edit. */
+    public static final List<String> KIN_MODIFIERS = List.of("older", "younger", "elder", "eldest", "youngest", "twin",
+            "little", "big");
+    /** Singular kin words. A closed list: extend it only by a reviewed edit. */
+    public static final List<String> KIN_WORDS = List.of("mother", "father", "mum", "mom", "dad", "parent", "son",
+            "daughter", "child", "brother", "sister", "sibling", "wife", "husband", "spouse", "partner", "fiance",
+            "fiancee", "grandmother", "grandfather", "grandparent", "grandson", "granddaughter", "grandchild", "aunt",
+            "uncle", "cousin", "niece", "nephew", "stepmother", "stepfather", "stepson", "stepdaughter", "stepbrother",
+            "stepsister", "mother-in-law", "father-in-law", "brother-in-law", "sister-in-law", "son-in-law",
+            "daughter-in-law");
+    private static final String KIN_TAIL = "['\u2019]s\\s+(?:(?:" + alternation(KIN_MODIFIERS) + ")\\s+)?("
+            + alternation(KIN_WORDS) + ")(?![\\w\\-])";
+    private static final String CLAUSE_CLOSE = ",;.!?)";
+
+    /**
+     * What proposed a candidate. OPERATOR is "the user" or the implicit operator, written by rule; KNOWN is the owner's
+     * name or a known Term name or alias.
+     */
+    public enum Source { OPERATOR, KNOWN, URL, PATH, FILE, TICKET, EMAIL, HANDLE, PHONE,
+                         PREFERENCE, VIEW, KIND_OF, CAPITALIZED, KIN }
+
+    /** A found span at {@code [start, end)}; a KIN one carries its kin word and possessor range. */
+    private record Found(int start, int end, Source source, @Nullable String kin, int possessorStart,
+                         int possessorEnd) {
+        Found(int start, int end, Source source) {
+            this(start, end, source, null, -1, -1);
+        }
+    }
+
     private CandidateGenerator() {}
+
+    private static String alternation(List<String> words) {
+        return words.stream().sorted(Comparator.comparingInt(String::length).reversed().thenComparing(w -> w))
+                .map(Pattern::quote).reduce((a, b) -> a + "|" + b).orElseThrow();
+    }
 
     /**
      * A span to type, at {@code [start, end)} of the text. An operator candidate ("the user", or implicit) is written
      * as a Person without a question, and an implicit one has no span in the text and is named
      * {@link GraphCases#IMPLICIT_OPERATOR_SPAN}; an owner named in the text is an ordinary candidate. A candidate with
-     * no position has offsets -1 and overlaps nothing.
+     * no position has offsets -1 and overlaps nothing. {@code sources} iterates in enum order; a KIN candidate's
+     * {@code kin} is its lower-case kin word and {@code [possessorStart, possessorEnd)} its possessor, else null and -1.
      */
     public record Candidate(String span, boolean operator, boolean implicit, int start, int end,
-                            @Nullable PreferenceFrame frame) {
+                            @Nullable PreferenceFrame frame, Set<Source> sources, @Nullable String kin,
+                            int possessorStart, int possessorEnd) {
+        public Candidate {
+            sources = sources.isEmpty() ? Set.of() : Collections.unmodifiableSet(EnumSet.copyOf(sources));
+        }
+
+        public Candidate(String span, boolean operator, boolean implicit, int start, int end,
+                         @Nullable PreferenceFrame frame) {
+            this(span, operator, implicit, start, end, frame, Set.of(), null, -1, -1);
+        }
+
         public Candidate(String span, boolean operator, boolean implicit, int start, int end) {
             this(span, operator, implicit, start, end, null);
         }
@@ -82,7 +149,10 @@ public final class CandidateGenerator {
             return new Candidate(span, false, false);
         }
 
+        /** Whether the spans share a character, unless one is the other's possessor. */
         public boolean overlaps(Candidate other) {
+            if (possessorStart >= 0 && possessorStart == other.start && possessorEnd == other.end) return false;
+            if (other.possessorStart >= 0 && other.possessorStart == start && other.possessorEnd == end) return false;
             return start >= 0 && other.start >= 0 && start < other.end && other.start < end;
         }
     }
@@ -110,65 +180,172 @@ public final class CandidateGenerator {
         return generate(text, List.of());
     }
 
-    /**
-     * The candidates in {@code text}: the operator first, then by position, each span once. Each of {@code knownNames}
-     * is a candidate wherever it appears as whole words, in any case, even when it is a time word. A recurring span
-     * keeps the occurrence that overlaps another candidate, else its first.
-     */
+    /** {@link #generate(String, Collection, String)} with no owner name: "the user" is the only kin possessor. */
     public static List<Candidate> generate(String text, Collection<String> knownNames) {
+        return generate(text, knownNames, null);
+    }
+
+    /**
+     * The candidates in {@code text}: the operator first, then by position, each span once. Each of {@code knownNames},
+     * and {@code ownerName}, is a candidate wherever it appears as whole words, in any case, even when it is a time
+     * word; {@code ownerName} and "the user" are the possessors of a kin phrase. A recurring span keeps the occurrence
+     * that overlaps another candidate, else its first, and the sources of every occurrence.
+     */
+    public static List<Candidate> generate(String text, Collection<String> knownNames, @Nullable String ownerName) {
         var out = new ArrayList<Candidate>();
         var user = THE_USER.matcher(text);
         boolean implicit = false;
+        var operatorSource = Set.of(Source.OPERATOR);
         if (user.find()) {
-            out.add(new Candidate(user.group(), true, false, user.start(), user.end()));
+            out.add(new Candidate(user.group(), true, false, user.start(), user.end(), null, operatorSource, null, -1,
+                    -1));
         } else if (subjectless(text)) {
             implicit = true;
-            out.add(new Candidate(GraphCases.IMPLICIT_OPERATOR_SPAN, true, true));
+            out.add(new Candidate(GraphCases.IMPLICIT_OPERATOR_SPAN, true, true, -1, -1, null, operatorSource, null, -1,
+                    -1));
         }
 
-        var found = new ArrayList<int[]>();
+        var found = new ArrayList<Found>();
         var taken = new ArrayList<int[]>();
         var framed = new ArrayList<Framed>();
-        for (var literal : LiteralSpans.spans(text)) {
-            var range = new int[] {literal.start(), literal.end()};
-            found.add(range);
-            if (literal.kind() == LiteralSpans.Kind.URL || literal.kind() == LiteralSpans.Kind.PATH) taken.add(range);
+        var literals = LiteralSpans.spans(text);
+        for (var literal : literals) {
+            found.add(new Found(literal.start(), literal.end(), Source.valueOf(literal.kind().name())));
+            if (literal.kind() == LiteralSpans.Kind.URL || literal.kind() == LiteralSpans.Kind.PATH) {
+                taken.add(new int[] {literal.start(), literal.end()});
+            }
         }
+        contacts(text, literals, found);
         preferences(text, taken, found, framed);
         objects(text, VIEW, PREFERENCE_END, taken, found);
         kindOf(text, taken, found);
-        var known = new ArrayList<int[]>();
+        var names = new ArrayList<String>();
         for (var name : knownNames) {
-            if (name.isBlank()) continue;
-            var m = Pattern.compile("(?i)(?<![\\w])" + Pattern.quote(name.strip()) + "(?![\\w])").matcher(text);
-            while (m.find()) known.add(new int[] {m.start(), m.end()});
+            if (!name.isBlank() && names.stream().noneMatch(n -> n.equalsIgnoreCase(name.strip()))) {
+                names.add(name.strip());
+            }
+        }
+        if (ownerName != null && !ownerName.isBlank()
+                && names.stream().noneMatch(n -> n.equalsIgnoreCase(ownerName.strip()))) {
+            names.add(ownerName.strip());
+        }
+        var known = new ArrayList<Found>();
+        for (var name : names) {
+            var m = Pattern.compile("(?i)(?<![\\w])" + Pattern.quote(name) + "(?![\\w])").matcher(text);
+            while (m.find()) known.add(new Found(m.start(), m.end(), Source.KNOWN));
         }
         capitalizedRuns(text, implicit, found);
-        found.removeIf(r -> onlyTime(text.substring(r[0], r[1])));
+        found.removeIf(r -> onlyTime(text.substring(r.start(), r.end())));
         var claimed = TemporalExpressions.claimedSpans(text);
-        found.removeIf(r -> claimed.stream().anyMatch(c -> c.start() <= r[0] && r[1] <= c.end()));
+        found.removeIf(r -> claimed.stream().anyMatch(c -> c.start() <= r.start() && r.end() <= c.end()));
         found.addAll(known);
+        found.addAll(kin(text, ownerName, found));
 
-        found.sort(Comparator.comparingInt(r -> r[0]));
+        found.sort(Comparator.comparingInt(Found::start));
         var operators = new HashSet<String>();
         out.forEach(c -> operators.add(c.span()));
-        var chosen = new LinkedHashMap<String, int[]>();
+        var chosen = new LinkedHashMap<String, Found>();
+        var sources = new HashMap<String, Set<Source>>();
+        var kinOf = new HashMap<String, Found>();
         for (var r : found) {
-            var span = text.substring(r[0], r[1]);
+            var span = text.substring(r.start(), r.end());
             if (span.isEmpty() || span.equalsIgnoreCase(GraphCases.IMPLICIT_OPERATOR_SPAN) || operators.contains(span)) {
                 continue;
             }
+            sources.computeIfAbsent(span, _ -> EnumSet.noneOf(Source.class)).add(r.source());
+            if (r.kin() != null) kinOf.putIfAbsent(span, r);
             var first = chosen.get(span);
             if (first == null || (!overlapsAnother(text, first, found) && overlapsAnother(text, r, found))) {
                 chosen.put(span, r);
             }
         }
         var frames = frames(text, framed, found, out);
-        chosen.values().stream().sorted(Comparator.comparingInt(r -> r[0])).forEach(r -> {
-            var span = text.substring(r[0], r[1]);
-            out.add(new Candidate(span, false, false, r[0], r[1], frames.get(span)));
+        chosen.values().stream().sorted(Comparator.comparingInt(Found::start)).forEach(r -> {
+            var span = text.substring(r.start(), r.end());
+            var k = kinOf.get(span);
+            int possessorStart = k == null ? -1 : r.start() + k.possessorStart() - k.start();
+            int possessorEnd = k == null ? -1 : r.start() + k.possessorEnd() - k.start();
+            out.add(new Candidate(span, false, false, r.start(), r.end(), frames.get(span),
+                    Objects.requireNonNull(sources.get(span)), k == null ? null : k.kin(), possessorStart,
+                    possessorEnd));
         });
         return List.copyOf(out);
+    }
+
+    /** Email addresses, @handles and phone numbers; none of them inside a URL, path, file name or ticket key. */
+    private static void contacts(String text, List<LiteralSpans.Span> literals, List<Found> found) {
+        var emails = new ArrayList<Found>();
+        var email = EMAIL.matcher(text);
+        while (email.find()) {
+            if (clear(literals, email.start(), email.end())) {
+                emails.add(new Found(email.start(), email.end(), Source.EMAIL));
+            }
+        }
+        found.addAll(emails);
+        var handle = HANDLE.matcher(text);
+        while (handle.find()) {
+            int s = handle.start();
+            int e = handle.end();
+            if (clear(literals, s, e) && emails.stream().allMatch(r -> e <= r.start() || s >= r.end())) {
+                found.add(new Found(s, e, Source.HANDLE));
+            }
+        }
+        var phone = PHONE.matcher(text);
+        while (phone.find()) {
+            if (phone(text, phone.start(), phone.end()) && clear(literals, phone.start(), phone.end())) {
+                found.add(new Found(phone.start(), phone.end(), Source.PHONE));
+            }
+        }
+    }
+
+    /** Whether the digit-group match at {@code [start, end)} reads as a phone number rather than a date or number. */
+    private static boolean phone(String text, int start, int end) {
+        if (end < text.length()) {
+            char next = text.charAt(end);
+            if (Character.isLetterOrDigit(next) || next == '_' || next == '(' || next == '@') return false;
+            if (",:./-".indexOf(next) >= 0 && end + 1 < text.length() && Character.isDigit(text.charAt(end + 1))) {
+                return false;
+            }
+        }
+        var match = text.substring(start, end);
+        long digits = match.chars().filter(Character::isDigit).count();
+        if (digits < PHONE_MIN_DIGITS || digits > PHONE_MAX_DIGITS) return false;
+        if (match.chars().filter(ch -> ch == '(').count() > 1) return false;
+        return !PHONE_DATE.matcher(match).matches() && !PHONE_YEAR_RANGE.matcher(match).matches()
+                && !PHONE_QUAD.matcher(match).matches();
+    }
+
+    private static boolean clear(List<LiteralSpans.Span> literals, int start, int end) {
+        return literals.stream().allMatch(l -> end <= l.start() || start >= l.end());
+    }
+
+    /**
+     * Each owner-possessive kin phrase ("Avery Lin's younger sister"), unless a capitalized name stands in apposition:
+     * right after the kin word ("son Wren"), or set off by commas and closing its clause ("son, Wren." or
+     * "Wren, Avery Lin's son."), so a leading or following clause ("In Port Calloway, ...") keeps the phrase.
+     */
+    private static List<Found> kin(String text, @Nullable String ownerName, List<Found> found) {
+        var possessor = "the user";
+        if (ownerName != null && !ownerName.isBlank()) possessor = Pattern.quote(ownerName.strip()) + "|" + possessor;
+        var m = Pattern.compile("(?i)(?<![\\w])(" + possessor + ")" + KIN_TAIL).matcher(text);
+        var out = new ArrayList<Found>();
+        while (m.find()) {
+            int s = m.start(1);
+            int e = m.end(2);
+            boolean apposition = found.stream().filter(r -> r.source() == Source.CAPITALIZED).anyMatch(r ->
+                    (r.start() == e + 1 && text.charAt(e) == ' ')
+                            || (r.start() == e + 2 && text.startsWith(", ", e) && closes(text, r.end()))
+                            || (r.end() + 2 == s && text.startsWith(", ", r.end()) && closes(text, e)));
+            if (!apposition) {
+                out.add(new Found(s, e, Source.KIN, m.group(2).toLowerCase(Locale.ROOT), s, m.end(1)));
+            }
+        }
+        return out;
+    }
+
+    /** Whether {@code at} is the end of the text or one of {@link #CLAUSE_CLOSE}. */
+    private static boolean closes(String text, int at) {
+        return at == text.length() || CLAUSE_CLOSE.indexOf(text.charAt(at)) >= 0;
     }
 
     /** A preference object at {@code [start, end)} and the frame match {@code [verbStart, verbEnd)} governing it. */
@@ -178,7 +355,7 @@ public final class CandidateGenerator {
      * The object of every valence frame, read in {@link TemporalExpressions#valence}'s order -- favorable endings,
      * unfavorable stances, favorable stances -- so a match inside an earlier one is the same frame and is skipped.
      */
-    private static void preferences(String text, List<int[]> taken, List<int[]> found, List<Framed> framed) {
+    private static void preferences(String text, List<int[]> taken, List<Found> found, List<Framed> framed) {
         var claimed = new ArrayList<int[]>();
         frameObjects(text, TemporalExpressions.FAVORABLE_FRAMES, true, OntologyRecord.Valence.FAVORABLE, claimed, taken,
                 found, framed);
@@ -190,7 +367,7 @@ public final class CandidateGenerator {
 
     private static void frameObjects(String text, List<TemporalExpressions.Frame> frames, boolean ending,
                                      OntologyRecord.Valence valence, List<int[]> claimed, List<int[]> taken,
-                                     List<int[]> found, List<Framed> framed) {
+                                     List<Found> found, List<Framed> framed) {
         for (var frame : frames) {
             if (frame.ending() != ending) continue;
             var m = frame.pattern().matcher(text);
@@ -213,7 +390,7 @@ public final class CandidateGenerator {
                 var stop = PREFERENCE_END.matcher(text).region(s, limit);
                 int e = trimSpace(text, s, stop.find() ? stop.start() : limit);
                 if (e > s && free(taken, s, e)) {
-                    found.add(new int[] {s, e});
+                    found.add(new Found(s, e, Source.PREFERENCE));
                     framed.add(new Framed(s, e, vs, ve, valence));
                 }
             }
@@ -221,7 +398,7 @@ public final class CandidateGenerator {
     }
 
     /** Each preference object's frame by span; a span framed twice keeps the frame of the verb that comes first. */
-    private static Map<String, PreferenceFrame> frames(String text, List<Framed> framed, List<int[]> found,
+    private static Map<String, PreferenceFrame> frames(String text, List<Framed> framed, List<Found> found,
                                                        List<Candidate> operators) {
         var out = new HashMap<String, PreferenceFrame>();
         framed.stream().sorted(Comparator.comparingInt(Framed::verbStart)).forEach(f -> out.putIfAbsent(
@@ -234,9 +411,10 @@ public final class CandidateGenerator {
      * The longest candidate span ending before {@code verb} in its sentence with only frame adverbs, auxiliaries or
      * negation between; else the implicit operator's span; else null.
      */
-    private static @Nullable String subject(String text, int verb, List<int[]> found, List<Candidate> operators) {
+    private static @Nullable String subject(String text, int verb, List<Found> found, List<Candidate> operators) {
         int[] best = null;
-        var ranges = new ArrayList<>(found);
+        var ranges = new ArrayList<int[]>();
+        for (var r : found) ranges.add(new int[] {r.start(), r.end()});
         for (var op : operators) if (!op.implicit()) ranges.add(new int[] {op.start(), op.end()});
         for (var r : ranges) {
             if (r[1] > verb || !onlyFrameWords(text.substring(r[1], verb))) continue;
@@ -256,21 +434,26 @@ public final class CandidateGenerator {
         return rest.isBlank();
     }
 
-    /** Whether {@code r} overlaps a found range of a different span. */
-    private static boolean overlapsAnother(String text, int[] r, List<int[]> found) {
-        var span = text.substring(r[0], r[1]);
-        return found.stream().anyMatch(q -> q[0] < r[1] && r[0] < q[1] && !text.substring(q[0], q[1]).equals(span));
+    /** Whether {@code r} overlaps a found range of a different span, other than its own possessor or possessive. */
+    private static boolean overlapsAnother(String text, Found r, List<Found> found) {
+        var span = text.substring(r.start(), r.end());
+        return found.stream().anyMatch(q -> q.start() < r.end() && r.start() < q.end()
+                && !text.substring(q.start(), q.end()).equals(span) && !possesses(q, r) && !possesses(r, q));
+    }
+
+    private static boolean possesses(Found kin, Found other) {
+        return kin.possessorStart() >= 0 && kin.possessorStart() == other.start() && kin.possessorEnd() == other.end();
     }
 
     /** The span after each match of {@code frame}, up to {@code end}'s first match or the end of the text. */
-    private static void objects(String text, Pattern frame, Pattern end, List<int[]> taken, List<int[]> found) {
+    private static void objects(String text, Pattern frame, Pattern end, List<int[]> taken, List<Found> found) {
         var m = frame.matcher(text);
         while (m.find()) {
             int s = m.end();
             var stop = end.matcher(text).region(s, text.length());
             int e = stop.find() ? stop.start() : text.length();
             e = trimSpace(text, s, e);
-            if (e > s && free(taken, s, e)) found.add(new int[] {s, e});
+            if (e > s && free(taken, s, e)) found.add(new Found(s, e, Source.VIEW));
         }
     }
 
@@ -278,7 +461,7 @@ public final class CandidateGenerator {
      * Both sides of "X is a kind of Y" and "considers X a kind of Y"; X starts at its clause, and without the copula
      * there is an X only after a considers verb in the same clause.
      */
-    private static void kindOf(String text, List<int[]> taken, List<int[]> found) {
+    private static void kindOf(String text, List<int[]> taken, List<Found> found) {
         var m = KIND_OF.matcher(text);
         while (m.find()) {
             int xEnd = trimSpace(text, 0, m.start());
@@ -298,12 +481,12 @@ public final class CandidateGenerator {
             xStart = lastWords(text, xStart, xEnd, KIND_SUBJECT_WORDS);
             var x = text.substring(xStart, xEnd);
             if (xEnd > xStart && !RELATIVE.matcher(x).lookingAt() && free(taken, xStart, xEnd)) {
-                found.add(new int[] {xStart, xEnd});
+                found.add(new Found(xStart, xEnd, Source.KIND_OF));
             }
             int s = m.end();
             var stop = KIND_END.matcher(text).region(s, text.length());
             int e = trimSpace(text, s, stop.find() ? stop.start() : text.length());
-            if (e > s && free(taken, s, e)) found.add(new int[] {s, e});
+            if (e > s && free(taken, s, e)) found.add(new Found(s, e, Source.KIND_OF));
         }
     }
 
@@ -337,7 +520,7 @@ public final class CandidateGenerator {
     private record Token(String core, int start, int end, boolean connector, boolean sentenceInitial) {}
 
     /** Maximal capitalized-token runs, connectors allowed inside; punctuation and a possessive end a run. */
-    private static void capitalizedRuns(String text, boolean implicit, List<int[]> found) {
+    private static void capitalizedRuns(String text, boolean implicit, List<Found> found) {
         var run = new ArrayList<Token>();
         boolean sentenceStart = true;
         var m = TOKEN.matcher(text);
@@ -377,7 +560,7 @@ public final class CandidateGenerator {
      * Closes a run, split at its time words, which are dropped. A time word directly followed by a capitalized word
      * that is not one opens a name ("May Chen", "Fridays Ltd") and stays.
      */
-    private static void close(List<Token> run, boolean implicit, List<int[]> found) {
+    private static void close(List<Token> run, boolean implicit, List<Found> found) {
         var tokens = new ArrayList<>(run);
         run.clear();
         var segment = new ArrayList<Token>();
@@ -399,7 +582,7 @@ public final class CandidateGenerator {
         return !token.connector() && TemporalExpressions.TIME_WORDS.contains(token.core().toLowerCase(Locale.ROOT));
     }
 
-    private static void closeSegment(List<Token> segment, boolean implicit, List<int[]> found) {
+    private static void closeSegment(List<Token> segment, boolean implicit, List<Found> found) {
         var r = new ArrayList<>(segment);
         while (!r.isEmpty() && r.getFirst().connector()) r.removeFirst();
         while (!r.isEmpty() && r.getLast().connector()) r.removeLast();
@@ -412,7 +595,7 @@ public final class CandidateGenerator {
                 while (!r.isEmpty() && r.getFirst().connector()) r.removeFirst();
             }
         }
-        if (!r.isEmpty()) found.add(new int[] {r.getFirst().start(), r.getLast().end()});
+        if (!r.isEmpty()) found.add(new Found(r.getFirst().start(), r.getLast().end(), Source.CAPITALIZED));
     }
 
     private static boolean free(List<int[]> taken, int start, int end) {

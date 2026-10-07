@@ -52,6 +52,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -503,6 +504,29 @@ class GraphEvalHarnessTest extends UnitTest {
             assertTrue(overlap.total() > 0, "the case raises an overlap");
             assertEquals(1.0, overlap.rate(), "overlap " + overlap);
         }
+    }
+
+    @Test
+    void theOwnerReachesTheHarnessGeneratorAsAKinPossessor() {
+        assertEquals("Avery Lin", owner());
+        var c = new Case("k1", List.of("plain"), "Avery Lin's son starts at Harborlight Academy.",
+                List.of(GraphCases.Entity.of("operator", "Avery Lin", "Person"),
+                        GraphCases.Entity.of("operator-son", "Avery Lin's son", "Person"),
+                        GraphCases.Entity.of("academy", "Harborlight Academy", "Organization")),
+                List.of(GraphCases.Relation.of("operator", "family_of", "operator-son")), List.of());
+        var golden = gold(List.of(c));
+        // The gold-fed typing stage asks every gold span; only the generated candidates' runs ask the kin phrase too.
+        var typed = new ConcurrentHashMap<String, Integer>();
+        run(List.of(c), request -> {
+            for (var q : request.getAsJsonObject("questions").entrySet()) {
+                if (!q.getKey().startsWith("m")) continue;
+                var rules = q.getValue().getAsJsonObject().getAsJsonObject("instructions").get("rules").getAsString();
+                QUOTED.matcher(rules).results().forEach(m -> typed.merge(m.group(1), 1, Integer::sum));
+            }
+            return golden.decide(request);
+        });
+        assertTrue(typed.getOrDefault("Harborlight Academy", 0) > 0, typed.toString());
+        assertEquals(typed.get("Harborlight Academy"), typed.get("Avery Lin's son"), typed.toString());
     }
 
     @Test

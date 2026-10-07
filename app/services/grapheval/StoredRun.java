@@ -14,6 +14,7 @@ import memory.ontology.OntologySchema;
 import org.jspecify.annotations.Nullable;
 import services.grapheval.CandidateGenerator.Candidate;
 import services.grapheval.CandidateGenerator.PreferenceFrame;
+import services.grapheval.CandidateGenerator.Source;
 import services.grapheval.Certifier.SpotCheck;
 import services.grapheval.ExtractionPipeline.CaseRun;
 import services.grapheval.ExtractionPipeline.Decision;
@@ -179,6 +180,14 @@ public record StoredRun(String split, String model, String digest, String schema
                 fo.addProperty("subject", frame.subject());
                 co.add("frame", fo);
             }
+            if (!c.sources().isEmpty()) {
+                var sources = new JsonArray();
+                c.sources().forEach(src -> sources.add(src.name()));
+                co.add("sources", sources);
+            }
+            if (c.kin() != null) co.addProperty("kin", c.kin());
+            if (c.possessorStart() != -1) co.addProperty("possessorStart", c.possessorStart());
+            if (c.possessorEnd() != -1) co.addProperty("possessorEnd", c.possessorEnd());
             candidates.add(co);
         }
         o.add("candidates", candidates);
@@ -254,8 +263,12 @@ public record StoredRun(String split, String model, String digest, String schema
                 frame = new PreferenceFrame(OntologyRecord.Valence.valueOf(f.get("valence").getAsString()),
                         nullable(f, "subject"));
             }
+            Set<Source> sources = EnumSet.noneOf(Source.class);
+            if (c.has("sources")) c.getAsJsonArray("sources").forEach(src -> sources.add(Source.valueOf(src.getAsString())));
             candidates.add(new Candidate(c.get("span").getAsString(), c.get("operator").getAsBoolean(),
-                    c.get("implicit").getAsBoolean(), c.get("start").getAsInt(), c.get("end").getAsInt(), frame));
+                    c.get("implicit").getAsBoolean(), c.get("start").getAsInt(), c.get("end").getAsInt(), frame,
+                    sources, nullable(c, "kin"), c.has("possessorStart") ? c.get("possessorStart").getAsInt() : -1,
+                    c.has("possessorEnd") ? c.get("possessorEnd").getAsInt() : -1));
         }
         var decisions = new ArrayList<Decision>();
         for (var e : o.getAsJsonArray("decisions")) {

@@ -9,7 +9,6 @@ import memory.MemoryProvenance;
 import memory.MemoryStoreFactory;
 import memory.TemporalExpressions;
 import memory.graph.GraphStore;
-import memory.ontology.OntologyRecord;
 import memory.ontology.OntologySchema;
 import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
@@ -552,7 +551,7 @@ public final class GraphEvalHarness {
         var tasks = new ArrayList<Callable<CaseRun>>();
         for (var c : sample) {
             tasks.add(() -> ExtractionPipeline.run(schema, c.id(), c.text(),
-                    CandidateGenerator.generate(c.text(), knownNames), m.name(), m.decider(),
+                    CandidateGenerator.generate(c.text(), knownNames, ownerName), m.name(), m.decider(),
                     inputs(c, ownerName, pairFilter, held.get(c.id()))));
         }
         var byId = new HashMap<String, CaseRun>();
@@ -584,10 +583,7 @@ public final class GraphEvalHarness {
     /** The agent's known spans: each Term's name followed by its aliases. Read, never written. */
     private static List<String> knownNames(String agentId) {
         try {
-            return GraphStore.get().read(Long.parseLong(agentId)).stream()
-                    .filter(r -> r instanceof OntologyRecord.Term)
-                    .map(r -> (OntologyRecord.Term) r)
-                    .flatMap(t -> Stream.concat(Stream.of(t.name()), t.aliases().stream())).toList();
+            return KnownNames.of(GraphStore.get(), Long.parseLong(agentId));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -600,7 +596,7 @@ public final class GraphEvalHarness {
     private static CaseResult askCase(OntologySchema schema, Case c, DecisionModel m, List<String> knownNames,
                                       ExtractionPipeline.Inputs inputs) {
         var text = c.text();
-        var candidates = CandidateGenerator.generate(text, knownNames);
+        var candidates = CandidateGenerator.generate(text, knownNames, inputs.ownerName());
         var overlap = ExtractionPipeline.settle(text,
                 candidates.stream().filter(k -> !k.operator()).toList(), m.name(), m.decider());
         var typing = ExtractionPipeline.type(schema, text, StageScorer.typingSpans(c), m.name(), m.decider());

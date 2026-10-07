@@ -1,15 +1,26 @@
 import memory.TemporalExpressions;
+import memory.graph.GraphStore;
 import memory.ontology.OntologyRecord;
+import memory.ontology.OntologyRecord.Evidence;
+import memory.ontology.OntologyRecord.Mapping;
+import memory.ontology.OntologyRecord.Meta;
+import memory.ontology.OntologyRecord.Term;
+import memory.ontology.OntologyRecord.Tier;
 import memory.ontology.OntologySchema;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import play.Play;
 import play.test.UnitTest;
 import services.grapheval.CandidateGenerator;
 import services.grapheval.CandidateGenerator.Candidate;
+import services.grapheval.CandidateGenerator.Source;
 import services.grapheval.GraphCases;
+import services.grapheval.KnownNames;
 
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 /** JCLAW-1356, JCLAW-1357: the fixed candidate rules, with no model in the loop. */
 class CandidateGeneratorTest extends UnitTest {
@@ -24,14 +35,16 @@ class CandidateGeneratorTest extends UnitTest {
     @Test
     void theUserIsTheOperatorAndIsNeverTyped() {
         var candidates = CandidateGenerator.generate("Wren Castillo met the user in Port Calloway.");
-        assertEquals(new Candidate("the user", true, false, 18, 26), candidates.getFirst());
+        assertEquals(new Candidate("the user", true, false, 18, 26, null, Set.of(Source.OPERATOR), null, -1, -1),
+                candidates.getFirst());
         assertEquals(List.of("the user", "Wren Castillo", "Port Calloway"), spans("Wren Castillo met the user in Port Calloway."));
     }
 
     @Test
     void aSubjectlessMemoryGetsAnImplicitOperatorAndDropsItsOpeningVerb() {
         var candidates = CandidateGenerator.generate("Prefers Neovim over VS Code when editing on Kestrel.");
-        assertEquals(new Candidate(GraphCases.IMPLICIT_OPERATOR_SPAN, true, true), candidates.getFirst());
+        assertEquals(new Candidate(GraphCases.IMPLICIT_OPERATOR_SPAN, true, true, -1, -1, null, Set.of(Source.OPERATOR),
+                null, -1, -1), candidates.getFirst());
         assertEquals(List.of("the user", "Neovim", "VS Code", "Kestrel"),
                 spans("Prefers Neovim over VS Code when editing on Kestrel."));
     }
@@ -287,5 +300,192 @@ class CandidateGeneratorTest extends UnitTest {
         }
         assertTrue(total > 0);
         assertTrue(hit >= TOPIC_RECALL_FLOOR, "Topic recall " + hit + "/" + total + ", missed " + missed);
+    }
+
+    private static final String OWNER = "Avery Lin";
+
+    private static List<Candidate> withSource(String text, Source source) {
+        return CandidateGenerator.generate(text, List.of(), OWNER).stream()
+                .filter(c -> c.sources().contains(source)).toList();
+    }
+
+    private static void assertOnly(String text, Source source, String span) {
+        var found = withSource(text, source);
+        assertEquals(List.of(span), found.stream().map(Candidate::span).toList(), text);
+    }
+
+    @Test
+    void everyMustMatchContactIsExactlyOneCandidateWithItsSource() {
+        assertOnly("Write to avery.lin@example.com about it.", Source.EMAIL, "avery.lin@example.com");
+        assertOnly("Alerts go to ops+alerts@harborlight.example.com.", Source.EMAIL, "ops+alerts@harborlight.example.com");
+        assertOnly("She posts as @averylin on most sites.", Source.HANDLE, "@averylin");
+        assertOnly("The studio is @vela_design, run by Wren.", Source.HANDLE, "@vela_design");
+        assertOnly("Call +1 202 555 0142 after six.", Source.PHONE, "+1 202 555 0142");
+        assertOnly("The office number is (415) 555-0137.", Source.PHONE, "(415) 555-0137");
+        assertOnly("The London desk is +44 20 7946 0958, ext 2.", Source.PHONE, "+44 20 7946 0958");
+        assertOnly("Her landline is 020 7946 0123 now.", Source.PHONE, "020 7946 0123");
+    }
+
+    @Test
+    void anEmailEndsBeforeTrailingPunctuationAndHidesNoHandle() {
+        var text = "Mail avery.lin@example.com.";
+        assertOnly(text, Source.EMAIL, "avery.lin@example.com");
+        assertEquals(List.of(), withSource(text, Source.HANDLE));
+    }
+
+    @Test
+    void noMustNotStringIsAContactCandidate() {
+        for (var s : List.of("2019-2022", "2026-12-12", "12/06/2027", "Q3 2027", "v2.4.1", "192.168.10.12", "OPS-4417",
+                "JCLAW-1346", "port 8080", "14:30", "1,250,000", "https://wiki.example.com/@team", "notes-2024-03.md")) {
+            var text = "The user noted " + s + " in the log.";
+            for (var source : List.of(Source.EMAIL, Source.HANDLE, Source.PHONE)) {
+                assertEquals(List.of(), withSource(text, source), source + " in " + text);
+            }
+        }
+        assertOnly("The user noted https://wiki.example.com/@team in the log.", Source.URL,
+                "https://wiki.example.com/@team");
+        assertOnly("The user noted OPS-4417 in the log.", Source.TICKET, "OPS-4417");
+        assertOnly("The user noted notes-2024-03.md in the log.", Source.FILE, "notes-2024-03.md");
+    }
+
+    @Test
+    void handlesNeedTwoCharactersAndAFreeStart() {
+        assertOnly("Ping @ab today.", Source.HANDLE, "@ab");
+        assertEquals(List.of(), withSource("Ping @a today.", Source.HANDLE));
+        assertEquals(List.of(), withSource("Ping x@ab today.", Source.HANDLE));
+    }
+
+    @Test
+    void aPhoneHasSevenToFifteenDigits() {
+        assertOnly("Dial 555-0142 now.", Source.PHONE, "555-0142");
+        assertOnly("Dial 555 0142 0199 0123 now.", Source.PHONE, "555 0142 0199 0123");
+        assertEquals(List.of(), withSource("Dial 555-014 now.", Source.PHONE));
+        assertEquals(List.of(), withSource("Dial 5550 0142 0199 0123 now.", Source.PHONE));
+        assertEquals(List.of(), withSource("Dial 555 014 now.", Source.PHONE));
+    }
+
+    private static void assertKin(String text, String span, String kin) {
+        var found = withSource(text, Source.KIN);
+        assertEquals(1, found.size(), text + " gave " + found);
+        assertEquals(span, found.getFirst().span(), text);
+        assertEquals(kin, found.getFirst().kin(), text);
+        var c = found.getFirst();
+        assertTrue(c.possessorStart() == c.start() && c.possessorEnd() > c.start() && c.possessorEnd() < c.end(),
+                () -> text + " possessor " + c);
+    }
+
+    @Test
+    void anOwnerPossessiveKinPhraseIsOneKinCandidate() {
+        assertKin("Avery Lin's son starts school in Port Calloway.", "Avery Lin's son", "son");
+        assertKin("The user's younger sister lives nearby.", "The user's younger sister", "sister");
+        assertKin("Avery Lin\u2019s son plays chess.", "Avery Lin\u2019s son", "son");
+        assertKin("avery lin's sister moved.", "avery lin's sister", "sister");
+        assertKin("They met Avery Lin's twin brother.", "Avery Lin's twin brother", "brother");
+        assertKin("Avery Lin's sister-in-law visited.", "Avery Lin's sister-in-law", "sister-in-law");
+        var c = withSource("Avery Lin's son plays chess.", Source.KIN).getFirst();
+        assertEquals(0, c.possessorStart());
+        assertEquals(9, c.possessorEnd());
+    }
+
+    @Test
+    void noKinForAPronounAPluralOrANameInApposition() {
+        for (var text : List.of("The user said their sister moved.", "Avery Lin's parents moved.",
+                "Avery Lin's sister Wren Castillo moved.", "Avery Lin's spouse, Priya Nandakumar, moved.",
+                "Wren Castillo, Avery Lin's sister, moved.")) {
+            assertEquals(List.of(), withSource(text, Source.KIN), text);
+        }
+        for (var row : List.of(List.of("Avery Lin's sister Wren Castillo", "Wren Castillo"),
+                List.of("Avery Lin's spouse, Priya Nandakumar", "Priya Nandakumar"),
+                List.of("Wren Castillo, Avery Lin's sister", "Wren Castillo"),
+                List.of("Avery Lin's spouse, Priya Nandakumar, moved.", "Priya Nandakumar"),
+                List.of("Wren Castillo, Avery Lin's sister, moved.", "Wren Castillo"))) {
+            var text = row.getFirst();
+            assertEquals(List.of(), withSource(text, Source.KIN), text);
+            assertTrue(withSource(text, Source.CAPITALIZED).stream().anyMatch(c -> c.span().equals(row.get(1))), text);
+        }
+    }
+
+    @Test
+    void aClauseBesideTheKinPhraseIsNotApposition() {
+        assertKin("In Port Calloway, Avery Lin's son plays chess.", "Avery Lin's son", "son");
+        assertKin("Sadly, the user's son broke a leg.", "the user's son", "son");
+        assertKin("Avery Lin's son, Harborlight Academy hired him.", "Avery Lin's son", "son");
+    }
+
+    @Test
+    void phoneAndHandleShapesNeedGroupsAndALetter() {
+        for (var text : List.of("The build was 20261012 then.", "It cost 1250000 then.", "Windows 10.0.19041 ran.")) {
+            assertEquals(List.of(), withSource(text, Source.PHONE), text);
+        }
+        assertOnly("Called 555-0142 3 times.", Source.PHONE, "555-0142");
+        assertOnly("Call (555)123-4567 today.", Source.PHONE, "(555)123-4567");
+        assertEquals(List.of(), withSource("Meet @12:30 by the door.", Source.HANDLE));
+        assertEquals(List.of(), withSource("Meet @10am by the door.", Source.HANDLE));
+    }
+
+    @Test
+    void aRecurringOwnerKeepsTheOccurrenceThatReallyOverlaps() {
+        var candidates = CandidateGenerator.generate("Avery Lin's son met staff at Avery Lin Studio.", List.of(), OWNER);
+        var owner = candidates.stream().filter(c -> c.span().equals(OWNER)).findFirst().orElseThrow();
+        var studio = candidates.stream().filter(c -> c.span().equals("Avery Lin Studio")).findFirst().orElseThrow();
+        assertTrue(owner.overlaps(studio), candidates::toString);
+        assertEquals(1, candidates.stream().filter(c -> "son".equals(c.kin())).count(), candidates::toString);
+    }
+
+    private static List<String> spansOf(String text) {
+        return CandidateGenerator.generate(text, List.of(), OWNER).stream().map(Candidate::span).toList();
+    }
+
+    @Test
+    void aKinCandidateDoesNotOverlapItsOwnPossessor() {
+        var candidates = CandidateGenerator.generate("Avery Lin's son starts at Harborlight Academy.", List.of(), OWNER);
+        var owner = candidates.stream().filter(c -> c.span().equals(OWNER)).findFirst().orElseThrow();
+        var kin = candidates.stream().filter(c -> "son".equals(c.kin())).findFirst().orElseThrow();
+        assertFalse(owner.overlaps(kin));
+        assertFalse(kin.overlaps(owner));
+        assertTrue(candidates.indexOf(owner) < candidates.indexOf(kin));
+    }
+
+    @Test
+    void anAliasIsAKnownCandidate() {
+        var kestrel = CandidateGenerator.generate("The user uses kestrel daily.", List.of("Kestrel CI", "Kestrel"));
+        assertTrue(kestrel.stream().anyMatch(c -> c.span().equals("kestrel") && c.sources().equals(Set.of(Source.KNOWN))),
+                kestrel.toString());
+    }
+
+    @Test
+    void aSpanProposedTwiceKeepsBothSources() {
+        var c = CandidateGenerator.generate("The user met Wren Castillo in town.", List.of("Wren Castillo")).stream()
+                .filter(k -> k.span().equals("Wren Castillo")).findFirst().orElseThrow();
+        assertEquals(List.of(Source.KNOWN, Source.CAPITALIZED), List.copyOf(c.sources()));
+    }
+
+    @Test
+    void theNewSourcesAreDeterministic() {
+        var text = "Avery Lin's son emails avery.lin@example.com, posts as @averylin and calls (415) 555-0137.";
+        assertEquals(CandidateGenerator.generate(text, List.of("Kestrel"), OWNER),
+                CandidateGenerator.generate(text, List.of("Kestrel"), OWNER));
+    }
+
+    @TempDir
+    Path tmp;
+
+    @Test
+    void knownNamesReadsEveryNameAndAliasDedupedWithoutBlanks() throws Exception {
+        var store = new GraphStore(tmp.resolve("memory-graph"));
+        long agent = 11L;
+        store.write(agent, List.of(
+                new Evidence(Meta.fresh("e1", agent, Tier.TENTATIVE), "memory:1", null),
+                new Term(Meta.fresh("t1", agent, Tier.TENTATIVE), "Organization", "Kestrel CI", List.of("m1"), List.of("e1"),
+                        List.of("Kestrel", " ", "kestrel ci"), null),
+                new Term(Meta.fresh("t2", agent, Tier.TENTATIVE), "Person", "Wren Castillo", List.of("m2"),
+                        List.of("e1"), List.of(" Kestrel ", "Wren"), null),
+                new Mapping(Meta.fresh("m1", agent, Tier.TENTATIVE), "t1", "memory:1", List.of("e1")),
+                new Mapping(Meta.fresh("m2", agent, Tier.TENTATIVE), "t2", "memory:1", List.of("e1"))));
+        var names = KnownNames.of(store, agent);
+        assertEquals(List.of("Kestrel CI", "Kestrel", "kestrel ci", "Wren Castillo", "Wren"), names);
+        var candidates = CandidateGenerator.generate("The user uses kestrel daily.", names);
+        assertTrue(candidates.stream().anyMatch(c -> c.span().equals("kestrel") && c.sources().contains(Source.KNOWN)),
+                candidates.toString());
     }
 }
