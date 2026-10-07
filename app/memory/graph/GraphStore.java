@@ -34,6 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
+import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -59,7 +60,7 @@ public final class GraphStore {
     private static final ReentrantReadWriteLock WRITERS = new ReentrantReadWriteLock();
 
     /** Thrown when a write would store a set the ontology refuses; nothing on disk changes. */
-    public static final class GraphRefusedException extends RuntimeException {
+    public static class GraphRefusedException extends RuntimeException {
         private final List<Violation> violations;
         private final List<String> foreignRecordIds;
 
@@ -76,6 +77,32 @@ public final class GraphStore {
         /** Records whose {@code agentId} is not the store's agent. */
         public List<String> foreignRecordIds() {
             return foreignRecordIds;
+        }
+    }
+
+    /** Thrown when a write would store Evidence from a run the agent's ledger marks retracted; nothing changes. */
+    public static final class RunRetractedException extends GraphRefusedException {
+        private final String runId;
+
+        RunRetractedException(long agentId, String runId) {
+            super("run retracted: " + runId + " in the graph of agent " + agentId, List.of(), List.of());
+            this.runId = runId;
+        }
+
+        public String runId() {
+            return runId;
+        }
+    }
+
+    /**
+     * What a retraction removed: {@code runs} newly marked retracted, {@code evidence} Evidence removed (cascade
+     * included), {@code records} other records removed.
+     */
+    public record Retraction(int runs, int evidence, int records) {
+        public static final Retraction NONE = new Retraction(0, 0, 0);
+
+        public Retraction plus(Retraction other) {
+            return new Retraction(runs + other.runs, evidence + other.evidence, records + other.records);
         }
     }
 
@@ -171,6 +198,121 @@ public final class GraphStore {
             writeLocked(agentId, next);
             return next;
         });
+    }
+
+    // ---- the run ledger ----
+
+    /**
+     * Apply one extraction run's {@code change} and upsert its ledger {@code entry}, both in one swap. Every Evidence
+     * the change adds must carry the entry's run id; a run that wrote nothing must leave the records as they were.
+     *
+     * @throws RunRetractedException    when the ledger already marks the run retracted
+     * @throws IllegalArgumentException when the change breaks either rule, or the entry is for another agent
+     * @throws GraphRefusedException    when the resulting set fails validation
+     */
+    public void recordRun(long agentId, RunLedger.Entry entry, UnaryOperator<List<OntologyRecord>> change)
+            throws IOException {
+        if (entry.agentId() != agentId) {
+            throw new IllegalArgumentException("run " + entry.runId() + " belongs to agent " + entry.agentId()
+                    + ", not " + agentId);
+        }
+        if (entry.retracted()) throw new IllegalArgumentException("run " + entry.runId() + " is recorded unretracted");
+        locked(agentId, () -> {
+            var ledger = ledgerLocked(agentId);
+            var existing = ledger.get(entry.runId());
+            if (existing != null && existing.retracted()) throw new RunRetractedException(agentId, entry.runId());
+            var before = readLocked(agentId);
+            var next = List.copyOf(change.apply(new ArrayList<>(before)));
+            var beforeIds = before.stream().map(OntologyRecord::id).collect(Collectors.toSet());
+            for (var r : next) {
+                if (r instanceof Evidence e && !beforeIds.contains(e.id()) && !entry.runId().equals(e.runId())) {
+                    throw new IllegalArgumentException("evidence " + e.id() + " carries run " + e.runId()
+                            + ", not " + entry.runId());
+                }
+            }
+            if (entry.outcome() != RunLedger.Outcome.WRITTEN && !Set.copyOf(next).equals(Set.copyOf(before))) {
+                throw new IllegalArgumentException("run " + entry.runId() + " is " + entry.outcome().wire()
+                        + " and may not change the graph");
+            }
+            ledger.put(entry.runId(), entry);
+            writeLocked(agentId, next, RunLedger.document(ledger.values()));
+            return true;
+        });
+    }
+
+    /** Retract the named runs from the agent's graph; a run the ledger does not hold, or holds retracted, adds nothing. */
+    public Retraction retract(long agentId, Set<String> runIds) throws IOException {
+        return locked(agentId, () -> retractLocked(agentId, e -> runIds.contains(e.runId())));
+    }
+
+    /** Retract every run the selector matches in every agent's ledger, summing the counts. */
+    public Retraction retract(RunLedger.Selector selector) throws IOException {
+        var total = Retraction.NONE;
+        for (var agentId : agentIds()) {
+            total = total.plus(locked(agentId, () -> retractLocked(agentId, selector::matches)));
+        }
+        return total;
+    }
+
+    /** The agent's ledger, sorted by run id; empty when it has none. */
+    public List<RunLedger.Entry> ledger(long agentId) throws IOException {
+        return locked(agentId, () -> List.copyOf(ledgerLocked(agentId).values()));
+    }
+
+    /** The run ids in the agent's ledger the selector matches, retracted or not. */
+    public SortedSet<String> runs(long agentId, RunLedger.Selector selector) throws IOException {
+        var out = new TreeSet<String>();
+        for (var e : ledger(agentId)) {
+            if (selector.matches(e)) out.add(e.runId());
+        }
+        return out;
+    }
+
+    private Retraction retractLocked(long agentId, Predicate<RunLedger.Entry> filter) throws IOException {
+        if (!hasGraph(agentId)) return Retraction.NONE;
+        var ledger = ledgerLocked(agentId);
+        var targets = new TreeMap<String, RunLedger.Entry>();
+        for (var e : ledger.values()) {
+            if (!e.retracted() && filter.test(e)) targets.put(e.runId(), e);
+        }
+        if (targets.isEmpty()) return Retraction.NONE;
+        var records = readLocked(agentId);
+        var evidenceIds = new TreeSet<String>();
+        for (var r : records) {
+            if (r instanceof Evidence e) {
+                var runId = e.runId();
+                if (runId != null && targets.containsKey(runId)) evidenceIds.add(e.id());
+            }
+        }
+        var withdrawn = GraphWithdrawal.withdrawEvidence(records, evidenceIds);
+        var wereEvidence = records.stream().filter(r -> r instanceof Evidence).map(OntologyRecord::id)
+                .collect(Collectors.toSet());
+        int evidence = (int) withdrawn.removedIds().stream().filter(wereEvidence::contains).count();
+        int other = withdrawn.removedIds().size() - evidence;
+        targets.values().forEach(e -> ledger.put(e.runId(), e.withRetracted(true)));
+        // A predecessor's lineage stamp names no run, only its successor's source, which a standing run may still hold.
+        var standing = new TreeSet<String>();
+        for (var e : ledger.values()) {
+            if (!e.retracted()) standing.add(e.source());
+        }
+        var successors = new TreeSet<String>();
+        for (var e : targets.values()) {
+            if (!standing.contains(e.source())) successors.add(e.source());
+        }
+        var cleared = GraphWithdrawal.clearLineage(withdrawn.survivors(), successors);
+        writeLocked(agentId, cleared.records(), RunLedger.document(ledger.values()));
+        return new Retraction(targets.size(), evidence, other);
+    }
+
+    /** The ledger by run id, read under the agent's lock. */
+    private TreeMap<String, RunLedger.Entry> ledgerLocked(long agentId) throws IOException {
+        var out = new TreeMap<String, RunLedger.Entry>();
+        var file = agentDir(agentId).resolve(RunLedger.FILE_NAME);
+        if (!Files.isRegularFile(file)) return out;
+        for (var e : RunLedger.parse(Files.readString(file, StandardCharsets.UTF_8), agentId + "/" + RunLedger.FILE_NAME)) {
+            out.put(e.runId(), e);
+        }
+        return out;
     }
 
     /** Withdraw {@code memory:<id>} for each id, cascading; returns the removed record ids. */
@@ -368,6 +510,27 @@ public final class GraphStore {
     }
 
     private void writeLocked(long agentId, Collection<? extends OntologyRecord> records) throws IOException {
+        writeLocked(agentId, records, null);
+    }
+
+    /**
+     * Validate and swap in {@code records}; a non-null {@code ledgerDocument} replaces the ledger in the same swap,
+     * a null one carries the current ledger over unchanged.
+     */
+    private void writeLocked(long agentId, Collection<? extends OntologyRecord> records,
+            @Nullable String ledgerDocument) throws IOException {
+        var retracted = new TreeSet<String>();
+        var ledger = ledgerDocument == null ? ledgerLocked(agentId).values()
+                : RunLedger.parse(ledgerDocument, agentId + "/" + RunLedger.FILE_NAME);
+        for (var e : ledger) {
+            if (e.retracted()) retracted.add(e.runId());
+        }
+        for (var r : records) {
+            if (r instanceof Evidence e) {
+                var runId = e.runId();
+                if (runId != null && retracted.contains(runId)) throw new RunRetractedException(agentId, runId);
+            }
+        }
         var foreign = records.stream().filter(r -> r.meta().agentId() != agentId).map(OntologyRecord::id)
                 .sorted().toList();
         if (!foreign.isEmpty()) {
@@ -390,6 +553,7 @@ public final class GraphStore {
         if (replacing) {
             try (var entries = Files.list(target)) {
                 entries.filter(p -> Files.isRegularFile(p) && Family.ofFileName(p.getFileName().toString()) == null)
+                        .filter(p -> ledgerDocument == null || !p.getFileName().toString().equals(RunLedger.FILE_NAME))
                         .sorted()
                         .forEach(unknown::add);
             }
@@ -400,6 +564,9 @@ public final class GraphStore {
             for (var entry : documents.entrySet()) {
                 Files.writeString(dir.resolve(entry.getKey().fileName()), entry.getValue(), StandardCharsets.UTF_8);
                 if (++written == failAfter) throw new IOException("staging failed after " + written + " files");
+            }
+            if (ledgerDocument != null) {
+                Files.writeString(dir.resolve(RunLedger.FILE_NAME), ledgerDocument, StandardCharsets.UTF_8);
             }
             for (var file : unknown) {
                 Files.copy(file, dir.resolve(file.getFileName()), StandardCopyOption.COPY_ATTRIBUTES);

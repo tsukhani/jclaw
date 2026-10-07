@@ -279,4 +279,49 @@ class MemoryGraphWithdrawalTest extends UnitTest {
             assertValid(out.records());
         }
     }
+
+    // ---- retraction by Evidence id (JCLAW-1371) ----
+
+    @Test
+    void withdrawingEvidenceByIdCascadesAsASourceWithdrawalDoes() {
+        var graph = graph();
+        var byId = GraphWithdrawal.withdrawEvidence(graph, Set.of("e5"));
+        assertEquals(GraphWithdrawal.withdraw(graph, Set.of("memory:5")), byId);
+        assertEquals(Set.of("e5", "R"), byId.removedIds());
+
+        var last = GraphWithdrawal.withdrawEvidence(graph, Set.of("e5", "e6"));
+        assertFalse(ids(last.survivors()).contains("T"), "T lost its last Evidence");
+        assertTrue(last.removedIds().containsAll(Set.of("T", "R", "R2", "mT", "cT", "eS")), last.removedIds().toString());
+        assertValid(last.survivors());
+    }
+
+    @Test
+    void anEvidenceIdThatNamesAnotherFamilyOrNothingRemovesNothing() {
+        var graph = graph();
+        var result = GraphWithdrawal.withdrawEvidence(graph, Set.of("T", "R", "e-none"));
+        assertEquals(Set.of(), result.removedIds());
+        assertEquals(graph, result.survivors());
+    }
+
+    @Test
+    void clearLineageNullsOnlyTheNamedSuccessorsStampsAndKeepsTheRetirement() {
+        var graph = List.<OntologyRecord>of(
+                stamped("e5", "memory:5", AT, "memory:9", Lineage.UPDATE, LocalDate.parse("2026-10-01")),
+                stamped("e6", "memory:6", AT, "memory:8", Lineage.CORRECTION, null),
+                new Evidence(meta("e7"), "memory:7", null, null, null, null, null, AT, "memory:9", null, null, null,
+                        null, null, null, null),
+                evidence("e1", "memory:9"));
+
+        var cleared = GraphWithdrawal.clearLineage(graph, Set.of("memory:9"));
+
+        assertEquals(1, cleared.lineageCleared(), "e7 carried no lineage to clear");
+        var e5 = ev(cleared.records(), "e5");
+        assertNull(e5.lineage());
+        assertNull(e5.changedBy());
+        assertEquals(AT, e5.retiredAt());
+        assertEquals("memory:9", e5.retiredBy());
+        assertEquals(Lineage.CORRECTION, ev(cleared.records(), "e6").lineage(), "memory:8 still stands");
+        assertEquals(graph.subList(1, 4), cleared.records().subList(1, 4));
+        assertEquals(0, GraphWithdrawal.clearLineage(graph, Set.of()).lineageCleared());
+    }
 }

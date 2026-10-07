@@ -30,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 import java.util.function.Function;
 import java.util.regex.Matcher;
@@ -128,11 +129,23 @@ public final class ExtractionPipeline {
      * confidence 0 and its reason in {@code failure}. An {@code operator} term, the implicit operator or "the user",
      * was never asked: it is written as a Person at confidence 1; an owner named in the text is asked like any term.
      * {@code floor} is what the decision also needs to reach a threshold: a surviving overlap span's settling
-     * confidence, or a relation's weakest endpoint; 1 when nothing gates it.
+     * confidence, or a relation's weakest endpoint; 1 when nothing gates it. {@code probabilities} is a choice
+     * question's whole answer, keys sorted; empty for a yes/no, operator or failed decision.
      */
     public record Decision(String stage, String subject, @Nullable String from, @Nullable String to,
                            @Nullable String choice, double confidence, boolean operator, @Nullable String failure,
-                           double floor) {
+                           double floor, Map<String, Double> probabilities) {
+
+        public Decision {
+            probabilities = probabilities.isEmpty() ? Map.of()
+                    : Collections.unmodifiableSortedMap(new TreeMap<>(probabilities));
+        }
+
+        public Decision(String stage, String subject, @Nullable String from, @Nullable String to,
+                        @Nullable String choice, double confidence, boolean operator, @Nullable String failure,
+                        double floor) {
+            this(stage, subject, from, to, choice, confidence, operator, failure, floor, Map.of());
+        }
 
         public Decision(String stage, String subject, @Nullable String from, @Nullable String to,
                         @Nullable String choice, double confidence, boolean operator, @Nullable String failure) {
@@ -154,7 +167,7 @@ public final class ExtractionPipeline {
         }
 
         Decision withFloor(double f) {
-            return new Decision(stage, subject, from, to, choice, confidence, operator, failure, f);
+            return new Decision(stage, subject, from, to, choice, confidence, operator, failure, f, probabilities);
         }
     }
 
@@ -1136,8 +1149,11 @@ public final class ExtractionPipeline {
         try {
             var valid = JevApi.validateChoice(answer.answer(), ids);
             var choice = valid.get("choice").getAsString();
-            var p = valid.getAsJsonObject("probabilities").get(choice).getAsDouble();
-            return new Decision(stage, subject, from, to, choice, p, false, null);
+            var probabilities = valid.getAsJsonObject("probabilities");
+            var distribution = new TreeMap<String, Double>();
+            probabilities.entrySet().forEach(e -> distribution.put(e.getKey(), e.getValue().getAsDouble()));
+            return new Decision(stage, subject, from, to, choice, probabilities.get(choice).getAsDouble(), false, null,
+                    1.0, distribution);
         } catch (RuntimeException _) {
             return new Decision(stage, subject, from, to, null, 0, false, JevApi.INVALID);
         }

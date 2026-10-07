@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.TreeSet;
+import java.util.function.Predicate;
 
 /**
  * Withdraws sources from a record set: their Evidence and Mappings go, then the removal
@@ -52,14 +53,29 @@ public final class GraphWithdrawal {
 
     public record Lineaged(List<OntologyRecord> records, boolean changed) {}
 
+    /** @param lineageCleared Evidence whose lineage or changedBy was nulled */
+    public record Cleared(List<OntologyRecord> records, int lineageCleared) {}
+
     private GraphWithdrawal() {}
 
     public static Result withdraw(Collection<? extends OntologyRecord> records, Set<String> sources) {
+        return withdrawWhere(records, record -> {
+            var source = GraphStore.sourceOf(record);
+            return source != null && sources.contains(source);
+        });
+    }
+
+    /** Withdraw the Evidence with these ids, cascading as {@link #withdraw} does. */
+    public static Result withdrawEvidence(Collection<? extends OntologyRecord> records, Set<String> evidenceIds) {
+        return withdrawWhere(records, record -> record instanceof Evidence && evidenceIds.contains(record.id()));
+    }
+
+    private static Result withdrawWhere(Collection<? extends OntologyRecord> records,
+            Predicate<OntologyRecord> withdrawn) {
         var removed = new TreeSet<String>();
         var current = new ArrayList<OntologyRecord>();
         for (var record : records) {
-            var source = GraphStore.sourceOf(record);
-            if (source != null && sources.contains(source)) {
+            if (withdrawn.test(record)) {
                 removed.add(record.id());
             } else {
                 current.add(record);
@@ -68,6 +84,26 @@ public final class GraphWithdrawal {
         if (removed.isEmpty()) return new Result(List.copyOf(current), Set.of());
         var survivors = cascadeAll(current, removed);
         return new Result(List.copyOf(survivors), Set.copyOf(removed));
+    }
+
+    /**
+     * Null the lineage and changedBy of every Evidence retired by one of {@code retiredBySources}, keeping its
+     * retiredAt and retiredBy: the successor that decided the lineage no longer stands.
+     */
+    public static Cleared clearLineage(Collection<? extends OntologyRecord> records, Set<String> retiredBySources) {
+        var out = new ArrayList<OntologyRecord>(records.size());
+        int cleared = 0;
+        for (var record : records) {
+            var by = record instanceof Evidence e ? e.retiredBy() : null;
+            if (record instanceof Evidence e && by != null && retiredBySources.contains(by)
+                    && (e.lineage() != null || e.changedBy() != null)) {
+                cleared++;
+                out.add(stamp(e, e.retiredAt(), by, null, null));
+            } else {
+                out.add(record);
+            }
+        }
+        return new Cleared(List.copyOf(out), cleared);
     }
 
     /** Cascades until a pass changes nothing; each record that no longer stands is added to {@code removed}. */
