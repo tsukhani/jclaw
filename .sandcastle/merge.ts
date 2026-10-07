@@ -53,6 +53,15 @@ export const followMain = (clone: string) => {
   git(clone, "reset", "--keep", "--quiet", "origin/main");
 };
 
+// A story's branch with no commits of its own, left by a run that stopped early, restarts from main rather than from
+// the main it was cut from; one a worktree holds is left for Sandcastle to reuse. Returns the commits ahead of main.
+export const restartEmptyBranch = (clone: string, branch: string): number => {
+  const ahead = Number(git(clone, "rev-list", "--count", `main..${branch}`));
+  const held = git(clone, "worktree", "list", "--porcelain").split("\n").includes(`branch refs/heads/${branch}`);
+  if (ahead === 0 && !held) git(clone, "branch", "--force", branch, "main");
+  return ahead;
+};
+
 export type Landed = { merge: string; regated: boolean };
 
 // The merge commit an earlier landing of `key` left on the checkout's main, if one did.

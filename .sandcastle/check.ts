@@ -7,7 +7,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, type Entry, type State, type Story } from "./board.ts";
 import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
-import { MergeRefused, followMain, landBranch, landedAs, mergeVerdict } from "./merge.ts";
+import { MergeRefused, followMain, landBranch, landedAs, mergeVerdict, restartEmptyBranch } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { bmadOutcome, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
@@ -422,4 +422,19 @@ g(checkout, "commit", "--quiet", "--amend", "--all", "--no-edit");
 followMain(mirror);
 check("the clone's main follows an amend in the checkout",
   [g(mirror, "rev-parse", "main") === g(checkout, "rev-parse", "main"), fs.readFileSync(path.join(mirror, "amended.txt"), "utf8")], [true, "final\n"]);
+
+// Branches an earlier run left as main then moved on: one empty, one a worktree holds, one with a commit of its own.
+const stale = g(mirror, "rev-parse", "main");
+g(mirror, "branch", "agent/T-7", stale);
+g(mirror, "branch", "agent/T-8", stale);
+g(mirror, "worktree", "add", "--quiet", path.join(sandbox, "held"), "agent/T-8");
+g(mirror, "branch", "agent/T-9", g(mirror, "commit-tree", "-p", stale, "-m", "work", `${stale}^{tree}`));
+const worked = g(mirror, "rev-parse", "agent/T-9");
+commit(checkout, "later.txt", "later\n");
+followMain(mirror);
+check("a retried story's empty branch restarts from main; a held one and one with commits stay",
+  [restartEmptyBranch(mirror, "agent/T-7"), g(mirror, "rev-parse", "agent/T-7") === g(mirror, "rev-parse", "main"),
+    restartEmptyBranch(mirror, "agent/T-8"), g(mirror, "rev-parse", "agent/T-8") === stale,
+    restartEmptyBranch(mirror, "agent/T-9"), g(mirror, "rev-parse", "agent/T-9") === worked],
+  [0, true, 0, true, 1, true]);
 fs.rmSync(sandbox, { recursive: true, force: true });
