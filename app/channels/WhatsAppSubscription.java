@@ -50,15 +50,18 @@ public final class WhatsAppSubscription {
     /** Meta's error message, or a transport description; never carries the token. */
     public record Failed(String reason) implements SubscribeResult {}
 
-    private record Ids(String wabaId, String appId) {}
+    /** {@code appId} is null when health_status names no APP entity. */
+    record Ids(String wabaId, @Nullable String appId) {}
 
-    private sealed interface Lookup permits Found, NotFound {}
+    sealed interface Lookup permits Found, NotFound {}
 
-    private record Found(Ids ids) implements Lookup {}
+    record Found(Ids ids) implements Lookup {}
 
-    private record NotFound(String reason) implements Lookup {}
+    record NotFound(String reason) implements Lookup {}
 
-    private record GraphResponse(int code, String body) {}
+    record GraphResponse(int code, String body) {}
+
+    private static final String NO_APP = "Graph named no app for this access token";
 
     /**
      * Test overrides honoured by the two-argument entries. Not replaceable by
@@ -101,6 +104,10 @@ public final class WhatsAppSubscription {
             return new Unknown(reason);
         }
         var ids = ((Found) lookup).ids();
+        var appId = ids.appId();
+        if (appId == null) {
+            return new Unknown(NO_APP);
+        }
         GraphResponse response;
         try {
             response = send(get(apiBase + ids.wabaId() + "/subscribed_apps", accessToken));
@@ -123,11 +130,11 @@ public final class WhatsAppSubscription {
             if (!entry.isJsonObject()) continue;
             var api = entry.getAsJsonObject().get("whatsapp_business_api_data");
             if (api != null && api.isJsonObject()
-                    && ids.appId().equals(JsonArgs.optNonBlankString(api.getAsJsonObject(), "id"))) {
-                return new Subscribed(ids.wabaId(), ids.appId());
+                    && appId.equals(JsonArgs.optNonBlankString(api.getAsJsonObject(), "id"))) {
+                return new Subscribed(ids.wabaId(), appId);
             }
         }
-        return new NotSubscribed(ids.wabaId(), ids.appId());
+        return new NotSubscribed(ids.wabaId(), appId);
     }
 
     /** Subscribe against the live Graph API, honouring an {@link #installForTest} override. Never throws. */
@@ -150,7 +157,11 @@ public final class WhatsAppSubscription {
         if (lookup instanceof NotFound(String reason)) {
             return new Failed(reason);
         }
-        var wabaId = ((Found) lookup).ids().wabaId();
+        var ids = ((Found) lookup).ids();
+        if (ids.appId() == null) {
+            return new Failed(NO_APP);
+        }
+        var wabaId = ids.wabaId();
         GraphResponse response;
         try {
             response = send(authorized(apiBase + wabaId + "/subscribed_apps", accessToken)
@@ -174,8 +185,11 @@ public final class WhatsAppSubscription {
         return new Failed(unexpected(response.body()));
     }
 
-    /** The first WABA and APP entities with a non-blank id in {@code health_status.entities}. */
-    private static Lookup resolveIds(String phoneNumberId, String accessToken, String apiBase) {
+    /**
+     * The first WABA and APP entities with a non-blank id in {@code health_status.entities};
+     * {@link NotFound} without a WABA. The one WABA lookup, shared with {@link WhatsAppUsage}.
+     */
+    static Lookup resolveIds(String phoneNumberId, String accessToken, String apiBase) {
         GraphResponse response;
         try {
             response = send(get(apiBase + phoneNumberId + "?fields=health_status", accessToken));
@@ -210,9 +224,6 @@ public final class WhatsAppSubscription {
         if (wabaId == null) {
             return new NotFound("Graph named no WhatsApp Business Account for this number");
         }
-        if (appId == null) {
-            return new NotFound("Graph named no app for this access token");
-        }
         return new Found(new Ids(wabaId, appId));
     }
 
@@ -222,11 +233,11 @@ public final class WhatsAppSubscription {
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + accessToken);
     }
 
-    private static Request get(String url, String accessToken) {
+    static Request get(String url, String accessToken) {
         return authorized(url, accessToken).get().build();
     }
 
-    private static GraphResponse send(Request request) throws IOException {
+    static GraphResponse send(Request request) throws IOException {
         var call = HttpFactories.general().newCall(request);
         call.timeout().timeout(WhatsAppCloudApiProbe.PROBE_TIMEOUT_MS, TimeUnit.MILLISECONDS);
         try (var response = call.execute()) {
@@ -235,11 +246,11 @@ public final class WhatsAppSubscription {
     }
 
     // OkHttp exception messages name the host or the failure, never a request header.
-    private static String transportError(Exception e) {
+    static String transportError(Exception e) {
         return "Graph request failed: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
     }
 
-    private static String unexpected(String body) {
+    static String unexpected(String body) {
         return "unexpected Graph response: " + Strings.truncate(body, 200);
     }
 }

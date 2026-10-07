@@ -299,6 +299,8 @@ GET     /api/channels/whatsapp/bindings/{id}/qr  WhatsAppQrController.status
 # Cloud API: Meta app subscription to the number's WhatsApp Business Account (JCLAW-1410)
 GET     /api/channels/whatsapp/bindings/{id}/subscription  WhatsAppSubscriptionController.status
 POST    /api/channels/whatsapp/bindings/{id}/subscription  WhatsAppSubscriptionController.subscribe
+# Cloud API: this month's replies against Meta's free service allowance (JCLAW-1412)
+GET     /api/channels/whatsapp/bindings/{id}/usage  WhatsAppUsageController.usage
 GET     /api/channels/{channelType}             ApiChannelsController.get
 PUT     /api/channels/{channelType}             ApiChannelsController.save
 

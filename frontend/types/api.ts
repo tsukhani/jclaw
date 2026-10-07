@@ -111,6 +111,19 @@ export interface WhatsAppSubscriptionState {
   reason: string | null
 }
 
+/** JCLAW-1412: this month's replies for a Cloud API number, as Meta's pricing analytics
+ *  count them, against Meta's monthly free allowance. Counts are null unless COUNTED. */
+export interface WhatsAppUsageState {
+  bindingId: number
+  state: 'COUNTED' | 'UNKNOWN' | 'NOT_APPLICABLE'
+  year: number
+  month: number
+  replies: number | null
+  billed: number | null
+  allowance: number
+  reason: string | null
+}
+
 /** One WhatsApp presence bound to one agent (JCLAW-444). The transport picks the
  *  integration stack: CLOUD_API (official Cloud API) or WHATSAPP_WEB (unofficial
  *  QR-paired Cobalt, ban-warned). Secrets are write-only — only presence flags

@@ -605,3 +605,115 @@ describe('whatsapp bindings page — delivery failure warning (JCLAW-1411)', () 
     expect(c.find(warning).exists()).toBe(false)
   })
 })
+
+describe('this month\'s replies against Meta\'s free allowance (JCLAW-1412)', () => {
+  let usage: Record<string, unknown> = {}
+  let usageGets = 0
+
+  function counted(replies: number, billed = 0) {
+    return { bindingId: 7, state: 'COUNTED', year: 2026, month: 10, replies, billed, allowance: 1000, reason: null }
+  }
+
+  registerEndpoint('/api/channels/whatsapp/bindings/7/usage', () => {
+    usageGets++
+    return usage
+  })
+
+  beforeEach(() => {
+    usage = counted(412)
+    usageGets = 0
+  })
+
+  const mounted: Awaited<ReturnType<typeof mountSuspended>>[] = []
+  async function mount() {
+    const c = await mountSuspended(WhatsApp)
+    mounted.push(c)
+    return c
+  }
+  afterEach(() => {
+    mounted.splice(0).forEach(c => c.unmount())
+  })
+
+  async function bar() {
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(c.find('[data-testid="usage"]').exists()).toBe(true))
+    return {
+      text: c.find('[data-testid="usage"]').text(),
+      progress: c.find('[data-testid="usage"] [role="progressbar"]'),
+      fill: c.find('[data-testid="usage-fill"]'),
+    }
+  }
+
+  it('shows the count under the allowance as a progress bar', async () => {
+    const { text, progress, fill } = await bar()
+    expect(text).toBe('412 of 1,000 free replies this month')
+    expect(progress.attributes('aria-valuenow')).toBe('412')
+    expect(progress.attributes('aria-valuemin')).toBe('0')
+    expect(progress.attributes('aria-valuemax')).toBe('1000')
+    expect(progress.attributes('aria-valuetext')).toBe('412 of 1,000 free replies this month')
+    expect(Number.parseFloat(fill.attributes('style')!.replace('width:', ''))).toBeCloseTo(41.2)
+    expect(fill.classes()).toContain('bg-emerald-600')
+    expect(fill.classes()).not.toContain('bg-amber-500')
+  })
+
+  it('stays in the normal tone at 799', async () => {
+    usage = counted(799)
+    const { fill } = await bar()
+    expect(fill.classes()).toContain('bg-emerald-600')
+  })
+
+  it('takes the warning tone from 80 percent', async () => {
+    usage = counted(800)
+    const { text, fill } = await bar()
+    expect(text).toBe('800 of 1,000 free replies this month')
+    expect(fill.classes()).toContain('bg-amber-500')
+  })
+
+  it('is full in the warning tone at exactly the allowance', async () => {
+    usage = counted(1000)
+    const { text, fill } = await bar()
+    expect(text).toBe('1,000 of 1,000 free replies this month')
+    expect(fill.attributes('style')).toContain('width: 100%')
+    expect(fill.classes()).toContain('bg-amber-500')
+  })
+
+  it('past the allowance is full and names Meta\'s billed count', async () => {
+    // billed comes from Meta's REGULAR count, so it need not equal replies minus the allowance.
+    usage = counted(1240, 237)
+    const { text, progress, fill } = await bar()
+    expect(text).toBe('1,240 replies this month, 237 billed')
+    expect(progress.attributes('aria-valuenow')).toBe('1000')
+    expect(fill.attributes('style')).toContain('width: 100%')
+    expect(fill.classes()).toContain('bg-amber-500')
+  })
+
+  it('shows one muted line with the reason when the count is unknown', async () => {
+    usage = { ...counted(0), state: 'UNKNOWN', replies: null, billed: null, reason: 'Invalid parameter' }
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(c.find('[data-testid="usage-unknown"]').exists()).toBe(true))
+    const line = c.find('[data-testid="usage-unknown"]')
+    expect(line.text()).toContain('Invalid parameter')
+    expect(line.classes()).toContain('text-fg-muted')
+    expect(c.find('[data-testid="usage"]').exists()).toBe(false)
+  })
+
+  it('shows nothing when the count is not applicable', async () => {
+    usage = { ...counted(0), state: 'NOT_APPLICABLE', replies: null, billed: null }
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(usageGets).toBeGreaterThan(0))
+    await flushPromises()
+    expect(c.find('[data-testid="usage"]').exists()).toBe(false)
+    expect(c.find('[data-testid="usage-unknown"]').exists()).toBe(false)
+  })
+
+  it('never asks about a WhatsApp-Web or a disabled binding', async () => {
+    bindingsResponse = [binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null }), binding({ id: 8, enabled: false })]
+    const c = await mount()
+    await flushPromises()
+    expect(usageGets).toBe(0)
+    expect(c.find('[data-testid="usage"]').exists()).toBe(false)
+  })
+})
