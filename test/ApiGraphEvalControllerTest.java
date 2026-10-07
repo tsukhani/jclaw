@@ -16,7 +16,6 @@ import services.grapheval.HeldOut;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -199,7 +198,7 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
 
     @Test
     void theBlindSheetHoldsOnlyTheSelectedIdsTextCapturedAtAndOwner() throws Exception {
-        var file = Play.applicationPath.toPath().resolve(HeldOut.DIR).resolve("blind-sheet.json");
+        var file = HeldOut.root().resolve(HeldOut.DIR).resolve("blind-sheet.json");
         var saved = Files.exists(file) ? Files.readString(file) : null;
         try {
             var response = POST(authed(), "/api/graph/eval/blind-sheet", "application/json", "{}");
@@ -325,26 +324,24 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
         return ref.get();
     }
 
-    /**
-     * Runs {@code body} with {@code content} over the file at {@code path} (absent when null), then restores it. The
-     * original is moved aside on disk, not held in memory: heldout.json is the operator's live labelling, and a suite
-     * killed mid-test must leave it recoverable.
-     */
+    /** Runs {@code body} with {@code content} at {@code path} (absent when null); the path is under the tests' own root. */
     private static void withFile(Path path, @Nullable String content, ThrowingRunnable body) throws Exception {
-        var saved = path.resolveSibling(path.getFileName() + ".saved-by-test");
-        assertFalse(Files.exists(saved), saved + " is left from an interrupted run: move it back over "
-                + path.getFileName() + " first");
-        boolean existed = Files.exists(path);
-        if (existed) Files.move(path, saved);
         try {
-            if (content != null) {
-                Files.createDirectories(path.getParent());
-                Files.writeString(path, content);
-            }
+            Files.deleteIfExists(path);
+            Files.createDirectories(path.getParent());
+            if (content != null) Files.writeString(path, content);
             body.run();
         } finally {
-            if (existed) Files.move(saved, path, StandardCopyOption.REPLACE_EXISTING);
-            else Files.deleteIfExists(path);
+            Files.deleteIfExists(path);
+        }
+    }
+
+    @Test
+    void underTestTheWorkingFilesAreNeverTheOperatorsOwn() {
+        var app = Play.applicationPath.toPath().normalize();
+        for (var path : List.of(HeldOut.defaultPath(), CompetencyQuestions.defaultPath())) {
+            assertFalse(path.startsWith(app.resolve(HeldOut.DIR)) || path.startsWith(app.resolve("evals")), path.toString());
+            assertTrue(path.startsWith(app.resolve("tmp")), path.toString());
         }
     }
 
@@ -391,7 +388,7 @@ class ApiGraphEvalControllerTest extends FunctionalTest {
                                 "status", "holds")),
                         "notRepresentable", List.of("instruction"), "numbers", List.of("identifier"),
                         "backReference", true))));
-                var questions = Play.applicationPath.toPath().resolve(CompetencyQuestions.DEFAULT_PATH);
+                var questions = CompetencyQuestions.defaultPath();
                 withFile(HeldOut.defaultPath(), heldout, () -> withFile(questions, null, () -> {
                     var response = POST(authed(), COVERAGE, "application/json", "{}");
                     assertEquals(200, response.status.intValue(), getContent(response));

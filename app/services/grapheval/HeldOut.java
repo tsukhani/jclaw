@@ -81,8 +81,13 @@ public final class HeldOut {
         }
     }
 
+    /** What the eval's working files resolve against: the application, or under %test a directory of the tests' own. */
+    public static Path root() {
+        return Play.applicationPath.toPath().resolve(Play.configuration.getProperty("grapheval.root", "")).normalize();
+    }
+
     public static Path defaultPath() {
-        return Play.applicationPath.toPath().resolve(DIR).resolve(FILE);
+        return root().resolve(DIR).resolve(FILE);
     }
 
     public static Sampled sample(String agentId, int count, long seed) throws IOException {

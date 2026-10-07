@@ -382,7 +382,7 @@ public class ApiGraphEvalController extends Controller {
     }
 
     private static Path root() {
-        return appPath(HeldOut.DIR);
+        return HeldOut.root().resolve(HeldOut.DIR);
     }
 
     /**
@@ -442,7 +442,7 @@ public class ApiGraphEvalController extends Controller {
         } catch (IOException | RuntimeException e) {
             throw invalid(INVALID_CASE_SET + e.getMessage());
         }
-        var file = appPath(HeldOut.DIR).resolve(BLIND_SHEET);
+        var file = root().resolve(BLIND_SHEET);
         try {
             Files.createDirectories(file.getParent());
             Files.writeString(file, GSON.toJson(sheet));
@@ -509,7 +509,7 @@ public class ApiGraphEvalController extends Controller {
 
     /** The operator's competency questions, null when there is no question file. */
     private static @Nullable List<CompetencyQuestions.Question> questions(OntologySchema schema) {
-        var file = appPath(CompetencyQuestions.DEFAULT_PATH);
+        var file = CompetencyQuestions.defaultPath();
         if (!Files.exists(file)) return null;
         try {
             return CompetencyQuestions.load(file, schema);

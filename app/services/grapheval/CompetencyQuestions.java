@@ -24,6 +24,10 @@ import java.util.regex.Pattern;
 public final class CompetencyQuestions {
 
     public static final String DEFAULT_PATH = "evals/graph/competency-questions.json";
+
+    public static Path defaultPath() {
+        return HeldOut.root().resolve(DEFAULT_PATH);
+    }
     /** The schema v3 claims a question may ask about. */
     public static final List<String> CLAIM_FACETS = List.of("status", "valid", "valence", "occurs");
     /** What a memory may express that the schema cannot store, in report order. */
