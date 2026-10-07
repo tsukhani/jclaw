@@ -8,9 +8,11 @@ import com.vladsch.flexmark.ast.Emphasis;
 import com.vladsch.flexmark.ast.FencedCodeBlock;
 import com.vladsch.flexmark.ast.Heading;
 import com.vladsch.flexmark.ast.HtmlBlock;
+import com.vladsch.flexmark.ast.HtmlEntity;
 import com.vladsch.flexmark.ast.HtmlInline;
 import com.vladsch.flexmark.ast.IndentedCodeBlock;
 import com.vladsch.flexmark.ast.Link;
+import com.vladsch.flexmark.ast.MailLink;
 import com.vladsch.flexmark.ast.OrderedList;
 import com.vladsch.flexmark.ast.Paragraph;
 import com.vladsch.flexmark.ast.StrongEmphasis;
@@ -97,7 +99,8 @@ public final class WhatsAppMarkdownFormatter {
 
         @Override protected void emitAutoLink(AutoLink al) { out.append(al.getUrl()); }
 
-        @Override protected void emitText(Text t) { out.append(t.getChars()); }
+        // No escape grammar to carry a backslash escape over, so print the character it protects.
+        @Override protected void emitText(Text t) { out.append(t.getChars().unescape()); }
 
         @Override protected void emitSoftLineBreak() { out.append('\n'); }
 
@@ -105,11 +108,14 @@ public final class WhatsAppMarkdownFormatter {
 
         @Override protected void emitThematicBreak() { out.append("──────────\n\n"); }
 
-        /** WhatsApp has no HTML grammar and needs no escaping: raw HTML passes through as text. */
+        /** WhatsApp has no HTML grammar and needs no escaping: raw HTML passes through as text.
+         *  An entity and an angle-bracket email have no child text, so the default walk would drop them. */
         @Override protected void emitFallback(Node node) {
             switch (node) {
                 case HtmlInline h -> out.append(h.getChars());
                 case HtmlBlock h -> out.append(h.getChars());
+                case HtmlEntity e -> out.append(e.getChars().unescape());
+                case MailLink m -> out.append(m.getText());
                 default -> super.emitFallback(node);
             }
         }

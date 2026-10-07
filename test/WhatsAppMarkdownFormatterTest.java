@@ -110,6 +110,18 @@ class WhatsAppMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
+    void textWithNoChildNodeIsKeptRatherThanDropped() {
+        assertEquals("x < y & z", fmt("x &lt; y &amp; z"));
+        assertEquals("mail a@b.com or c@d.com", fmt("mail <a@b.com> or c@d.com"));
+    }
+
+    @Test
+    void aBackslashEscapePrintsTheCharacterItProtects() {
+        assertEquals("5 * 3 and a_b", fmt("5 \\* 3 and a\\_b"));
+        assertEquals("C:\\Users\\me", fmt("C:\\Users\\me"), "a backslash before a letter is literal");
+    }
+
+    @Test
     void tableBecomesOneBulletLinePerBodyRow() {
         var md = """
                 | Course | Level | Duration | Price |
