@@ -119,16 +119,24 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
 15. Push to `origin` first: `/usr/bin/git push --follow-tags origin HEAD`. The `--follow-tags` flag pushes both the branch HEAD and any annotated tags reachable from it (i.e., the `v<NEW_VERSION>` tag we just created), so the commit and tag land in one atomic operation per remote. Report the result.
 16. Push to `github`: `/usr/bin/git push --follow-tags github HEAD`. Report the result.
 17. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually. If GitHub answers `GH006: Protected branch update failed … Commits must have verified signatures`, it lists the unsigned commits: the preflight should have caught them, so report them rather than bypass.
+18. **Delete the Renovate branches this release merged**, only after both pushes succeeded. A `renovate/*` branch that the pushed `HEAD` contains is now on Bitbucket's `main` and is dead; Renovate would prune it only at its next Monday run. Delete it now and not earlier: a branch deleted while its bump is still only local is recreated by that Monday run. A branch `HEAD` does not contain is a pending bump, so leave it. The Bash tool runs zsh, which does not word-split an unquoted variable, hence the array:
+    ```bash
+    /usr/bin/git fetch -q origin --prune
+    B=(${(f)"$(/usr/bin/git branch -r --list 'origin/renovate/*' | tr -d ' ' | sed 's|^origin/||')"})
+    merged=(); for b in "${B[@]}"; do /usr/bin/git merge-base --is-ancestor "origin/$b" HEAD && merged+=("$b"); done
+    if (( ${#merged[@]} )); then /usr/bin/git push origin --delete "${merged[@]}"; fi
+    ```
+    The pre-push hook skips the suite on a delete-only push, so this needs no bypass. Renovate pushes only to Bitbucket, so `github` has no such branches. A failed delete does not undo the release: report it.
 
 **Phase 4: Report**
 
-18. Summarize in one message: new version, commit hash, tag name, branch name, and both push destinations with their reported ref updates. Example:
+19. Summarize in one message: new version, commit hash, tag name, branch name, both push destinations with their reported ref updates, and the Renovate branches step 18 deleted, if any. Example:
 
     > Released **v0.7.6** as `a1b2c3d` on `main` (signed, tagged `v0.7.6`).
     > - origin (Bitbucket): `<old-sha>..a1b2c3d` + tag `v0.7.6`
     > - github: `<old-sha>..a1b2c3d` + tag `v0.7.6`
 
-19. **If the release touched `frontend/` or `app/controllers/`, close the report by naming the post-deploy check** — one line, not a new step to perform:
+20. **If the release touched `frontend/` or `app/controllers/`, close the report by naming the post-deploy check** — one line, not a new step to perform:
 
     > This release touched the frontend. To verify what shipped: `./jclaw.sh restart`, then `/e2e-audit`.
 
