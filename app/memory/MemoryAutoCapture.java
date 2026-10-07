@@ -23,11 +23,15 @@ import services.ConversationService;
 import services.EventLogger;
 import services.LoadTestRunner;
 import services.SessionCompactor;
+import services.TimezoneResolver;
 import services.Tx;
 import services.WorkspaceFiles;
+import utils.AppClock;
 import utils.CircuitBreaker;
 import utils.CircuitBreakers;
 
+import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -518,8 +522,32 @@ public final class MemoryAutoCapture {
         }
         List<Candidate> deduped = parsed;
 
-        final List<Candidate> kept =
+        final List<Candidate> filtered =
                 applySafetyFilters(deduped, agentKey, agentName, userMessage, assistantResponse);
+        // JCLAW-1383: after the filters, so they judge the extractor's own words; before semantic dedup, plan and the judge.
+        final List<Candidate> kept;
+        if (filtered.isEmpty()) {
+            kept = filtered;
+        } else {
+            var anchor = captureAnchor(provenance);
+            var rewritten = filtered.stream().map(c -> new Candidate(AbsoluteDates.rewrite(c.text(), anchor),
+                    c.category(), c.importance(), c.retrievalKey())).toList();
+            // The memory tool logs the stored, absolute text, so the raw relative probe above misses it.
+            var survivors = new ArrayList<Candidate>();
+            for (int i = 0; i < rewritten.size(); i++) {
+                var c = rewritten.get(i);
+                if (c.text().equals(filtered.get(i).text())
+                        || !MemoryForgetLog.recentlyForgotten(agentKey, c.text())) {
+                    survivors.add(c);
+                }
+            }
+            int forgotten = rewritten.size() - survivors.size();
+            if (forgotten > 0) {
+                EventLogger.info(EVENT_CATEGORY, agentName, null,
+                        "Dropped %d candidate memory(ies) the operator just asked to forget".formatted(forgotten));
+            }
+            kept = survivors;
+        }
 
         // JCLAW-942: the maxPerTurn cut in plan() keeps the first survivors in list order, so
         // that order has to mean something. The extractor scores every candidate for
@@ -601,6 +629,16 @@ public final class MemoryAutoCapture {
         } finally {
             lock.unlock();
         }
+    }
+
+    /** The app-zone day of the source message, else of now: what a relative date in the turn was said against. */
+    private static LocalDate captureAnchor(MemoryProvenance provenance) {
+        var messageId = provenance.sourceMessageId();
+        @Nullable Instant said = messageId == null ? null : Tx.<@Nullable Instant>run(() -> {
+            Message source = Message.findById(messageId);
+            return source == null ? null : source.createdAt;
+        });
+        return (said != null ? said : AppClock.now()).atZone(TimezoneResolver.appZone()).toLocalDate();
     }
 
     /** Writes a name the turn states to USER.md and drops the candidates stating the owner's old or new name. */
