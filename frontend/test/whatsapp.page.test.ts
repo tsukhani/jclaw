@@ -570,6 +570,27 @@ describe('whatsapp bindings page — delivery failure warning (JCLAW-1411)', () 
     const c = await mountSuspended(WhatsApp)
     expect(c.find(warning).exists()).toBe(true)
     expect(c.find(warning).text()).toContain('23h ago')
+    expect(c.find(warning).text()).toContain('Meta error 131042')
+  })
+
+  it('shows a title alone when Meta gave no code', async () => {
+    bindingsResponse = [binding({ lastDeliveryFailureAt: failedAgo(60 * MINUTE), lastDeliveryFailureTitle: 'Payment issue' })]
+    const c = await mountSuspended(WhatsApp)
+    const text = c.find(warning).text()
+    expect(text).toContain('— Payment issue')
+    expect(text).not.toContain('Meta error')
+  })
+
+  it('ends at the age when Meta gave neither code nor title', async () => {
+    bindingsResponse = [binding({ lastDeliveryFailureAt: failedAgo(2 * MINUTE) })]
+    const c = await mountSuspended(WhatsApp)
+    expect(c.find(warning).text()).toMatch(/customer 2m ago$/)
+  })
+
+  it('counts a recent failure in minutes', async () => {
+    bindingsResponse = [binding({ lastDeliveryFailureAt: failedAgo(5 * MINUTE), lastDeliveryFailureCode: 131042 })]
+    const c = await mountSuspended(WhatsApp)
+    expect(c.find(warning).text()).toContain('5m ago')
   })
 
   it('is gone at 24h01m', async () => {
