@@ -242,7 +242,8 @@ class HeldOutTest extends UnitTest {
                     a.add(7);
                     o.add("numbers", a);
                 },
-                o -> o.addProperty("backReference", "zeppelin"));
+                o -> o.addProperty("backReference", "zeppelin"),
+                o -> o.addProperty("backReference", "yes"));
         for (var breakIt : breaks) {
             var file = labelledWith(o -> {
                 o.add("notRepresentable", array());
@@ -252,7 +253,8 @@ class HeldOutTest extends UnitTest {
             });
             var e = assertThrows(IllegalArgumentException.class, () -> HeldOut.load(file, OntologySchema.seed()));
             assertTrue(e.getMessage().startsWith("case h0: "), e.getMessage());
-            assertFalse(e.getMessage().contains("zeppelin"), "a refusal never quotes the value: " + e.getMessage());
+            assertFalse(e.getMessage().contains("zeppelin") || e.getMessage().contains("yes"),
+                    "a refusal never quotes the value: " + e.getMessage());
             assertFalse(e.getMessage().contains("notebook"), "a refusal never quotes the memory: " + e.getMessage());
         }
     }

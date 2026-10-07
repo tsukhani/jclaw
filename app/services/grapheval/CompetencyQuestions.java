@@ -142,8 +142,8 @@ public final class CompetencyQuestions {
             default -> types.stream().anyMatch(t -> dated(schema, t));
         };
         if (!admitted) {
-            throw new IllegalArgumentException(where + ": facet '" + facet + "' is no claim "
-                    + (relation == null ? "a question with no relation" : "'" + relation + "'") + " admits");
+            throw new IllegalArgumentException(where + ": facet '" + facet + "' is not a claim "
+                    + (relation == null ? "a question with no relation" : "relation '" + relation + "'") + " admits");
         }
     }
 

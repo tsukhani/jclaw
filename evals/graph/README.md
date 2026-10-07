@@ -645,24 +645,27 @@ id itself is bad.
 
 ## Coverage report
 
-Every held-out run's report carries `coverage` (JCLAW-1374): the label sections once, and one
-type-confusion matrix per model. `./jclaw.sh grapheval coverage [--out FILE]`
-(`POST /api/graph/eval/heldout/coverage`) gives the label sections alone and is model-free: it
-reads `data/graph-eval/heldout.json` and the question file when there is one, asks no model, reads
-no decision-model setting and no memory row, and covers every labelled case, frozen splits
-included. Without a question file `questions` is null and no grid cell lists a question.
+A held-out run without a split carries `coverage` in its report (JCLAW-1374): the label sections
+once, and one type-confusion matrix per model, both over the cases left after frozen-split ids are
+excluded. A certification run over a held-out split carries none. `./jclaw.sh grapheval coverage
+[--out FILE]` (`POST /api/graph/eval/heldout/coverage`) gives the label sections alone and is
+model-free: it reads `data/graph-eval/heldout.json` and the question file when there is one, asks
+no model, reads no decision-model setting and no memory row, and covers every labelled case,
+frozen splits included. Without a question file `questions` is null and no grid cell lists a
+question.
 
 Every section counts only the labelled cases carrying all three coverage fields. Counts are
-memories, each counted at most once per bucket; a share is the count over the counted cases,
-null when none is counted. Relations count only when not noise and labelled `holds`, `ended` or
-`denied` (asserted); an implicit operator is a Person endpoint as labelled.
+memories, each counted at most once per bucket; a share is the count over the counted cases, null
+when none is counted. In the Questions and Grid sections a relation counts only when not noise and
+labelled `holds`, `ended` or `denied` (asserted), and an implicit operator is a Person endpoint as
+labelled; the strata read the raw labels.
 
 | Section | Definition |
 |---|---|
 | Questions | Per question id, by its facet. Facet null or a schema claim: `represented` is the memories holding a non-noise asserted relation of the question's relation from an entity of its first type to one of its second, with the claim's value present when the facet is `valid`, `valence` or `occurs` (the Event endpoint's `occurs`); with no relation, memories holding a non-noise entity of its type other than the operator (with `occurs` for an `occurs` facet). Facet a not-representable kind: `represented` is null, and `unrepresented` is the memories whose `notRepresentable` holds that kind. |
 | Grid | Every (From type, relation, To type) cell the schema allows, 43 under schema v3. Per cell: the memories holding such a non-noise, asserted relation, and the ids of the questions that need the cell. Covered cells over allowed cells. |
 | Type confusions | Per model, from every run's gold-fed typing stage of a held-out run: gold Project, System and Artifact mentions against the chosen Project, System, Artifact, `other` type, `notAnEntity`, or a `failed` decision. Not computed by the model-free path. |
-| Not representable | Memories per kind, and memories with any. |
+| Not representable | Memories per kind, memories with any, and that share. |
 | Numbers | Memories per number kind, memories with any, and that share. |
 | Back reference | The memories with `backReference` true, and their share. |
 | Strata | Each stratum below: its count and its share of the counted memories. |

@@ -199,6 +199,22 @@ class CoverageReportTest extends UnitTest {
     }
 
     @Test
+    void aTagAlonePlacesAMemoryInItsStratum() {
+        var owner = List.of(entity("operator", "The user", "Person", false),
+                entity("harborlight", "Harborlight Analytics", "Organization", false));
+        var holds = List.of(relation("operator", "works_at", "harborlight", "holds"));
+        var coverage = new HeldOut.Coverage(List.of(), List.of(), false);
+        var cases = List.of(
+                held(11, List.of("negated"), owner, holds, MemoryAuthorType.HUMAN_TURN, coverage),
+                held(12, List.of("unasserted"), owner, holds, MemoryAuthorType.HUMAN_TURN, coverage),
+                held(13, List.of("ended"), owner, holds, MemoryAuthorType.HUMAN_TURN, coverage));
+        var strata = CoverageReport.sections(cases, null, SCHEMA).strata();
+        for (var name : List.of("negation", "plans-or-uncertainty", "ended")) {
+            assertEquals(new CoverageReport.Share(1, 1 / 3.0), strata.get(name), name);
+        }
+    }
+
+    @Test
     void noCountedCaseCountsZeroAndSharesNothing() {
         var s = CoverageReport.sections(List.of(C4), null, SCHEMA);
         assertNull(s.questions());

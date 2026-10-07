@@ -113,6 +113,8 @@ class CompetencyQuestionsTest extends UnitTest {
                 + " \"facet\": null}", "question q01", "undeclared type");
         assertRefused("{\"id\": \"q01\", \"text\": \"Who?\", \"types\": [\"Organization\", \"Person\"],"
                 + " \"relation\": \"works_at\", \"facet\": null}", "question q01", "does not allow");
+        assertRefused("{\"id\": \"q01\", \"text\": \"Who?\", \"types\": [\"Person\", \"Organization\"],"
+                + " \"relation\": \"admires\", \"facet\": null}", "question q01", "undeclared relation 'admires'");
         assertRefused("{\"id\": \"q01\", \"text\": \"Who?\", \"types\": [\"Person\"], \"relation\": null,"
                 + " \"facet\": \"mood\"}", "question q01", "facet 'mood'");
         assertRefused("{\"id\": \"q01\", \"text\": \"Who?\", \"types\": [\"Person\", \"Organization\"],"
