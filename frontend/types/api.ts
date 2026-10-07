@@ -34,6 +34,8 @@ export interface Agent {
   /** JCLAW-1190: where a turn goes when the primary's breaker refuses it; both null means no fallback. */
   fallbackProvider: string | null
   fallbackModelId: string | null
+  /** A service agent works for whoever is speaking: no USER.md or BOOTSTRAP.md. Set at creation only. */
+  serviceAgent: boolean
 }
 
 /**

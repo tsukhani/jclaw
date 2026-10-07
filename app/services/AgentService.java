@@ -124,8 +124,21 @@ public class AgentService {
     public static Agent create(String name, String modelProvider, String modelId,
                                 @Nullable String thinkingMode, @Nullable String description,
                                 boolean createWorkspace, @Nullable Agent parentAgent) {
+        return create(name, modelProvider, modelId, thinkingMode, description, createWorkspace, parentAgent, false);
+    }
+
+    /** Creates a top-level service agent: its workspace is seeded without USER.md and BOOTSTRAP.md. */
+    public static Agent createServiceAgent(String name, String modelProvider, String modelId,
+                                           @Nullable String thinkingMode, @Nullable String description) {
+        return create(name, modelProvider, modelId, thinkingMode, description, true, null, true);
+    }
+
+    private static Agent create(String name, String modelProvider, String modelId,
+                                @Nullable String thinkingMode, @Nullable String description,
+                                boolean createWorkspace, @Nullable Agent parentAgent, boolean serviceAgent) {
         var agent = new Agent();
         agent.parentAgent = parentAgent;
+        agent.serviceAgent = serviceAgent;
         agent.name = name;
         agent.modelProvider = modelProvider;
         agent.modelId = modelId;

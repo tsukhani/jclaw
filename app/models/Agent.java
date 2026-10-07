@@ -159,6 +159,14 @@ public class Agent extends TimestampedModel {
     @Column(name = "fallback_model_id")
     public String fallbackModelId;
 
+    /**
+     * A service agent works for whoever is speaking rather than for one person: its workspace is
+     * created without USER.md and BOOTSTRAP.md, and nothing adds them later. Set at creation only.
+     */
+    @Column(name = "service_agent", nullable = false)
+    @ColumnDefault("false")
+    public boolean serviceAgent = false;
+
     // Hibernate PersistentBag isn't Serializable, but JClaw never serializes
     // JPA entities off-heap (no session replication, no caching). The
     // Serializable on GenericModel is incidental — fields are JPA-tracked.

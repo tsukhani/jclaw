@@ -69,6 +69,7 @@ public class ApiAgentsController extends Controller {
     private static final String KEY_MEMORY_AUTOCAPTURE_MODEL = "memoryAutocaptureModel";
     private static final String KEY_FALLBACK_PROVIDER = "fallbackProvider";
     private static final String KEY_FALLBACK_MODEL_ID = "fallbackModelId";
+    private static final String KEY_SERVICE_AGENT = "serviceAgent";
 
     /**
      * Slug regex enforced on every {@code name} received from the public
@@ -137,7 +138,8 @@ public class ApiAgentsController extends Controller {
     }
 
     public record AgentRequest(String name, String modelProvider, String modelId,
-                               String thinkingMode, String description, Boolean enabled) {}
+                               String thinkingMode, String description, Boolean enabled,
+                               Boolean serviceAgent) {}
 
     public record WorkspaceFileRequest(String content) {}
 
@@ -159,7 +161,8 @@ public class ApiAgentsController extends Controller {
                              String memoryAutocaptureProvider,
                              String memoryAutocaptureModel,
                              @Nullable String fallbackProvider,
-                             @Nullable String fallbackModelId) {
+                             @Nullable String fallbackModelId,
+                             boolean serviceAgent) {
         static AgentView of(Agent a) {
             return of(a, AgentService.isProviderConfigured(a.modelProvider, a.modelId));
         }
@@ -191,7 +194,8 @@ public class ApiAgentsController extends Controller {
                     a.autocaptureProviderEffective(),
                     a.autocaptureModelEffective(),
                     a.fallbackProvider,
-                    a.fallbackModelId);
+                    a.fallbackModelId,
+                    a.serviceAgent);
         }
     }
 
@@ -370,7 +374,9 @@ public class ApiAgentsController extends Controller {
         var fallbackModelId = readOptionalString(body, KEY_FALLBACK_MODEL_ID);
         validateFallback(modelProvider, fallbackProvider, fallbackModelId);
 
-        var agent = AgentService.create(name, modelProvider, modelId, thinkingMode, description);
+        var agent = JsonArgs.optBool(body, KEY_SERVICE_AGENT)
+                ? AgentService.createServiceAgent(name, modelProvider, modelId, thinkingMode, description)
+                : AgentService.create(name, modelProvider, modelId, thinkingMode, description);
         if (fallbackProvider != null) {
             agent.fallbackProvider = fallbackProvider;
             agent.fallbackModelId = fallbackModelId;
@@ -473,6 +479,7 @@ public class ApiAgentsController extends Controller {
         // Checked before any field is applied: `agent` is managed, so a 403 thrown after a
         // partial apply would still flush the earlier fields on the request's commit.
         requireOperatorForAcpChange(agent, body);
+        requireUnchangedServiceAgent(agent, body);
 
         var name = optStringOr(body, "name", agent.name);
         validateRenameRules(agent, name);
@@ -526,6 +533,15 @@ public class ApiAgentsController extends Controller {
         if (RequestPrincipal.isAgentOriginated()) {
             ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
                     "acpAllowed is operator-only; an agent cannot grant itself or another agent the ACP runtime.");
+        }
+    }
+
+    /** Switching would strand USER.md and BOOTSTRAP.md, or leave them missing; an unchanged echo passes. */
+    private static void requireUnchangedServiceAgent(Agent agent, JsonObject body) {
+        var requested = JsonArgs.optBoolean(body, KEY_SERVICE_AGENT);
+        if (requested != null && requested != agent.serviceAgent) {
+            ApiResponses.error(409, ApiResponses.CONFLICT,
+                    "serviceAgent is set when an agent is created and cannot be changed afterwards");
         }
     }
 

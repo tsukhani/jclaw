@@ -1528,3 +1528,95 @@ describe('Agents page — list and workspace actions that fail', () => {
     }
   })
 })
+
+describe('Agents page — personal and service agents', () => {
+  let unregister: Array<() => void> = []
+
+  afterEach(async () => {
+    unregister.forEach(off => off())
+    unregister = []
+    await useRouter().replace('/agents')
+  })
+
+  const kindRadios = (component: { findAll: (selector: string) => unknown }) =>
+    component.findAll('[data-testid="agent-kind"] input[type="radio"]') as Array<{
+      element: HTMLInputElement
+      setValue: (checked: boolean) => Promise<void>
+    }>
+
+  it('offers both kinds on the create form, each explained, with Personal chosen', async () => {
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await component.find('button[title="New Agent"]').trigger('click')
+    await flushPromises()
+
+    const kind = component.find('[data-testid="agent-kind"]')
+    expect((kind.element as HTMLFieldSetElement).disabled).toBe(false)
+    expect(kindRadios(component).map(r => r.element.checked)).toEqual([true, false])
+    const labels = kind.findAll('label').map(l => l.text())
+    expect(labels[0]).toMatch(/^Personal.*Works for one person.*USER\.md.*BOOTSTRAP\.md/)
+    expect(labels[1]).toMatch(/^Service.*Works for whoever is talking to it.*no USER\.md or BOOTSTRAP\.md/)
+  })
+
+  it.each([
+    ['Personal', 0, false],
+    ['Service', 1, true],
+  ])('POSTs the kind chosen on the create form: %s', async (_label, index, serviceAgent) => {
+    let postBody: Record<string, unknown> | null = null
+    setupAgentsApi()
+    unregister.push(registerEndpoint('/api/agents', {
+      method: 'POST',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        postBody = await readBody(event) as Record<string, unknown>
+        return { id: 3 }
+      },
+    }))
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await component.find('button[title="New Agent"]').trigger('click')
+    await flushPromises()
+
+    await kindRadios(component)[index]!.setValue(true)
+    await component.find('[data-tour="agent-edit-form"] input:not([type="radio"])').setValue('front-desk')
+    await component.findAll('button').find(b => b.attributes('title') === 'Save')!.trigger('click')
+    await vi.waitFor(() => expect(postBody).not.toBeNull())
+
+    expect(postBody).toMatchObject({ name: 'front-desk', serviceAgent })
+  })
+
+  it('shows an existing service agent its kind read-only, without the two owner-file tabs', async () => {
+    setupAgentsApi({
+      agents: [
+        {
+          id: 2, name: 'helper', modelProvider: 'openai', modelId: 'gpt-4', enabled: true, isMain: false,
+          providerConfigured: true, thinkingMode: null, compressionEnabled: false, compressionJson: false,
+          compressionCode: false, compressionText: false, compressionTargetRatio: 0.3, acpAllowed: false,
+          memoryAutocaptureEnabled: true, memoryAutocaptureModelInherited: true,
+          memoryAutocaptureProvider: 'openai', memoryAutocaptureModel: 'gpt-4',
+          fallbackProvider: null, fallbackModelId: null, serviceAgent: true,
+          createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z',
+        },
+      ],
+    })
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    expect((component.find('[data-testid="agent-kind"]').element as HTMLFieldSetElement).disabled).toBe(true)
+    expect(kindRadios(component).map(r => r.element.checked)).toEqual([false, true])
+    const tabs = component.findAll('button').map(b => b.text()).filter(t => t.endsWith('.md'))
+    expect(tabs).toEqual(['SOUL.md', 'IDENTITY.md', 'AGENT.md'])
+  })
+
+  it('keeps all five workspace tabs for a personal agent', async () => {
+    setupAgentsApi()
+    const component = await mountSuspended(Agents)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    const tabs = component.findAll('button').map(b => b.text()).filter(t => t.endsWith('.md'))
+    expect(tabs).toEqual(['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md'])
+  })
+})

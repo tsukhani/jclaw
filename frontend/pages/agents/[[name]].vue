@@ -85,6 +85,7 @@ interface AgentForm {
   /** JCLAW-1190: '' means no fallback; the pair is sent as null/null then. */
   fallbackProvider: string
   fallbackModelId: string
+  serviceAgent: boolean
 }
 const form = ref<AgentForm>({
   name: '',
@@ -95,6 +96,7 @@ const form = ref<AgentForm>({
   thinkingMode: '',
   fallbackProvider: '',
   fallbackModelId: '',
+  serviceAgent: false,
 })
 // Snapshot of the agent form at load time (or after a successful save). See
 // formDirty below — together they gate the Save button so it's only active
@@ -421,6 +423,7 @@ const deletingId = ref<number | null>(null)
 // A11y: stable ids for label/control association in the edit form
 const agentNameId = useId()
 const agentDescriptionId = useId()
+const agentKindId = useId()
 const agentProviderId = useId()
 const agentModelId = useId()
 const agentFallbackProviderId = useId()
@@ -787,6 +790,7 @@ function newAgent() {
     thinkingMode: '',
     fallbackProvider: '',
     fallbackModelId: '',
+    serviceAgent: false,
   }
   formBaseline.value = { ...form.value }
   creating.value = true
@@ -808,6 +812,7 @@ function editAgent(agent: Agent) {
     thinkingMode: agent.thinkingMode ?? '',
     fallbackProvider: agent.fallbackProvider ?? '',
     fallbackModelId: agent.fallbackModelId ?? '',
+    serviceAgent: agent.serviceAgent ?? false,
   }
   formBaseline.value = { ...form.value }
   void nextTick(() => {
@@ -1482,7 +1487,23 @@ function cancel() {
   if (route.params.name) router.push('/agents')
 }
 
-const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md']
+// A service agent's workspace has neither owner file, so their tabs would open onto nothing.
+const workspaceFiles = computed(() => editing.value?.serviceAgent
+  ? ['SOUL.md', 'IDENTITY.md', 'AGENT.md']
+  : ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md'])
+
+const agentKinds = [
+  {
+    serviceAgent: false,
+    label: 'Personal',
+    explanation: 'Works for one person. Its workspace includes USER.md, a profile of that person, and BOOTSTRAP.md, which has the agent ask their name in a first direct chat.',
+  },
+  {
+    serviceAgent: true,
+    label: 'Service',
+    explanation: 'Works for whoever is talking to it, such as the members of a shared channel. Its workspace has no USER.md or BOOTSTRAP.md, so it holds no profile of any one person and records no owner\'s name.',
+  },
+]
 </script>
 
 <template>
@@ -1746,6 +1767,41 @@ const workspaceFiles = ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AG
               class="w-full px-3 py-2 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden focus:border-ring"
             >
           </label>
+          <fieldset
+            class="col-span-2 min-w-0"
+            :disabled="!creating"
+            data-testid="agent-kind"
+          >
+            <legend class="block text-xs text-fg-muted mb-1">
+              Agent type
+              <span
+                v-if="!creating"
+                class="ml-1 text-fg-muted"
+              >(set when the agent was created)</span>
+            </legend>
+            <div class="grid grid-cols-2 gap-x-4">
+              <label
+                v-for="kind in agentKinds"
+                :key="kind.label"
+                :for="`${agentKindId}-${kind.label}`"
+                class="flex items-start gap-3 px-3 py-2 bg-muted border border-input"
+                :class="[creating ? 'cursor-pointer' : 'cursor-not-allowed', { 'opacity-50': !creating && form.serviceAgent !== kind.serviceAgent }]"
+              >
+                <input
+                  :id="`${agentKindId}-${kind.label}`"
+                  v-model="form.serviceAgent"
+                  type="radio"
+                  name="agent-kind"
+                  :value="kind.serviceAgent"
+                  class="mt-0.5 accent-emerald-600"
+                >
+                <span class="min-w-0">
+                  <span class="block text-sm text-fg-strong">{{ kind.label }}</span>
+                  <span class="block text-xs text-fg-muted mt-0.5">{{ kind.explanation }}</span>
+                </span>
+              </label>
+            </div>
+          </fieldset>
           <label
             :for="agentProviderId"
             class="block"

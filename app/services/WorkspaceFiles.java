@@ -347,6 +347,15 @@ public final class WorkspaceFiles {
         });
     }
 
+    // Asked of the directory's owner: a subagent shares its root's workspace, so its own flag says nothing.
+    private static boolean ownedByServiceAgent(String agentName) {
+        var ownerName = resolveWorkspaceOwnerName(agentName);
+        return Tx.run(() -> {
+            var owner = Agent.findByName(ownerName);
+            return owner != null && owner.serviceAgent;
+        });
+    }
+
     /**
      * Resolve {@code relativePath} inside {@code root}, rejecting any target
      * that would escape the root. Thin delegate to
@@ -571,9 +580,10 @@ public final class WorkspaceFiles {
     /**
      * Writes {@code name} on the Name line of the agent's USER.md, adding the line when it is missing. A different
      * name already there moves to an "Also known as" line, so memories written under it still name the owner.
+     * Does nothing for a service agent, which has no owner.
      */
     public static void setOwnerName(String agentName, String name) {
-        if (!Files.isDirectory(workspacePath(agentName))) return;
+        if (!Files.isDirectory(workspacePath(agentName)) || ownedByServiceAgent(agentName)) return;
         var current = Files.isRegularFile(workspacePath(agentName).resolve(USER_MD))
                 ? readWorkspaceFile(agentName, USER_MD) : null;
         var updated = withOwnerName(current == null ? USER_TEMPLATE : current, name);
@@ -616,10 +626,11 @@ public final class WorkspaceFiles {
      * Brings a workspace created before USER.md had a Name line up to date: adds an empty Name line
      * to USER.md, and the ask-for-the-name step to BOOTSTRAP.md, each only when it is missing. An
      * untouched BOOTSTRAP.md template is replaced whole; an edited one keeps its text. Idempotent.
+     * A service agent's workspace is left without either file.
      */
     public static void addOwnerNamePrompts(String agentName) {
         var dir = workspacePath(agentName);
-        if (!Files.isDirectory(dir)) return;
+        if (!Files.isDirectory(dir) || ownedByServiceAgent(agentName)) return;
         var user = Files.isRegularFile(dir.resolve(USER_MD)) ? readWorkspaceFile(agentName, USER_MD) : null;
         if (user == null) {
             writeWorkspaceFile(agentName, USER_MD, USER_TEMPLATE);
@@ -673,9 +684,11 @@ public final class WorkspaceFiles {
                     Name: %s
                     """.formatted(agentName), overwrite);
 
-            writeFile(dir.resolve(USER_MD), USER_TEMPLATE, overwrite);
+            if (!ownedByServiceAgent(agentName)) {
+                writeFile(dir.resolve(USER_MD), USER_TEMPLATE, overwrite);
 
-            writeFile(dir.resolve(BOOTSTRAP_MD), BOOTSTRAP_TEMPLATE, overwrite);
+                writeFile(dir.resolve(BOOTSTRAP_MD), BOOTSTRAP_TEMPLATE, overwrite);
+            }
 
             writeFile(dir.resolve("AGENT.md"), """
                     # Agent Instructions

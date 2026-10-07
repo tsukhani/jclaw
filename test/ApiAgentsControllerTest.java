@@ -288,6 +288,51 @@ class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     // =====================
+    // Service agents
+    // =====================
+
+    @Test
+    void createAsAServiceAgentLeavesOutUserAndBootstrap() {
+        login();
+        var created = JsonParser.parseString(getContent(POST("/api/agents", "application/json", """
+                {"name": "svc-desk", "modelProvider": "openrouter", "modelId": "gpt-4.1", "serviceAgent": true}
+                """))).getAsJsonObject();
+        assertTrue(created.get("serviceAgent").getAsBoolean(), "the kind is reported back: " + created);
+
+        var id = created.get("id").getAsString();
+        assertIsOk(GET("/api/agents/" + id + "/workspace/AGENT.md"));
+        assertEquals(404, GET("/api/agents/" + id + "/workspace/USER.md").status.intValue());
+        assertEquals(404, GET("/api/agents/" + id + "/workspace/BOOTSTRAP.md").status.intValue());
+    }
+
+    @Test
+    void createDefaultsToAPersonalAgentWithBothFiles() {
+        login();
+        var id = createAgent("personal-default");
+        var fetched = JsonParser.parseString(getContent(GET("/api/agents/" + id))).getAsJsonObject();
+        assertFalse(fetched.get("serviceAgent").getAsBoolean());
+        assertIsOk(GET("/api/agents/" + id + "/workspace/USER.md"));
+        assertIsOk(GET("/api/agents/" + id + "/workspace/BOOTSTRAP.md"));
+    }
+
+    @Test
+    void updateRefusesToSwitchAnAgentsKindButAcceptsAnEcho() {
+        login();
+        var id = createAgent("kind-is-fixed");
+        var switched = PUT("/api/agents/" + id, "application/json",
+                "{\"description\": \"must not land\", \"serviceAgent\": true}");
+        assertEquals(409, switched.status.intValue(), getContent(switched));
+        var refused = JsonParser.parseString(getContent(GET("/api/agents/" + id))).getAsJsonObject();
+        assertFalse(refused.get("serviceAgent").getAsBoolean());
+        assertTrue(refused.get("description").isJsonNull(), "the refused PUT applied none of its fields: " + refused);
+
+        var echoed = PUT("/api/agents/" + id, "application/json",
+                "{\"description\": \"lands\", \"serviceAgent\": false}");
+        assertIsOk(echoed);
+        assertEquals("lands", JsonParser.parseString(getContent(echoed)).getAsJsonObject().get("description").getAsString());
+    }
+
+    // =====================
     // Workspace file endpoints
     // =====================
 

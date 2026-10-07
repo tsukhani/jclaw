@@ -1,10 +1,12 @@
 import models.Agent;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.AgentService;
 import services.WorkspaceFiles;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 /**
  * JCLAW-910: the default agent's workspace is scaffolded from shipped templates
@@ -159,6 +161,54 @@ class WorkspaceScaffoldTest extends UnitTest {
         var bootstrap = read(name, "BOOTSTRAP.md");
         assertTrue(bootstrap.startsWith("# Bootstrap\n\nIf the Name line in USER.md is empty"), bootstrap);
         assertTrue(bootstrap.endsWith("Check the build is green first.\n"), "the operator's own text survives; got: " + bootstrap);
+    }
+
+    @Test
+    void aServiceAgentsWorkspaceIsSeededWithoutUserAndBootstrap() {
+        var agent = AgentService.createServiceAgent("service-scaffold-" + System.nanoTime(), "openrouter", "gpt-4.1", null, null);
+        try {
+            var dir = WorkspaceFiles.workspacePath(agent.name);
+            for (var seeded : List.of("SOUL.md", "IDENTITY.md", "AGENT.md")) {
+                assertTrue(Files.exists(dir.resolve(seeded)), seeded + " is seeded for every kind of agent");
+            }
+            assertFalse(Files.exists(dir.resolve("USER.md")), "a service agent works for no one person");
+            assertFalse(Files.exists(dir.resolve("BOOTSTRAP.md")), "with no USER.md there is no name to ask for");
+        } finally {
+            AgentService.delete(agent);
+        }
+    }
+
+    @Test
+    void nothingAddsTheOwnerFilesToAServiceAgentLater() {
+        var agent = AgentService.createServiceAgent("service-later-" + System.nanoTime(), "openrouter", "gpt-4.1", null, null);
+        try {
+            // A subagent shares its root's directory, so its name must reach the same refusal.
+            var child = AgentService.create(agent.name + "-child", "openrouter", "gpt-4.1", null, null, false, agent);
+            for (var name : List.of(agent.name, child.name)) {
+                // The three writers of USER.md on a personal agent: the boot job, memory capture, a reset.
+                WorkspaceFiles.addOwnerNamePrompts(name);
+                WorkspaceFiles.setOwnerName(name, "Ada");
+                WorkspaceFiles.resetWorkspace(name);
+            }
+            var dir = WorkspaceFiles.workspacePath(agent.name);
+            assertFalse(Files.exists(dir.resolve("USER.md")));
+            assertFalse(Files.exists(dir.resolve("BOOTSTRAP.md")));
+            assertNull(WorkspaceFiles.ownerName(agent.name));
+        } finally {
+            AgentService.delete(agent);
+        }
+    }
+
+    @Test
+    void aPersonalAgentStillGetsBothOwnerFiles() {
+        var agent = AgentService.create("personal-scaffold-" + System.nanoTime(), "openrouter", "gpt-4.1");
+        try {
+            var dir = WorkspaceFiles.workspacePath(agent.name);
+            assertTrue(Files.exists(dir.resolve("USER.md")));
+            assertTrue(Files.exists(dir.resolve("BOOTSTRAP.md")));
+        } finally {
+            AgentService.delete(agent);
+        }
     }
 
     @Test
