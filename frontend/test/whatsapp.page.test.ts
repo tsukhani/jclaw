@@ -37,6 +37,9 @@ function binding(overrides: Record<string, unknown> = {}) {
     enabled: true,
     createdAt: null,
     updatedAt: null,
+    lastDeliveryFailureAt: null,
+    lastDeliveryFailureCode: null,
+    lastDeliveryFailureTitle: null,
     ...overrides,
   }
 }
@@ -541,5 +544,64 @@ describe('Meta app subscription (JCLAW-1410)', () => {
     expect(subscribeButton(c).attributes('disabled')).toBeDefined()
     release()
     await vi.waitFor(() => expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false))
+  })
+})
+
+describe('whatsapp bindings page — delivery failure warning (JCLAW-1411)', () => {
+  const MINUTE = 60_000
+  const failedAgo = (ms: number) => new Date(Date.now() - ms).toISOString()
+  const warning = '[data-testid="delivery-failure-warning"]'
+
+  it('shows the age and Meta\'s code and title for a failure an hour old', async () => {
+    bindingsResponse = [binding({
+      lastDeliveryFailureAt: failedAgo(60 * MINUTE),
+      lastDeliveryFailureCode: 131049,
+      lastDeliveryFailureTitle: 'This message was not delivered to maintain healthy ecosystem engagement.',
+    })]
+    const c = await mountSuspended(WhatsApp)
+    const text = c.find(warning).text()
+    expect(text).toContain('A reply failed to reach a customer 1h ago')
+    expect(text).toContain('Meta error 131049')
+    expect(text).toContain('This message was not delivered to maintain healthy ecosystem engagement.')
+  })
+
+  it('still shows at 23h59m', async () => {
+    bindingsResponse = [binding({ lastDeliveryFailureAt: failedAgo(24 * 60 * MINUTE - MINUTE), lastDeliveryFailureCode: 131042 })]
+    const c = await mountSuspended(WhatsApp)
+    expect(c.find(warning).exists()).toBe(true)
+    expect(c.find(warning).text()).toContain('23h ago')
+    expect(c.find(warning).text()).toContain('Meta error 131042')
+  })
+
+  it('shows a title alone when Meta gave no code', async () => {
+    bindingsResponse = [binding({ lastDeliveryFailureAt: failedAgo(60 * MINUTE), lastDeliveryFailureTitle: 'Payment issue' })]
+    const c = await mountSuspended(WhatsApp)
+    const text = c.find(warning).text()
+    expect(text).toContain('— Payment issue')
+    expect(text).not.toContain('Meta error')
+  })
+
+  it('ends at the age when Meta gave neither code nor title', async () => {
+    bindingsResponse = [binding({ lastDeliveryFailureAt: failedAgo(2 * MINUTE) })]
+    const c = await mountSuspended(WhatsApp)
+    expect(c.find(warning).text()).toMatch(/customer 2m ago$/)
+  })
+
+  it('counts a recent failure in minutes', async () => {
+    bindingsResponse = [binding({ lastDeliveryFailureAt: failedAgo(5 * MINUTE), lastDeliveryFailureCode: 131042 })]
+    const c = await mountSuspended(WhatsApp)
+    expect(c.find(warning).text()).toContain('5m ago')
+  })
+
+  it('is gone at 24h01m', async () => {
+    bindingsResponse = [binding({ lastDeliveryFailureAt: failedAgo(24 * 60 * MINUTE + MINUTE), lastDeliveryFailureCode: 131042 })]
+    const c = await mountSuspended(WhatsApp)
+    expect(c.find(warning).exists()).toBe(false)
+  })
+
+  it('is absent when the binding has no recorded failure', async () => {
+    bindingsResponse = [binding()]
+    const c = await mountSuspended(WhatsApp)
+    expect(c.find(warning).exists()).toBe(false)
   })
 })

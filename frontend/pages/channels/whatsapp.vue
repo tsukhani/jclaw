@@ -275,6 +275,30 @@ async function subscribe(binding: WhatsAppBindingSummary) {
   subscriptions.value[binding.id] = result
 }
 
+// ── JCLAW-1411: a reply Meta refused or failed to deliver, shown for 24h ────
+const DELIVERY_FAILURE_WINDOW_MS = 24 * 60 * 60 * 1000
+
+function ago(ms: number): string {
+  const minutes = Math.floor(ms / 60_000)
+  if (minutes < 1) return 'just now'
+  if (minutes < 60) return `${minutes}m ago`
+  return `${Math.floor(minutes / 60)}h ago`
+}
+
+function deliveryFailure(b: WhatsAppBindingSummary): string | null {
+  const at = b.lastDeliveryFailureAt ? Date.parse(b.lastDeliveryFailureAt) : Number.NaN
+  if (!Number.isFinite(at)) return null
+  const age = Math.max(0, Date.now() - at)
+  if (age >= DELIVERY_FAILURE_WINDOW_MS) return null
+  let text = `A reply failed to reach a customer ${ago(age)}`
+  const code = b.lastDeliveryFailureCode
+  const title = b.lastDeliveryFailureTitle
+  if (code != null && title) text += ` — Meta error ${code}: ${title}`
+  else if (code != null) text += ` — Meta error ${code}`
+  else if (title) text += ` — ${title}`
+  return text
+}
+
 function transportLabel(t: string | null): string {
   return t === 'WHATSAPP_WEB' ? 'WhatsApp-Web' : 'Cloud API'
 }
@@ -484,6 +508,18 @@ onBeforeUnmount(stopPoll)
             </dd>
           </div>
         </dl>
+
+        <p
+          v-if="deliveryFailure(b)"
+          data-testid="delivery-failure-warning"
+          class="flex items-start gap-1.5 border border-amber-500/60 bg-amber-500/10 p-3 mb-4 text-xs text-amber-700 dark:text-amber-300"
+        >
+          <ExclamationTriangleIcon
+            class="h-4 w-4 shrink-0"
+            aria-hidden="true"
+          />
+          <span>{{ deliveryFailure(b) }}</span>
+        </p>
 
         <div
           v-if="subscriptions[b.id]?.state === 'NOT_SUBSCRIBED'"

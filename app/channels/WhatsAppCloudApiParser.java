@@ -5,13 +5,15 @@ import com.google.gson.JsonObject;
 import org.jspecify.annotations.Nullable;
 import utils.JsonArgs;
 
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 import static channels.WhatsAppInboundMessage.MessageType;
 
 /**
  * Pure data translation of a WhatsApp Cloud-API webhook payload into a normalized
- * {@link WhatsAppInboundMessage} (JCLAW-446). It makes ZERO business decisions —
+ * {@link WhatsAppInboundMessage} (JCLAW-446), or into its delivery statuses. It makes ZERO business decisions —
  * no dedup, no access gate, no media download, no attribution. Every rule lives in
  * {@link WhatsAppInbound}; this class only reshapes the Graph JSON into the
  * transport-agnostic record both transports share.
@@ -40,6 +42,9 @@ import static channels.WhatsAppInboundMessage.MessageType;
  * {@code phoneNumberId} comes from {@code value.metadata.phone_number_id}; the
  * sender display name from {@code value.contacts[0].profile.name}; the quoted
  * message id from {@code message.context.id}.
+ *
+ * <p>{@link #parseStatuses} reads {@code value.statuses} — every entry, not just the first —
+ * into {@link WhatsAppDeliveryStatus} records (JCLAW-1411).
  */
 public final class WhatsAppCloudApiParser {
 
@@ -224,6 +229,80 @@ public final class WhatsAppCloudApiParser {
                 true,                                   // DM to a business number is implicitly addressed
                 envelope.quotedId(),
                 envelope.senderName());
+    }
+
+    /**
+     * Every parseable entry of {@code entry[0].changes[0].value.statuses}, in order; empty when
+     * the payload carries none. Never throws: a malformed entry is skipped, a missing or odd
+     * field is left null, and an entry with no {@code id} or {@code status} yields no record.
+     */
+    public static List<WhatsAppDeliveryStatus> parseStatuses(JsonObject payload) {
+        try {
+            var value = firstValue(payload);
+            if (value == null) return List.of();
+            var statuses = value.get("statuses");
+            if (statuses == null || !statuses.isJsonArray()) return List.of();
+            var out = new ArrayList<WhatsAppDeliveryStatus>();
+            for (var el : statuses.getAsJsonArray()) {
+                try {
+                    if (!el.isJsonObject()) continue;
+                    var status = deliveryStatus(el.getAsJsonObject());
+                    if (status != null) out.add(status);
+                } catch (RuntimeException _) {
+                    // One malformed entry must not drop its siblings.
+                }
+            }
+            return out;
+        } catch (RuntimeException _) {
+            return List.of();
+        }
+    }
+
+    private static @Nullable WhatsAppDeliveryStatus deliveryStatus(JsonObject entry) {
+        var id = JsonArgs.optNonBlankString(entry, "id");
+        var status = JsonArgs.optNonBlankString(entry, "status");
+        if (id == null || status == null) return null;
+        Integer code = null;
+        String title = null;
+        String details = null;
+        var errors = entry.get("errors");
+        if (errors != null && errors.isJsonArray() && !errors.getAsJsonArray().isEmpty()
+                && errors.getAsJsonArray().get(0).isJsonObject()) {
+            var error = errors.getAsJsonArray().get(0).getAsJsonObject();
+            code = optInteger(error, "code");
+            title = optStringQuietly(error, "title");
+            var data = error.get("error_data");
+            if (data != null && data.isJsonObject()) details = optStringQuietly(data.getAsJsonObject(), "details");
+        }
+        return new WhatsAppDeliveryStatus(id, status, optStringQuietly(entry, "recipient_id"),
+                epochSeconds(optStringQuietly(entry, "timestamp")), code, title, details);
+    }
+
+    private static @Nullable String optStringQuietly(JsonObject obj, String key) {
+        try {
+            return JsonArgs.optNonBlankString(obj, key);
+        } catch (RuntimeException _) {
+            return null;
+        }
+    }
+
+    private static @Nullable Integer optInteger(JsonObject obj, String key) {
+        var el = obj.get(key);
+        if (el == null || !el.isJsonPrimitive()) return null;
+        try {
+            return el.getAsInt();
+        } catch (RuntimeException _) {
+            return null;
+        }
+    }
+
+    private static @Nullable Instant epochSeconds(@Nullable String raw) {
+        if (raw == null) return null;
+        try {
+            return Instant.ofEpochSecond(Long.parseLong(raw.trim()));
+        } catch (RuntimeException _) {
+            return null;
+        }
     }
 
     // ── payload navigation helpers ──

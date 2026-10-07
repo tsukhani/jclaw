@@ -73,7 +73,10 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
                                 String verifiedName, String displayPhoneNumber,
                                 String templateName, String templateLanguage,
                                 String defaultTarget, String ownerNumber,
-                                boolean enabled, @Nullable String createdAt, @Nullable String updatedAt) {
+                                boolean enabled, @Nullable String createdAt, @Nullable String updatedAt,
+                                @Nullable String lastDeliveryFailureAt,
+                                @Nullable Integer lastDeliveryFailureCode,
+                                @Nullable String lastDeliveryFailureTitle) {
         static BindingView of(WhatsAppBinding b) {
             return new BindingView(b.id,
                     b.agent != null ? b.agent.id : null,
@@ -91,7 +94,10 @@ public class ApiWhatsAppBindingsController extends ApiBindingController {
                     b.ownerNumber,
                     b.enabled,
                     b.createdAt != null ? b.createdAt.toString() : null,
-                    b.updatedAt != null ? b.updatedAt.toString() : null);
+                    b.updatedAt != null ? b.updatedAt.toString() : null,
+                    b.lastDeliveryFailureAt != null ? b.lastDeliveryFailureAt.toString() : null,
+                    b.lastDeliveryFailureCode,
+                    b.lastDeliveryFailureTitle);
         }
     }
 

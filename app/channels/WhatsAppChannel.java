@@ -290,7 +290,8 @@ public class WhatsAppChannel implements Channel {
                 var id = sentMessageId(responseBody);
                 return id != null ? SendResult.sent(List.of(id)) : SendResult.OK;
             }
-            if (metaErrorCode(responseBody) == ChannelErrorTemplates.META_OUTSIDE_WINDOW) {
+            var errorCode = metaErrorCode(responseBody);
+            if (errorCode == ChannelErrorTemplates.META_OUTSIDE_WINDOW) {
                 // JCLAW-1135: a business rule, not a fault — logged at INFO and worded as a
                 // constraint, so an operator is not sent looking for a break that is not there.
                 EventLogger.info(CHANNEL, null, WHATSAPP, ChannelErrorTemplates.render(
@@ -301,11 +302,24 @@ public class WhatsAppChannel implements Channel {
             }
             EventLogger.warn(CHANNEL, null, WHATSAPP,
                     "WhatsApp API error (HTTP %d): %s".formatted(response.code(), responseBody));
+            recordDeliveryFailure(errorCode < 0 ? null : errorCode, metaErrorMessage(responseBody));
             return SendResult.FAILED;
         } catch (Exception e) {
             EventLogger.warn(CHANNEL, null, WHATSAPP,
                     "Send failed: %s".formatted(e.getMessage()));
             return SendResult.FAILED;
+        }
+    }
+
+    /** JCLAW-1411: mark the binding's card; a DB error degrades to a warning so a send never throws. */
+    private void recordDeliveryFailure(@Nullable Integer code, @Nullable String title) {
+        var id = bindingId;
+        if (id == null) return;
+        try {
+            Tx.run(() -> WhatsAppBinding.recordDeliveryFailure(id, AppClock.now(), code, title));
+        } catch (Exception e) {
+            EventLogger.warn(CHANNEL, null, WHATSAPP,
+                    "Could not record the delivery failure on binding %d: %s".formatted(id, e.getMessage()));
         }
     }
 
@@ -327,6 +341,23 @@ public class WhatsAppChannel implements Channel {
             return code != null && code.isJsonPrimitive() ? code.getAsInt() : -1;
         } catch (RuntimeException _) {
             return -1;
+        }
+    }
+
+    /** The {@code error.message} of a Graph API error body, or null; never throws, as {@link #metaErrorCode}. */
+    public static @Nullable String metaErrorMessage(@Nullable String body) {
+        if (body == null || body.isBlank()) return null;
+        try {
+            var root = JsonParser.parseString(body);
+            if (!root.isJsonObject()) return null;
+            var err = root.getAsJsonObject().get("error");
+            if (err == null || !err.isJsonObject()) return null;
+            var message = err.getAsJsonObject().get("message");
+            if (message == null || !message.isJsonPrimitive()) return null;
+            var text = message.getAsString();
+            return text.isBlank() ? null : text;
+        } catch (RuntimeException _) {
+            return null;
         }
     }
 

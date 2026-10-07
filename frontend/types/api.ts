@@ -148,6 +148,12 @@ export interface WhatsAppBindingSummary {
   enabled: boolean
   createdAt: string | null
   updatedAt: string | null
+  /** JCLAW-1411: ISO time Meta last refused or failed to deliver a reply; null when never. */
+  lastDeliveryFailureAt: string | null
+  /** JCLAW-1411: Meta's error code for that failure; null when Meta gave none. */
+  lastDeliveryFailureCode: number | null
+  /** JCLAW-1411: Meta's error title for that failure; null when Meta gave none. */
+  lastDeliveryFailureTitle: string | null
 }
 
 /** A conversation between a user and an agent. */
