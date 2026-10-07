@@ -208,7 +208,7 @@ public final class WhatsAppCobaltChannel implements Channel {
      * no-op default so {@code WhatsAppStreamingSink} cues it polymorphically.
      */
     @Override
-    public void startTyping(String peerId) {
+    public void startTyping(String peerId, String inboundMessageId) {
         var wa = liveSession();
         if (wa == null) return;
         var jid = toJid(peerId);

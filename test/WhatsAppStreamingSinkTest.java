@@ -30,12 +30,23 @@ class WhatsAppStreamingSinkTest extends UnitTest {
             sent.add(text);
             return SendResult.OK;
         }
+
+        /** Slower than a seal, so only a sink that waits for the cue records it first. */
+        @Override
+        public void startTyping(String peerId, String inboundMessageId) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            sent.add("[typing " + inboundMessageId + "]");
+        }
     }
 
     @Test
     void sealSendsTheFullTextOnce() {
         var ch = new RecordingChannel();
-        var sink = new WhatsAppStreamingSink(ch, "447911111111", null);
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
         sink.update("ignored ");
         sink.update("tokens");
         sink.seal("the complete reply");
@@ -44,9 +55,19 @@ class WhatsAppStreamingSinkTest extends UnitTest {
     }
 
     @Test
+    void theTypingCueNamesTheInboundMessageAndLandsBeforeTheReply() {
+        var ch = new RecordingChannel();
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
+        sink.startTypingHeartbeat();
+        sink.seal("the reply");
+        assertEquals(List.of("[typing wamid.IN]", "the reply"), ch.sent,
+                "a cue that lands after the reply shows typing for its full 25 s");
+    }
+
+    @Test
     void sealIsIdempotent() {
         var ch = new RecordingChannel();
-        var sink = new WhatsAppStreamingSink(ch, "447911111111", null);
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
         sink.seal("first");
         sink.seal("second");
         assertEquals(List.of("first"), ch.sent, "a second seal is a no-op");
@@ -55,7 +76,7 @@ class WhatsAppStreamingSinkTest extends UnitTest {
     @Test
     void blankSealSendsNothing() {
         var ch = new RecordingChannel();
-        var sink = new WhatsAppStreamingSink(ch, "447911111111", null);
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
         sink.seal("   ");
         assertTrue(ch.sent.isEmpty(), "a blank reply is not sent");
     }
@@ -64,7 +85,7 @@ class WhatsAppStreamingSinkTest extends UnitTest {
     @Test
     void errorFallbackNeverShowsTheCustomerTheProviderOrItsBilling() {
         var ch = new RecordingChannel();
-        var sink = new WhatsAppStreamingSink(ch, "447911111111", null);
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
         var failure = new LlmErrorTemplates.Failure(
                 LlmErrorTemplates.Remedy.QUOTA_EXHAUSTED, "openrouter", "gpt-4.1", null, null);
         sink.errorFallback(new LlmProvider.LlmException.ClientError("HTTP 402 from openrouter", failure));
@@ -77,7 +98,7 @@ class WhatsAppStreamingSinkTest extends UnitTest {
     @Test
     void errorFallbackSendsAnApology() {
         var ch = new RecordingChannel();
-        var sink = new WhatsAppStreamingSink(ch, "447911111111", null);
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
         sink.errorFallback(new RuntimeException("boom"));
         assertEquals(1, ch.sent.size());
         // JCLAW-1133: a 3-part notice, plain — WhatsApp formatting is its own dialect, so the
@@ -92,7 +113,7 @@ class WhatsAppStreamingSinkTest extends UnitTest {
     @Test
     void cancelSuppressesLaterSeal() {
         var ch = new RecordingChannel();
-        var sink = new WhatsAppStreamingSink(ch, "447911111111", null);
+        var sink = new WhatsAppStreamingSink(ch, "447911111111", null, "wamid.IN");
         sink.cancel();
         sink.seal("too late");
         assertTrue(ch.sent.isEmpty(), "a cancelled sink sends nothing on a later seal");

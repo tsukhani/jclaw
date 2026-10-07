@@ -156,14 +156,14 @@ public interface Channel {
     }
 
     /**
-     * Show a transient "typing…" / presence indicator to {@code peerId} during the
-     * agent's prologue, when the platform supports one (JCLAW-450). Default no-op —
-     * Cloud-API WhatsApp, Slack, Telegram, and web have no socket presence to push
-     * here; WhatsApp-Web (Cobalt) overrides it with a {@code COMPOSING} presence.
+     * Show a transient "typing…" indicator to {@code peerId} while the agent answers
+     * {@code inboundMessageId} (JCLAW-450). Default no-op — only the two WhatsApp
+     * transports cue through this hook: WhatsApp-Web (Cobalt) pushes a {@code COMPOSING}
+     * presence, and the Cloud API ties its indicator to the inbound message, marking it read.
      * Lets {@code WhatsAppStreamingSink} cue typing polymorphically with no transport
      * branch. Must not throw.
      */
-    default void startTyping(String peerId) {
+    default void startTyping(String peerId, String inboundMessageId) {
         // no-op by default
     }
 }

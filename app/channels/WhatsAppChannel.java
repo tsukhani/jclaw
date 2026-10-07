@@ -27,6 +27,7 @@ import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.security.MessageDigest;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
@@ -34,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 /**
  * WhatsApp Cloud API (Meta) client via raw HTTP.
@@ -89,6 +91,9 @@ public class WhatsAppChannel implements Channel {
     public static final int MAX_TEXT_CHARS = 4096;
 
     private static final String DEFAULT_TEMPLATE_LANGUAGE = "en_US";
+
+    /** The reply waits for the typing cue, so the cue gets far less than the client's 60 s. */
+    private static final Duration TYPING_CUE_TIMEOUT = Duration.ofSeconds(5);
 
     /** Stateless instance using the app-global config (backward-compat path). */
     public WhatsAppChannel() {
@@ -248,6 +253,34 @@ public class WhatsAppChannel implements Channel {
         return postMessage(config, body, "reaction sent to %s".formatted(peerId));
     }
 
+    /**
+     * Mark {@code inboundMessageId} read and show "typing…" until the reply lands; Meta clears
+     * it after 25 s regardless. Best-effort: a refusal is not a delivery failure, so it is
+     * logged and kept off the binding's card.
+     */
+    @Override
+    public void startTyping(String peerId, String inboundMessageId) {
+        var config = effectiveConfig();
+        if (config == null) return;
+        var body = gson.toJson(Map.of(
+                MESSAGING_PRODUCT, WHATSAPP,
+                "status", "read",
+                "message_id", inboundMessageId,
+                "typing_indicator", Map.of("type", "text")
+        ));
+        var call = HttpFactories.general().newCall(messagesRequest(config, body));
+        call.timeout().timeout(TYPING_CUE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+        try (var response = call.execute()) {
+            if (!response.isSuccessful()) {
+                EventLogger.warn(CHANNEL, null, WHATSAPP, "Typing indicator refused (HTTP %d): %s"
+                        .formatted(response.code(), response.body().string()));
+            }
+        } catch (Exception e) {
+            EventLogger.warn(CHANNEL, null, WHATSAPP,
+                    "Typing indicator failed: %s".formatted(e.getMessage()));
+        }
+    }
+
     public static boolean sendMessage(String to, String text) {
         var config = WhatsAppConfig.load();
         if (config == null) {
@@ -277,13 +310,7 @@ public class WhatsAppChannel implements Channel {
      * logging. {@code successLog} is the info line on a 200. Must not throw.
      */
     private SendResult postMessage(WhatsAppConfig config, String jsonBody, String successLog) {
-        var url = API_BASE + config.phoneNumberId() + "/messages";
-        var request = new Request.Builder()
-                .url(url)
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.accessToken())
-                .post(RequestBody.create(jsonBody, JSON_MEDIA_TYPE))
-                .build();
-        try (var response = HttpFactories.general().newCall(request).execute()) {
+        try (var response = HttpFactories.general().newCall(messagesRequest(config, jsonBody)).execute()) {
             var responseBody = response.body().string();
             if (response.code() == 200) {
                 EventLogger.info(CHANNEL, null, WHATSAPP, successLog);
@@ -309,6 +336,14 @@ public class WhatsAppChannel implements Channel {
                     "Send failed: %s".formatted(e.getMessage()));
             return SendResult.FAILED;
         }
+    }
+
+    private static Request messagesRequest(WhatsAppConfig config, String jsonBody) {
+        return new Request.Builder()
+                .url(API_BASE + config.phoneNumberId() + "/messages")
+                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.accessToken())
+                .post(RequestBody.create(jsonBody, JSON_MEDIA_TYPE))
+                .build();
     }
 
     /** JCLAW-1411: mark the binding's card; a DB error degrades to a warning so a send never throws. */

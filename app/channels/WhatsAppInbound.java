@@ -126,7 +126,7 @@ public final class WhatsAppInbound {
             var text = turnText(msg);
             AgentRunner.processInboundForAgentStreaming(
                     agent, CHANNEL_WHATSAPP, peerId, text,
-                    _ -> new WhatsAppStreamingSink(channel, peerId, agent),
+                    _ -> new WhatsAppStreamingSink(channel, peerId, agent, msg.messageId()),
                     attachments, msg.chatType());
         } catch (Exception e) {
             EventLogger.error(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,

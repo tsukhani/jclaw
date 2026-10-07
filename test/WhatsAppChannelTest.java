@@ -10,6 +10,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
+import okio.Buffer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
@@ -21,6 +22,7 @@ import utils.HttpFactories;
 import java.io.File;
 import java.nio.file.Files;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -255,6 +257,49 @@ class WhatsAppChannelTest extends UnitTest {
                 "this binding has a template, so the log must not say it has none");
     }
 
+    // ── The typing cue: a read receipt plus typing indicator for the message being answered ──
+
+    @Test
+    void theTypingCueMarksTheInboundMessageReadAndShowsTyping() {
+        var binding = new WhatsAppBinding();
+        binding.phoneNumberId = "1550003";
+        binding.accessToken = "EAAG-tok";
+        var posted = new ArrayList<String>();
+
+        HttpFactories.runWith(recordingClient(200, "{\"success\":true}", posted),
+                () -> WhatsAppChannel.forBinding(binding).startTyping("447900987654", "wamid.IN"));
+
+        assertEquals(1, posted.size(), "one call per turn");
+        var request = posted.getFirst().split(" ", 2);
+        assertEquals("/v21.0/1550003/messages", request[0]);
+        var body = json(request[1]);
+        assertEquals("whatsapp", body.get("messaging_product").getAsString());
+        assertEquals("read", body.get("status").getAsString());
+        assertEquals("wamid.IN", body.get("message_id").getAsString());
+        assertEquals("text", body.getAsJsonObject("typing_indicator").get("type").getAsString());
+    }
+
+    @Test
+    void aRefusedTypingCueIsLoggedAndKeptOffTheBindingCard() {
+        var binding = boundBinding("wa-ch-typing-agent", null);
+        binding.phoneNumberId = "1550004";
+        binding.accessToken = "EAAG-tok";
+        // Built once: the refresh below reloads the saved row over these unsaved credentials.
+        var ch = WhatsAppChannel.forBinding(binding);
+        var refusal = "{\"error\":{\"message\":\"Unsupported post request\",\"code\":100}}";
+
+        var logged = EventLogger.captureForTest(() -> HttpFactories.runWith(cannedClient(400, refusal),
+                () -> ch.startTyping("447900987654", "wamid.IN")));
+
+        assertTrue(logExists(logged, "Typing indicator refused (HTTP 400)"), "the refusal is logged");
+        binding.refresh();
+        assertNull(binding.lastDeliveryFailureAt, "a missed cue is not a failed delivery");
+
+        HttpFactories.runWith(cannedClient(400, refusal), () -> ch.trySend("447900987654", "hello"));
+        binding.refresh();
+        assertNotNull(binding.lastDeliveryFailureAt, "the same refusal on a send does mark the card");
+    }
+
     // ── JCLAW-1297: the ids a send returns, for a reply that quotes it ──
 
     @Test
@@ -391,6 +436,19 @@ class WhatsAppChannelTest extends UnitTest {
                 .body(ResponseBody.create(body, null))
                 .build();
         return new OkHttpClient.Builder().addInterceptor(canned).build();
+    }
+
+    /** {@link #cannedClient} that also records each request as {@code "<path> <body>"}. */
+    private static OkHttpClient recordingClient(int code, String body, List<String> posted) {
+        Interceptor record = chain -> {
+            var sent = new Buffer();
+            chain.request().body().writeTo(sent);
+            posted.add(chain.request().url().encodedPath() + " " + sent.readUtf8());
+            return chain.proceed(chain.request());
+        };
+        var builder = cannedClient(code, body).newBuilder();
+        builder.interceptors().addFirst(record);
+        return builder.build();
     }
 
     private static JsonObject json(String raw) {

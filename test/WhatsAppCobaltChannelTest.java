@@ -141,10 +141,10 @@ class WhatsAppCobaltChannelTest extends UnitTest {
 
     @Test
     void startTypingIsASafeNoOpWithoutALiveSession() throws Exception {
-        assertDoesNotThrow(() -> channelFor(UNREGISTERED_ID).startTyping("447911111111@s.whatsapp.net"),
+        assertDoesNotThrow(() -> channelFor(UNREGISTERED_ID).startTyping("447911111111@s.whatsapp.net", "wamid.IN"),
                 "presence is best-effort: no session must never break the reply flow");
         var ch = channelWithBareSession();
-        assertDoesNotThrow(() -> ch.startTyping("447911111111@s.whatsapp.net"),
+        assertDoesNotThrow(() -> ch.startTyping("447911111111@s.whatsapp.net", "wamid.IN"),
                 "a never-connected session must be equally harmless");
     }
 

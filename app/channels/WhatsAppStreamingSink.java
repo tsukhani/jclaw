@@ -1,6 +1,7 @@
 package channels;
 
 import models.Agent;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import utils.ChannelErrorTemplates;
 import utils.ErrorRendering;
@@ -18,9 +19,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  * <p>Per-token {@link #update(String)} batches are ignored (there is nothing to
  * stream into); {@code seal} receives the complete text and delivers it. The
- * typing heartbeat is a no-op in this foundation — a presence/typing indicator is
- * wired per transport in JCLAW-447 (Cloud-API: none) / JCLAW-450 (WhatsApp-Web:
- * {@code COMPOSING}).
+ * typing cue is one call per turn, wired per transport: the Cloud API's read
+ * receipt plus typing indicator, WhatsApp-Web's {@code COMPOSING} presence (JCLAW-450).
  */
 public final class WhatsAppStreamingSink implements ChannelStreamingSink {
 
@@ -32,20 +32,33 @@ public final class WhatsAppStreamingSink implements ChannelStreamingSink {
     private final Channel channel;
     private final String peerId;
     private final Agent agent;
+    private final String inboundMessageId;
     private final AtomicBoolean sealed = new AtomicBoolean(false);
+    private volatile @Nullable Thread typingCue;
 
-    public WhatsAppStreamingSink(Channel channel, String peerId, Agent agent) {
+    public WhatsAppStreamingSink(Channel channel, String peerId, Agent agent, String inboundMessageId) {
         this.channel = channel;
         this.peerId = peerId;
         this.agent = agent;
+        this.inboundMessageId = inboundMessageId;
     }
 
     @Override
     public void startTypingHeartbeat() {
-        // Cue the transport's presence indicator (COMPOSING on WhatsApp-Web; a no-op
-        // on Cloud-API, which has no typing API). Polymorphic — no transport branch.
-        if (channel != null) {
-            channel.startTyping(peerId);
+        if (channel == null) return;
+        // Off-thread: the Cloud API cue is a Graph round trip the turn must not wait on.
+        typingCue = Thread.ofVirtual().name("whatsapp-typing")
+                .start(() -> channel.startTyping(peerId, inboundMessageId));
+    }
+
+    /** A cue that reached Meta after the reply would show "typing…" for its full 25 s. */
+    private void awaitTypingCue() {
+        var cue = typingCue;
+        if (cue == null) return;
+        try {
+            cue.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -64,6 +77,7 @@ public final class WhatsAppStreamingSink implements ChannelStreamingSink {
                     "No channel resolved for %s — reply dropped".formatted(peerId));
             return;
         }
+        awaitTypingCue();
         channel.sendText(peerId, fullText, agent);
     }
 
@@ -71,6 +85,7 @@ public final class WhatsAppStreamingSink implements ChannelStreamingSink {
     public void errorFallback(Exception e) {
         if (!sealed.compareAndSet(false, true)) return;
         if (channel != null) {
+            awaitTypingCue();
             // Plain: WhatsApp's formatting is its own dialect, so emit none.
             channel.sendText(peerId, ChannelErrorTemplates.render(
                     ChannelErrorTemplates.forChannelReader(), ErrorRendering.PLAIN,
