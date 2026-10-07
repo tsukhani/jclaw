@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import { nextTick } from 'vue'
+import type { H3Event } from 'h3'
 import WhatsApp from '~/pages/channels/whatsapp.vue'
 
 // JCLAW-444: per-agent WhatsApp bindings with a per-binding transport choice —
@@ -373,5 +374,133 @@ describe('WhatsApp-Web owner number (JCLAW-1408)', () => {
     finally {
       off()
     }
+  })
+})
+
+describe('Meta app subscription (JCLAW-1410)', () => {
+  const URL = '/api/channels/whatsapp/bindings/7/subscription'
+  let state: Record<string, unknown> = {}
+  let getCount = 0
+  let postHandler: (event: H3Event) => unknown = () => ({})
+
+  function sub(overrides: Record<string, unknown>) {
+    return { bindingId: 7, wabaId: null, appId: null, reason: null, ...overrides }
+  }
+
+  registerEndpoint(URL, {
+    method: 'GET',
+    handler: () => {
+      getCount++
+      return state
+    },
+  })
+  registerEndpoint(URL, {
+    method: 'POST',
+    handler: event => postHandler(event),
+  })
+
+  beforeEach(() => {
+    state = sub({ state: 'NOT_SUBSCRIBED', wabaId: '222', appId: '444' })
+    getCount = 0
+    postHandler = () => sub({ state: 'SUBSCRIBED', wabaId: '222', appId: '444' })
+  })
+
+  // Unmounted so a page left over from this block cannot fire GETs into another test's count.
+  const mounted: Awaited<ReturnType<typeof mountSuspended>>[] = []
+  async function mount() {
+    const c = await mountSuspended(WhatsApp)
+    mounted.push(c)
+    return c
+  }
+  afterEach(() => {
+    mounted.splice(0).forEach(c => c.unmount())
+  })
+
+  function subscribeButton(c: Awaited<ReturnType<typeof mount>>) {
+    return c.find('[data-testid="subscription-warning"] button')
+  }
+
+  it('warns and offers Subscribe when the app is not subscribed', async () => {
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(true))
+    const warning = c.find('[data-testid="subscription-warning"]').text()
+    expect(warning).toContain('Meta will not deliver')
+    expect(warning).toContain('222')
+    const button = subscribeButton(c)
+    expect(button.text()).toBe('Subscribe')
+    expect(button.attributes('disabled')).toBeUndefined()
+  })
+
+  it('shows one muted line with the reason when the check is unknown', async () => {
+    state = sub({ state: 'UNKNOWN', reason: '(#200) Permissions error' })
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(c.find('[data-testid="subscription-unknown"]').exists()).toBe(true))
+    expect(c.find('[data-testid="subscription-unknown"]').text()).toContain('(#200) Permissions error')
+    expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false)
+  })
+
+  it('shows nothing when the app is subscribed', async () => {
+    state = sub({ state: 'SUBSCRIBED', wabaId: '222', appId: '444' })
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(getCount).toBeGreaterThan(0))
+    await flushPromises()
+    expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false)
+    expect(c.find('[data-testid="subscription-unknown"]').exists()).toBe(false)
+  })
+
+  it('never asks about a WhatsApp-Web or disabled binding', async () => {
+    bindingsResponse = [
+      binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null }),
+      binding({ id: 8, enabled: false }),
+    ]
+    const c = await mount()
+    await flushPromises()
+    expect(getCount).toBe(0)
+    expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false)
+  })
+
+  it('clears the warning after a successful Subscribe', async () => {
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(true))
+    await subscribeButton(c).trigger('click')
+    await vi.waitFor(() => expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false))
+  })
+
+  it('shows Meta\'s message and keeps the button after a refused Subscribe', async () => {
+    postHandler = async (event) => {
+      const { setResponseStatus } = await import('h3')
+      setResponseStatus(event, 422)
+      return { type: 'error', code: 'cloud_api_subscribe_failed', message: 'Meta refused the subscription: (#200) Permissions error' }
+    }
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(true))
+    await subscribeButton(c).trigger('click')
+    await vi.waitFor(() => expect(c.find('[data-testid="subscription-error"]').exists()).toBe(true))
+    expect(c.find('[data-testid="subscription-error"]').text()).toContain('Meta refused the subscription: (#200) Permissions error')
+    expect(subscribeButton(c).exists()).toBe(true)
+  })
+
+  it('disables the button while the Subscribe request is in flight', async () => {
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    postHandler = async () => {
+      await held
+      return sub({ state: 'SUBSCRIBED', wabaId: '222', appId: '444' })
+    }
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(true))
+    await subscribeButton(c).trigger('click')
+    await nextTick()
+    expect(subscribeButton(c).attributes('disabled')).toBeDefined()
+    release()
+    await vi.waitFor(() => expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false))
   })
 })

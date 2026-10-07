@@ -212,6 +212,9 @@ public final class ApiErrorTemplates {
             e(ApiResponses.CLOUD_API_VERIFICATION_FAILED, "The channel provider rejected the credentials.",
                     "Check the phone number id, access token and app secret against the provider's console.",
                     "Correct the credentials and save again to re-verify."),
+            e(ApiResponses.CLOUD_API_SUBSCRIBE_FAILED, "Meta refused to subscribe the app to the business account.",
+                    "Check that the access token holds the whatsapp_business_management permission.",
+                    "Fix the token's permissions in Meta and try Subscribe again."),
 
             // --- request shape and limits ---
             e(ApiResponses.NO_INPUT, "The request carried no content to act on.",

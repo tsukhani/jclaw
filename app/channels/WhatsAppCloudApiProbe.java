@@ -34,9 +34,9 @@ public final class WhatsAppCloudApiProbe {
 
     private WhatsAppCloudApiProbe() {}
 
-    private static final String API_BASE = "https://graph.facebook.com/v21.0/";
+    static final String API_BASE = "https://graph.facebook.com/v21.0/";
     private static final String FIELDS = "verified_name,code_verification_status,display_phone_number";
-    private static final long PROBE_TIMEOUT_MS = 15_000L;
+    static final long PROBE_TIMEOUT_MS = 15_000L;
 
     /** The Graph error envelope's top-level key ({@code {"error":{"message":...}}}). */
     private static final String FIELD_ERROR = "error";
@@ -155,7 +155,7 @@ public final class WhatsAppCloudApiProbe {
      * ({@code {"error":{"message":...}}}), falling back to the HTTP status when
      * the body isn't the expected shape.
      */
-    private static String graphError(String body, int httpCode) {
+    static String graphError(String body, int httpCode) {
         try {
             var json = JsonParser.parseString(body).getAsJsonObject();
             if (json.has(FIELD_ERROR) && json.get(FIELD_ERROR).isJsonObject()) {
