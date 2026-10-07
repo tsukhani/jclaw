@@ -5,6 +5,8 @@ import com.google.gson.JsonParser;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
+import java.time.Instant;
+
 /**
  * Unit coverage for {@link WhatsAppCloudApiParser} (JCLAW-446) — pure data
  * translation of the Cloud-API webhook JSON into a {@link WhatsAppInboundMessage}.
@@ -219,5 +221,146 @@ class WhatsAppCloudApiParserTest extends UnitTest {
                 """);
         assertEquals("PNID-1", WhatsAppCloudApiParser.extractPhoneNumberId(payload));
         assertNull(WhatsAppCloudApiParser.extractPhoneNumberId(json("{}")));
+    }
+
+    // ── JCLAW-1411: delivery statuses ──
+
+    /** Meta's own failed-status example ("Status messages webhook reference"), verbatim. */
+    static final String META_FAILED_EXAMPLE = """
+            {"object":"whatsapp_business_account","entry":[{"id":"102290129340398","changes":[{"value":{
+              "messaging_product":"whatsapp",
+              "metadata":{"display_phone_number":"15550783881","phone_number_id":"106540352242922"},
+              "statuses":[{
+                "id":"wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBI0QUQ2MjA4NEYyRkExNjMyREUA",
+                "status":"failed",
+                "timestamp":"1751142888",
+                "recipient_id":"16505551234",
+                "errors":[{
+                  "code":131049,
+                  "title":"This message was not delivered to maintain healthy ecosystem engagement.",
+                  "message":"This message was not delivered to maintain healthy ecosystem engagement.",
+                  "error_data":{"details":"In order to maintain a healthy ecosystem engagement, the message failed to be delivered."},
+                  "href":"/documentation/business-messaging/whatsapp/support/error-codes"}]}]},
+              "field":"messages"}]}]}
+            """;
+
+    /** Meta's own delivered-status example, verbatim. */
+    static final String META_DELIVERED_EXAMPLE = """
+            {"object":"whatsapp_business_account","entry":[{"id":"102290129340398","changes":[{"value":{
+              "messaging_product":"whatsapp",
+              "metadata":{"display_phone_number":"15550783881","phone_number_id":"106540352242922"},
+              "statuses":[{
+                "id":"wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBI3MTE5MjVBOTE3MDk5QUVFM0YA",
+                "status":"delivered",
+                "timestamp":"1750263773",
+                "recipient_id":"16505551234",
+                "conversation":{"id":"6ceb9d929c9bdc4f90e967a32f8639b4","origin":{"type":"service"}},
+                "pricing":{"billable":true,"pricing_model":"CBP","category":"service"}}]},
+              "field":"messages"}]}]}
+            """;
+
+    private static JsonObject statuses(String statusesJson) {
+        return json("""
+                {"object":"whatsapp_business_account","entry":[{"id":"WABA","changes":[{"field":"messages","value":{
+                  "messaging_product":"whatsapp",
+                  "metadata":{"display_phone_number":"15550100","phone_number_id":"PNID-1"},
+                  "statuses":%s
+                }}]}]}
+                """.formatted(statusesJson));
+    }
+
+    @Test
+    void parsesMetasFailedStatusExample() {
+        var list = WhatsAppCloudApiParser.parseStatuses(json(META_FAILED_EXAMPLE));
+        assertEquals(1, list.size());
+        var s = list.get(0);
+        assertEquals("wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBI0QUQ2MjA4NEYyRkExNjMyREUA", s.messageId());
+        assertEquals("failed", s.status());
+        assertTrue(s.failed());
+        assertEquals("16505551234", s.recipientId());
+        assertEquals(Instant.ofEpochSecond(1751142888L), s.timestamp());
+        assertEquals(131049, s.errorCode());
+        assertEquals("This message was not delivered to maintain healthy ecosystem engagement.", s.errorTitle());
+        assertEquals("In order to maintain a healthy ecosystem engagement, the message failed to be delivered.",
+                s.errorDetails());
+    }
+
+    @Test
+    void parsesMetasDeliveredStatusExample() {
+        var list = WhatsAppCloudApiParser.parseStatuses(json(META_DELIVERED_EXAMPLE));
+        assertEquals(1, list.size());
+        var s = list.get(0);
+        assertEquals("wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBI3MTE5MjVBOTE3MDk5QUVFM0YA", s.messageId());
+        assertEquals("delivered", s.status());
+        assertFalse(s.failed());
+        assertEquals("16505551234", s.recipientId());
+        assertEquals(Instant.ofEpochSecond(1750263773L), s.timestamp());
+        assertNull(s.errorCode());
+        assertNull(s.errorTitle());
+        assertNull(s.errorDetails());
+    }
+
+    @Test
+    void failedStatusWithoutErrorsHasNullErrorFields() {
+        var list = WhatsAppCloudApiParser.parseStatuses(statuses("""
+                [{"id":"wamid.NOERR","status":"failed","timestamp":"100","recipient_id":"447900000001"}]
+                """));
+        assertEquals(1, list.size());
+        var s = list.get(0);
+        assertTrue(s.failed());
+        assertEquals("447900000001", s.recipientId());
+        assertNull(s.errorCode());
+        assertNull(s.errorTitle());
+        assertNull(s.errorDetails());
+    }
+
+    @Test
+    void parsesEveryStatusInOrder() {
+        var list = WhatsAppCloudApiParser.parseStatuses(statuses("""
+                [{"id":"wamid.A","status":"delivered","timestamp":"1"},
+                 {"id":"wamid.B","status":"failed","timestamp":"2","errors":[{"code":131042,"title":"pay"}]},
+                 {"id":"wamid.C","status":"failed","timestamp":"3"}]
+                """));
+        assertEquals(java.util.List.of("wamid.A", "wamid.B", "wamid.C"),
+                list.stream().map(channels.WhatsAppDeliveryStatus::messageId).toList());
+        assertEquals(131042, list.get(1).errorCode());
+        assertNull(list.get(1).errorDetails());
+    }
+
+    @Test
+    void malformedStatusesNeverThrow() {
+        assertTrue(WhatsAppCloudApiParser.parseStatuses(statuses("{\"id\":\"x\"}")).isEmpty(),
+                "statuses not an array");
+        assertTrue(WhatsAppCloudApiParser.parseStatuses(json("{\"entry\":\"nope\"}")).isEmpty());
+        var list = WhatsAppCloudApiParser.parseStatuses(statuses("""
+                ["not an object",
+                 {"status":"failed"},
+                 {"id":"  ","status":"failed"},
+                 {"id":"wamid.NOSTATUS"},
+                 {"id":"wamid.BADCODE","status":"failed","timestamp":"abc","errors":[{"code":"x","title":"t"}]},
+                 {"id":"wamid.OBJ","status":"failed","recipient_id":{"a":1},"errors":"nope"}]
+                """));
+        assertEquals(2, list.size());
+        var bad = list.get(0);
+        assertEquals("wamid.BADCODE", bad.messageId());
+        assertNull(bad.errorCode(), "a non-numeric code yields null");
+        assertEquals("t", bad.errorTitle());
+        assertNull(bad.timestamp(), "a non-numeric timestamp yields null");
+        var obj = list.get(1);
+        assertEquals("wamid.OBJ", obj.messageId());
+        assertNull(obj.recipientId());
+        assertNull(obj.errorCode());
+    }
+
+    @Test
+    void messagesOnlyPayloadHasNoStatuses() {
+        assertTrue(WhatsAppCloudApiParser.parseStatuses(envelope("""
+                {"from":"447900000001","id":"wamid.TEXT","timestamp":"1","type":"text","text":{"body":"hi"}}
+                """)).isEmpty());
+    }
+
+    @Test
+    void parseStillIgnoresAStatusPayload() {
+        assertNull(WhatsAppCloudApiParser.parse(json(META_FAILED_EXAMPLE)));
     }
 }

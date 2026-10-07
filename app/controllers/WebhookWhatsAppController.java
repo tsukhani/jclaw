@@ -1,7 +1,9 @@
 package controllers;
 
+import channels.InboundEventDedup;
 import channels.WhatsAppChannel;
 import channels.WhatsAppCloudApiParser;
+import channels.WhatsAppDeliveryStatus;
 import channels.WhatsAppInbound;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
@@ -126,9 +128,16 @@ public class WebhookWhatsAppController extends Controller {
             unauthorized("Invalid signature");
         }
 
+        for (var status : WhatsAppCloudApiParser.parseStatuses(payload)) {
+            if (status.failed()
+                    && InboundEventDedup.firstSeen("wa-status:" + status.messageId() + ":failed")) {
+                recordFailedStatus(binding, status);
+            }
+        }
+
         var msg = WhatsAppCloudApiParser.parse(payload);
         if (msg == null) {
-            // Status update or unsupported type — nothing to dispatch.
+            // Status-only payload or unsupported type — nothing to dispatch.
             ok();
             return;
         }
@@ -152,6 +161,22 @@ public class WebhookWhatsAppController extends Controller {
 
         WhatsAppInbound.dispatchMessage(binding, msg);
         ok();
+    }
+
+    /** JCLAW-1411: Meta could not deliver a reply; statuses touch no conversation state. */
+    private static void recordFailedStatus(WhatsAppBinding binding, WhatsAppDeliveryStatus status) {
+        var detail = status.errorCode() == null && status.errorTitle() == null && status.errorDetails() == null
+                ? "no error detail"
+                : "Meta error %s: %s%s".formatted(
+                        status.errorCode() != null ? status.errorCode() : "(no code)",
+                        status.errorTitle() != null ? status.errorTitle() : "(no title)",
+                        status.errorDetails() != null ? " — " + status.errorDetails() : "");
+        EventLogger.warn(CATEGORY_CHANNEL, String.valueOf(binding.agent.id), CHANNEL_WHATSAPP,
+                "WhatsApp reply to %s was not delivered (%s)".formatted(
+                        status.recipientId() != null ? status.recipientId() : "unknown recipient", detail));
+        WhatsAppBinding.recordDeliveryFailure(binding.id,
+                status.timestamp() != null ? status.timestamp() : AppClock.now(),
+                status.errorCode(), status.errorTitle());
     }
 
     private static String firstNonNull(String a, String b) {

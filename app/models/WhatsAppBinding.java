@@ -7,7 +7,9 @@ import jakarta.persistence.Index;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.jspecify.annotations.Nullable;
 
+import java.time.Instant;
 import java.util.List;
 
 /**
@@ -142,6 +144,34 @@ public class WhatsAppBinding extends AgentBoundBinding {
      */
     @Column(name = "template_language")
     public String templateLanguage;
+
+    /** When Meta last refused or failed to deliver a reply on this binding (JCLAW-1411). Nullable. */
+    @Column(name = "last_delivery_failure_at")
+    public Instant lastDeliveryFailureAt;
+
+    /** Meta's error code for {@link #lastDeliveryFailureAt}; null when Meta gave none. */
+    @Column(name = "last_delivery_failure_code")
+    public Integer lastDeliveryFailureCode;
+
+    /** Meta's error title (a send refusal's {@code error.message}), truncated to 255. */
+    @Column(name = "last_delivery_failure_title")
+    public String lastDeliveryFailureTitle;
+
+    /**
+     * Record a delivery failure on the binding, unless the stored one is newer: the time never
+     * moves backwards, so a replayed or late status cannot regress the card. The caller supplies
+     * the transaction.
+     */
+    public static void recordDeliveryFailure(Long bindingId, Instant at,
+                                             @Nullable Integer code, @Nullable String title) {
+        WhatsAppBinding binding = WhatsAppBinding.findById(bindingId);
+        if (binding == null) return;
+        if (binding.lastDeliveryFailureAt != null && binding.lastDeliveryFailureAt.isAfter(at)) return;
+        binding.lastDeliveryFailureAt = at;
+        binding.lastDeliveryFailureCode = code;
+        binding.lastDeliveryFailureTitle = title != null && title.length() > 255 ? title.substring(0, 255) : title;
+        binding.save();
+    }
 
     public static WhatsAppBinding findByAgent(Agent agent) {
         return WhatsAppBinding.find("agent", agent).first();

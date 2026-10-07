@@ -240,6 +240,141 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         assertTrue(found, "expected WEBHOOK_SIGNATURE_FAILURE event for whatsapp");
     }
 
+    // ── JCLAW-1411: delivery statuses ──
+
+    private static final String META_WAMID_FAILED = "wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBI0QUQ2MjA4NEYyRkExNjMyREUA";
+    private static final String META_WAMID_DELIVERED = "wamid.HBgLMTY1MDM4Nzk0MzkVAgARGBI3MTE5MjVBOTE3MDk5QUVFM0YA";
+
+    /** Meta's failed example, routed to this test's binding, with a wamid unique to the call (dedup is process-global). */
+    private static String failedStatusBody(String wamid, String timestamp) {
+        return WhatsAppCloudApiParserTest.META_FAILED_EXAMPLE
+                .replace("106540352242922", PHONE_NUMBER_ID)
+                .replace(META_WAMID_FAILED, wamid)
+                .replace("\"1751142888\"", "\"" + timestamp + "\"");
+    }
+
+    private static String uniqueWamid() {
+        return "wamid.test-" + System.nanoTime();
+    }
+
+    private static String agentIdOf(Long bindingId) {
+        return commitInFreshTx(() -> {
+            WhatsAppBinding b = WhatsAppBinding.findById(bindingId);
+            return String.valueOf(b.agent.id);
+        });
+    }
+
+    private static WhatsAppBinding reload(Long bindingId) {
+        return commitInFreshTx(() -> WhatsAppBinding.<WhatsAppBinding>findById(bindingId));
+    }
+
+    private static java.util.List<EventLog> eventsFor(String agentId) {
+        EventLogger.flush();
+        return EventLog.findRecent(500).stream()
+                .filter(e -> agentId.equals(e.agentId))
+                .toList();
+    }
+
+    @Test
+    void signedFailedStatusIsLoggedOnceAndRecordedOnTheBinding() {
+        var bindingId = seedBinding(APP_SECRET);
+        var agentId = agentIdOf(bindingId);
+        var body = failedStatusBody(uniqueWamid(), "1751142888");
+
+        assertIsOk(postWithSig(body, sign(body)));
+
+        var events = eventsFor(agentId);
+        assertEquals(1, events.size(), () -> "events: " + events);
+        var e = events.get(0);
+        assertEquals("WARN", e.level);
+        assertEquals("channel", e.category);
+        assertEquals("whatsapp", e.channel);
+        assertTrue(e.message.contains("16505551234"), e.message);
+        assertTrue(e.message.contains("131049"), e.message);
+        assertTrue(e.message.contains("This message was not delivered to maintain healthy ecosystem engagement."),
+                e.message);
+        assertTrue(e.message.contains("the message failed to be delivered."), e.message);
+
+        var b = reload(bindingId);
+        assertEquals(java.time.Instant.ofEpochSecond(1751142888L), b.lastDeliveryFailureAt);
+        assertEquals(131049, b.lastDeliveryFailureCode);
+        assertEquals("This message was not delivered to maintain healthy ecosystem engagement.",
+                b.lastDeliveryFailureTitle);
+    }
+
+    @Test
+    void unsignedFailedStatusIsRefusedAndRecordsNothing() {
+        var bindingId = seedBinding(APP_SECRET);
+        var agentId = agentIdOf(bindingId);
+        var body = failedStatusBody(uniqueWamid(), "1751142888");
+
+        assertEquals(401, postWithSig(body, null).status.intValue());
+        assertEquals(401, postWithSig(body, "sha256=bad").status.intValue());
+
+        assertTrue(eventsFor(agentId).isEmpty());
+        var b = reload(bindingId);
+        assertNull(b.lastDeliveryFailureAt);
+        assertNull(b.lastDeliveryFailureCode);
+        assertNull(b.lastDeliveryFailureTitle);
+    }
+
+    @Test
+    void theSameFailedStatusTwiceIsLoggedOnce() {
+        var bindingId = seedBinding(APP_SECRET);
+        var agentId = agentIdOf(bindingId);
+        var body = failedStatusBody(uniqueWamid(), "1751142888");
+
+        assertIsOk(postWithSig(body, sign(body)));
+        assertIsOk(postWithSig(body, sign(body)));
+
+        assertEquals(1, eventsFor(agentId).size());
+    }
+
+    @Test
+    void deliveredStatusLogsAndRecordsNothing() {
+        var bindingId = seedBinding(APP_SECRET);
+        var agentId = agentIdOf(bindingId);
+        var body = WhatsAppCloudApiParserTest.META_DELIVERED_EXAMPLE
+                .replace("106540352242922", PHONE_NUMBER_ID)
+                .replace(META_WAMID_DELIVERED, uniqueWamid());
+
+        assertIsOk(postWithSig(body, sign(body)));
+
+        assertTrue(eventsFor(agentId).isEmpty());
+        var b = reload(bindingId);
+        assertNull(b.lastDeliveryFailureAt);
+        assertNull(b.lastDeliveryFailureCode);
+        assertNull(b.lastDeliveryFailureTitle);
+    }
+
+    @Test
+    void anOlderFailureNeverRegressesTheStoredOneAndANewerOneReplacesIt() {
+        var bindingId = seedBinding(APP_SECRET);
+        var newer = failedStatusBody(uniqueWamid(), "1751142888");
+        assertIsOk(postWithSig(newer, sign(newer)));
+
+        var older = failedStatusBody(uniqueWamid(), "1751000000");
+        assertIsOk(postWithSig(older, sign(older)));
+        assertEquals(java.time.Instant.ofEpochSecond(1751142888L), reload(bindingId).lastDeliveryFailureAt);
+
+        var later = failedStatusBody(uniqueWamid(), "1751200000");
+        assertIsOk(postWithSig(later, sign(later)));
+        assertEquals(java.time.Instant.ofEpochSecond(1751200000L), reload(bindingId).lastDeliveryFailureAt);
+    }
+
+    @Test
+    void aPayloadWithNeitherMessagesNorStatusesIsAckedSilently() {
+        var bindingId = seedBinding(APP_SECRET);
+        var agentId = agentIdOf(bindingId);
+        var body = "{\"entry\":[{\"changes\":[{\"value\":{"
+                + "\"metadata\":{\"phone_number_id\":\"" + PHONE_NUMBER_ID + "\"}}}]}]}";
+
+        assertIsOk(postWithSig(body, sign(body)));
+
+        assertTrue(eventsFor(agentId).isEmpty());
+        assertNull(reload(bindingId).lastDeliveryFailureAt);
+    }
+
     private static String textPayload() {
         // JCLAW-784: carry a fresh per-message timestamp so the replay-window guard
         // (VULN-012) admits it — a real Cloud-API message always includes one.

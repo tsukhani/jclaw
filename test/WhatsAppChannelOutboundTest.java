@@ -1,6 +1,8 @@
 import channels.WhatsAppChannel;
 import com.google.gson.JsonParser;
+import models.Agent;
 import models.WhatsAppBinding;
+import models.WhatsAppTransport;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -9,6 +11,7 @@ import okhttp3.ResponseBody;
 import okio.Buffer;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.Tx;
 import utils.HttpFactories;
 
 import java.util.List;
@@ -167,5 +170,91 @@ class WhatsAppChannelOutboundTest extends UnitTest {
                 () -> WhatsAppChannel.forBinding(binding).sendText("447900000001", text));
         assertTrue(result.ok());
         return bodies;
+    }
+
+    // ── JCLAW-1411: a send Meta refuses is recorded on the binding ──
+
+    @Test
+    void aRefusedSendRecordsTheFailureOnTheBinding() {
+        var b = sendThroughPersistedBinding(400,
+                "{\"error\":{\"message\":\"(#131042) Business eligibility payment issue\",\"code\":131042}}");
+        assertNotNull(b.lastDeliveryFailureAt);
+        assertEquals(131042, b.lastDeliveryFailureCode);
+        assertEquals("(#131042) Business eligibility payment issue", b.lastDeliveryFailureTitle);
+    }
+
+    @Test
+    void anOutsideTheWindowRefusalIsNotRecorded() {
+        var b = sendThroughPersistedBinding(400,
+                "{\"error\":{\"message\":\"Re-engagement message\",\"code\":131047}}");
+        assertNull(b.lastDeliveryFailureAt);
+        assertNull(b.lastDeliveryFailureCode);
+        assertNull(b.lastDeliveryFailureTitle);
+    }
+
+    @Test
+    void aRefusalWithANonJsonBodyRecordsNullCodeAndTitle() {
+        var b = sendThroughPersistedBinding(502, "<html>Bad gateway</html>");
+        assertNotNull(b.lastDeliveryFailureAt);
+        assertNull(b.lastDeliveryFailureCode);
+        assertNull(b.lastDeliveryFailureTitle);
+    }
+
+    @Test
+    void aSuccessfulSendRecordsNothing() {
+        var b = sendThroughPersistedBinding(200, "{\"messages\":[{\"id\":\"wamid.OK\"}]}");
+        assertNull(b.lastDeliveryFailureAt);
+        assertNull(b.lastDeliveryFailureCode);
+        assertNull(b.lastDeliveryFailureTitle);
+    }
+
+    @Test
+    void metaErrorMessageNeverThrows() {
+        assertEquals("boom", WhatsAppChannel.metaErrorMessage("{\"error\":{\"message\":\"boom\"}}"));
+        assertNull(WhatsAppChannel.metaErrorMessage(null));
+        assertNull(WhatsAppChannel.metaErrorMessage("<html>"));
+        assertNull(WhatsAppChannel.metaErrorMessage("{\"error\":\"x\"}"));
+        assertNull(WhatsAppChannel.metaErrorMessage("{\"error\":{\"message\":{}}}"));
+    }
+
+    /** Send through a committed binding against a canned Graph response; returns the binding re-read afterwards. */
+    private static WhatsAppBinding sendThroughPersistedBinding(int status, String responseBody) {
+        var suffix = String.valueOf(System.nanoTime());
+        WhatsAppBinding binding = Tx.run(() -> {
+            var agent = new Agent();
+            agent.name = "wa-outbound-agent-" + suffix;
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.enabled = true;
+            agent.save();
+            var b = new WhatsAppBinding();
+            b.agent = agent;
+            b.transport = WhatsAppTransport.CLOUD_API;
+            b.phoneNumberId = "PN-OUT-" + suffix;
+            b.accessToken = "EAAG-tok";
+            b.enabled = true;
+            b.save();
+            return b;
+        });
+        try {
+            Interceptor canned = chain -> new Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(status)
+                    .message("canned")
+                    .body(ResponseBody.create(responseBody, null))
+                    .build();
+            var client = new OkHttpClient.Builder().addInterceptor(canned).build();
+            HttpFactories.callWith(client,
+                    () -> WhatsAppChannel.forBinding(binding).trySend("447900000001", "hi"));
+            return Tx.run(() -> WhatsAppBinding.<WhatsAppBinding>findById(binding.id));
+        } finally {
+            Tx.run(() -> {
+                WhatsAppBinding b = WhatsAppBinding.findById(binding.id);
+                var agent = b.agent;
+                b.delete();
+                agent.delete();
+            });
+        }
     }
 }
