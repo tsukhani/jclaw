@@ -228,12 +228,26 @@ function subscriptionUrl(id: number) {
   return `/api/channels/whatsapp/bindings/${id}/subscription`
 }
 
+function forgetSubscription(id: number) {
+  const { [id]: _state, ...states } = subscriptions.value
+  const { [id]: _error, ...errors } = subscribeErrors.value
+  subscriptions.value = states
+  subscribeErrors.value = errors
+}
+
 watch(bindings, (list) => {
+  const listed = new Set((list ?? []).map(b => b.id))
+  for (const id of Object.keys(subscriptions.value).map(Number)) {
+    if (!listed.has(id)) forgetSubscription(id)
+  }
   for (const b of list ?? []) {
-    if (!b.enabled || b.transport === 'WHATSAPP_WEB') continue
+    if (!b.enabled || b.transport === 'WHATSAPP_WEB') {
+      forgetSubscription(b.id)
+      continue
+    }
     $fetch<WhatsAppSubscriptionState>(subscriptionUrl(b.id))
       .then((state) => { subscriptions.value[b.id] = state })
-      .catch(() => {})
+      .catch(() => forgetSubscription(b.id))
   }
 }, { immediate: true })
 

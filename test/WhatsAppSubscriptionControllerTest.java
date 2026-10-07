@@ -8,8 +8,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.EventLogger;
 import services.Tx;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -204,6 +206,12 @@ class WhatsAppSubscriptionControllerTest extends FunctionalTest {
         checkAnswer.set(new WhatsAppSubscription.Subscribed("222", "444"));
         login();
 
+        var events = EventLogger.captureMatchingForTest(e -> e.message().contains("Binding " + id + ":"),
+                _ -> assertIsOk(POST(path(id), "application/json", "{}")));
+        assertEquals(List.of("INFO"), events.stream().map(EventLogger.Captured::level).toList());
+        assertTrue(events.getFirst().message().contains("222"));
+        assertFalse(events.getFirst().message().contains(TOKEN));
+
         var response = POST(path(id), "application/json", "{}");
         assertIsOk(response);
         var content = getContent(response);
@@ -211,8 +219,8 @@ class WhatsAppSubscriptionControllerTest extends FunctionalTest {
         assertEquals("SUBSCRIBED", json.get("state").getAsString());
         assertEquals("222", json.get("wabaId").getAsString());
         assertFalse(content.contains(TOKEN));
-        assertEquals(1, subscribes.get());
-        assertEquals(1, checks.get());
+        assertEquals(2, subscribes.get());
+        assertEquals(2, checks.get());
     }
 
     @Test
@@ -220,6 +228,11 @@ class WhatsAppSubscriptionControllerTest extends FunctionalTest {
         subscribeAnswer.set(new WhatsAppSubscription.Failed("(#200) Permissions error"));
         var id = seedCloudBinding();
         login();
+
+        var events = EventLogger.captureMatchingForTest(e -> e.message().contains("Binding " + id + ":"),
+                _ -> assertEquals(422, POST(path(id), "application/json", "{}").status.intValue()));
+        assertEquals(List.of("WARN"), events.stream().map(EventLogger.Captured::level).toList());
+        assertFalse(events.getFirst().message().contains(TOKEN));
 
         var response = POST(path(id), "application/json", "{}");
         assertEquals(422, response.status.intValue());

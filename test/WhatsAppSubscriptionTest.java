@@ -70,6 +70,7 @@ class WhatsAppSubscriptionTest extends UnitTest {
     private final Map<String, Canned> answers = new LinkedHashMap<>();
     private final List<Request> requests = new ArrayList<>();
     private boolean failTransport;
+    private String transportMessage = "connection reset by graph.invalid";
 
     // ===== check =====
 
@@ -209,6 +210,15 @@ class WhatsAppSubscriptionTest extends UnitTest {
     }
 
     @Test
+    void transportErrorWithoutAMessageNamesTheException() {
+        failTransport = true;
+        transportMessage = null;
+
+        assertUnknownContaining(run(() -> WhatsAppSubscription.check("111", TOKEN, BASE)),
+                "Graph request failed: IOException");
+    }
+
+    @Test
     void blankCredentialsAreUnknownWithoutHttp() {
         run(() -> {
             assertTrue(WhatsAppSubscription.check("", TOKEN, BASE) instanceof WhatsAppSubscription.Unknown);
@@ -311,7 +321,7 @@ class WhatsAppSubscriptionTest extends UnitTest {
             var request = chain.request();
             requests.add(request);
             if (failTransport) {
-                throw new IOException("connection reset by graph.invalid");
+                throw new IOException(transportMessage);
             }
             var answer = answers.getOrDefault(request.method() + " " + request.url().encodedPath(),
                     new Canned(599, "unregistered " + request.url().encodedPath()));

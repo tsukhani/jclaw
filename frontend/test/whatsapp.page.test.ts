@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { clearNuxtData } from '#app'
+import { clearNuxtData, refreshNuxtData } from '#app'
 import { nextTick } from 'vue'
 import type { H3Event } from 'h3'
 import WhatsApp from '~/pages/channels/whatsapp.vue'
@@ -451,15 +451,29 @@ describe('Meta app subscription (JCLAW-1410)', () => {
     expect(c.find('[data-testid="subscription-unknown"]').exists()).toBe(false)
   })
 
-  it('never asks about a WhatsApp-Web or disabled binding', async () => {
-    bindingsResponse = [
-      binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null }),
-      binding({ id: 8, enabled: false }),
-    ]
+  it('never asks about a WhatsApp-Web binding', async () => {
+    bindingsResponse = [binding({ transport: 'WHATSAPP_WEB', phoneNumberId: null })]
     const c = await mount()
     await flushPromises()
     expect(getCount).toBe(0)
     expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false)
+  })
+
+  it('never asks about a disabled binding', async () => {
+    bindingsResponse = [binding({ enabled: false })]
+    const c = await mount()
+    await flushPromises()
+    expect(getCount).toBe(0)
+    expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false)
+  })
+
+  it('drops the warning when a refresh shows the binding disabled', async () => {
+    bindingsResponse = [binding()]
+    const c = await mount()
+    await vi.waitFor(() => expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(true))
+    bindingsResponse = [binding({ enabled: false })]
+    await refreshNuxtData()
+    await vi.waitFor(() => expect(c.find('[data-testid="subscription-warning"]').exists()).toBe(false))
   })
 
   it('clears the warning after a successful Subscribe', async () => {

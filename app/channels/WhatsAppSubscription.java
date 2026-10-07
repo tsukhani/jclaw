@@ -236,7 +236,7 @@ public final class WhatsAppSubscription {
 
     // OkHttp exception messages name the host or the failure, never a request header.
     private static String transportError(Exception e) {
-        return "Graph request failed: " + e.getMessage();
+        return "Graph request failed: " + (e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName());
     }
 
     private static String unexpected(String body) {
