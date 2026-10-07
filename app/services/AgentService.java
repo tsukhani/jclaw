@@ -242,6 +242,19 @@ public class AgentService {
     }
 
     /**
+     * Switches an agent between personal and service. Its workspace follows when the change commits: a
+     * service agent's USER.md and BOOTSTRAP.md are deleted, a personal agent gains whichever it lacks.
+     */
+    public static void setServiceAgent(Agent agent, boolean serviceAgent) {
+        if (agent.serviceAgent == serviceAgent) return;
+        agent.serviceAgent = serviceAgent;
+        agent.save();
+        WorkspaceFiles.syncOwnerFiles(agent.name);
+        EventLogger.info(LOG_CATEGORY, agent.name, null, "Agent '%s' is now a %s agent"
+                .formatted(agent.name, serviceAgent ? "service" : "personal"));
+    }
+
+    /**
      * JCLAW-533: re-key the name-partitioned {@code agent.<name>.*} config rows
      * when an agent is renamed, so per-agent settings (shell allowlist, queue
      * mode, …) follow the agent instead of stranding under the old name. Uses a

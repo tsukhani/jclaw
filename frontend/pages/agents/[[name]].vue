@@ -69,6 +69,10 @@ onUnmounted(() => {
   stopCoreMigrationPoll()
 })
 const workspaceTab = ref('AGENT.md')
+// A service agent's workspace has neither owner file, so their tabs would open onto nothing.
+const workspaceFiles = computed(() => editing.value?.serviceAgent
+  ? ['SOUL.md', 'IDENTITY.md', 'AGENT.md']
+  : ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md'])
 const workspaceContent = ref('')
 // Snapshot of the last-saved workspace-file content for the active tab.
 // Compared against workspaceContent to drive the save button's disabled state.
@@ -1357,6 +1361,16 @@ watch(() => form.value.modelProvider, (newProvider) => {
 })
 
 async function saveAgent() {
+  // Becoming a service agent deletes two workspace files, and a save has no undo.
+  if (editing.value && form.value.serviceAgent && !editing.value.serviceAgent) {
+    const confirmed = await confirm({
+      title: 'Change to a service agent',
+      message: `Change "${editing.value.name}" to a service agent? Its USER.md and BOOTSTRAP.md will be deleted. This cannot be undone.`,
+      confirmText: 'Change and delete',
+      variant: 'danger',
+    })
+    if (!confirmed) return
+  }
   saving.value = true
   saveError.value = null
   // Empty string means "reasoning off" — send null so the backend clears the
@@ -1383,6 +1397,9 @@ async function saveAgent() {
       // Edit mode stays on the detail page; reset the baseline so the Save
       // button disables until the user makes another change.
       formBaseline.value = { ...form.value }
+      editing.value.serviceAgent = form.value.serviceAgent
+      // The open tab may be one of the two files a service agent no longer has.
+      if (!workspaceFiles.value.includes(workspaceTab.value)) void loadWorkspaceFile(editing.value.id, 'AGENT.md')
     }
   })
   if (ok) refresh()
@@ -1486,11 +1503,6 @@ function cancel() {
   // Only the edit form has a URL of its own; the create form lives on /agents.
   if (route.params.name) router.push('/agents')
 }
-
-// A service agent's workspace has neither owner file, so their tabs would open onto nothing.
-const workspaceFiles = computed(() => editing.value?.serviceAgent
-  ? ['SOUL.md', 'IDENTITY.md', 'AGENT.md']
-  : ['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md'])
 
 const agentKinds = [
   {
@@ -1769,23 +1781,17 @@ const agentKinds = [
           </label>
           <fieldset
             class="col-span-2 min-w-0"
-            :disabled="!creating"
             data-testid="agent-kind"
           >
             <legend class="block text-xs text-fg-muted mb-1">
               Agent type
-              <span
-                v-if="!creating"
-                class="ml-1 text-fg-muted"
-              >(set when the agent was created)</span>
             </legend>
             <div class="grid grid-cols-2 gap-x-4">
               <label
                 v-for="kind in agentKinds"
                 :key="kind.label"
                 :for="`${agentKindId}-${kind.label}`"
-                class="flex items-start gap-3 px-3 py-2 bg-muted border border-input"
-                :class="[creating ? 'cursor-pointer' : 'cursor-not-allowed', { 'opacity-50': !creating && form.serviceAgent !== kind.serviceAgent }]"
+                class="flex items-start gap-3 px-3 py-2 bg-muted border border-input cursor-pointer"
               >
                 <input
                   :id="`${agentKindId}-${kind.label}`"

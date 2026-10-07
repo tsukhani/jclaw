@@ -13,6 +13,7 @@ import services.ConfigService;
 import services.Tx;
 import utils.TokenHasher;
 
+import java.nio.file.Files;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
@@ -134,6 +135,13 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
             Agent agent = Agent.findById(agentId);
             var config = AgentToolConfig.findByAgentAndTool(agent, tool);
             return config != null && config.enabled;
+        });
+    }
+
+    private static boolean serviceAgentFor(Long agentId) {
+        return fetchInFreshTx(() -> {
+            Agent agent = Agent.findById(agentId);
+            return agent != null && agent.serviceAgent;
         });
     }
 
@@ -292,6 +300,38 @@ class ApiToolsControllerOperatorOnlyTest extends FunctionalTest {
 
         assertIsOk(resp);
         assertTrue(acpAllowedFor(id), "the operator's acp grant must persist");
+    }
+
+    // --- PUT /api/agents/{id} — the serviceAgent switch ---
+
+    @Test
+    void agentPrincipalCannotSwitchAnAgentsType() {
+        // The switch deletes USER.md and BOOTSTRAP.md, and every route that writes or deletes a
+        // workspace file is operator-only: this one must not be the way around them.
+        var id = createAgent("operator-only-type-switch");
+
+        var resp = asAgent(() -> PUT(agentRequest(), "/api/agents/" + id,
+                "application/json", "{\"serviceAgent\":true}"));
+
+        assertStatus(403, resp);
+        assertTrue(getContent(resp).contains("operator_only"),
+                "expected the operator_only error code; got: " + getContent(resp));
+        assertFalse(serviceAgentFor(id), "the rejected PUT must not have switched the type");
+        assertTrue(Files.exists(AgentService.workspacePath("operator-only-type-switch").resolve("USER.md")),
+                "the rejected PUT must not have deleted USER.md");
+    }
+
+    /** CONTROL — passes with the guard reverted; pins that an unchanged type echoed back with an
+     *  ordinary edit is no switch, so a read-modify-write of the agent JSON keeps working. */
+    @Test
+    void agentPrincipalMayEchoAnUnchangedType() {
+        var id = createAgent("operator-only-type-echo");
+
+        var resp = asAgent(() -> PUT(agentRequest(), "/api/agents/" + id, "application/json",
+                "{\"description\":\"written-by-the-agent\",\"serviceAgent\":false}"));
+
+        assertIsOk(resp);
+        assertTrue(getContent(resp).contains("written-by-the-agent"), getContent(resp));
     }
 
     // --- POST /api/agents/{id}/skills/{name}/copy ---

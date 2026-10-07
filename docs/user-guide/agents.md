@@ -23,7 +23,7 @@ Click **New Agent** at the top of the page, or click an existing agent's name to
 |----------------------|---------------------------------------------------------------------------------------------------------------|
 | **Name**             | How the agent appears in the Chat Agent dropdown and breadcrumbs.                                              |
 | **Description**      | A short blurb shown under the name. Optional but useful when you have many agents.                             |
-| **Agent type**       | **Personal** or **Service**, chosen when you create the agent and fixed after that. A personal agent works for one person; a service agent works for whoever is talking to it, such as the members of a shared channel. The difference is two workspace files — see *Workspace file contents* below. The Main Agent is personal. |
+| **Agent type**       | **Personal** or **Service**. A personal agent works for one person; a service agent works for whoever is talking to it, such as the members of a shared channel. The difference is two workspace files — see *Workspace file contents* below — and changing the type later changes them: to **Service** deletes them, after a confirmation; to **Personal** adds blank ones. |
 | **Default Provider** | Which model provider to use. Must be configured in [Settings → LLM Providers](/guide#settings) first.          |
 | **Default Model**    | The specific model id within that provider. The capability pills (thinking / vision / audio / video / no tools) update to reflect what that model supports. Once the [Model Router](/guide#settings-model-router) lists a model for its Chat class, provider **router** with model **Auto (best value)** is offered too, and picks a model per prompt. |
 | **Fallback Provider** | Optional. Where a turn goes when the default provider's circuit breaker refuses it — any configured provider other than the default. Leave it at **None** and a refused turn fails fast instead. See [When a provider misbehaves](/guide#settings-when-a-provider-misbehaves). |
@@ -77,7 +77,7 @@ A small workspace of named markdown files the platform reads into every turn's s
 | `BOOTSTRAP.md`    | First-run scaffolding the agent re-reads at the start of every fresh conversation. Until `USER.md` has your name, it asks for it once, in a direct chat. |
 | `AGENT.md`        | Project / repo / workspace notes you want the agent to carry into every turn. |
 
-A **Service** agent is created without `USER.md` and `BOOTSTRAP.md`, and its tab strip shows only the other three. Nothing tells it who it works for, it is not prompted to ask anyone's name, and a name someone gives it is never recorded as its owner's.
+A **Service** agent has no `USER.md` or `BOOTSTRAP.md`, and its tab strip shows only the other three. Nothing tells it who it works for, it is not prompted to ask anyone's name, and a name someone gives it is never recorded as its owner's.
 
 These files are read on every turn when the system prompt is assembled, through a 30-second cache that is invalidated the moment you save, so an edit is picked up on the agent's next turn without a conversation reset or a restart.
 

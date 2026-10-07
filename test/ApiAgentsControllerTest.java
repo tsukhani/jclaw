@@ -316,20 +316,58 @@ class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
-    void updateRefusesToSwitchAnAgentsKindButAcceptsAnEcho() {
+    void updateSwitchesAPersonalAgentToServiceAndDeletesBothFiles() {
         login();
-        var id = createAgent("kind-is-fixed");
-        var switched = PUT("/api/agents/" + id, "application/json",
-                "{\"description\": \"must not land\", \"serviceAgent\": true}");
-        assertEquals(409, switched.status.intValue(), getContent(switched));
-        var refused = JsonParser.parseString(getContent(GET("/api/agents/" + id))).getAsJsonObject();
-        assertFalse(refused.get("serviceAgent").getAsBoolean());
-        assertTrue(refused.get("description").isJsonNull(), "the refused PUT applied none of its fields: " + refused);
+        var id = createAgent("becomes-service");
+        // Read first, so the switch has a cached copy to evict as well as a file to delete.
+        assertIsOk(GET("/api/agents/" + id + "/workspace/USER.md"));
 
-        var echoed = PUT("/api/agents/" + id, "application/json",
-                "{\"description\": \"lands\", \"serviceAgent\": false}");
-        assertIsOk(echoed);
-        assertEquals("lands", JsonParser.parseString(getContent(echoed)).getAsJsonObject().get("description").getAsString());
+        var switched = PUT("/api/agents/" + id, "application/json", "{\"serviceAgent\": true}");
+        assertIsOk(switched);
+        assertTrue(JsonParser.parseString(getContent(switched)).getAsJsonObject().get("serviceAgent").getAsBoolean());
+        assertEquals(404, GET("/api/agents/" + id + "/workspace/USER.md").status.intValue());
+        assertEquals(404, GET("/api/agents/" + id + "/workspace/BOOTSTRAP.md").status.intValue());
+        assertIsOk(GET("/api/agents/" + id + "/workspace/AGENT.md"));
+    }
+
+    @Test
+    void updateSwitchesAServiceAgentToPersonalAndSeedsBothFiles() {
+        login();
+        var id = JsonParser.parseString(getContent(POST("/api/agents", "application/json", """
+                {"name": "becomes-personal", "modelProvider": "openrouter", "modelId": "gpt-4.1", "serviceAgent": true}
+                """))).getAsJsonObject().get("id").getAsString();
+
+        var switched = PUT("/api/agents/" + id, "application/json", "{\"serviceAgent\": false}");
+        assertIsOk(switched);
+        assertFalse(JsonParser.parseString(getContent(switched)).getAsJsonObject().get("serviceAgent").getAsBoolean());
+        var user = GET("/api/agents/" + id + "/workspace/USER.md");
+        assertIsOk(user);
+        assertTrue(getContent(user).contains("Name:"), "the blank template, with its Name line: " + getContent(user));
+        assertIsOk(GET("/api/agents/" + id + "/workspace/BOOTSTRAP.md"));
+    }
+
+    @Test
+    void aSwitchInTheSameRequestAsARenameDeletesFromTheMovedWorkspace() {
+        login();
+        var id = createAgent("renamed-and-switched-from");
+
+        assertIsOk(PUT("/api/agents/" + id, "application/json",
+                "{\"name\": \"renamed-and-switched-to\", \"serviceAgent\": true}"));
+        assertEquals(404, GET("/api/agents/" + id + "/workspace/USER.md").status.intValue());
+        assertIsOk(GET("/api/agents/" + id + "/workspace/AGENT.md"));
+    }
+
+    @Test
+    void anUnchangedTypeEchoedOnUpdateLeavesTheOwnerFilesAlone() {
+        login();
+        var id = createAgent("type-echoed");
+        assertIsOk(PUT("/api/agents/" + id + "/workspace/USER.md", "application/json",
+                "{\"content\": \"Name: Ada\\n\"}"));
+
+        assertIsOk(PUT("/api/agents/" + id, "application/json",
+                "{\"description\": \"edited\", \"serviceAgent\": false}"));
+        assertTrue(getContent(GET("/api/agents/" + id + "/workspace/USER.md")).contains("Name: Ada"),
+                "an echo is no switch, so the operator's USER.md is untouched");
     }
 
     // =====================

@@ -645,6 +645,34 @@ public final class WorkspaceFiles {
         }
     }
 
+    /**
+     * Makes USER.md and BOOTSTRAP.md match the type of the agent that owns {@code agentName}'s workspace, once
+     * the ambient transaction commits: a service agent loses both, a personal one gains whichever it lacks.
+     */
+    public static void syncOwnerFiles(String agentName) {
+        var dir = workspacePath(agentName);
+        if (!Files.isDirectory(dir)) return;
+        // Read here, not in the callback: after the commit there is no transaction left to query in.
+        boolean serviceAgent = ownedByServiceAgent(agentName);
+        Tx.afterCommit(() -> {
+            try {
+                if (serviceAgent) {
+                    Files.deleteIfExists(dir.resolve(USER_MD));
+                    Files.deleteIfExists(dir.resolve(BOOTSTRAP_MD));
+                } else {
+                    writeFile(dir.resolve(USER_MD), USER_TEMPLATE, false);
+                    writeFile(dir.resolve(BOOTSTRAP_MD), BOOTSTRAP_TEMPLATE, false);
+                }
+            } catch (IOException e) {
+                EventLogger.error(LOG_CATEGORY, "Failed to bring USER.md and BOOTSTRAP.md in line with agent %s: %s"
+                        .formatted(agentName, e.getMessage()));
+            }
+            fileCache.invalidate(agentName + "/" + USER_MD);
+            fileCache.invalidate(agentName + "/" + BOOTSTRAP_MD);
+            invalidateWorkspaceSize();
+        });
+    }
+
     // Inserts a paragraph after a leading "# " title, or at the top when there is none.
     private static String afterTitle(String text, String paragraph) {
         var title = Pattern.compile("\\A\\s*#[^#\\n][^\\n]*\\n").matcher(text);

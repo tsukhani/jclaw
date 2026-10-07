@@ -1586,28 +1586,95 @@ describe('Agents page — personal and service agents', () => {
     expect(postBody).toMatchObject({ name: 'front-desk', serviceAgent })
   })
 
-  it('shows an existing service agent its kind read-only, without the two owner-file tabs', async () => {
-    setupAgentsApi({
-      agents: [
-        {
-          id: 2, name: 'helper', modelProvider: 'openai', modelId: 'gpt-4', enabled: true, isMain: false,
-          providerConfigured: true, thinkingMode: null, compressionEnabled: false, compressionJson: false,
-          compressionCode: false, compressionText: false, compressionTargetRatio: 0.3, acpAllowed: false,
-          memoryAutocaptureEnabled: true, memoryAutocaptureModelInherited: true,
-          memoryAutocaptureProvider: 'openai', memoryAutocaptureModel: 'gpt-4',
-          fallbackProvider: null, fallbackModelId: null, serviceAgent: true,
-          createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z',
-        },
-      ],
-    })
+  const serviceHelper = {
+    id: 2, name: 'helper', modelProvider: 'openai', modelId: 'gpt-4', enabled: true, isMain: false,
+    providerConfigured: true, thinkingMode: null, compressionEnabled: false, compressionJson: false,
+    compressionCode: false, compressionText: false, compressionTargetRatio: 0.3, acpAllowed: false,
+    memoryAutocaptureEnabled: true, memoryAutocaptureModelInherited: true,
+    memoryAutocaptureProvider: 'openai', memoryAutocaptureModel: 'gpt-4',
+    fallbackProvider: null, fallbackModelId: null, serviceAgent: true,
+    createdAt: '2026-04-10T10:00:00Z', updatedAt: '2026-04-20T10:00:00Z',
+  }
+
+  const tabsOf = (component: { findAll: (selector: string) => Array<{ text: () => string }> }) =>
+    component.findAll('button').map(b => b.text()).filter(t => t.endsWith('.md'))
+
+  const dialogButton = (label: string) => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+    .find(b => (b.textContent ?? '').trim() === label)
+
+  function capturePut() {
+    const sent: { body: Record<string, unknown> | null } = { body: null }
+    unregister.push(registerEndpoint('/api/agents/2', {
+      method: 'PUT',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        sent.body = await readBody(event) as Record<string, unknown>
+        return { id: 2 }
+      },
+    }))
+    return sent
+  }
+
+  it('leaves the two owner-file tabs out for a service agent', async () => {
+    setupAgentsApi({ agents: [serviceHelper] })
     const component = await mountSuspended(Agents)
     await flushPromises()
     await openHelperEdit(component)
 
-    expect((component.find('[data-testid="agent-kind"]').element as HTMLFieldSetElement).disabled).toBe(true)
     expect(kindRadios(component).map(r => r.element.checked)).toEqual([false, true])
-    const tabs = component.findAll('button').map(b => b.text()).filter(t => t.endsWith('.md'))
-    expect(tabs).toEqual(['SOUL.md', 'IDENTITY.md', 'AGENT.md'])
+    expect(tabsOf(component)).toEqual(['SOUL.md', 'IDENTITY.md', 'AGENT.md'])
+  })
+
+  it('asks before changing a personal agent to a service agent, then saves it and drops the two tabs', async () => {
+    const sent = capturePut()
+    setupAgentsApi()
+    const component = await mountSuspended(AgentsHarness)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    await kindRadios(component)[1]!.setValue(true)
+    await component.findAll('button').find(b => b.attributes('title') === 'Save')!.trigger('click')
+    await vi.waitFor(() => expect(dialogButton('Change and delete')).toBeTruthy())
+    expect(document.body.textContent).toContain('Its USER.md and BOOTSTRAP.md will be deleted')
+    expect(sent.body, 'nothing is sent until the operator confirms').toBeNull()
+
+    dialogButton('Change and delete')!.click()
+    await vi.waitFor(() => expect(sent.body).not.toBeNull())
+    expect(sent.body).toMatchObject({ name: 'helper', serviceAgent: true })
+    await vi.waitFor(() => expect(tabsOf(component)).toEqual(['SOUL.md', 'IDENTITY.md', 'AGENT.md']))
+  })
+
+  it('sends nothing when the change to a service agent is cancelled', async () => {
+    const sent = capturePut()
+    setupAgentsApi()
+    const component = await mountSuspended(AgentsHarness)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    await kindRadios(component)[1]!.setValue(true)
+    await component.findAll('button').find(b => b.attributes('title') === 'Save')!.trigger('click')
+    await vi.waitFor(() => expect(dialogButton('Cancel')).toBeTruthy())
+    dialogButton('Cancel')!.click()
+    await flushPromises()
+    await flushPromises()
+
+    expect(sent.body).toBeNull()
+    expect(tabsOf(component)).toEqual(['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md'])
+  })
+
+  it('changes a service agent to personal without asking, and shows its two new tabs', async () => {
+    const sent = capturePut()
+    setupAgentsApi({ agents: [serviceHelper] })
+    const component = await mountSuspended(AgentsHarness)
+    await flushPromises()
+    await openHelperEdit(component)
+
+    await kindRadios(component)[0]!.setValue(true)
+    await component.findAll('button').find(b => b.attributes('title') === 'Save')!.trigger('click')
+    await vi.waitFor(() => expect(sent.body).not.toBeNull())
+
+    expect(sent.body).toMatchObject({ serviceAgent: false })
+    await vi.waitFor(() => expect(tabsOf(component)).toEqual(['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md']))
   })
 
   it('keeps all five workspace tabs for a personal agent', async () => {
@@ -1616,7 +1683,6 @@ describe('Agents page — personal and service agents', () => {
     await flushPromises()
     await openHelperEdit(component)
 
-    const tabs = component.findAll('button').map(b => b.text()).filter(t => t.endsWith('.md'))
-    expect(tabs).toEqual(['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md'])
+    expect(tabsOf(component)).toEqual(['SOUL.md', 'IDENTITY.md', 'USER.md', 'BOOTSTRAP.md', 'AGENT.md'])
   })
 })

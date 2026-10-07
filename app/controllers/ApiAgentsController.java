@@ -466,7 +466,7 @@ public class ApiAgentsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentView.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = AgentRequest.class)))
     @Operation(summary = "Update an agent by id")
-    @AgentAccess(value = OPEN, reason = "model config only; acpAllowed is refused per-field for the agent principal (JCLAW-1023) and tool grants live on operator-only routes")
+    @AgentAccess(value = OPEN, reason = "model config only; acpAllowed (JCLAW-1023) and a serviceAgent switch are refused per-field for the agent principal, and tool grants live on operator-only routes")
     public static void update(Long id) {
         var agent = requireAgent(id);
 
@@ -479,7 +479,7 @@ public class ApiAgentsController extends Controller {
         // Checked before any field is applied: `agent` is managed, so a 403 thrown after a
         // partial apply would still flush the earlier fields on the request's commit.
         requireOperatorForAcpChange(agent, body);
-        requireUnchangedServiceAgent(agent, body);
+        requireOperatorForTypeChange(agent, body);
 
         var name = optStringOr(body, "name", agent.name);
         validateRenameRules(agent, name);
@@ -520,6 +520,9 @@ public class ApiAgentsController extends Controller {
 
         agent = AgentService.update(agent, name, modelProvider, modelId, enabled, thinkingMode,
                 description);
+        // After the update, so a rename in the same request has already moved the workspace.
+        var serviceAgent = JsonArgs.optBoolean(body, KEY_SERVICE_AGENT);
+        if (serviceAgent != null) AgentService.setServiceAgent(agent, serviceAgent);
         renderJSON(gson.toJson(AgentView.of(agent)));
     }
 
@@ -536,12 +539,14 @@ public class ApiAgentsController extends Controller {
         }
     }
 
-    /** Switching would strand USER.md and BOOTSTRAP.md, or leave them missing; an unchanged echo passes. */
-    private static void requireUnchangedServiceAgent(Agent agent, JsonObject body) {
+    /** A type switch deletes or creates USER.md and BOOTSTRAP.md, and the routes that write a
+     *  workspace are operator-only; an unchanged echo is no switch. */
+    private static void requireOperatorForTypeChange(Agent agent, JsonObject body) {
         var requested = JsonArgs.optBoolean(body, KEY_SERVICE_AGENT);
-        if (requested != null && requested != agent.serviceAgent) {
-            ApiResponses.error(409, ApiResponses.CONFLICT,
-                    "serviceAgent is set when an agent is created and cannot be changed afterwards");
+        if (requested == null || requested == agent.serviceAgent) return;
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
+                    "serviceAgent is operator-only; switching an agent's type deletes or creates its USER.md and BOOTSTRAP.md.");
         }
     }
 

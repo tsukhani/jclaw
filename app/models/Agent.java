@@ -160,8 +160,9 @@ public class Agent extends TimestampedModel {
     public String fallbackModelId;
 
     /**
-     * A service agent works for whoever is speaking rather than for one person: its workspace is
-     * created without USER.md and BOOTSTRAP.md, and nothing adds them later. Set at creation only.
+     * A service agent works for whoever is speaking rather than for one person: its workspace holds
+     * no USER.md or BOOTSTRAP.md, and nothing adds them. Change it through
+     * {@code AgentService.setServiceAgent}, which moves the files with it.
      */
     @Column(name = "service_agent", nullable = false)
     @ColumnDefault("false")
