@@ -300,7 +300,8 @@ Prerequisites: Docker Desktop running, Node 24 or newer, pnpm 12 or newer, a JCl
 
 On first start the harness clones your checkout into `~/.jclaw-factory/jclaw`, creates the gateway, and seeds the
 sandboxes' Gradle cache from `~/.gradle`. Without that cache, each sandbox downloads its dependencies through the
-gateway. Re-run the installer after moving the checkout or changing your Node install, because the agent records both
+gateway. The clone's `main` then follows yours at every poll, through an amend or rebase as well, since the factory
+never commits to it. Re-run the installer after moving the checkout or changing your Node install, because the agent records both
 paths.
 
 ## Several developers

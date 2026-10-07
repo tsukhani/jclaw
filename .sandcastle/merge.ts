@@ -47,6 +47,12 @@ const busy = (checkout: string) =>
     fs.existsSync(path.resolve(checkout, git(checkout, "rev-parse", "--git-path", p))),
   );
 
+// Nothing commits to the clone's main, so it follows the checkout's through an amend or rebase rather than refusing.
+export const followMain = (clone: string) => {
+  git(clone, "fetch", "--quiet", "origin", "main");
+  git(clone, "reset", "--keep", "--quiet", "origin/main");
+};
+
 export type Landed = { merge: string; regated: boolean };
 
 // The merge commit an earlier landing of `key` left on the checkout's main, if one did.

@@ -11,7 +11,7 @@ import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, facto
 import { githubTracker } from "./github.ts";
 import { jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
-import { MergeRefused, landBranch, landedAs, mergeVerdict, type Report } from "./merge.ts";
+import { MergeRefused, followMain, landBranch, landedAs, mergeVerdict, type Report } from "./merge.ts";
 import { buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, type About } from "./board.ts";
@@ -493,8 +493,7 @@ const land = async (key: string): Promise<void> => {
   if (verdict) return refuse(verdict);
 
   // The rebase targets the checkout's main, and a re-gate needs the image built from it.
-  gitIn(REPO, "fetch", "--quiet", "origin", "main");
-  gitIn(REPO, "merge", "--ff-only", "--quiet", "origin/main");
+  followMain(REPO);
   const gates: string[] = [];
   const timed = <T>(phase: string, body: () => Promise<T>) => {
     console.log(`[${key} ${phase}] started`);
@@ -578,9 +577,7 @@ const round = async (candidates: Snapshot[]): Promise<Promise<void>[]> => {
   if (free <= 0) wait(unblocked, busy);
   if (free <= 0 || unblocked.length === 0) return [];
 
-  // ff-only: nothing in the factory commits to main, so a divergence is for a human to look at, not to merge.
-  gitIn(REPO, "fetch", "--quiet", "origin", "main");
-  gitIn(REPO, "merge", "--ff-only", "--quiet", "origin/main");
+  followMain(REPO);
   ensureBmadSeed(running.size === 0);
   board.main = gitIn(REPO, "rev-parse", "main");
   if (!ensureImage(REPO, board.main, `${LOGS}/image-build.log`)) {

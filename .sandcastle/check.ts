@@ -7,7 +7,7 @@ import { execFileSync, spawn } from "node:child_process";
 import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, type Entry, type State, type Story } from "./board.ts";
 import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
-import { MergeRefused, landBranch, landedAs, mergeVerdict } from "./merge.ts";
+import { MergeRefused, followMain, landBranch, landedAs, mergeVerdict } from "./merge.ts";
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
@@ -400,4 +400,15 @@ const resetDuringGate: Regate = async () => {
 };
 check("main reset back during the re-gate waits, and keeps the reset", [await attempt("T-6", head6, resetDuringGate), g(checkout, "rev-parse", "main") === resetTo],
   ["waiting: your checkout's main moved while the branch was landing", true]);
+
+// The clone took a commit the checkout then amended, so the two mains have diverged.
+const mirror = path.join(sandbox, "mirror");
+g(sandbox, "clone", "--quiet", checkout, mirror);
+commit(checkout, "amended.txt", "draft\n");
+followMain(mirror);
+write(checkout, "amended.txt", "final\n");
+g(checkout, "commit", "--quiet", "--amend", "--all", "--no-edit");
+followMain(mirror);
+check("the clone's main follows an amend in the checkout",
+  [g(mirror, "rev-parse", "main") === g(checkout, "rev-parse", "main"), fs.readFileSync(path.join(mirror, "amended.txt"), "utf8")], [true, "final\n"]);
 fs.rmSync(sandbox, { recursive: true, force: true });
