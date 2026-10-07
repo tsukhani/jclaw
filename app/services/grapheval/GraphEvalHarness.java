@@ -57,6 +57,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.DoubleFunction;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Stream;
 
 import static utils.GsonHolder.GSON;
@@ -713,7 +714,7 @@ public final class GraphEvalHarness {
         var book = new Adjudications.Book(adjudications, options.guide(), options.agreedSeed(), options.agreedShare(),
                 options.checkShare());
         var v2 = v2(cases, data.stream().map(RunData::e2e).toList(), schema, book, DEVELOPMENT_START,
-                CertificationSplit.relationOrder(cases, schema), recallFloor, RecordBounds.INSTANCE);
+                CertificationSplit.relationOrder(cases, schema), recallFloor, MemoryBounds.INSTANCE, null);
         return new Development(DEVELOPMENT_START, v2.sequencing(), v2.tallies(), v2.agreedSample(),
                 v2.judgement().unjudgedByGate(), checks(book, v2.judgement()));
     }
@@ -725,9 +726,12 @@ public final class GraphEvalHarness {
     /**
      * Sequences {@code runs}' stored decisions over {@code cases} through a memoized pure evaluator; several runs are
      * read gate by gate at the run with the highest bound (the lowest recall bound for recall), so every run must pass.
+     * {@code set} is the split's certifying set, null for a development run: a gate certified by the other set reads
+     * no counts.
      */
     private static V2 v2(List<Case> cases, List<List<CaseRun>> runs, OntologySchema schema, Adjudications.Book book,
-                         double start, List<String> relationOrder, double recallFloor, GateBounds bounds) {
+                         double start, List<String> relationOrder, double recallFloor, GateBounds bounds,
+                         @Nullable String set) {
         var symmetric = schema.symmetricSet();
         var outcomes = new IdentityHashMap<CaseRun, Map<List<Object>, Statements.Outcome>>();
         // Statements.at reads a class only as max(t, its threshold), so classes equal under that share one outcome.
@@ -748,8 +752,9 @@ public final class GraphEvalHarness {
         Certifier.Sequencing sequencing = null;
         Configuration reached = new Configuration(start, new TreeMap<>(), new TreeMap<>());
         if (failed == 0 && !runs.isEmpty()) {
-            sequencing = Certifier.sequence(bounds, start, relationOrder, recallFloor,
-                    c -> worst(scoreAt.apply(c).stream().map(cf -> evaluation(cf, book)).toList(), bounds));
+            sequencing = Certifier.sequence(bounds, set, start, relationOrder, recallFloor,
+                    c -> worst(scoreAt.apply(c).stream().map(cf -> routed(evaluation(cf, book), set)).toList(),
+                            bounds));
             reached = sequencing.reached();
         }
         var atReached = scoreAt.apply(reached);
@@ -813,12 +818,29 @@ public final class GraphEvalHarness {
         return new Certifier.Evaluation(gates, classes, written, trap);
     }
 
-    /** Each gate at the run whose bound is highest, its recall at the run whose recall bound is lowest. */
-    static Certifier.Evaluation worst(List<Certifier.Evaluation> runs, GateBounds bounds) {
+    /** The evaluation as {@code set} certifies it: the gates the other set certifies read no counts. */
+    private static Certifier.Evaluation routed(Certifier.Evaluation e, @Nullable String set) {
+        if (set == null) return e;
+        Predicate<String> ours = gate -> Certifier.certifyingSet(gate).equals(set);
+        var gates = new HashMap<String, Certifier.GateCounts>();
+        e.gates().forEach((g, c) -> {
+            if (ours.test(g)) gates.put(g, c);
+        });
+        var classes = new HashMap<String, List<MemoryCounts>>();
+        e.classes().forEach((c, l) -> {
+            if (ours.test(c)) classes.put(c, l);
+        });
+        return new Certifier.Evaluation(gates, classes, ours.test(Certifier.G_WRITTEN) ? e.written() : List.of(),
+                ours.test(Certifier.G_TRAP) ? e.trap() : List.of());
+    }
+
+    /**
+     * Each gate at the run whose bound at that gate's tail is highest, its recall at the run whose recall bound is
+     * lowest.
+     */
+    public static Certifier.Evaluation worst(List<Certifier.Evaluation> runs, GateBounds bounds) {
         if (runs.size() == 1) return runs.getFirst();
         var tail = Certifier.CONFIDENCE_TAIL;
-        Function<List<List<MemoryCounts>>, List<MemoryCounts>> highest = lists -> lists.stream()
-                .max((a, b) -> Double.compare(bounds.upper(a, tail), bounds.upper(b, tail))).orElse(List.of());
         var names = new TreeSet<String>();
         runs.forEach(e -> names.addAll(e.gates().keySet()));
         var gates = new HashMap<String, Certifier.GateCounts>();
@@ -827,16 +849,22 @@ public final class GraphEvalHarness {
             var labelled = counts.stream().map(Certifier.GateCounts::labelled)
                     .min((a, b) -> Double.compare(bounds.recallLower(a, tail), bounds.recallLower(b, tail)))
                     .orElse(List.of());
-            gates.put(g, new Certifier.GateCounts(highest.apply(counts.stream().map(Certifier.GateCounts::writing)
-                    .toList()), labelled));
+            gates.put(g, new Certifier.GateCounts(highest(counts.stream().map(Certifier.GateCounts::writing).toList(),
+                    bounds, Certifier.BASE_GATE_TAIL), labelled));
         }
         var classes = new HashMap<String, List<MemoryCounts>>();
         for (var name : Certifier.V2_CLASSES) {
-            classes.put(name, highest.apply(runs.stream().map(e -> e.classes().getOrDefault(name, List.of())).toList()));
+            classes.put(name, highest(runs.stream().map(e -> e.classes().getOrDefault(name, List.of())).toList(),
+                    RecordBounds.INSTANCE, tail));
         }
         return new Certifier.Evaluation(gates, classes,
-                highest.apply(runs.stream().map(Certifier.Evaluation::written).toList()),
-                highest.apply(runs.stream().map(Certifier.Evaluation::trap).toList()));
+                highest(runs.stream().map(Certifier.Evaluation::written).toList(), bounds, tail),
+                highest(runs.stream().map(Certifier.Evaluation::trap).toList(), RecordBounds.INSTANCE, tail));
+    }
+
+    private static List<MemoryCounts> highest(List<List<MemoryCounts>> lists, GateBounds bounds, double tail) {
+        return lists.stream().max((a, b) -> Double.compare(bounds.upper(a, tail), bounds.upper(b, tail)))
+                .orElse(List.of());
     }
 
     private static Tallies tallies(List<GraphEvalScorer.Configured> runs) {
@@ -907,13 +935,21 @@ public final class GraphEvalHarness {
                                  AgreedSample agreedSample, Map<String, Integer> unjudgedByGate, Checks checks,
                                  SequenceHarness.@Nullable ModelReport sequences,
                                  Certifier.@Nullable Power lineagePower, Certifier.Verdict verdict,
-                                 @Nullable String certificate) {}
+                                 @Nullable String certificate, List<Certifier.Requirement> requirements) {
+        public CertifiedModel {
+            requirements = List.copyOf(requirements);
+        }
+    }
 
-    /** A certification run's or a re-score's report: counts and fingerprints only, never a timing. */
+    /**
+     * A certification run's or a re-score's report: counts and fingerprints only, never a timing.
+     * {@code bootstrapSeed} and {@code bootstrapResamples} are the recall bootstrap's.
+     */
     public record CertificationReport(String kind, String set, String split, String schema, String extraction,
                                       String cases, String sequences, String guide, double startingThreshold,
                                       List<String> relationOrder, int memories, double recallFloor,
-                                      Agreement.Result agreement, String sequencesNote, List<CertifiedModel> models) {}
+                                      Agreement.Result agreement, String sequencesNote, long bootstrapSeed,
+                                      int bootstrapResamples, List<CertifiedModel> models) {}
 
     /** One model scored from its stored run, with the blind sheet and, when certified, the certificate. */
     private record Scored(CertifiedModel model, JsonObject sheet, @Nullable CertificateDocument certificate) {}
@@ -943,7 +979,7 @@ public final class GraphEvalHarness {
     }
 
     public static CertificationReport certify(CertifyRequest req, EvalProgress progress) {
-        return certify(req, progress, RecordBounds.INSTANCE);
+        return certify(req, progress, MemoryBounds.INSTANCE);
     }
 
     /**
@@ -1036,7 +1072,7 @@ public final class GraphEvalHarness {
             var cases = split.casesFrom(source);
             var agreement = Agreement.compare(cases, secondLabels, schema.symmetricSet()).withReason(secondLabelsReason);
             var scored = scoreStored(stored, split, cases, sequences, schema, source.guide(), adjudications,
-                    checkShare, stored.recallFloor(), agreement, RecordBounds.INSTANCE, TimezoneResolver.appZone());
+                    checkShare, stored.recallFloor(), agreement, MemoryBounds.INSTANCE, TimezoneResolver.appZone());
             writeOutputs(root, split, scored);
             return report(split, schema, source.guide(), cases.size(), stored.recallFloor(), agreement,
                     List.of(scored.model()));
@@ -1051,7 +1087,7 @@ public final class GraphEvalHarness {
         return new CertificationReport(CERTIFICATION, split.set(), split.split(), schema.fingerprint(),
                 ExtractionPipeline.fingerprint(schema), split.cases(), split.sequences(), guide,
                 split.startingThreshold(), split.relationOrder(), memories, recallFloor, agreement,
-                SequenceHarness.DEVELOPMENT_NOTE, models);
+                SequenceHarness.DEVELOPMENT_NOTE, MemoryBounds.BOOTSTRAP_SEED, MemoryBounds.RESAMPLES, models);
     }
 
     /** The one scoring path both a full run and a re-score take, from the stored form. */
@@ -1062,14 +1098,14 @@ public final class GraphEvalHarness {
         var book = new Adjudications.Book(adjudications, guide, stored.agreedSeed(), stored.agreedShare(), checkShare);
         var start = split.startingThreshold();
         var v2 = v2(cases, stored.passes().stream().map(StoredRun.Pass::cases).toList(), schema, book, start,
-                split.relationOrder(), recallFloor, bounds);
+                split.relationOrder(), recallFloor, bounds, split.set());
         int failed = stored.failedDecisions();
         var sequencing = failed > 0 ? null : v2.sequencing();
         SequenceHarness.ModelReport seq = null;
         if (sequencing != null) {
             seq = SequenceHarness.scoreAt(schema, sequences.chains(), stored.model(),
                     stored.passes().stream().map(StoredRun.Pass::chains).toList(), sequencing.reached(), start,
-                    stored.sequenceSpotCheck(), zone, bounds);
+                    stored.sequenceSpotCheck(), zone, RecordBounds.INSTANCE);
         }
         var judgement = v2.judgement();
         var verdict = Certifier.verdict(sequencing, new Certifier.VerdictInputs(stored.memoriesChanged() > 0, failed,
@@ -1087,16 +1123,17 @@ public final class GraphEvalHarness {
                 stored.memoriesChanged(), failed, stored.spotCheck(), stored.sequenceSpotCheck(),
                 stored.passes().stream().map(StoredRun.Pass::stages).toList(), sequencing, v2.tallies(),
                 v2.agreedSample(), judgement.unjudgedByGate(), checks(book, judgement), seq,
-                seq == null ? null : lineagePower(seq.lineage(), bounds), verdict,
-                certificate == null ? null : certificate.id());
+                seq == null ? null : lineagePower(seq.lineage()), verdict,
+                certificate == null ? null : certificate.id(),
+                sequencing == null ? List.of() : sequencing.requirements());
         return new Scored(model, sheet(split, guide, book, cases, v2.inScope()), certificate);
     }
 
     /** Lineage's power at its walked n, as {@link Certifier} gives every other class's; 0 when disabled. */
-    private static Certifier.Power lineagePower(ClassWalk lineage, GateBounds bounds) {
+    private static Certifier.Power lineagePower(ClassWalk lineage) {
         var at = lineage.threshold() == null ? List.<MemoryCounts>of()
                 : List.of(new MemoryCounts("", lineage.n(), lineage.k(), 0, 0, 0));
-        return Certifier.Power.of(bounds, at);
+        return Certifier.Power.of(RecordBounds.INSTANCE, at);
     }
 
     /**

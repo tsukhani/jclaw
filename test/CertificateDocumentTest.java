@@ -20,8 +20,9 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.stream.Collectors;
 
-/** JCLAW-1368: the certificate as canonical JSON, its stable id, its configuration and its reader. */
+/** JCLAW-1368, JCLAW-1369: the certificate as canonical JSON, its stable id, its configuration and its reader. */
 class CertificateDocumentTest extends UnitTest {
 
     private static final String SCHEMA = "v3@aaaaaaaaaaaa";
@@ -68,7 +69,8 @@ class CertificateDocumentTest extends UnitTest {
                         new Certifier.ClassGate("time", Certifier.PROVISIONAL, 0.90, 84, 2, 0.073, POWER, List.of()),
                         new Certifier.ClassGate("negation", Certifier.DISABLED, null, 10, 0, 0.3, POWER, List.of())),
                 new Certifier.Pooled(Certifier.G_WRITTEN, 1650, 41, 0.032, true, POWER),
-                new Certifier.Pooled(Certifier.G_TRAP, 228, 4, 0.040, true, POWER), List.of(), reached, true, List.of());
+                new Certifier.Pooled(Certifier.G_TRAP, 228, 4, 0.040, true, POWER), List.of(), reached, true, List.of(),
+                List.of());
         var lineage = new Certifier.ClassWalk("lineage", 0.90, Certifier.PROVISIONAL, 80, 1, 0.058, List.of());
         var timeline = SequenceScorer.timeline(240, 205, 3, 10, 2, 200);
         return CertificateDocument.of(model, DIGEST, Certifier.CERTIFIED, split, "guide@333333333333", SCHEMA, EXTRACTION,
@@ -91,6 +93,29 @@ class CertificateDocumentTest extends UnitTest {
         assertTrue(json.getAsJsonObject("relations").getAsJsonObject("kind_of").get("threshold").isJsonNull());
         assertEquals(Map.of("state", "disabled").keySet(),
                 json.getAsJsonObject("classes").getAsJsonObject("negation").keySet());
+    }
+
+    @Test
+    void theCertificateStatesWhichSetCertifiedEachPartAndRefusesAnUnknownOne() throws IOException {
+        var cert = certificate("tev1", 4);
+        var sets = cert.json().getAsJsonObject("sets");
+        assertEquals(Map.of("terms", "heldout", "relations", "heldout", "G_written", "heldout", "recall", "heldout",
+                "classes", "cases", "G_trap", "cases", "lineage", "sequences", "timeline", "sequences"),
+                sets.entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey,
+                        e -> e.getValue().getAsString())));
+        assertEquals(cert, CertificateDocument.parse(cert.text()));
+        var file = CertificateDocument.path(root, "tev1");
+        Files.createDirectories(file.getParent());
+        var extra = cert.json().deepCopy();
+        extra.getAsJsonObject("sets").addProperty("valence", "cases");
+        Files.writeString(file, extra.toString());
+        assertEquals("certificate sets: unknown key 'valence'",
+                CertificateDocument.read(root, "tev1", SCHEMA, EXTRACTION, DIGEST).reason());
+        var missing = cert.json().deepCopy();
+        missing.remove("sets");
+        Files.writeString(file, missing.toString());
+        assertEquals("certificate: 'sets' is required",
+                CertificateDocument.read(root, "tev1", SCHEMA, EXTRACTION, DIGEST).reason());
     }
 
     @Test

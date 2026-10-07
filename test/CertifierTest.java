@@ -1,6 +1,7 @@
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.grapheval.Adjudications;
+import services.grapheval.CertificationSplit;
 import services.grapheval.Certifier;
 import services.grapheval.Certifier.ClassStep;
 import services.grapheval.Certifier.Evaluation;
@@ -9,10 +10,12 @@ import services.grapheval.Certifier.Walk;
 import services.grapheval.Configuration;
 import services.grapheval.GateBounds;
 import services.grapheval.GateBounds.MemoryCounts;
+import services.grapheval.GraphEvalHarness;
 import services.grapheval.GraphEvalScorer;
 import services.grapheval.GraphEvalScorer.ClassTally;
 import services.grapheval.GraphEvalScorer.Point;
 import services.grapheval.GraphEvalScorer.WrongRecord;
+import services.grapheval.MemoryBounds;
 import services.grapheval.RecordBounds;
 import services.grapheval.SequenceScorer;
 
@@ -22,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.function.DoubleFunction;
 
 /**
@@ -316,17 +320,28 @@ class CertifierTest extends UnitTest {
         assertEquals("extraction stamp x@111 differs from running x@222", Certifier.check(cert, "v3@aaa", "x@222"));
     }
 
-    // ---- Protocol v2 (JCLAW-1368) ----
+    // ---- Protocol v2 (JCLAW-1368, JCLAW-1369) ----
 
     private static final double START = 0.95;
+    private static final double BASE_TAIL = Certifier.BASE_GATE_TAIL;
 
-    /** A synthetic world: each gate's {written, wrong, gold, right} at threshold t, the trap set and its violators. */
+    /**
+     * A synthetic world: each gate's {written, wrong, gold, right} at threshold t, spread one per memory (memory i
+     * writes {@code perMemory} records, wrong when i < wrong, and holds one gold record, right when i < right); the
+     * trap set and its violators; the class, written and trap records {@code packed} per memory; and, when
+     * {@code set} is given, the gates the other set certifies emptied as the harness routes them.
+     */
     private static final class World {
         DoubleFunction<int[]> terms = _ -> new int[] {200, 0, 200, 200};
         final Map<String, int[]> relations = new LinkedHashMap<>();
         int trapGold = 100;
         final Map<String, Integer> violations = new HashMap<>();
         int extraWrong;
+        int perMemory = 1;
+        int packed = 1;
+        int classValues;
+        int classWrong;
+        String set;
         final List<Configuration> seen = new ArrayList<>();
 
         World relation(String name, int written, int wrong, int gold, int right) {
@@ -334,9 +349,27 @@ class CertifierTest extends UnitTest {
             return this;
         }
 
-        private static GateCounts counts(int[] w) {
-            var mc = new MemoryCounts("m1", w[0], w[1], 0, w[2], w[3]);
-            return new GateCounts(w[0] > 0 ? List.of(mc) : List.of(), w[2] > 0 ? List.of(mc) : List.of());
+        private GateCounts counts(int[] w) {
+            var writing = new ArrayList<MemoryCounts>();
+            var labelled = new ArrayList<MemoryCounts>();
+            for (int i = 0; i < Math.max(w[0], w[2]); i++) {
+                var mc = new MemoryCounts("m" + i, i < w[0] ? perMemory : 0, i < w[1] ? 1 : 0, 0, i < w[2] ? 1 : 0,
+                        i < w[3] ? 1 : 0);
+                if (mc.written() > 0) writing.add(mc);
+                if (mc.gold() > 0) labelled.add(mc);
+            }
+            return new GateCounts(writing, labelled);
+        }
+
+        /** {@code n} records, the first {@code wrong} of them wrong, {@link #packed} to a memory. */
+        private List<MemoryCounts> spread(int n, int wrong) {
+            var out = new ArrayList<MemoryCounts>();
+            for (int first = 0; first < n; first += packed) {
+                int written = Math.min(packed, n - first);
+                int bad = Math.clamp(wrong - first, 0, written);
+                out.add(new MemoryCounts("m" + first / packed, written, bad, 0, 0, 0));
+            }
+            return out;
         }
 
         Evaluation evaluate(Configuration c) {
@@ -354,22 +387,30 @@ class CertifierTest extends UnitTest {
                 wrong += w[1];
                 violated += violations.getOrDefault(r, 0);
             }
-            return new Evaluation(gates, Map.of(), List.of(new MemoryCounts("m1", written, wrong, 0, 0, 0)),
-                    List.of(new MemoryCounts("m1", trapGold, violated, 0, 0, 0)));
+            var classes = new HashMap<String, List<MemoryCounts>>();
+            for (var name : Certifier.V2_CLASSES) classes.put(name, spread(classValues, classWrong));
+            boolean live = set == null || set.equals(CertificationSplit.HELDOUT);
+            boolean synthetic = set == null || set.equals(CertificationSplit.CASES);
+            return new Evaluation(live ? gates : Map.of(), synthetic ? classes : Map.of(),
+                    live ? spread(written, wrong) : List.of(), synthetic ? spread(trapGold, violated) : List.of());
         }
 
         Certifier.Sequencing sequence(double start, GateBounds bounds) {
-            return Certifier.sequence(bounds, start, List.copyOf(relations.keySet()), Certifier.DEFAULT_RECALL_FLOOR,
-                    this::evaluate);
+            return Certifier.sequence(bounds, set, start, List.copyOf(relations.keySet()),
+                    Certifier.DEFAULT_RECALL_FLOOR, this::evaluate);
         }
 
         Certifier.Sequencing sequence() {
-            return sequence(START, RecordBounds.INSTANCE);
+            return sequence(START, MemoryBounds.INSTANCE);
         }
     }
 
     private static Certifier.Gate gate(Certifier.Sequencing s, String name) {
         return s.relations().stream().filter(g -> g.name().equals(name)).findFirst().orElseThrow();
+    }
+
+    private static Certifier.Requirement requirement(Certifier.Sequencing s, String name) {
+        return s.requirements().stream().filter(r -> r.name().equals(name)).findFirst().orElseThrow();
     }
 
     private static final Certifier.VerdictInputs CLEAN = new Certifier.VerdictInputs(false, 0, false, false,
@@ -378,21 +419,22 @@ class CertifierTest extends UnitTest {
     @Test
     void aFailingTermGateEvaluatesNoRelationAndEnablesNothing() {
         var world = new World().relation("uses", 200, 0, 200, 200);
-        world.terms = _ -> new int[] {58, 0, 100, 100};
+        world.terms = _ -> new int[] {129, 0, 200, 200};
         var s = world.sequence();
         assertEquals(Certifier.OFF, s.terms().state());
         assertEquals(List.of(), s.relations());
-        assertTrue(world.seen.stream().allMatch(c -> c.relations().isEmpty()), "no relation gate was evaluated");
+        assertTrue(world.seen.stream().allMatch(c -> c.relations().values().stream().allMatch(t -> t == START)),
+                "no relation gate was walked; the relations are only observed at the start for their requirements");
         assertEquals(Map.of(), s.reached().relations());
         assertFalse(s.passed());
         var v = Certifier.verdict(s, CLEAN);
         assertEquals(Certifier.NOT_CERTIFIED, v.status());
-        assertTrue(v.reasons().getFirst().contains("Terms") && v.reasons().getFirst().contains("0 wrong of 58"),
+        assertTrue(v.reasons().getFirst().contains("Terms") && v.reasons().getFirst().contains("0 wrong of 129"),
                 v.reasons().toString());
 
         var passing = new World().relation("uses", 200, 0, 200, 200);
-        passing.terms = _ -> new int[] {59, 0, 100, 100};
-        assertEquals(Certifier.ON, passing.sequence().terms().state(), "59 Terms with none wrong pass");
+        passing.terms = _ -> new int[] {130, 0, 200, 200};
+        assertEquals(Certifier.ON, passing.sequence().terms().state(), "130 Term memories with none wrong pass");
     }
 
     @Test
@@ -409,8 +451,8 @@ class CertifierTest extends UnitTest {
     }
 
     @Test
-    void aRelationOfFiftyEightRecordsStaysOffAndFiftyNineSwitchOn() {
-        var s = new World().relation("kind_of", 58, 0, 58, 58).relation("uses", 59, 0, 59, 59).sequence();
+    void aRelationOfOneHundredTwentyNineMemoriesStaysOffAndOneHundredThirtySwitchOn() {
+        var s = new World().relation("kind_of", 129, 0, 129, 129).relation("uses", 130, 0, 130, 130).sequence();
         assertEquals(Certifier.OFF, gate(s, "kind_of").state());
         assertNull(gate(s, "kind_of").threshold());
         assertEquals(Certifier.ON, gate(s, "uses").state());
@@ -420,12 +462,24 @@ class CertifierTest extends UnitTest {
     }
 
     @Test
+    void severalRecordsInOneMemoryCountAsOneMemory() {
+        var world = new World();
+        world.perMemory = 3;
+        world.terms = _ -> new int[] {129, 0, 200, 200};
+        var s = world.sequence();
+        assertEquals(129, s.terms().n(), "n is writing memories, not the 387 records");
+        assertEquals(Certifier.OFF, s.terms().state());
+        assertEquals(Certifier.ON, world.sequence(START, RecordBounds.INSTANCE).terms().state(),
+                "pooled, the same records would overstate n and pass");
+    }
+
+    @Test
     void oneFailingRelationLeavesEveryOtherAsItWas() {
-        var failing = new World().relation("a", 100, 0, 100, 100).relation("b", 100, 10, 100, 100)
-                .relation("c", 100, 0, 100, 100);
+        var failing = new World().relation("a", 200, 0, 200, 200).relation("b", 200, 10, 200, 200)
+                .relation("c", 200, 0, 200, 200);
         failing.trapGold = 200;
-        var passing = new World().relation("a", 100, 0, 100, 100).relation("b", 100, 0, 100, 100)
-                .relation("c", 100, 0, 100, 100);
+        var passing = new World().relation("a", 200, 0, 200, 200).relation("b", 200, 0, 200, 200)
+                .relation("c", 200, 0, 200, 200);
         passing.trapGold = 200;
         var s = failing.sequence();
         var t = passing.sequence();
@@ -437,7 +491,7 @@ class CertifierTest extends UnitTest {
 
     @Test
     void aRelationWhoseRecallLowerBoundIsUnderTheFloorIsOffAndTheRestUnchanged() {
-        var s = new World().relation("a", 100, 0, 100, 20).relation("b", 100, 0, 100, 100).sequence();
+        var s = new World().relation("a", 200, 0, 200, 40).relation("b", 200, 0, 200, 200).sequence();
         assertEquals(Certifier.OFF, gate(s, "a").state());
         assertTrue(gate(s, "a").reason().contains("recall lower bound"), gate(s, "a").reason());
         assertNotNull(gate(s, "a").recallLower());
@@ -447,8 +501,8 @@ class CertifierTest extends UnitTest {
 
     @Test
     void theLastEnabledRelationThatPushesGTrapOverIsBackedOffAndTheEarlierStayOn() {
-        var world = new World().relation("a", 100, 0, 100, 100).relation("b", 100, 0, 100, 100)
-                .relation("c", 100, 0, 100, 100);
+        var world = new World().relation("a", 200, 0, 200, 200).relation("b", 200, 0, 200, 200)
+                .relation("c", 200, 0, 200, 200);
         world.violations.put("c", 5);
         var s = world.sequence();
         assertEquals(Certifier.ON, gate(s, "a").state());
@@ -487,9 +541,9 @@ class CertifierTest extends UnitTest {
 
     @Test
     void noWalkEvaluatesAThresholdAboveTheStartOrARelationBelowTheTerms() {
-        var world = new World().relation("a", 100, 0, 100, 100).relation("b", 100, 0, 100, 100);
+        var world = new World().relation("a", 200, 0, 200, 200).relation("b", 200, 0, 200, 200);
         world.terms = t -> t >= 0.80 - 1e-9 ? new int[] {200, 0, 200, 200} : new int[] {200, 30, 200, 200};
-        var s = world.sequence(0.85, RecordBounds.INSTANCE);
+        var s = world.sequence(0.85, MemoryBounds.INSTANCE);
         assertEquals(0.80, s.terms().threshold());
         assertEquals(0.85, s.terms().steps().getFirst().t(), "the walk starts at the start");
         for (var c : world.seen) {
@@ -534,7 +588,7 @@ class CertifierTest extends UnitTest {
     void swappingTheBoundsChangesTheVerdictWithoutTouchingACaller() {
         var world = new World().relation("a", 10, 5, 10, 5);
         world.terms = _ -> new int[] {10, 5, 10, 5};
-        var strict = world.sequence(START, RecordBounds.INSTANCE);
+        var strict = world.sequence(START, MemoryBounds.INSTANCE);
         var lenient = world.sequence(START, LENIENT);
         assertEquals(Certifier.NOT_CERTIFIED, Certifier.verdict(strict, CLEAN).status());
         assertEquals(Certifier.CERTIFIED, Certifier.verdict(lenient, CLEAN).status());
@@ -543,7 +597,7 @@ class CertifierTest extends UnitTest {
 
     @Test
     void theVerdictTakesTheFirstPreconditionThatApplies() {
-        var good = new World().relation("a", 100, 0, 100, 100).sequence();
+        var good = new World().relation("a", 200, 0, 200, 200).sequence();
         var bad = new World();
         bad.terms = _ -> new int[] {10, 0, 10, 10};
         var off = bad.sequence();
@@ -572,13 +626,231 @@ class CertifierTest extends UnitTest {
 
     @Test
     void everyGateReportsItsPowerBesideItsVerdict() {
-        var s = new World().relation("uses", 59, 0, 59, 59).sequence();
+        var s = new World().relation("uses", 130, 0, 130, 130).sequence();
         var g = gate(s, "uses");
-        assertEquals(59, g.n());
+        assertEquals(130, g.n());
         assertEquals(0, g.k());
-        assertEquals(0.553, g.power().at1(), 5e-4);
+        assertEquals(Math.pow(0.99, 130), g.power().at1(), 1e-12, "at 0.05 / 39, 130 memories allow none wrong");
         assertTrue(g.power().at3() < g.power().at2() && g.power().at2() < g.power().at1());
         assertNotNull(s.written());
         assertTrue(s.written().power().at1() > 0);
+    }
+
+    @Test
+    void baseGatesAreBoundedAtTheCorrectedTailAndThePooledGatesAtFivePercent() {
+        var world = new World().relation("uses", 200, 1, 200, 200);
+        world.terms = _ -> new int[] {200, 1, 200, 200};
+        var s = world.sequence();
+        var step = s.terms().steps().getFirst();
+        assertEquals(Certifier.upperBound(1, 200, BASE_TAIL), step.bound());
+        assertEquals(Certifier.upperBound(1, 200, BASE_TAIL), gate(s, "uses").bound());
+        var written = s.written();
+        assertNotNull(written);
+        assertEquals(Certifier.upperBound(written.k(), written.n(), Certifier.CONFIDENCE_TAIL), written.bound());
+        assertEquals(Certifier.upperBound(0, 100, Certifier.CONFIDENCE_TAIL), s.trap().bound());
+    }
+
+    @Test
+    void aHeldOutRunDisablesTheClassesAndFailsAtOnceOnAnUnevaluableTrapGate() {
+        var world = new World().relation("a", 200, 0, 200, 200).relation("b", 200, 0, 200, 200);
+        world.classValues = 300;
+        world.violations.put("b", 50);
+        world.set = CertificationSplit.HELDOUT;
+        var s = world.sequence();
+        assertEquals(Certifier.ON, s.terms().state());
+        assertEquals(Certifier.ON, gate(s, "a").state());
+        assertEquals(Certifier.ON, gate(s, "b").state(), "no back-off: switching b off gives G_trap no data");
+        for (var c : s.classes()) assertEquals(Certifier.DISABLED, c.state(), c.name());
+        assertFalse(s.passed());
+        assertEquals(List.of(), s.backOff());
+        var reason = "G_trap not evaluable: its certifying set cases has no data in this run";
+        assertEquals(List.of(reason), s.reasons());
+        var v = Certifier.verdict(s, CLEAN);
+        assertEquals(Certifier.NOT_CERTIFIED, v.status());
+        assertEquals(List.of(reason), v.reasons());
+
+        world.set = null;
+        var development = world.sequence();
+        assertTrue(development.classes().stream().allMatch(c -> c.state().equals(Certifier.CLASS_CERTIFIED)),
+                "a development run routes nothing");
+        assertEquals(1, development.backOff().size());
+    }
+
+    @Test
+    void aCasesRunTurnsTheTermGateOffAsNotEvaluable() {
+        var world = new World().relation("a", 200, 0, 200, 200);
+        world.classValues = 300;
+        world.set = CertificationSplit.CASES;
+        var s = world.sequence();
+        assertEquals(Certifier.OFF, s.terms().state());
+        assertEquals("terms not evaluable: its certifying set heldout has no data in this run", s.terms().reason());
+        assertNull(s.terms().recallLower());
+        assertEquals(List.of("Terms gate: terms not evaluable: its certifying set heldout has no data in this run"),
+                Certifier.verdict(s, CLEAN).reasons());
+    }
+
+    @Test
+    void aRelationWithNoWritingMemoryOnItsSetIsNotEvaluable() {
+        var world = new World().relation("a", 0, 0, 50, 0).relation("b", 200, 0, 200, 200)
+                .relation("c", 1, 0, 1, 1);
+        world.set = CertificationSplit.HELDOUT;
+        var s = world.sequence();
+        assertEquals(Certifier.OFF, gate(s, "a").state());
+        assertEquals("a not evaluable: its certifying set heldout has no data in this run", gate(s, "a").reason());
+        assertEquals(Certifier.ON, gate(s, "b").state());
+        assertEquals(Certifier.OFF, gate(s, "c").state());
+        assertTrue(gate(s, "c").reason().startsWith("c fails its bound at 0.950: 0 wrong of 1,"), gate(s, "c").reason());
+    }
+
+    @Test
+    void everyGateListsItsSetTailObservedCountsNeedsAndReachability() {
+        var world = new World().relation("uses", 130, 0, 130, 130).relation("kind_of", 200, 0, 129, 129);
+        world.perMemory = 2;
+        world.classValues = 40;
+        var s = world.sequence();
+        assertEquals(List.of(Certifier.TERMS, "uses", "kind_of", "status", "time", "negation", Certifier.G_WRITTEN,
+                Certifier.G_TRAP), s.requirements().stream().map(Certifier.Requirement::name).toList());
+
+        var terms = requirement(s, Certifier.TERMS);
+        assertEquals(CertificationSplit.HELDOUT, terms.set());
+        assertEquals(BASE_TAIL, terms.tail());
+        assertEquals(400, terms.writtenRecords());
+        assertEquals(200, terms.writingMemories());
+        assertEquals(200, terms.goldMemories());
+        assertEquals(List.of(new Certifier.Needed(0, 130, 130), new Certifier.Needed(1, 176, 176),
+                new Certifier.Needed(2, 215, 215), new Certifier.Needed(3, 251, 251),
+                new Certifier.Needed(5, 317, 317)), terms.needed());
+        assertEquals(true, terms.reachable());
+
+        var uses = requirement(s, "uses");
+        assertEquals(130, uses.goldMemories());
+        assertEquals(true, uses.reachable(), "130 memories with gold reach the zero-wrong minimum");
+        var kindOf = requirement(s, "kind_of");
+        assertEquals(Certifier.ON, gate(s, "kind_of").state());
+        assertEquals(129, kindOf.goldMemories());
+        assertEquals(false, kindOf.reachable(), "129 do not");
+
+        var written = requirement(s, Certifier.G_WRITTEN);
+        assertEquals(CertificationSplit.HELDOUT, written.set());
+        assertEquals(Certifier.CONFIDENCE_TAIL, written.tail());
+        assertEquals(List.of(59, 93, 124, 153, 208),
+                written.needed().stream().map(Certifier.Needed::memories).toList());
+        assertEquals(200, written.goldMemories(), "every memory with gold for any gate");
+
+        for (var name : List.of("status", "time", "negation", Certifier.G_TRAP)) {
+            var r = requirement(s, name);
+            assertEquals(CertificationSplit.CASES, r.set(), name);
+            assertEquals(Certifier.CONFIDENCE_TAIL, r.tail(), name);
+            assertNull(r.reachable(), name + " is record-level");
+            assertEquals(List.of(59, 93, 124, 153, 208),
+                    r.needed().stream().map(Certifier.Needed::records).toList(), name);
+            assertTrue(r.needed().stream().allMatch(n -> n.memories() == null), name);
+        }
+        assertEquals(40, requirement(s, "status").writtenRecords());
+        assertEquals(100, requirement(s, Certifier.G_TRAP).writtenRecords());
+        assertEquals(100, requirement(s, Certifier.G_TRAP).goldMemories());
+    }
+
+    @Test
+    void aDisabledClassWithEvaluableValuesIsObservedAtItsHighestEvaluableThreshold() {
+        var world = new World().relation("a", 200, 0, 200, 200);
+        world.classValues = 40;
+        world.classWrong = 10;
+        var s = world.sequence();
+        assertEquals(Certifier.DISABLED, s.classes().getFirst().state(), "10 wrong of 40 fails the class bound");
+        assertEquals(40, requirement(s, "status").writtenRecords());
+    }
+
+    @Test
+    void theRecordLevelGatesCountRecordsAndTheMemoryLevelGatesMemories() {
+        var world = new World().relation("a", 200, 0, 200, 200);
+        world.perMemory = 3;
+        world.packed = 4;
+        world.classValues = 300;
+        var s = world.sequence();
+        assertEquals(200, s.terms().n(), "Terms counts writing memories, not the 600 records");
+        assertNotNull(s.written());
+        assertEquals(100, s.written().n(), "G_written counts the 100 memories its 400 records sit in");
+        assertNotNull(s.trap());
+        assertEquals(100, s.trap().n(), "G_trap counts its 100 records, not their 25 memories");
+        assertEquals(300, s.classes().getFirst().n(), "a class counts its 300 values, not their 75 memories");
+
+        // One memory with 50 records, one wrong, against 20 memories of one record, one wrong.
+        var clustered = List.of(new MemoryCounts("m0", 50, 1, 0, 0, 0));
+        var spread = new ArrayList<MemoryCounts>();
+        for (int i = 0; i < 20; i++) spread.add(new MemoryCounts("m" + i, 1, i == 0 ? 1 : 0, 0, 0, 0));
+        var a = new Evaluation(Map.of(Certifier.TERMS, new GateCounts(clustered, List.of())),
+                Map.of("status", clustered), clustered, clustered);
+        var b = new Evaluation(Map.of(Certifier.TERMS, new GateCounts(spread, List.of())),
+                Map.of("status", spread), spread, spread);
+        var worst = GraphEvalHarness.worst(List.of(a, b), MemoryBounds.INSTANCE);
+        assertEquals(clustered, worst.gates().get(Certifier.TERMS).writing(), "1 of 1 memories beats 1 of 20");
+        assertEquals(clustered, worst.written());
+        assertEquals(spread, worst.trap(), "1 of 20 records beats 1 of 50");
+        assertEquals(spread, worst.classes().get("status"));
+    }
+
+    @Test
+    void aTermGateOffStillListsARequirementForEveryGateObservedAtTheStart() {
+        var cases = new World().relation("a", 200, 0, 200, 200).relation("b", 150, 0, 150, 150);
+        cases.classValues = 300;
+        cases.set = CertificationSplit.CASES;
+        var c = cases.sequence();
+        assertEquals(Certifier.OFF, c.terms().state());
+        var order = List.of(Certifier.TERMS, "a", "b", "status", "time", "negation", Certifier.G_WRITTEN,
+                Certifier.G_TRAP);
+        assertEquals(order, c.requirements().stream().map(Certifier.Requirement::name).toList());
+        assertEquals(0, requirement(c, "a").writtenRecords(), "a cases run reads no live counts");
+        assertEquals(false, requirement(c, "a").reachable());
+        assertEquals(100, requirement(c, Certifier.G_TRAP).writtenRecords());
+        assertEquals(0, requirement(c, Certifier.G_WRITTEN).writtenRecords());
+
+        var heldout = new World().relation("a", 200, 0, 200, 200).relation("b", 150, 0, 150, 150);
+        heldout.terms = _ -> new int[] {129, 0, 200, 200};
+        heldout.perMemory = 2;
+        heldout.set = CertificationSplit.HELDOUT;
+        var h = heldout.sequence();
+        assertEquals(Certifier.OFF, h.terms().state());
+        assertTrue(h.terms().reason().contains("fails its bound"), h.terms().reason());
+        assertEquals(order, h.requirements().stream().map(Certifier.Requirement::name).toList());
+        var a = requirement(h, "a");
+        assertEquals(400, a.writtenRecords());
+        assertEquals(200, a.writingMemories());
+        assertEquals(200, a.goldMemories());
+        assertEquals(true, a.reachable());
+        var b = requirement(h, "b");
+        assertEquals(150, b.writingMemories());
+        assertEquals(true, b.reachable());
+        var all = new TreeMap<String, Double>();
+        all.put("a", START);
+        all.put("b", START);
+        assertTrue(heldout.seen.contains(new Configuration(START, all, new TreeMap<>())),
+                "the relations are observed with every relation at the start");
+        var provisional = new TreeMap<String, Configuration.ClassSetting>();
+        for (var name : Certifier.V2_CLASSES) {
+            provisional.put(name, new Configuration.ClassSetting(Certifier.PROVISIONAL, START));
+        }
+        assertTrue(heldout.seen.contains(new Configuration(START, all, provisional)),
+                "the classes are observed provisional at the start");
+        assertEquals(300, requirement(c, "status").writtenRecords(), "a class observed at the start writes values");
+        assertEquals(129, requirement(h, Certifier.G_WRITTEN).writtenRecords(), "Terms alone at the start");
+        assertEquals(0, requirement(h, "status").writtenRecords(), "a held-out run reads no class");
+        assertEquals(0, requirement(h, Certifier.G_TRAP).writtenRecords());
+    }
+
+    @Test
+    void anUnevaluableTrapGateBesideAFailingWrittenGateListsBothAndBacksNothingOff() {
+        var world = new World().relation("a", 200, 0, 200, 200);
+        world.extraWrong = 30;
+        world.set = CertificationSplit.HELDOUT;
+        var s = world.sequence();
+        assertEquals(Certifier.ON, gate(s, "a").state());
+        assertNotNull(s.written());
+        assertFalse(s.written().passes());
+        assertFalse(s.passed());
+        assertEquals(List.of(), s.backOff());
+        assertEquals(2, s.reasons().size(), s.reasons().toString());
+        assertTrue(s.reasons().getFirst().startsWith("G_written fails: 30 wrong of 400, bound "), s.reasons().toString());
+        assertEquals("G_trap not evaluable: its certifying set cases has no data in this run", s.reasons().get(1));
     }
 }
