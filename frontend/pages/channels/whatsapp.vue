@@ -8,7 +8,7 @@ import {
 // Privacy: the QR is rendered locally with the qrcode lib. The raw pairing
 // string is NEVER sent to any third-party/external QR service or URL.
 import QRCode from 'qrcode'
-import type { Agent, WhatsAppBindingSummary, WhatsAppSubscriptionState } from '~/types/api'
+import type { Agent, WhatsAppBindingSummary, WhatsAppSubscriptionState, WhatsAppUsageState } from '~/types/api'
 
 const [{ data: bindings, refresh }, { data: agents }] = await Promise.all([
   useFetch<WhatsAppBindingSummary[]>('/api/channels/whatsapp/bindings'),
@@ -273,6 +273,53 @@ async function subscribe(binding: WhatsAppBindingSummary) {
   }
   beginSubscriptionRead(binding.id)
   subscriptions.value[binding.id] = result
+}
+
+// ── JCLAW-1412: this month's replies against Meta's free allowance ────
+// Meta's own figure, read per enabled Cloud API binding without awaiting.
+const USAGE_WARNING_SHARE = 0.8
+const usages = ref<Record<number, WhatsAppUsageState>>({})
+const usageReads = new Map<number, ReturnType<typeof useLatestRequest>>()
+
+function forgetUsage(id: number) {
+  usageReads.get(id)?.begin()
+  const { [id]: _usage, ...rest } = usages.value
+  usages.value = rest
+}
+
+watch(bindings, (list) => {
+  const listed = new Set((list ?? []).map(b => b.id))
+  for (const id of [...usageReads.keys()]) {
+    if (!listed.has(id)) forgetUsage(id)
+  }
+  for (const b of list ?? []) {
+    if (!b.enabled || b.transport === 'WHATSAPP_WEB') {
+      forgetUsage(b.id)
+      continue
+    }
+    const reads = usageReads.get(b.id) ?? useLatestRequest()
+    usageReads.set(b.id, reads)
+    const token = reads.begin()
+    $fetch<WhatsAppUsageState>(`/api/channels/whatsapp/bindings/${b.id}/usage`)
+      .then((usage) => { if (reads.isCurrent(token)) usages.value[b.id] = usage })
+      .catch(() => { if (reads.isCurrent(token)) forgetUsage(b.id) })
+  }
+}, { immediate: true })
+
+function usageLabel(u: WhatsAppUsageState): string {
+  const replies = (u.replies ?? 0).toLocaleString('en-US')
+  if ((u.replies ?? 0) > u.allowance) {
+    return `${replies} replies this month, ${(u.billed ?? 0).toLocaleString('en-US')} billed`
+  }
+  return `${replies} of ${u.allowance.toLocaleString('en-US')} free replies this month`
+}
+
+function usageWarning(u: WhatsAppUsageState): boolean {
+  return (u.replies ?? 0) >= u.allowance * USAGE_WARNING_SHARE
+}
+
+function usagePercent(u: WhatsAppUsageState): number {
+  return Math.min(100, ((u.replies ?? 0) / u.allowance) * 100)
 }
 
 // ── JCLAW-1411: a reply Meta refused or failed to deliver, shown for 24h ────
@@ -560,6 +607,42 @@ onBeforeUnmount(stopPoll)
           class="text-xs text-fg-muted mb-4"
         >
           Couldn't check the Meta app subscription: {{ subscriptions[b.id]?.reason }}
+        </p>
+
+        <div
+          v-if="usages[b.id]?.state === 'COUNTED'"
+          data-testid="usage"
+          class="mb-4 text-xs space-y-1"
+        >
+          <p
+            :id="`usage-label-${b.id}`"
+            :class="usageWarning(usages[b.id]!) ? 'text-amber-700 dark:text-amber-300' : 'text-fg-muted'"
+          >
+            {{ usageLabel(usages[b.id]!) }}
+          </p>
+          <div
+            role="progressbar"
+            :aria-labelledby="`usage-label-${b.id}`"
+            aria-valuemin="0"
+            :aria-valuemax="usages[b.id]!.allowance"
+            :aria-valuenow="Math.min(usages[b.id]!.replies ?? 0, usages[b.id]!.allowance)"
+            :aria-valuetext="usageLabel(usages[b.id]!)"
+            class="h-1.5 w-full bg-muted rounded-full overflow-hidden"
+          >
+            <div
+              data-testid="usage-fill"
+              class="h-full transition-[width]"
+              :class="usageWarning(usages[b.id]!) ? 'bg-amber-500' : 'bg-emerald-600 dark:bg-emerald-500'"
+              :style="{ width: `${usagePercent(usages[b.id]!)}%` }"
+            />
+          </div>
+        </div>
+        <p
+          v-else-if="usages[b.id]?.state === 'UNKNOWN'"
+          data-testid="usage-unknown"
+          class="text-xs text-fg-muted mb-4"
+        >
+          Couldn't read this month's replies from Meta: {{ usages[b.id]?.reason }}
         </p>
 
         <div class="flex justify-end items-center gap-1">

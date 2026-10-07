@@ -295,6 +295,15 @@ class WhatsAppSubscriptionTest extends UnitTest {
     }
 
     @Test
+    void noAppEntityMeansNoPost() {
+        answers.put(HEALTH_PATH, new Canned(200,
+                "{\"health_status\":{\"entities\":[{\"entity_type\":\"WABA\",\"id\":\"222\"}]},\"id\":\"111\"}"));
+
+        assertFailed(run(() -> WhatsAppSubscription.subscribe("111", TOKEN, BASE)), "app");
+        assertEquals(1, requests.size());
+    }
+
+    @Test
     void transportErrorOnSubscribeIsFailed() {
         failTransport = true;
 
