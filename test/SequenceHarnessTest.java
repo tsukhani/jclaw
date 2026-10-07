@@ -5,6 +5,7 @@ import memory.ontology.OntologyRecord.Evidence;
 import memory.ontology.OntologySchema;
 import memory.ontology.OntologyValidator;
 import models.Memory;
+import models.MemoryAuthorType;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
@@ -32,6 +33,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -391,6 +393,18 @@ class SequenceHarnessTest extends UnitTest {
         var twice = run(set, gold(set, new CopyOnWriteArrayList<>()), 2, Configuration.defaultFor(SCHEMA));
         assertNull(twice.models().getFirst().spotCheck());
         assertEquals(2, twice.models().getFirst().runs().size());
+    }
+
+    @Test
+    void theOwnerReachesTheSequenceGeneratorAsAKinPossessor() {
+        var labels = new GraphCases.Case("s1", List.of("plain"), "Avery Lin's son starts at Harborlight Academy.",
+                List.of(), List.of(), List.of());
+        var chain = new Sequences.Chain("k", List.of(), List.of(new Sequences.Memory(labels, new LinkedHashMap<>(),
+                List.of(), null, MemoryAuthorType.HUMAN_TURN)), List.of());
+        var decider = ExtractionPipelineTest.scripted(new CopyOnWriteArrayList<>(), Map.of(), Map.of());
+        var runs = SequenceHarness.ask(SCHEMA, "Avery Lin", chain, 0, "tev1", decider, ZONE);
+        var candidates = runs.getFirst().candidates();
+        assertTrue(candidates.stream().anyMatch(c -> "son".equals(c.kin())), candidates::toString);
     }
 
     @Test

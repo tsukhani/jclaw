@@ -320,9 +320,9 @@ public final class CandidateGenerator {
     }
 
     /**
-     * Each owner-possessive kin phrase ("Avery Lin's younger sister"), unless a capitalized name stands in apposition:
-     * right after the kin word ("son Wren"), or set off by commas and closing its clause ("son, Wren." or
-     * "Wren, Avery Lin's son."), so a leading or following clause ("In Port Calloway, ...") keeps the phrase.
+     * Each owner-possessive kin phrase ("Avery Lin's younger sister"), unless a capitalized name is in apposition: right
+     * after the kin word ("son Wren"), or comma-separated when the appositive after the kin word ("son, Wren.") or
+     * the kin phrase after a leading name ("Wren, Avery Lin's son.") closes its clause.
      */
     private static List<Found> kin(String text, @Nullable String ownerName, List<Found> found) {
         var possessor = "the user";
