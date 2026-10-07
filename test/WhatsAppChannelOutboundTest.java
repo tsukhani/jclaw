@@ -209,6 +209,16 @@ class WhatsAppChannelOutboundTest extends UnitTest {
     }
 
     @Test
+    void aTransportExceptionRecordsNothing() {
+        var b = sendThroughPersistedBinding(chain -> {
+            throw new java.io.IOException("connection reset");
+        });
+        assertNull(b.lastDeliveryFailureAt);
+        assertNull(b.lastDeliveryFailureCode);
+        assertNull(b.lastDeliveryFailureTitle);
+    }
+
+    @Test
     void metaErrorMessageNeverThrows() {
         assertEquals("boom", WhatsAppChannel.metaErrorMessage("{\"error\":{\"message\":\"boom\"}}"));
         assertNull(WhatsAppChannel.metaErrorMessage(null));
@@ -219,6 +229,16 @@ class WhatsAppChannelOutboundTest extends UnitTest {
 
     /** Send through a committed binding against a canned Graph response; returns the binding re-read afterwards. */
     private static WhatsAppBinding sendThroughPersistedBinding(int status, String responseBody) {
+        return sendThroughPersistedBinding(chain -> new Response.Builder()
+                .request(chain.request())
+                .protocol(Protocol.HTTP_1_1)
+                .code(status)
+                .message("canned")
+                .body(ResponseBody.create(responseBody, null))
+                .build());
+    }
+
+    private static WhatsAppBinding sendThroughPersistedBinding(Interceptor canned) {
         var suffix = String.valueOf(System.nanoTime());
         WhatsAppBinding binding = Tx.run(() -> {
             var agent = new Agent();
@@ -237,13 +257,6 @@ class WhatsAppChannelOutboundTest extends UnitTest {
             return b;
         });
         try {
-            Interceptor canned = chain -> new Response.Builder()
-                    .request(chain.request())
-                    .protocol(Protocol.HTTP_1_1)
-                    .code(status)
-                    .message("canned")
-                    .body(ResponseBody.create(responseBody, null))
-                    .build();
             var client = new OkHttpClient.Builder().addInterceptor(canned).build();
             HttpFactories.callWith(client,
                     () -> WhatsAppChannel.forBinding(binding).trySend("447900000001", "hi"));

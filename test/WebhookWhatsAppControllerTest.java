@@ -363,6 +363,66 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
     }
 
     @Test
+    void aFailedStatusWithoutErrorsIsLoggedWithNoDetailAndRecordedWithNullCodeAndTitle() {
+        var bindingId = seedBinding(APP_SECRET);
+        var agentId = agentIdOf(bindingId);
+        var body = statusesBody("""
+                [{"id":"%s","status":"failed","timestamp":"1751142888","recipient_id":"16505551234"}]
+                """.formatted(uniqueWamid()));
+
+        assertIsOk(postWithSig(body, sign(body)));
+
+        var events = eventsFor(agentId);
+        assertEquals(1, events.size(), () -> "events: " + events);
+        assertTrue(events.get(0).message.contains("16505551234"), events.get(0).message);
+        assertTrue(events.get(0).message.contains("no error detail"), events.get(0).message);
+        var b = reload(bindingId);
+        assertEquals(java.time.Instant.ofEpochSecond(1751142888L), b.lastDeliveryFailureAt);
+        assertNull(b.lastDeliveryFailureCode);
+        assertNull(b.lastDeliveryFailureTitle);
+    }
+
+    @Test
+    void aFailedStatusWithNoUsableTimestampIsRecordedAtNow() {
+        var bindingId = seedBinding(APP_SECRET);
+        var before = java.time.Instant.now();
+        var absent = statusesBody("[{\"id\":\"" + uniqueWamid() + "\",\"status\":\"failed\"}]");
+        assertIsOk(postWithSig(absent, sign(absent)));
+        var first = reload(bindingId).lastDeliveryFailureAt;
+        assertNotNull(first);
+        assertFalse(first.isBefore(before), () -> "absent timestamp recorded at " + first);
+
+        var garbled = statusesBody("[{\"id\":\"" + uniqueWamid() + "\",\"status\":\"failed\",\"timestamp\":\"abc\"}]");
+        assertIsOk(postWithSig(garbled, sign(garbled)));
+        var second = reload(bindingId).lastDeliveryFailureAt;
+        assertFalse(second.isBefore(first), () -> "unparseable timestamp recorded at " + second);
+    }
+
+    @Test
+    void eachFailedStatusInOnePayloadIsLoggedOnce() {
+        var bindingId = seedBinding(APP_SECRET);
+        var agentId = agentIdOf(bindingId);
+        var body = statusesBody("""
+                [{"id":"%s","status":"delivered","timestamp":"1751142000"},
+                 {"id":"%s","status":"failed","timestamp":"1751142001","recipient_id":"111"},
+                 {"id":"%s","status":"failed","timestamp":"1751142002","recipient_id":"222"}]
+                """.formatted(uniqueWamid(), uniqueWamid(), uniqueWamid()));
+
+        assertIsOk(postWithSig(body, sign(body)));
+
+        var events = eventsFor(agentId);
+        assertEquals(2, events.size(), () -> "events: " + events);
+        assertTrue(events.stream().anyMatch(e -> e.message.contains("111")));
+        assertTrue(events.stream().anyMatch(e -> e.message.contains("222")));
+        assertEquals(java.time.Instant.ofEpochSecond(1751142002L), reload(bindingId).lastDeliveryFailureAt);
+    }
+
+    private static String statusesBody(String statusesJson) {
+        return "{\"entry\":[{\"changes\":[{\"value\":{\"metadata\":{\"phone_number_id\":\""
+                + PHONE_NUMBER_ID + "\"},\"statuses\":" + statusesJson + "}}]}]}";
+    }
+
+    @Test
     void aPayloadWithNeitherMessagesNorStatusesIsAckedSilently() {
         var bindingId = seedBinding(APP_SECRET);
         var agentId = agentIdOf(bindingId);

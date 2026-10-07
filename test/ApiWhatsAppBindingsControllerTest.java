@@ -140,6 +140,34 @@ class ApiWhatsAppBindingsControllerTest extends FunctionalTest {
         assertEquals("[]", getContent(response).trim());
     }
 
+    @Test
+    void listReturnsTheLastDeliveryFailure() {
+        login();
+        var id = seedCloudBinding(seedAgent("wb-delivery-failure"), "phone-delivery-failure");
+        var plain = seedCloudBinding(seedAgent("wb-delivery-none"), "phone-delivery-none");
+        commitInFreshTx(() -> {
+            WhatsAppBinding.recordDeliveryFailure(id, java.time.Instant.ofEpochSecond(1751142888L),
+                    131042, "There was an error related to your payment method");
+            return null;
+        });
+
+        var arr = JsonParser.parseString(getContent(GET("/api/channels/whatsapp/bindings"))).getAsJsonArray();
+        com.google.gson.JsonObject failed = null;
+        com.google.gson.JsonObject clean = null;
+        for (var el : arr) {
+            var o = el.getAsJsonObject();
+            if (o.get("id").getAsLong() == id) failed = o;
+            if (o.get("id").getAsLong() == plain) clean = o;
+        }
+        assertNotNull(failed);
+        assertEquals("2025-06-28T20:34:48Z", failed.get("lastDeliveryFailureAt").getAsString());
+        assertEquals(131042, failed.get("lastDeliveryFailureCode").getAsInt());
+        assertEquals("There was an error related to your payment method",
+                failed.get("lastDeliveryFailureTitle").getAsString());
+        assertNotNull(clean);
+        assertTrue(clean.get("lastDeliveryFailureAt") == null || clean.get("lastDeliveryFailureAt").isJsonNull());
+    }
+
     // ===== Create =====
 
     @Test
