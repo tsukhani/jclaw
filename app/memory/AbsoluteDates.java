@@ -71,7 +71,7 @@ public final class AbsoluteDates {
     private static @Nullable Replacement replacement(String text, TemporalExpressions.DateSpan span) {
         if (!REWRITE_SET.matcher(span.span().toLowerCase(Locale.ROOT)).matches()) return null;
         if (span.readings().size() != 1
-                || !(span.readings().getFirst() instanceof EdtfInterval(EdtfInterval.Point(var date), var _, var single))
+                || !(span.readings().getFirst() instanceof EdtfInterval(EdtfInterval.Point(var date), _, var single))
                 || !single) {
             return null;
         }
@@ -86,7 +86,9 @@ public final class AbsoluteDates {
         }
         boolean day = date.precision() == EdtfDate.Precision.DAY;
         boolean capital = sentenceStart(text, span.start()) || Character.isUpperCase(text.charAt(span.start()));
-        var preposition = capital ? (day ? "On " : "In ") : (day ? "on " : "in ");
+        String preposition;
+        if (day) preposition = capital ? "On " : "on ";
+        else preposition = capital ? "In " : "in ";
         return new Replacement(span, span.start(), preposition, form);
     }
 

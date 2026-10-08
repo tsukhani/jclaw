@@ -57,7 +57,7 @@ public final class WhatsAppStreamingSink implements ChannelStreamingSink {
         if (cue == null) return;
         try {
             cue.join();
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

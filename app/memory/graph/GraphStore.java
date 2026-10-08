@@ -285,7 +285,7 @@ public final class GraphStore {
             }
         }
         var withdrawn = GraphWithdrawal.withdrawEvidence(records, evidenceIds);
-        var wereEvidence = records.stream().filter(r -> r instanceof Evidence).map(OntologyRecord::id)
+        var wereEvidence = records.stream().filter(Evidence.class::isInstance).map(OntologyRecord::id)
                 .collect(Collectors.toSet());
         int evidence = (int) withdrawn.removedIds().stream().filter(wereEvidence::contains).count();
         int other = withdrawn.removedIds().size() - evidence;
@@ -519,18 +519,8 @@ public final class GraphStore {
      */
     private void writeLocked(long agentId, Collection<? extends OntologyRecord> records,
             @Nullable String ledgerDocument) throws IOException {
-        var retracted = new TreeSet<String>();
-        var ledger = ledgerDocument == null ? ledgerLocked(agentId).values()
-                : RunLedger.parse(ledgerDocument, agentId + "/" + RunLedger.FILE_NAME);
-        for (var e : ledger) {
-            if (e.retracted()) retracted.add(e.runId());
-        }
-        for (var r : records) {
-            if (r instanceof Evidence e) {
-                var runId = e.runId();
-                if (runId != null && retracted.contains(runId)) throw new RunRetractedException(agentId, runId);
-            }
-        }
+        refuseRetractedRuns(agentId, records, ledgerDocument == null ? ledgerLocked(agentId).values()
+                : RunLedger.parse(ledgerDocument, agentId + "/" + RunLedger.FILE_NAME));
         var foreign = records.stream().filter(r -> r.meta().agentId() != agentId).map(OntologyRecord::id)
                 .sorted().toList();
         if (!foreign.isEmpty()) {
@@ -581,5 +571,19 @@ public final class GraphStore {
             }
         });
         indexes.put(agentId, Index.of(records));
+    }
+
+    private static void refuseRetractedRuns(long agentId, Collection<? extends OntologyRecord> records,
+            Collection<RunLedger.Entry> ledger) {
+        var retracted = new TreeSet<String>();
+        for (var e : ledger) {
+            if (e.retracted()) retracted.add(e.runId());
+        }
+        for (var r : records) {
+            if (r instanceof Evidence e) {
+                var runId = e.runId();
+                if (runId != null && retracted.contains(runId)) throw new RunRetractedException(agentId, runId);
+            }
+        }
     }
 }

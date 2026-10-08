@@ -93,7 +93,9 @@ public class ApiGraphEvalController extends Controller {
             if (body.has("set")) throw invalid("set follows from the split: send split without set");
             split = loadSplit(string(body, "split"));
         }
-        var set = split != null ? split.set() : body.has("set") ? string(body, "set") : "cases";
+        String set;
+        if (split != null) set = split.set();
+        else set = body.has("set") ? string(body, "set") : "cases";
         if (!set.equals("cases") && !set.equals("heldout") && !set.equals("sequences")) {
             throw invalid("set must be 'cases', 'heldout' or 'sequences'");
         }
@@ -117,8 +119,8 @@ public class ApiGraphEvalController extends Controller {
         if (body.has("recallFloor")) recallFloor = share(body, "recallFloor", true);
         double floor = recallFloor;
         double agreedShare = body.has("agreedShare") ? share(body, "agreedShare", false) : Adjudications.DEFAULT_SHARE;
-        long agreedSeed = body.has("agreedSeed") ? readLong(body, "agreedSeed")
-                : split != null ? split.seed() : GraphEvalHarness.DEFAULT_AGREED_SEED;
+        long defaultSeed = split != null ? split.seed() : GraphEvalHarness.DEFAULT_AGREED_SEED;
+        long agreedSeed = body.has("agreedSeed") ? readLong(body, "agreedSeed") : defaultSeed;
         boolean pairFilter = false;
         if (body.has("pairFilter")) {
             var raw = body.get("pairFilter");

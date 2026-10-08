@@ -25,7 +25,8 @@ public final class ExactMatchResolver {
     private static final Pattern DETERMINER = Pattern.compile("^(?:the|a|an) ");
     private static final Pattern POSSESSIVE = Pattern.compile("['’]s$");
     private static final Pattern PUNCTUATION = Pattern.compile("\\p{P}+");
-    private static final Pattern EDGE_PUNCTUATION = Pattern.compile("^[\\p{P}\\s]+|[\\p{P}\\s]+$");
+    private static final Pattern LEADING_EDGE = Pattern.compile("^[\\p{P}\\s]+");
+    private static final Pattern TRAILING_EDGE = Pattern.compile("[\\p{P}\\s]+$");
     private static final Pattern URL_PREFIX = Pattern.compile("^([A-Za-z][A-Za-z0-9+.\\-]*://)([^/?#]*)(.*)$");
 
     private ExactMatchResolver() {}
@@ -39,7 +40,8 @@ public final class ExactMatchResolver {
      */
     public static String normalize(String surface) {
         // Trimmed first, or a quoted "The Inn" keeps its determiner and "Inn's." its possessive.
-        var s = collapse(EDGE_PUNCTUATION.matcher(surface.toLowerCase(Locale.ROOT)).replaceAll(""));
+        var s = LEADING_EDGE.matcher(surface.toLowerCase(Locale.ROOT)).replaceFirst("");
+        s = collapse(TRAILING_EDGE.matcher(s).replaceFirst(""));
         s = DETERMINER.matcher(s).replaceFirst("");
         // Before punctuation goes, or "inn's" would read as "inns".
         s = POSSESSIVE.matcher(s).replaceFirst("");

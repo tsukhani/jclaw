@@ -247,7 +247,7 @@ function forgetSubscription(id: number) {
 
 watch(bindings, (list) => {
   const listed = new Set((list ?? []).map(b => b.id))
-  for (const id of [...subscriptionReads.keys()]) {
+  for (const id of subscriptionReads.keys()) {
     if (!listed.has(id)) forgetSubscription(id)
   }
   for (const b of list ?? []) {
@@ -289,7 +289,7 @@ function forgetUsage(id: number) {
 
 watch(bindings, (list) => {
   const listed = new Set((list ?? []).map(b => b.id))
-  for (const id of [...usageReads.keys()]) {
+  for (const id of usageReads.keys()) {
     if (!listed.has(id)) forgetUsage(id)
   }
   for (const b of list ?? []) {

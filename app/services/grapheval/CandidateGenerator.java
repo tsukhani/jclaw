@@ -65,9 +65,9 @@ public final class CandidateGenerator {
             "(?i)(?:^|[,;:!?.]\\s|\\bthat\\s|\\bthinks\\s|\\bbelieves\\s|\\bconsiders\\s)");
     private static final Pattern SENTENCE_END = Pattern.compile("[.!?][\"'\u201d\u2019)]*$");
 
-    /** Email: a local part, "@", and a domain with at least one dot. */
+    /** Email: a local part, "@", and a domain with at least one dot. Possessive, or a long run overflows the stack. */
     private static final Pattern EMAIL = Pattern.compile(
-            "(?<![\\w.+\\-])[\\w][\\w.+\\-]*@[A-Za-z0-9](?:[A-Za-z0-9\\-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9\\-]*[A-Za-z0-9])?)+");
+            "(?<![\\w.+\\-])[\\w][\\w.+\\-]*@[A-Za-z0-9](?:[A-Za-z0-9\\-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9\\-]*[A-Za-z0-9])?)++");
     private static final Pattern HANDLE = Pattern.compile("(?<![\\w.@])@[A-Za-z_]\\w++");
     /**
      * At least two digit groups, joined by single spaces, hyphens or dots, or by nothing after a parenthesised group;

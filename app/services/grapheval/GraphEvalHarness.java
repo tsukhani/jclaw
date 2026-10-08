@@ -909,7 +909,7 @@ public final class GraphEvalHarness {
                 ruleWritten += m.ruleWritten();
                 boolean anyFailed = m.failedDecisions() > 0;
                 if (anyFailed) failed++;
-                int bucket = m.questions() <= 10 ? 0 : m.questions() <= 20 ? 1 : m.questions() <= 40 ? 2 : 3;
+                int bucket = questionBucket(m.questions());
                 bucketMemories[bucket]++;
                 if (anyFailed) bucketFailed[bucket]++;
                 for (var tag : m.tags()) {
@@ -927,6 +927,12 @@ public final class GraphEvalHarness {
         tagMemories.forEach((tag, n) -> falsePositive.put(tag, Ratio.of(tagUnsupported.getOrDefault(tag, 0), n)));
         return new Tallies(memories, memories == 0 ? null : (double) questions / memories, failed,
                 memories == 0 ? null : (double) failed / memories, byQuestions, falsePositive, ruleWritten);
+    }
+
+    private static int questionBucket(int questions) {
+        if (questions <= 10) return 0;
+        if (questions <= 20) return 1;
+        return questions <= 40 ? 2 : 3;
     }
 
     /**
@@ -1019,7 +1025,7 @@ public final class GraphEvalHarness {
         var split = req.split();
         var schema = req.schema();
         var cases = split.casesFrom(req.source());
-        var measured = split.set().equals(CertificationSplit.HELDOUT)
+        var measured = split.set().equals(CertificationSplit.SET_HELDOUT)
                 ? measureHeld(cases, req.held(), req.ownerName(), schema, req.models(), req.runs(), req.concurrency(),
                         progress)
                 : measureStored(Objects.requireNonNull(req.agentId(), "the cases set needs an agent"), cases,
@@ -1245,7 +1251,8 @@ public final class GraphEvalHarness {
         var after = snapshot(memoryIds);
         int unchanged = 0;
         for (var entry : before.entrySet()) {
-            if (entry.getValue() != null && entry.getValue().equals(after.get(entry.getKey()))) unchanged++;
+            var was = entry.getValue();
+            if (was != null && was.equals(after.get(entry.getKey()))) unchanged++;
         }
         return new MeasuredCases(measured, spotChecks, new MemoryIntegrity(before.size(), unchanged, List.of(), 0));
     }

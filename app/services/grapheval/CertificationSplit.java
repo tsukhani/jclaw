@@ -38,8 +38,8 @@ public record CertificationSplit(String split, String set, long seed, List<Strin
                                  double startingThreshold, List<String> relationOrder) {
 
     public static final String DIR = "splits";
-    public static final String CASES = "cases";
-    public static final String HELDOUT = "heldout";
+    public static final String SET_CASES = "cases";
+    public static final String SET_HELDOUT = "heldout";
     public static final String GUIDE_PATH = "evals/graph/GUIDE.md";
     private static final Pattern NAME = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,63}");
     private static final Set<String> KEYS = Set.of("split", "set", "seed", "ids", "hashes", "cases", "sequences",
@@ -75,7 +75,7 @@ public record CertificationSplit(String split, String set, long seed, List<Strin
             }
             var cases = new LinkedHashMap<String, Case>();
             parsed.forEach(c -> cases.put(c.id(), c));
-            return new Source(CASES, items, cases, sequences, guideFingerprint(guide), schema.fingerprint());
+            return new Source(SET_CASES, items, cases, sequences, guideFingerprint(guide), schema.fingerprint());
         }
 
         /**
@@ -101,7 +101,7 @@ public record CertificationSplit(String split, String set, long seed, List<Strin
                 cases.put(id, new Case(id, c.tags(), c.text(), c.entities(), c.relations(), c.negatives(),
                         c.capturedAt(), c.dates()));
             }
-            return new Source(HELDOUT, items, cases, sequences, guideFingerprint(guide), schema.fingerprint());
+            return new Source(SET_HELDOUT, items, cases, sequences, guideFingerprint(guide), schema.fingerprint());
         }
     }
 
@@ -145,8 +145,9 @@ public record CertificationSplit(String split, String set, long seed, List<Strin
             hashes.put(id, Fingerprints.hex12(item));
             selected.add(item);
         }
-        var split = new CertificationSplit(name, source.set(), seed, chosen, hashes, Fingerprints.hex12(CASES, selected),
-                source.sequences(), source.guide(), source.schema(), startingThreshold, order);
+        var split = new CertificationSplit(name, source.set(), seed, chosen, hashes,
+                Fingerprints.hex12(SET_CASES, selected), source.sequences(), source.guide(), source.schema(),
+                startingThreshold, order);
         Files.createDirectories(file.getParent());
         Files.writeString(file, GSON.toJson(split.toJson()), StandardOpenOption.CREATE_NEW);
         return split;
@@ -165,7 +166,8 @@ public record CertificationSplit(String split, String set, long seed, List<Strin
             }
             return inFileOrder(source, unique);
         }
-        double s = share != null ? share : source.set().equals(HELDOUT) ? 1.0 : Double.NaN;
+        double fallback = source.set().equals(SET_HELDOUT) ? 1.0 : Double.NaN;
+        double s = share != null ? share : fallback;
         if (!(s > 0 && s <= 1)) throw new IllegalArgumentException("share must be in (0, 1]");
         var all = new ArrayList<>(source.items().keySet());
         var shuffled = new ArrayList<>(all);
@@ -216,7 +218,7 @@ public record CertificationSplit(String split, String set, long seed, List<Strin
      */
     public @Nullable String verify(Source source) {
         if (!source.set().equals(set)) return "split '%s' is over the %s set, not %s".formatted(split, set, source.set());
-        var noun = set.equals(HELDOUT) ? "memory" : "case";
+        var noun = set.equals(SET_HELDOUT) ? "memory" : "case";
         for (var id : ids) {
             var item = source.items().get(id);
             if (item == null) return "%s %s of split '%s' is no longer in the set".formatted(noun, id, split);

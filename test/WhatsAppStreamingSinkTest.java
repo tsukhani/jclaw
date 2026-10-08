@@ -36,7 +36,7 @@ class WhatsAppStreamingSinkTest extends UnitTest {
         public void startTyping(String peerId, String inboundMessageId) {
             try {
                 Thread.sleep(50);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             sent.add("[typing " + inboundMessageId + "]");

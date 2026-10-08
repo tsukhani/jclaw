@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** JCLAW-1356, JCLAW-1357: the fixed candidate rules, with no model in the loop. */
 class CandidateGeneratorTest extends UnitTest {
@@ -446,6 +447,21 @@ class CandidateGeneratorTest extends UnitTest {
 
     private static List<String> spansOf(String text) {
         return CandidateGenerator.generate(text, List.of(), OWNER).stream().map(Candidate::span).toList();
+    }
+
+    @Test
+    void aLongDottedRunAfterAnAddressDoesNotOverflowTheStack() throws Exception {
+        var text = "Write to x@" + "a.".repeat(20_000) + "a today.";
+        var spans = new AtomicReference<List<String>>();
+        var failure = new AtomicReference<Throwable>();
+        // On its own thread for the JVM's default stack, which the greedy loop exhausted at about 4,000 labels.
+        var thread = new Thread(() -> spans.set(spansOf(text)));
+        thread.setUncaughtExceptionHandler((_, e) -> failure.set(e));
+        thread.start();
+        thread.join();
+
+        assertNull(failure.get(), () -> String.valueOf(failure.get()));
+        assertTrue(spans.get().stream().anyMatch(s -> s.startsWith("x@a.a.")), "the address is still a candidate");
     }
 
     @Test

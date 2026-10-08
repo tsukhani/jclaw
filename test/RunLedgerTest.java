@@ -277,9 +277,9 @@ class RunLedgerTest extends UnitTest {
     void everyEvidenceAWrittenRunAddsCarriesItsRunIdGroundingIncluded() throws Exception {
         var entry = record(506, TEXT);
         var records = store.read(AGENT);
-        var evidence = records.stream().filter(r -> r instanceof Evidence).map(r -> (Evidence) r).toList();
+        var evidence = records.stream().filter(Evidence.class::isInstance).map(Evidence.class::cast).toList();
         assertFalse(evidence.isEmpty());
-        assertTrue(records.stream().anyMatch(r -> r instanceof Mapping), "the terms were grounded");
+        assertTrue(records.stream().anyMatch(Mapping.class::isInstance), "the terms were grounded");
         assertTrue(evidence.stream().anyMatch(e -> e.subjectId() != null && e.subjectId().startsWith("rel:")),
                 "the relation's claim is there");
         for (var e : evidence) assertEquals(entry.runId(), e.runId(), e.id());

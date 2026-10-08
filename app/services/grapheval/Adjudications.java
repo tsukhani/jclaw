@@ -171,13 +171,11 @@ public final class Adjudications {
     /** The verdicts under {@code guide}, looked up by case and record; later lines win. */
     public static final class Book {
         private final Map<List<String>, Verdict> current = new HashMap<>();
-        private final String guide;
         private final long seed;
         private final double share;
         private final double checkShare;
 
         public Book(List<Verdict> verdicts, String guide, long seed, double share, double checkShare) {
-            this.guide = guide;
             this.seed = seed;
             this.share = share;
             this.checkShare = checkShare;
@@ -208,7 +206,10 @@ public final class Adjudications {
 
         private @Nullable Verdict verdict(GateRecord r) {
             var v = current.get(List.of(r.caseId(), r.record()));
-            return v != null && (v.side() == null || v.side().equals(r.agreed() ? AGREED : UNMATCHED)) ? v : null;
+            if (v == null) return null;
+            var side = v.side();
+            if (side != null && !side.equals(r.agreed() ? AGREED : UNMATCHED)) return null;
+            return v;
         }
 
         /** The model-verdict check's own draw: the same hash rule over a key the agreed draw never uses. */
@@ -248,9 +249,10 @@ public final class Adjudications {
                 if (v.on(r.agreed()).equals(LABEL_ERROR)) labelError = true;
                 if (!v.byModel() || !checkMarked(r)) continue;
                 marked++;
-                if (v.check() == null) continue;
+                var check = v.check();
+                if (check == null) continue;
                 checked++;
-                if (v.check().equals(DISAGREE)) disagreed++;
+                if (check.equals(DISAGREE)) disagreed++;
             }
             return new Judgement(byGate, unjudged, sample, labelError, marked, checked, disagreed, marked - checked,
                     checked == 0 ? null : (double) disagreed / checked);

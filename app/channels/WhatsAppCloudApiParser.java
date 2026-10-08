@@ -1,6 +1,7 @@
 package channels;
 
 import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import org.jspecify.annotations.Nullable;
 import utils.JsonArgs;
@@ -244,17 +245,21 @@ public final class WhatsAppCloudApiParser {
             if (statuses == null || !statuses.isJsonArray()) return List.of();
             var out = new ArrayList<WhatsAppDeliveryStatus>();
             for (var el : statuses.getAsJsonArray()) {
-                try {
-                    if (!el.isJsonObject()) continue;
-                    var status = deliveryStatus(el.getAsJsonObject());
-                    if (status != null) out.add(status);
-                } catch (RuntimeException _) {
-                    // One malformed entry must not drop its siblings.
-                }
+                var status = deliveryStatusOrNull(el);
+                if (status != null) out.add(status);
             }
             return out;
         } catch (RuntimeException _) {
             return List.of();
+        }
+    }
+
+    private static @Nullable WhatsAppDeliveryStatus deliveryStatusOrNull(JsonElement el) {
+        try {
+            return el.isJsonObject() ? deliveryStatus(el.getAsJsonObject()) : null;
+        } catch (RuntimeException _) {
+            // One malformed entry must not drop its siblings.
+            return null;
         }
     }
 

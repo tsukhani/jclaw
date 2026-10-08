@@ -389,8 +389,8 @@ class CertifierTest extends UnitTest {
             }
             var classes = new HashMap<String, List<MemoryCounts>>();
             for (var name : Certifier.V2_CLASSES) classes.put(name, spread(classValues, classWrong));
-            boolean live = set == null || set.equals(CertificationSplit.HELDOUT);
-            boolean synthetic = set == null || set.equals(CertificationSplit.CASES);
+            boolean live = set == null || set.equals(CertificationSplit.SET_HELDOUT);
+            boolean synthetic = set == null || set.equals(CertificationSplit.SET_CASES);
             return new Evaluation(live ? gates : Map.of(), synthetic ? classes : Map.of(),
                     live ? spread(written, wrong) : List.of(), synthetic ? spread(trapGold, violated) : List.of());
         }
@@ -655,7 +655,7 @@ class CertifierTest extends UnitTest {
         var world = new World().relation("a", 200, 0, 200, 200).relation("b", 200, 0, 200, 200);
         world.classValues = 300;
         world.violations.put("b", 50);
-        world.set = CertificationSplit.HELDOUT;
+        world.set = CertificationSplit.SET_HELDOUT;
         var s = world.sequence();
         assertEquals(Certifier.ON, s.terms().state());
         assertEquals(Certifier.ON, gate(s, "a").state());
@@ -680,7 +680,7 @@ class CertifierTest extends UnitTest {
     void aCasesRunTurnsTheTermGateOffAsNotEvaluable() {
         var world = new World().relation("a", 200, 0, 200, 200);
         world.classValues = 300;
-        world.set = CertificationSplit.CASES;
+        world.set = CertificationSplit.SET_CASES;
         var s = world.sequence();
         assertEquals(Certifier.OFF, s.terms().state());
         assertEquals("terms not evaluable: its certifying set heldout has no data in this run", s.terms().reason());
@@ -693,7 +693,7 @@ class CertifierTest extends UnitTest {
     void aRelationWithNoWritingMemoryOnItsSetIsNotEvaluable() {
         var world = new World().relation("a", 0, 0, 50, 0).relation("b", 200, 0, 200, 200)
                 .relation("c", 1, 0, 1, 1);
-        world.set = CertificationSplit.HELDOUT;
+        world.set = CertificationSplit.SET_HELDOUT;
         var s = world.sequence();
         assertEquals(Certifier.OFF, gate(s, "a").state());
         assertEquals("a not evaluable: its certifying set heldout has no data in this run", gate(s, "a").reason());
@@ -712,7 +712,7 @@ class CertifierTest extends UnitTest {
                 Certifier.G_TRAP), s.requirements().stream().map(Certifier.Requirement::name).toList());
 
         var terms = requirement(s, Certifier.TERMS);
-        assertEquals(CertificationSplit.HELDOUT, terms.set());
+        assertEquals(CertificationSplit.SET_HELDOUT, terms.set());
         assertEquals(BASE_TAIL, terms.tail());
         assertEquals(400, terms.writtenRecords());
         assertEquals(200, terms.writingMemories());
@@ -731,7 +731,7 @@ class CertifierTest extends UnitTest {
         assertEquals(false, kindOf.reachable(), "129 do not");
 
         var written = requirement(s, Certifier.G_WRITTEN);
-        assertEquals(CertificationSplit.HELDOUT, written.set());
+        assertEquals(CertificationSplit.SET_HELDOUT, written.set());
         assertEquals(Certifier.CONFIDENCE_TAIL, written.tail());
         assertEquals(List.of(59, 93, 124, 153, 208),
                 written.needed().stream().map(Certifier.Needed::memories).toList());
@@ -739,7 +739,7 @@ class CertifierTest extends UnitTest {
 
         for (var name : List.of("status", "time", "negation", Certifier.G_TRAP)) {
             var r = requirement(s, name);
-            assertEquals(CertificationSplit.CASES, r.set(), name);
+            assertEquals(CertificationSplit.SET_CASES, r.set(), name);
             assertEquals(Certifier.CONFIDENCE_TAIL, r.tail(), name);
             assertNull(r.reachable(), name + " is record-level");
             assertEquals(List.of(59, 93, 124, 153, 208),
@@ -794,7 +794,7 @@ class CertifierTest extends UnitTest {
     void aTermGateOffStillListsARequirementForEveryGateObservedAtTheStart() {
         var cases = new World().relation("a", 200, 0, 200, 200).relation("b", 150, 0, 150, 150);
         cases.classValues = 300;
-        cases.set = CertificationSplit.CASES;
+        cases.set = CertificationSplit.SET_CASES;
         var c = cases.sequence();
         assertEquals(Certifier.OFF, c.terms().state());
         var order = List.of(Certifier.TERMS, "a", "b", "status", "time", "negation", Certifier.G_WRITTEN,
@@ -808,7 +808,7 @@ class CertifierTest extends UnitTest {
         var heldout = new World().relation("a", 200, 0, 200, 200).relation("b", 150, 0, 150, 150);
         heldout.terms = _ -> new int[] {129, 0, 200, 200};
         heldout.perMemory = 2;
-        heldout.set = CertificationSplit.HELDOUT;
+        heldout.set = CertificationSplit.SET_HELDOUT;
         var h = heldout.sequence();
         assertEquals(Certifier.OFF, h.terms().state());
         assertTrue(h.terms().reason().contains("fails its bound"), h.terms().reason());
@@ -842,7 +842,7 @@ class CertifierTest extends UnitTest {
     void anUnevaluableTrapGateBesideAFailingWrittenGateListsBothAndBacksNothingOff() {
         var world = new World().relation("a", 200, 0, 200, 200);
         world.extraWrong = 30;
-        world.set = CertificationSplit.HELDOUT;
+        world.set = CertificationSplit.SET_HELDOUT;
         var s = world.sequence();
         assertEquals(Certifier.ON, gate(s, "a").state());
         assertNotNull(s.written());

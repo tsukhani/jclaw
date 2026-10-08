@@ -432,7 +432,7 @@ public final class Certifier {
     }
 
     /** The units a bound counts n and k in: writing memories for {@link MemoryBounds}, records for any other. */
-    private record Units(ToIntFunction<List<MemoryCounts>> n, ToIntFunction<List<MemoryCounts>> k, boolean memories) {
+    private record Units(ToIntFunction<List<MemoryCounts>> n, ToIntFunction<List<MemoryCounts>> k, boolean byMemory) {
         static final Units RECORDS = new Units(RecordBounds::n, RecordBounds::k, false);
         static final Units MEMORIES = new Units(MemoryBounds::n, MemoryBounds::k, true);
 
@@ -443,7 +443,8 @@ public final class Certifier {
 
     /** The set that certifies {@code gate} (JCLAW-1369): synthetic strata for the classes and G_trap, else live. */
     public static String certifyingSet(String gate) {
-        return V2_CLASSES.contains(gate) || gate.equals(G_TRAP) ? CertificationSplit.CASES : CertificationSplit.HELDOUT;
+        return V2_CLASSES.contains(gate) || gate.equals(G_TRAP) ? CertificationSplit.SET_CASES
+                : CertificationSplit.SET_HELDOUT;
     }
 
     static String notEvaluable(String gate) {
@@ -742,7 +743,7 @@ public final class Certifier {
     }
 
     private static @Nullable GateBounds memoryLevel(GateBounds bounds) {
-        return Units.of(bounds).memories() ? bounds : null;
+        return Units.of(bounds).byMemory() ? bounds : null;
     }
 
     /** {@code memoryLevel} is the gate's bounds when they count memories, null for a record-level gate. */

@@ -634,10 +634,13 @@ public final class MemoryAutoCapture {
     /** The app-zone day of the source message, else of now: what a relative date in the turn was said against. */
     private static LocalDate captureAnchor(MemoryProvenance provenance) {
         var messageId = provenance.sourceMessageId();
-        @Nullable Instant said = messageId == null ? null : Tx.<@Nullable Instant>run(() -> {
-            Message source = Message.findById(messageId);
-            return source == null ? null : source.createdAt;
-        });
+        @Nullable Instant said = null;
+        if (messageId != null) {
+            said = Tx.<@Nullable Instant>run(() -> {
+                Message source = Message.findById(messageId);
+                return source == null ? null : source.createdAt;
+            });
+        }
         return (said != null ? said : AppClock.now()).atZone(TimezoneResolver.appZone()).toLocalDate();
     }
 

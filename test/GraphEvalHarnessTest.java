@@ -872,7 +872,7 @@ class GraphEvalHarnessTest extends UnitTest {
             assertEquals(List.of("Terms gate: " + TERMS_NOT_EVALUABLE), model.verdict().reasons());
             var terms = model.requirements().getFirst();
             assertEquals(Certifier.TERMS, terms.name());
-            assertEquals(CertificationSplit.HELDOUT, terms.set());
+            assertEquals(CertificationSplit.SET_HELDOUT, terms.set());
             assertEquals(Certifier.BASE_GATE_TAIL, terms.tail());
             assertEquals(0, terms.writingMemories(), "a cases split holds no live Term data");
             assertEquals(false, terms.reachable());
