@@ -151,12 +151,16 @@ test.describe('UAT-4 agent lifecycle', () => {
     // configured provider with a registered model. Skip rather than fail on an
     // install with only one provider — that is a valid configuration, not drift.
     const { modelProvider, modelId } = await borrowModelConfig(request)
-    const providers = await (await request.get('/api/providers')).json() as Array<{ name: string }>
+    // Candidates are the editor's own options: it leaves out a disabled provider, which /api/providers still lists.
+    await gotoPage(page, `/agents/${agentName}`)
+    await expect(page.getByLabel('Default Provider')).toHaveValue(modelProvider)
+    const offered = await page.getByLabel('Fallback Provider').locator('option')
+      .evaluateAll(options => options.map(o => (o as HTMLOptionElement).value).filter(Boolean))
     let fallback: { provider: string, modelId: string } | null = null
-    for (const p of providers.filter(p => p.name !== modelProvider)) {
-      const { models } = await (await request.get(`/api/providers/${p.name}/models`)).json() as { models: Array<{ id: string }> }
-      if (models[0]) {
-        fallback = { provider: p.name, modelId: models[0].id }
+    for (const name of offered) {
+      const { models } = await (await request.get(`/api/providers/${name}/models`)).json() as { models?: Array<{ id: string }> }
+      if (models?.[0]) {
+        fallback = { provider: name, modelId: models[0].id }
         break
       }
     }
