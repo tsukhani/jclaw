@@ -4245,7 +4245,8 @@ PYSTREAM
     fi
 
     if [[ "$sub" != "run" && "$sub" != "rescore" ]]; then
-        python3 -c 'import json,sys; [print("  %s: %s" % kv) for kv in json.load(open(sys.argv[1])).items()]' "$tmp"
+        # A held-out split's ids and hashes name memories, which stay off the console: print how many, not which.
+        python3 -c 'import json,sys; [print("  %s: %s" % (k, "%d entries" % len(v) if k in ("ids", "hashes") else v)) for k, v in json.load(open(sys.argv[1])).items()]' "$tmp"
         rm -f "$tmp"
         return 0
     fi
