@@ -73,6 +73,12 @@ public final class ExtractionPipeline {
     public static final String CORRECTION = "correction";
     public static final String OPERATOR_TYPE = "Person";
     public static final String EXCEEDS_CONTEXT = "exceeds context";
+    /**
+     * Packing to the context alone let a memory naming twelve things send nimble 56 questions in one request, which
+     * timed out and failed them all (JCLAW-1433). Twelve-question requests still ran up to 27 s and one drew Ollama's
+     * HTTP 500 at 30 s; at the 2.5 s a question seen at worst, eight answer in about 20 s.
+     */
+    public static final int MAX_QUESTIONS_PER_REQUEST = 8;
     public static final int OLLAMA_ATTEMPTS = 3;
     /** The lowest threshold a relation can write at; below it nothing is qualified. */
     public static final double KEPT = Collections.min(GraphEvalScorer.THRESHOLDS);
@@ -1067,15 +1073,19 @@ public final class ExtractionPipeline {
     }
 
     /**
-     * Asks every question, packed greedily into requests that fit the model's context and never truncated. A request
-     * refused with HTTP 400 is split in half and retried; a question that cannot fit alone fails with
-     * {@link #EXCEEDS_CONTEXT}. With no questions, sends nothing.
+     * Asks every question, packed greedily into requests of at most {@link #MAX_QUESTIONS_PER_REQUEST} that fit the
+     * model's context and are never truncated. A request refused with HTTP 400 is split in half and retried; a question
+     * that cannot fit alone fails with {@link #EXCEEDS_CONTEXT}. With no questions, sends nothing.
      */
     private static Map<String, Answer> ask(String model, JsonObject state, Map<String, JsonObject> questions,
                                            Decider decider) {
         var out = new HashMap<String, Answer>();
         var batch = new LinkedHashMap<String, JsonObject>();
         for (var entry : questions.entrySet()) {
+            if (batch.size() == MAX_QUESTIONS_PER_REQUEST) {
+                send(model, state, batch, decider, out);
+                batch = new LinkedHashMap<>();
+            }
             batch.put(entry.getKey(), entry.getValue());
             if (DecisionContext.fits(model, body(model, state, batch).toString())) continue;
             batch.remove(entry.getKey());
@@ -1199,20 +1209,24 @@ public final class ExtractionPipeline {
 
     /**
      * {@code x@<12 hex>}: a SHA-256 prefix over every question the pipeline can build against {@code schema}, the
-     * lexicons that decide what is asked and {@link TemporalExpressions#renderProbes()}. A graph-eval certificate holds
-     * only under the extraction fingerprint it was measured with, beside the schema's.
+     * lexicons that decide what is asked, {@link TemporalExpressions#renderProbes()} and
+     * {@link #MAX_QUESTIONS_PER_REQUEST}, since questions sharing a request are answered together. A graph-eval
+     * certificate holds only under the extraction fingerprint it was measured with, beside the schema's.
      */
     public static String fingerprint(OntologySchema schema) {
-        return fingerprint(fingerprintQuestions(schema), fingerprintLexicons(), TemporalExpressions.renderProbes());
+        return fingerprint(fingerprintQuestions(schema), fingerprintLexicons(), TemporalExpressions.renderProbes(),
+                MAX_QUESTIONS_PER_REQUEST);
     }
 
     /** The fingerprint over the given parts, so a test can change one. */
-    public static String fingerprint(List<String> questions, List<String> lexicons, String probes) {
+    public static String fingerprint(List<String> questions, List<String> lexicons, String probes,
+                                     int maxQuestionsPerRequest) {
         var canonical = new StringBuilder();
         questions.forEach(q -> canonical.append(q).append('\n'));
         canonical.append('\u001F');
         lexicons.forEach(l -> canonical.append(l).append('\n'));
         canonical.append('\u001F').append(probes);
+        canonical.append('\u001F').append(maxQuestionsPerRequest);
         try {
             var digest = MessageDigest.getInstance("SHA-256")
                     .digest(canonical.toString().getBytes(StandardCharsets.UTF_8));

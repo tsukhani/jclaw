@@ -152,11 +152,14 @@ threshold, and a relation needs both endpoints to: that requirement is the decis
 written, abstained (a choice below t or its floor), declined (`not_an_entity`, `neither`) or
 failed.
 
-Questions are packed greedily into `/v1/systemone` requests that fit the model's context
-(`DecisionContext`: tev1 2050, nimble 8194, clef-flash 16384 tokens, any other model 2050;
-the cl100k estimate is inflated by 1.25 since it is not the models' tokenizer), and are
-never truncated. A request refused with HTTP 400 is split in half and retried; a question
-that cannot fit alone fails with `exceeds context`.
+Questions are packed greedily into `/v1/systemone` requests of at most 8 questions that fit
+the model's context (`DecisionContext`: tev1 2050, nimble 8194, clef-flash 16384 tokens, any
+other model 2050; the cl100k estimate is inflated by 1.25 since it is not the models'
+tokenizer), and are never truncated. A request refused with HTTP 400 is split in half and
+retried; a question that cannot fit alone fails with `exceeds context`. The cap (JCLAW-1433)
+keeps a request answerable inside the timeout: packed to the context alone, a memory naming
+twelve things sent nimble 56 questions at once and the timeout failed them all, and requests of
+twelve still ran up to 27 s, one drawing Ollama's HTTP 500 at 30 s.
 
 Mentions are clustered by `ExactMatchResolver` on the canonical key (lower case, a leading
 "the", "a" or "an" and a possessive stripped, punctuation removed, a Topic's last token made
@@ -438,8 +441,9 @@ when its schema and extraction stamps and its digest match the running ones, and
 unknown key; otherwise it names which differs. Only what passed is enabled.
 
 Every report stamps `extraction: x@…` beside `schema`: a hash of every question text, lexicon
-and temporal probe the pipeline renders, so a wording change voids a certificate as a schema
-change does. The `schema` is the seed's fingerprint, `v<version>@<12 hex>`: a SHA-256 prefix
+and temporal probe the pipeline renders, and of the per-request question cap, since questions
+sharing a request are answered together, so a wording or batching change voids a certificate as
+a schema change does. The `schema` is the seed's fingerprint, `v<version>@<12 hex>`: a SHA-256 prefix
 over each term type's name and covers text and each relation's name and endpoints, the parts of
 the schema the questions are built from. A request that times out while the model is still
 loading waits for the load and is sent again, three attempts in all; one that times out on a

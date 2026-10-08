@@ -29,6 +29,7 @@ import services.grapheval.ExtractionPipeline.Decider;
 import services.grapheval.ExtractionPipeline.Decision;
 import services.grapheval.ExtractionPipeline.Inputs;
 import services.grapheval.ExtractionPipeline.Records;
+import services.grapheval.ExtractionPipeline.Typed;
 import services.grapheval.StoredRun;
 import utils.HttpFactories;
 
@@ -511,7 +512,29 @@ class ExtractionPipelineTest extends UnitTest {
 
         requests.clear();
         run(TEXT, manySpans(40), "clef-flash", scripted(Map.of(), Map.of()));
-        assertEquals(1, requests.size(), "a larger context takes them in one request");
+        assertEquals(Math.ceilDiv(40, ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST), requests.size(),
+                "a context that holds all 40 still sends at most the cap per request");
+        requests.forEach(r -> assertTrue(
+                r.getAsJsonObject("questions").size() <= ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST, r::toString));
+    }
+
+    @Test
+    void aMemoryNamingTwelveThingsAsksItsRelationsInCappedRequests() {
+        var terms = List.of(new Typed("Avery Lin", "Person"), new Typed("Dana Reyes", "Person"),
+                new Typed("Omar Haddad", "Person"), new Typed("Mira Okafor", "Person"),
+                new Typed("Harborlight Analytics", "Organization"), new Typed("Vela", "Organization"),
+                new Typed("Ashgrove", "Place"), new Typed("Port Calloway", "Place"),
+                new Typed("Project Kestrel", "Project"), new Typed("Fenwick", "System"), new Typed("Quillon", "System"),
+                new Typed("the Larchmere report", "Artifact"));
+        var text = "Avery Lin met Dana Reyes and Omar Haddad at Harborlight Analytics in Ashgrove to plan Project Kestrel,"
+                + " which uses Fenwick and Quillon; Vela in Port Calloway will host it, and Mira Okafor wrote the"
+                + " Larchmere report.";
+        var relations = ExtractionPipeline.relate(SCHEMA, text, terms, "clef-flash", scripted(Map.of(), Map.of()));
+        int asked = requests.stream().mapToInt(r -> r.getAsJsonObject("questions").size()).sum();
+        assertTrue(asked > ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST, "more questions than one request holds: " + asked);
+        requests.forEach(r -> assertTrue(
+                r.getAsJsonObject("questions").size() <= ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST, r::toString));
+        assertTrue(relations.decisions().stream().noneMatch(Decision::failed), relations.decisions().toString());
     }
 
     @Test
@@ -524,12 +547,12 @@ class ExtractionPipelineTest extends UnitTest {
             if (size > 3) throw new JevException("Ollama returned HTTP 400", 400);
             return answering.decide(request);
         };
-        var run = run(TEXT, manySpans(12), "clef-flash", small);
-        assertEquals(12, sizes.getFirst());
+        var run = run(TEXT, manySpans(ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST), "clef-flash", small);
+        assertEquals(ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST, sizes.getFirst());
         assertTrue(run.decisions().stream().noneMatch(Decision::failed), run.decisions().toString());
         var asked = new HashSet<String>();
         requests.forEach(r -> asked.addAll(r.getAsJsonObject("questions").keySet()));
-        assertEquals(12, asked.size(), "every question answered once the halves fit");
+        assertEquals(ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST, asked.size(), "every question answered once the halves fit");
 
         Decider never = _ -> {
             throw new JevException("Ollama returned HTTP 400", 400);
@@ -638,13 +661,13 @@ class ExtractionPipelineTest extends UnitTest {
                         .message("canned").body(ResponseBody.create(json, MediaType.get("application/json"))).build();
             };
             var client = new OkHttpClient.Builder().addInterceptor(ollama).build();
-            var run = HttpFactories.callWith(client, () -> run(TEXT, manySpans(12), "clef-flash",
+            var run = HttpFactories.callWith(client, () -> run(TEXT, manySpans(ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST), "clef-flash",
                     Decider.ollama(base, "tev1", 5_000)));
-            assertEquals(12, sizes.getFirst(), "one request first, refused with 400");
+            assertEquals(ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST, sizes.getFirst(), "one request first, refused with 400");
             assertTrue(sizes.stream().anyMatch(n -> n <= 3), sizes.toString());
             assertTrue(run.decisions().stream().noneMatch(Decision::failed), "every decision answered");
             var terms = stage(run, ExtractionPipeline.TERM);
-            assertEquals(12, terms.size());
+            assertEquals(ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST, terms.size());
             terms.forEach(d -> assertEquals("Person", d.choice(), d.toString()));
         } finally {
             JevBreakerTestSync.release();
@@ -1222,14 +1245,16 @@ class ExtractionPipelineTest extends UnitTest {
             assertTrue(lexicons.stream().anyMatch(l -> l.startsWith(family + " ")), family);
         }
         assertTrue(lexicons.contains("auxiliary does"));
-        assertEquals(fingerprint, ExtractionPipeline.fingerprint(questions, lexicons, probes));
+        assertEquals(fingerprint, ExtractionPipeline.fingerprint(questions, lexicons, probes, ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST));
         var swapped = new ArrayList<>(questions);
         swapped.set(swapped.size() - 1, swapped.getLast().replace("neither", "none"));
-        assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(swapped, lexicons, probes));
+        assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(swapped, lexicons, probes, ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST));
         var lexicon = new ArrayList<>(lexicons);
         lexicon.add("negation nae");
-        assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(questions, lexicon, probes));
-        assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(questions, lexicons, probes + "\nx"));
+        assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(questions, lexicon, probes, ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST));
+        assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(questions, lexicons, probes + "\nx", ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST));
+        assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(questions, lexicons, probes,
+                ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST + 1), "the batching cap moves answers, so it is fingerprinted");
 
         var shortlist = EntityResolver.fingerprintShortlistQuestion(EntityResolver.SHORTLIST_WORDING).toString();
         int at = questions.indexOf(shortlist);
@@ -1237,7 +1262,7 @@ class ExtractionPipelineTest extends UnitTest {
         var reworded = new ArrayList<>(questions);
         reworded.set(at, EntityResolver.fingerprintShortlistQuestion(
                 EntityResolver.SHORTLIST_WORDING.replace("cannot tell", "are unsure")).toString());
-        assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(reworded, lexicons, probes));
+        assertNotEquals(fingerprint, ExtractionPipeline.fingerprint(reworded, lexicons, probes, ExtractionPipeline.MAX_QUESTIONS_PER_REQUEST));
 
         var yaml = Files.readString(Play.applicationPath.toPath().resolve("conf/ontology/seed-schema.yaml"));
         var documentation = yaml.replace("When JClaw recorded the source", "When the source was recorded")
