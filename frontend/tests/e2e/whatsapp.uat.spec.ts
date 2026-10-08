@@ -13,6 +13,8 @@ import { test, expect, gotoPage, blockApiWrites } from './helpers'
  */
 
 const BINDINGS = '/api/channels/whatsapp/bindings'
+/** One binding's subscription or usage route: group 1 is the binding id, group 2 which of the two. */
+const PER_BINDING = /^\/api\/channels\/whatsapp\/bindings\/(\d+)\/(subscription|usage)$/
 const ABSENT_BINDING = 999_999_999
 const CLOUD = 9001
 const WABA = '104857600000001'
@@ -55,8 +57,8 @@ async function serveCards(page: Page, bindings: WhatsAppBindingSummary[], meta: 
   const asked: string[] = []
   await page.route(url => url.pathname === BINDINGS, route =>
     route.request().method() === 'GET' ? route.fulfill({ json: bindings }) : route.fallback())
-  await page.route(url => /^\/api\/channels\/whatsapp\/bindings\/\d+\/(subscription|usage)$/.test(url.pathname), (route) => {
-    const [, id, kind] = /(\d+)\/(subscription|usage)$/.exec(new URL(route.request().url()).pathname)!
+  await page.route(url => PER_BINDING.test(url.pathname), (route) => {
+    const [, id, kind] = PER_BINDING.exec(new URL(route.request().url()).pathname)!
     const method = route.request().method()
     asked.push(`${method} ${id}/${kind}`)
     if (kind === 'usage') return route.fulfill({ json: usage(Number(id), meta.usage) })
@@ -183,7 +185,8 @@ test.describe('UAT-24 WhatsApp binding cards', () => {
     // Any binding asked about would render both, so three cards showing one of each is the claim.
     await expect(page.getByTestId('subscription-warning')).toHaveCount(1)
     await expect(page.getByTestId('usage')).toHaveCount(1)
-    expect(meta.asked().sort()).toEqual([`GET ${CLOUD}/subscription`, `GET ${CLOUD}/usage`])
+    const asked = [...meta.asked()].sort((a, b) => a.localeCompare(b))
+    expect(asked).toEqual([`GET ${CLOUD}/subscription`, `GET ${CLOUD}/usage`])
   })
 
   test.describe('the routes themselves', () => {

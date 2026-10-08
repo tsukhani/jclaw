@@ -24,8 +24,9 @@ test.describe('UAT-7 memories', () => {
   test('rows render and pagination controls are present', async ({ page }) => {
     await gotoPage(page, '/memories')
     await expect(page.getByTestId('memory-row').first()).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Next' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Prev' })).toBeVisible()
+    // Exact: a row's Confirm button is named after its memory's text, which can hold either word.
+    await expect(page.getByRole('button', { name: 'Next', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Prev', exact: true })).toBeVisible()
   })
 
   test('filter grammar narrows the corpus', async ({ page }) => {
