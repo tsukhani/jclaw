@@ -45,6 +45,8 @@ $NoJre      = [bool]$env:JCLAW_NO_JRE
 $InstallJre = [bool]$env:JCLAW_INSTALL_JRE
 $Asset     = 'jclaw-bundle.zip'
 $MinJava   = 25
+# The module JClaw starts java with: jvm.memory in the bundle's conf/application.conf, not here yet when Java is checked.
+$JavaModule = 'jdk.incubator.vector'
 $AppDir    = Join-Path $JclawHome 'jclaw'   # bundle zip extracts under a jclaw\ prefix
 $JreDir    = Join-Path $JclawHome 'jre'     # managed Zulu JRE, sibling of jclaw\ (jclaw.sh finds it)
 $AzulApi   = 'https://api.azul.com/metadata/v1/zulu/packages/'
@@ -99,6 +101,10 @@ function Get-JavaMajorFrom([string]$Text) {
 
 # The major version an invoker reports as [int], or $null if absent/unparseable.
 function Get-JavaMajor([scriptblock]$Invoker) { Get-JavaMajorFrom (Get-JavaVersionText $Invoker) }
+
+# True when the invoker's java, given the module JClaw starts with, still prints its version: a Java without the
+# module fails at boot, before the banner, and could not start JClaw either.
+function Test-JavaModule([scriptblock]$Invoker) { $null -ne (Get-JavaMajor $Invoker) }
 
 function Show-JavaHelp([switch]$Auto) {
     Write-Host ''
@@ -166,6 +172,9 @@ function Get-ZuluJre {
         if (-not $said) { $said = '(nothing)' }
         throw "$($java.FullName) did not report Java $MinJava+ - it printed: $said"
     }
+    if (-not (Test-JavaModule { & $java.FullName "--add-modules=$JavaModule" -version })) {
+        throw "$($java.FullName) lacks the $JavaModule module - please report this."
+    }
     Substep "installed -> $(Split-Path $java.FullName)"
 }
 
@@ -232,13 +241,20 @@ if ($useWsl) {
     $jv = Get-JavaMajor { wsl.exe bash -lc 'java -version' }
     if ($null -eq $jv) { Substep 'No Git Bash; WSL found.'; Show-JavaHelp; Die "WSL is present but has no Java $MinJava+ (install it inside your WSL distro)." }
     if ($jv -lt $MinJava) { Show-JavaHelp; Die "WSL has Java $jv, but JClaw needs $MinJava or newer." }
+    # WSL gets no managed JRE, so a Java there without the module ends the install.
+    if (-not (Test-JavaModule { wsl.exe bash -lc "java --add-modules=$JavaModule -version" })) {
+        Show-JavaHelp; Die "WSL's Java $jv lacks the $JavaModule module JClaw starts with (install a full JRE or JDK $MinJava+ inside your WSL distro)."
+    }
     Substep "Java $jv detected (in WSL)"
 } else {
     $jv = Get-JavaMajor { java -version }
-    if ($null -ne $jv -and $jv -ge $MinJava) {
+    $lacksModule = $null -ne $jv -and $jv -ge $MinJava -and -not (Test-JavaModule { java "--add-modules=$JavaModule" -version })
+    if ($null -ne $jv -and $jv -ge $MinJava -and -not $lacksModule) {
         Substep "Java $jv detected"
     } else {
-        $reason = if ($null -eq $jv) { 'Java was not found on your PATH.' } else { "Found Java $jv, but JClaw needs $MinJava or newer." }
+        $reason = if ($null -eq $jv) { 'Java was not found on your PATH.' }
+                  elseif ($lacksModule) { "Found Java $jv, but it lacks the $JavaModule module JClaw starts with." }
+                  else { "Found Java $jv, but JClaw needs $MinJava or newer." }
         if (-not $NoJre -and $WinArch -and (Test-WantJre $reason)) {
             try { Get-ZuluJre; Substep "Java $MinJava ready (managed JRE)" }
             catch { Show-JavaHelp -Auto:([bool]$WinArch); Die $_.Exception.Message }

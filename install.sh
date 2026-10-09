@@ -59,6 +59,8 @@ APP_DIR="$JCLAW_HOME/jclaw"     # bundle zip extracts under a jclaw/ prefix
 JRE_DIR="$JCLAW_HOME/jre"       # self-contained Zulu JRE lands here when Java is missing
 ASSET="jclaw-bundle.zip"
 MIN_JAVA=25
+# The module JClaw starts java with: jvm.memory in the bundle's conf/application.conf, not here yet when Java is checked.
+JAVA_MODULE=jdk.incubator.vector
 AZUL_API="https://api.azul.com/metadata/v1/zulu/packages/"
 
 # Releases after this one carry SHA256SUMS.sig; at or below it they are unsigned.
@@ -160,7 +162,9 @@ check_java() {
         substep "Java $JV detected ${DIM}($(command -v java))${RESET}"
         return
     fi
-    if command -v java >/dev/null 2>&1; then
+    if [ -n "$JAVA_LACKS_MODULE" ]; then
+        REASON="Found Java $JV at $(command -v java), but it lacks the $JAVA_MODULE module JClaw starts with."
+    elif command -v java >/dev/null 2>&1; then
         REASON="Found Java ${JV:-?}, but JClaw needs Java $MIN_JAVA or newer."
     else
         REASON="Java was not found on your PATH."
@@ -171,6 +175,7 @@ check_java() {
             # A java that does not run at all was built for another C library or CPU.
             "$JAVA_HOME/bin/java" -version >/dev/null 2>&1 \
                 || die "the Zulu JRE in $JAVA_HOME cannot run on this system ($AZUL_OS, $(uname -m)) — please report this."
+            [ -z "$JAVA_LACKS_MODULE" ] || die "the Zulu JRE in $JAVA_HOME lacks the $JAVA_MODULE module — please report this."
             die "installed a Zulu JRE but \`java\` still isn't $MIN_JAVA+ — please report this."
         fi
         substep "Java $JV ready ${DIM}(managed JRE)${RESET}"
@@ -183,12 +188,15 @@ check_java() {
 #   openjdk version "25.0.1" 2025-...  →  25
 #   java version "1.8.0_412"           →  1  (correctly rejected)
 java_ok() {
+    JAVA_LACKS_MODULE=''
     command -v java >/dev/null 2>&1 || return 1
     # Pull the version from whichever line carries `version "…"` — never blindly
     # head -n1, since stderr noise (a broken-CWD `getcwd` warning, a
     # `Picked up JAVA_TOOL_OPTIONS` line) can precede it and break the parse.
     JV=$(java -version 2>&1 | sed -n 's/.*version "\([0-9][0-9]*\).*/\1/p' | head -n1)
-    [ -n "$JV" ] && [ "$JV" -ge "$MIN_JAVA" ]
+    [ -n "$JV" ] && [ "$JV" -ge "$MIN_JAVA" ] || return 1
+    # A Java without the module refuses to boot JClaw, with nothing saying why.
+    java --add-modules="$JAVA_MODULE" -version >/dev/null 2>&1 || { JAVA_LACKS_MODULE=1; return 1; }
 }
 
 # Decide whether to auto-install the JRE. Forced by JCLAW_INSTALL_JRE; else prompt
@@ -198,8 +206,9 @@ want_jre() {
     [ -n "$JCLAW_INSTALL_JRE" ] && return 0
     # Try to actually open the terminal — `[ -r /dev/tty ]` passes on the device
     # node even with no controlling tty (CI, `docker run` without -t), which would
-    # then make the prompt's redirect fail under `set -e`.
-    if { : >/dev/tty; } 2>/dev/null; then
+    # then make the prompt's redirect fail under `set -e`. In a subshell, because dash
+    # exits outright when a redirection fails on `:`, a special builtin.
+    if ( : >/dev/tty ) 2>/dev/null; then
         printf '\n%s%s%s\n' "$YELLOW" "$REASON" "$RESET" >/dev/tty
         printf 'Download a self-contained Zulu JRE %s (~50 MB) into %s? [Y/n] ' \
             "$MIN_JAVA" "$JRE_DIR" >/dev/tty

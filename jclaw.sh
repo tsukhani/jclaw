@@ -2442,6 +2442,35 @@ check_java() {
     fi
 }
 
+# The --add-modules flags of jvm.memory, which the bundle launcher passes to java on every start (play1 PF-183),
+# looked up as the launcher does: %prod.jvm.memory, then jvm.memory.
+conf_jvm_modules() {
+    local conf="$SCRIPT_DIR/conf/application.conf" key value="" flag mods=""
+    [[ -f "$conf" ]] || return 0
+    for key in "%prod.jvm.memory" "jvm.memory"; do
+        value=$(awk -v k="$key" 'index($0, k) == 1 && substr($0, length(k) + 1) ~ /^[[:space:]]*=/ {
+            v = substr($0, length(k) + 1); sub(/^[[:space:]]*=[[:space:]]*/, "", v); print v; exit }' "$conf" || true)
+        [[ -n "$value" ]] && break
+    done
+    for flag in $value; do
+        [[ "$flag" == --add-modules=* ]] && mods="$mods $flag"
+    done
+    printf '%s\n' "${mods# }"
+}
+
+# A Java without a module jvm.memory adds refuses to boot, with nothing saying why (JCLAW-1437).
+check_java_modules() {
+    local mods out missing
+    mods=$(conf_jvm_modules)
+    [[ -z "$mods" ]] && return 0
+    # shellcheck disable=SC2086
+    out=$(java $mods -version 2>&1) && return 0
+    missing=$(printf '%s\n' "$out" | sed -n 's/.*Module \([^ ]*\) not found.*/\1/p' | head -1)
+    echo "Error: the Java at $(command -v java) lacks the ${missing:-${mods//--add-modules=/}} module JClaw starts with (jvm.memory in conf/application.conf)."
+    echo "       Install a full JRE or JDK 25+, or re-run the JClaw installer with JCLAW_INSTALL_JRE=1 so it brings its own."
+    exit 1
+}
+
 # Verify Node.js is available. Required for the Nuxt dev server and the prod
 # SPA build (npx nuxi generate). pnpm no longer needs it — pnpm 12 is a native
 # binary — but Nuxt and vitest still run on Node.
@@ -2552,6 +2581,7 @@ check_play() {
 check_prereqs() {
     # Foundational — no dependencies on other checks
     check_java
+    check_java_modules
 
     # Derived — depends on the foundational checks above
     check_play       # the play CLI must be on PATH
