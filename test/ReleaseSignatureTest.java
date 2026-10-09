@@ -104,8 +104,8 @@ class ReleaseSignatureTest extends UnitTest {
 
     @Test
     void theVerifierStandsAlone() {
-        // jclaw.sh runs this class on precompiled/java alone, with no jar on the classpath: a
-        // reference outside the JDK fails at runtime, in the middle of an upgrade.
+        // jclaw.sh runs this class on the installed classes alone (precompiled/classes.jar), with no
+        // library on the classpath: a reference outside the JDK fails at runtime, in the middle of an upgrade.
         ArchRule rule = classes().that().haveNameMatching("utils\\.ReleaseSignature(\\$.*)?")
                 .should().onlyDependOnClassesThat(resideInAPackage("java..").or(type(ReleaseSignature.class)))
                 .because("jclaw.sh upgrade runs ReleaseSignature out of process on the compiled classes alone");

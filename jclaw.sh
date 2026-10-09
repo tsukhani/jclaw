@@ -22,6 +22,16 @@ native_path() {
     if [[ "$IS_WINDOWS" == 1 ]]; then cygpath -w "$1"; else printf '%s\n' "$1"; fi
 }
 
+# The compiled classes as a class path entry. A bundle or dist from play1 1.13.77 on carries them as
+# precompiled/classes.jar, which wins over a precompiled/java left beside it, as it does for Play; a clone has the folder.
+installed_classes() {
+    if [[ -f "$SCRIPT_DIR/precompiled/classes.jar" ]]; then
+        printf '%s\n' "$SCRIPT_DIR/precompiled/classes.jar"
+    else
+        printf '%s\n' "$SCRIPT_DIR/precompiled/java"
+    fi
+}
+
 # One pid per line for sockets on $1; pass "listen" to keep only LISTENing ones.
 # lsof is absent from Git Bash, so Windows falls back to netstat. Exit 2 means
 # NEITHER tool exists: callers must not read that as "the port is free", which is
@@ -3100,10 +3110,15 @@ do_start_prod() {
         # edited it). The matching `play run -Dprecompiled=true` below
         # would otherwise produce Play's terse "Precompiled classes
         # are missing!!" with no hint at the operator-side cause.
-        if [[ ! -d precompiled/java ]]; then
-            echo "Error: dist install is missing precompiled/java."
+        if [[ ! -f precompiled/classes.jar ]]; then
+            echo "Error: dist install is missing precompiled/classes.jar."
             echo "       The tarball was built without a precompile pass — re-run \`${INVOKE} dist\` from a developer clone and re-unzip the resulting dist/jclaw.zip."
             exit 1
+        fi
+        # An upgrade starts the new release through here, so no older install's class files outlive it beside the jar.
+        if [[ -d precompiled/java ]]; then
+            echo "==> Removing precompiled/java, an older install's classes — this release runs from precompiled/classes.jar"
+            rm -rf "${SCRIPT_DIR:?}/precompiled/java"
         fi
         if [[ ! -d public/spa ]]; then
             echo "Error: dist install is missing public/spa."
@@ -5445,7 +5460,7 @@ upgrade_verify_release() {
     printf '%s\n' "$UPGRADE_RELEASE_PUBKEY" >"$dir/release.pub"
     # The installed tree's own verifier, not openssl: Java is the one tool every
     # install has, and minimal Fedora, Alpine and UBI images ship no openssl.
-    if ! java -cp "$(native_path "$SCRIPT_DIR/precompiled/java")" utils.ReleaseSignature \
+    if ! java -cp "$(native_path "$(installed_classes)")" utils.ReleaseSignature \
             "$(native_path "$dir/release.pub")" "$(native_path "$dir/SHA256SUMS.sig")" \
             "$(native_path "$dir/SHA256SUMS")"; then
         echo "Error: the signature on SHA256SUMS for $target does not verify." >&2
@@ -5895,18 +5910,22 @@ db_engine_classpath() {
         echo "Error: Could not locate the Gson jar beside $h2." >&2
         return 1
     fi
-    # A dist has precompiled/ only; a source checkout may have both, and either can be
-    # the stale one, so take the tree that actually carries the engine.
+    # A dist has precompiled/classes.jar only; a source checkout may have both trees, and either
+    # can be the stale one, so take the tree that actually carries the engine.
     classes=""
     local candidate
-    for candidate in "$SCRIPT_DIR/precompiled/java" "$SCRIPT_DIR/build/classes/java/main"; do
-        if [[ -f "$candidate/services/database/H2Maintenance.class" ]]; then
-            classes="$candidate"
-            break
-        fi
-    done
+    if [[ -f "$SCRIPT_DIR/precompiled/classes.jar" ]]; then
+        classes="$SCRIPT_DIR/precompiled/classes.jar"
+    else
+        for candidate in "$SCRIPT_DIR/precompiled/java" "$SCRIPT_DIR/build/classes/java/main"; do
+            if [[ -f "$candidate/services/database/H2Maintenance.class" ]]; then
+                classes="$candidate"
+                break
+            fi
+        done
+    fi
     if [[ -z "$classes" ]]; then
-        echo "Error: no compiled classes carry the database tools (looked in precompiled/java and build/classes/java/main)." >&2
+        echo "Error: no compiled classes carry the database tools (looked in precompiled/classes.jar, precompiled/java and build/classes/java/main)." >&2
         echo "       Run '${INVOKE} restart' once so they are compiled, or './gradlew compileJava' on a source checkout." >&2
         return 1
     fi

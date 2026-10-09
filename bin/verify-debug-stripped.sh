@@ -19,10 +19,14 @@ command -v javap >/dev/null || { echo "verify-debug-stripped: javap not on PATH"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-# Extract only the precompiled Java classes (a few MB), not the whole bundle.
-unzip -q "$ZIP" '*/precompiled/java/*' -d "$TMP" || true
-JDIR="$(find "$TMP" -type d -path '*/precompiled/java' -print -quit)"
-[ -n "$JDIR" ] || { echo "verify-debug-stripped: no precompiled/java in $ZIP" >&2; exit 2; }
+# Extract only the precompiled Java classes (a few MB), not the whole bundle. play1 1.13.77 on
+# ships them as one jar, precompiled/classes.jar.
+unzip -q "$ZIP" '*/precompiled/classes.jar' -d "$TMP" || true
+JAR="$(find "$TMP" -type f -path '*/precompiled/classes.jar' -print -quit)"
+[ -n "$JAR" ] || { echo "verify-debug-stripped: no precompiled/classes.jar in $ZIP" >&2; exit 2; }
+JDIR="$TMP/classes"
+mkdir "$JDIR"
+unzip -q "$JAR" -d "$JDIR"
 
 COUNT="$(find "$JDIR" -name '*.class' | wc -l | tr -d ' ')"
 # Positive control: a real precompile of app/ is ~1500+ classes. A tiny count means the
