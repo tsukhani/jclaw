@@ -1,4 +1,5 @@
 import { onMounted, onUnmounted, triggerRef, type Ref, type ShallowRef } from 'vue'
+import { fetchConversationMessages } from '~/utils/conversation-messages'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
 import { backfillServerIds } from '~/utils/message-reconcile'
@@ -241,7 +242,7 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
     if (!convoId) return
     let fresh: Message[]
     try {
-      fresh = await $fetch<Message[]>(`/api/conversations/${convoId}/messages`) ?? []
+      fresh = await fetchConversationMessages(convoId) ?? []
     }
     catch (e) {
       console.error('Failed to poll for announce:', e)

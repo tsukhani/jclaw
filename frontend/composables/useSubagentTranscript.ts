@@ -10,6 +10,7 @@ import {
   type Ref,
   type ShallowRef,
 } from 'vue'
+import { fetchConversationMessages } from '~/utils/conversation-messages'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
 import type { Message, MessageAttachment, ToolCall } from '~/types/api'
@@ -37,9 +38,6 @@ interface CachedTranscript {
 }
 
 const POLL_INTERVAL_MS = 5000
-// The messages endpoint's largest page.
-const PAGE_SIZE = 500
-
 // Module-level because collapsing a chip unmounts its panel, and a re-expand must show what was loaded.
 const cache = new Map<number, CachedTranscript>()
 
@@ -50,19 +48,6 @@ function cachedTranscript(id: number): CachedTranscript {
     cache.set(id, entry)
   }
   return entry
-}
-
-// Null when the panel went away between pages: a collapsed chip sends nothing more, and half a window is never merged.
-async function fetchMessagesFrom(conversationId: number, offset: number, active: () => boolean): Promise<Message[] | null> {
-  const rows: Message[] = []
-  for (;;) {
-    const page = await $fetch<Message[]>(`/api/conversations/${conversationId}/messages`, {
-      query: { limit: PAGE_SIZE, offset: offset + rows.length },
-    }) ?? []
-    rows.push(...page)
-    if (page.length < PAGE_SIZE) return rows
-    if (!active()) return null
-  }
 }
 
 // Hydration carries calls forward to the next assistant row with content, so a window can only begin
@@ -208,7 +193,7 @@ export function useSubagentTranscript(
       const start = full ? 0 : incrementalStart(entry.messages.value)
       if (start > 0) {
         // One row before the window anchors the offset to a row the cache already holds.
-        const rows = await fetchMessagesFrom(childConversationId, start - 1, isActive)
+        const rows = await fetchConversationMessages(childConversationId, start - 1, isActive)
         if (!rows) return
         if (linesUp(entry.messages.value, rows, start - 1)) {
           merge(entry, rows.slice(1), start)
@@ -217,7 +202,7 @@ export function useSubagentTranscript(
         }
         if (!active) return
       }
-      const rows = await fetchMessagesFrom(childConversationId, 0, isActive)
+      const rows = await fetchConversationMessages(childConversationId, 0, isActive)
       if (!rows) return
       merge(entry, rows, 0)
       entry.loaded.value = true

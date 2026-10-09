@@ -4,6 +4,7 @@ import {
   ChatBubbleOvalLeftEllipsisIcon,
 } from '@heroicons/vue/24/outline'
 import type { Conversation, Message } from '~/types/api'
+import { fetchConversationMessages } from '~/utils/conversation-messages'
 import { computeUsageCostBreakdown } from '~/utils/usage-cost'
 import { routeClassLabel, routeDescription } from '~/utils/model-route'
 import { renderMarkdown } from '~/utils/chat-markdown'
@@ -24,7 +25,7 @@ try {
   // row even though the message body underneath was correct.
   const [convo, msgs] = await Promise.all([
     $fetch<Conversation>(`/api/conversations/${id}`),
-    $fetch<Message[]>(`/api/conversations/${id}/messages`),
+    fetchConversationMessages(id),
   ])
   conversation.value = convo ?? null
   messages.value = msgs ?? []

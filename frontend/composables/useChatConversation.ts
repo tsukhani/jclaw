@@ -1,4 +1,5 @@
 import { computed, ref, shallowRef, triggerRef, watch, type ComputedRef, type Ref } from 'vue'
+import { fetchConversationMessages } from '~/utils/conversation-messages'
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
 import { backfillServerIds } from '~/utils/message-reconcile'
@@ -99,7 +100,7 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     const convoId = selectedConvoId.value
     if (!convoId) return
     try {
-      const fresh = await $fetch<Message[]>(`/api/conversations/${convoId}/messages`)
+      const fresh = await fetchConversationMessages(convoId)
       if (selectedConvoId.value !== convoId) return
       if (!fresh?.length) return
       if (backfillServerIds(messages.value, fresh)) triggerRef(messages)
@@ -177,7 +178,7 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     const request = loads.begin()
     selectedConvoId.value = id
     hooks.beforeLoad?.() // a prior conversation's poll loop shouldn't leak into this one
-    const loaded = await $fetch<Message[]>(`/api/conversations/${id}/messages`) ?? []
+    const loaded = await fetchConversationMessages(id) ?? []
     if (!loads.isCurrent(request)) return
     // JCLAW-170: fold persisted tool-role rows into the following assistant
     // message's toolCalls array so the tool-calls block re-renders on reload.

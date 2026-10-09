@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { Agent, ApiErrorDetails, Message } from '~/types/api'
+import { fetchConversationMessages } from '~/utils/conversation-messages'
 import { SUBAGENT_STATUS_BADGE } from '~/utils/subagent-status'
 // UsersRound matches the Subagents nav icon (the "spawned children" glyph) so
 // the empty-state landing reads as the same surface.
@@ -399,7 +400,7 @@ async function selectRun(run: SubagentRun) {
   peekOpen.value = true
   peekMessages.value = run.childConversationId === null
     ? []
-    : (await $fetch<Message[]>(`/api/conversations/${run.childConversationId}/messages`) ?? [])
+    : (await fetchConversationMessages(run.childConversationId) ?? [])
 }
 
 function closePeek() {

@@ -4,6 +4,7 @@ import type { Filter } from '~/components/FilterBar.vue'
 import { h } from 'vue'
 import type { SortingState } from '@tanstack/vue-table'
 import type { DataTableColumn } from '~/utils/data-table'
+import { fetchConversationMessages } from '~/utils/conversation-messages'
 import { ChatBubbleLeftRightIcon, PencilSquareIcon, StarIcon as StarOutlineIcon } from '@heroicons/vue/24/outline'
 import { StarIcon as StarSolidIcon } from '@heroicons/vue/24/solid'
 
@@ -385,7 +386,7 @@ const peekOpen = ref(false)
 async function selectConversation(convo: Conversation) {
   selectedConvo.value = convo
   peekOpen.value = true
-  messages.value = await $fetch<Message[]>(`/api/conversations/${convo.id}/messages`) ?? []
+  messages.value = await fetchConversationMessages(convo.id) ?? []
 }
 
 function closePeek() {

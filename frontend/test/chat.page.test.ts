@@ -660,6 +660,31 @@ describe('Chat page — async subagent announce polling', () => {
     vi.restoreAllMocks()
   })
 
+  it('loads every message of a conversation longer than one page, not only the first 200', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 450, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
+        peerId: 'admin', messageCount: 260, preview: 'long',
+        createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
+    ])
+    const rows = Array.from({ length: 260 }, (_, i) => ({
+      id: 9000 + i, role: i % 2 ? 'assistant' : 'user', content: `turn ${i}`, createdAt: '2026-05-14T10:00:00Z' }))
+    // Served as the endpoint does: oldest first, 200 rows when unpaged, `limit` from `offset` otherwise.
+    registerEndpoint('/api/conversations/450/messages', async (event) => {
+      const { getQuery } = await import('h3')
+      const query = getQuery(event)
+      const offset = Number(query.offset) || 0
+      return rows.slice(offset, offset + Math.min(Number(query.limit) || 200, 500))
+    })
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    await (component.vm as unknown as { loadConversation: (id: number) => Promise<void> }).loadConversation(450)
+    await flushPromises()
+
+    expect(component.text()).toContain('turn 259')
+  })
+
   it('polls for new messages when an async subagent run is pending', async () => {
     setupBaseChatApi()
     registerEndpoint('/api/conversations', () => [
