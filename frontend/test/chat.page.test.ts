@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import Chat from '~/pages/chat.vue'
+import { serveConversation } from './conversation-endpoint'
 
 /**
  * Page-level Vitest coverage for the {@code chat.vue} streaming state machine
@@ -660,29 +661,83 @@ describe('Chat page — async subagent announce polling', () => {
     vi.restoreAllMocks()
   })
 
-  it('loads every message of a conversation longer than one page, not only the first 200', async () => {
+  // Turn i of a long conversation, saved i * 10 s after the first; even turns are the user's, odd ones replies.
+  const longTurnAt = (i: number) => new Date(Date.UTC(2026, 4, 14, 10, 0, i * 10)).toISOString()
+  async function openLongConversation(count: number, attachTo?: HTMLElement) {
     setupBaseChatApi()
     registerEndpoint('/api/conversations', () => [
       { id: 450, agentId: 1, agentName: 'streaming-agent', channelType: 'web',
-        peerId: 'admin', messageCount: 260, preview: 'long',
+        peerId: 'admin', messageCount: count, preview: 'long',
         createdAt: '2026-05-14T10:00:00Z', updatedAt: '2026-05-14T10:00:00Z' },
     ])
-    const rows = Array.from({ length: 260 }, (_, i) => ({
-      id: 9000 + i, role: i % 2 ? 'assistant' : 'user', content: `turn ${i}`, createdAt: '2026-05-14T10:00:00Z' }))
-    // Served as the endpoint does: oldest first, 200 rows when unpaged, `limit` from `offset` otherwise.
-    registerEndpoint('/api/conversations/450/messages', async (event) => {
-      const { getQuery } = await import('h3')
-      const query = getQuery(event)
-      const offset = Number(query.offset) || 0
-      return rows.slice(offset, offset + Math.min(Number(query.limit) || 200, 500))
-    })
-
-    const component = await mountSuspended(Chat)
+    const rows: Array<{ id: number, role: string, content: string, createdAt: string }> = Array.from(
+      { length: count }, (_, i) => ({ id: 9000 + i, role: i % 2 ? 'assistant' : 'user', content: `turn ${i}.`, createdAt: longTurnAt(i) }))
+    const asked = serveConversation(450, rows)
+    const component = await mountSuspended(Chat, attachTo ? { attachTo } : {})
     await flushPromises()
-    await (component.vm as unknown as { loadConversation: (id: number) => Promise<void> }).loadConversation(450)
+    const vm = component.vm as unknown as {
+      loadConversation: (id: number) => Promise<void>
+      loadOlderMessages: () => Promise<void>
+      pollForAnnounce: () => Promise<void>
+      messages: Array<{ id?: number }>
+    }
+    await vm.loadConversation(450)
     await flushPromises()
+    return { rows, asked, component, vm }
+  }
 
-    expect(component.text()).toContain('turn 259')
+  it('opens a long conversation at its newest page and loads older turns on request', async () => {
+    const { rows, asked, component, vm } = await openLongConversation(260)
+
+    // The newest page is turns 160-259; it opens at turn 162, the first user row whose turn it holds whole.
+    expect(component.text()).toContain('turn 259.')
+    expect(component.text()).not.toContain('turn 161.')
+    expect(vm.messages[0]?.id).toBe(9162)
+
+    for (let i = 0; i < 5; i++) await vm.loadOlderMessages()
+    await flushPromises()
+    expect(component.text()).toContain('turn 0.')
+    expect(vm.messages.map(m => m.id)).toEqual(rows.map(r => r.id))
+
+    // New rows are fetched from the newest settled reply a minute behind the newest row: turn 253.
+    asked.length = 0
+    await vm.pollForAnnounce()
+    expect(asked).toEqual([{ after: '9253', limit: '500' }])
+  })
+
+  it('loads older turns from a button, for a reader who cannot scroll, and then hands focus to the list', async () => {
+    const { component, vm } = await openLongConversation(260, document.body)
+    const button = () => component.find('[data-testid="chat-load-older"]')
+    expect(button().text()).toBe('Load earlier messages')
+
+    ;(button().element as HTMLButtonElement).focus()
+    await button().trigger('click')
+    expect(button().attributes('aria-busy')).toBe('true')
+    expect(button().text()).toBe('Loading earlier messages…')
+    await vi.waitFor(() => expect(vm.messages[0]?.id).toBe(9062))
+    await flushPromises()
+    expect(document.activeElement).toBe(button().element)
+
+    await button().trigger('click')
+    await vi.waitFor(() => expect(button().exists()).toBe(false))
+    expect(vm.messages[0]?.id).toBe(9000)
+    expect(document.activeElement).toBe(component.find('[data-testid="chat-messages-scroll"]').element)
+    component.unmount()
+  })
+
+  it('fetches a row that commits after a newer one it was saved before', async () => {
+    const { rows, component, vm } = await openLongConversation(260)
+
+    rows.push({ id: 9261, role: 'assistant', content: 'committed first.', createdAt: longTurnAt(261) })
+    await vm.pollForAnnounce()
+    await flushPromises()
+    expect(component.text()).toContain('committed first.')
+
+    // Saved before 9261, so it carries the lower id, but its transaction commits only after that poll.
+    rows.splice(260, 0, { id: 9260, role: 'user', content: 'committed late.', createdAt: longTurnAt(260) })
+    await vm.pollForAnnounce()
+    await flushPromises()
+    expect(component.text()).toContain('committed late.')
   })
 
   it('polls for new messages when an async subagent run is pending', async () => {

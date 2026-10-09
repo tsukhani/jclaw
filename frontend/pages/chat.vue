@@ -140,6 +140,10 @@ const {
   reconcileMessageIds,
   resolveAndLoadConversation,
   loadConversation,
+  hasOlderMessages,
+  loadingOlder,
+  earlierUsages,
+  loadOlderMessages,
 } = useChatConversation({ agents, selectedAgentId, hooks: convHooks })
 
 // Agent + model + thinking-config state (model resolution chain, capability
@@ -198,7 +202,16 @@ const chatInput = ref<HTMLTextAreaElement | null>(null)
 const streamReasoning = ref('')
 // Autoscroll coordination (viewport el + scrollToBottom + reasoning-body pin)
 // lives in useChatScroll; it reads the stream state it reacts to as args.
-const { messagesEl, scrollToBottom } = useChatScroll(streaming, streamReasoning)
+const { messagesEl, scrollToBottom, keepViewport } = useChatScroll(streaming, streamReasoning, loadOlderMessages)
+
+// Older turns without scrolling, for a keyboard or screen-reader user; focus moves to the list once none remain.
+const loadOlderButton = ref<HTMLButtonElement | null>(null)
+async function loadEarlierMessages() {
+  if (loadingOlder.value) return
+  const hadFocus = document.activeElement === loadOlderButton.value
+  await loadOlderMessages(keepViewport)
+  if (hadFocus && !hasOlderMessages.value) messagesEl.value?.focus()
+}
 
 onMounted(() => {
   focusInput()
@@ -273,6 +286,7 @@ convHooks.afterLoad = (msgs) => {
   focusInput()
   startVideoPolling() // resume progress polling for any pending video placeholder
 }
+convHooks.afterPrepend = older => initSubagentCollapsedState(older)
 
 // Async-spawn announce / task-delivery poller (JCLAW-270/326) lives in
 // useChatAnnouncePoller. Conversation-refresh, not display — it merges
@@ -302,7 +316,7 @@ const {
   contextPromptTokens,
   conversationCumulativeTokens,
   conversationCostSummary,
-} = useChatUsageMeter(displayMessages, streaming)
+} = useChatUsageMeter(displayMessages, streaming, earlierUsages)
 
 // Deep-link: if ?conversation=ID is present, load that conversation and switch
 // to its agent on mount.
@@ -899,6 +913,7 @@ function exportConversation() {
           ref="messagesEl"
           data-testid="chat-messages-scroll"
           tabindex="-1"
+          :aria-busy="loadingOlder"
           class="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-6"
         >
           <!--
@@ -914,6 +929,22 @@ function exportConversation() {
           past the card's right edge.
         -->
           <div class="mx-auto w-full max-w-3xl px-4 space-y-5">
+            <div
+              v-if="hasOlderMessages || loadingOlder"
+              class="flex justify-center"
+            >
+              <button
+                ref="loadOlderButton"
+                type="button"
+                data-testid="chat-load-older"
+                :aria-disabled="loadingOlder"
+                :aria-busy="loadingOlder"
+                class="text-xs text-fg-muted underline underline-offset-2 hover:text-fg-strong"
+                @click="loadEarlierMessages"
+              >
+                {{ loadingOlder ? 'Loading earlier messages…' : 'Load earlier messages' }}
+              </button>
+            </div>
             <ChatMessage
               v-for="(msg, msgIdx) in displayMessages"
               :key="msg.id ?? msg._key"

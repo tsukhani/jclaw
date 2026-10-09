@@ -4,6 +4,7 @@ import { mount } from '@vue/test-utils'
 import type { Message } from '~/types/api'
 import type { MessageUsage } from '~/utils/usage-cost'
 import { useChatUsageMeter, type UseChatUsageMeter } from '~/composables/useChatUsageMeter'
+import type { MessageUsageRow } from '~/utils/conversation-messages'
 
 function assistant(usage: Partial<MessageUsage>): Message {
   return { role: 'assistant', content: '', usage: usage as MessageUsage } as Message
@@ -12,14 +13,14 @@ function user(): Message {
   return { role: 'user', content: 'hi' } as Message
 }
 
-function mountMeter(msgs: Message[] = [], streamingInit = false) {
+function mountMeter(msgs: Message[] = [], streamingInit = false, earlier: MessageUsageRow[] = []) {
   const displayMessages = ref<Message[]>(msgs)
   const streaming = ref(streamingInit)
   let api!: UseChatUsageMeter
   const wrapper = mount(
     defineComponent({
       setup() {
-        api = useChatUsageMeter(displayMessages, streaming)
+        api = useChatUsageMeter(displayMessages, streaming, ref(earlier))
         return () => h('div')
       },
     }),
@@ -56,6 +57,17 @@ describe('useChatUsageMeter', () => {
       assistant({ prompt: 20, completion: 8 }),
     ])
     expect(api.conversationCumulativeTokens.value).toBe(43) // 15 + 28
+  })
+
+  it('counts the usage of rows older than the loaded ones in the totals and the first switch divider', () => {
+    const { api } = mountMeter(
+      [assistant({ prompt: 20, completion: 8, modelId: 'b' })],
+      false,
+      [{ id: 1, usage: { prompt: 10, completion: 5, modelId: 'a' } as MessageUsage }],
+    )
+    expect(api.conversationCumulativeTokens.value).toBe(43)
+    expect(api.conversationCostSummary.value?.turnCount ?? 2).toBe(2)
+    expect(api.shouldShowModelSwitchIndicator(0)).toBe(true) // a, before the window, then b
   })
 
   it('shouldShowModelSwitchIndicator flags an assistant turn on a different model than the prior one', () => {

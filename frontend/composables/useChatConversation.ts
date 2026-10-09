@@ -1,6 +1,13 @@
 import { computed, ref, shallowRef, triggerRef, watch, type ComputedRef, type Ref } from 'vue'
-import { fetchConversationMessages } from '~/utils/conversation-messages'
-import { hydrateToolCalls } from '~/utils/tool-calls'
+import {
+  fetchHistoryPage,
+  fetchMessagesAfter,
+  fetchUsageBefore,
+  HISTORY_PAGE_SIZE,
+  newRowsCursor,
+  type MessageUsageRow,
+} from '~/utils/conversation-messages'
+import { hydrateToolCalls, turnWindowStart } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
 import { backfillServerIds } from '~/utils/message-reconcile'
 import type { Agent, Conversation, Message } from '~/types/api'
@@ -27,7 +34,12 @@ export interface ChatConversationLoadHooks {
   beforeLoad?: () => void
   /** Runs after messages land (subagent-collapse init, autoscroll, focus, resume video poll). */
   afterLoad?: (messages: Message[]) => void
+  /** Runs after older rows are prepended, with just those rows. */
+  afterPrepend?: (older: Message[]) => void
 }
+
+/** Applies a prepend of older rows while keeping the reader's place; false refuses it and leaves the list as it was. */
+export type PrependOlder = (prepend: () => void) => Promise<boolean>
 
 export interface UseChatConversationDeps {
   /** useFetch data ref — `undefined` while pending, so accept it alongside null. */
@@ -47,6 +59,12 @@ export interface UseChatConversation {
   reconcileMessageIds: () => Promise<void>
   resolveAndLoadConversation: (id: number) => Promise<boolean>
   loadConversation: (id: number) => Promise<void>
+  /** True while the shown messages start after the conversation's first row. */
+  hasOlderMessages: Ref<boolean>
+  loadingOlder: Ref<boolean>
+  /** Token usage of the rows older than the shown ones, so a total still covers the whole conversation. */
+  earlierUsages: Ref<MessageUsageRow[]>
+  loadOlderMessages: (apply?: PrependOlder) => Promise<void>
 }
 
 export function useChatConversation(deps: UseChatConversationDeps): UseChatConversation {
@@ -100,7 +118,7 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     const convoId = selectedConvoId.value
     if (!convoId) return
     try {
-      const fresh = await fetchConversationMessages(convoId)
+      const fresh = await fetchMessagesAfter(convoId, newRowsCursor(messages.value))
       if (selectedConvoId.value !== convoId) return
       if (!fresh?.length) return
       if (backfillServerIds(messages.value, fresh)) triggerRef(messages)
@@ -173,19 +191,13 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     return true
   }
 
-  const loads = useLatestRequest()
-  async function loadConversation(id: number) {
-    const request = loads.begin()
-    selectedConvoId.value = id
-    hooks.beforeLoad?.() // a prior conversation's poll loop shouldn't leak into this one
-    const loaded = await fetchConversationMessages(id) ?? []
-    if (!loads.isCurrent(request)) return
-    // JCLAW-170: fold persisted tool-role rows into the following assistant
-    // message's toolCalls array so the tool-calls block re-renders on reload.
-    // Mutates in place, then we also collapse the block by default for
-    // historical turns — same UX as the thinking card.
-    hydrateToolCalls(loaded as unknown as Array<Record<string, unknown>>)
-    for (const m of loaded) {
+  // JCLAW-170: fold persisted tool-role rows into the following assistant
+  // message's toolCalls array so the tool-calls block re-renders on reload.
+  // Mutates in place, then we also collapse the block by default for
+  // historical turns — same UX as the thinking card.
+  function prepareHistorical(rows: Message[]) {
+    hydrateToolCalls(rows as unknown as Array<Record<string, unknown>>)
+    for (const m of rows) {
       if (!m.toolCalls?.length) continue
       // Outer accordion: collapsed by default on historical turns to keep the
       // transcript dense; users click "N tool calls" to drill in.
@@ -197,9 +209,110 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
         m.toolCalls[i]!._expanded = i === m.toolCalls.length - 1
       }
     }
-    messages.value = loaded
-    initCollapsedState(messages.value)
+    initCollapsedState(rows)
+  }
+
+  // The shown rows are the newest part of the conversation; rows fetched but not yet shown wait in heldBack, because
+  // the window may only open where hydration can start (turnWindowStart). Bumping windowGen orphans in-flight fetches.
+  let heldBack: Message[] = []
+  let historyExhausted = true
+  let windowGen = 0
+  const hasOlderMessages = ref(false)
+  const loadingOlder = ref(false)
+  const earlierUsages = shallowRef<MessageUsageRow[]>([])
+
+  function resetWindow() {
+    windowGen++
+    heldBack = []
+    historyExhausted = true
+    hasOlderMessages.value = false
+    loadingOlder.value = false
+    earlierUsages.value = []
+  }
+  watch(selectedConvoId, resetWindow, { flush: 'sync' })
+
+  /** Pulls older pages in front of `rows` until a turn can open the window; null when `current` turns false meanwhile. */
+  async function windowFrom(id: number, rows: Message[], exhausted: boolean, oldestShown: number | null,
+    current: () => boolean) {
+    let start = turnWindowStart(rows, exhausted)
+    while (start < 0) {
+      const page = await fetchHistoryPage(id, rows[0]?.id ?? oldestShown)
+      if (!current()) return null
+      rows = [...page, ...rows]
+      exhausted = page.length < HISTORY_PAGE_SIZE
+      start = turnWindowStart(rows, exhausted)
+    }
+    return { held: rows.slice(0, start), shown: rows.slice(start), exhausted }
+  }
+
+  function keepWindow(held: Message[], exhausted: boolean) {
+    heldBack = held
+    historyExhausted = exhausted
+    hasOlderMessages.value = held.length > 0 || !exhausted
+  }
+
+  async function loadEarlierUsages(id: number, before: number, current: () => boolean) {
+    try {
+      const rows = await fetchUsageBefore(id, before)
+      if (!current()) return
+      const oldestShown = messages.value[0]?.id ?? before
+      earlierUsages.value = rows.filter(u => u.id < oldestShown)
+    }
+    catch (e) {
+      console.error('Failed to load the earlier usage:', e)
+    }
+  }
+
+  const loads = useLatestRequest()
+  async function loadConversation(id: number) {
+    const request = loads.begin()
+    selectedConvoId.value = id
+    resetWindow()
+    const gen = windowGen
+    const current = () => loads.isCurrent(request) && gen === windowGen
+    hooks.beforeLoad?.() // a prior conversation's poll loop shouldn't leak into this one
+    const newest = await fetchHistoryPage(id, null)
+    if (!current()) return
+    const window = await windowFrom(id, newest, newest.length < HISTORY_PAGE_SIZE, null, current)
+    if (!window) return
+    keepWindow(window.held, window.exhausted)
+    prepareHistorical(window.shown)
+    messages.value = window.shown
     hooks.afterLoad?.(messages.value)
+    const oldestShown = window.shown[0]?.id
+    if (hasOlderMessages.value && oldestShown != null) void loadEarlierUsages(id, oldestShown, current)
+  }
+
+  async function loadOlderMessages(apply: PrependOlder = async (prepend) => {
+    prepend()
+    return true
+  }) {
+    const id = selectedConvoId.value
+    const oldestShown = messages.value[0]?.id
+    if (!id || oldestShown == null || !hasOlderMessages.value || loadingOlder.value) return
+    const gen = windowGen
+    const current = () => gen === windowGen
+    loadingOlder.value = true
+    try {
+      const window = await windowFrom(id, heldBack, historyExhausted, oldestShown, current)
+      if (!window) return
+      const committed = await apply(() => {
+        prepareHistorical(window.shown)
+        keepWindow(window.held, window.exhausted)
+        const oldestNow = window.shown[0]?.id ?? oldestShown
+        earlierUsages.value = earlierUsages.value.filter(u => u.id < oldestNow)
+        messages.value = [...window.shown, ...messages.value]
+        hooks.afterPrepend?.(window.shown)
+      })
+      // Refused rows stay fetched, unhydrated, so the next attempt shows them without asking again.
+      if (!committed && current()) keepWindow([...window.held, ...window.shown], window.exhausted)
+    }
+    catch (e) {
+      console.error('Failed to load earlier messages:', e)
+    }
+    finally {
+      if (current()) loadingOlder.value = false
+    }
   }
 
   return {
@@ -212,5 +325,9 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
     reconcileMessageIds,
     resolveAndLoadConversation,
     loadConversation,
+    hasOlderMessages,
+    loadingOlder,
+    earlierUsages,
+    loadOlderMessages,
   }
 }

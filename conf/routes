@@ -260,6 +260,7 @@ DELETE  /api/attachments/{uuid}                 ApiAttachmentsController.deleteA
 GET     /api/conversations                      ApiConversationsController.listConversations
 GET     /api/conversations/channels             ApiConversationsController.listConversationChannels
 GET     /api/conversations/{id}/messages        ApiConversationsController.getMessages
+GET     /api/conversations/{id}/usage           ApiConversationsController.getUsage
 DELETE  /api/conversations/{id}/messages/{mid}  ApiConversationsController.deleteMessage
 GET     /api/conversations/{id}/queue           ApiConversationsController.getQueueStatus
 POST    /api/conversations/{id}/stop            ApiConversationsController.stopTurn

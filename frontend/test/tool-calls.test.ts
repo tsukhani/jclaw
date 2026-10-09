@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { hydrateToolCalls } from '~/utils/tool-calls'
+import { hydrateToolCalls, settledRowId, turnWindowStart } from '~/utils/tool-calls'
 
 /**
  * JCLAW-170: hydration fold for persisted tool activity. Asserts the three
@@ -233,5 +233,57 @@ describe('hydrateToolCalls', () => {
     const carrier = msgs[1] as { toolCalls: Array<{ id: string }>, attachments: unknown[] }
     expect(carrier.toolCalls.map(tc => tc.id)).toEqual(['tc1'])
     expect(carrier.attachments).toEqual([img])
+  })
+})
+
+describe('turnWindowStart', () => {
+  const call = (id: string) => ({ id, type: 'function', function: { name: 'exec', arguments: '{}' } })
+  // A run whose calls wait past a queued user row for the reply that takes them, then a stopped turn, then two turns.
+  const conversation = (): Array<Record<string, unknown>> => [
+    { id: 1, role: 'user', content: 'run it' },
+    { id: 2, role: 'assistant', content: null, toolCalls: [call('c1')] },
+    { id: 3, role: 'tool', content: 'r1', toolResults: 'c1' },
+    { id: 4, role: 'user', content: 'queued while it ran' },
+    { id: 5, role: 'assistant', content: 'done' },
+    { id: 6, role: 'user', content: 'again' },
+    { id: 7, role: 'assistant', content: null, toolCalls: [call('c2')] },
+    { id: 8, role: 'assistant', messageKind: 'stop_marker', content: '(Stopped)' },
+    { id: 9, role: 'user', content: 'next' },
+    { id: 10, role: 'assistant', content: 'reply' },
+    { id: 11, role: 'user', content: 'inside a run', subagentRunId: 77 },
+    { id: 12, role: 'user', content: 'last' },
+    { id: 13, role: 'assistant', content: 'end' },
+  ]
+
+  const startId = (rows: Array<Record<string, unknown>>, opensConversation: boolean) => {
+    const i = turnWindowStart(rows, opensConversation)
+    return i < 0 ? null : rows[i]!.id
+  }
+
+  it('opens only at a user row nothing earlier still waits to attach to', () => {
+    // Not row 4 (c1 waits for row 5), not 9 (c2 waits past the stop marker), not 11 (inside a subagent run).
+    expect(startId(conversation(), false)).toBe(6)
+    expect(startId(conversation().slice(6), false)).toBe(12)
+    expect(startId(conversation().slice(10), false)).toBeNull()
+    expect(startId(conversation().slice(10), true)).toBe(11)
+  })
+
+  it('hydrates a window opened there exactly as the whole conversation hydrates it', () => {
+    for (let from = 0; from < conversation().length; from++) {
+      const rows = conversation().slice(from)
+      const start = turnWindowStart(rows, false)
+      if (start < 0) continue
+      const whole = conversation()
+      hydrateToolCalls(whole)
+      const window = rows.slice(start)
+      hydrateToolCalls(window)
+      expect(window, `window opened at row ${rows[start]!.id}`).toEqual(whole.slice(from + start))
+    }
+  })
+
+  it('names the newest assistant row with text and an id as settled', () => {
+    expect(settledRowId(conversation())).toBe(13)
+    expect(settledRowId(conversation().slice(0, 9))).toBe(5)
+    expect(settledRowId(conversation().slice(0, 3))).toBeNull()
   })
 })

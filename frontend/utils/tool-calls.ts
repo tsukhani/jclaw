@@ -106,7 +106,7 @@ function collectNormalizedCalls(
 }
 
 // A stop marker renders as a bare note, so a stopped turn's calls and attachments stay on its own rows.
-function isStopMarker(row: RawRow): boolean {
+function isStopMarker(row: RawRow | LoadedRow): boolean {
   return row.messageKind === 'stop_marker'
 }
 
@@ -174,6 +174,51 @@ function flushIntoContentRow(m: RawRow, pending: Pending): void {
     ]
     pending.attachments = []
   }
+}
+
+/** The fields the window rules read from a loaded Message, which RawRow's index signature would refuse. */
+interface LoadedRow {
+  id?: number
+  role: string
+  content: string | null
+  toolCalls?: unknown[] | null
+  attachments?: unknown[] | null
+  messageKind?: string | null
+  subagentRunId?: number | null
+}
+
+// True once a row leaves nothing for hydrateToolCalls to carry forward, false while calls wait for a content row.
+function settlesAt(m: RawRow | LoadedRow, settled: boolean): boolean {
+  if (m.role !== 'assistant' || isStopMarker(m)) return settled
+  if (m.content) return true
+  const drains = Array.isArray(m.toolCalls)
+    && (m.toolCalls.length > 0 || (Array.isArray(m.attachments) && m.attachments.length > 0))
+  return drains ? false : settled
+}
+
+/**
+ * Index of the first user row a window of `rows` can open at: hydrating from it gives the same rows as hydrating
+ * from the start, since nothing earlier is still waiting to attach. 0 when `rows` open the conversation, -1 when
+ * no row qualifies. A row inside a subagent run never opens one, so a run is never split.
+ */
+export function turnWindowStart(rows: ReadonlyArray<RawRow | LoadedRow>, opensConversation: boolean): number {
+  if (opensConversation) return 0
+  let settled = false
+  for (let i = 0; i < rows.length; i++) {
+    const m = rows[i]!
+    if (settled && m.role === 'user' && !m.subagentRunId) return i
+    settled = settlesAt(m, settled)
+  }
+  return -1
+}
+
+/** Id of the newest row after which nothing waits to attach, so rows fetched after it hydrate on their own. */
+export function settledRowId(rows: ReadonlyArray<RawRow | LoadedRow>): number | null {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const m = rows[i]!
+    if (typeof m.id === 'number' && m.role === 'assistant' && !isStopMarker(m) && m.content) return m.id
+  }
+  return null
 }
 
 export function hydrateToolCalls(msgs: RawRow[]): void {

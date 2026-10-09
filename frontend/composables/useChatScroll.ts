@@ -1,4 +1,5 @@
-import { onUnmounted, ref, watch, type Ref } from 'vue'
+import { nextTick, onUnmounted, ref, watch, type Ref } from 'vue'
+import type { PrependOlder } from '~/composables/useChatConversation'
 
 /**
  * Chat scroll coordination (JCLAW-690 stage 4).
@@ -18,14 +19,45 @@ import { onUnmounted, ref, watch, type Ref } from 'vue'
 export interface UseChatScroll {
   messagesEl: Ref<HTMLElement | null>
   scrollToBottom: () => void
+  /** Prepends older rows without moving what the reader sees. */
+  keepViewport: PrependOlder
 }
 
 export function useChatScroll(
   streaming: Ref<boolean>,
   streamReasoning: Ref<string>,
+  loadOlder?: (keepViewport: PrependOlder) => Promise<void>,
 ): UseChatScroll {
   const messagesEl = ref<HTMLElement | null>(null)
   let scrollRaf: number | null = null
+
+  // A turn streams into its bubble by index (useChatStream's assistantIdx), so nothing is prepended while one runs.
+  async function keepViewport(prepend: () => void): Promise<boolean> {
+    if (streaming.value) return false
+    const el = messagesEl.value
+    const fromBottom = el ? el.scrollHeight - el.scrollTop : 0
+    prepend()
+    await nextTick()
+    if (el) el.scrollTop = el.scrollHeight - fromBottom
+    return true
+  }
+
+  // Within a screen of the top, older rows load until the reader is a screen away or the conversation's start shows.
+  let pulling = false
+  async function pullOlderNearTop() {
+    if (!loadOlder || pulling) return
+    pulling = true
+    try {
+      for (let el = messagesEl.value; el && !streaming.value && el.scrollTop <= el.clientHeight; el = messagesEl.value) {
+        const height = el.scrollHeight
+        await loadOlder(keepViewport)
+        if (el.scrollHeight === height) break
+      }
+    }
+    finally {
+      pulling = false
+    }
+  }
 
   function scrollToBottom() {
     if (scrollRaf) return
@@ -66,6 +98,7 @@ export function useChatScroll(
   }
   function trackPinned(e: Event) {
     pinnedToBottom = atBottom(e.currentTarget as HTMLElement)
+    void pullOlderNearTop()
   }
   // The content is observed too: a card opened in place grows it without a scroll event, leaving the reader above the bottom.
   const resizeObserver = typeof ResizeObserver === 'undefined'
@@ -75,6 +108,7 @@ export function useChatScroll(
         if (!el) return
         if (pinnedToBottom && entries.some(entry => entry.target === el)) el.scrollTop = el.scrollHeight
         pinnedToBottom = atBottom(el)
+        void pullOlderNearTop()
       })
   let observedContent: Element | null = null
   watch(messagesEl, (el, prev) => {
@@ -100,5 +134,5 @@ export function useChatScroll(
     if (messagesEl.value instanceof HTMLElement) messagesEl.value.removeEventListener('scroll', trackPinned)
   })
 
-  return { messagesEl, scrollToBottom }
+  return { messagesEl, scrollToBottom, keepViewport }
 }

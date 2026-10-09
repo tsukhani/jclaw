@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
 import models.Message;
@@ -15,6 +16,8 @@ import services.ConversationService;
 import services.Tx;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Supplier;
 
 /**
@@ -1023,6 +1026,70 @@ class ApiConversationsControllerTest extends FunctionalTest {
         login();
         var resp = DELETE("/api/conversations/999999/model-override");
         assertEquals(404, resp.status.intValue());
+    }
+
+    // --- message-id cursors and usage ---
+
+    /** A conversation's id followed by the ids of its {@code count} messages, oldest first; every third has usage. */
+    private static List<Long> seedMessages(String agentName, int count) {
+        return commitInFreshTx(() -> {
+            Agent agent = new Agent();
+            agent.name = agentName;
+            agent.modelProvider = "openrouter";
+            agent.modelId = "gpt-4.1";
+            agent.save();
+            var conv = ConversationService.create(agent, "web", "u");
+            var ids = new ArrayList<Long>();
+            ids.add(conv.id);
+            for (int i = 0; i < count; i++) {
+                Message m = new Message();
+                m.conversation = conv;
+                m.role = MessageRole.ASSISTANT.value;
+                m.content = "m" + i;
+                if (i % 3 == 0) m.usageJson = "{\"prompt\":" + i + "}";
+                m.save();
+                ids.add(m.id);
+            }
+            return ids;
+        });
+    }
+
+    private List<Long> idsAt(String url) {
+        var resp = GET(url);
+        assertIsOk(resp);
+        var ids = new ArrayList<Long>();
+        for (var row : JsonParser.parseString(getContent(resp)).getAsJsonArray()) {
+            ids.add(row.getAsJsonObject().get("id").getAsLong());
+        }
+        return ids;
+    }
+
+    @Test
+    void getMessagesPagesBackwardAndForwardByMessageIdOldestFirst() {
+        login();
+        var seeded = seedMessages("cursor-paging", 7);
+        var url = "/api/conversations/" + seeded.getFirst() + "/messages";
+        var m = seeded.subList(1, seeded.size());
+
+        assertEquals(m.subList(4, 7), idsAt(url + "?latest=true&limit=3"));
+        assertEquals(m.subList(1, 4), idsAt(url + "?before=" + m.get(4) + "&limit=3"));
+        assertEquals(m.subList(0, 1), idsAt(url + "?before=" + m.get(1) + "&limit=3"));
+        assertEquals(m.subList(3, 7), idsAt(url + "?after=" + m.get(2)));
+        assertEquals(List.of(), idsAt(url + "?after=" + m.get(6)));
+        assertEquals(400, GET(url + "?before=" + m.get(4) + "&after=" + m.get(1)).status.intValue());
+    }
+
+    @Test
+    void getUsageListsTheUsageOfRowsThatHaveOneBeforeTheCursor() {
+        login();
+        var seeded = seedMessages("usage-listing", 7);
+        var url = "/api/conversations/" + seeded.getFirst() + "/usage";
+        var m = seeded.subList(1, seeded.size());
+
+        assertEquals(List.of(m.get(0), m.get(3), m.get(6)), idsAt(url));
+        assertEquals(List.of(m.get(0), m.get(3)), idsAt(url + "?before=" + m.get(6)));
+        var body = JsonParser.parseString(getContent(GET(url + "?before=" + m.get(6)))).getAsJsonArray();
+        assertEquals(3, body.get(1).getAsJsonObject().getAsJsonObject("usage").get("prompt").getAsInt());
     }
 
     // --- enrichToolCallsWithIcons additional branches ---

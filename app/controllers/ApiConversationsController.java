@@ -347,22 +347,41 @@ public class ApiConversationsController extends Controller {
     }
 
     /**
-     * GET /api/conversations/{id}/messages
+     * GET /api/conversations/{id}/messages — by offset, or by a message-id cursor: {@code latest=true} is the newest
+     * page, {@code before} the page just older than that message, {@code after} the rows newer than it. Every mode
+     * answers oldest first.
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MessageView.class))))
-    @Operation(summary = "List a conversation's messages in ascending order, paginated")
+    @Operation(summary = "List a conversation's messages in ascending order, by offset or by a message-id cursor")
     @AgentAccess(value = OWN_ONLY,
             reason = "one conversation the calling agent owns; main reaches every agent's (JCLAW-1270)")
-    public static void getMessages(Long id, Integer limit, Integer offset) {
+    public static void getMessages(Long id, Integer limit, Integer offset,
+                                   @Nullable Long before, @Nullable Long after, @Nullable Boolean latest) {
         Conversation conversation = requireConversation(id);
+        if (before != null && after != null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Pass before or after, not both.");
+        }
 
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 500) : 200;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
         long total = Message.count("conversation = ?1", conversation);
-        var query = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation);
-        List<Message> messages = query.from(effectiveOffset).fetch(effectiveLimit);
+        // A cursor counts by id rather than position, so a row deleted or added meanwhile cannot shift a page.
+        List<Message> messages;
+        if (after != null) {
+            messages = Message.find("conversation = ?1 AND id > ?2 ORDER BY id ASC", conversation, after)
+                    .fetch(effectiveLimit);
+        } else if (before != null || Boolean.TRUE.equals(latest)) {
+            List<Message> newestFirst = before == null
+                    ? Message.find("conversation = ?1 ORDER BY id DESC", conversation).fetch(effectiveLimit)
+                    : Message.find("conversation = ?1 AND id < ?2 ORDER BY id DESC", conversation, before)
+                            .fetch(effectiveLimit);
+            messages = newestFirst.reversed();
+        } else {
+            messages = Message.find("conversation = ?1 ORDER BY createdAt ASC", conversation)
+                    .from(effectiveOffset).fetch(effectiveLimit);
+        }
 
         setPaginationHeaders(total);
 
@@ -379,6 +398,29 @@ public class ApiConversationsController extends Controller {
                 .toList();
 
         renderJSON(gson.toJson(result));
+    }
+
+    /**
+     * One message's token usage, for a chat that totals a conversation's cost without loading every row.
+     *
+     * @param id    the message id
+     * @param usage the token-usage JSON the message carries, as {@link MessageView#usage()}
+     */
+    public record MessageUsageView(Long id, JsonElement usage) {}
+
+    /** GET /api/conversations/{id}/usage — the usage of every message that has one, oldest first. */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = MessageUsageView.class))))
+    @Operation(summary = "List the token usage of a conversation's messages, optionally only those before a message")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "the chat's cost meter; an agent has each message's usage from /messages")
+    public static void getUsage(Long id, @Nullable Long before) {
+        Conversation conversation = requireConversation(id);
+        List<Message> rows = before == null
+                ? Message.find("conversation = ?1 AND usageJson IS NOT NULL ORDER BY id ASC", conversation).fetch()
+                : Message.find("conversation = ?1 AND usageJson IS NOT NULL AND id < ?2 ORDER BY id ASC",
+                        conversation, before).fetch();
+        renderJSON(gson.toJson(rows.stream()
+                .map(m -> new MessageUsageView(m.id, JsonParser.parseString(m.usageJson)))
+                .toList()));
     }
 
     /**

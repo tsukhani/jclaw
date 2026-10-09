@@ -1,6 +1,7 @@
 import { computed, ref, watch, type ComputedRef, type Ref } from 'vue'
 import { computeConversationCost, formatConversationCost, formatConversationCostTooltip, type MessageUsage } from '~/utils/usage-cost'
 import type { Message } from '~/types/api'
+import type { MessageUsageRow } from '~/utils/conversation-messages'
 
 /**
  * Token-usage + cost meter for the chat header (JCLAW-690 stage 5f; behaviour
@@ -22,6 +23,8 @@ export interface UseChatUsageMeter {
 export function useChatUsageMeter(
   displayMessages: Ref<Message[]>,
   streaming: Ref<boolean>,
+  /** Usage of the conversation's rows older than the loaded ones, oldest first. */
+  earlierUsages: Ref<MessageUsageRow[]> = ref([]),
 ): UseChatUsageMeter {
   /**
    * Walk displayMessages backwards from idx - 1 to find the most recent PRIOR
@@ -34,7 +37,7 @@ export function useChatUsageMeter(
       const prev = displayMessages.value[i]
       if (prev?.role === 'assistant' && prev.usage) return prev.usage
     }
-    return null
+    return earlierUsages.value.at(-1)?.usage ?? null
   }
 
   /**
@@ -86,6 +89,7 @@ export function useChatUsageMeter(
   const conversationCumulativeTokens = computed<number>(() => {
     const msgs = displayMessages.value ?? []
     let total = 0
+    for (const { usage } of earlierUsages.value) total += (usage.prompt ?? 0) + (usage.completion ?? 0)
     for (const m of msgs) {
       if (m?.role === 'assistant' && m.usage) {
         total += (m.usage.prompt ?? 0) + (m.usage.completion ?? 0)
@@ -107,11 +111,14 @@ export function useChatUsageMeter(
   // on messages already prevents per-token cascades; this watch keeps the
   // recompute off the displayMessages tracking path entirely so the meter
   // stays stable through the streaming → idle transition.
-  watch(() => [displayMessages.value, streaming.value] as const, ([msgs, isStreaming]) => {
+  watch(() => [displayMessages.value, streaming.value, earlierUsages.value] as const, ([msgs, isStreaming, earlier]) => {
     if (isStreaming) return
-    const usages = (msgs ?? [])
-      .filter(m => m.role === 'assistant' && m.usage)
-      .map(m => m.usage as MessageUsage)
+    const usages = [
+      ...earlier.map(row => row.usage),
+      ...(msgs ?? [])
+        .filter(m => m.role === 'assistant' && m.usage)
+        .map(m => m.usage as MessageUsage),
+    ]
     if (usages.length === 0) {
       conversationCostSummary.value = null
       return
