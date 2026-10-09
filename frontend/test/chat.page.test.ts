@@ -725,6 +725,12 @@ describe('Chat page — async subagent announce polling', () => {
     component.unmount()
   })
 
+  it('makes the message list the containing block of its screen-reader text (JCLAW-1439)', async () => {
+    const { component } = await openLongConversation(20)
+    // jsdom computes no layout: without relative, absolutely positioned sr-only text escapes into <main>'s scroll range.
+    expect(component.find('[data-testid="chat-messages-scroll"]').classes()).toContain('relative')
+  })
+
   it('fetches a row that commits after a newer one it was saved before', async () => {
     const { rows, component, vm } = await openLongConversation(260)
 

@@ -907,6 +907,8 @@ function exportConversation() {
           ever re-introduces a scroll range there (e.g. when the API
           status banner is visible). Without it, aggressive scroll in
           this list could push the chat header up out of view.
+          relative makes the list the containing block of the messages'
+          sr-only text, which otherwise overflows into <main> (JCLAW-1439).
         -->
         <div
           v-if="!isEmptyChat"
@@ -914,7 +916,7 @@ function exportConversation() {
           data-testid="chat-messages-scroll"
           tabindex="-1"
           :aria-busy="loadingOlder"
-          class="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-6"
+          class="relative flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-4 py-6"
         >
           <!--
           Unsloth-style centered content column: the scroll container
