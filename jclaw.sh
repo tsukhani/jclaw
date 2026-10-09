@@ -3279,11 +3279,14 @@ kill_orphan_jvms() {
     # Git Bash ships no pgrep and Windows offers no cheap command-line match, so
     # the signature sweep is skipped there rather than reporting "no orphans".
     command -v pgrep >/dev/null 2>&1 || return 0
-    local candidates pid orphans=""
-    candidates=$(pgrep -f "application.path=${SCRIPT_DIR}" 2>/dev/null || true)
+    local candidates pid cmd orphans=""
+    candidates=$(pgrep -f "application.path=" 2>/dev/null || true)
     for pid in $candidates; do
+        cmd=$(ps -o command= -p "$pid" 2>/dev/null || true)
+        # The whole argument, as a string: a substring or pattern match on .../jclaw also takes .../jclaw-old (JCLAW-1436).
+        [[ " $cmd " == *" -Dapplication.path=$SCRIPT_DIR "* ]] || continue
         # A test server (play autotest, including the pre-push suite) carries the same path but is live: killing it fails the run.
-        case "$(ps -o command= -p "$pid" 2>/dev/null || true)" in
+        case "$cmd" in
             *-Dplay.id=test*) continue ;;
         esac
         orphans="${orphans:+$orphans }$pid"
