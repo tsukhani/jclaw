@@ -121,9 +121,21 @@ cleanup() {
 trap cleanup EXIT
 
 # ─── Platform guard ──────────────────────────────────────────────────────────
+# A musl system (Alpine) cannot run a glibc JRE. ldd names the C library; without ldd, the musl loader's presence does.
+is_musl() {
+    if command -v ldd >/dev/null 2>&1; then
+        ldd --version 2>&1 | grep -qi musl
+    else
+        ls /lib/ld-musl-*.so.1 >/dev/null 2>&1
+    fi
+}
+
 detect_os() {
     case "$(uname -s)" in
-        Linux)  OS=linux;  AZUL_OS=linux  ;;
+        Linux)
+            OS=linux; AZUL_OS=linux
+            # Azul's catalog lists musl builds under their own OS name.
+            if is_musl; then AZUL_OS=linux-musl; fi ;;
         Darwin) OS=macos;  AZUL_OS=macos  ;;
         MINGW*|MSYS*|CYGWIN*)
             die "this is the Unix installer. On Windows run the PowerShell one:
@@ -155,7 +167,12 @@ check_java() {
     fi
     if [ -z "$JCLAW_NO_JRE" ] && [ -n "$ARCH" ] && want_jre; then
         provision_jre
-        java_ok || die "installed a Zulu JRE but \`java\` still isn't $MIN_JAVA+ — please report this."
+        if ! java_ok; then
+            # A java that does not run at all was built for another C library or CPU.
+            "$JAVA_HOME/bin/java" -version >/dev/null 2>&1 \
+                || die "the Zulu JRE in $JAVA_HOME cannot run on this system ($AZUL_OS, $(uname -m)) — please report this."
+            die "installed a Zulu JRE but \`java\` still isn't $MIN_JAVA+ — please report this."
+        fi
         substep "Java $JV ready ${DIM}(managed JRE)${RESET}"
         return
     fi
@@ -198,14 +215,14 @@ want_jre() {
 # this os/arch into $JRE_DIR, then put it on PATH for the rest of this run.
 provision_jre() {
     step "Installing Zulu JRE $MIN_JAVA ${DIM}($AZUL_OS/$ARCH)${RESET}"
-    _libc=''
-    [ "$AZUL_OS" = linux ] && _libc='&libc_type=glibc'
-    _api="${AZUL_API}?java_version=${MIN_JAVA}&os=${AZUL_OS}&arch=${ARCH}&archive_type=tar.gz&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20${_libc}"
+    _api="${AZUL_API}?java_version=${MIN_JAVA}&os=${AZUL_OS}&arch=${ARCH}&archive_type=tar.gz&java_package_type=jre&release_status=ga&include_fields=sha256_hash&page_size=20"
     _json=$(http_get "$_api") || die "couldn't reach the Azul JRE catalog — install Java $MIN_JAVA yourself and re-run."
     # Collapse to one object per line, then take the first plain JRE — skip the
-    # JavaFX-bundled (fx), CRaC, and musl-libc variants.
+    # JavaFX-bundled (fx) and CRaC variants, and on glibc the musl builds the catalog lists beside them.
+    _skip='fx|crac|musl'
+    if [ "$AZUL_OS" = linux-musl ]; then _skip='fx|crac'; fi
     _obj=$(printf '%s' "$_json" | tr -d '\n' | sed 's/},[[:space:]]*{/}\
-{/g' | grep '"download_url"' | grep -viE 'fx|crac|musl' | head -n1)
+{/g' | grep '"download_url"' | grep -viE "$_skip" | head -n1)
     JRE_URL=$(printf '%s' "$_obj" | sed -n 's/.*"download_url":"\([^"]*\)".*/\1/p')
     JRE_SHA=$(printf '%s' "$_obj" | sed -n 's/.*"sha256_hash":"\([0-9a-f]*\)".*/\1/p')
     [ -n "$JRE_URL" ] || die "no Zulu JRE $MIN_JAVA found for $AZUL_OS/$ARCH in the Azul catalog."
@@ -422,6 +439,8 @@ banner
 detect_os
 
 step "Checking prerequisites"
+# jclaw.sh, which manages the install from here on, is a bash script; Alpine and other minimal systems ship without bash.
+command -v bash >/dev/null 2>&1 || die "JClaw needs bash, which this system lacks — install it (on Alpine: apk add bash) and re-run."
 check_java
 
 # Re-running the installer over an existing install is the obvious way to
