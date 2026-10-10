@@ -40,6 +40,10 @@ function server(over: Partial<Record<string, unknown>> = {}) {
     createdAt: null,
     updatedAt: null,
     duplicateOf: null,
+    protocol: 'AUTOMATIC',
+    protocolVersion: null,
+    protocolSwitchedAt: null,
+    protocolSwitchReason: null,
     ...over,
   }
 }
@@ -85,7 +89,7 @@ function setupApi(rows: unknown[]) {
   })
   registerEndpoint('/api/mcp-servers/1/test', () => {
     testedId = 1
-    return { success: true, toolCount: 2, message: 'Connected', toolNames: ['create_issue', 'list_repos'] }
+    return { success: true, toolCount: 2, message: 'Connected over 2025-06-18. 2 tool(s) advertised. The server offers 2026-07-28.', toolNames: ['create_issue', 'list_repos'], protocolVersion: '2025-06-18', offersModern: true }
   })
 }
 
@@ -271,6 +275,55 @@ describe('MCP Servers page', () => {
     await clickLabel(c, 'Test connection to github')
     expect(testedId).toBe(1)
     expect(c.text()).toContain('Connected')
+  })
+
+  it('shows the protocol version each server last connected with (JCLAW-1443)', async () => {
+    setupApi([server({ protocolVersion: '2026-07-28' }), server({ id: 2, name: 'fresh' })])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+
+    const versions = c.findAll('[data-testid="mcp-protocol-version"]')
+    expect(versions.map(v => v.text())).toEqual(['2026-07-28'])
+  })
+
+  it('edits the protocol setting beside the version JClaw last connected with', async () => {
+    setupApi([server({ protocolVersion: '2026-07-28' })])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    await clickText(c, 'Edit')
+
+    const select = c.find('#edit-1-protocol')
+    expect((select.element as HTMLSelectElement).value).toBe('AUTOMATIC')
+    expect(c.find('[data-testid="mcp-protocol-last-version"]').text()).toBe('Last connected with 2026-07-28')
+    expect(c.find('[data-testid="mcp-protocol-switched"]').exists()).toBe(false)
+
+    await select.setValue('HANDSHAKE')
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(putBody).toBeTruthy())
+    expect(putBody!.protocol).toBe('HANDSHAKE')
+  })
+
+  it('says when and why JClaw switched a server to Handshake', async () => {
+    setupApi([server({ protocol: 'HANDSHAKE', protocolVersion: '2025-06-18',
+      protocolSwitchedAt: '2026-10-11T08:00:00Z', protocolSwitchReason: 'the first tools/list over 2026-07-28 failed' })])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    await clickText(c, 'Edit')
+
+    expect((c.find('#edit-1-protocol').element as HTMLSelectElement).value).toBe('HANDSHAKE')
+    const note = c.find('[data-testid="mcp-protocol-switched"]')
+    expect(note.text()).toContain('JClaw switched this server to Handshake')
+    expect(note.text()).toContain('the first tools/list over 2026-07-28 failed')
+  })
+
+  it('reports the protocol a connection test found', async () => {
+    setupApi([server()])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+
+    await clickLabel(c, 'Test connection to github')
+    expect(c.text()).toContain('Connected over 2025-06-18')
+    expect(c.text()).toContain('The server offers 2026-07-28.')
   })
 
   it('deletes only after the operator confirms', async () => {

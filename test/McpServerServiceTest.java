@@ -51,6 +51,8 @@ class McpServerServiceTest extends UnitTest {
                             serverInfo: { name: 'svc-ok', version: '0.0.1' } } });
               } else if (m.method === 'tools/list') {
                 send({ jsonrpc: '2.0', id: m.id, result: { tools: [] } });
+              } else if (m.id !== undefined) {
+                send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });
               }
             });
             function send(obj) { process.stdout.write(JSON.stringify(obj) + '\\n'); }

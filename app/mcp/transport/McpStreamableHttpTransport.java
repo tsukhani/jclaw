@@ -1,8 +1,6 @@
 package mcp.transport;
 
 import com.google.errorprone.annotations.MustBeClosed;
-import com.google.gson.JsonElement;
-import mcp.McpClient;
 import mcp.McpException;
 import mcp.jsonrpc.JsonRpc;
 import okhttp3.Call;
@@ -20,8 +18,6 @@ import utils.SsrfGuard;
 
 import java.io.IOException;
 import java.net.URI;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -119,6 +115,11 @@ public final class McpStreamableHttpTransport implements McpTransport {
 
     @Override
     public void send(JsonRpc.Message msg) throws IOException {
+        send(msg, Map.of());
+    }
+
+    @Override
+    public void send(JsonRpc.Message msg, Map<String, String> requestHeaders) throws IOException {
         if (closed) throw new IOException("transport closed");
         // JCLAW-778: the endpoint is agent-settable config. Reject a metadata /
         // link-local literal before opening the connection; hostname rebinding is
@@ -134,6 +135,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
                 .header(HttpKeys.ACCEPT, "application/json, text/event-stream")
                 .post(body);
         for (var entry : headers.entrySet()) builder.header(entry.getKey(), entry.getValue());
+        for (var entry : requestHeaders.entrySet()) builder.header(entry.getKey(), entry.getValue());
         // Echo the session id once the server has assigned one — required by
         // streamable-HTTP servers (e.g. context7) that reject subsequent
         // requests with HTTP 400 "No valid session ID provided" without it.
@@ -142,6 +144,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
         var sid = sessionId.get();
         if (sid != null) builder.header(MCP_SESSION_ID, sid);
         var requestId = msg instanceof JsonRpc.Request r ? r.id() : null;
+        var isInitialize = msg instanceof JsonRpc.Request r && "initialize".equals(r.method());
         var carriedSession = sid != null;
         var call = HttpFactories.llmStreamingGuarded().newCall(builder.build());
         var token = callSeq.incrementAndGet();
@@ -164,7 +167,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
             @Override
             public void onResponse(Call call, Response resp) {
                 try (resp) {
-                    handleResponse(resp, requestId, carriedSession);
+                    handleResponse(resp, requestId, isInitialize, carriedSession);
                 } catch (IOException | RuntimeException e) {
                     // RuntimeException too: an unexpected parse/dereference failure
                     // while reading the response would otherwise vanish silently —
@@ -186,15 +189,17 @@ public final class McpStreamableHttpTransport implements McpTransport {
         inFlight.clear();
     }
 
-    private void handleResponse(Response resp, @Nullable Object requestId, boolean carriedSession)
-            throws IOException {
+    private void handleResponse(Response resp, @Nullable Object requestId, boolean isInitialize,
+                                boolean carriedSession) throws IOException {
         // Capture the session id assigned by the server (if present). Both
         // canonical (Mcp-Session-Id) and lowercase forms are seen in the wild
         // since header names are case-insensitive; OkHttp normalizes lookup
         // so the canonical name covers both. First non-null wins — subsequent
-        // responses may omit the header and shouldn't clobber.
+        // responses may omit the header and shouldn't clobber. Only initialize
+        // assigns one: 2026-07-28 has no sessions, so a modern connection never
+        // stores or sends one (JCLAW-1443).
         var sidFromHeader = resp.header(MCP_SESSION_ID);
-        if (sidFromHeader != null && !sidFromHeader.isBlank()) {
+        if (isInitialize && sidFromHeader != null && !sidFromHeader.isBlank()) {
             sessionId.compareAndSet(null, sidFromHeader);
         }
         if (!resp.isSuccessful()) {
@@ -235,31 +240,17 @@ public final class McpStreamableHttpTransport implements McpTransport {
      * one, plus any recognized versions in {@code data.supported}. Never the body's message text.
      */
     private static McpException requestFailure(Response resp) {
-        var status = "MCP HTTP " + resp.code();
         JsonRpc.Message decoded;
         try {
             decoded = JsonRpc.decode(resp.peekBody(ERROR_BODY_LIMIT).string());
         } catch (IOException | RuntimeException _) {
             // Not a JSON-RPC body; the exception text may quote it, so it goes nowhere.
-            return new McpException(status);
+            return McpException.fromHttp(resp.code(), null, null);
         }
         if (decoded instanceof JsonRpc.Response r && r.error() != null) {
-            return new McpException(r.error().code(), status, supportedVersions(r.error().data()));
+            return McpException.fromHttp(resp.code(), r.error().code(), r.error().data());
         }
-        return new McpException(status);
-    }
-
-    private static List<String> supportedVersions(@Nullable JsonElement data) {
-        if (data == null || !data.isJsonObject()) return List.of();
-        var supported = data.getAsJsonObject().get("supported");
-        if (supported == null || !supported.isJsonArray()) return List.of();
-        var out = new ArrayList<String>();
-        for (var el : supported.getAsJsonArray()) {
-            if (el.isJsonPrimitive() && McpClient.KNOWN_PROTOCOL_VERSIONS.contains(el.getAsString())) {
-                out.add(el.getAsString());
-            }
-        }
-        return out;
+        return McpException.fromHttp(resp.code(), null, null);
     }
 
     /**

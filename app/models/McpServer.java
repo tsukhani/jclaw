@@ -57,6 +57,13 @@ public class McpServer extends TimestampedModel {
 
     public enum Status { DISCONNECTED, CONNECTING, CONNECTED, ERROR }
 
+    /**
+     * JCLAW-1443: how JClaw opens a connection. {@code AUTOMATIC} probes with
+     * {@code server/discover} and speaks 2026-07-28 to a server that answers it;
+     * {@code HANDSHAKE} never probes and opens with {@code initialize}.
+     */
+    public enum Protocol { AUTOMATIC, HANDSHAKE }
+
     @Column(nullable = false, unique = true, length = 100)
     public String name;
 
@@ -98,6 +105,26 @@ public class McpServer extends TimestampedModel {
     @Column(name = "last_error", length = 500)
     public String lastError;
 
+    /** Null on a row from before the column existed, and read as {@link Protocol#AUTOMATIC}: see {@link #protocolSetting()}. */
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    public Protocol protocol = Protocol.AUTOMATIC;
+
+    /** The protocol version JClaw last connected with; display only. */
+    @Column(name = "protocol_version", length = 16)
+    public String protocolVersion;
+
+    /** When JClaw itself moved this server to {@link Protocol#HANDSHAKE}; cleared when the operator sets the protocol. */
+    @Column(name = "protocol_switched_at")
+    public Instant protocolSwitchedAt;
+
+    @Column(name = "protocol_switch_reason", length = 500)
+    public String protocolSwitchReason;
+
+    /** The last probe ran out its budget unanswered, so connects skip it until the configuration is edited. */
+    @Column(name = "probe_timed_out_at")
+    public Instant probeTimedOutAt;
+
     @Column(name = "last_connected_at")
     public Instant lastConnectedAt;
 
@@ -117,6 +144,10 @@ public class McpServer extends TimestampedModel {
     public static String toolName(String serverName, String action) {
         var handle = "mcp_" + serverName;
         return action == null || action.isEmpty() ? handle : handle + "_" + action;
+    }
+
+    public Protocol protocolSetting() {
+        return protocol != null ? protocol : Protocol.AUTOMATIC;
     }
 
     public static List<McpServer> findEnabled() {

@@ -11,11 +11,15 @@ import java.time.Instant;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Consumer;
 
 /**
  * Messages to the operator, on a channel they chose, when unattended work fails (JCLAW-1279): a
- * circuit breaker opening or recovering, and a recurring task's occurrence failing for good.
+ * circuit breaker opening or recovering, a recurring task's occurrence failing for good, and an MCP server
+ * moved to the handshake protocol.
  *
  * <p>{@link #KEY} holds the destination as a delivery spec ({@code telegram:<chat id>}), sent
  * through the main agent's bindings. Unset, nothing is decided and nothing is sent. The decision
@@ -43,6 +47,7 @@ public final class OperatorAlerts {
 
     private static final Map<String, Outage> OUTAGES = new HashMap<>();
     private static final Map<String, Instant> LAST_ANNOUNCED = new HashMap<>();
+    private static final List<Consumer<String>> LISTENERS = new CopyOnWriteArrayList<>();
 
     private OperatorAlerts() {}
 
@@ -85,6 +90,39 @@ public final class OperatorAlerts {
             return null;
         }
         return "JClaw: " + BreakerAlarms.describe(subject, transition);
+    }
+
+    /**
+     * Called when JClaw moves an MCP server from Automatic to Handshake because it failed protocol
+     * 2026-07-28 while the handshake still worked (JCLAW-1443).
+     */
+    public static void onMcpProtocolSwitched(String serverName, String reason) {
+        var text = mcpProtocolSwitchAlert(serverName, reason);
+        for (var listener : LISTENERS) listener.accept(text);
+        if (destination() == null) return;
+        send(text);
+    }
+
+    public static String mcpProtocolSwitchAlert(String serverName, String reason) {
+        var shortReason = reason.length() > MAX_ERROR_CHARS ? reason.substring(0, MAX_ERROR_CHARS) + "…" : reason;
+        return ("JClaw alert: MCP server '%s' was moved to the Handshake protocol: %s. It stays there until its"
+                + " Protocol is set back to Automatic on the MCP Servers page.").formatted(serverName, shortReason);
+    }
+
+    /**
+     * Test-only: the protocol-switch alerts any thread decides while {@code body} runs, whether or
+     * not a destination is set. Listener-based, so a connect thread's alert is seen.
+     */
+    public static List<String> captureMcpAlertsForTest(Runnable body) {
+        var seen = new CopyOnWriteArrayList<String>();
+        Consumer<String> listener = seen::add;
+        LISTENERS.add(listener);
+        try {
+            body.run();
+        } finally {
+            LISTENERS.remove(listener);
+        }
+        return List.copyOf(seen);
     }
 
     /** Called when an occurrence of a recurring task fails for good and the task moves on to {@code next}. */

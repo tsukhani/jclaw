@@ -205,9 +205,18 @@ Once saved, a header value and an environment variable whose name marks it as a 
 
 ### Testing a server
 
-Each row has a **Test connection** button, and the add/edit form has one too. JClaw connects, lists the server's tools, and reports back. A successful test means the server is reachable and speaks MCP; if it fails, the error message is surfaced inline so you can fix the config.
+Each row has a **Test connection** button, and the add/edit form has one too. JClaw connects, lists the server's tools, and reports back, including which MCP protocol version it connected with and whether the server offers 2026-07-28. A successful test means the server is reachable and speaks MCP; if it fails, the error message is surfaced inline so you can fix the config. The test uses a connection of its own and leaves the live one alone.
 
 A successful test doesn't guarantee a server's tools will work end-to-end — you still need to attach it to an agent and try one.
+
+### Protocol versions
+
+MCP has two generations of protocol: the older one, which opens every connection with a handshake, and 2026-07-28, which drops the handshake. JClaw speaks both. The version a server last connected with shows beside its status, and its edit form has a **Protocol** setting:
+
+- **Automatic** (the default) asks the server on every connect whether it speaks 2026-07-28, and uses it if so. A server that doesn't is connected the older way, at the cost of one extra round trip.
+- **Handshake** always connects the older way and never asks.
+
+If a server that offered 2026-07-28 then fails on it while the older protocol still works, JClaw moves it to Handshake by itself, logs a warning, and sends an [alert](/guide#settings-alerts). The form shows when and why until you change the setting; setting it back to Automatic tries 2026-07-28 again. A tool call the server refused when that happened fails with a message saying so, and is not retried for you. Use Handshake yourself for a server that answers on 2026-07-28 without an error but answers wrongly, which JClaw can't detect.
 
 ### Binding a server to an agent
 

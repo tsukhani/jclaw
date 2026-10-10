@@ -16,6 +16,7 @@ import play.Play;
 import play.db.jpa.JPA;
 import services.BreakerAlarms;
 import services.EventLogger;
+import services.OperatorAlerts;
 import services.Tx;
 import utils.AppClock;
 import utils.CircuitBreaker;
@@ -79,6 +80,7 @@ public final class McpConnectionManager {
     private static final String CLIENT_VERSION_FALLBACK = "0.0.0-dev";
     private static final String CATEGORY_CONNECT = "MCP_CONNECT";
     private static final String CATEGORY_DISCONNECT = "MCP_DISCONNECT";
+    private static final String CATEGORY_PROTOCOL = "MCP_PROTOCOL";
     private static final String BREAKER_PREFIX = "mcp:";
     private static final String TIMESTAMP_LAST_DISCONNECTED = "lastDisconnectedAt";
 
@@ -233,6 +235,9 @@ public final class McpConnectionManager {
         // (McpServerService.syncRuntime → connect replaces the entry), so the
         // captured value tracks the persisted flag across edits.
         entry.requiresApproval = server.requiresApproval;
+        entry.protocol = server.protocolSetting();
+        entry.skipProbe = server.probeTimedOutAt != null;
+        entry.server = server;
         connections.put(server.name, entry);
         scheduleConnect(entry, server, 0);
     }
@@ -328,10 +333,93 @@ public final class McpConnectionManager {
             throws IOException, McpException {
         var entry = connections.get(serverName);
         var client = entry == null ? null : entry.client;
-        if (client == null || client.state() != McpClient.State.READY) {
+        if (entry == null || client == null || client.state() != McpClient.State.READY) {
             throw new McpException("MCP server '" + serverName + "' not ready");
         }
-        return guardedCall(breaker(serverName), serverName, () -> client.callTool(toolName, arguments));
+        try {
+            return guardedCall(breaker(serverName), serverName, () -> client.callTool(toolName, arguments));
+        } catch (McpException.NeedsHandshake e) {
+            throw fallBackToHandshake(entry, client, e);
+        } catch (McpException e) {
+            // The client drops a modern HTTP connection whose server stopped answering 2026-07-28;
+            // no transport error fired, so the disconnect hook did not either.
+            if (client.state() != McpClient.State.READY) {
+                var server = entry.server;
+                if (server != null) {
+                    Thread.ofVirtual().name("mcp-disconnect-" + serverName).start(() -> handleDisconnect(entry, server));
+                }
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * A modern server refused a call in a way the handshake may not (JCLAW-1443): reach it over
+     * the handshake on a fresh connection, and only if that works move it to Handshake. The
+     * refused call is not replayed. A handshake that fails too leaves the setting alone and runs
+     * the ordinary failure and backoff.
+     */
+    private static McpException fallBackToHandshake(Entry entry, McpClient refused, McpException.NeedsHandshake e) {
+        var server = entry.server;
+        if (server == null) return e;
+        synchronized (entry.fallbackLock) {
+            if (connections.get(server.name) != entry) return e;
+            if (entry.client != refused) return switchedFailure(server.name, e);
+            McpClient handshake;
+            try {
+                handshake = newClient(entry, server, McpClient.Opening.INITIALIZE, DEFAULT_REQUEST_TIMEOUT);
+                handshake.connect();
+            } catch (Exception he) {
+                handleFailure(entry, server, entry.attempts, he.getMessage());
+                return new McpException(("MCP server '%s' refused this call over protocol 2026-07-28 (%s), and"
+                        + " the handshake failed too: %s").formatted(server.name, e.reason(), he.getMessage()), e);
+            }
+            entry.client = handshake;
+            bestEffortClose(refused);
+            // Its own transaction: a tool call can run inside the caller's, whose rollback must not undo the switch.
+            inOwnTransaction(() -> {
+                recordProtocolSwitch(entry, server, e.reason());
+                persistProtocolVersion(server.id, handshake.protocolVersion());
+            });
+            republishTools(server.name, handshake.tools());
+            if (handshake.state() != McpClient.State.READY) handleDisconnect(entry, server);
+            return switchedFailure(server.name, e);
+        }
+    }
+
+    private static void inOwnTransaction(Runnable work) {
+        try {
+            Thread.ofVirtual().name("mcp-protocol-switch").start(work).join();
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
+    private static McpException switchedFailure(String serverName, McpException.NeedsHandshake e) {
+        return new McpException(("MCP server '%s' refused this call over protocol 2026-07-28 (%s), so JClaw"
+                + " switched it to the Handshake protocol. The call was not retried: try it again.")
+                .formatted(serverName, e.reason()), e);
+    }
+
+    /** Persist the move to Handshake and tell the operator: the event log, and an alert like an opened breaker's. */
+    private static void recordProtocolSwitch(Entry entry, McpServer server, String reason) {
+        entry.protocol = McpServer.Protocol.HANDSHAKE;
+        var truncated = reason.length() > 500 ? reason.substring(0, 500) : reason;
+        if (server.id != null) {
+            try {
+                Tx.run(() -> JPA.em().createQuery(
+                                "UPDATE McpServer s SET s.protocol = :protocol, s.protocolSwitchedAt = :now,"
+                                        + " s.protocolSwitchReason = :reason, s.updatedAt = :now WHERE s.id = :id")
+                        .setParameter("protocol", McpServer.Protocol.HANDSHAKE)
+                        .setParameter("now", AppClock.now())
+                        .setParameter("reason", truncated)
+                        .setParameter("id", server.id)
+                        .executeUpdate());
+            } catch (RuntimeException _) { /* best effort persistence */ }
+        }
+        EventLogger.warn(CATEGORY_PROTOCOL, ("MCP server '%s' moved to the Handshake protocol: %s. It stays there"
+                + " until its Protocol is set back to Automatic.").formatted(server.name, reason));
+        OperatorAlerts.onMcpProtocolSwitched(server.name, reason);
     }
 
     /** One MCP tool call, as {@link #guardedCall} sees it. */
@@ -475,32 +563,28 @@ public final class McpConnectionManager {
         Thread.ofVirtual().name("mcp-connect-" + server.name).start(() -> doConnect(entry, server, attempt));
     }
 
-    // MustBeClosed: the transport and the client it wraps outlive this method by design —
-    // entry.client owns them until stop()/handleDisconnect/onTransportError closes them.
-    @SuppressWarnings("MustBeClosed")
     private static void doConnect(Entry entry, McpServer server, int attempt) {
         entry.status = McpServer.Status.CONNECTING;
         persistStatus(server.id, McpServer.Status.CONNECTING, null);
-
-        McpTransport transport;
-        try {
-            transport = withDisconnectHook(buildTransport(server), server.name,
-                    () -> handleDisconnect(entry, server));
-        } catch (RuntimeException e) {
-            handleFailure(entry, server, attempt, "transport build failed: " + e.getMessage());
-            signalFirstAttemptResolved(entry, attempt);
-            return;
-        }
 
         // JCLAW-288: the first attempt's handshake gets cold-cache install headroom (see
         // firstAttemptRequestTimeout); by the second the cache is warm or there's a real
         // problem, and a long timeout would only delay the failure signal. JCLAW-1191: the
         // headroom is the handshake's alone — every tool call gets the steady-state budget.
+        // JCLAW-1443: the probe shares it, having no timer of its own.
         var handshakeTimeout = (attempt == 0) ? firstAttemptRequestTimeout : DEFAULT_REQUEST_TIMEOUT;
-        var client = new McpClient(server.name, transport, clientVersion(), handshakeTimeout, DEFAULT_REQUEST_TIMEOUT);
-        client.onToolsChanged(tools -> republishTools(server.name, tools));
+        McpClient client;
+        McpEraDetection.Opened opened;
         try {
-            client.connect();
+            opened = McpEraDetection.open(server.name, entry.protocol, entry.skipProbe,
+                    opening -> newClient(entry, server, opening, handshakeTimeout));
+            client = opened.client();
+        } catch (Exception e) {
+            handleFailure(entry, server, attempt, e.getMessage());
+            signalFirstAttemptResolved(entry, attempt);
+            return;
+        }
+        try {
             // stop() may have removed this entry while connect() was in flight (operator
             // toggled the server off or replaced its config); an orphaned doConnect would
             // re-publish tools, re-write the allowlist and persist CONNECTED for it. That
@@ -508,6 +592,11 @@ public final class McpConnectionManager {
             if (connections.get(server.name) != entry) {
                 bestEffortClose(client);
                 return;
+            }
+            if (opened.switchReason() != null) recordProtocolSwitch(entry, server, opened.switchReason());
+            if (client.probeTimedOut() && !entry.skipProbe) {
+                entry.skipProbe = true;
+                persistProbeTimedOut(server.id);
             }
             // A prior client may still be attached (watchdog reconnect after onTransportError);
             // close it before overwriting so a path that reaches scheduleConnect without a
@@ -527,8 +616,10 @@ public final class McpConnectionManager {
             clearUnlessIsolated(breaker(server.name));
             persistStatus(server.id, McpServer.Status.CONNECTED, null);
             persistTimestamp(server.id, "lastConnectedAt");
+            persistProtocolVersion(server.id, client.protocolVersion());
             EventLogger.info(CATEGORY_CONNECT,
-                    "MCP server '%s' connected (%d tools)".formatted(server.name, client.tools().size()));
+                    "MCP server '%s' connected over %s (%d tools)".formatted(
+                            server.name, client.protocolVersion(), client.tools().size()));
             // An error that beat the CONNECTED publish above found the hook's
             // guard closed, so it skipped the teardown and left a dead
             // connection marked CONNECTED.
@@ -539,6 +630,27 @@ public final class McpConnectionManager {
             handleFailure(entry, server, attempt, e.getMessage());
             signalFirstAttemptResolved(entry, attempt);
         }
+    }
+
+    /**
+     * An unconnected client for {@code server} over a fresh transport. MustBeClosed: the transport
+     * and the client outlive this method by design — entry.client owns them until
+     * stop()/handleDisconnect/onTransportError closes them, and McpEraDetection closes one it discards.
+     */
+    @SuppressWarnings("MustBeClosed")
+    private static McpClient newClient(Entry entry, McpServer server, McpClient.Opening opening,
+                                       Duration handshakeTimeout) {
+        McpTransport transport;
+        try {
+            transport = withDisconnectHook(buildTransport(server), server.name,
+                    () -> handleDisconnect(entry, server));
+        } catch (RuntimeException e) {
+            throw new IllegalStateException("transport build failed: " + e.getMessage(), e);
+        }
+        var client = new McpClient(server.name, transport, clientVersion(), handshakeTimeout,
+                DEFAULT_REQUEST_TIMEOUT, opening);
+        client.onToolsChanged(tools -> republishTools(server.name, tools));
+        return client;
     }
 
     /** JCLAW-288: complete the awaiter's future on the FIRST attempt's
@@ -582,6 +694,11 @@ public final class McpConnectionManager {
             @Override
             public void send(JsonRpc.Message msg) throws IOException {
                 delegate.send(msg);
+            }
+
+            @Override
+            public void send(JsonRpc.Message msg, Map<String, String> requestHeaders) throws IOException {
+                delegate.send(msg, requestHeaders);
             }
 
             @Override
@@ -796,6 +913,26 @@ public final class McpConnectionManager {
         } catch (RuntimeException _) { /* best effort persistence */ }
     }
 
+    private static void persistProtocolVersion(Long serverId, @Nullable String version) {
+        if (serverId == null) return;
+        try {
+            Tx.run(() -> JPA.em().createQuery("UPDATE McpServer s SET s.protocolVersion = :v WHERE s.id = :id")
+                        .setParameter("v", version)
+                        .setParameter("id", serverId)
+                        .executeUpdate());
+        } catch (RuntimeException _) { /* best effort persistence */ }
+    }
+
+    private static void persistProbeTimedOut(Long serverId) {
+        if (serverId == null) return;
+        try {
+            Tx.run(() -> JPA.em().createQuery("UPDATE McpServer s SET s.probeTimedOutAt = :now WHERE s.id = :id")
+                        .setParameter("now", AppClock.now())
+                        .setParameter("id", serverId)
+                        .executeUpdate());
+        } catch (RuntimeException _) { /* best effort persistence */ }
+    }
+
     private static synchronized void ensureScheduler() {
         if (scheduler == null || scheduler.isShutdown()) {
             // Two platform threads — small, plenty for backoff-timer fan-out;
@@ -833,6 +970,14 @@ public final class McpConnectionManager {
          *  path via {@link #requiresApproval(String)}; volatile so a
          *  reconnect that replaces the entry publishes a fresh value. */
         volatile boolean requiresApproval;
+        /** JCLAW-1443: the server's protocol setting, captured at connect; an automatic switch updates it. */
+        volatile McpServer.Protocol protocol = McpServer.Protocol.AUTOMATIC;
+        /** JCLAW-1443: the last probe ran out its budget, so connects open with initialize. */
+        volatile boolean skipProbe;
+        /** The row this entry connects, for a call-time fallback that must build a fresh transport. */
+        volatile @Nullable McpServer server;
+        /** Serializes call-time fallbacks, so two refused calls open one handshake connection. */
+        final Object fallbackLock = new Object();
         @SuppressWarnings("java:S3077")
         volatile @Nullable ScheduledFuture<?> scheduledRetry;
         /** JCLAW-288: when non-null, completed on the FIRST attempt's
