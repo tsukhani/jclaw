@@ -11,18 +11,25 @@ import models.McpServer;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import utils.AppClock;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -818,10 +825,12 @@ class McpClientTest extends UnitTest {
             onMessage.accept(msg);
         }
 
-        /** Stands in for Streamable HTTP, the transport that sends headers. */
+        /** True stands in for Streamable HTTP, the transport that sends headers; false for stdio. */
+        volatile boolean carriesHeaders = true;
+
         @Override
         public boolean carriesHeaders() {
-            return true;
+            return carriesHeaders;
         }
 
         @Override
@@ -832,6 +841,382 @@ class McpClientTest extends UnitTest {
         @Override
         public void close() {
             closed = true;
+        }
+    }
+
+    // ==================== JCLAW-1445: tool-list freshness ====================
+
+    private static final Instant T0 = Instant.parse("2026-10-10T12:00:00Z");
+
+    /**
+     * A modern server whose n-th {@code tools/list} lists tool {@code t<n>} (or {@code echo} every
+     * time when {@code !changing}). Each refetch after the connect's lands in {@link #refetches};
+     * while {@link #hold} is set, its answer waits for the latch.
+     */
+    private static final class ToolServer implements Script {
+        final AtomicInteger lists = new AtomicInteger();
+        final BlockingQueue<Integer> refetches = new LinkedBlockingQueue<>();
+        final BlockingQueue<JsonRpc.Request> listens = new LinkedBlockingQueue<>();
+        volatile @Nullable Long ttlMs;
+        volatile boolean listChanged;
+        volatile boolean changing = true;
+        volatile @Nullable CountDownLatch hold;
+        volatile @Nullable String listenAnswer;
+
+        @Override
+        public JsonRpc.@Nullable Response answer(ScriptedTransport t, JsonRpc.Request r) {
+            return switch (r.method()) {
+                case "server/discover" -> ok(r, "{\"supportedVersions\":[\"2026-07-28\"],\"capabilities\":{\"tools\":"
+                        + "{\"listChanged\":" + listChanged + "}}}");
+                case "tools/list" -> {
+                    var n = lists.incrementAndGet();
+                    var body = "{\"tools\":[{\"name\":\"" + (changing ? "t" + n : "echo")
+                            + "\",\"inputSchema\":{}}]" + (ttlMs != null ? ",\"ttlMs\":" + ttlMs : "") + "}";
+                    if (n == 1) yield ok(r, body);
+                    refetches.add(n);
+                    var latch = hold;
+                    if (latch == null) yield ok(r, body);
+                    Thread.startVirtualThread(() -> {
+                        try {
+                            latch.await(5, TimeUnit.SECONDS);
+                        } catch (InterruptedException _) {
+                            Thread.currentThread().interrupt();
+                        }
+                        t.deliver(ok(r, body));
+                    });
+                    yield null;
+                }
+                case "subscriptions/listen" -> {
+                    listens.add(r);
+                    var answer = listenAnswer;
+                    yield answer == null ? null : answer.startsWith("error")
+                            ? err(r, -32601, "Method not found", null) : ok(r, answer);
+                }
+                default -> ok(r, "{}");
+            };
+        }
+    }
+
+    @SuppressWarnings("MustBeClosed") // each caller closes it in try-with-resources
+    private static McpClient connectedAt(Instant at, ScriptedTransport t) throws Exception {
+        var client = new McpClient("fake", t, "0", Duration.ofSeconds(5), Duration.ofSeconds(5),
+                McpClient.Opening.PROBE);
+        AppClock.callWith(Clock.fixed(at, ZoneOffset.UTC), () -> {
+            client.connect();
+            return null;
+        });
+        return client;
+    }
+
+    private static void readAt(McpClient client, Instant at) {
+        AppClock.runWith(Clock.fixed(at, ZoneOffset.UTC), client::refreshToolsIfStale);
+    }
+
+    private static List<String> names(McpClient client) {
+        return client.tools().stream().map(McpToolDef::name).toList();
+    }
+
+    @Test
+    void aFreshListIsNotRefetched() throws Exception {
+        var server = new ToolServer();
+        server.ttlMs = 600_000L;
+        try (var client = connectedAt(T0, new ScriptedTransport(server))) {
+            readAt(client, T0.plusSeconds(120));
+            assertNull(server.refetches.poll(300, TimeUnit.MILLISECONDS), "a fresh list is not refetched");
+            assertEquals(List.of("t1"), names(client));
+        }
+    }
+
+    @Test
+    void aStaleListIsRefetchedOnceAcrossTwoReads() throws Exception {
+        var server = new ToolServer();
+        server.ttlMs = 600_000L;
+        try (var client = connectedAt(T0, new ScriptedTransport(server))) {
+            var changed = new CountDownLatch(1);
+            client.onToolsChanged(_ -> changed.countDown());
+            readAt(client, T0.plusSeconds(601));
+            readAt(client, T0.plusSeconds(601));
+            assertEquals(2, server.refetches.poll(5, TimeUnit.SECONDS));
+            assertTrue(changed.await(5, TimeUnit.SECONDS));
+            readAt(client, T0.plusSeconds(601));
+            assertNull(server.refetches.poll(300, TimeUnit.MILLISECONDS), "exactly one refetch");
+            assertEquals(List.of("t2"), names(client));
+        }
+    }
+
+    @Test
+    void thePreviousListIsServedWhileTheRefetchIsInFlight() throws Exception {
+        var server = new ToolServer();
+        server.ttlMs = 600_000L;
+        var release = new CountDownLatch(1);
+        server.hold = release;
+        try (var client = connectedAt(T0, new ScriptedTransport(server))) {
+            var changed = new CountDownLatch(1);
+            client.onToolsChanged(_ -> changed.countDown());
+            readAt(client, T0.plusSeconds(601));
+            assertEquals(2, server.refetches.poll(5, TimeUnit.SECONDS));
+            assertEquals(List.of("t1"), names(client), "the old list until the refetch lands");
+            readAt(client, T0.plusSeconds(700));
+            assertEquals(List.of("t1"), names(client));
+            release.countDown();
+            assertTrue(changed.await(5, TimeUnit.SECONDS));
+            assertEquals(List.of("t2"), names(client));
+            assertNull(server.refetches.poll(300, TimeUnit.MILLISECONDS), "a read during the refetch adds none");
+        }
+    }
+
+    @Test
+    void aZeroTtlIsNotAskedMoreOftenThanTheMinimumInterval() throws Exception {
+        var server = new ToolServer();
+        server.ttlMs = 0L;
+        try (var client = connectedAt(T0, new ScriptedTransport(server))) {
+            var changed = new CountDownLatch(1);
+            client.onToolsChanged(_ -> changed.countDown());
+            readAt(client, T0.plusSeconds(30));
+            assertNull(server.refetches.poll(300, TimeUnit.MILLISECONDS), "not before the minimum interval");
+            readAt(client, T0.plusSeconds(61));
+            assertEquals(2, server.refetches.poll(5, TimeUnit.SECONDS));
+            assertTrue(changed.await(5, TimeUnit.SECONDS));
+            readAt(client, T0.plusSeconds(61));
+            assertNull(server.refetches.poll(300, TimeUnit.MILLISECONDS), "none on a repeat read at the same instant");
+        }
+    }
+
+    /** Two pages, each carrying its own {@code ttlMs} (null for none); records every tools/list. */
+    private static Script pagedTtl(@Nullable Long first, @Nullable Long second, BlockingQueue<Object> lists) {
+        return (_, r) -> switch (r.method()) {
+            case "server/discover" -> ok(r, DISCOVER_RESULT);
+            case "tools/list" -> {
+                lists.add(r.id());
+                var cursor = ((JsonObject) Objects.requireNonNull(r.params())).get("cursor");
+                var ttl = cursor == null ? first : second;
+                var tail = (ttl != null ? ",\"ttlMs\":" + ttl : "") + (cursor == null ? ",\"nextCursor\":\"p2\"" : "");
+                yield ok(r, "{\"tools\":[{\"name\":\"" + (cursor == null ? "a" : "b") + "\",\"inputSchema\":{}}]"
+                        + tail + "}");
+            }
+            default -> ok(r, "{}");
+        };
+    }
+
+    @Test
+    void aPagedListTakesTheMinimumTtlOverItsPagesWithAbsentAsZero() throws Exception {
+        for (var absentSecond : new boolean[] {true, false}) {
+            var lists = new LinkedBlockingQueue<Object>();
+            var t = new ScriptedTransport(pagedTtl(300_000L, absentSecond ? null : 300_000L, lists));
+            try (var client = connectedAt(T0, t)) {
+                assertEquals(2, lists.size());
+                lists.clear();
+                readAt(client, T0.plusSeconds(61));
+                if (absentSecond) {
+                    assertNotNull(lists.poll(5, TimeUnit.SECONDS), "an absent ttlMs on one page makes the list stale");
+                } else {
+                    assertNull(lists.poll(300, TimeUnit.MILLISECONDS), "both pages fresh for 300 s");
+                }
+            }
+        }
+    }
+
+    @Test
+    void aHandshakeEraListIsNeverRefetchedOnRead() throws Exception {
+        var lists = new LinkedBlockingQueue<Object>();
+        Script handshake = (t, r) -> {
+            if (r.method().equals("tools/list")) lists.add(r.id());
+            return handshakeEra(-32601).answer(t, r);
+        };
+        try (var client = connectedAt(T0, new ScriptedTransport(handshake))) {
+            assertFalse(client.isModern());
+            assertNotNull(lists.poll());
+            readAt(client, T0.plus(Duration.ofDays(10)));
+            assertNull(lists.poll(300, TimeUnit.MILLISECONDS));
+        }
+    }
+
+    @Test
+    void aListChangedDuringARefreshRunsOneMoreFetch() throws Exception {
+        var server = new ToolServer();
+        var release = new CountDownLatch(1);
+        server.hold = release;
+        var t = new ScriptedTransport(server);
+        try (var client = connectedAt(T0, t)) {
+            var changes = new LinkedBlockingQueue<List<McpToolDef>>();
+            client.onToolsChanged(changes::add);
+            t.deliver(new JsonRpc.Notification("notifications/tools/list_changed", null));
+            assertEquals(2, server.refetches.poll(5, TimeUnit.SECONDS));
+            t.deliver(new JsonRpc.Notification("notifications/tools/list_changed", null));
+            t.deliver(new JsonRpc.Notification("notifications/tools/list_changed", null));
+            release.countDown();
+            assertEquals(3, server.refetches.poll(5, TimeUnit.SECONDS), "the change may postdate the fetch in flight");
+            assertNull(server.refetches.poll(300, TimeUnit.MILLISECONDS), "exactly one more");
+            assertNotNull(changes.poll(5, TimeUnit.SECONDS));
+            assertNotNull(changes.poll(5, TimeUnit.SECONDS));
+            assertEquals(List.of("t3"), names(client));
+        }
+    }
+
+    @Test
+    void anUnchangedRefreshedListFiresNoCallback() throws Exception {
+        var server = new ToolServer();
+        server.changing = false;
+        var t = new ScriptedTransport(server);
+        try (var client = connectedAt(T0, t)) {
+            var fired = new CountDownLatch(1);
+            client.onToolsChanged(_ -> fired.countDown());
+            t.deliver(new JsonRpc.Notification("notifications/tools/list_changed", null));
+            assertEquals(2, server.refetches.poll(5, TimeUnit.SECONDS));
+            assertFalse(fired.await(300, TimeUnit.MILLISECONDS), "nothing to republish");
+            assertEquals(List.of("echo"), names(client));
+        }
+    }
+
+    // ==================== JCLAW-1445: subscriptions/listen ====================
+
+    private static JsonRpc.Notification withSubscription(String method, @Nullable String idJson,
+                                                         @Nullable String extraParams) {
+        var params = new JsonObject();
+        if (extraParams != null) params = JsonParser.parseString(extraParams).getAsJsonObject();
+        if (idJson != null) {
+            var meta = new JsonObject();
+            meta.add("io.modelcontextprotocol/subscriptionId", JsonParser.parseString(idJson));
+            params.add("_meta", meta);
+        }
+        return new JsonRpc.Notification(method, params);
+    }
+
+    private static JsonRpc.Notification ack(@Nullable String idJson, String granted) {
+        return withSubscription("notifications/subscriptions/acknowledged", idJson,
+                "{\"notifications\":" + granted + "}");
+    }
+
+    private static JsonRpc.Notification listChanged(@Nullable String idJson) {
+        return withSubscription("notifications/tools/list_changed", idJson, null);
+    }
+
+    @Test
+    void discoveryDecidesWhetherListChangedIsOffered() throws Exception {
+        for (var offered : new boolean[] {true, false}) {
+            var server = new ToolServer();
+            server.listChanged = offered;
+            try (var client = connectedAt(T0, new ScriptedTransport(server))) {
+                assertEquals(offered, client.toolsListChangedOffered());
+            }
+        }
+        // A -32022 refusal settles the era with no DiscoverResult, so nothing was offered.
+        try (var client = connectedAt(T0, new ScriptedTransport((_, r) -> switch (r.method()) {
+            case "server/discover" -> err(r, -32022, "Unsupported", "{\"supported\":[\"2026-07-28\"]}");
+            default -> ok(r, TOOLS);
+        }))) {
+            assertTrue(client.isModern());
+            assertFalse(client.toolsListChangedOffered());
+        }
+    }
+
+    @Test
+    void theListenRequestCarriesToolsListChangedAndItsAckMatchesNumberOrStringIds() throws Exception {
+        var server = new ToolServer();
+        server.listChanged = true;
+        var t = new ScriptedTransport(server);
+        try (var client = connectedAt(T0, t)) {
+            var events = new LinkedBlockingQueue<McpClient.SubscriptionEvent>();
+            var changes = new LinkedBlockingQueue<List<McpToolDef>>();
+            client.onToolsChanged(changes::add);
+            client.openToolsSubscription(events::add);
+            var listen = server.listens.poll(5, TimeUnit.SECONDS);
+            assertNotNull(listen);
+            var params = (JsonObject) Objects.requireNonNull(listen.params());
+            assertTrue(params.getAsJsonObject("notifications").get("toolsListChanged").getAsBoolean());
+            assertEquals("subscriptions/listen", t.headers.get(t.methods.indexOf("subscriptions/listen")).get("Mcp-Method"));
+            var id = listen.id().toString();
+
+            t.deliver(ack("\"999\"", "{\"toolsListChanged\":true}"));
+            assertNull(events.poll(200, TimeUnit.MILLISECONDS), "another subscription's ack");
+            t.deliver(ack(id, "{\"toolsListChanged\":true}"));
+            assertEquals(McpClient.SubscriptionEvent.ACKNOWLEDGED, events.poll(5, TimeUnit.SECONDS));
+
+            t.deliver(listChanged("\"" + id + "\""));
+            assertEquals(2, server.refetches.poll(5, TimeUnit.SECONDS), "a string id matches");
+            assertNotNull(changes.poll(5, TimeUnit.SECONDS));
+            t.deliver(listChanged(id));
+            assertEquals(3, server.refetches.poll(5, TimeUnit.SECONDS), "a numeric id matches");
+            assertNotNull(changes.poll(5, TimeUnit.SECONDS));
+            t.deliver(listChanged(Long.toString(Long.parseLong(id) + 100)));
+            assertNull(server.refetches.poll(300, TimeUnit.MILLISECONDS), "a mismatched id is ignored");
+
+            t.carriesHeaders = false;
+            t.deliver(listChanged(null));
+            assertNull(server.refetches.poll(300, TimeUnit.MILLISECONDS), "an id-less one is ignored on stdio");
+            t.carriesHeaders = true;
+            t.deliver(listChanged(null));
+            assertEquals(4, server.refetches.poll(5, TimeUnit.SECONDS), "an id-less one counts over HTTP");
+            assertTrue(t.cancelled.isEmpty());
+        }
+    }
+
+    @Test
+    void anAckThatOmitsToolsListChangedIsRefusedAndCancelled() throws Exception {
+        var server = new ToolServer();
+        server.listChanged = true;
+        var t = new ScriptedTransport(server);
+        try (var client = connectedAt(T0, t)) {
+            var events = new LinkedBlockingQueue<McpClient.SubscriptionEvent>();
+            client.openToolsSubscription(events::add);
+            var listen = Objects.requireNonNull(server.listens.poll(5, TimeUnit.SECONDS));
+            t.deliver(ack(listen.id().toString(), "{}"));
+            assertEquals(McpClient.SubscriptionEvent.REFUSED, events.poll(5, TimeUnit.SECONDS));
+            assertEquals(List.of(listen.id()), t.cancelled);
+            assertNull(events.poll(200, TimeUnit.MILLISECONDS), "one terminal event");
+            assertEquals(McpClient.State.READY, client.state());
+        }
+    }
+
+    @Test
+    void aListenEndedByAResultDropsAndOneEndedByAnErrorIsRefused() throws Exception {
+        for (var answer : List.of("{}", "error")) {
+            var server = new ToolServer();
+            server.listChanged = true;
+            server.listenAnswer = answer;
+            try (var client = connectedAt(T0, new ScriptedTransport(server))) {
+                var events = new LinkedBlockingQueue<McpClient.SubscriptionEvent>();
+                client.openToolsSubscription(events::add);
+                assertEquals("error".equals(answer) ? McpClient.SubscriptionEvent.REFUSED
+                        : McpClient.SubscriptionEvent.DROPPED, events.poll(5, TimeUnit.SECONDS), answer);
+                assertEquals(McpClient.State.READY, client.state());
+            }
+        }
+    }
+
+    @Test
+    void anUnacknowledgedListenIsCancelledAndDropped() throws Exception {
+        var server = new ToolServer();
+        server.listChanged = true;
+        var t = new ScriptedTransport(server);
+        try (var client = new McpClient("fake", t, "0", Duration.ofSeconds(5), Duration.ofMillis(200),
+                McpClient.Opening.PROBE)) {
+            client.connect();
+            var events = new LinkedBlockingQueue<McpClient.SubscriptionEvent>();
+            client.openToolsSubscription(events::add);
+            assertEquals(McpClient.SubscriptionEvent.DROPPED, events.poll(5, TimeUnit.SECONDS));
+            assertEquals(1, t.cancelled.size());
+        }
+    }
+
+    @Test
+    void closingTheClientEndsTheSubscriptionSilently() throws Exception {
+        var server = new ToolServer();
+        server.listChanged = true;
+        var events = new LinkedBlockingQueue<McpClient.SubscriptionEvent>();
+        try (var client = connectedAt(T0, new ScriptedTransport(server))) {
+            client.openToolsSubscription(events::add);
+            assertNotNull(server.listens.poll(5, TimeUnit.SECONDS));
+        }
+        assertNull(events.poll(300, TimeUnit.MILLISECONDS));
+    }
+
+    @Test
+    void aHandshakeEraClientOpensNoSubscription() throws Exception {
+        var t = new ScriptedTransport(handshakeEra(-32601));
+        try (var client = connectedAt(T0, t)) {
+            client.openToolsSubscription(_ -> {});
+            assertFalse(t.methods.contains("subscriptions/listen"));
         }
     }
 

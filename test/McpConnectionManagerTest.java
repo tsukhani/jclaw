@@ -2,6 +2,7 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import mcp.McpAllowlist;
 import mcp.McpConnectionManager;
+import mcp.McpServerTool;
 import mcp.jsonrpc.JsonRpc;
 import mockwebserver3.Dispatcher;
 import mockwebserver3.MockResponse;
@@ -20,19 +21,24 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.EventLogger;
 import services.Tx;
+import utils.AppClock;
 import utils.CircuitBreakers;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * End-to-end test for {@link McpConnectionManager} with a real Node-based
@@ -675,6 +681,197 @@ class McpConnectionManagerTest extends UnitTest {
         var server = seedStdioServer("await-none", FIXTURE_SCRIPT);
         McpConnectionManager.connect(server);
         awaitState("await-none", McpServer.Status.CONNECTED, 5);
+    }
+
+    // ==================== JCLAW-1445: tool-list freshness over HTTP ====================
+
+    private record Arrival(String method, long nanos) {}
+
+    @FunctionalInterface
+    private interface Answer {
+        MockResponse answer(Object id, int n) throws InterruptedException;
+    }
+
+    /** A 2026-07-28 server over HTTP; every request lands in {@code seen}, each method's n-th answered by its {@link Answer}. */
+    private static MockWebServer modernHttp(boolean listChanged, List<Arrival> seen, Answer toolsList, Answer listen)
+            throws IOException {
+        var http = new MockWebServer();
+        var counts = new ConcurrentHashMap<String, AtomicInteger>();
+        http.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
+                var msg = JsonRpc.decode(request.getBody().utf8());
+                if (!(msg instanceof JsonRpc.Request r)) return new MockResponse.Builder().code(202).build();
+                seen.add(new Arrival(r.method(), System.nanoTime()));
+                var n = counts.computeIfAbsent(r.method(), _ -> new AtomicInteger()).incrementAndGet();
+                return switch (r.method()) {
+                    case "server/discover" -> rpc(200, r.id(), "{\"supportedVersions\":[\"2026-07-28\"],"
+                            + "\"capabilities\":{\"tools\":{\"listChanged\":" + listChanged + "}}}").build();
+                    case "tools/list" -> toolsList.answer(r.id(), n);
+                    case "subscriptions/listen" -> listen.answer(r.id(), n);
+                    default -> rpc(200, r.id(), "{\"content\":[]}").build();
+                };
+            }
+        });
+        http.start();
+        return http;
+    }
+
+    private static MockResponse toolsListing(Object id, @Nullable Long ttlMs, String... names) {
+        var tools = new StringBuilder();
+        for (var name : names) {
+            if (!tools.isEmpty()) tools.append(',');
+            tools.append("{\"name\":\"").append(name).append("\",\"inputSchema\":{\"type\":\"object\"}}");
+        }
+        return rpc(200, id, "{\"tools\":[" + tools + "]" + (ttlMs != null ? ",\"ttlMs\":" + ttlMs : "") + "}").build();
+    }
+
+    private static String sseEvent(String json) {
+        return "data: " + json + "\n\n";
+    }
+
+    private static String subscriptionNotice(String method, Object id, String params) {
+        return "{\"jsonrpc\":\"2.0\",\"method\":\"" + method + "\",\"params\":{" + params
+                + "\"_meta\":{\"io.modelcontextprotocol/subscriptionId\":" + id + "}}}";
+    }
+
+    private static MockResponse.Builder sse(String body) {
+        return new MockResponse.Builder().code(200).addHeader("Content-Type", "text/event-stream").body(body);
+    }
+
+    private static String ackEvent(Object id) {
+        return sseEvent(subscriptionNotice("notifications/subscriptions/acknowledged", id,
+                "\"notifications\":{\"toolsListChanged\":true},"));
+    }
+
+    private static long count(List<Arrival> seen, String method) {
+        return seen.stream().filter(a -> a.method().equals(method)).count();
+    }
+
+    private String connectHttp(String prefix, MockWebServer http) throws InterruptedException {
+        var name = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
+        var cfg = new JsonObject();
+        cfg.addProperty("url", http.url("/mcp").toString());
+        McpConnectionManager.connect(seedServer(name, McpServer.Transport.HTTP, cfg.toString()));
+        return name;
+    }
+
+    private static void awaitTrue(String what, long maxMillis, java.util.function.BooleanSupplier condition)
+            throws InterruptedException {
+        var deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(maxMillis);
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > deadline) fail("Timed out waiting for " + what);
+            Thread.sleep(20);
+        }
+    }
+
+    @Test
+    void aListChangedOnTheListenStreamRefetchesOnceAndRepublishes() throws Exception {
+        var seen = new CopyOnWriteArrayList<Arrival>();
+        String name = null;
+        try (var http = modernHttp(true, seen,
+                (id, n) -> n == 1 ? toolsListing(id, null, "a") : toolsListing(id, null, "a", "b"),
+                (id, n) -> n == 1
+                        ? sse(": ping\n\n" + ackEvent(id) + sseEvent(subscriptionNotice(
+                                "notifications/tools/list_changed", id, ""))).build()
+                        // The reopened stream stays quiet for the rest of the test.
+                        : sse(ackEvent(id)).headersDelay(3, TimeUnit.SECONDS).build())) {
+            name = connectHttp("listen", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var n = name;
+            awaitTrue("the refreshed list", 5000, () -> McpConnectionManager.tools(n).size() == 2);
+            assertTrue(toolRegistered(McpServer.toolName(name, "b")), "republished into the registry");
+            Thread.sleep(300);
+            assertEquals(2, count(seen, "tools/list"), "one tools/list after the connect's: " + seen);
+            assertEquals(McpServer.Status.CONNECTED, McpConnectionManager.status(name));
+        } finally {
+            if (name != null) {
+                McpConnectionManager.stop(name);
+                CircuitBreakers.remove("mcp:" + name);
+            }
+        }
+    }
+
+    /** mcp.context7.com reported {@code listChanged} false on 2026-10-11. */
+    @Test
+    void aServerNotOfferingListChangedGetsNoListenRequest() throws Exception {
+        var seen = new CopyOnWriteArrayList<Arrival>();
+        String name = null;
+        try (var http = modernHttp(false, seen, (id, _) -> toolsListing(id, null, "a"),
+                (id, _) -> sse(ackEvent(id)).build())) {
+            name = connectHttp("nolisten", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            Thread.sleep(300);
+            assertEquals(0, count(seen, "subscriptions/listen"), seen.toString());
+        } finally {
+            if (name != null) {
+                McpConnectionManager.stop(name);
+                CircuitBreakers.remove("mcp:" + name);
+            }
+        }
+    }
+
+    @Test
+    void aDroppedListenStreamIsReopenedAfterTheBackoffNotInATightLoop() throws Exception {
+        McpConnectionManager.setBackoff(400, 400);
+        var seen = new CopyOnWriteArrayList<Arrival>();
+        var ends = new CopyOnWriteArrayList<Long>();
+        String name = null;
+        try (var http = modernHttp(true, seen, (id, _) -> toolsListing(id, null, "a"), (id, _) -> {
+            ends.add(System.nanoTime());
+            return sse(ackEvent(id)).build();
+        })) {
+            name = connectHttp("reopen", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            awaitTrue("a reopened listen", 5000, () -> count(seen, "subscriptions/listen") >= 2);
+            var listens = seen.stream().filter(a -> a.method().equals("subscriptions/listen")).toList();
+            var gap = TimeUnit.NANOSECONDS.toMillis(listens.get(1).nanos() - ends.getFirst());
+            assertTrue(gap >= 350, "reopened after " + gap + " ms");
+            Thread.sleep(1300);
+            var first = listens.getFirst().nanos();
+            var within = seen.stream().filter(a -> a.method().equals("subscriptions/listen")
+                    && a.nanos() - first < TimeUnit.MILLISECONDS.toNanos(1200)).count();
+            assertTrue(within <= 3, within + " listens within 1.2 s");
+            assertEquals(McpServer.Status.CONNECTED, McpConnectionManager.status(name), "a dropped stream is not a dropped connection");
+            assertFalse(McpConnectionManager.callTool(name, "a", new JsonObject()).isError());
+        } finally {
+            if (name != null) {
+                McpConnectionManager.stop(name);
+                CircuitBreakers.remove("mcp:" + name);
+            }
+        }
+    }
+
+    @Test
+    void aStaleZeroTtlListIsRefetchedOnceOffTheTurnAndTheOldActionsServed() throws Exception {
+        var seen = new CopyOnWriteArrayList<Arrival>();
+        var release = new CountDownLatch(1);
+        String name = null;
+        try (var http = modernHttp(false, seen, (id, n) -> {
+            if (n == 1) return toolsListing(id, 0L, "a");
+            release.await(5, TimeUnit.SECONDS);
+            return toolsListing(id, 0L, "a", "b");
+        }, (id, _) -> sse(ackEvent(id)).build())) {
+            name = connectHttp("ttl", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            var later = Clock.offset(Clock.systemUTC(), Duration.ofSeconds(61));
+            var actions = AppClock.callWith(later, () -> tool.execute("{}", new Agent()));
+            assertTrue(actions.contains("\"a\"") && !actions.contains("\"b\""), actions);
+            awaitTrue("the refetch", 5000, () -> count(seen, "tools/list") == 2);
+            release.countDown();
+            var n = name;
+            awaitTrue("the refreshed list", 5000, () -> McpConnectionManager.tools(n).size() == 2);
+            AppClock.callWith(later, () -> tool.execute("{}", new Agent()));
+            Thread.sleep(300);
+            assertEquals(2, count(seen, "tools/list"), "the minimum interval holds: " + seen);
+        } finally {
+            release.countDown();
+            if (name != null) {
+                McpConnectionManager.stop(name);
+                CircuitBreakers.remove("mcp:" + name);
+            }
+        }
     }
 
     // ==================== fixtures ====================

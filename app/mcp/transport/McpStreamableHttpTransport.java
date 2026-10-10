@@ -71,6 +71,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
     private static final String MCP_SESSION_ID = "Mcp-Session-Id";
     /** Enough for any JSON-RPC error object; a larger error body is not one we parse. */
     private static final long ERROR_BODY_LIMIT = 64 * 1024L;
+    private static final String LISTEN = "subscriptions/listen";
 
     private final String name;
     private final URI endpoint;
@@ -80,6 +81,8 @@ public final class McpStreamableHttpTransport implements McpTransport {
     private BiConsumer<Object, McpException> onRequestFailed = (_, _) -> {};
     private Consumer<Throwable> onError = _ -> {};
     private volatile boolean closed;
+    /** Started with a request table, so a stream that ends unanswered can fail its request alone. */
+    private volatile boolean tracksRequests;
 
     private final ConcurrentHashMap<Long, Call> inFlight = new ConcurrentHashMap<>();
     private final AtomicLong callSeq = new AtomicLong();
@@ -103,6 +106,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
     @Override
     public void start(Consumer<JsonRpc.Message> onMessage, Consumer<Throwable> onError) {
         start(onMessage, (_, e) -> onError.accept(e), onError);
+        tracksRequests = false;
     }
 
     @Override
@@ -112,6 +116,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
         this.onMessage = onMessage;
         this.onRequestFailed = onRequestFailed;
         this.onError = onError;
+        this.tracksRequests = true;
     }
 
     @Override
@@ -146,6 +151,8 @@ public final class McpStreamableHttpTransport implements McpTransport {
         if (sid != null) builder.header(MCP_SESSION_ID, sid);
         var requestId = msg instanceof JsonRpc.Request r ? r.id() : null;
         var isInitialize = msg instanceof JsonRpc.Request r && "initialize".equals(r.method());
+        // A dropped or idle listen stream fails that subscription, never the connection.
+        var isListen = msg instanceof JsonRpc.Request r && LISTEN.equals(r.method());
         var carriedSession = sid != null;
         var call = HttpFactories.llmStreamingGuarded().newCall(builder.build());
         var token = callSeq.incrementAndGet();
@@ -161,7 +168,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
             public void onFailure(Call call, IOException e) {
                 try {
                     // A cancelled call is one request given up on, not a failed connection.
-                    if (!closed && !call.isCanceled()) onError.accept(e);
+                    if (!closed && !call.isCanceled()) ioFailure(e, requestId, isListen);
                 } finally {
                     forget(token, requestId, call);
                 }
@@ -171,7 +178,9 @@ public final class McpStreamableHttpTransport implements McpTransport {
             public void onResponse(Call call, Response resp) {
                 try (resp) {
                     handleResponse(resp, requestId, isInitialize, carriedSession);
-                } catch (IOException | RuntimeException e) {
+                } catch (IOException e) {
+                    if (!closed && !call.isCanceled()) ioFailure(e, requestId, isListen);
+                } catch (RuntimeException e) {
                     // RuntimeException too: an unexpected parse/dereference failure
                     // while reading the response would otherwise vanish silently —
                     // route it to onError so the connection manager can react.
@@ -181,6 +190,14 @@ public final class McpStreamableHttpTransport implements McpTransport {
                 }
             }
         });
+    }
+
+    private void ioFailure(IOException e, @Nullable Object requestId, boolean isListen) {
+        if (isListen && requestId != null) {
+            onRequestFailed.accept(requestId, new McpException(LISTEN + " stream failed: " + e.getMessage(), e));
+        } else {
+            onError.accept(e);
+        }
     }
 
     private void forget(long token, @Nullable Object requestId, Call call) {
@@ -250,6 +267,10 @@ public final class McpStreamableHttpTransport implements McpTransport {
         var contentType = resp.header(HttpKeys.CONTENT_TYPE, "");
         if (contentType.contains("text/event-stream")) {
             consumeSseStream(rb.source());
+            if (requestId != null && tracksRequests && !closed) {
+                // Ignored by the client when the stream already carried the response.
+                onRequestFailed.accept(requestId, new McpException("stream ended without a response"));
+            }
             return;
         }
         var bodyStr = rb.string();
@@ -299,7 +320,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
             } else if (line.startsWith("data:")) {
                 appendSseDataLine(data, line);
             }
-            // event:, id:, retry:, comment lines (':...') — all ignored for MCP
+            // event:, id:, retry: are ignored for MCP; comment lines (':...') are keep-alives
         }
         // EOF without trailing blank line: dispatch any buffered event.
         if (!data.isEmpty()) dispatchSseEvent(data.toString());

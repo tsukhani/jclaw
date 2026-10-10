@@ -8,10 +8,13 @@ import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpTransport;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
+import utils.AppClock;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -19,11 +22,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.TreeSet;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -58,6 +63,16 @@ public class McpClient implements AutoCloseable {
 
     public enum State { DISCONNECTED, INITIALIZING, READY, CLOSING }
 
+    /** What became of a {@link #openToolsSubscription} stream. */
+    public enum SubscriptionEvent {
+        /** The server granted {@code toolsListChanged}: the stream is up. */
+        ACKNOWLEDGED,
+        /** The stream ended or never acknowledged in time; reopen it. */
+        DROPPED,
+        /** The server refused the subscription or did not grant it; do not reopen. */
+        REFUSED
+    }
+
     /** How {@link #connect()} opens the conversation. */
     public enum Opening {
         /** {@code server/discover} at 2026-07-28 first; its answer decides the era. */
@@ -83,11 +98,17 @@ public class McpClient implements AutoCloseable {
     private static final String TOOLS_CALL = "tools/call";
     private static final String TOOLS_LIST = "tools/list";
     private static final String INITIALIZE = "initialize";
+    private static final String LISTEN = "subscriptions/listen";
+    private static final String TOOLS_LIST_CHANGED = "notifications/tools/list_changed";
+    private static final String SUBSCRIPTION_ACKNOWLEDGED = "notifications/subscriptions/acknowledged";
+    private static final String SUBSCRIPTION_ID = META_PREFIX + "subscriptionId";
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
     /** Retries of one request on a state-only {@code input_required}; a server needing more is looping. */
     public static final int MAX_INPUT_RETRIES = 3;
     /** {@code tools/list} pages read per fetch, so a server that never ends the list cannot hang a connect. */
     public static final int MAX_TOOL_PAGES = 50;
+    /** A {@code ttlMs} of zero or none is stale at once, so this bounds how often a turn may refetch. */
+    public static final Duration MIN_TOOLS_REFRESH_INTERVAL = Duration.ofSeconds(60);
 
     private final String name;
     private final McpTransport transport;
@@ -102,10 +123,13 @@ public class McpClient implements AutoCloseable {
     private final ConcurrentHashMap<Object, CompletableFuture<JsonRpc.Response>> pending = new ConcurrentHashMap<>();
     private final AtomicReference<State> state = new AtomicReference<>(State.DISCONNECTED);
 
-    // Reassigned with List.copyOf(...) / List.of(); the held list is immutable
-    // so volatile-on-reference is sufficient publication.
-    @SuppressWarnings("java:S3077")
-    private volatile List<McpToolDef> cachedTools = List.of();
+    private final AtomicReference<ToolList> toolList =
+            new AtomicReference<>(new ToolList(List.of(), Duration.ZERO, Instant.EPOCH, Instant.EPOCH));
+    private final AtomicBoolean refreshing = new AtomicBoolean();
+    /** A list_changed arrived during a refresh, whose result may predate the change. */
+    private final AtomicBoolean rerun = new AtomicBoolean();
+    private final AtomicReference<@Nullable Subscription> subscription = new AtomicReference<>();
+    private volatile boolean toolsListChangedOffered;
     private volatile @Nullable String lastError;
     // Reassigned with a stateless Consumer; volatile-on-reference is sufficient.
     @SuppressWarnings("java:S3077")
@@ -159,7 +183,10 @@ public class McpClient implements AutoCloseable {
 
     public @Nullable String lastError() { return lastError; }
 
-    public List<McpToolDef> tools() { return cachedTools; }
+    public List<McpToolDef> tools() { return Objects.requireNonNull(toolList.get()).tools(); }
+
+    /** Whether the server's DiscoverResult advertised {@code capabilities.tools.listChanged}. */
+    public boolean toolsListChangedOffered() { return toolsListChangedOffered; }
 
     /** True once the connection speaks 2026-07-28. */
     public boolean isModern() { return modern; }
@@ -173,7 +200,7 @@ public class McpClient implements AutoCloseable {
     /** The probe ran out the handshake budget unanswered, and the connection went on over the handshake. */
     public boolean probeTimedOut() { return probeTimedOut; }
 
-    /** Set a callback fired when the server reports {@code tools/list_changed}. */
+    /** Set a callback fired when a refresh changes the tool list. */
     public void onToolsChanged(Consumer<List<McpToolDef>> handler) {
         this.onToolsChanged = handler != null ? handler : _ -> {};
     }
@@ -248,7 +275,7 @@ public class McpClient implements AutoCloseable {
     }
 
     private Map<String, String> mirroredHeaders(String toolName, JsonObject arguments) {
-        for (var tool : cachedTools) {
+        for (var tool : tools()) {
             if (tool.name().equals(toolName)) return McpParamHeaders.headersFor(tool.inputSchema(), arguments);
         }
         return Map.of();
@@ -257,6 +284,7 @@ public class McpClient implements AutoCloseable {
     @Override
     public void close() {
         if (state.getAndSet(State.CLOSING) == State.CLOSING) return;
+        subscription.set(null);
         for (var future : pending.values()) {
             future.completeExceptionally(new McpException("Client closing"));
         }
@@ -319,6 +347,11 @@ public class McpClient implements AutoCloseable {
     private void onDiscovered(JsonObject result) throws IOException, McpException {
         var versions = knownVersions(result.get("supportedVersions"));
         offersModern = versions.contains(MODERN_PROTOCOL_VERSION);
+        toolsListChangedOffered = result.get("capabilities") instanceof JsonObject caps
+                && caps.get("tools") instanceof JsonObject tools
+                && tools.get("listChanged") instanceof JsonElement listChanged
+                && listChanged.isJsonPrimitive() && listChanged.getAsJsonPrimitive().isBoolean()
+                && listChanged.getAsBoolean();
         if (!offersModern) {
             throw new McpException.NeedsHandshake(
                     "the server answered discovery offering " + describeVersions(versions), false, null, versions);
@@ -394,7 +427,7 @@ public class McpClient implements AutoCloseable {
                 && KNOWN_PROTOCOL_VERSIONS.contains(version.getAsString())
                 && !MODERN_PROTOCOL_VERSION.equals(version.getAsString()) ? version.getAsString() : PROTOCOL_VERSION;
         sendNotification("notifications/initialized", null);
-        cachedTools = fetchTools(handshakeTimeout);
+        storeConnectList(fetchTools(handshakeTimeout));
     }
 
     /**
@@ -409,7 +442,7 @@ public class McpClient implements AutoCloseable {
         // The server answered on 2026-07-28 after all, however late: the probe stays worth sending.
         probeTimedOut = false;
         try {
-            cachedTools = fetchToolsStrict(handshakeTimeout);
+            storeConnectList(fetchToolsStrict(handshakeTimeout));
         } catch (McpException e) {
             throw new McpException.NeedsHandshake(
                     "the first tools/list over 2026-07-28 failed: " + e.getMessage(), true, e.code(), List.of());
@@ -452,25 +485,199 @@ public class McpClient implements AutoCloseable {
         return versions.isEmpty() ? "no version JClaw knows" : String.join(", ", versions);
     }
 
+    // ==================== tool-list freshness ====================
+
+    /** The cached list, its {@code ttlMs} and when it was received; {@code lastFetchStartedAt} rate-limits refreshes. */
+    private record ToolList(List<McpToolDef> tools, Duration ttl, Instant fetchedAt, Instant lastFetchStartedAt) {}
+
+    /** One fetch's tools and its effective ttl, the minimum over its pages. */
+    private record Fetched(List<McpToolDef> tools, Duration ttl) {}
+
+    private void storeConnectList(Fetched fetched) {
+        var now = AppClock.now();
+        toolList.set(new ToolList(fetched.tools(), fetched.ttl(), now, now));
+    }
+
+    /**
+     * On a modern READY connection whose list has outlived its {@code ttlMs} and the
+     * {@link #MIN_TOOLS_REFRESH_INTERVAL}, start one refresh off this thread. Never blocks:
+     * {@link #tools()} keeps serving the previous list until the refresh lands.
+     */
+    public void refreshToolsIfStale() {
+        if (!modern || state.get() != State.READY) return;
+        var now = AppClock.now();
+        var list = Objects.requireNonNull(toolList.get());
+        if (Duration.between(list.fetchedAt(), now).compareTo(list.ttl()) < 0) return;
+        if (Duration.between(list.lastFetchStartedAt(), now).compareTo(MIN_TOOLS_REFRESH_INTERVAL) < 0) return;
+        startRefresh(now, false);
+    }
+
+    /**
+     * Single-flight: a forced refresh that finds one in flight queues exactly one more. The
+     * instant is read by the caller, because an {@link AppClock} binding does not reach the new thread.
+     */
+    private void startRefresh(Instant startedAt, boolean force) {
+        if (!refreshing.compareAndSet(false, true)) {
+            if (force) rerun.set(true);
+            return;
+        }
+        var startNanos = System.nanoTime();
+        Thread.ofVirtual().name("mcp-tools-refresh-" + name).start(() -> {
+            do {
+                rerun.set(false);
+                var at = startedAt.plusNanos(System.nanoTime() - startNanos);
+                toolList.updateAndGet(l -> new ToolList(l.tools(), l.ttl(), l.fetchedAt(), at));
+                refreshOnce(startedAt, startNanos);
+                refreshing.set(false);
+            } while (rerun.get() && refreshing.compareAndSet(false, true));
+        });
+    }
+
+    private void refreshOnce(Instant base, long baseNanos) {
+        Fetched fetched;
+        try {
+            fetched = fetchTools(requestTimeout);
+        } catch (Exception e) {
+            Logger.warn("[mcp:%s] tools/list refresh failed: %s", name, e.getMessage());
+            return;
+        }
+        if (state.get() != State.READY) return;
+        var landed = base.plusNanos(System.nanoTime() - baseNanos);
+        var previous = Objects.requireNonNull(toolList.getAndUpdate(
+                l -> new ToolList(fetched.tools(), fetched.ttl(), landed, l.lastFetchStartedAt())));
+        if (!previous.tools().equals(fetched.tools())) onToolsChanged.accept(fetched.tools());
+    }
+
+    // ==================== tools/list_changed subscription ====================
+
+    private record Subscription(long id, CompletableFuture<JsonObject> ack, AtomicBoolean ended) {}
+
+    /**
+     * Open one {@code subscriptions/listen} for {@code toolsListChanged} and return at once.
+     * {@code onEvent} hears {@link SubscriptionEvent#ACKNOWLEDGED} when the server grants it, then
+     * at most one of {@link SubscriptionEvent#DROPPED} or {@link SubscriptionEvent#REFUSED}; nothing
+     * once the client is closing or has left READY.
+     */
+    public void openToolsSubscription(Consumer<SubscriptionEvent> onEvent) {
+        if (!modern || state.get() != State.READY) return;
+        var sub = new Subscription(nextId.getAndIncrement(), new CompletableFuture<>(), new AtomicBoolean());
+        subscription.set(sub);
+        var notifications = new JsonObject();
+        notifications.addProperty("toolsListChanged", true);
+        var params = new JsonObject();
+        params.add("notifications", notifications);
+        CompletableFuture<JsonRpc.Response> listen;
+        try {
+            listen = dispatch(sub.id(), LISTEN, params, true);
+        } catch (IOException | RuntimeException e) {
+            Logger.warn("[mcp:%s] %s could not be sent: %s", name, LISTEN, e.getMessage());
+            endSubscription(sub, SubscriptionEvent.DROPPED, onEvent, false);
+            return;
+        }
+        // A response, success or error, is the server ending the subscription.
+        listen.whenComplete((resp, _) -> {
+            if (resp != null && resp.isError()) {
+                Logger.warn("[mcp:%s] %s refused: %s", name, LISTEN, resp.resolvedError().message());
+                endSubscription(sub, SubscriptionEvent.REFUSED, onEvent, false);
+            } else {
+                endSubscription(sub, SubscriptionEvent.DROPPED, onEvent, false);
+            }
+        });
+        Thread.ofVirtual().name("mcp-listen-" + name).start(() -> awaitAcknowledgment(sub, onEvent));
+    }
+
+    private void awaitAcknowledgment(Subscription sub, Consumer<SubscriptionEvent> onEvent) {
+        JsonObject granted;
+        try {
+            granted = sub.ack().get(requestTimeout.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException _) {
+            endSubscription(sub, SubscriptionEvent.DROPPED, onEvent, true);
+            return;
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+            endSubscription(sub, SubscriptionEvent.DROPPED, onEvent, true);
+            return;
+        } catch (ExecutionException | CancellationException _) {
+            return;  // the subscription ended before it was acknowledged, and reported that
+        }
+        if (!isGranted(granted.get("toolsListChanged"))) {
+            Logger.warn("[mcp:%s] %s was acknowledged without toolsListChanged", name, LISTEN);
+            endSubscription(sub, SubscriptionEvent.REFUSED, onEvent, true);
+            return;
+        }
+        if (subscription.get() == sub && !sub.ended().get() && state.get() == State.READY) {
+            onEvent.accept(SubscriptionEvent.ACKNOWLEDGED);
+        }
+    }
+
+    private static boolean isGranted(@Nullable JsonElement el) {
+        if (el == null || el.isJsonNull()) return false;
+        return !(el.isJsonPrimitive() && el.getAsJsonPrimitive().isBoolean() && !el.getAsBoolean());
+    }
+
+    /** Reports {@code event} once per subscription, and only while it is still the active one on a READY client. */
+    private void endSubscription(Subscription sub, SubscriptionEvent event, Consumer<SubscriptionEvent> onEvent,
+                                 boolean cancel) {
+        if (!sub.ended().compareAndSet(false, true)) return;
+        sub.ack().cancel(false);
+        pending.remove(sub.id());
+        if (cancel) {
+            try { transport.cancel(sub.id(), LISTEN + " ended"); } catch (RuntimeException _) { /* best effort */ }
+        }
+        if (!subscription.compareAndSet(sub, null) || state.get() != State.READY) return;
+        onEvent.accept(event);
+    }
+
+    private static @Nullable JsonElement meta(JsonRpc.Notification n) {
+        return n.params() instanceof JsonObject params ? params.get(META) : null;
+    }
+
+    /** Numeric and string ids compare alike: the server may echo our long id either way. */
+    private boolean subscriptionIdMatches(@Nullable JsonElement meta) {
+        var sub = subscription.get();
+        if (sub == null || !(meta instanceof JsonObject obj)) return false;
+        if (!(obj.get(SUBSCRIPTION_ID) instanceof JsonElement id) || !id.isJsonPrimitive()) return false;
+        var p = id.getAsJsonPrimitive();
+        if (p.isNumber()) return p.getAsBigDecimal().compareTo(BigDecimal.valueOf(sub.id())) == 0;
+        return p.isString() && p.getAsString().equals(Long.toString(sub.id()));
+    }
+
+    private static boolean hasSubscriptionId(@Nullable JsonElement meta) {
+        return meta instanceof JsonObject obj && obj.has(SUBSCRIPTION_ID);
+    }
+
+    /**
+     * Over the handshake every list_changed counts. On 2026-07-28 one must carry the active
+     * subscription's id, except over HTTP, where an id-less one can only ride a stream JClaw opened.
+     */
+    private boolean acceptsListChanged(JsonRpc.Notification n) {
+        if (!modern) return true;
+        var meta = meta(n);
+        if (hasSubscriptionId(meta)) return subscriptionIdMatches(meta);
+        return transport.carriesHeaders();
+    }
+
     // ==================== protocol ====================
 
-    private List<McpToolDef> fetchTools(Duration timeout) throws IOException, McpException {
+    private Fetched fetchTools(Duration timeout) throws IOException, McpException {
         return fetchTools(timeout, false);
     }
 
     /** As {@link #fetchTools(Duration)}, but a page with no tools array is a failure rather than an empty list. */
-    private List<McpToolDef> fetchToolsStrict(Duration timeout) throws IOException, McpException {
+    private Fetched fetchToolsStrict(Duration timeout) throws IOException, McpException {
         return fetchTools(timeout, true);
     }
 
     /** Every page of {@code tools/list}, following {@code nextCursor} up to {@link #MAX_TOOL_PAGES}. */
-    private List<McpToolDef> fetchTools(Duration timeout, boolean strict) throws IOException, McpException {
+    private Fetched fetchTools(Duration timeout, boolean strict) throws IOException, McpException {
         var out = new ArrayList<McpToolDef>();
         @Nullable String cursor = null;
+        long ttlMs = Long.MAX_VALUE;
         for (var page = 0; page < MAX_TOOL_PAGES; page++) {
             var params = new JsonObject();
             if (cursor != null) params.addProperty("cursor", cursor);
             var result = untilComplete(TOOLS_LIST, params, p -> toolsListPage(p, timeout, strict));
+            ttlMs = Math.min(ttlMs, ttlMs(result.get("ttlMs")));
             var tools = result.get("tools");
             if (tools == null || !tools.isJsonArray()) {
                 if (strict) throw new McpException("tools/list returned no tools array");
@@ -478,12 +685,19 @@ public class McpClient implements AutoCloseable {
                 out.addAll(toolDefs(tools.getAsJsonArray()));
             }
             var next = result.get("nextCursor");
-            if (next == null || !next.isJsonPrimitive()) return publishable(out);
+            if (next == null || !next.isJsonPrimitive()) return new Fetched(publishable(out), Duration.ofMillis(ttlMs));
             cursor = next.getAsString();
         }
         Logger.warn("[mcp:%s] tools/list was still paging after %d pages; publishing the tools those listed",
                 name, MAX_TOOL_PAGES);
-        return publishable(out);
+        return new Fetched(publishable(out), Duration.ofMillis(ttlMs));
+    }
+
+    /** Absent, non-numeric and negative all mean stale at once. */
+    private static long ttlMs(@Nullable JsonElement el) {
+        if (el == null || !el.isJsonPrimitive() || !el.getAsJsonPrimitive().isNumber()) return 0;
+        var ms = el.getAsDouble();
+        return ms > 0 ? (long) ms : 0;
     }
 
     private JsonObject toolsListPage(JsonObject params, Duration timeout, boolean strict)
@@ -758,19 +972,20 @@ public class McpClient implements AutoCloseable {
     }
 
     private void handleNotification(JsonRpc.Notification n) {
-        if ("notifications/tools/list_changed".equals(n.method())) {
-            // Refresh out-of-band; never block the read thread on a network round-trip.
-            Thread.startVirtualThread(() -> {
-                try {
-                    var refreshed = fetchTools(requestTimeout);
-                    cachedTools = refreshed;
-                    onToolsChanged.accept(refreshed);
-                } catch (Exception e) {
-                    Logger.warn("[mcp:%s] tools/list refresh failed: %s", name, e.getMessage());
+        switch (n.method()) {
+            case SUBSCRIPTION_ACKNOWLEDGED -> {
+                var sub = subscription.get();
+                if (sub != null && subscriptionIdMatches(meta(n))) {
+                    var params = n.params() instanceof JsonObject p ? p : new JsonObject();
+                    sub.ack().complete(params.get("notifications") instanceof JsonObject granted
+                            ? granted : new JsonObject());
                 }
-            });
+            }
+            case TOOLS_LIST_CHANGED -> {
+                if (acceptsListChanged(n)) startRefresh(AppClock.now(), true);
+            }
+            default -> { /* logging/message, progress, canceled: out of scope */ }
         }
-        // Other notifications (logging/message, progress, canceled) are out of scope for JCLAW-31.
     }
 
     private void handleServerRequest(JsonRpc.Request r) {
@@ -791,6 +1006,8 @@ public class McpClient implements AutoCloseable {
     }
 
     private void onTransportError(Throwable t) {
+        // Cleared first, so the listen future failing below reports nothing.
+        subscription.set(null);
         lastError = t.getMessage();
         for (var future : pending.values()) {
             future.completeExceptionally(t);
