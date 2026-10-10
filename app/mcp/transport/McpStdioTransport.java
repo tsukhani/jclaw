@@ -91,6 +91,15 @@ public final class McpStdioTransport implements McpTransport {
     }
 
     @Override
+    public void cancel(Object requestId, String reason) {
+        try {
+            send(new JsonRpc.Notification("notifications/cancelled", Map.of("requestId", requestId, "reason", reason)));
+        } catch (IOException e) {
+            Logger.warn("[mcp:%s] failed to cancel request %s: %s", name, requestId, e.getMessage());
+        }
+    }
+
+    @Override
     public void close() {
         closed = true;
         // Close stdin first so the subprocess sees EOF on its input and a

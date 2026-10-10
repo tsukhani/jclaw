@@ -54,6 +54,18 @@ public interface McpTransport extends AutoCloseable {
         send(msg);
     }
 
+    /** Whether {@link #send(JsonRpc.Message, Map)} puts its headers on the wire. */
+    default boolean carriesHeaders() {
+        return false;
+    }
+
+    /**
+     * Give up on request {@code requestId}, which its caller stopped waiting for (JCLAW-1444):
+     * stdio tells the server with {@code notifications/cancelled}, HTTP cancels the request's
+     * call. Never fails the connection; the default does nothing.
+     */
+    default void cancel(Object requestId, String reason) {}
+
     @Override
     void close();
 }

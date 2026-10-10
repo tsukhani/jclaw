@@ -83,6 +83,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
 
     private final ConcurrentHashMap<Long, Call> inFlight = new ConcurrentHashMap<>();
     private final AtomicLong callSeq = new AtomicLong();
+    private final ConcurrentHashMap<Object, Call> requestCalls = new ConcurrentHashMap<>();
     /** Session id assigned by the server on the initialize response (if any).
      *  Atomic so the SSE-reader thread that observes it from one response
      *  publishes to subsequent {@link #send} calls without a lock. Null until
@@ -149,6 +150,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
         var call = HttpFactories.llmStreamingGuarded().newCall(builder.build());
         var token = callSeq.incrementAndGet();
         inFlight.put(token, call);
+        if (requestId != null) requestCalls.put(requestId, call);
         // Enqueue through OkHttp's Dispatcher rather than firing a per-send
         // virtual thread + call.execute(): the dispatcher owns the virtual-thread
         // executor (per HttpFactories#llmStreaming) and enforces the operator's
@@ -158,9 +160,10 @@ public final class McpStreamableHttpTransport implements McpTransport {
             @Override
             public void onFailure(Call call, IOException e) {
                 try {
-                    if (!closed) onError.accept(e);
+                    // A cancelled call is one request given up on, not a failed connection.
+                    if (!closed && !call.isCanceled()) onError.accept(e);
                 } finally {
-                    inFlight.remove(token);
+                    forget(token, requestId, call);
                 }
             }
 
@@ -172,12 +175,34 @@ public final class McpStreamableHttpTransport implements McpTransport {
                     // RuntimeException too: an unexpected parse/dereference failure
                     // while reading the response would otherwise vanish silently —
                     // route it to onError so the connection manager can react.
-                    if (!closed) onError.accept(e);
+                    if (!closed && !call.isCanceled()) onError.accept(e);
                 } finally {
-                    inFlight.remove(token);
+                    forget(token, requestId, call);
                 }
             }
         });
+    }
+
+    private void forget(long token, @Nullable Object requestId, Call call) {
+        inFlight.remove(token);
+        if (requestId != null) requestCalls.remove(requestId, call);
+    }
+
+    @Override
+    public boolean carriesHeaders() {
+        return true;
+    }
+
+    /** Cancelling the call closes its response stream, which is how Streamable HTTP cancels a request. */
+    @Override
+    public void cancel(Object requestId, String reason) {
+        var call = requestCalls.remove(requestId);
+        if (call != null) call.cancel();
+    }
+
+    /** HTTP calls sent and not yet finished, for a test to see that a cancelled one went. */
+    public int inFlightCalls() {
+        return inFlight.size();
     }
 
     @Override
@@ -187,6 +212,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
             try { call.cancel(); } catch (RuntimeException _) { /* best effort */ }
         }
         inFlight.clear();
+        requestCalls.clear();
     }
 
     private void handleResponse(Response resp, @Nullable Object requestId, boolean isInitialize,

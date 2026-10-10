@@ -323,6 +323,36 @@ class McpStreamableHttpTransportTest extends UnitTest {
     }
 
     @Test
+    void aTimedOutRequestLeavesNoCallInFlightAndTheConnectionStands() throws Exception {
+        var release = new CountDownLatch(1);
+        serveMcp(null, (tool, id) -> {
+            if (tool.equals("hang")) {
+                try {
+                    release.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+            return json(200, result(id, "{\"content\":[]}")).build();
+        });
+        try (var transport = newTransport();
+             var client = new McpClient("test", transport, "0", Duration.ofSeconds(5), Duration.ofMillis(300))) {
+            client.connect();
+            var ex = assertThrows(McpException.class, () -> client.callTool("hang", new JsonObject()));
+            assertTrue(ex.getMessage().contains("timed out"), ex.getMessage());
+            // The server is still holding the request, so only the cancel can have ended the call.
+            var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (transport.inFlightCalls() > 0 && System.nanoTime() < deadline) Thread.sleep(20);
+            assertEquals(0, transport.inFlightCalls());
+            assertEquals(McpClient.State.READY, client.state(), "a cancelled call is not a lost connection");
+            assertNull(client.lastError());
+            assertFalse(client.callTool("fast", new JsonObject()).isError());
+        } finally {
+            release.countDown();
+        }
+    }
+
+    @Test
     void aJsonRpcErrorBodyGivesItsCodeAndKnownVersionsButNeverItsMessage() throws Exception {
         serveMcp(null, (_, id) -> json(400, rpcError(id, -32022,
                 "{\"supported\":[\"2026-07-28\",\"" + MARKER + "\",\"2025-06-18\",7]}")).build());
