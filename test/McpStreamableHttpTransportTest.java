@@ -353,7 +353,16 @@ class McpStreamableHttpTransportTest extends UnitTest {
 
     @Test
     void aNotFoundOnASessionBearingRequestTearsTheConnectionDown() throws Exception {
-        serveMcp("sess-1", (_, id) -> json(404, rpcError(id, -32001, "null")).build());
+        assertSessionBearingStatusTearsDown(404);
+    }
+
+    @Test
+    void aBadRequestOnASessionBearingRequestTearsTheConnectionDown() throws Exception {
+        assertSessionBearingStatusTearsDown(400);
+    }
+
+    private void assertSessionBearingStatusTearsDown(int status) throws Exception {
+        serveMcp("sess-1", (_, id) -> json(status, rpcError(id, -32001, "null")).build());
         try (var client = newClient()) {
             client.connect();
             assertThrows(Exception.class, () -> client.callTool("t", new JsonObject()));
@@ -363,7 +372,7 @@ class McpStreamableHttpTransportTest extends UnitTest {
                 Thread.sleep(10);
             }
             assertEquals(McpClient.State.DISCONNECTED, client.state());
-            assertEquals("MCP HTTP 404", client.lastError());
+            assertEquals("MCP HTTP " + status, client.lastError());
         }
     }
 
@@ -379,12 +388,17 @@ class McpStreamableHttpTransportTest extends UnitTest {
     }
 
     @Test
-    void aBadRequestOnASessionBearingRequestFailsOnlyItsRequest() throws Exception {
-        serveMcp("sess-1", (_, id) -> json(400, rpcError(id, -32602, "null")).build());
+    void aServerErrorOnASessionBearingRequestFailsOnlyItsRequest() throws Exception {
+        serveMcp("sess-1", (tool, id) -> tool.equals("bad")
+                ? json(500, rpcError(id, -32603, "null")).build()
+                : json(200, result(id, "{\"content\":[]}")).build());
         try (var client = newClient()) {
             client.connect();
-            var ex = assertThrows(McpException.class, () -> client.callTool("t", new JsonObject()));
-            assertEquals(-32602, ex.code());
+            var ex = assertThrows(McpException.class, () -> client.callTool("bad", new JsonObject()));
+            assertEquals(-32603, ex.code());
+            assertEquals(McpClient.State.READY, client.state());
+            assertNull(client.lastError());
+            assertFalse(client.callTool("again", new JsonObject()).isError());
             assertEquals(McpClient.State.READY, client.state());
         }
     }

@@ -2,10 +2,16 @@ import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import mcp.McpAllowlist;
 import mcp.McpConnectionManager;
+import mcp.jsonrpc.JsonRpc;
+import mockwebserver3.Dispatcher;
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
+import mockwebserver3.RecordedRequest;
 import models.Agent;
 import models.AgentSkillAllowedTool;
 import models.EventLog;
 import models.McpServer;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,6 +20,7 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.EventLogger;
 import services.Tx;
+import utils.CircuitBreakers;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -21,7 +28,10 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.CancellationException;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -250,6 +260,74 @@ class McpConnectionManagerTest extends UnitTest {
         assertTrue(prompt >= 6,
                 "disconnect must land on the transport-error callback, not a poll tick; "
                         + "only " + prompt + "/8 deaths were noticed within 60 ms " + latencies);
+    }
+
+    // ==================== JCLAW-1442: a lost HTTP session reconnects ====================
+
+    @Test
+    void aNotFoundOnASessionBearingCallReconnectsWithoutTheOldSessionId() throws Exception {
+        assertSessionLossReconnectsFresh(404);
+    }
+
+    @Test
+    void aBadRequestOnASessionBearingCallReconnectsWithoutTheOldSessionId() throws Exception {
+        assertSessionLossReconnectsFresh(400);
+    }
+
+    /** Hands out {@code sess-1}, answers its first tool call with {@code status}, then
+     *  hands the next initialize {@code sess-2}; records each initialize's session header. */
+    private void assertSessionLossReconnectsFresh(int status) throws Exception {
+        var name = "http-sess-" + status + "-" + UUID.randomUUID().toString().substring(0, 8);
+        var initSessions = new CopyOnWriteArrayList<Optional<String>>();
+        try (var http = new MockWebServer()) {
+            http.setDispatcher(new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    var msg = JsonRpc.decode(request.getBody().utf8());
+                    if (!(msg instanceof JsonRpc.Request r)) return new MockResponse.Builder().code(202).build();
+                    var sent = Optional.ofNullable(request.getHeaders().get("Mcp-Session-Id"));
+                    return switch (r.method()) {
+                        case "initialize" -> {
+                            initSessions.add(sent);
+                            yield rpc(200, r.id(), "{}")
+                                    .addHeader("Mcp-Session-Id", "sess-" + initSessions.size()).build();
+                        }
+                        case "tools/list" -> rpc(200, r.id(), "{\"tools\":[]}").build();
+                        default -> sent.equals(Optional.of("sess-1"))
+                                ? rpc(status, r.id(), null).build()
+                                : rpc(200, r.id(), "{\"content\":[]}").build();
+                    };
+                }
+            });
+            http.start();
+            var cfg = new JsonObject();
+            cfg.addProperty("url", http.url("/mcp").toString());
+            McpConnectionManager.connect(seedServer(name, McpServer.Transport.HTTP, cfg.toString()));
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+
+            assertThrows(Exception.class, () -> McpConnectionManager.callTool(name, "t", new JsonObject()));
+
+            var deadline = System.currentTimeMillis() + 10_000;
+            while ((initSessions.size() < 2 || McpConnectionManager.status(name) != McpServer.Status.CONNECTED)
+                    && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
+            }
+            assertEquals(2, initSessions.size(), "the session loss must reconnect: " + initSessions);
+            assertEquals(Optional.empty(), initSessions.get(0));
+            assertEquals(Optional.empty(), initSessions.get(1), "the reconnect must not resend the old session id");
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            assertFalse(McpConnectionManager.callTool(name, "t", new JsonObject()).isError());
+        } finally {
+            McpConnectionManager.stop(name);
+            CircuitBreakers.remove("mcp:" + name);
+        }
+    }
+
+    private static MockResponse.Builder rpc(int code, Object id, @Nullable String result) {
+        var body = result != null
+                ? "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":" + result + "}"
+                : "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":-32001,\"message\":\"gone\"}}";
+        return new MockResponse.Builder().code(code).addHeader("Content-Type", "application/json").body(body);
     }
 
     /** Status and tools are two reads, so one disagreeing sample can be an

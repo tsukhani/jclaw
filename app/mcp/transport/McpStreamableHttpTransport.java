@@ -59,8 +59,8 @@ import java.util.function.Consumer;
  * <p><b>Failures.</b> A non-2xx answer to a request fails that request alone through
  * {@code onRequestFailed} (JCLAW-1442): under 2026-07-28 a 400 or 404 carrying a JSON-RPC
  * error is an ordinary answer to one request. Two cases stay connection-level and go to
- * {@code onError}: a 404 on a POST that carried {@code Mcp-Session-Id}, which the
- * handshake-era spec defines as an expired session, and a call that got no HTTP response.
+ * {@code onError}: a 400 or 404 on a POST that carried {@code Mcp-Session-Id}, either of which
+ * can mean the session is gone, and a call that got no HTTP response.
  *
  * <p><b>Out of scope.</b> The optional GET-SSE channel for receiving
  * server-initiated events between requests is not implemented; for the
@@ -200,7 +200,11 @@ public final class McpStreamableHttpTransport implements McpTransport {
         if (!resp.isSuccessful()) {
             // JCLAW-778: status only — the upstream body is attacker-influenced
             // (agent-settable endpoint) and must not be reflected into lastError.
-            if (resp.code() == 404 && carriedSession) throw new IOException("MCP HTTP 404");
+            // Either can mean the session is gone: 404 for one the server ended, 400 from a server
+            // that treats an unknown id like a missing one. Reconnecting drops the stale id.
+            if (carriedSession && (resp.code() == 404 || resp.code() == 400)) {
+                throw new IOException("MCP HTTP " + resp.code());
+            }
             if (requestId != null) {
                 if (!closed) onRequestFailed.accept(requestId, requestFailure(resp));
             } else {
