@@ -357,6 +357,11 @@ class McpStreamableHttpTransportTest extends UnitTest {
         try (var client = newClient()) {
             client.connect();
             assertThrows(Exception.class, () -> client.callTool("t", new JsonObject()));
+            // onTransportError fails the pending future before it flips the state.
+            var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            while (client.state() != McpClient.State.DISCONNECTED && System.nanoTime() < deadline) {
+                Thread.sleep(10);
+            }
             assertEquals(McpClient.State.DISCONNECTED, client.state());
             assertEquals("MCP HTTP 404", client.lastError());
         }
