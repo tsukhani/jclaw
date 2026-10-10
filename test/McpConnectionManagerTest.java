@@ -69,6 +69,8 @@ class McpConnectionManagerTest extends UnitTest {
                 const text = (m.params && m.params.arguments && m.params.arguments.text) || '';
                 send({ jsonrpc: '2.0', id: m.id,
                   result: { content: [{ type: 'text', text: 'echo:' + text }] } });
+              } else if (m.id !== undefined) {
+                send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });
               }
             });
             function send(obj) { process.stdout.write(JSON.stringify(obj) + '\\n'); }
@@ -565,6 +567,8 @@ class McpConnectionManagerTest extends UnitTest {
                             serverInfo: { name: 'slow', version: '0.0.1' } } }), DELAY_MS);
               } else if (m.method === 'tools/list') {
                 send({ jsonrpc: '2.0', id: m.id, result: { tools: [] } });
+              } else if (m.id !== undefined) {
+                send({ jsonrpc: '2.0', id: m.id, error: { code: -32601, message: 'Method not found' } });
               }
             });
             function send(obj) { process.stdout.write(JSON.stringify(obj) + '\\n'); }

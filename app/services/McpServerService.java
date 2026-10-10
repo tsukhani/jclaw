@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import mcp.McpClient;
 import mcp.McpConnectionManager;
+import mcp.McpEraDetection;
 import mcp.McpToolDef;
 import mcp.transport.McpStdioTransport;
 import mcp.transport.McpStreamableHttpTransport;
@@ -45,8 +46,8 @@ import java.util.stream.Collectors;
  *       updated, or deleted.</li>
  *   <li>{@link #testConnection} — synchronous "Test connection"
  *       handler: spin a throwaway {@link McpClient} with the candidate
- *       config, run initialize + tools/list, return success+tool count
- *       or error. Doesn't disturb any active connection for the row.</li>
+ *       config, detect its protocol era and list its tools, return
+ *       success+tool count or error. Doesn't disturb any active connection for the row.</li>
  * </ul>
  */
 public final class McpServerService {
@@ -83,7 +84,14 @@ public final class McpServerService {
                        List<ToolInfo> tools,
                        @Nullable String createdAt, @Nullable String updatedAt,
                        /** JCLAW-982: name of the older server this one duplicates, else null. */
-                       @Nullable String duplicateOf) {
+                       @Nullable String duplicateOf,
+                       /** JCLAW-1443: AUTOMATIC or HANDSHAKE. */
+                       String protocol,
+                       /** The protocol version JClaw last connected with, else null. */
+                       @Nullable String protocolVersion,
+                       /** When JClaw itself moved the server to HANDSHAKE, and why; null once the operator sets it. */
+                       @Nullable String protocolSwitchedAt,
+                       @Nullable String protocolSwitchReason) {
 
         public static View of(McpServer row) {
             var cfg = explodeConfigJson(row.transport, row.configJson);
@@ -127,14 +135,19 @@ public final class McpServerService {
                     toolInfo,
                     row.createdAt != null ? row.createdAt.toString() : null,
                     row.updatedAt != null ? row.updatedAt.toString() : null,
-                    null);
+                    null,
+                    row.protocolSetting().name(),
+                    row.protocolVersion,
+                    row.protocolSwitchedAt != null ? row.protocolSwitchedAt.toString() : null,
+                    row.protocolSwitchReason);
         }
 
         /** {@link #of} sees one row; only the caller holding the whole list can spot a twin. */
         public View withDuplicateOf(@Nullable String original) {
             return new View(id, name, enabled, requiresApproval, transport, command, args, env,
                     url, headers, status, lastError, lastConnectedAt, lastDisconnectedAt,
-                    toolCount, tools, createdAt, updatedAt, original);
+                    toolCount, tools, createdAt, updatedAt, original, protocol, protocolVersion,
+                    protocolSwitchedAt, protocolSwitchReason);
         }
     }
 
@@ -351,35 +364,49 @@ public final class McpServerService {
      * @param message   human-readable message — on failure this is the
      *                  reason surfaced near the Test button
      * @param toolNames names of the tools the server advertised
+     * @param protocolVersion the protocol version the test connected with, else null
+     * @param offersModern    whether the server offers protocol 2026-07-28
      */
     public record TestResult(boolean success, int toolCount, String message,
-                             List<String> toolNames) {}
+                             List<String> toolNames, @Nullable String protocolVersion, boolean offersModern) {}
 
     /**
-     * Spin a throwaway {@link McpClient} with the row's config, run
-     * initialize + tools/list, then close. Bounded by {@link #TEST_TIMEOUT};
-     * does not interact with the live {@link McpConnectionManager} entry
-     * for this server, so it's safe to test while a connection is active.
+     * Spin a throwaway {@link McpClient} with the row's config, detect its protocol era and list
+     * its tools, then close. Always probes, whatever the row's protocol setting (JCLAW-1443), so
+     * the result says whether the server offers 2026-07-28. Bounded by {@link #TEST_TIMEOUT};
+     * does not interact with the live {@link McpConnectionManager} entry for this server, so
+     * it's safe to test while a connection is active.
      */
-    // MustBeClosed: the transport is handed to the McpClient below, whose close() closes it;
-    // it is built first so a bad config reports as such instead of as a connect failure.
-    @SuppressWarnings("MustBeClosed")
     public static TestResult testConnection(McpServer row) {
+        var clientVersion = Play.configuration.getProperty("application.version", "0.0.0-dev");
+        McpEraDetection.Opened opened;
+        try {
+            opened = McpEraDetection.open(row.name, McpServer.Protocol.AUTOMATIC, false,
+                    opening -> testClient(row, clientVersion, opening));
+        } catch (Exception e) {
+            return new TestResult(false, 0, e.getMessage() != null ? e.getMessage() : e.toString(), List.of(),
+                    null, false);
+        }
+        try (var client = opened.client()) {
+            var names = client.tools().stream().map(McpToolDef::name).sorted().toList();
+            var offer = opened.offersModern() ? "The server offers 2026-07-28."
+                    : "The server does not offer 2026-07-28.";
+            return new TestResult(true, names.size(), "Connected over %s. %d tool(s) advertised. %s"
+                    .formatted(client.protocolVersion(), names.size(), offer), names,
+                    client.protocolVersion(), opened.offersModern());
+        }
+    }
+
+    // MustBeClosed: the client owns the transport, and McpEraDetection or the caller closes the client.
+    @SuppressWarnings("MustBeClosed")
+    private static McpClient testClient(McpServer row, String clientVersion, McpClient.Opening opening) {
         McpTransport transport;
         try {
             transport = buildTransport(row);
         } catch (RuntimeException e) {
-            return new TestResult(false, 0, "Bad transport config: " + e.getMessage(), List.of());
+            throw new IllegalArgumentException("Bad transport config: " + e.getMessage(), e);
         }
-        var clientVersion = Play.configuration.getProperty("application.version", "0.0.0-dev");
-        try (var client = new McpClient("test:" + row.name, transport, clientVersion, TEST_TIMEOUT)) {
-            client.connect();
-            var names = client.tools().stream().map(McpToolDef::name).sorted().toList();
-            return new TestResult(true, names.size(),
-                    "Connected. " + names.size() + " tool(s) advertised.", names);
-        } catch (Exception e) {
-            return new TestResult(false, 0, e.getMessage() != null ? e.getMessage() : e.toString(), List.of());
-        }
+        return new McpClient("test:" + row.name, transport, clientVersion, TEST_TIMEOUT, TEST_TIMEOUT, opening);
     }
 
     // ==================== validation ====================

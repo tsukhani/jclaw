@@ -359,6 +359,62 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                 "a PUT that omits requiresApproval must not reset it: " + getContent(put));
     }
 
+    // ==================== JCLAW-1443: protocol setting ====================
+
+    @Test
+    void aServerCreatedWithoutAProtocolReadsAutomatic() {
+        login();
+        var created = created("""
+                {"name":"proto-default","enabled":false,"transport":"HTTP","url":"http://127.0.0.1:1/mcp"}
+                """);
+        assertEquals("AUTOMATIC", created.get("protocol").getAsString());
+        assertTrue(created.get("protocolVersion") == null || created.get("protocolVersion").isJsonNull());
+    }
+
+    @Test
+    void theProtocolSettingRoundTripsAndRejectsAnUnknownValue() {
+        login();
+        var created = created("""
+                {"name":"proto-set","enabled":false,"transport":"HTTP","url":"http://127.0.0.1:1/mcp",
+                 "protocol":"HANDSHAKE"}
+                """);
+        assertEquals("HANDSHAKE", created.get("protocol").getAsString());
+        var id = created.get("id").getAsLong();
+        var back = PUT("/api/mcp-servers/" + id, "application/json", "{\"protocol\":\"AUTOMATIC\"}");
+        assertIsOk(back);
+        assertTrue(getContent(back).contains("\"protocol\":\"AUTOMATIC\""), getContent(back));
+        assertStatus(400, PUT("/api/mcp-servers/" + id, "application/json", "{\"protocol\":\"STATELESS\"}"));
+    }
+
+    @Test
+    void settingTheProtocolEndsTheNoteThatJclawSwitchedIt() {
+        login();
+        var id = created("""
+                {"name":"proto-note","enabled":false,"transport":"HTTP","url":"http://127.0.0.1:1/mcp"}
+                """).get("id").getAsLong();
+        commitInFreshTx(() -> {
+            models.McpServer row = models.McpServer.findById(id);
+            row.protocol = models.McpServer.Protocol.HANDSHAKE;
+            row.protocolSwitchedAt = java.time.Instant.parse("2026-10-11T08:00:00Z");
+            row.protocolSwitchReason = "the first tools/list over 2026-07-28 failed";
+            row.probeTimedOutAt = java.time.Instant.parse("2026-10-11T07:00:00Z");
+            row.save();
+            return null;
+        });
+        var unchanged = JsonParser.parseString(getContent(PUT("/api/mcp-servers/" + id, "application/json",
+                "{\"protocol\":\"HANDSHAKE\"}"))).getAsJsonObject();
+        assertEquals("the first tools/list over 2026-07-28 failed", unchanged.get("protocolSwitchReason").getAsString(),
+                "saving the setting it already has is not the operator changing it");
+
+        var changed = JsonParser.parseString(getContent(PUT("/api/mcp-servers/" + id, "application/json",
+                "{\"protocol\":\"AUTOMATIC\"}"))).getAsJsonObject();
+        assertEquals("AUTOMATIC", changed.get("protocol").getAsString());
+        assertTrue(changed.get("protocolSwitchedAt") == null || changed.get("protocolSwitchedAt").isJsonNull());
+        assertTrue(changed.get("protocolSwitchReason") == null || changed.get("protocolSwitchReason").isJsonNull());
+        awaitCommitted(() -> models.McpServer.<models.McpServer>findById(id).probeTimedOutAt == null,
+                "a changed setting gives the probe another chance");
+    }
+
     // ==================== test connection ====================
 
     @Test

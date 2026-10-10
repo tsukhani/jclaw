@@ -1037,6 +1037,16 @@ export interface McpServer {
    * strings are compared by eye.
    */
   duplicateOf: string | null
+  /**
+   * JCLAW-1443: AUTOMATIC probes with server/discover on every connect and speaks 2026-07-28
+   * to a server that answers it; HANDSHAKE never probes and opens with initialize.
+   */
+  protocol: 'AUTOMATIC' | 'HANDSHAKE'
+  /** The protocol version JClaw last connected with, or null before the first connect. */
+  protocolVersion: string | null
+  /** When JClaw itself moved the server to HANDSHAKE, and why; null once the operator sets it. */
+  protocolSwitchedAt: string | null
+  protocolSwitchReason: string | null
 }
 
 /** JCLAW-813: a saved prompt in the Prompts Library. The category glyph is a
@@ -1083,6 +1093,10 @@ export interface McpTestResult {
   toolCount: number
   message: string
   toolNames: string[]
+  /** The protocol version the test connected with; null when it failed. */
+  protocolVersion: string | null
+  /** Whether the server offers 2026-07-28, which the test always probes for. */
+  offersModern: boolean
 }
 
 /**

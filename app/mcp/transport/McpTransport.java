@@ -4,6 +4,7 @@ import mcp.McpException;
 import mcp.jsonrpc.JsonRpc;
 
 import java.io.IOException;
+import java.util.Map;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -44,6 +45,14 @@ public interface McpTransport extends AutoCloseable {
     }
 
     void send(JsonRpc.Message msg) throws IOException;
+
+    /**
+     * As {@link #send(JsonRpc.Message)}, with headers for this one message. Only Streamable HTTP
+     * has anywhere to put them (JCLAW-1443); every other transport keeps this default.
+     */
+    default void send(JsonRpc.Message msg, Map<String, String> requestHeaders) throws IOException {
+        send(msg);
+    }
 
     @Override
     void close();

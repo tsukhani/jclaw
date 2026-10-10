@@ -11,6 +11,7 @@ import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import mcp.McpConnectionManager;
 import models.McpServer;
+import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.McpServerService;
@@ -53,12 +54,13 @@ public class ApiMcpServersController extends Controller {
     public record McpServerRequest(String name, Boolean enabled, Boolean requiresApproval,
                                    String transport, String command, List<String> args,
                                    Map<String, String> env, String url,
-                                   Map<String, String> headers) {}
+                                   Map<String, String> headers, String protocol) {}
 
     // JSON body keys reused across create/update parsers.
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_TRANSPORT = "transport";
     private static final String KEY_REQUIRES_APPROVAL = "requiresApproval";
+    private static final String KEY_PROTOCOL = "protocol";
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.View.class))))
     @Operation(summary = "List MCP servers with status and tool count")
@@ -107,6 +109,8 @@ public class ApiMcpServersController extends Controller {
                 && !body.get(KEY_REQUIRES_APPROVAL).isJsonNull()
                 && body.get(KEY_REQUIRES_APPROVAL).getAsBoolean();
         row.transport = transport;
+        var protocol = readProtocol(body);
+        if (protocol != null) row.protocol = protocol;
         restoreMaskedSecrets(body, McpServerService.TransportConfig.empty());
         row.configJson = McpServerService.composeConfigJson(transport, body);
         try {
@@ -151,6 +155,15 @@ public class ApiMcpServersController extends Controller {
         if (body.has(KEY_TRANSPORT) && !body.get(KEY_TRANSPORT).isJsonNull()) {
             row.transport = readTransport(body);
         }
+        // JCLAW-1443: the operator setting the protocol ends the note that JClaw switched it, and
+        // any edit to how the server is reached earns its probe another chance.
+        var protocol = readProtocol(body);
+        if (protocol != null && protocol != row.protocolSetting()) {
+            row.protocol = protocol;
+            row.protocolSwitchedAt = null;
+            row.protocolSwitchReason = null;
+            row.probeTimedOutAt = null;
+        }
         // configJson rebuild: any of (transport, command, args, env, url, headers)
         // appearing in the body triggers a fresh compose. Cheaper than diffing.
         if (touchesTransportConfig(body)) {
@@ -160,6 +173,7 @@ public class ApiMcpServersController extends Controller {
             requireMainForStdio(row.transport);
             restoreMaskedSecrets(body, priorConfig);
             row.configJson = McpServerService.composeConfigJson(row.transport, body);
+            row.probeTimedOutAt = null;
         }
         try {
             McpServerService.validate(row);
@@ -251,6 +265,20 @@ public class ApiMcpServersController extends Controller {
             return McpServer.Transport.valueOf(raw.toUpperCase());
         } catch (IllegalArgumentException _) {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Unknown transport '%s' (expected STDIO or HTTP)".formatted(raw));
+            throw ApiResponses.unreachable();
+        }
+    }
+
+    /** The body's protocol setting, or null when it carries none. */
+    @SuppressWarnings("java:S2259")
+    private static McpServer.@Nullable Protocol readProtocol(JsonObject body) {
+        var raw = JsonArgs.optString(body, KEY_PROTOCOL);
+        if (raw == null) return null;
+        try {
+            return McpServer.Protocol.valueOf(raw.toUpperCase());
+        } catch (IllegalArgumentException _) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST,
+                    "Unknown protocol '%s' (expected AUTOMATIC or HANDSHAKE)".formatted(raw));
             throw ApiResponses.unreachable();
         }
     }

@@ -23,6 +23,7 @@ interface FormState {
   envRows: KeyValueRow[]
   url: string
   headerRows: KeyValueRow[]
+  protocol: McpServer['protocol']
 }
 
 const editing = ref<FormState | null>(null)
@@ -94,6 +95,7 @@ function blankForm(): FormState {
     envRows: [{ key: '', value: '' }],
     url: '',
     headerRows: [{ key: '', value: '' }],
+    protocol: 'AUTOMATIC',
   }
 }
 
@@ -122,6 +124,7 @@ function formFromServer(s: McpServer): FormState {
     envRows,
     url: s.url || '',
     headerRows,
+    protocol: s.protocol ?? 'AUTOMATIC',
   }
 }
 
@@ -160,6 +163,7 @@ function buildPayload(form: FormState) {
     name: form.name.trim(),
     enabled: form.enabled,
     transport: form.transport,
+    protocol: form.protocol,
   }
   if (form.transport === 'STDIO') {
     base.command = form.command.trim()
@@ -275,6 +279,10 @@ async function testFromForm() {
     return
   }
   await testServer({ id: editing.value.id } as McpServer)
+}
+
+function formatSwitchedAt(iso: string) {
+  return new Date(iso).toLocaleString()
 }
 
 const statusBadgeClass: Record<McpServer['status'], string> = {
@@ -647,6 +655,12 @@ function removeHeaderRow(i: number) {
                     :class="statusBadgeClass[server.status]"
                     :title="server.lastError || ''"
                   >{{ server.status }}</span>
+                  <span
+                    v-if="server.protocolVersion"
+                    class="text-[10px] font-mono text-fg-muted"
+                    :title="`JClaw last connected with MCP protocol ${server.protocolVersion}`"
+                    data-testid="mcp-protocol-version"
+                  >{{ server.protocolVersion }}</span>
                   <button
                     v-if="breakerOf(server)"
                     type="button"
@@ -878,6 +892,41 @@ function removeHeaderRow(i: number) {
                       </label>
                     </div>
                   </fieldset>
+
+                  <div>
+                    <div class="flex items-end gap-4">
+                      <label
+                        :for="`edit-${server.id}-protocol`"
+                        class="block"
+                      >
+                        <span class="block text-xs text-fg-muted mb-1">Protocol</span>
+                        <select
+                          :id="`edit-${server.id}-protocol`"
+                          v-model="editing.protocol"
+                          class="bg-surface border border-input text-sm text-fg-strong px-2 py-1 focus:outline-hidden"
+                        >
+                          <option value="AUTOMATIC">Automatic</option>
+                          <option value="HANDSHAKE">Handshake</option>
+                        </select>
+                      </label>
+                      <span
+                        class="text-xs text-fg-muted pb-1.5"
+                        data-testid="mcp-protocol-last-version"
+                      >{{ server.protocolVersion ? `Last connected with ${server.protocolVersion}` : 'Not connected yet' }}</span>
+                    </div>
+                    <p class="text-xs text-fg-muted mt-1">
+                      Automatic asks the server on every connect whether it speaks MCP 2026-07-28 and uses it if so.
+                      Handshake always connects the older way, for a server that misbehaves on 2026-07-28.
+                    </p>
+                    <p
+                      v-if="server.protocolSwitchedAt && server.protocol === 'HANDSHAKE'"
+                      class="text-xs text-amber-700 dark:text-amber-400 mt-1"
+                      data-testid="mcp-protocol-switched"
+                    >
+                      JClaw switched this server to Handshake on {{ formatSwitchedAt(server.protocolSwitchedAt) }}:
+                      {{ server.protocolSwitchReason }}. Set it back to Automatic to try 2026-07-28 again.
+                    </p>
+                  </div>
 
                   <div
                     v-if="editing.transport === 'STDIO'"
