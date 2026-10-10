@@ -1,5 +1,8 @@
 import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import mcp.McpClient;
+import mcp.McpException;
 import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpStdioTransport;
 import org.junit.jupiter.api.AfterEach;
@@ -33,6 +36,7 @@ class McpStdioTransportTest extends UnitTest {
             // from stdin, replies with the matching JSON-RPC shape per method.
             const readline = require('readline');
             process.stderr.write('fixture starting\\n');
+            const cancelled = [];
             const rl = readline.createInterface({ input: process.stdin, terminal: false });
             rl.on('line', (line) => {
               if (!line.trim()) return;
@@ -48,6 +52,13 @@ class McpStdioTransportTest extends UnitTest {
                   result: { tools: [{ name: 'echo', description: 'Echo input',
                                        inputSchema: { type: 'object',
                                          properties: { text: { type: 'string' } } } }] } });
+              } else if (msg.method === 'notifications/cancelled') {
+                cancelled.push(msg.params);
+              } else if (msg.method === 'tools/call' && msg.params.name === 'hang') {
+                // never answered
+              } else if (msg.method === 'tools/call' && msg.params.name === 'cancelled') {
+                send({ jsonrpc: '2.0', id: msg.id,
+                  result: { content: [{ type: 'text', text: JSON.stringify(cancelled) }] } });
               } else if (msg.method === 'tools/call') {
                 const text = (msg.params && msg.params.arguments && msg.params.arguments.text) || '';
                 send({ jsonrpc: '2.0', id: msg.id,
@@ -197,6 +208,24 @@ class McpStdioTransportTest extends UnitTest {
             // that never reach it. McpStdioTransport.close() is idempotent.
             assertTimeoutPreemptively(Duration.ofSeconds(5), idle::close,
                     "close() must not deadlock on the stdout reader lock");
+        }
+    }
+
+    @Test
+    void aTimedOutRequestSendsOneCancelledNotification() throws Exception {
+        try (var transport = newTransport();
+             var client = new McpClient("fixture", transport, "0", Duration.ofSeconds(10), Duration.ofMillis(300))) {
+            client.connect();
+            var ex = assertThrows(McpException.class, () -> client.callTool("hang", new JsonObject()));
+            assertTrue(ex.getMessage().contains("timed out"), ex.getMessage());
+            // The fixture reports the cancellations it received; the stdio pipe keeps them in order.
+            var seen = JsonParser.parseString(client.callTool("cancelled", new JsonObject()).content()).getAsJsonArray();
+            assertEquals(1, seen.size(), seen.toString());
+            var cancel = seen.get(0).getAsJsonObject();
+            // initialize is 1 and tools/list 2, so the call that hung is 3.
+            assertEquals(3, cancel.get("requestId").getAsInt());
+            assertTrue(cancel.get("reason").getAsString().contains("timed out"), cancel.toString());
+            assertEquals(McpClient.State.READY, client.state());
         }
     }
 

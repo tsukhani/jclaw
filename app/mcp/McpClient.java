@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeSet;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -83,6 +84,10 @@ public class McpClient implements AutoCloseable {
     private static final String TOOLS_LIST = "tools/list";
     private static final String INITIALIZE = "initialize";
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
+    /** Retries of one request on a state-only {@code input_required}; a server needing more is looping. */
+    public static final int MAX_INPUT_RETRIES = 3;
+    /** {@code tools/list} pages read per fetch, so a server that never ends the list cannot hang a connect. */
+    public static final int MAX_TOOL_PAGES = 50;
 
     private final String name;
     private final McpTransport transport;
@@ -214,25 +219,39 @@ public class McpClient implements AutoCloseable {
         if (state.get() != State.READY) {
             throw new McpException("callTool requires READY state, was " + state.get());
         }
+        var args = arguments != null ? arguments : new JsonObject();
         var params = new JsonObject();
         params.addProperty("name", toolName);
-        params.add("arguments", arguments != null ? arguments : new JsonObject());
-        JsonRpc.Response resp;
-        try {
-            resp = sendRequest(TOOLS_CALL, params, requestTimeout);
-        } catch (McpException e) {
-            throw callFailure(e);
+        params.add("arguments", args);
+        var mirrored = mirrorsParams() ? mirroredHeaders(toolName, args) : Map.<String, String>of();
+        return CallToolResult.fromResultObject(untilComplete(TOOLS_CALL, params, p -> {
+            JsonRpc.Response resp;
+            try {
+                resp = sendRequest(TOOLS_CALL, p, requestTimeout, mirrored);
+            } catch (McpException e) {
+                throw callFailure(e);
+            }
+            if (resp.isError()) {
+                var err = resp.resolvedError();
+                throw callFailure(McpException.fromRpcError(err.code(), err.message(), err.data()));
+            }
+            if (!(resp.result() instanceof JsonObject result)) {
+                throw new McpException("tools/call returned non-object result");
+            }
+            return result;
+        }));
+    }
+
+    /** Parameters are mirrored into headers only on 2026-07-28 over a transport that sends headers. */
+    private boolean mirrorsParams() {
+        return modern && transport.carriesHeaders();
+    }
+
+    private Map<String, String> mirroredHeaders(String toolName, JsonObject arguments) {
+        for (var tool : cachedTools) {
+            if (tool.name().equals(toolName)) return McpParamHeaders.headersFor(tool.inputSchema(), arguments);
         }
-        if (resp.isError()) {
-            var err = resp.resolvedError();
-            throw callFailure(McpException.fromRpcError(err.code(), err.message(), err.data()));
-        }
-        if (resp.result() == null || !resp.result().isJsonObject()) {
-            throw new McpException("tools/call returned non-object result");
-        }
-        var result = resp.result().getAsJsonObject();
-        requireComplete(TOOLS_CALL, result);
-        return CallToolResult.fromResultObject(result);
+        return Map.of();
     }
 
     @Override
@@ -436,54 +455,145 @@ public class McpClient implements AutoCloseable {
     // ==================== protocol ====================
 
     private List<McpToolDef> fetchTools(Duration timeout) throws IOException, McpException {
-        var resp = sendRequest(TOOLS_LIST, new JsonObject(), timeout);
-        if (resp.isError()) {
-            var err = resp.resolvedError();
-            throw McpException.fromRpcError(err.code(), "tools/list failed: " + err.message(), err.data());
-        }
-        var result = resp.result();
-        if (result == null || !result.isJsonObject()) return List.of();
-        requireComplete(TOOLS_LIST, result.getAsJsonObject());
-        return toolDefs(result.getAsJsonObject().getAsJsonArray("tools"));
+        return fetchTools(timeout, false);
     }
 
-    /** As {@link #fetchTools}, but an answer with no tools array is a failure rather than an empty list. */
+    /** As {@link #fetchTools(Duration)}, but a page with no tools array is a failure rather than an empty list. */
     private List<McpToolDef> fetchToolsStrict(Duration timeout) throws IOException, McpException {
-        var resp = sendRequest(TOOLS_LIST, new JsonObject(), timeout);
+        return fetchTools(timeout, true);
+    }
+
+    /** Every page of {@code tools/list}, following {@code nextCursor} up to {@link #MAX_TOOL_PAGES}. */
+    private List<McpToolDef> fetchTools(Duration timeout, boolean strict) throws IOException, McpException {
+        var out = new ArrayList<McpToolDef>();
+        @Nullable String cursor = null;
+        for (var page = 0; page < MAX_TOOL_PAGES; page++) {
+            var params = new JsonObject();
+            if (cursor != null) params.addProperty("cursor", cursor);
+            var result = untilComplete(TOOLS_LIST, params, p -> toolsListPage(p, timeout, strict));
+            var tools = result.get("tools");
+            if (tools == null || !tools.isJsonArray()) {
+                if (strict) throw new McpException("tools/list returned no tools array");
+            } else {
+                out.addAll(toolDefs(tools.getAsJsonArray()));
+            }
+            var next = result.get("nextCursor");
+            if (next == null || !next.isJsonPrimitive()) return publishable(out);
+            cursor = next.getAsString();
+        }
+        Logger.warn("[mcp:%s] tools/list was still paging after %d pages; publishing the tools those listed",
+                name, MAX_TOOL_PAGES);
+        return publishable(out);
+    }
+
+    private JsonObject toolsListPage(JsonObject params, Duration timeout, boolean strict)
+            throws IOException, McpException {
+        var resp = sendRequest(TOOLS_LIST, params, timeout);
         if (resp.isError()) {
             var err = resp.resolvedError();
             throw McpException.fromRpcError(err.code(), "tools/list failed: " + err.message(), err.data());
         }
-        var result = resp.result() instanceof JsonObject obj ? obj : null;
-        var tools = result != null ? result.get("tools") : null;
-        if (result == null || tools == null || !tools.isJsonArray()) {
-            throw new McpException("tools/list returned no tools array");
-        }
-        requireComplete(TOOLS_LIST, result);
-        return toolDefs(tools.getAsJsonArray());
+        if (resp.result() instanceof JsonObject result) return result;
+        if (strict) throw new McpException("tools/list returned no tools array");
+        return new JsonObject();
     }
 
-    private static List<McpToolDef> toolDefs(@Nullable JsonArray arr) {
-        if (arr == null) return List.of();
-        var out = new ArrayList<McpToolDef>(arr.size());
-        for (var el : arr) {
-            if (el.isJsonObject()) out.add(McpToolDef.fromJson(el.getAsJsonObject()));
+    /** Drops a tool whose {@code x-mcp-header} annotations could not be mirrored as the spec requires. */
+    private List<McpToolDef> publishable(List<McpToolDef> tools) {
+        if (!mirrorsParams()) return List.copyOf(tools);
+        var out = new ArrayList<McpToolDef>(tools.size());
+        for (var tool : tools) {
+            var invalid = McpParamHeaders.invalidReason(tool.inputSchema());
+            if (invalid == null) {
+                out.add(tool);
+            } else {
+                Logger.warn("[mcp:%s] dropping tool '%s': %s", name, tool.name(), invalid);
+            }
         }
         return List.copyOf(out);
     }
 
+    private static List<McpToolDef> toolDefs(JsonArray arr) {
+        var out = new ArrayList<McpToolDef>(arr.size());
+        for (var el : arr) {
+            if (el.isJsonObject()) out.add(McpToolDef.fromJson(el.getAsJsonObject()));
+        }
+        return out;
+    }
+
+    /** One request and its answer; {@link #untilComplete} repeats it with new params. */
+    @FunctionalInterface
+    private interface Round {
+        JsonObject send(JsonObject params) throws IOException, McpException;
+    }
+
     /**
-     * Until JCLAW-1444 handles result types, anything but a complete result fails: read as a plain
-     * result, an {@code input_required} reply is an empty success no later check can tell apart.
+     * Send {@code params} until the result is complete, retrying a state-only {@code input_required}
+     * (2026-07-28 Multi Round-Trip Requests) with its {@code requestState} echoed unchanged. Each
+     * retry is a new request, so it gets a new id.
      */
-    private static void requireComplete(String method, JsonObject result) {
+    private static JsonObject untilComplete(String method, JsonObject params, Round round)
+            throws IOException, McpException {
+        var p = params;
+        for (var retries = 0; ; retries++) {
+            var result = round.send(p);
+            var state = inputRequiredState(method, result);
+            if (state == null) return result;
+            if (retries == MAX_INPUT_RETRIES) {
+                throw new McpException(method + " still asked for another round after " + MAX_INPUT_RETRIES
+                        + " retries, so JClaw stopped: the server never completed the request");
+            }
+            p = params.deepCopy();
+            p.add("requestState", state);
+        }
+    }
+
+    /**
+     * Null for a complete result, which is also what an absent {@code resultType} means; the
+     * {@code requestState} to echo for a state-only {@code input_required}; otherwise a failure.
+     */
+    private static @Nullable JsonElement inputRequiredState(String method, JsonObject result) {
         var type = result.get("resultType");
-        if (type == null || type.isJsonNull()) return;
-        if (type.isJsonPrimitive() && "complete".equals(type.getAsString())) return;
-        var shown = type.isJsonPrimitive() && type.getAsString().matches("[a-z_]{1,32}")
-                ? "'" + type.getAsString() + "'" : "of an unknown kind";
-        throw new McpException(method + " returned a result " + shown
-                + ", which JClaw cannot handle yet: it accepts only complete results");
+        if (type == null || type.isJsonNull()) return null;
+        var kind = type.isJsonPrimitive() ? type.getAsString() : "";
+        if ("complete".equals(kind)) return null;
+        if (!"input_required".equals(kind)) {
+            var shown = kind.matches("[a-z_]{1,32}") ? "'" + kind + "'" : "of an unknown kind";
+            throw new McpException(method + " returned a result " + shown
+                    + ", which JClaw cannot handle: it knows complete and input_required");
+        }
+        if (isPresent(result.get("inputRequests"))) {
+            // JClaw declares no elicitation, sampling or roots, so a conforming server never asks.
+            throw new McpException("the server asked for input mid-request (" + inputKinds(result.get("inputRequests"))
+                    + "), which JClaw cannot give: it offers no elicitation, sampling or roots. Call the tool"
+                    + " again with every argument it needs filled in, or use another tool.");
+        }
+        var state = result.get("requestState");
+        if (state == null || state.isJsonNull()) {
+            throw new McpException(method + " returned input_required with neither inputRequests nor requestState");
+        }
+        return state;
+    }
+
+    private static boolean isPresent(@Nullable JsonElement el) {
+        if (el == null || el.isJsonNull()) return false;
+        if (el instanceof JsonObject obj) return !obj.isEmpty();
+        return !el.isJsonArray() || !el.getAsJsonArray().isEmpty();
+    }
+
+    /** The methods the server's input requests name, when they look like methods; never other text it sent. */
+    private static String inputKinds(@Nullable JsonElement requests) {
+        var kinds = new TreeSet<String>();
+        var items = new ArrayList<JsonElement>();
+        if (requests instanceof JsonObject obj) obj.entrySet().forEach(e -> items.add(e.getValue()));
+        if (requests instanceof JsonArray arr) arr.forEach(items::add);
+        for (var item : items) {
+            if (item instanceof JsonObject req && req.get("method") instanceof JsonElement m && m.isJsonPrimitive()
+                    && m.getAsString().matches("[a-z]{1,32}/[A-Za-z]{1,32}")) {
+                kinds.add(m.getAsString());
+            }
+        }
+        return kinds.isEmpty() ? "of an unknown kind" : String.join(", ", kinds);
     }
 
     /**
@@ -529,18 +639,30 @@ public class McpClient implements AutoCloseable {
 
     private JsonRpc.Response sendRequest(String method, JsonObject params, Duration timeout)
             throws IOException, McpException {
+        return sendRequest(method, params, timeout, Map.of());
+    }
+
+    private JsonRpc.Response sendRequest(String method, JsonObject params, Duration timeout,
+                                         Map<String, String> extraHeaders) throws IOException, McpException {
         var id = nextId.getAndIncrement();
-        return await(id, method, dispatch(id, method, params, modern), timeout);
+        return await(id, method, dispatch(id, method, params, modern, extraHeaders), timeout);
     }
 
     /** Register {@code id} and put the request on the wire; a modern request carries {@code _meta} and its headers. */
     private CompletableFuture<JsonRpc.Response> dispatch(long id, String method, JsonObject params, boolean asModern)
             throws IOException {
+        return dispatch(id, method, params, asModern, Map.of());
+    }
+
+    private CompletableFuture<JsonRpc.Response> dispatch(long id, String method, JsonObject params, boolean asModern,
+                                                         Map<String, String> extraHeaders) throws IOException {
         var future = new CompletableFuture<JsonRpc.Response>();
         pending.put(id, future);
         var req = new JsonRpc.Request(id, method, asModern ? withMeta(params) : params);
+        var headers = headers(method, params, asModern);
+        headers.putAll(extraHeaders);
         try {
-            transport.send(req, headers(method, params, asModern));
+            transport.send(req, headers);
         } catch (IOException | RuntimeException e) {
             pending.remove(id);
             throw e;
@@ -554,7 +676,12 @@ public class McpClient implements AutoCloseable {
             return future.get(timeout.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             pending.remove(id);
-            throw new McpException("Request " + method + " timed out after " + timeout, e);
+            var reason = "Request " + method + " timed out after " + timeout;
+            // The spec forbids cancelling initialize.
+            if (!INITIALIZE.equals(method)) {
+                try { transport.cancel(id, reason); } catch (RuntimeException _) { /* best effort */ }
+            }
+            throw new McpException(reason, e);
         } catch (InterruptedException e) {
             pending.remove(id);
             Thread.currentThread().interrupt();

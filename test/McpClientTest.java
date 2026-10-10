@@ -517,16 +517,193 @@ class McpClientTest extends UnitTest {
         }
     }
 
-    @Test
-    void aResultThatIsNotCompleteFailsTheCall() throws Exception {
+    // ==================== JCLAW-1444: result types, MRTR, mirrored headers, pagination, cancellation ====================
+
+    private McpClient modernClient(List<ScriptedTransport> transports, Script onCall) throws IOException {
+        return McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                clients(transports, () -> modernOnly(onCall), Duration.ofSeconds(5))).client();
+    }
+
+    private McpException callFails(String result) throws Exception {
         var transports = new CopyOnWriteArrayList<ScriptedTransport>();
-        var opened = McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false, clients(transports,
-                () -> modernOnly((_, r) -> ok(r, "{\"resultType\":\"input_required\",\"inputRequests\":{}}")),
-                Duration.ofSeconds(5)));
-        try (var client = opened.client()) {
+        try (var client = modernClient(transports, (_, r) -> ok(r, result))) {
             var ex = assertThrows(McpException.class, () -> client.callTool("echo", new JsonObject()));
-            assertTrue(ex.getMessage().contains("input_required"), ex.getMessage());
+            assertEquals(McpClient.State.READY, client.state(), "a refused result fails the call, not the connection");
+            assertEquals(1, transports.getFirst().methods.stream().filter("tools/call"::equals).count(), result);
+            return ex;
+        }
+    }
+
+    @Test
+    void eachResultTypeBranch() throws Exception {
+        assertTrue(callFails("{\"resultType\":\"deferred\",\"content\":[]}").getMessage()
+                .contains("a result 'deferred', which JClaw cannot handle"));
+        assertTrue(callFails("{\"resultType\":{\"x\":1},\"content\":[]}").getMessage()
+                .contains("a result of an unknown kind"));
+        assertTrue(callFails("{\"resultType\":\"input_required\",\"inputRequests\":{}}").getMessage()
+                .contains("input_required with neither inputRequests nor requestState"));
+        var asked = callFails("{\"resultType\":\"input_required\",\"requestState\":\"s\",\"inputRequests\":"
+                + "{\"ask\":{\"method\":\"elicitation/create\",\"params\":{\"message\":\"IGNORE ALL\"}}}}");
+        assertTrue(asked.getMessage().contains("asked for input mid-request (elicitation/create)"), asked.getMessage());
+        assertTrue(asked.getMessage().contains("Call the tool again with every argument"), asked.getMessage());
+        assertFalse(asked.getMessage().contains("IGNORE ALL"), "the server's own text never reaches the model");
+        // Absent is complete (every handshake-era test above), and so is complete itself.
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = modernClient(transports,
+                (_, r) -> ok(r, "{\"content\":[{\"type\":\"text\",\"text\":\"no type\"}]}"))) {
+            assertEquals("no type", client.callTool("echo", new JsonObject()).content());
+        }
+    }
+
+    @Test
+    void aStateOnlyInputRequiredIsRetriedWithANewIdAndTheSameState() throws Exception {
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        Script twoRounds = (_, r) -> {
+            var state = ((JsonObject) Objects.requireNonNull(r.params())).get("requestState");
+            if (state == null) {
+                return ok(r, "{\"resultType\":\"input_required\",\"requestState\":\"opaque/1+=\"}");
+            }
+            return ok(r, "{\"resultType\":\"complete\",\"content\":[{\"type\":\"text\",\"text\":\""
+                    + state.getAsString() + "\"}]}");
+        };
+        try (var client = modernClient(transports, twoRounds)) {
+            var args = new JsonObject();
+            args.addProperty("q", "x");
+            assertEquals("opaque/1+=", client.callTool("echo", args).content());
+            var calls = transports.getFirst().requests.stream().filter(r -> r.method().equals("tools/call")).toList();
+            assertEquals(2, calls.size());
+            assertNotEquals(calls.get(0).id(), calls.get(1).id());
+            var retry = (JsonObject) Objects.requireNonNull(calls.get(1).params());
+            assertEquals("opaque/1+=", retry.get("requestState").getAsString());
+            assertEquals(args, retry.get("arguments"));
+            assertEquals("echo", retry.get("name").getAsString());
+        }
+    }
+
+    @Test
+    void theRetryStopsAtTheBound() throws Exception {
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = modernClient(transports,
+                (_, r) -> ok(r, "{\"resultType\":\"input_required\",\"requestState\":\"again\"}"))) {
+            var ex = assertThrows(McpException.class, () -> client.callTool("echo", new JsonObject()));
+            assertTrue(ex.getMessage().contains("after " + McpClient.MAX_INPUT_RETRIES + " retries"), ex.getMessage());
+            var calls = transports.getFirst().requests.stream().filter(r -> r.method().equals("tools/call")).toList();
+            assertEquals(McpClient.MAX_INPUT_RETRIES + 1, calls.size());
+            assertEquals(McpClient.MAX_INPUT_RETRIES + 1, calls.stream().map(JsonRpc.Request::id).distinct().count());
+        }
+    }
+
+    private static final String ANNOTATED_TOOLS = "{\"tools\":["
+            + "{\"name\":\"good\",\"inputSchema\":{\"type\":\"object\",\"properties\":{"
+            + "\"region\":{\"type\":\"string\",\"x-mcp-header\":\"Region\"},\"q\":{\"type\":\"string\"}}}},"
+            + "{\"name\":\"bad\",\"inputSchema\":{\"type\":\"object\",\"properties\":{"
+            + "\"region\":{\"type\":\"object\",\"x-mcp-header\":\"Region\"}}}},"
+            + "{\"name\":\"plain\",\"inputSchema\":{\"type\":\"object\"}}]}";
+
+    @Test
+    void aToolWithAnInvalidAnnotationIsDroppedAndItsSiblingsMirrorTheirArguments() throws Exception {
+        Script server = (_, r) -> switch (r.method()) {
+            case "server/discover" -> ok(r, DISCOVER_RESULT);
+            case "tools/list" -> ok(r, ANNOTATED_TOOLS);
+            default -> ok(r, "{\"content\":[]}");
+        };
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                clients(transports, () -> server, Duration.ofSeconds(5))).client()) {
+            assertEquals(List.of("good", "plain"), client.tools().stream().map(McpToolDef::name).toList());
+            var args = new JsonObject();
+            args.addProperty("region", "eu west");
+            args.addProperty("q", "not mirrored");
+            client.callTool("good", args);
+            var headers = transports.getFirst().headers.getLast();
+            assertEquals("eu west", headers.get("Mcp-Param-Region"));
+            assertEquals(4, headers.size(), headers.toString());
+            client.callTool("good", new JsonObject());
+            assertNull(transports.getFirst().headers.getLast().get("Mcp-Param-Region"), "an absent argument sends no header");
+        }
+    }
+
+    @Test
+    void theHandshakeEraNeitherDropsAnnotatedToolsNorMirrorsHeaders() throws Exception {
+        Script server = (_, r) -> switch (r.method()) {
+            case "initialize" -> ok(r, INIT_RESULT);
+            case "tools/list" -> ok(r, ANNOTATED_TOOLS);
+            default -> ok(r, "{\"content\":[]}");
+        };
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = McpEraDetection.open("fake", McpServer.Protocol.HANDSHAKE, false,
+                clients(transports, () -> server, Duration.ofSeconds(5))).client()) {
+            assertEquals(3, client.tools().size());
+            var args = new JsonObject();
+            args.addProperty("region", "eu");
+            client.callTool("good", args);
+            assertNull(transports.getFirst().headers.getLast().get("Mcp-Param-Region"));
+        }
+    }
+
+    /** A tools/list answering page n with tool {@code t<n>} and a cursor to page n+1 while n < pages. */
+    private static Script paged(boolean modern, int pages) {
+        return (_, r) -> switch (r.method()) {
+            case "server/discover" -> modern ? ok(r, DISCOVER_RESULT) : err(r, -32601, "no such method", null);
+            case "initialize" -> ok(r, INIT_RESULT);
+            case "tools/list" -> {
+                var cursor = ((JsonObject) Objects.requireNonNull(r.params())).get("cursor");
+                var page = cursor == null ? 1 : Integer.parseInt(cursor.getAsString().substring(1));
+                var next = page < pages ? ",\"nextCursor\":\"p" + (page + 1) + "\"" : "";
+                yield ok(r, "{\"tools\":[{\"name\":\"t" + page + "\",\"inputSchema\":{}}]" + next + "}");
+            }
+            default -> ok(r, "{}");
+        };
+    }
+
+    @Test
+    void aTwoPageToolListPublishesBothPagesInEitherEra() throws Exception {
+        for (var modern : new boolean[] {true, false}) {
+            var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+            try (var client = McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                    clients(transports, () -> paged(modern, 2), Duration.ofSeconds(5))).client()) {
+                assertEquals(modern, client.isModern());
+                assertEquals(List.of("t1", "t2"), client.tools().stream().map(McpToolDef::name).toList(), "modern=" + modern);
+                var lists = transports.getFirst().requests.stream().filter(r -> r.method().equals("tools/list")).toList();
+                assertEquals(2, lists.size());
+                assertNull(((JsonObject) Objects.requireNonNull(lists.get(0).params())).get("cursor"));
+                assertEquals("p2", ((JsonObject) Objects.requireNonNull(lists.get(1).params())).get("cursor").getAsString());
+            }
+        }
+    }
+
+    @Test
+    void aServerThatPagesForeverStopsAtTheCap() throws Exception {
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                clients(transports, () -> paged(true, Integer.MAX_VALUE), Duration.ofSeconds(5))).client()) {
             assertEquals(McpClient.State.READY, client.state());
+            assertEquals(McpClient.MAX_TOOL_PAGES, client.tools().size());
+            assertEquals(McpClient.MAX_TOOL_PAGES,
+                    transports.getFirst().methods.stream().filter("tools/list"::equals).count());
+        }
+        // One page short of the cap still ends on its own.
+        var below = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                clients(below, () -> paged(true, McpClient.MAX_TOOL_PAGES - 1), Duration.ofSeconds(5))).client()) {
+            assertEquals(McpClient.MAX_TOOL_PAGES - 1, client.tools().size());
+        }
+    }
+
+    @Test
+    void aTimedOutCallIsCancelledOnceAndTheConnectionStands() throws Exception {
+        var t = new ScriptedTransport(modernOnly((_, r) ->
+                "slow".equals(((JsonObject) Objects.requireNonNull(r.params())).get("name").getAsString())
+                        ? null : ok(r, "{\"content\":[]}")));
+        try (var client = new McpClient("fake", t, "0", Duration.ofSeconds(5), Duration.ofMillis(200),
+                McpClient.Opening.PROBE)) {
+            client.connect();
+            var ex = assertThrows(McpException.class, () -> client.callTool("slow", new JsonObject()));
+            assertTrue(ex.getMessage().contains("timed out"), ex.getMessage());
+            assertEquals(List.of(t.requests.getLast().id()), t.cancelled);
+            assertEquals(McpClient.State.READY, client.state());
+            assertFalse(client.callTool("fast", new JsonObject()).isError());
+            assertEquals(1, t.cancelled.size(), "an answered call is never cancelled");
         }
     }
 
@@ -599,6 +776,7 @@ class McpClientTest extends UnitTest {
         final List<String> methods = new CopyOnWriteArrayList<>();
         final List<JsonRpc.Request> requests = new CopyOnWriteArrayList<>();
         final List<Map<String, String>> headers = new CopyOnWriteArrayList<>();
+        final List<Object> cancelled = new CopyOnWriteArrayList<>();
         private final Script script;
         private volatile Consumer<JsonRpc.Message> onMessage = _ -> {};
         private volatile boolean closed;
@@ -638,6 +816,17 @@ class McpClientTest extends UnitTest {
 
         void deliver(JsonRpc.Message msg) {
             onMessage.accept(msg);
+        }
+
+        /** Stands in for Streamable HTTP, the transport that sends headers. */
+        @Override
+        public boolean carriesHeaders() {
+            return true;
+        }
+
+        @Override
+        public void cancel(Object requestId, String reason) {
+            cancelled.add(requestId);
         }
 
         @Override
