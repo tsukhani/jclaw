@@ -324,8 +324,8 @@ public final class McpConnectionManager {
 
     /**
      * {@link #tools(String)} for an agent turn: a stale list starts one refresh off this thread
-     * and the previous list is returned at once. Everything else reads {@link #tools(String)},
-     * which never touches the network.
+     * and the previous list is returned at once. The admin UI, the allowlist and the service view
+     * read {@link #tools(String)} instead, which never refreshes.
      */
     public static List<McpToolDef> toolsForTurn(String serverName) {
         var e = connections.get(serverName);

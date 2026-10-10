@@ -792,9 +792,24 @@ class McpClientTest extends UnitTest {
             this.script = script;
         }
 
+        private volatile java.util.function.BiConsumer<Object, McpException> onRequestFailed = (_, _) -> {};
+
         @Override
         public void start(Consumer<JsonRpc.Message> onMessage, Consumer<Throwable> onError) {
             this.onMessage = onMessage;
+        }
+
+        @Override
+        public void start(Consumer<JsonRpc.Message> onMessage,
+                          java.util.function.BiConsumer<Object, McpException> onRequestFailed,
+                          Consumer<Throwable> onError) {
+            this.onMessage = onMessage;
+            this.onRequestFailed = onRequestFailed;
+        }
+
+        /** Fails one request alone, as Streamable HTTP does for a non-2xx answer. */
+        void fail(Object id, McpException e) {
+            onRequestFailed.accept(id, e);
         }
 
         @Override
@@ -1152,7 +1167,26 @@ class McpClientTest extends UnitTest {
     }
 
     @Test
-    void anAckThatOmitsToolsListChangedIsRefusedAndCancelled() throws Exception {
+    void anAckThatDoesNotGrantToolsListChangedIsRefusedAndCancelled() throws Exception {
+        for (var granted : List.of("{}", "{\"toolsListChanged\":\"false\"}")) {
+            var server = new ToolServer();
+            server.listChanged = true;
+            var t = new ScriptedTransport(server);
+            try (var client = connectedAt(T0, t)) {
+                var events = new LinkedBlockingQueue<McpClient.SubscriptionEvent>();
+                client.openToolsSubscription(events::add);
+                var listen = Objects.requireNonNull(server.listens.poll(5, TimeUnit.SECONDS));
+                t.deliver(ack(listen.id().toString(), granted));
+                assertEquals(McpClient.SubscriptionEvent.REFUSED, events.poll(5, TimeUnit.SECONDS), granted);
+                assertEquals(List.of(listen.id()), t.cancelled, granted);
+                assertNull(events.poll(200, TimeUnit.MILLISECONDS), "one terminal event");
+                assertEquals(McpClient.State.READY, client.state());
+            }
+        }
+    }
+
+    @Test
+    void aListenRefusedWithAnHttpJsonRpcErrorIsRefusedNotDropped() throws Exception {
         var server = new ToolServer();
         server.listChanged = true;
         var t = new ScriptedTransport(server);
@@ -1160,12 +1194,30 @@ class McpClientTest extends UnitTest {
             var events = new LinkedBlockingQueue<McpClient.SubscriptionEvent>();
             client.openToolsSubscription(events::add);
             var listen = Objects.requireNonNull(server.listens.poll(5, TimeUnit.SECONDS));
-            t.deliver(ack(listen.id().toString(), "{}"));
+            t.fail(listen.id(), McpException.fromHttp(400, -32601, null));
             assertEquals(McpClient.SubscriptionEvent.REFUSED, events.poll(5, TimeUnit.SECONDS));
-            assertEquals(List.of(listen.id()), t.cancelled);
             assertNull(events.poll(200, TimeUnit.MILLISECONDS), "one terminal event");
-            assertEquals(McpClient.State.READY, client.state());
         }
+    }
+
+    @Test
+    void aCallbackThatThrowsDoesNotWedgeLaterRefreshes() throws Exception {
+        var server = new ToolServer();
+        var t = new ScriptedTransport(server);
+        try (var client = connectedAt(T0, t)) {
+            client.onToolsChanged(_ -> { throw new IllegalStateException("publish failed"); });
+            t.deliver(new JsonRpc.Notification("notifications/tools/list_changed", null));
+            assertEquals(2, server.refetches.poll(5, TimeUnit.SECONDS));
+            assertEquals(List.of("t2"), waitForNames(client, List.of("t2")));
+            t.deliver(new JsonRpc.Notification("notifications/tools/list_changed", null));
+            assertEquals(3, server.refetches.poll(5, TimeUnit.SECONDS), "the single-flight flag was released");
+        }
+    }
+
+    private static List<String> waitForNames(McpClient client, List<String> expected) throws InterruptedException {
+        var latest = new LinkedBlockingQueue<List<String>>();
+        for (var i = 0; i < 250 && !names(client).equals(expected); i++) latest.poll(20, TimeUnit.MILLISECONDS);
+        return names(client);
     }
 
     @Test

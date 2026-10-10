@@ -24,6 +24,7 @@ import java.util.Objects;
 import java.util.TreeSet;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
@@ -527,8 +528,11 @@ public class McpClient implements AutoCloseable {
                 rerun.set(false);
                 var at = startedAt.plusNanos(System.nanoTime() - startNanos);
                 toolList.updateAndGet(l -> new ToolList(l.tools(), l.ttl(), l.fetchedAt(), at));
-                refreshOnce(startedAt, startNanos);
-                refreshing.set(false);
+                try {
+                    refreshOnce(startedAt, startNanos);
+                } finally {
+                    refreshing.set(false);
+                }
             } while (rerun.get() && refreshing.compareAndSet(false, true));
         });
     }
@@ -545,7 +549,12 @@ public class McpClient implements AutoCloseable {
         var landed = base.plusNanos(System.nanoTime() - baseNanos);
         var previous = Objects.requireNonNull(toolList.getAndUpdate(
                 l -> new ToolList(fetched.tools(), fetched.ttl(), landed, l.lastFetchStartedAt())));
-        if (!previous.tools().equals(fetched.tools())) onToolsChanged.accept(fetched.tools());
+        if (previous.tools().equals(fetched.tools())) return;
+        try {
+            onToolsChanged.accept(fetched.tools());
+        } catch (RuntimeException e) {
+            Logger.warn("[mcp:%s] publishing the refreshed tool list failed: %s", name, e.getMessage());
+        }
     }
 
     // ==================== tools/list_changed subscription ====================
@@ -575,9 +584,14 @@ public class McpClient implements AutoCloseable {
             return;
         }
         // A response, success or error, is the server ending the subscription.
-        listen.whenComplete((resp, _) -> {
+        listen.whenComplete((resp, failure) -> {
+            var cause = failure instanceof CompletionException ce && ce.getCause() != null ? ce.getCause() : failure;
             if (resp != null && resp.isError()) {
                 Logger.warn("[mcp:%s] %s refused: %s", name, LISTEN, resp.resolvedError().message());
+                endSubscription(sub, SubscriptionEvent.REFUSED, onEvent, false);
+            } else if (cause instanceof McpException me && me.code() != null) {
+                // An HTTP 4xx carrying a JSON-RPC error is a refusal too, not a dropped stream.
+                Logger.warn("[mcp:%s] %s refused: %s", name, LISTEN, me.getMessage());
                 endSubscription(sub, SubscriptionEvent.REFUSED, onEvent, false);
             } else {
                 endSubscription(sub, SubscriptionEvent.DROPPED, onEvent, false);
@@ -611,8 +625,8 @@ public class McpClient implements AutoCloseable {
     }
 
     private static boolean isGranted(@Nullable JsonElement el) {
-        if (el == null || el.isJsonNull()) return false;
-        return !(el.isJsonPrimitive() && el.getAsJsonPrimitive().isBoolean() && !el.getAsBoolean());
+        if (el == null) return false;
+        return el.isJsonObject() || (el.isJsonPrimitive() && el.getAsJsonPrimitive().isBoolean() && el.getAsBoolean());
     }
 
     /** Reports {@code event} once per subscription, and only while it is still the active one on a READY client. */

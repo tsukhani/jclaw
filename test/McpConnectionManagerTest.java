@@ -1,3 +1,4 @@
+import agents.McpServerCatalog;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import mcp.McpAllowlist;
@@ -32,11 +33,14 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -845,28 +849,82 @@ class McpConnectionManagerTest extends UnitTest {
     @Test
     void aStaleZeroTtlListIsRefetchedOnceOffTheTurnAndTheOldActionsServed() throws Exception {
         var seen = new CopyOnWriteArrayList<Arrival>();
+        var refetches = new LinkedBlockingQueue<Integer>();
         var release = new CountDownLatch(1);
         String name = null;
-        try (var http = modernHttp(false, seen, (id, n) -> {
-            if (n == 1) return toolsListing(id, 0L, "a");
-            release.await(5, TimeUnit.SECONDS);
-            return toolsListing(id, 0L, "a", "b");
-        }, (id, _) -> sse(ackEvent(id)).build())) {
+        try (var http = modernHttp(false, seen, heldRefetch(refetches, release), (id, _) -> sse(ackEvent(id)).build())) {
             name = connectHttp("ttl", http);
             awaitState(name, McpServer.Status.CONNECTED, 10);
             var tool = new McpServerTool(name);
             var later = Clock.offset(Clock.systemUTC(), Duration.ofSeconds(61));
             var actions = AppClock.callWith(later, () -> tool.execute("{}", new Agent()));
             assertTrue(actions.contains("\"a\"") && !actions.contains("\"b\""), actions);
-            awaitTrue("the refetch", 5000, () -> count(seen, "tools/list") == 2);
+            assertEquals(2, refetches.poll(5, TimeUnit.SECONDS));
             release.countDown();
             var n = name;
             awaitTrue("the refreshed list", 5000, () -> McpConnectionManager.tools(n).size() == 2);
             AppClock.callWith(later, () -> tool.execute("{}", new Agent()));
-            Thread.sleep(300);
-            assertEquals(2, count(seen, "tools/list"), "the minimum interval holds: " + seen);
+            assertNull(refetches.poll(300, TimeUnit.MILLISECONDS), "the minimum interval holds: " + seen);
         } finally {
             release.countDown();
+            if (name != null) {
+                McpConnectionManager.stop(name);
+                CircuitBreakers.remove("mcp:" + name);
+            }
+        }
+    }
+
+    /** tools/list answering {@code a} with a zero ttlMs, then each refetch, recorded and held until {@code release}, {@code a, b}. */
+    private static Answer heldRefetch(BlockingQueue<Integer> refetches, CountDownLatch release) {
+        return (id, n) -> {
+            if (n == 1) return toolsListing(id, 0L, "a");
+            refetches.add(n);
+            release.await(5, TimeUnit.SECONDS);
+            return toolsListing(id, 0L, "a", "b");
+        };
+    }
+
+    @Test
+    void theSystemPromptCatalogRefreshesAStaleListOnce() throws Exception {
+        var seen = new CopyOnWriteArrayList<Arrival>();
+        var refetches = new LinkedBlockingQueue<Integer>();
+        var release = new CountDownLatch(1);
+        String name = null;
+        try (var http = modernHttp(false, seen, heldRefetch(refetches, release), (id, _) -> sse(ackEvent(id)).build())) {
+            name = connectHttp("catalog", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var later = Clock.offset(Clock.systemUTC(), Duration.ofSeconds(61));
+            var catalog = AppClock.callWith(later, () -> Tx.run(() -> McpServerCatalog.formatCatalogForPrompt(Set.of())));
+            assertTrue(catalog.contains(name), catalog);
+            assertEquals(2, refetches.poll(5, TimeUnit.SECONDS));
+            AppClock.callWith(later, () -> Tx.run(() -> McpServerCatalog.formatCatalogForPrompt(Set.of())));
+            assertNull(refetches.poll(300, TimeUnit.MILLISECONDS), "exactly one refetch: " + seen);
+        } finally {
+            release.countDown();
+            if (name != null) {
+                McpConnectionManager.stop(name);
+                CircuitBreakers.remove("mcp:" + name);
+            }
+        }
+    }
+
+    @Test
+    void anIdLessListChangedOnAnHttpListenStreamRefetches() throws Exception {
+        var seen = new CopyOnWriteArrayList<Arrival>();
+        var refetches = new LinkedBlockingQueue<Integer>();
+        String name = null;
+        try (var http = modernHttp(true, seen, (id, n) -> {
+            if (n > 1) refetches.add(n);
+            return n == 1 ? toolsListing(id, null, "a") : toolsListing(id, null, "a", "b");
+        }, (id, n) -> n == 1
+                ? sse(ackEvent(id) + sseEvent("{\"jsonrpc\":\"2.0\",\"method\":\"notifications/tools/list_changed\"}"))
+                        .build()
+                : sse(ackEvent(id)).headersDelay(3, TimeUnit.SECONDS).build())) {
+            name = connectHttp("idless", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            assertEquals(2, refetches.poll(5, TimeUnit.SECONDS), "an id-less list_changed counts over HTTP");
+            assertNull(refetches.poll(300, TimeUnit.MILLISECONDS), seen.toString());
+        } finally {
             if (name != null) {
                 McpConnectionManager.stop(name);
                 CircuitBreakers.remove("mcp:" + name);
