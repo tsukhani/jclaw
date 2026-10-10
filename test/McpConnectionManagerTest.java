@@ -847,6 +847,30 @@ class McpConnectionManagerTest extends UnitTest {
     }
 
     @Test
+    void aStreamThatHangsUpRightAfterItsAcknowledgmentBacksOffFurtherEachTime() throws Exception {
+        McpConnectionManager.setBackoff(150, 2_000);
+        var seen = new CopyOnWriteArrayList<Arrival>();
+        var ends = new CopyOnWriteArrayList<Long>();
+        String name = null;
+        try (var http = modernHttp(true, seen, (id, _) -> toolsListing(id, null, "a"), (id, _) -> {
+            ends.add(System.nanoTime());
+            return sse(ackEvent(id)).build();
+        })) {
+            name = connectHttp("hangup", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            awaitTrue("a fourth listen", 5000, () -> count(seen, "subscriptions/listen") >= 4);
+            var listens = seen.stream().filter(a -> a.method().equals("subscriptions/listen")).toList();
+            var third = TimeUnit.NANOSECONDS.toMillis(listens.get(3).nanos() - ends.get(2));
+            assertTrue(third >= 500, "the third reopen waited " + third + " ms, not the initial 150");
+        } finally {
+            if (name != null) {
+                McpConnectionManager.stop(name);
+                CircuitBreakers.remove("mcp:" + name);
+            }
+        }
+    }
+
+    @Test
     void aStaleZeroTtlListIsRefetchedOnceOffTheTurnAndTheOldActionsServed() throws Exception {
         var seen = new CopyOnWriteArrayList<Arrival>();
         var refetches = new LinkedBlockingQueue<Integer>();
