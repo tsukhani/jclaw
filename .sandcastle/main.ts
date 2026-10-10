@@ -16,6 +16,7 @@ import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, pars
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
 import { Board, autoMerges, type About } from "./board.ts";
 import { MAX_OVERLOADS, Overloads, afterFailure, overloadReason, resetsOverloads } from "./overload.ts";
+import { frontendGate, type Diagnostic } from "./frontend-gate.ts";
 
 // Sandcastle's lines too: one log spans every launchd restart. Local time, to read beside `pmset -g log`.
 for (const level of ["log", "error", "warn"] as const) {
@@ -73,7 +74,6 @@ const fromAll = async <T>(what: string, read: (t: Tracker) => Promise<T[]>, unre
     )
   ).flat();
 
-type Diagnostic = { kind: string; file: string | null; line: number | null; message: string };
 // Where a gate records what it saw, for the story's comment and report.
 type GateLog = {
   key: string;
@@ -84,7 +84,8 @@ type GateLog = {
   flakes: { gate: string; failure: string }[];
 };
 
-// The full-suite gate on the sandbox's branch, returning only the failures that are new relative to main.
+// The full-suite gate on the sandbox's branch, returning only the failures that are new relative to main. A branch that
+// changes frontend/ gets the frontend checks too, which `play autotest` does not run.
 const gateIn = (sandbox: sandcastle.Sandbox, log: GateLog) => {
   const suiteOf = (r: Diagnostic) => r.message.split(".")[0];
   // Only a passed report clears a suite: a re-run that wrote no reports would otherwise forgive every failure.
@@ -130,8 +131,11 @@ const gateIn = (sandbox: sandcastle.Sandbox, log: GateLog) => {
         for (const r of records) if (!failingAlone.has(suiteOf(r))) log.flakes.push({ gate: label, failure: r.message.split("\n")[0] });
         fresh = records.filter((r) => failingAlone.has(suiteOf(r)) && !failingOnMain.has(suiteOf(r)));
       }
-      log.gates.push(`${label}: ${passed} classes passed, ${fresh.length === 0 ? "no new failures" : `${fresh.length} new failures`}`);
-      return fresh;
+      const frontend = await frontendGate((command) => sandbox.exec(command), onMain);
+      for (const failing of frontend.environment) log.environmentFailures.add(failing);
+      for (const failure of frontend.flakes) log.flakes.push({ gate: label, failure });
+      log.gates.push(`${label}: ${passed} classes passed, ${fresh.length === 0 ? "no new failures" : `${fresh.length} new failures`}; ${frontend.summary}`);
+      return [...fresh, ...frontend.fresh];
     });
 };
 
@@ -244,7 +248,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     for (let round = 1; failures.length > 0 && round <= MAX_REPAIRS; round++) {
       const message =
         `The harness ran the full suite on branch ${branch} (ticket ${key}) and these failures are new relative to main. ` +
-        `Fix them, re-run the affected classes, commit, then output <promise>COMPLETE</promise>.\n\n${JSON.stringify(failures, null, 2)}`;
+        `Fix them, re-run the affected classes or frontend checks, commit, then output <promise>COMPLETE</promise>.\n\n${JSON.stringify(failures, null, 2)}`;
       const options = { idleTimeoutSeconds: 1200, logging: logTo(`repair-${round}`) };
       const previous = current;
       // resume() re-spreads the original run's promptArgs onto an inline prompt, which Sandcastle rejects unless emptied.

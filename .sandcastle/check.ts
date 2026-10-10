@@ -1,10 +1,12 @@
 // Offline checks on synthetic tickets: review feedback, planning, build mode, the GitHub trust rule, Jira's intake and
-// merge queries, the board, model-API overloads, and auto-merge, which lands branches between throwaway repos with real signing. `pnpm run check`.
+// merge queries, the board, model-API overloads, the frontend gate against a scripted shell, and auto-merge, which lands
+// branches between throwaway repos with real signing. `pnpm run check`.
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, type Entry, type State, type Story } from "./board.ts";
+import { STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
 import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch } from "./merge.ts";
@@ -30,6 +32,100 @@ check("sent back without a comment", feedbackOf(ticket(OFFER)), "");
 check("sent back with feedback", feedbackOf(ticket("old note", OFFER, "rename the helper")), "Reviewer: rename the helper");
 check("feedback survives a later gave-up", feedbackOf(ticket(OFFER, GAVE_UP, "rename the helper")), "Reviewer: rename the helper");
 check("second rejection reads only the newest round", feedbackOf(ticket(OFFER, "first round", OFFER, "second round")), "Reviewer: second round");
+
+// The frontend gate against a scripted sandbox shell. The report has the shape vitest writes with --reporter=json.
+const vitestReport = (failed: string[]) =>
+  JSON.stringify({ testResults: failed.map((f) => ({ name: `/home/agent/workspace/frontend/${f}`, status: "failed", message: "", assertionResults: [{ status: "failed", fullName: "page renders", failureMessages: ["AssertionError: expected 2 to be 3\n    at x.ts:1"] }] })) });
+type Scripted = {
+  touched?: boolean;
+  installs?: (main: boolean) => boolean;
+  tests?: (files: string[], main: boolean) => string[] | "crash";
+  red?: (name: string, main: boolean) => boolean;
+  onMain?: string[];
+};
+const frontend = async (o: Scripted) => {
+  let main = false;
+  let report = "";
+  const ran: string[] = [];
+  const where = () => (main ? "main:" : "");
+  const exec = async (cmd: string) => {
+    const done = (exitCode: number, stdout = "") => ({ stdout, exitCode });
+    if (cmd.startsWith("git diff")) return done(0, o.touched === false ? "" : "frontend/pages/x.vue\n");
+    if (cmd.startsWith("tail")) return done(0, "the log's tail");
+    if (cmd.startsWith("cat")) return done(0, report);
+    if (cmd.startsWith("test -f")) return done((o.onMain ?? ["test/a.test.ts", "test/b.test.ts"]).some((f) => cmd.includes(f)) ? 0 : 1);
+    if (cmd.includes("pnpm install")) {
+      ran.push(`${where()}prepare`);
+      return done((o.installs?.(main) ?? true) ? 0 : 1);
+    }
+    if (cmd.includes("vitest run")) {
+      const files = [...cmd.matchAll(/'([^']+)'/g)].map((m) => m[1]);
+      ran.push(`${where()}test${files.length ? `(${files.join(",")})` : ""}`);
+      const failed = o.tests?.(files, main) ?? [];
+      report = failed === "crash" ? "" : vitestReport(failed);
+      return done(failed === "crash" || failed.length > 0 ? 1 : 0);
+    }
+    const name = STATIC_CHECKS.find((c) => cmd.includes(`pnpm ${c}`));
+    if (!name) throw new Error(`unscripted command: ${cmd}`);
+    ran.push(`${where()}${name}`);
+    return done(o.red?.(name, main) ? 1 : 0);
+  };
+  const onMain = async <T>(body: () => Promise<T>) => {
+    main = true;
+    try {
+      return await body();
+    } finally {
+      main = false;
+    }
+  };
+  try {
+    const r = await frontendGate(exec, onMain);
+    return { fresh: r.fresh.map((d) => `${d.file ?? "-"}: ${d.message.split("\n")[0]}`), environment: r.environment, flakes: r.flakes, summary: r.summary, ran };
+  } catch (error) {
+    return { threw: (error as Error).message.split("\n")[0], ran };
+  }
+};
+const fileA = "test/a.test.ts", fileB = "test/b.test.ts", added = "test/new.test.ts";
+const GREEN = "frontend tests, stylelint, lint and typecheck: no new failures";
+check("vitest's report gives each failed file, relative to frontend/, with its first failed test",
+  vitestFailures(vitestReport([fileA])), [{ file: fileA, message: "page renders: AssertionError: expected 2 to be 3" }]);
+check("a file that fails to import has no assertions, so its own message is the reason",
+  vitestFailures(JSON.stringify({ testResults: [{ name: `/w/frontend/${fileA}`, status: "failed", message: "Failed to resolve import \"./gone\"\n  at y", assertionResults: [] }, { name: `/w/frontend/${fileB}`, status: "passed", message: "", assertionResults: [] }] })),
+  [{ file: fileA, message: 'Failed to resolve import "./gone"' }]);
+check("no report, or one that is not a report, is not an empty list of failures", [vitestFailures(""), vitestFailures("{}"), vitestFailures("[]")], [undefined, undefined, undefined]);
+check("a branch that changes nothing under frontend/ runs no frontend check", await frontend({ touched: false }),
+  { fresh: [], environment: [], flakes: [], summary: "frontend checks not run: the branch changes nothing under frontend/", ran: [] });
+check("a green frontend installs, then runs the tests and the three static checks, and never visits main", await frontend({}),
+  { fresh: [], environment: [], flakes: [], summary: GREEN, ran: ["prepare", "test", "stylelint", "lint", "typecheck"] });
+check("a test file that fails in the full run and passes alone is a flake", await frontend({ tests: (files) => (files.length === 0 ? [fileA] : []) }),
+  { fresh: [], environment: [], flakes: [`pnpm test ${fileA}: page renders: AssertionError: expected 2 to be 3`], summary: GREEN, ran: ["prepare", "test", `test(${fileA})`, "stylelint", "lint", "typecheck"] });
+check("a test file that also fails on main is the environment; one that passes there is new, and the branch is prepared again",
+  await frontend({ tests: (files, main) => (main ? [fileA] : [fileA, fileB]) }),
+  { fresh: [`frontend/${fileB}: pnpm test: ${fileB}: page renders: AssertionError: expected 2 to be 3`], environment: [`frontend/${fileA}`], flakes: [], summary: "frontend: 1 new failure",
+    ran: ["prepare", "test", `test(${fileA},${fileB})`, "stylelint", "lint", "typecheck", "main:prepare", `main:test(${fileA},${fileB})`, "prepare"] });
+check("a failing test file the branch added is new without being run on main, where it does not exist",
+  (await frontend({ tests: () => [added] })).ran.filter((r) => r.startsWith("main:")), ["main:prepare"]);
+check("a static check that is red on main as well is the environment",
+  await frontend({ red: (name) => name !== "stylelint" }).then((r) => [r.fresh, r.environment]), [[], ["pnpm lint", "pnpm typecheck"]]);
+check("a static check that passes on main is handed back with its output",
+  await frontend({ red: (name, main) => name === "typecheck" && !main }).then((r) => [r.fresh, r.environment, r.summary]),
+  [["-: pnpm typecheck fails on this branch and passes on main:"], [], "frontend: 1 new failure"]);
+check("vitest dying without a report is new when main's run writes one, even a red one",
+  await frontend({ tests: (_files, main) => (main ? [fileA] : "crash") }).then((r) => [r.fresh, r.environment]),
+  [["-: pnpm test failed without a report on this branch and runs on main:"], []]);
+check("vitest dying on main as well stops the gate: tests nothing could run have verified nothing", (await frontend({ tests: () => "crash" })).threw,
+  "the frontend tests do not run in the sandbox, on main either:");
+check("the tests are run through vitest itself, because pnpm takes a leading --reporter as its own",
+  await (async () => {
+    const seen: string[] = [];
+    await frontendGate(async (cmd) => (seen.push(cmd), { stdout: cmd.startsWith("git diff") ? "frontend/x\n" : "", exitCode: 0 }), (body) => body());
+    return seen.filter((c) => c.includes("--reporter=json")).map((c) => c.includes("pnpm exec vitest run") && !c.includes("pnpm test"));
+  })(), [true]);
+check("dependencies that install on main but not on the branch are the branch's failure",
+  await frontend({ installs: (main) => main }).then((r) => [r.fresh, r.ran]),
+  [["frontend/package.json: pnpm install or nuxi prepare fails on this branch and works on main:"], ["prepare", "main:prepare"]]);
+check("dependencies that install nowhere stop the gate instead of blaming the branch", (await frontend({ installs: () => false })).threw,
+  "frontend dependencies do not install in the sandbox, on main either:");
 
 const s = (key: string) => ({ key });
 const keys = (r: ReturnType<typeof pickNonOverlapping>) => ({ picked: r.picked.map((x) => x.key), deferred: r.deferred.map((d) => d.key) });
