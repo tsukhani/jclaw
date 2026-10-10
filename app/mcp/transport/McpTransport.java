@@ -1,8 +1,10 @@
 package mcp.transport;
 
+import mcp.McpException;
 import mcp.jsonrpc.JsonRpc;
 
 import java.io.IOException;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -29,6 +31,17 @@ import java.util.function.Consumer;
 public interface McpTransport extends AutoCloseable {
 
     void start(Consumer<JsonRpc.Message> onMessage, Consumer<Throwable> onError) throws IOException;
+
+    /**
+     * As {@link #start(Consumer, Consumer)}, plus {@code onRequestFailed}, called with a request's
+     * id when that request alone failed and the connection did not. A transport with no such
+     * failure mode keeps this default, which never calls it.
+     */
+    default void start(Consumer<JsonRpc.Message> onMessage,
+                       BiConsumer<Object, McpException> onRequestFailed,
+                       Consumer<Throwable> onError) throws IOException {
+        start(onMessage, onError);
+    }
 
     void send(JsonRpc.Message msg) throws IOException;
 

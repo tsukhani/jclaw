@@ -1,21 +1,35 @@
 import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonObject;
+import mcp.McpClient;
+import mcp.McpConnectionManager;
+import mcp.McpException;
 import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpStreamableHttpTransport;
+import mockwebserver3.Dispatcher;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
+import mockwebserver3.RecordedRequest;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.EventLogger;
+import utils.CircuitBreakers;
 
 import java.net.URI;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiFunction;
 
 /**
  * Streamable HTTP transport contract: POSTs each JSON-RPC message and
@@ -173,7 +187,45 @@ class McpStreamableHttpTransportTest extends UnitTest {
     // ==================== error paths ====================
 
     @Test
-    void httpErrorTriggersOnError() throws Exception {
+    void httpErrorFailsTheRequestNotTheConnection() throws Exception {
+        try (var transport = newTransport()) {
+            server.enqueue(new MockResponse.Builder().code(500).body("server bad").build());
+
+            var failedId = new AtomicReference<Object>();
+            var failure = new AtomicReference<McpException>();
+            var latch = new CountDownLatch(1);
+            transport.start(received::add,
+                    (id, e) -> { failedId.set(id); failure.set(e); latch.countDown(); }, error::set);
+            transport.send(new JsonRpc.Request(7L, "ping", null));
+
+            assertTrue(latch.await(3, TimeUnit.SECONDS), "the request should fail on HTTP 500");
+            assertEquals(7L, failedId.get());
+            assertTrue(failure.get().getMessage().contains("500"), "failure must mention status: " + failure.get());
+            assertNull(failure.get().code(), "a non-JSON-RPC body carries no code");
+            assertNull(error.get(), "a failed exchange that got a response is not a transport error");
+        }
+    }
+
+    @Test
+    void httpErrorDoesNotReflectUpstreamBody() throws Exception {
+        try (var transport = newTransport()) {
+            // JCLAW-778: the failure carries the status only — the attacker-influenced upstream body is not echoed.
+            server.enqueue(new MockResponse.Builder().code(500).body("SUPER_SECRET_UPSTREAM_BODY").build());
+
+            var failure = new AtomicReference<McpException>();
+            var latch = new CountDownLatch(1);
+            transport.start(received::add, (_, e) -> { failure.set(e); latch.countDown(); }, error::set);
+            transport.send(new JsonRpc.Request(1L, "ping", null));
+
+            assertTrue(latch.await(3, TimeUnit.SECONDS), "the request should fail on HTTP 500");
+            assertTrue(failure.get().getMessage().contains("500"), "failure must mention status: " + failure.get());
+            assertFalse(failure.get().getMessage().contains("SUPER_SECRET_UPSTREAM_BODY"),
+                    "failure must NOT reflect the upstream body: " + failure.get());
+        }
+    }
+
+    @Test
+    void twoArgStartRoutesARequestFailureToOnError() throws Exception {
         try (var transport = newTransport()) {
             server.enqueue(new MockResponse.Builder().code(500).body("server bad").build());
 
@@ -186,21 +238,149 @@ class McpStreamableHttpTransportTest extends UnitTest {
         }
     }
 
+    // ==================== per-request failure through McpClient (JCLAW-1442) ====================
+
+    private static final String MARKER = "JCLAW1442_BODY_MARKER";
+
+    /** A scripted MCP server: handshake, then each tools/call answered by {@code onCall(toolName, id)}. */
+    private void serveMcp(@Nullable String sessionId, BiFunction<String, Object, MockResponse> onCall) {
+        server.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                var msg = JsonRpc.decode(request.getBody().utf8());
+                if (!(msg instanceof JsonRpc.Request r)) return new MockResponse.Builder().code(202).build();
+                return switch (r.method()) {
+                    case "initialize" -> {
+                        var b = json(200, result(r.id(), "{}"));
+                        if (sessionId != null) b.addHeader("Mcp-Session-Id", sessionId);
+                        yield b.build();
+                    }
+                    case "tools/list" -> json(200, result(r.id(), "{\"tools\":[]}")).build();
+                    default -> onCall.apply(
+                            ((JsonObject) Objects.requireNonNull(r.params())).get("name").getAsString(), r.id());
+                };
+            }
+        });
+    }
+
+    private static MockResponse.Builder json(int code, String body) {
+        return new MockResponse.Builder().code(code).addHeader("Content-Type", "application/json").body(body);
+    }
+
+    private static String result(Object id, String result) {
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":" + result + "}";
+    }
+
+    private static String rpcError(Object id, int code, String data) {
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + code
+                + ",\"message\":\"" + MARKER + "\",\"data\":" + data + "}}";
+    }
+
+    @MustBeClosed
+    @SuppressWarnings("MustBeClosed") // the client owns the transport and closes it
+    private McpClient newClient() {
+        return new McpClient("test", newTransport(), "0", Duration.ofSeconds(5));
+    }
+
     @Test
-    void httpErrorDoesNotReflectUpstreamBody() throws Exception {
-        try (var transport = newTransport()) {
-            // JCLAW-778: the error surfaced to onError (and thence lastError) carries
-            // the status only — the attacker-influenced upstream body is not echoed.
-            server.enqueue(new MockResponse.Builder().code(500).body("SUPER_SECRET_UPSTREAM_BODY").build());
+    void aFailedExchangeLeavesTheOtherInFlightCallAndTheClient() throws Exception {
+        var slowArrived = new CountDownLatch(1);
+        var releaseSlow = new CountDownLatch(1);
+        serveMcp(null, (tool, id) -> {
+            if (tool.equals("bad")) return json(400, rpcError(id, -32602, "null")).build();
+            slowArrived.countDown();
+            try {
+                releaseSlow.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return json(200, result(id, "{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}")).build();
+        });
+        try (var client = newClient()) {
+            client.connect();
+            var slow = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return client.callTool("slow", new JsonObject());
+                } catch (Exception e) {
+                    throw new CompletionException(e);
+                }
+            });
+            assertTrue(slowArrived.await(3, TimeUnit.SECONDS), "the slow call must be in flight");
 
-            var latch = new CountDownLatch(1);
-            transport.start(received::add, t -> { error.set(t); latch.countDown(); });
-            transport.send(new JsonRpc.Request(1L, "ping", null));
+            var ex = assertThrows(McpException.class, () -> client.callTool("bad", new JsonObject()));
+            assertEquals(-32602, ex.code());
+            assertEquals(McpClient.State.READY, client.state());
 
-            assertTrue(latch.await(3, TimeUnit.SECONDS), "onError should fire on HTTP 500");
-            assertTrue(error.get().getMessage().contains("500"), "error must mention status: " + error.get());
-            assertFalse(error.get().getMessage().contains("SUPER_SECRET_UPSTREAM_BODY"),
-                    "error must NOT reflect the upstream body: " + error.get());
+            releaseSlow.countDown();
+            var ok = slow.get(5, TimeUnit.SECONDS);
+            assertFalse(ok.isError());
+            assertEquals(McpClient.State.READY, client.state());
+            assertNull(client.lastError());
+            // A later call still goes through on the same connection.
+            serveMcp(null, (_, id) -> json(200, result(id, "{\"content\":[]}")).build());
+            assertFalse(client.callTool("again", new JsonObject()).isError());
+        }
+    }
+
+    @Test
+    void aJsonRpcErrorBodyGivesItsCodeAndKnownVersionsButNeverItsMessage() throws Exception {
+        serveMcp(null, (_, id) -> json(400, rpcError(id, -32022,
+                "{\"supported\":[\"2026-07-28\",\"" + MARKER + "\",\"2025-06-18\",7]}")).build());
+        var breakerName = "mcp-test-" + UUID.randomUUID();
+        var breaker = CircuitBreakers.get(breakerName, McpConnectionManager.BREAKER_CONFIG);
+        try (var client = newClient()) {
+            client.connect();
+            var thrown = new AtomicReference<McpException>();
+            var events = EventLogger.captureMatchingForTest(
+                    c -> c.message().contains(MARKER) || (c.details() != null && c.details().contains(MARKER)),
+                    _ -> thrown.set(assertThrows(McpException.class, () -> McpConnectionManager.guardedCall(
+                            breaker, "test", () -> client.callTool("t", new JsonObject())))));
+
+            var ex = thrown.get();
+            assertEquals(-32022, ex.code());
+            assertEquals(List.of("2026-07-28", "2025-06-18"), ex.supportedVersions());
+            assertTrue(ex.getMessage().contains("400"), "failure must mention status: " + ex.getMessage());
+            assertFalse(ex.getMessage().contains(MARKER), ex.getMessage());
+            assertTrue(client.lastError() == null || !client.lastError().contains(MARKER), client.lastError());
+            assertEquals(List.of(), events);
+            // JCLAW-1168: the failed call still counts against the server.
+            assertEquals(1, breaker.stats().failures());
+            assertEquals(McpClient.State.READY, client.state());
+        } finally {
+            CircuitBreakers.remove(breakerName);
+        }
+    }
+
+    @Test
+    void aNotFoundOnASessionBearingRequestTearsTheConnectionDown() throws Exception {
+        serveMcp("sess-1", (_, id) -> json(404, rpcError(id, -32001, "null")).build());
+        try (var client = newClient()) {
+            client.connect();
+            assertThrows(Exception.class, () -> client.callTool("t", new JsonObject()));
+            assertEquals(McpClient.State.DISCONNECTED, client.state());
+            assertEquals("MCP HTTP 404", client.lastError());
+        }
+    }
+
+    @Test
+    void aNotFoundWithoutASessionFailsOnlyItsRequest() throws Exception {
+        serveMcp(null, (_, id) -> json(404, rpcError(id, -32601, "null")).build());
+        try (var client = newClient()) {
+            client.connect();
+            var ex = assertThrows(McpException.class, () -> client.callTool("t", new JsonObject()));
+            assertEquals(-32601, ex.code());
+            assertEquals(McpClient.State.READY, client.state());
+        }
+    }
+
+    @Test
+    void aBadRequestOnASessionBearingRequestFailsOnlyItsRequest() throws Exception {
+        serveMcp("sess-1", (_, id) -> json(400, rpcError(id, -32602, "null")).build());
+        try (var client = newClient()) {
+            client.connect();
+            var ex = assertThrows(McpException.class, () -> client.callTool("t", new JsonObject()));
+            assertEquals(-32602, ex.code());
+            assertEquals(McpClient.State.READY, client.state());
         }
     }
 

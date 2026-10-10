@@ -1,6 +1,9 @@
 package mcp.transport;
 
 import com.google.errorprone.annotations.MustBeClosed;
+import com.google.gson.JsonElement;
+import mcp.McpClient;
+import mcp.McpException;
 import mcp.jsonrpc.JsonRpc;
 import okhttp3.Call;
 import okhttp3.Callback;
@@ -9,6 +12,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okio.BufferedSource;
+import org.jspecify.annotations.Nullable;
 import play.Logger;
 import utils.HttpFactories;
 import utils.HttpKeys;
@@ -16,10 +20,13 @@ import utils.SsrfGuard;
 
 import java.io.IOException;
 import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -49,6 +56,12 @@ import java.util.function.Consumer;
  * pooled and dispatched by that executor, so the dispatcher's per-host
  * request caps apply and provide backpressure.
  *
+ * <p><b>Failures.</b> A non-2xx answer to a request fails that request alone through
+ * {@code onRequestFailed} (JCLAW-1442): under 2026-07-28 a 400 or 404 carrying a JSON-RPC
+ * error is an ordinary answer to one request. Two cases stay connection-level and go to
+ * {@code onError}: a 404 on a POST that carried {@code Mcp-Session-Id}, which the
+ * handshake-era spec defines as an expired session, and a call that got no HTTP response.
+ *
  * <p><b>Out of scope.</b> The optional GET-SSE channel for receiving
  * server-initiated events between requests is not implemented; for the
  * tools-only slice JCLAW-31 covers, notifications can only ride on the
@@ -60,12 +73,15 @@ public final class McpStreamableHttpTransport implements McpTransport {
     /** Per MCP spec (2025-06-18) §2.5: clients must echo this header on every
      *  request after the server assigns it on the initialize response. */
     private static final String MCP_SESSION_ID = "Mcp-Session-Id";
+    /** Enough for any JSON-RPC error object; a larger error body is not one we parse. */
+    private static final long ERROR_BODY_LIMIT = 64 * 1024L;
 
     private final String name;
     private final URI endpoint;
     private final Map<String, String> headers;
 
     private Consumer<JsonRpc.Message> onMessage = _ -> {};
+    private BiConsumer<Object, McpException> onRequestFailed = (_, _) -> {};
     private Consumer<Throwable> onError = _ -> {};
     private volatile boolean closed;
 
@@ -86,9 +102,18 @@ public final class McpStreamableHttpTransport implements McpTransport {
         this.headers = headers == null ? Map.of() : Map.copyOf(headers);
     }
 
+    /** With no request table to fail into, a per-request failure goes to {@code onError}. */
     @Override
     public void start(Consumer<JsonRpc.Message> onMessage, Consumer<Throwable> onError) {
+        start(onMessage, (_, e) -> onError.accept(e), onError);
+    }
+
+    @Override
+    public void start(Consumer<JsonRpc.Message> onMessage,
+                      BiConsumer<Object, McpException> onRequestFailed,
+                      Consumer<Throwable> onError) {
         this.onMessage = onMessage;
+        this.onRequestFailed = onRequestFailed;
         this.onError = onError;
     }
 
@@ -116,6 +141,8 @@ public final class McpStreamableHttpTransport implements McpTransport {
         // form to match the spec example.
         var sid = sessionId.get();
         if (sid != null) builder.header(MCP_SESSION_ID, sid);
+        var requestId = msg instanceof JsonRpc.Request r ? r.id() : null;
+        var carriedSession = sid != null;
         var call = HttpFactories.llmStreamingGuarded().newCall(builder.build());
         var token = callSeq.incrementAndGet();
         inFlight.put(token, call);
@@ -137,7 +164,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
             @Override
             public void onResponse(Call call, Response resp) {
                 try (resp) {
-                    handleResponse(resp);
+                    handleResponse(resp, requestId, carriedSession);
                 } catch (IOException | RuntimeException e) {
                     // RuntimeException too: an unexpected parse/dereference failure
                     // while reading the response would otherwise vanish silently —
@@ -159,7 +186,8 @@ public final class McpStreamableHttpTransport implements McpTransport {
         inFlight.clear();
     }
 
-    private void handleResponse(Response resp) throws IOException {
+    private void handleResponse(Response resp, @Nullable Object requestId, boolean carriedSession)
+            throws IOException {
         // Capture the session id assigned by the server (if present). Both
         // canonical (Mcp-Session-Id) and lowercase forms are seen in the wild
         // since header names are case-insensitive; OkHttp normalizes lookup
@@ -172,7 +200,13 @@ public final class McpStreamableHttpTransport implements McpTransport {
         if (!resp.isSuccessful()) {
             // JCLAW-778: status only — the upstream body is attacker-influenced
             // (agent-settable endpoint) and must not be reflected into lastError.
-            throw new IOException("MCP HTTP " + resp.code());
+            if (resp.code() == 404 && carriedSession) throw new IOException("MCP HTTP 404");
+            if (requestId != null) {
+                if (!closed) onRequestFailed.accept(requestId, requestFailure(resp));
+            } else {
+                Logger.warn("[mcp:%s] HTTP %d answering a message that expects no reply", name, resp.code());
+            }
+            return;
         }
         if (resp.code() == 202) return;  // notification accepted, no body
 
@@ -190,6 +224,38 @@ public final class McpStreamableHttpTransport implements McpTransport {
         } catch (RuntimeException e) {
             Logger.warn("[mcp:%s] failed to parse HTTP body: %s", name, e.getMessage());
         }
+    }
+
+    /**
+     * The failure a non-2xx answer hands its request: the JSON-RPC error code when the body is
+     * one, plus any recognized versions in {@code data.supported}. Never the body's message text.
+     */
+    private static McpException requestFailure(Response resp) {
+        var status = "MCP HTTP " + resp.code();
+        JsonRpc.Message decoded;
+        try {
+            decoded = JsonRpc.decode(resp.peekBody(ERROR_BODY_LIMIT).string());
+        } catch (IOException | RuntimeException _) {
+            // Not a JSON-RPC body; the exception text may quote it, so it goes nowhere.
+            return new McpException(status);
+        }
+        if (decoded instanceof JsonRpc.Response r && r.error() != null) {
+            return new McpException(r.error().code(), status, supportedVersions(r.error().data()));
+        }
+        return new McpException(status);
+    }
+
+    private static List<String> supportedVersions(@Nullable JsonElement data) {
+        if (data == null || !data.isJsonObject()) return List.of();
+        var supported = data.getAsJsonObject().get("supported");
+        if (supported == null || !supported.isJsonArray()) return List.of();
+        var out = new ArrayList<String>();
+        for (var el : supported.getAsJsonArray()) {
+            if (el.isJsonPrimitive() && McpClient.KNOWN_PROTOCOL_VERSIONS.contains(el.getAsString())) {
+                out.add(el.getAsString());
+            }
+        }
+        return out;
     }
 
     /**
