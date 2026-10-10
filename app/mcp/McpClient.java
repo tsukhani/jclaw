@@ -45,6 +45,9 @@ public class McpClient implements AutoCloseable {
     public enum State { DISCONNECTED, INITIALIZING, READY, CLOSING }
 
     public static final String PROTOCOL_VERSION = "2025-06-18";
+    /** Every published MCP revision; a server-supplied version list is filtered to these. */
+    public static final List<String> KNOWN_PROTOCOL_VERSIONS =
+            List.of("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28");
     private static final String CLIENT_NAME = "jclaw";
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
 
@@ -121,7 +124,7 @@ public class McpClient implements AutoCloseable {
             throw new McpException("connect() called from state " + state.get());
         }
         try {
-            transport.start(this::onInbound, this::onTransportError);
+            transport.start(this::onInbound, this::onRequestFailed, this::onTransportError);
             doInitialize();
             sendNotification("notifications/initialized", null);
             cachedTools = fetchTools(handshakeTimeout);
@@ -283,6 +286,12 @@ public class McpClient implements AutoCloseable {
             Logger.warn("[mcp:%s] failed to reply to server request %s: %s",
                     name, r.method(), e.getMessage());
         }
+    }
+
+    /** One request failed on its own; the connection and every other in-flight call stand. */
+    private void onRequestFailed(Object id, McpException e) {
+        var future = pending.remove(id);
+        if (future != null) future.completeExceptionally(e);
     }
 
     private void onTransportError(Throwable t) {

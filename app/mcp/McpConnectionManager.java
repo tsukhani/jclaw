@@ -39,6 +39,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 /**
@@ -561,10 +562,21 @@ public final class McpConnectionManager {
         return new McpTransport() {
             @Override
             public void start(Consumer<JsonRpc.Message> onMessage, Consumer<Throwable> onError) throws IOException {
-                delegate.start(onMessage, error -> {
+                delegate.start(onMessage, hooked(onError));
+            }
+
+            @Override
+            public void start(Consumer<JsonRpc.Message> onMessage,
+                              BiConsumer<Object, McpException> onRequestFailed,
+                              Consumer<Throwable> onError) throws IOException {
+                delegate.start(onMessage, onRequestFailed, hooked(onError));
+            }
+
+            private Consumer<Throwable> hooked(Consumer<Throwable> onError) {
+                return error -> {
                     onError.accept(error);
                     Thread.ofVirtual().name("mcp-disconnect-" + serverName).start(hook);
-                });
+                };
             }
 
             @Override
