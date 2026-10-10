@@ -423,6 +423,25 @@ class McpClientTest extends UnitTest {
             assertEquals(List.of("server/discover", "initialize", "tools/list"), transports.getFirst().methods);
             assertTrue(transports.getFirst().requests.getLast().params().toString()
                     .contains("io.modelcontextprotocol/protocolVersion"), "the tools/list after must be modern");
+            assertFalse(client.probeTimedOut(), "a server that answered the probe keeps being probed");
+        }
+    }
+
+    @Test
+    void aSilentProbeThenInitializeRefusedWithMinus32022EndsModernAndKeepsProbing() throws Exception {
+        Script silentModern = (_, r) -> switch (r.method()) {
+            case "server/discover" -> null;
+            case "initialize" -> err(r, -32022, "Unsupported protocol version", "{\"supported\":[\"2026-07-28\"]}");
+            case "tools/list" -> ok(r, TOOLS);
+            default -> ok(r, "{}");
+        };
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        var opened = McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                clients(transports, () -> silentModern, Duration.ofMillis(300)));
+        try (var client = opened.client()) {
+            assertTrue(client.isModern());
+            assertEquals(List.of("server/discover", "initialize", "tools/list"), transports.getFirst().methods);
+            assertFalse(client.probeTimedOut(), "only a connect that ends on the handshake remembers the timeout");
         }
     }
 

@@ -165,7 +165,7 @@ public class McpClient implements AutoCloseable {
     /** Whether the server said it offers 2026-07-28, in a DiscoverResult or a -32022 version list. */
     public boolean offersModern() { return offersModern; }
 
-    /** The probe ran out the handshake budget unanswered, and the connection went on with {@code initialize}. */
+    /** The probe ran out the handshake budget unanswered, and the connection went on over the handshake. */
     public boolean probeTimedOut() { return probeTimedOut; }
 
     /** Set a callback fired when the server reports {@code tools/list_changed}. */
@@ -320,7 +320,6 @@ public class McpClient implements AutoCloseable {
             awaitEither(discover, init);
             if (lateDiscoverResult(discover) instanceof JsonObject result) {
                 pending.remove(initId);
-                probeTimedOut = false;
                 onDiscovered(result);
                 return;
             }
@@ -388,6 +387,8 @@ public class McpClient implements AutoCloseable {
         modern = true;
         protocolVersion = MODERN_PROTOCOL_VERSION;
         offersModern = true;
+        // The server answered on 2026-07-28 after all, however late: the probe stays worth sending.
+        probeTimedOut = false;
         try {
             cachedTools = fetchToolsStrict(handshakeTimeout);
         } catch (McpException e) {
