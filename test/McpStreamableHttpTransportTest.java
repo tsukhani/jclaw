@@ -9,6 +9,7 @@ import mockwebserver3.Dispatcher;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
 import mockwebserver3.RecordedRequest;
+import mockwebserver3.SocketEffect;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -159,6 +160,51 @@ class McpStreamableHttpTransportTest extends UnitTest {
             assertTrue(latch.await(3, TimeUnit.SECONDS));
             assertEquals(1, received.size());
             assertTrue(received.get(0) instanceof JsonRpc.Response);
+        }
+    }
+
+    @Test
+    void anSseStreamOfKeepAlivesThatEndsUnansweredFailsOnlyItsRequest() throws Exception {
+        try (var transport = newTransport()) {
+            server.enqueue(new MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "text/event-stream")
+                    .body(": keepalive\n\n: keepalive\n\n")
+                    .build());
+            var failure = new CompletableFuture<Map.Entry<Object, McpException>>();
+            transport.start(received::add, (id, e) -> failure.complete(Map.entry(id, e)), error::set);
+            transport.send(new JsonRpc.Request(5L, "tools/call", null));
+
+            var failed = failure.get(3, TimeUnit.SECONDS);
+            assertEquals(5L, failed.getKey());
+            assertTrue(failed.getValue().getMessage().contains("stream ended"), failed.getValue().getMessage());
+            assertTrue(received.isEmpty(), "keep-alive comments dispatch nothing");
+            assertNull(error.get(), "the connection stands");
+        }
+    }
+
+    @Test
+    void aBrokenListenStreamFailsTheSubscriptionNotTheConnection() throws Exception {
+        for (var method : List.of("subscriptions/listen", "tools/call")) {
+            error.set(null);
+            server.enqueue(new MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "text/event-stream")
+                    .body("data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n" + ": ping\n\n".repeat(2000))
+                    .onResponseBody(new SocketEffect.CloseSocket())
+                    .build());
+            try (var transport = newTransport()) {
+                var failed = new CompletableFuture<Object>();
+                var broke = new CompletableFuture<Throwable>();
+                transport.start(received::add, (id, _) -> failed.complete(id), broke::complete);
+                transport.send(new JsonRpc.Request(9L, method, null));
+                if (method.equals("subscriptions/listen")) {
+                    assertEquals(9L, failed.get(3, TimeUnit.SECONDS));
+                    assertFalse(broke.isDone(), "a dropped listen stream never reaches onError");
+                } else {
+                    assertNotNull(broke.get(3, TimeUnit.SECONDS), "the same break on any other request is connection-level");
+                }
+            }
         }
     }
 

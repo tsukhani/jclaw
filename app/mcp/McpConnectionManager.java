@@ -323,6 +323,19 @@ public final class McpConnectionManager {
     }
 
     /**
+     * {@link #tools(String)} for an agent turn: a stale list starts one refresh off this thread
+     * and the previous list is returned at once. The admin UI, the allowlist and the service view
+     * read {@link #tools(String)} instead, which never refreshes.
+     */
+    public static List<McpToolDef> toolsForTurn(String serverName) {
+        var e = connections.get(serverName);
+        if (e != null && e.status == McpServer.Status.CONNECTED && e.client instanceof McpClient client) {
+            client.refreshToolsIfStale();
+        }
+        return tools(serverName);
+    }
+
+    /**
      * Invoke an MCP tool on a connected server. Used by {@link McpToolAdapter}.
      *
      * <p>Guarded by this server's {@link #breaker(String) circuit breaker}, so a
@@ -612,6 +625,8 @@ public final class McpConnectionManager {
             entry.status = McpServer.Status.CONNECTED;
             entry.lastError = null;
             entry.attempts = 0;
+            entry.listenAttempts = 0;
+            entry.listenAckedAtNanos = null;
             // The watchdog reconnect path never goes through stop(), so clear the breaker here too.
             clearUnlessIsolated(breaker(server.name));
             persistStatus(server.id, McpServer.Status.CONNECTED, null);
@@ -623,12 +638,55 @@ public final class McpConnectionManager {
             // An error that beat the CONNECTED publish above found the hook's
             // guard closed, so it skipped the teardown and left a dead
             // connection marked CONNECTED.
-            if (client.state() != McpClient.State.READY) handleDisconnect(entry, server);
+            if (client.state() != McpClient.State.READY) {
+                handleDisconnect(entry, server);
+            } else if (client.isModern() && client.toolsListChangedOffered()) {
+                openListen(entry, server, client);
+            }
             signalFirstAttemptResolved(entry, attempt);
         } catch (Exception e) {
             try { client.close(); } catch (RuntimeException _) {}
             handleFailure(entry, server, attempt, e.getMessage());
             signalFirstAttemptResolved(entry, attempt);
+        }
+    }
+
+    private static boolean listenStillWanted(Entry entry, McpServer server, McpClient client) {
+        return connections.get(server.name) == entry && entry.client == client
+                && client.state() == McpClient.State.READY;
+    }
+
+    private static void openListen(Entry entry, McpServer server, McpClient client) {
+        if (!listenStillWanted(entry, server, client)) return;
+        client.openToolsSubscription(event -> onListenEvent(entry, server, client, event));
+    }
+
+    /**
+     * A dropped stream is reopened on the connect backoff. Only a stream that stayed up for the backoff
+     * ceiling resets the attempt count, so a server that acknowledges and hangs up is not asked every second.
+     */
+    private static void onListenEvent(Entry entry, McpServer server, McpClient client,
+                                      McpClient.SubscriptionEvent event) {
+        switch (event) {
+            case ACKNOWLEDGED -> entry.listenAckedAtNanos = System.nanoTime();
+            case REFUSED -> EventLogger.info(CATEGORY_PROTOCOL, ("MCP server '%s' did not grant tools/list_changed"
+                    + " notifications; its tool list refreshes when an agent turn finds it stale")
+                    .formatted(server.name));
+            case DROPPED -> {
+                if (!listenStillWanted(entry, server, client)) return;
+                var sched = scheduler;
+                if (sched == null) return;
+                var ackedAt = entry.listenAckedAtNanos;
+                entry.listenAckedAtNanos = null;
+                if (ackedAt != null && System.nanoTime() - ackedAt
+                        >= TimeUnit.MILLISECONDS.toNanos(backoffCeilingMillis)) {
+                    entry.listenAttempts = 0;
+                }
+                var attempt = ++entry.listenAttempts;
+                sched.schedule(() -> Thread.ofVirtual().name("mcp-listen-" + server.name)
+                                .start(() -> openListen(entry, server, client)),
+                        backoffDelay(attempt), TimeUnit.MILLISECONDS);
+            }
         }
     }
 
@@ -699,6 +757,16 @@ public final class McpConnectionManager {
             @Override
             public void send(JsonRpc.Message msg, Map<String, String> requestHeaders) throws IOException {
                 delegate.send(msg, requestHeaders);
+            }
+
+            @Override
+            public boolean carriesHeaders() {
+                return delegate.carriesHeaders();
+            }
+
+            @Override
+            public void cancel(Object requestId, String reason) {
+                delegate.cancel(requestId, reason);
             }
 
             @Override
@@ -965,6 +1033,10 @@ public final class McpConnectionManager {
         volatile McpServer.Status status = McpServer.Status.DISCONNECTED;
         volatile @Nullable String lastError;
         volatile int attempts;
+        /** Consecutive drops of the tools/list_changed stream since one last stayed up. */
+        volatile int listenAttempts;
+        /** {@link System#nanoTime()} of the current stream's acknowledgment; null before one. */
+        volatile @Nullable Long listenAckedAtNanos;
         /** JCLAW-388: per-server interactive-approval flag, captured from the
          *  {@link McpServer} row at connect time. Read on the tool-dispatch
          *  path via {@link #requiresApproval(String)}; volatile so a

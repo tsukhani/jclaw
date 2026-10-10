@@ -92,7 +92,7 @@ public final class McpServerCatalog {
     /** {@code <0} means "not yet enumerated"; the server is connected but
      *  the registry doesn't have a tools-list response cached yet. */
     private static int countActions(String serverName) {
-        var defs = McpConnectionManager.tools(serverName);
+        var defs = McpConnectionManager.toolsForTurn(serverName);
         return defs == null ? -1 : defs.size();
     }
 

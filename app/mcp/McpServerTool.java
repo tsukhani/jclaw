@@ -225,7 +225,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
     }
 
     private ToolRegistry.ToolResult enumerateActions() {
-        var defs = McpConnectionManager.tools(serverName);
+        var defs = McpConnectionManager.toolsForTurn(serverName);
         if (defs == null || defs.isEmpty()) {
             return ToolRegistry.ToolResult.text(
                     "MCP server '" + serverName + "' is not currently connected or advertises no actions.");
@@ -255,7 +255,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
      * a schema it can re-invoke {@code mcp_<server>} with no args.
      */
     private String enumerateActionNames() {
-        var defs = McpConnectionManager.tools(serverName);
+        var defs = McpConnectionManager.toolsForTurn(serverName);
         if (defs == null || defs.isEmpty()) {
             return "(none — server not connected or advertises no actions)";
         }
