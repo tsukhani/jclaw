@@ -100,7 +100,7 @@ public final class McpParamHeaders {
         try {
             n = p.getAsBigDecimal();
         } catch (NumberFormatException _) {
-            n = null;  // Gson refuses an exponent past 10,000 digits, far outside the range either way
+            n = null;  // Gson refuses a scale of 10,000 or more either way, so no safe integer lands here
         }
         // Range first: toBigIntegerExact on 1e999 would build a thousand-digit number.
         if (n == null || n.abs().compareTo(MAX_SAFE) > 0) {
