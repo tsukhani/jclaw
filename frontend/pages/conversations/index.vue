@@ -820,7 +820,7 @@ const pinnedColumns = columns.filter(c => c.id !== 'select')
               <span class="text-xs font-mono text-fg-muted">{{ msg.role }}</span>
               <span class="text-xs text-fg-muted">{{ new Date(msg.createdAt).toLocaleTimeString() }}</span>
             </div>
-            <div class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap">
+            <div class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap break-words">
               {{ msg.content || '(tool call)' }}
             </div>
           </div>

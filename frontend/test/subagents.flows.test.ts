@@ -257,6 +257,22 @@ describe('Subagents — quick preview peek panel', () => {
   })
 })
 
+describe('Subagents — quick preview wrapping', () => {
+  // A long URL or a minified tool result otherwise runs past the bubble and the whole panel scrolls sideways.
+  it('wraps unbroken text inside the outcome block and every message bubble', async () => {
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+    await component.findAll('button[title="Quick preview"]')[0]!.trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const bubbles = [...document.body.querySelectorAll('[data-slot="sheet-content"] .whitespace-pre-wrap')]
+    // The outcome block plus at least one transcript message.
+    expect(bubbles.length).toBeGreaterThan(1)
+    for (const b of bubbles) expect([...b.classList]).toContain('break-words')
+  })
+})
+
 describe('Subagents — pagination', () => {
   it('Next/Prev move the offset and the page label follows x-total-count', async () => {
     totalCount = 42 // 3 pages at pageSize 20

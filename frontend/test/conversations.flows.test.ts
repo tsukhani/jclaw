@@ -436,6 +436,21 @@ describe('Conversations — quick preview peek panel', () => {
   })
 })
 
+describe('Conversations — quick preview wrapping', () => {
+  // A long URL or a minified tool result otherwise runs past the bubble and the whole panel scrolls sideways.
+  it('wraps unbroken text inside every message bubble', async () => {
+    const component = await mountSuspended(Conversations)
+    await flushPromises()
+    await component.find('button[title="Quick preview"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    const bubbles = [...document.body.querySelectorAll('[data-slot="sheet-content"] .whitespace-pre-wrap')]
+    expect(bubbles.length).toBeGreaterThan(0)
+    for (const b of bubbles) expect([...b.classList]).toContain('break-words')
+  })
+})
+
 describe('Conversations — CSV export', () => {
   let capturedBlob: Blob | null
   let downloadName: string
