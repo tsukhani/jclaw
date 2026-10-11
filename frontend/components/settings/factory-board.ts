@@ -78,8 +78,8 @@ export interface StoryGroup {
 }
 
 const GROUPS: { id: string, title: string, states: StoryState[] }[] = [
-  { id: 'waiting', title: 'Waiting', states: ['waiting'] },
   { id: 'running', title: 'Running', states: ['running'] },
+  { id: 'waiting', title: 'Waiting', states: ['waiting'] },
   { id: 'review', title: 'In review', states: ['review'] },
   { id: 'blocked', title: 'Blocked or refused', states: ['blocked', 'refused'] },
   { id: 'merged', title: 'Merged', states: ['merged'] },

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { ChevronRightIcon } from '@heroicons/vue/24/outline'
 import { elapsed, groupStories, mergedLabel, type BoardStory } from './factory-board'
 
 const props = defineProps<{
@@ -11,6 +12,8 @@ const props = defineProps<{
 const emit = defineEmits<{ select: [key: string] }>()
 
 const groups = computed(() => groupStories(props.stories).filter(g => g.stories.length > 0))
+
+const collapsed = ref<Record<string, boolean>>({})
 </script>
 
 <template>
@@ -30,13 +33,28 @@ const groups = computed(() => groupStories(props.stories).filter(g => g.stories.
     <div
       v-for="g in groups"
       :key="g.id"
-      class="space-y-1"
       :data-testid="`factory-group-${g.id}`"
     >
-      <h4 class="text-xs font-medium text-fg-muted">
-        {{ g.title }} ({{ g.stories.length }})
+      <h4>
+        <button
+          type="button"
+          class="w-full flex items-center gap-1 py-1 text-left text-xs font-medium text-fg-muted hover:text-fg-strong"
+          :aria-expanded="!collapsed[g.id]"
+          :data-testid="`factory-toggle-${g.id}`"
+          @click="collapsed[g.id] = !collapsed[g.id]"
+        >
+          <ChevronRightIcon
+            class="w-3.5 h-3.5 shrink-0 transition-transform duration-150"
+            :class="collapsed[g.id] ? '' : 'rotate-90'"
+            aria-hidden="true"
+          />
+          {{ g.title }} ({{ g.stories.length }})
+        </button>
       </h4>
-      <ul class="bg-surface-elevated border border-border divide-y divide-border">
+      <ul
+        v-if="!collapsed[g.id]"
+        class="bg-surface-elevated border border-border divide-y divide-border"
+      >
         <li
           v-for="s in g.stories"
           :key="s.key"

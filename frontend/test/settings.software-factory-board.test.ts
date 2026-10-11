@@ -10,7 +10,7 @@ import { elapsed, groupStories, mergedLabel, type BoardStory, type StatusView } 
 
 /**
  * The Software Factory panel past Setup (JCLAW-1394): status strip and its confirmations, the
- * settings form, the grouped story board and the per-story log poll.
+ * settings form, the grouped story board and the per-story log poll in its peek panel.
  */
 
 const Harness = defineComponent({
@@ -120,6 +120,20 @@ async function settle() {
   for (let i = 0; i < 4; i++) await flushPromises()
 }
 
+// The peek panel is a sheet portaled to <body>, outside the mounted wrapper.
+function sheet(): HTMLElement | null {
+  return document.body.querySelector('[data-slot="sheet-content"]')
+}
+
+function peek(testid: string): HTMLElement | null {
+  return sheet()?.querySelector(`[data-testid="${testid}"]`) ?? null
+}
+
+function closePeek() {
+  const close = [...sheet()!.querySelectorAll('button')].find(b => (b.textContent ?? '').trim() === 'Close')
+  close!.click()
+}
+
 // Unmounted after each test: a live panel keeps its status interval and visibility listener.
 let mounted: Array<{ unmount: () => void }> = []
 
@@ -154,6 +168,7 @@ beforeEach(() => {
 afterEach(() => {
   for (const c of mounted) c.unmount()
   mounted = []
+  document.body.querySelectorAll('[data-slot="sheet-content"]').forEach(el => el.remove())
   vi.useRealTimers()
   Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' })
 })
@@ -162,8 +177,8 @@ describe('factory-board helpers', () => {
   it('groups in board order, with refused under Blocked and empty groups kept', () => {
     const groups = groupStories(stories())
     expect(groups.map(g => [g.title, g.stories.map(s => s.key)])).toEqual([
-      ['Waiting', ['JCLAW-1']],
       ['Running', ['JCLAW-2']],
+      ['Waiting', ['JCLAW-1']],
       ['In review', ['JCLAW-3']],
       ['Blocked or refused', ['JCLAW-4', 'JCLAW-5']],
       ['Merged', ['JCLAW-6', 'JCLAW-7', 'JCLAW-8']],
@@ -225,6 +240,35 @@ describe('Settings — Software Factory panel', () => {
     expect(merged.find('[data-testid="factory-story-JCLAW-7"]').text()).toContain('Merged by hand · fedcba98')
     expect(merged.find('[data-testid="factory-story-JCLAW-8"]').text()).toContain('Auto-merged')
     expect(merged.find('[data-testid="factory-story-JCLAW-8"] .font-mono[title]').exists()).toBe(false)
+  })
+
+  it('lists Running first, then Waiting, and Merged last', async () => {
+    const c = await mount()
+    expect(c.findAll('[data-testid^="factory-group-"]').map(g => g.attributes('data-testid')))
+      .toEqual(['running', 'waiting', 'review', 'blocked', 'merged'].map(id => `factory-group-${id}`))
+  })
+
+  it('folds one group, leaves the others open, and keeps it folded across a status refresh', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const c = await mount()
+    const toggle = c.find('[data-testid="factory-toggle-merged"]')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(toggle.text()).toBe('Merged (3)')
+    expect(c.find('[data-testid="factory-story-JCLAW-6"]').exists()).toBe(false)
+    expect(c.find('[data-testid="factory-toggle-running"]').attributes('aria-expanded')).toBe('true')
+    expect(c.find('[data-testid="factory-story-JCLAW-2"]').exists()).toBe(true)
+
+    const before = statusGets
+    await vi.advanceTimersByTimeAsync(5_000)
+    await settle()
+    expect(statusGets).toBeGreaterThan(before)
+    expect(c.find('[data-testid="factory-story-JCLAW-6"]').exists()).toBe(false)
+
+    await c.find('[data-testid="factory-toggle-merged"]').trigger('click')
+    expect(c.find('[data-testid="factory-story-JCLAW-6"]').exists()).toBe(true)
   })
 
   it('badges Auto-merge on exactly the stories that carry it', async () => {
@@ -328,12 +372,24 @@ describe('Settings — Software Factory panel', () => {
     expect(c.find('[data-testid="factory-settings"]').text()).toContain('Saved; applies once the factory is idle.')
   })
 
+  it('opens a story in the resizable peek panel, not inline, titled with its key and summary', async () => {
+    const c = await mount()
+    expect(sheet()).toBeNull()
+    await c.find('[data-testid="factory-story-JCLAW-3"]').trigger('click')
+    await settle()
+    expect(c.find('[data-testid="factory-story-JCLAW-3"]').attributes('aria-pressed')).toBe('true')
+    expect(c.find('[data-testid="factory-story-view"]').exists()).toBe(false)
+    expect(peek('factory-story-view')).not.toBeNull()
+    expect(sheet()!.querySelector('[role="separator"]')).not.toBeNull()
+    expect(sheet()!.textContent).toContain('JCLAW-3')
+    expect(sheet()!.textContent).toContain('Summary of JCLAW-3')
+  })
+
   it('shows No logs yet without a request for a story with no logs', async () => {
     const c = await mount()
     await c.find('[data-testid="factory-story-JCLAW-3"]').trigger('click')
     await settle()
-    expect(c.find('[data-testid="factory-story-JCLAW-3"]').attributes('aria-pressed')).toBe('true')
-    expect(c.find('[data-testid="factory-story-view"]').text()).toContain('No logs yet.')
+    expect(peek('factory-story-view')!.textContent).toContain('No logs yet.')
     expect(logGets).toBe(0)
   })
 
@@ -342,15 +398,16 @@ describe('Settings — Software Factory panel', () => {
     const c = await mount()
     await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
     await settle()
-    expect(c.findAll('[data-testid^="factory-log-tab-"]').map(t => t.text())).toEqual(['JCLAW-2.log', 'JCLAW-2-review.log'])
-    expect(c.find('[data-testid="factory-log-tab-JCLAW-2.log"]').attributes('aria-pressed')).toBe('true')
+    expect([...sheet()!.querySelectorAll('[data-testid^="factory-log-tab-"]')].map(t => t.textContent!.trim()))
+      .toEqual(['JCLAW-2.log', 'JCLAW-2-review.log'])
+    expect(peek('factory-log-tab-JCLAW-2.log')!.getAttribute('aria-pressed')).toBe('true')
     expect(logGets).toBe(1)
-    expect(c.find('[data-testid="factory-log-text"]').text()).toBe('tail 1')
+    expect(peek('factory-log-text')!.textContent).toBe('tail 1')
 
     await vi.advanceTimersByTimeAsync(3_000)
     await settle()
     expect(logGets).toBe(2)
-    expect(c.find('[data-testid="factory-log-text"]').text()).toBe('tail 2')
+    expect(peek('factory-log-text')!.textContent).toBe('tail 2')
 
     status = installed({ board: { ...installed().board!, stories: stories().map(s => s.key === 'JCLAW-2' ? { ...s, state: 'review' as const } : s) } })
     await vi.advanceTimersByTimeAsync(2_000)
@@ -359,7 +416,7 @@ describe('Settings — Software Factory panel', () => {
     await vi.advanceTimersByTimeAsync(10_000)
     await settle()
     expect(logGets).toBe(2)
-    expect(c.find('[data-testid="factory-story-view"]').exists()).toBe(true)
+    expect(peek('factory-story-view')).not.toBeNull()
   })
 
   it('stops polling the status while the document is hidden and refreshes on return', async () => {
@@ -439,11 +496,10 @@ describe('Settings — Software Factory panel', () => {
     const c = await mount()
     await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
     await settle()
-    await c.find('[data-testid="factory-log-tab-JCLAW-2-review.log"]').trigger('click')
+    peek('factory-log-tab-JCLAW-2-review.log')!.click()
     await settle()
-    const view = c.find('[data-testid="factory-story-view"]')
-    expect(view.text()).toContain('JCLAW-2-review.log is not on the board.')
-    expect(view.find('[data-testid="factory-log-text"]').exists()).toBe(false)
+    expect(peek('factory-story-view')!.textContent).toContain('JCLAW-2-review.log is not on the board.')
+    expect(peek('factory-log-text')).toBeNull()
     const after = logGets
     await vi.advanceTimersByTimeAsync(3_000)
     await settle()
@@ -455,13 +511,14 @@ describe('Settings — Software Factory panel', () => {
     const c = await mount()
     await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
     await settle()
-    expect(c.find('[data-testid="factory-story-view"]').text()).toContain('Showing the end of the log only.')
-    await c.find('[data-testid="factory-story-close"]').trigger('click')
+    expect(peek('factory-story-view')!.textContent).toContain('Showing the end of the log only.')
+    closePeek()
+    await settle()
     truncated = false
     await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
     await settle()
-    expect(c.find('[data-testid="factory-log-text"]').exists()).toBe(true)
-    expect(c.find('[data-testid="factory-story-view"]').text()).not.toContain('Showing the end of the log only.')
+    expect(peek('factory-log-text')).not.toBeNull()
+    expect(peek('factory-story-view')!.textContent).not.toContain('Showing the end of the log only.')
   })
 
   it('starts the log poll when a selected story begins running', async () => {
@@ -490,10 +547,10 @@ describe('Settings — Software Factory panel', () => {
     await settle()
     await c.find('[data-testid="factory-story-JCLAW-4"]').trigger('click')
     await settle()
-    expect(c.find('[data-testid="factory-log-text"]').text()).toBe('blocked tail')
+    expect(peek('factory-log-text')!.textContent).toBe('blocked tail')
     release()
     await settle()
-    expect(c.find('[data-testid="factory-log-text"]').text()).toBe('blocked tail')
+    expect(peek('factory-log-text')!.textContent).toBe('blocked tail')
   })
 
   it('disables every control while one is in flight', async () => {
@@ -513,28 +570,30 @@ describe('Settings — Software Factory panel', () => {
     expect(c.find('[data-testid="factory-gateway-resume"]').attributes('disabled')).toBeUndefined()
   })
 
-  it('closes the detail on Close, and when the story leaves the board without reopening on its return', async () => {
+  it('closes the peek panel on Close, and when the story leaves the board without reopening on its return', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const c = await mount()
     await c.find('[data-testid="factory-story-JCLAW-3"]').trigger('click')
     await settle()
-    await c.find('[data-testid="factory-story-close"]').trigger('click')
+    closePeek()
     await settle()
-    expect(c.find('[data-testid="factory-story-view"]').exists()).toBe(false)
+    expect(sheet()).toBeNull()
     expect(c.find('[data-testid="factory-story-JCLAW-3"]').attributes('aria-pressed')).toBe('false')
 
     await c.find('[data-testid="factory-story-JCLAW-3"]').trigger('click')
     await settle()
+    expect(sheet()).not.toBeNull()
     status = installed({ board: { ...installed().board!, stories: stories().filter(s => s.key !== 'JCLAW-3') } })
     await vi.advanceTimersByTimeAsync(5_000)
     await settle()
-    expect(c.find('[data-testid="factory-story-view"]').exists()).toBe(false)
+    expect(sheet()).toBeNull()
 
     status = installed()
     await vi.advanceTimersByTimeAsync(5_000)
     await settle()
     expect(c.find('[data-testid="factory-story-JCLAW-3"]').exists()).toBe(true)
-    expect(c.find('[data-testid="factory-story-view"]').exists()).toBe(false)
+    expect(c.find('[data-testid="factory-story-JCLAW-3"]').attributes('aria-pressed')).toBe('false')
+    expect(sheet()).toBeNull()
   })
 
   it('pauses the log poll while the document is hidden and resumes on return', async () => {
@@ -579,12 +638,12 @@ describe('Settings — Software Factory panel', () => {
     const c = await mount()
     await c.find('[data-testid="factory-story-JCLAW-2"]').trigger('click')
     await settle()
-    expect(c.find('[data-testid="factory-log-text"]').text()).toBe('tail 1')
+    expect(peek('factory-log-text')!.textContent).toBe('tail 1')
     statusFails = false
     logFails = true
     await vi.advanceTimersByTimeAsync(3_000)
     await settle()
-    expect(c.find('[data-testid="factory-log-text"]').text()).toBe('tail 1')
-    expect(c.find('[data-testid="factory-story-view"]').text()).toContain('log read failed')
+    expect(peek('factory-log-text')!.textContent).toBe('tail 1')
+    expect(peek('factory-story-view')!.textContent).toContain('log read failed')
   })
 })

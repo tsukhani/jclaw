@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import type { ApiErrorDetails } from '~/types/api'
-import { FACTORY_BUTTON, type BoardStory, type LogView } from './factory-board'
+import type { BoardStory, LogView } from './factory-board'
 
 const POLL_MS = 3_000
 
 const props = defineProps<{ story: BoardStory }>()
-const emit = defineEmits<{ close: [] }>()
 
 const tab = ref<string | null>(null)
 const log = ref<LogView | null>(null)
@@ -83,23 +82,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section
-    class="bg-surface-elevated border border-border px-4 py-3 space-y-3"
+  <div
+    class="space-y-3"
     data-testid="factory-story-view"
   >
-    <div class="flex items-start justify-between gap-3">
-      <h3 class="text-sm font-medium text-fg-strong">
-        <span class="font-mono">{{ story.key }}</span> {{ story.summary }}
-      </h3>
-      <button
-        type="button"
-        :class="FACTORY_BUTTON"
-        data-testid="factory-story-close"
-        @click="emit('close')"
-      >
-        Close
-      </button>
-    </div>
     <p
       v-if="story.logs.length === 0"
       class="text-xs text-fg-muted"
@@ -107,7 +93,7 @@ onBeforeUnmount(() => {
       No logs yet.
     </p>
     <template v-else>
-      <div class="flex flex-wrap gap-1">
+      <div class="sticky top-0 bg-background flex flex-wrap gap-1 pb-2">
         <button
           v-for="f in story.logs"
           :key="f"
@@ -130,9 +116,9 @@ onBeforeUnmount(() => {
       </p>
       <pre
         v-if="log"
-        class="max-h-96 overflow-auto text-xs font-mono bg-muted p-2 whitespace-pre-wrap break-words"
+        class="text-xs font-mono bg-muted p-2 whitespace-pre-wrap break-words"
         data-testid="factory-log-text"
       >{{ log.text }}</pre>
     </template>
-  </section>
+  </div>
 </template>
