@@ -377,7 +377,10 @@ public final class McpConnectionManager {
         if (server == null) return e;
         synchronized (entry.fallbackLock) {
             if (connections.get(server.name) != entry) return e;
-            if (entry.client != refused) return switchedFailure(server.name, e);
+            if (entry.client != refused) {
+                return entry.protocol == McpServer.Protocol.HANDSHAKE ? switchedFailure(server.name, e)
+                        : replacedFailure(server.name, e);
+            }
             McpClient handshake;
             try {
                 handshake = newClient(entry, server, McpClient.Opening.INITIALIZE, DEFAULT_REQUEST_TIMEOUT);
@@ -411,6 +414,13 @@ public final class McpConnectionManager {
     private static McpException switchedFailure(String serverName, McpException.NeedsHandshake e) {
         return new McpException(("MCP server '%s' refused this call over protocol 2026-07-28 (%s), so JClaw"
                 + " switched it to the Handshake protocol. The call was not retried: try it again.")
+                .formatted(serverName, e.reason()), e);
+    }
+
+    /** The refused connection was already replaced by a reconnect, which detects the server's protocol afresh. */
+    private static McpException replacedFailure(String serverName, McpException.NeedsHandshake e) {
+        return new McpException(("MCP server '%s' refused this call over protocol 2026-07-28 (%s) on a connection"
+                + " JClaw has since replaced. The call was not retried: try it again.")
                 .formatted(serverName, e.reason()), e);
     }
 
@@ -533,6 +543,12 @@ public final class McpConnectionManager {
      *  waiting the production 120 s. Production code never calls this. */
     public static void setFirstAttemptRequestTimeout(Duration timeout) {
         firstAttemptRequestTimeout = timeout;
+    }
+
+    /** The backoff before the last reopen of {@code serverName}'s tools/list_changed stream; 0 before any. */
+    public static long listenReopenDelayMillis(String serverName) {
+        var e = connections.get(serverName);
+        return e == null ? 0 : e.listenReopenDelayMillis;
     }
 
     public static int connectionCount() { return connections.size(); }
@@ -682,10 +698,11 @@ public final class McpConnectionManager {
                         >= TimeUnit.MILLISECONDS.toNanos(backoffCeilingMillis)) {
                     entry.listenAttempts = 0;
                 }
-                var attempt = ++entry.listenAttempts;
+                var delay = backoffDelay(++entry.listenAttempts);
+                entry.listenReopenDelayMillis = delay;
                 sched.schedule(() -> Thread.ofVirtual().name("mcp-listen-" + server.name)
                                 .start(() -> openListen(entry, server, client)),
-                        backoffDelay(attempt), TimeUnit.MILLISECONDS);
+                        delay, TimeUnit.MILLISECONDS);
             }
         }
     }
@@ -1035,6 +1052,8 @@ public final class McpConnectionManager {
         volatile int attempts;
         /** Consecutive drops of the tools/list_changed stream since one last stayed up. */
         volatile int listenAttempts;
+        /** The backoff the last reopen of that stream waited. */
+        volatile long listenReopenDelayMillis;
         /** {@link System#nanoTime()} of the current stream's acknowledgment; null before one. */
         volatile @Nullable Long listenAckedAtNanos;
         /** JCLAW-388: per-server interactive-approval flag, captured from the

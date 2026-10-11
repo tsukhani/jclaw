@@ -698,6 +698,88 @@ class McpClientTest extends UnitTest {
     }
 
     @Test
+    void anEmptyNextCursorEndsTheListInEitherEra() throws Exception {
+        for (var modern : new boolean[] {true, false}) {
+            Script server = (_, r) -> switch (r.method()) {
+                case "server/discover" -> modern ? ok(r, DISCOVER_RESULT) : err(r, -32601, "no such method", null);
+                case "initialize" -> ok(r, INIT_RESULT);
+                case "tools/list" -> ok(r, "{\"tools\":[{\"name\":\"t1\",\"inputSchema\":{}}],\"nextCursor\":\"\"}");
+                default -> ok(r, "{}");
+            };
+            var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+            try (var client = McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                    clients(transports, () -> server, Duration.ofSeconds(5))).client()) {
+                assertEquals(List.of("t1"), client.tools().stream().map(McpToolDef::name).toList(), "modern=" + modern);
+                assertEquals(1, transports.getFirst().methods.stream().filter("tools/list"::equals).count(),
+                        "modern=" + modern);
+            }
+        }
+    }
+
+    private static final String SPEC_ANNOTATED_TOOLS = "{\"tools\":["
+            + "{\"name\":\"num\",\"inputSchema\":{\"type\":\"object\",\"properties\":{"
+            + "\"n\":{\"type\":\"number\",\"x-mcp-header\":\"N\"}}}},"
+            + "{\"name\":\"nested\",\"inputSchema\":{\"type\":\"object\",\"properties\":{\"target\":{\"type\":\"object\","
+            + "\"properties\":{\"location\":{\"type\":\"object\",\"properties\":{"
+            + "\"region\":{\"type\":\"string\",\"x-mcp-header\":\"Region\"}}}}}}}},"
+            + "{\"name\":\"branch\",\"inputSchema\":{\"type\":\"object\",\"anyOf\":[{\"properties\":{"
+            + "\"region\":{\"type\":\"string\",\"x-mcp-header\":\"Region\"}}}]}},"
+            + "{\"name\":\"big\",\"inputSchema\":{\"type\":\"object\",\"properties\":{"
+            + "\"n\":{\"type\":\"integer\",\"x-mcp-header\":\"N\"}}}},"
+            + "{\"name\":\"plain\",\"inputSchema\":{\"type\":\"object\"}}]}";
+
+    @SuppressWarnings("MustBeClosed") // each caller closes it in try-with-resources
+    private static McpClient specAnnotated(List<ScriptedTransport> transports) throws IOException {
+        Script server = (_, r) -> switch (r.method()) {
+            case "server/discover" -> ok(r, DISCOVER_RESULT);
+            case "tools/list" -> ok(r, SPEC_ANNOTATED_TOOLS);
+            default -> ok(r, "{\"content\":[]}");
+        };
+        return McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                clients(transports, () -> server, Duration.ofSeconds(5))).client();
+    }
+
+    @Test
+    void aNumberOrBranchAnnotatedToolIsDroppedAndANestedOneMirrorsItsPath() throws Exception {
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = specAnnotated(transports)) {
+            assertEquals(List.of("nested", "big", "plain"), client.tools().stream().map(McpToolDef::name).toList());
+            client.callTool("nested", JsonParser.parseString(
+                    "{\"target\":{\"location\":{\"region\":\"eu-west1\"}},\"region\":\"top\"}").getAsJsonObject());
+            assertEquals("eu-west1", transports.getFirst().headers.getLast().get("Mcp-Param-Region"));
+            client.callTool("nested", JsonParser.parseString("{\"region\":\"top\"}").getAsJsonObject());
+            assertNull(transports.getFirst().headers.getLast().get("Mcp-Param-Region"), "no value at the path, no header");
+        }
+    }
+
+    @Test
+    void anIntegerOutsideTheSafeRangeFailsTheCallNamingItAndSendsNothing() throws Exception {
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = specAnnotated(transports)) {
+            var ex = assertThrows(McpException.class, () -> client.callTool("big",
+                    JsonParser.parseString("{\"n\":9007199254740992}").getAsJsonObject()));
+            assertTrue(ex.getMessage().contains("argument 'n' is outside the integer range"), ex.getMessage());
+            assertFalse(transports.getFirst().methods.contains("tools/call"), transports.getFirst().methods.toString());
+            client.callTool("big", JsonParser.parseString("{\"n\":9007199254740991}").getAsJsonObject());
+            assertEquals("9007199254740991", transports.getFirst().headers.getLast().get("Mcp-Param-N"));
+        }
+    }
+
+    /** Cancelling the probe could reach a handshake-era stdio server before initialize, which the spec forbids. */
+    @Test
+    void aStdioProbeThatRunsOutItsBudgetIsFollowedByInitializeAndNoCancellation() throws Exception {
+        var t = new ScriptedTransport(handshakeEra(null));
+        t.carriesHeaders = false;
+        try (var client = new McpClient("fake", t, "0", Duration.ofMillis(300), Duration.ofSeconds(5),
+                McpClient.Opening.PROBE)) {
+            client.connect();
+            assertTrue(client.probeTimedOut());
+            assertEquals(List.of("server/discover", "initialize", "notifications/initialized", "tools/list"), t.methods);
+            assertEquals(List.of(), t.cancelled);
+        }
+    }
+
+    @Test
     void aTimedOutCallIsCancelledOnceAndTheConnectionStands() throws Exception {
         var t = new ScriptedTransport(modernOnly((_, r) ->
                 "slow".equals(((JsonObject) Objects.requireNonNull(r.params())).get("name").getAsString())
