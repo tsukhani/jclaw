@@ -56,8 +56,8 @@ function onResizeStart(e: MouseEvent) {
   >
     <SheetContent
       side="right"
-      :class="['max-w-none', isResizing ? 'select-none' : '']"
-      :style="{ width: `${panelWidth}px` }"
+      :class="['sm:w-(--peek-width) sm:max-w-none', isResizing ? 'select-none' : '']"
+      :style="{ '--peek-width': `${panelWidth}px` }"
     >
       <!-- Resize handle uses ARIA separator role because there is no native HTML element for a resizable divider; this is the WAI ARIA recommended role for that pattern. -->
       <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- pointer-only resize affordance; panel width also has sensible default and can be adjusted by dragging -->

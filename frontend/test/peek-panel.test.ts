@@ -45,6 +45,30 @@ describe('PeekPanel', () => {
     expect(handle).not.toBeNull()
   })
 
+  // The sheet's `sm:max-w-sm` pins the panel at 384px however far the handle is dragged.
+  it('lifts the sheet\'s max-width cap at the breakpoint that sets it', async () => {
+    await mountSuspended(PeekPanel, {
+      props: { open: true, title: 'Width Test' },
+    })
+    await nextTick()
+    const classes = [...document.body.querySelector('[data-slot="sheet-content"]')!.classList]
+    expect(classes).toContain('sm:max-w-none')
+    expect(classes).not.toContain('sm:max-w-sm')
+  })
+
+  // An inline width also applies below `sm`, where 45% of a 390px screen is a 176px sliver.
+  it('sizes the panel through a variable that takes effect only from sm up', async () => {
+    await mountSuspended(PeekPanel, {
+      props: { open: true, title: 'Phone Test' },
+    })
+    await nextTick()
+    const content = document.body.querySelector<HTMLElement>('[data-slot="sheet-content"]')!
+    expect(content.style.width).toBe('')
+    expect(content.style.getPropertyValue('--peek-width')).toMatch(/^\d+px$/)
+    expect([...content.classList]).toContain('sm:w-(--peek-width)')
+    expect([...content.classList]).toContain('w-3/4')
+  })
+
   it('renders slot content', async () => {
     await mountSuspended(PeekPanel, {
       props: { open: true, title: 'Slot Test' },
