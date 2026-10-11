@@ -15,7 +15,7 @@
 # .play-version, so all this Dockerfile needs to do is land the framework
 # tree at /opt/play1, downloaded from the GitHub release .play-version names.
 
-FROM ubuntu:26.04@sha256:da6fc2be547864451aa253836dd926da33623312df4a9a243e35dc877c378a78
+FROM ubuntu:26.04@sha256:f144425ff09be612d6d9ad965196e9cdc23dae1f42110a8a11a3e9a8198759f7
 
 # GHCR links the pushed package to this repo by this label, so it lists on the repo page.
 LABEL org.opencontainers.image.source=https://github.com/tsukhani/jclaw
