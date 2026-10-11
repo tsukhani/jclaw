@@ -20,19 +20,12 @@ watch(status, () => {
 
 const installed = computed(() => status.value?.installed === true)
 
-// The key outlives a close so the panel keeps its content while it slides out.
 const selectedKey = ref<string | null>(null)
-const peekOpen = ref(false)
 const selectedStory = computed(() =>
   status.value?.board?.stories.find(s => s.key === selectedKey.value) ?? null)
 watch(selectedStory, (story) => {
-  if (!story) peekOpen.value = false
+  if (!story) selectedKey.value = null
 })
-
-function selectStory(key: string) {
-  selectedKey.value = key
-  peekOpen.value = true
-}
 
 const harnessState = computed(() => status.value?.harness.state ?? 'unknown')
 const gatewayState = computed(() => status.value?.gateway.state ?? 'unknown')
@@ -255,9 +248,9 @@ onBeforeUnmount(() => {
       <FactoryStoryBoard
         v-if="status.board"
         :stories="status.board.stories"
-        :selected="peekOpen ? selectedKey : null"
+        :selected="selectedKey"
         :now="now"
-        @select="selectStory"
+        @select="selectedKey = $event"
       />
       <p
         v-else
@@ -268,10 +261,10 @@ onBeforeUnmount(() => {
       </p>
 
       <PeekPanel
-        :open="peekOpen"
+        :open="selectedStory !== null"
         :title="selectedStory?.key"
         :description="selectedStory?.summary"
-        @update:open="peekOpen = $event"
+        @update:open="selectedKey = null"
       >
         <FactoryStoryDetail
           v-if="selectedStory"
