@@ -699,7 +699,10 @@ public class McpClient implements AutoCloseable {
                 out.addAll(toolDefs(tools.getAsJsonArray()));
             }
             var next = result.get("nextCursor");
-            if (next == null || !next.isJsonPrimitive()) return new Fetched(publishable(out), Duration.ofMillis(ttlMs));
+            // An empty cursor names no next page, so it ends the list as an absent one does.
+            if (next == null || !next.isJsonPrimitive() || next.getAsString().isEmpty()) {
+                return new Fetched(publishable(out), Duration.ofMillis(ttlMs));
+            }
             cursor = next.getAsString();
         }
         Logger.warn("[mcp:%s] tools/list was still paging after %d pages; publishing the tools those listed",

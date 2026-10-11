@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.EventLogger;
 import utils.CircuitBreakers;
+import utils.HttpFactories;
 
 import java.net.URI;
 import java.time.Duration;
@@ -203,6 +204,45 @@ class McpStreamableHttpTransportTest extends UnitTest {
                     assertFalse(broke.isDone(), "a dropped listen stream never reaches onError");
                 } else {
                     assertNotNull(broke.get(3, TimeUnit.SECONDS), "the same break on any other request is connection-level");
+                }
+            }
+        }
+    }
+
+    /** A server need not send keep-alives on a listen stream, which may stay silent for as long as nothing changes. */
+    @Test
+    void aListenStreamOutlastsTheReadTimeoutThatCutsAnyOtherRequest() throws Exception {
+        var shortRead = HttpFactories.llmStreamingGuarded().newBuilder().readTimeout(Duration.ofMillis(300)).build();
+        var first = "data: {\"jsonrpc\":\"2.0\",\"method\":\"notifications/progress\"}\n\n";
+        for (var method : List.of("subscriptions/listen", "tools/call")) {
+            received.clear();
+            server.enqueue(new MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "text/event-stream")
+                    .body(first + "data: {\"jsonrpc\":\"2.0\",\"id\":9,\"result\":{}}\n\n")
+                    // The first event, then three read timeouts of silence, then the rest.
+                    .throttleBody(first.length(), 900, TimeUnit.MILLISECONDS)
+                    .build());
+            try (var transport = newTransport()) {
+                var answered = new CompletableFuture<JsonRpc.Message>();
+                var broke = new CompletableFuture<Throwable>();
+                transport.start(m -> {
+                    received.add(m);
+                    if (m instanceof JsonRpc.Response) answered.complete(m);
+                }, (_, _) -> { /* follows every finished stream; the client ignores it once answered */ }, broke::complete);
+                HttpFactories.runWith(shortRead, () -> {
+                    try {
+                        transport.send(new JsonRpc.Request(9L, method, null));
+                    } catch (java.io.IOException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+                if (method.equals("subscriptions/listen")) {
+                    assertNotNull(answered.get(5, TimeUnit.SECONDS), "the listen stream is still open after the silence");
+                    assertFalse(broke.isDone(), String.valueOf(broke.getNow(null)));
+                } else {
+                    assertNotNull(broke.get(5, TimeUnit.SECONDS), "any other request is cut by the read timeout");
+                    assertFalse(answered.isDone());
                 }
             }
         }

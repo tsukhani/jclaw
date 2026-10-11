@@ -6,6 +6,7 @@ import mcp.jsonrpc.JsonRpc;
 import okhttp3.Call;
 import okhttp3.Callback;
 import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
@@ -18,6 +19,7 @@ import utils.SsrfGuard;
 
 import java.io.IOException;
 import java.net.URI;
+import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
@@ -154,7 +156,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
         // A dropped or idle listen stream fails that subscription, never the connection.
         var isListen = msg instanceof JsonRpc.Request r && LISTEN.equals(r.method());
         var carriedSession = sid != null;
-        var call = HttpFactories.llmStreamingGuarded().newCall(builder.build());
+        var call = (isListen ? listenClient() : HttpFactories.llmStreamingGuarded()).newCall(builder.build());
         var token = callSeq.incrementAndGet();
         inFlight.put(token, call);
         if (requestId != null) requestCalls.put(requestId, call);
@@ -190,6 +192,14 @@ public final class McpStreamableHttpTransport implements McpTransport {
                 }
             }
         });
+    }
+
+    /**
+     * A listen stream is silent until something changes, and a server need not send keep-alives, so
+     * the 180 s read timeout would cut it every three minutes; {@link #close()} or the server ends it.
+     */
+    private static OkHttpClient listenClient() {
+        return HttpFactories.llmStreamingGuarded().newBuilder().readTimeout(Duration.ZERO).build();
     }
 
     private void ioFailure(IOException e, @Nullable Object requestId, boolean isListen) {

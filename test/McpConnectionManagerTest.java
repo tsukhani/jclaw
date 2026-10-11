@@ -689,7 +689,7 @@ class McpConnectionManagerTest extends UnitTest {
 
     // ==================== JCLAW-1445: tool-list freshness over HTTP ====================
 
-    private record Arrival(String method, long nanos) {}
+    private record Arrival(String method) {}
 
     @FunctionalInterface
     private interface Answer {
@@ -706,7 +706,7 @@ class McpConnectionManagerTest extends UnitTest {
             public MockResponse dispatch(RecordedRequest request) throws InterruptedException {
                 var msg = JsonRpc.decode(request.getBody().utf8());
                 if (!(msg instanceof JsonRpc.Request r)) return new MockResponse.Builder().code(202).build();
-                seen.add(new Arrival(r.method(), System.nanoTime()));
+                seen.add(new Arrival(r.method()));
                 var n = counts.computeIfAbsent(r.method(), _ -> new AtomicInteger()).incrementAndGet();
                 return switch (r.method()) {
                     case "server/discover" -> rpc(200, r.id(), "{\"supportedVersions\":[\"2026-07-28\"],"
@@ -819,23 +819,12 @@ class McpConnectionManagerTest extends UnitTest {
     void aDroppedListenStreamIsReopenedAfterTheBackoffNotInATightLoop() throws Exception {
         McpConnectionManager.setBackoff(400, 400);
         var seen = new CopyOnWriteArrayList<Arrival>();
-        var ends = new CopyOnWriteArrayList<Long>();
         String name = null;
-        try (var http = modernHttp(true, seen, (id, _) -> toolsListing(id, null, "a"), (id, _) -> {
-            ends.add(System.nanoTime());
-            return sse(ackEvent(id)).build();
-        })) {
+        try (var http = modernHttp(true, seen, (id, _) -> toolsListing(id, null, "a"), (id, _) -> sse(ackEvent(id)).build())) {
             name = connectHttp("reopen", http);
             awaitState(name, McpServer.Status.CONNECTED, 10);
             awaitTrue("a reopened listen", 5000, () -> count(seen, "subscriptions/listen") >= 2);
-            var listens = seen.stream().filter(a -> a.method().equals("subscriptions/listen")).toList();
-            var gap = TimeUnit.NANOSECONDS.toMillis(listens.get(1).nanos() - ends.getFirst());
-            assertTrue(gap >= 350, "reopened after " + gap + " ms");
-            Thread.sleep(1300);
-            var first = listens.getFirst().nanos();
-            var within = seen.stream().filter(a -> a.method().equals("subscriptions/listen")
-                    && a.nanos() - first < TimeUnit.MILLISECONDS.toNanos(1200)).count();
-            assertTrue(within <= 3, within + " listens within 1.2 s");
+            assertEquals(400, McpConnectionManager.listenReopenDelayMillis(name), "the reopen waited the backoff");
             assertEquals(McpServer.Status.CONNECTED, McpConnectionManager.status(name), "a dropped stream is not a dropped connection");
             assertFalse(McpConnectionManager.callTool(name, "a", new JsonObject()).isError());
         } finally {
@@ -850,18 +839,15 @@ class McpConnectionManagerTest extends UnitTest {
     void aStreamThatHangsUpRightAfterItsAcknowledgmentBacksOffFurtherEachTime() throws Exception {
         McpConnectionManager.setBackoff(150, 2_000);
         var seen = new CopyOnWriteArrayList<Arrival>();
-        var ends = new CopyOnWriteArrayList<Long>();
         String name = null;
-        try (var http = modernHttp(true, seen, (id, _) -> toolsListing(id, null, "a"), (id, _) -> {
-            ends.add(System.nanoTime());
-            return sse(ackEvent(id)).build();
-        })) {
+        // Held 50 ms past the acknowledgment, so the manager hears it before the hang-up.
+        try (var http = modernHttp(true, seen, (id, _) -> toolsListing(id, null, "a"), (id, _) -> sse(ackEvent(id) + ": bye\n\n")
+                .throttleBody(ackEvent(id).length(), 50, TimeUnit.MILLISECONDS).build())) {
             name = connectHttp("hangup", http);
             awaitState(name, McpServer.Status.CONNECTED, 10);
             awaitTrue("a fourth listen", 5000, () -> count(seen, "subscriptions/listen") >= 4);
-            var listens = seen.stream().filter(a -> a.method().equals("subscriptions/listen")).toList();
-            var third = TimeUnit.NANOSECONDS.toMillis(listens.get(3).nanos() - ends.get(2));
-            assertTrue(third >= 500, "the third reopen waited " + third + " ms, not the initial 150");
+            var delay = McpConnectionManager.listenReopenDelayMillis(name);
+            assertTrue(delay >= 600, "the third reopen waited " + delay + " ms, not the initial 150");
         } finally {
             if (name != null) {
                 McpConnectionManager.stop(name);

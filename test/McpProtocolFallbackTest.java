@@ -52,6 +52,7 @@ class McpProtocolFallbackTest extends UnitTest {
             const readline = require('readline');
             const SCENARIO = process.env.SCENARIO || '';
             let era = null;
+            let held = null;
             const rl = readline.createInterface({ input: process.stdin, terminal: false });
             rl.on('line', (line) => {
               if (!line.trim()) return;
@@ -81,6 +82,12 @@ class McpProtocolFallbackTest extends UnitTest {
               if (m.method === 'tools/call') {
                 const name = m.params.name;
                 if (era === 'modern' && name === 'mismatch') return err(m, -32020, 'header mismatch');
+                if (era === 'modern' && name === 'mismatch-pair') {
+                  // Held until a second arrives, so both refusals land before either fallback runs.
+                  if (!held) { held = m; return; }
+                  err(held, -32020, 'header mismatch');
+                  return err(m, -32020, 'header mismatch');
+                }
                 if (name === 'needs') return err(m, -32021, 'missing capability', { requiredCapabilities: { elicitation: {} } });
                 return ok(m, { content: [{ type: 'text', text: era + ':' + name }] });
               }
@@ -234,6 +241,29 @@ class McpProtocolFallbackTest extends UnitTest {
         assertEquals(1, alerts.size());
         assertEquals("HANDSHAKE", column(server.id, "protocol"));
         assertEquals("tools/call", processes().getFirst().methods().getLast(), "the refused call is not replayed");
+    }
+
+    /** The first refusal's handshake fails and tears the connection down; the second finds it gone. */
+    @Test
+    void aRefusedCallWhoseConnectionWasAlreadyReplacedDoesNotClaimASwitch() throws Exception {
+        var server = seed("replaced", "handshake-broken", McpServer.Protocol.AUTOMATIC);
+        McpConnectionManager.connect(server);
+        awaitState("replaced", McpServer.Status.CONNECTED);
+
+        var messages = new CopyOnWriteArrayList<String>();
+        var calls = new ArrayList<Thread>();
+        for (var i = 0; i < 2; i++) {
+            calls.add(Thread.ofVirtual().start(() -> messages.add(assertThrows(McpException.class,
+                    () -> McpConnectionManager.callTool("replaced", "mismatch-pair", new JsonObject())).getMessage())));
+        }
+        for (var t : calls) t.join(TimeUnit.SECONDS.toMillis(20));
+
+        assertEquals(2, messages.size(), messages.toString());
+        assertEquals(1, messages.stream().filter(m -> m.contains("the handshake failed too")).count(), messages.toString());
+        assertEquals(1, messages.stream().filter(m -> m.contains("on a connection JClaw has since replaced")
+                && m.contains("try it again")).count(), messages.toString());
+        assertTrue(messages.stream().noneMatch(m -> m.contains("switched it to the Handshake")), messages.toString());
+        assertEquals("AUTOMATIC", column(server.id, "protocol"));
     }
 
     @Test
