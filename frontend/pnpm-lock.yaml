@@ -195,7 +195,7 @@ importers:
         version: 2.1.1
       cronstrue:
         specifier: ^3.24.0
-        version: 3.29.0
+        version: 3.31.0
       dompurify:
         specifier: ^3.4.12
         version: 3.4.16
@@ -2520,8 +2520,8 @@ packages:
     resolution: {integrity: sha512-ixNtAJndqh173VQ4KodSdJEI6nuioBWI0V1ITNKhZZsO0pEMoDxz539T4FTTbSZ/xIOSuDnzxLVRqBVSvPNE2g==}
     engines: {node: '>=18.0'}
 
-  cronstrue@3.29.0:
-    resolution: {integrity: sha512-jSs7/VEuy9o449mDY5eZFb7lYMByQ7uZWHnIjzOQE5kfpKnwcqFGtfVvKgxLtDOmZkbD0e37BMFGHdpOvESpdg==}
+  cronstrue@3.31.0:
+    resolution: {integrity: sha512-P+qVKwM6CHu6lWfQIq13DCBx95pxY/2zCQhIJvu5FsEsOlt9ZtuUI124V1LafoPsqHH09ruRsentTc4sbWxQHA==}
     hasBin: true
 
   cross-spawn@7.0.6:
@@ -7826,7 +7826,7 @@ snapshots:
 
   croner@10.0.1: {}
 
-  cronstrue@3.29.0: {}
+  cronstrue@3.31.0: {}
 
   cross-spawn@7.0.6:
     dependencies:
