@@ -314,7 +314,11 @@ dependencies {
     // path (Stage 2) to speak real ACP instead of the stdin/stdout wrapper.
     // Pulls Jackson + Reactor transitively. Verified full round-trip against
     // claude-agent-acp.
-    implementation("com.agentclientprotocol:acp-core:0.18.0")
+    val acpVersion = "0.18.0"
+    implementation("com.agentclientprotocol:acp-core:$acpVersion")
+    // acp-core finds its JSON implementation by ServiceLoader and since 0.18 ships none:
+    // without this the stdio transport's constructor throws ServiceConfigurationError.
+    runtimeOnly("com.agentclientprotocol:acp-json-jackson2:$acpVersion")
 
     // JCLAW-735: JSpecify nullness annotations (@Nullable / @NonNull, TYPE_USE).
     // The tree-wide standard for expressing null contracts; introduced first on
