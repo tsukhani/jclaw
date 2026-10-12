@@ -101,6 +101,7 @@ class WhatsAppMarkdownFormatterTest extends UnitTest {
         assertEquals("See docs. https://x.com", fmt("See [docs](https://x.com)."));
         assertEquals("(see docs) https://x.com now", fmt("(see [docs](https://x.com)) now"));
         assertEquals("docs, https://x.com\nnext", fmt("[docs](https://x.com),\nnext"));
+        assertEquals("docs, https://x.com\nnext", fmt("[docs](https://x.com),  \nnext"));
         assertEquals("*Title* https://x.com", fmt("# [Title](https://x.com)"));
         assertEquals("- a https://x.com/a\n- b https://x.com/b", fmt("- [a](https://x.com/a)\n- [b](https://x.com/b)"));
         assertEquals("> docs https://x.com", fmt("> [docs](https://x.com)"));

@@ -752,7 +752,7 @@ class McpConnectionManagerTest extends UnitTest {
         return seen.stream().filter(a -> a.method().equals(method)).count();
     }
 
-    private String connectHttp(String prefix, MockWebServer http) throws InterruptedException {
+    private String connectHttp(String prefix, MockWebServer http) {
         var name = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
         var cfg = new JsonObject();
         cfg.addProperty("url", http.url("/mcp").toString());

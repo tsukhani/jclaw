@@ -377,7 +377,7 @@ class McpStreamableHttpTransportTest extends UnitTest {
             slowArrived.countDown();
             try {
                 releaseSlow.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             return json(200, result(id, "{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}")).build();
@@ -415,7 +415,7 @@ class McpStreamableHttpTransportTest extends UnitTest {
             if (tool.equals("hang")) {
                 try {
                     release.await(10, TimeUnit.SECONDS);
-                } catch (InterruptedException e) {
+                } catch (InterruptedException _) {
                     Thread.currentThread().interrupt();
                 }
             }

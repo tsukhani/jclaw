@@ -40,6 +40,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
@@ -641,7 +642,7 @@ public final class McpConnectionManager {
             entry.status = McpServer.Status.CONNECTED;
             entry.lastError = null;
             entry.attempts = 0;
-            entry.listenAttempts = 0;
+            entry.listenAttempts.set(0);
             entry.listenAckedAtNanos = null;
             // The watchdog reconnect path never goes through stop(), so clear the breaker here too.
             clearUnlessIsolated(breaker(server.name));
@@ -696,9 +697,9 @@ public final class McpConnectionManager {
                 entry.listenAckedAtNanos = null;
                 if (ackedAt != null && System.nanoTime() - ackedAt
                         >= TimeUnit.MILLISECONDS.toNanos(backoffCeilingMillis)) {
-                    entry.listenAttempts = 0;
+                    entry.listenAttempts.set(0);
                 }
-                var delay = backoffDelay(++entry.listenAttempts);
+                var delay = backoffDelay(entry.listenAttempts.incrementAndGet());
                 entry.listenReopenDelayMillis = delay;
                 sched.schedule(() -> Thread.ofVirtual().name("mcp-listen-" + server.name)
                                 .start(() -> openListen(entry, server, client)),
@@ -1051,7 +1052,7 @@ public final class McpConnectionManager {
         volatile @Nullable String lastError;
         volatile int attempts;
         /** Consecutive drops of the tools/list_changed stream since one last stayed up. */
-        volatile int listenAttempts;
+        final AtomicInteger listenAttempts = new AtomicInteger();
         /** The backoff the last reopen of that stream waited. */
         volatile long listenReopenDelayMillis;
         /** {@link System#nanoTime()} of the current stream's acknowledgment; null before one. */
@@ -1065,7 +1066,9 @@ public final class McpConnectionManager {
         volatile McpServer.Protocol protocol = McpServer.Protocol.AUTOMATIC;
         /** JCLAW-1443: the last probe ran out its budget, so connects open with initialize. */
         volatile boolean skipProbe;
-        /** The row this entry connects, for a call-time fallback that must build a fresh transport. */
+        /** The row this entry connects, for a call-time fallback that must build a fresh transport.
+         *  Never mutated after connect captures it; this volatile only publishes the reference. */
+        @SuppressWarnings("java:S3077")
         volatile @Nullable McpServer server;
         /** Serializes call-time fallbacks, so two refused calls open one handshake connection. */
         final Object fallbackLock = new Object();

@@ -142,7 +142,7 @@ public final class WhatsAppMarkdownFormatter {
 
         @Override protected void emitSoftLineBreak() { flushPendingUrls(); out.append('\n'); }
 
-        @Override protected void emitHardLineBreak() { flushPendingUrls(); out.append('\n'); }
+        @Override protected void emitHardLineBreak() { emitSoftLineBreak(); }
 
         @Override protected void emitThematicBreak() { out.append("──────────\n\n"); }
 
