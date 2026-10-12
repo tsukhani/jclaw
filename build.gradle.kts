@@ -638,8 +638,8 @@ dependencies {
     // lucene-queryparser is deliberately absent: collectScored builds its query
     // programmatically from PrefixQuery/TermQuery/BooleanQuery (all in core) so a
     // stray operator character can't ParseException the query out from under the UI.
-    implementation("org.apache.lucene:lucene-core:10.5.1")
-    implementation("org.apache.lucene:lucene-analysis-common:10.5.1")
+    implementation("org.apache.lucene:lucene-core:10.5.2")
+    implementation("org.apache.lucene:lucene-analysis-common:10.5.2")
 
     // JCLAW-448: Cobalt — the unofficial WhatsApp-Web (Baileys-equivalent) stack
     // for the WHATSAPP_WEB transport (QR-paired, group-capable, ban-warned).
