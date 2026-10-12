@@ -1,4 +1,5 @@
-// The frontend half of the gate, for a branch that changes frontend/: the checks `./jclaw.sh test` runs before a push.
+// The frontend half of the gate, for a branch that changes what the SPA is built from: the checks `./jclaw.sh test`
+// runs before a push.
 // It takes the sandbox's exec and the gate's switch to main, so the offline checks drive it with a scripted shell.
 
 export type Diagnostic = { kind: string; file: string | null; line: number | null; message: string };
@@ -11,7 +12,9 @@ const IN = "cd frontend &&";
 // Prepared as `./jclaw.sh test` does: a stale .nuxt or vite cache has passed a broken page before (JCLAW-680).
 const PREPARE = `${IN} pnpm install --frozen-lockfile > /tmp/fe-prepare.log 2>&1 && rm -rf .nuxt node_modules/.vite && pnpm exec nuxi prepare >> /tmp/fe-prepare.log 2>&1`;
 export const STATIC_CHECKS = ["stylelint", "lint", "typecheck"];
-const NOT_RUN = "frontend checks not run: the branch changes nothing under frontend/";
+// The SPA's own tree, and the user guide: sections.ts imports each page raw, and guide.page.test.ts pins its anchors.
+export const FRONTEND_INPUTS = ["frontend", "docs/user-guide"];
+const NOT_RUN = "frontend checks not run: the branch changes nothing under frontend/ or docs/user-guide/";
 
 type Failed = { file: string; message: string };
 
@@ -39,7 +42,7 @@ export const vitestFailures = (raw: string): Failed[] | undefined => {
 // a file or check that also fails on main is the environment. Throws when the dependencies install on neither, or the
 // tests run on neither: a suite nothing could run has verified nothing.
 export const frontendGate = async (exec: Exec, onMain: OnMain): Promise<FrontendGate> => {
-  if (!(await exec("git diff --name-only main...HEAD -- frontend | head -1")).stdout.trim()) return { fresh: [], environment: [], flakes: [], summary: NOT_RUN };
+  if (!(await exec(`git diff --name-only main...HEAD -- ${FRONTEND_INPUTS.join(" ")} | head -1`)).stdout.trim()) return { fresh: [], environment: [], flakes: [], summary: NOT_RUN };
 
   // Without the colour codes: the tail goes into a repair prompt and a ticket comment.
   const tail = async (log: string) => (await exec(`tail -40 ${log}`)).stdout.replace(/\x1b\[[0-9;]*m/g, "").trim();

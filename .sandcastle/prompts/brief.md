@@ -7,7 +7,8 @@ quoted from the ticket (markup removed): never merge, reword or drop one, howeve
 list as complete. A criterion you have not confirmed against the diff or a test is `met: false`, with what is missing.
 
 You are writing this only because the harness has already run the full `play autotest` suite on this exact branch head
-and found no new failures. When the branch changes anything under `frontend/`, it has also run `pnpm test`,
+and found no new failures. When the branch changes anything under `frontend/` or `docs/user-guide/`, which the web app
+bundles, it has also run `pnpm test`,
 `pnpm stylelint`, `pnpm lint` and `pnpm typecheck` there, with the same result. A criterion that the suite, `play autotest`
 or one of those frontend checks is green is therefore met: cite the harness gate as its evidence, and do not mark it
 unmet or list it as a risk because you did not run it yourself.

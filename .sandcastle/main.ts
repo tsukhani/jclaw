@@ -85,7 +85,7 @@ type GateLog = {
 };
 
 // The full-suite gate on the sandbox's branch, returning only the failures that are new relative to main. A branch that
-// changes frontend/ gets the frontend checks too, which `play autotest` does not run.
+// changes what the SPA is built from gets the frontend checks too, which `play autotest` does not run.
 const gateIn = (sandbox: sandcastle.Sandbox, log: GateLog) => {
   const suiteOf = (r: Diagnostic) => r.message.split(".")[0];
   // Only a passed report clears a suite: a re-run that wrote no reports would otherwise forgive every failure.

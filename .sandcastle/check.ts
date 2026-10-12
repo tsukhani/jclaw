@@ -6,7 +6,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
 import { Board, RETENTION_MS, autoMerges, expired, transition, writeAtomically, type Entry, type State, type Story } from "./board.ts";
-import { STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
+import { FRONTEND_INPUTS, STATIC_CHECKS, frontendGate, vitestFailures } from "./frontend-gate.ts";
 import { ownerApplied, vetIssue, type Issue } from "./github.ts";
 import { intakeJql, mergeJql } from "./jira-intake.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch } from "./merge.ts";
@@ -93,8 +93,37 @@ check("a file that fails to import has no assertions, so its own message is the 
   vitestFailures(JSON.stringify({ testResults: [{ name: `/w/frontend/${fileA}`, status: "failed", message: "Failed to resolve import \"./gone\"\n  at y", assertionResults: [] }, { name: `/w/frontend/${fileB}`, status: "passed", message: "", assertionResults: [] }] })),
   [{ file: fileA, message: 'Failed to resolve import "./gone"' }]);
 check("no report, or one that is not a report, is not an empty list of failures", [vitestFailures(""), vitestFailures("{}"), vitestFailures("[]")], [undefined, undefined, undefined]);
-check("a branch that changes nothing under frontend/ runs no frontend check", await frontend({ touched: false }),
-  { fresh: [], environment: [], flakes: [], summary: "frontend checks not run: the branch changes nothing under frontend/", ran: [] });
+check("a branch that changes nothing the SPA is built from runs no frontend check", await frontend({ touched: false }),
+  { fresh: [], environment: [], flakes: [], summary: "frontend checks not run: the branch changes nothing under frontend/ or docs/user-guide/", ran: [] });
+check("the gate asks git about the user guide as well as frontend/, since the SPA bundles it",
+  await (async () => {
+    const asked: string[] = [];
+    await frontendGate(async (cmd) => (asked.push(cmd), { stdout: "", exitCode: 0 }), (body) => body());
+    return asked;
+  })(), ["git diff --name-only main...HEAD -- frontend docs/user-guide | head -1"]);
+// A new import that reaches outside frontend/ has to be added to FRONTEND_INPUTS, or its edits skip the frontend gate.
+const spaRoot = path.resolve(import.meta.dirname, "../frontend");
+const readsOutside = new Set<string>();
+const scanSpa = (dir: string) => {
+  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, entry.name);
+    // tests/e2e is the Playwright suite, which the gate does not run.
+    if (entry.isDirectory()) {
+      if (!["node_modules", ".nuxt", ".output", "dist", "coverage", "e2e"].includes(entry.name)) scanSpa(full);
+    } else if (/\.(ts|mts|vue)$/.test(entry.name)) {
+      for (const m of fs.readFileSync(full, "utf8").matchAll(/['"`]((?:\.\.\/)+[^'"`\s?]+)/g)) {
+        const target = path.resolve(dir, m[1]);
+        const fromRepo = path.relative(path.resolve(spaRoot, ".."), target);
+        if (!target.startsWith(spaRoot + path.sep) && target !== spaRoot && !fromRepo.startsWith("..")) readsOutside.add(fromRepo);
+      }
+    }
+  }
+};
+scanSpa(spaRoot);
+check("the SPA reads the user guide from outside frontend/, so the scan below is looking at real imports",
+  [...readsOutside].some((p) => p.startsWith("docs/user-guide/")), true);
+check("every repo path the SPA and its unit tests read from outside frontend/ triggers the frontend gate",
+  [...readsOutside].filter((p) => !FRONTEND_INPUTS.some((input) => p === input || p.startsWith(`${input}/`))), []);
 check("a green frontend installs, then runs the tests and the three static checks, and never visits main", await frontend({}),
   { fresh: [], environment: [], flakes: [], summary: GREEN, ran: ["prepare", "test", "stylelint", "lint", "typecheck"] });
 check("a test file that fails in the full run and passes alone is a flake", await frontend({ tests: (files) => (files.length === 0 ? [fileA] : []) }),
