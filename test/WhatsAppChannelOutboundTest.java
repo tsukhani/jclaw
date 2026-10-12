@@ -123,7 +123,7 @@ class WhatsAppChannelOutboundTest extends UnitTest {
     @Test
     void aMarkdownReplyReachesTheWireConverted() {
         var bodies = sendCapturing("Status: **green**, see [docs](https://d.io).\n\n- one\n- two");
-        assertEquals(List.of("Status: *green*, see docs (https://d.io).\n\n- one\n- two"), bodies);
+        assertEquals(List.of("Status: *green*, see docs. https://d.io\n\n- one\n- two"), bodies);
     }
 
     @Test

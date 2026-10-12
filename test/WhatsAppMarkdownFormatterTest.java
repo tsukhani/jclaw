@@ -88,9 +88,33 @@ class WhatsAppMarkdownFormatterTest extends UnitTest {
     }
 
     @Test
-    void linkBecomesTextThenAddressInParentheses() {
-        assertEquals("click (https://x.com)", fmt("[click](https://x.com)"));
-        assertEquals("*click* (https://x.com)", fmt("[**click**](https://x.com)"));
+    void linkBecomesTextThenAddress() {
+        assertEquals("click https://x.com", fmt("[click](https://x.com)"));
+        assertEquals("*click* https://x.com", fmt("[**click**](https://x.com)"));
+        assertEquals("Read docs https://x.com for more", fmt("Read [docs](https://x.com) for more"));
+    }
+
+    @Test
+    void onlyWhitespaceTouchesALinkAddress() {
+        assertEquals("*View course page →* https://x.com/a", fmt("**[View course page →](https://x.com/a)**"));
+        assertEquals("_~docs~_ https://x.com", fmt("*~~[docs](https://x.com)~~*"));
+        assertEquals("See docs. https://x.com", fmt("See [docs](https://x.com)."));
+        assertEquals("(see docs) https://x.com now", fmt("(see [docs](https://x.com)) now"));
+        assertEquals("docs, https://x.com\nnext", fmt("[docs](https://x.com),\nnext"));
+        assertEquals("*Title* https://x.com", fmt("# [Title](https://x.com)"));
+        assertEquals("- a https://x.com/a\n- b https://x.com/b", fmt("- [a](https://x.com/a)\n- [b](https://x.com/b)"));
+        assertEquals("> docs https://x.com", fmt("> [docs](https://x.com)"));
+    }
+
+    @Test
+    void anAddressAtTheEdgeOfASpanGoesOutUnwrapped() {
+        assertEquals("a@b.com / *+60 12-440 6583*", fmt("**a@b.com** / **+60 12-440 6583**"));
+        assertEquals("https://x.com", fmt("**https://x.com**"));
+        assertEquals("https://x.com", fmt("_**[https://x.com](https://x.com)**_"));
+        assertEquals("Email: a@b.com", fmt("**Email: a@b.com**"));
+        assertEquals("a@b.com or call", fmt("~~<a@b.com> or call~~"));
+        assertEquals("https://x.com", fmt("# https://x.com"));
+        assertEquals("*write to a@b.com today*", fmt("**write to a@b.com today**"));
     }
 
     @Test
@@ -132,9 +156,9 @@ class WhatsAppMarkdownFormatterTest extends UnitTest {
         var out = fmt(md);
         var lines = out.split("\n");
         assertEquals(2, lines.length, out);
-        assertEquals("- *Course*: Intro to Widgets (https://example.com/course/intro-to-widgets)"
+        assertEquals("- *Course*: Intro to Widgets https://example.com/course/intro-to-widgets"
                 + " — *Level*: Beginner — *Duration*: 2 days — *Price*: USD 500", lines[0]);
-        assertTrue(lines[1].startsWith("- *Course*: Advanced Widgets (https://example.com/course/advanced-widgets)"),
+        assertTrue(lines[1].startsWith("- *Course*: Advanced Widgets https://example.com/course/advanced-widgets"),
                 out);
         assertFalse(out.contains("|"), "no pipe row may reach the output: " + out);
         assertFalse(out.contains("---"), "no separator row may reach the output: " + out);
@@ -161,7 +185,7 @@ class WhatsAppMarkdownFormatterTest extends UnitTest {
         assertEquals("""
                 - *"What courses do you have?"* — I can search our catalog
 
-                - *Course*: Intro to Widgets (https://example.com/w) — *Level*: Beginner
+                - *Course*: Intro to Widgets https://example.com/w — *Level*: Beginner
 
                 A few notes:
 

@@ -38,8 +38,8 @@ import java.util.List;
  * Markdown → WhatsApp formatting converter (JCLAW-1409). WhatsApp's dialect is
  * {@code *bold*}, {@code _italic_}, {@code ~strike~}, {@code `code`}, {@code ```mono```},
  * {@code -}/{@code 1.} lists and {@code >} quotes, with no heading, table, link-text or
- * escape grammar — so a link becomes {@code text (url)} and literal text passes through
- * unescaped. Otherwise follows {@link SlackMarkdownFormatter}'s choices.
+ * escape grammar — so a link becomes its text with the address after it, and literal text
+ * passes through unescaped. Otherwise follows {@link SlackMarkdownFormatter}'s choices.
  */
 public final class WhatsAppMarkdownFormatter {
 
@@ -61,9 +61,21 @@ public final class WhatsAppMarkdownFormatter {
 
     private static final class Emitter extends FlexmarkChannelEmitter {
 
-        @Override protected void emitHeading(Heading h) { out.append('*'); emitChildren(h); out.append("*\n\n"); }
+        // WhatsApp linked the ")" of "*text (url)*" as part of the address, so a link's
+        // address waits here for the next whitespace, where nothing can touch it.
+        private final StringBuilder pendingUrls = new StringBuilder();
 
-        @Override protected void emitParagraph(Paragraph p) { emitChildren(p); out.append("\n\n"); }
+        @Override protected void emitHeading(Heading h) {
+            wrap(h, "*");
+            flushPendingUrls();
+            out.append("\n\n");
+        }
+
+        @Override protected void emitParagraph(Paragraph p) {
+            emitChildren(p);
+            flushPendingUrls();
+            out.append("\n\n");
+        }
 
         @Override protected void emitStrongEmphasis(StrongEmphasis s) { wrap(s, "*"); }
 
@@ -88,23 +100,49 @@ public final class WhatsAppMarkdownFormatter {
 
         @Override protected void emitLink(Link link) {
             String url = link.getUrl().toString();
-            String label = collectText(link).trim();
-            if (label.isEmpty() || label.equals(url)) {
+            if (isBareAddress(link)) {
                 out.append(url);
             } else {
                 emitChildren(link);
-                out.append(" (").append(url).append(')');
+                pendingUrls.append(' ').append(url);
             }
+        }
+
+        static boolean isBareAddress(Link link) {
+            String label = collectText(link).trim();
+            return label.isEmpty() || label.equals(link.getUrl().toString());
+        }
+
+        void flushPendingUrls() {
+            out.append(pendingUrls);
+            pendingUrls.setLength(0);
         }
 
         @Override protected void emitAutoLink(AutoLink al) { out.append(al.getUrl()); }
 
         // No escape grammar to carry a backslash escape over, so print the character it protects.
-        @Override protected void emitText(Text t) { out.append(t.getChars().unescape()); }
+        @Override protected void emitText(Text t) {
+            String text = t.getChars().unescape();
+            int space = pendingUrls.isEmpty() ? -1 : firstWhitespace(text);
+            if (space < 0) {
+                out.append(text);
+                return;
+            }
+            out.append(text, 0, space);
+            flushPendingUrls();
+            out.append(text, space, text.length());
+        }
 
-        @Override protected void emitSoftLineBreak() { out.append('\n'); }
+        static int firstWhitespace(String text) {
+            for (int i = 0; i < text.length(); i++) {
+                if (Character.isWhitespace(text.charAt(i))) return i;
+            }
+            return -1;
+        }
 
-        @Override protected void emitHardLineBreak() { out.append('\n'); }
+        @Override protected void emitSoftLineBreak() { flushPendingUrls(); out.append('\n'); }
+
+        @Override protected void emitHardLineBreak() { flushPendingUrls(); out.append('\n'); }
 
         @Override protected void emitThematicBreak() { out.append("──────────\n\n"); }
 
@@ -120,10 +158,24 @@ public final class WhatsAppMarkdownFormatter {
             }
         }
 
+        // WhatsApp took the opening "*" of "*a@b.com*" into the address, and a marker cannot
+        // stand apart from its text, so a span with an address at either edge goes out unwrapped.
         void wrap(Node n, String delim) {
+            if (edgeIsAddress(n, true) || edgeIsAddress(n, false)) {
+                emitChildren(n);
+                return;
+            }
             out.append(delim);
             emitChildren(n);
             out.append(delim);
+        }
+
+        static boolean edgeIsAddress(Node span, boolean leading) {
+            for (Node n = span; n != null; n = leading ? n.getFirstChild() : n.getLastChild()) {
+                if (n instanceof AutoLink || n instanceof MailLink) return true;
+                if (n instanceof Link link && isBareAddress(link)) return true;
+            }
+            return false;
         }
 
         void emitFence(String content) {
@@ -191,6 +243,7 @@ public final class WhatsAppMarkdownFormatter {
                     out.append('*').append(headers.get(i)).append("*: ");
                 }
                 emitChildren(cells.get(i));
+                flushPendingUrls();
             }
             out.append('\n');
         }
