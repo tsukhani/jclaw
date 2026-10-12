@@ -180,7 +180,7 @@ importers:
         version: 2.2.0(vue@3.5.43(typescript@6.0.3))
       '@lucide/vue':
         specifier: ^1.25.0
-        version: 1.52.0(vue@3.5.43(typescript@6.0.3))
+        version: 1.53.0(vue@3.5.43(typescript@6.0.3))
       '@tanstack/vue-table':
         specifier: ^9.2.4
         version: 9.2.6(vue@3.5.43(typescript@6.0.3))
@@ -894,8 +894,8 @@ packages:
   '@kwsites/promise-deferred@1.1.1':
     resolution: {integrity: sha512-GaHYm+c0O9MjZRu0ongGBRbinu8gVAMd2UZjji6jVmqKtZluZnptXGWhz1E8j8D2HJ3f/yMxKAUC0b+57wncIw==}
 
-  '@lucide/vue@1.52.0':
-    resolution: {integrity: sha512-Gwr6c14jhY6BscoFU+B9OKsr7lg8RTAKOLgW0e61kkFwkt9Q7CZmB9AyJcvhoqapEJgRg2bFoeAcO+cqpgKzEQ==}
+  '@lucide/vue@1.53.0':
+    resolution: {integrity: sha512-WtBYxiwNVd9yP/UKeMbxAntZqrd50pWxhkXrxxOcYJc4XhsO0pkKbUed+sEh08C1u07zj5I3Rz6AU1v9wHEDqA==}
     peerDependencies:
       vue: '>=3.0.1'
 
@@ -6057,7 +6057,7 @@ snapshots:
 
   '@kwsites/promise-deferred@1.1.1': {}
 
-  '@lucide/vue@1.52.0(vue@3.5.43(typescript@6.0.3))':
+  '@lucide/vue@1.53.0(vue@3.5.43(typescript@6.0.3))':
     dependencies:
       vue: 3.5.43(typescript@6.0.3)
 
