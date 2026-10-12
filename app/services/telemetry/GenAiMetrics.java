@@ -17,12 +17,17 @@ public final class GenAiMetrics {
     public static final String GEN_AI_CLIENT_OPERATION_DURATION_DESCRIPTION = "GenAI operation duration.";
     public static final String GEN_AI_CLIENT_OPERATION_DURATION_UNIT = "s";
 
-    public static final String GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_NAME =
-            "gen_ai.client.operation.time_to_first_chunk";
-    public static final String GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_DESCRIPTION =
+    public static final String GEN_AI_CLIENT_INFERENCE_DURATION_NAME = "gen_ai.client.inference.duration";
+    public static final String GEN_AI_CLIENT_INFERENCE_DURATION_DESCRIPTION =
+            "GenAI client inference operation duration.";
+    public static final String GEN_AI_CLIENT_INFERENCE_DURATION_UNIT = "s";
+
+    public static final String GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME =
+            "gen_ai.client.inference.time_to_first_chunk";
+    public static final String GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_DESCRIPTION =
             "Time to receive the first chunk, measured from when the client issues the generation"
                     + " request to when the first chunk is received in the response stream.";
-    public static final String GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_UNIT = "s";
+    public static final String GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_UNIT = "s";
 
     public static final String GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME =
             "gen_ai.client.inference.operation.input_tokens";

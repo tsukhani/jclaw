@@ -47,7 +47,8 @@ public final class GenAiSpans {
     private static final String SCOPE = "jclaw";
 
     private record Instruments(OpenTelemetry api, DoubleHistogram inputTokens, DoubleHistogram outputTokens,
-                               DoubleHistogram duration, DoubleHistogram firstChunk) {}
+                               DoubleHistogram operationDuration, DoubleHistogram inferenceDuration,
+                               DoubleHistogram firstChunk) {}
 
     private static volatile @Nullable Instruments instruments;
 
@@ -133,9 +134,13 @@ public final class GenAiSpans {
                         .setDescription(GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_DESCRIPTION)
                         .setUnit(GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_UNIT)
                         .setExplicitBucketBoundariesAdvice(MetricBuckets.GEN_AI_SECONDS).build(),
-                meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_NAME)
-                        .setDescription(GenAiMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_DESCRIPTION)
-                        .setUnit(GenAiMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_UNIT)
+                meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME)
+                        .setDescription(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_DESCRIPTION)
+                        .setUnit(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_UNIT)
+                        .setExplicitBucketBoundariesAdvice(MetricBuckets.GEN_AI_SECONDS).build(),
+                meter.histogramBuilder(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME)
+                        .setDescription(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_DESCRIPTION)
+                        .setUnit(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_UNIT)
                         .setExplicitBucketBoundariesAdvice(MetricBuckets.GEN_AI_SECONDS).build());
         instruments = built;
         return built;
@@ -270,7 +275,9 @@ public final class GenAiSpans {
             if (!TelemetryState.enabled) return;
             var i = instruments();
             var attrs = baseAttributes(errorType);
-            i.duration().record(seconds(System.nanoTime()), attrs);
+            // Upstream keeps operation.duration for calls that are not inference; embeddings is one.
+            var duration = OPERATION_CHAT.equals(operation) ? i.inferenceDuration() : i.operationDuration();
+            duration.record(seconds(System.nanoTime()), attrs);
             var u = usage;
             if (u != null && errorType == null) {
                 i.inputTokens().record(u.promptTokens(), attrs);

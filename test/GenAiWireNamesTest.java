@@ -52,9 +52,11 @@ class GenAiWireNamesTest extends UnitTest {
         // Units matter as much as names: a collector aggregates by both.
         assertEquals("gen_ai.client.operation.duration", GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME);
         assertEquals("s", GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_UNIT);
-        assertEquals("gen_ai.client.operation.time_to_first_chunk",
-                GenAiMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_NAME);
-        assertEquals("s", GenAiMetrics.GEN_AI_CLIENT_OPERATION_TIME_TO_FIRST_CHUNK_UNIT);
+        assertEquals("gen_ai.client.inference.duration", GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME);
+        assertEquals("s", GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_UNIT);
+        assertEquals("gen_ai.client.inference.time_to_first_chunk",
+                GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_NAME);
+        assertEquals("s", GenAiMetrics.GEN_AI_CLIENT_INFERENCE_TIME_TO_FIRST_CHUNK_UNIT);
         assertEquals("gen_ai.client.inference.operation.input_tokens",
                 GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME);
         assertEquals("{token}", GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_UNIT);

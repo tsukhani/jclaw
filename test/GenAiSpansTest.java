@@ -146,7 +146,7 @@ class GenAiSpansTest extends UnitTest {
                 "the HTTP client span nests under the model call");
 
         var metrics = OtelRuntime.captureMetricsForTest(() -> { });
-        var duration = histogramPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME);
+        var duration = histogramPoint(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME);
         assertTrue(duration.getBoundaries().contains(0.01), () -> "semconv buckets on the duration: " + duration.getBoundaries());
         // Aggregation is cumulative and the streamed test records the same model, so key on this call's host.
         var input = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME, "api.example.test");
@@ -240,13 +240,24 @@ class GenAiSpansTest extends UnitTest {
             call.response("chatcmpl-f", "gpt-x-2024", usage, List.of());
             call.failed(new IllegalStateException("stream died after its usage chunk"));
         });
-        var duration = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME, "fails.example.test");
+        var duration = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME, "fails.example.test");
         assertEquals(1, duration.size(), () -> "duration points: " + duration);
         assertEquals(IllegalStateException.class.getName(), duration.getFirst().getAttributes().get(ErrorAttributes.ERROR_TYPE));
         for (var name : List.of(GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_INPUT_TOKENS_NAME,
                 GenAiMetrics.GEN_AI_CLIENT_INFERENCE_OPERATION_OUTPUT_TOKENS_NAME)) {
             assertTrue(hostSeries(metrics, name, "fails.example.test").isEmpty(), () -> name + " recorded for a failed call");
         }
+    }
+
+    @Test
+    void anEmbeddingsCallRecordsTheOperationDurationNotTheInferenceOne() {
+        var metrics = OtelRuntime.captureMetricsForTest(() ->
+                GenAiSpans.start(new ProviderConfig("OpenAI", "https://embeds.example.test/v1", "sk-test", List.of()),
+                        GenAiSpans.OPERATION_EMBEDDINGS, "embed-x", false, null).succeeded());
+        var operation = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_OPERATION_DURATION_NAME, "embeds.example.test");
+        assertEquals(1, operation.size(), () -> "operation.duration points: " + operation);
+        var inference = hostSeries(metrics, GenAiMetrics.GEN_AI_CLIENT_INFERENCE_DURATION_NAME, "embeds.example.test");
+        assertTrue(inference.isEmpty(), () -> "inference.duration recorded for embeddings: " + inference);
     }
 
     private static List<HistogramPointData> hostSeries(Collection<MetricData> metrics, String name, String host) {

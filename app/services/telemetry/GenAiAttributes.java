@@ -17,7 +17,7 @@ import static io.opentelemetry.api.common.AttributeKey.stringKey;
  * their own repository, which publishes no Java artifact, so jclaw owns them. The wire names are
  * the contract — collectors, dashboards and queries key on them — and track
  * open-telemetry/semantic-conventions-genai {@code model/gen-ai/registry.yaml} as of commit
- * 8ffdf568e1b4391a99adb081db16e8102e36918e. That repository cuts no releases and marks these
+ * 6fd0d763a092db245a54104fc1124031eb3c51d2. That repository cuts no releases and marks these
  * {@code stability: development}, so they can change: {@code /renovate} checks them against
  * upstream, and GenAiWireNamesTest pins them here. Constant names follow the upstream keys.
  */
