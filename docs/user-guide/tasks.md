@@ -105,7 +105,7 @@ Tokens combine. `q:summary status:PENDING type:CRON` shows pending cron tasks co
 | `COMPLETED` | Terminal for one-shot tasks. Recurring tasks never reach `COMPLETED` unless explicitly cancelled.              |
 | `FAILED`    | A one-shot that hit the retry cap or a non-recoverable error. Click **Retry** to requeue. A recurring task does not end here: a failed occurrence waits for the next one, unless its schedule has no next fire (a malformed cron, say). |
 | `CANCELLED` | `cancelTask` was called. Row is preserved; `runNow` revives it.                                                |
-| `PAUSED`    | Shown in place of `PENDING`/`ACTIVE` while you have suspended the schedule. Display-only. Pause sets a flag and keeps the underlying state, which is why **Resume** picks a recurring cadence straight back up. A one-off whose moment passes while paused has its fire dropped; resuming re-arms it (immediately, if that moment is now in the past). |
+| `PAUSED`    | Shown in place of `PENDING` or `ACTIVE` while you have suspended the schedule. Display-only. Pause sets a flag and keeps the underlying state, which is why **Resume** picks a recurring cadence straight back up. A one-off whose moment passes while paused has its fire dropped; resuming re-arms it (immediately, if that moment is now in the past). |
 
 ### Lifecycle
 
@@ -142,9 +142,9 @@ The transitions, one by one:
 
 | Icon             | Appears when                                              | Effect                                                                                |
 |------------------|-----------------------------------------------------------|---------------------------------------------------------------------------------------|
-| ▶ Run once       | Recurring and live (`PENDING`/`ACTIVE`), no fire in flight | Fires immediately; the next scheduled run is unchanged. Greyed out while paused. A paused task's fire body is skipped, so running it would do nothing. |
+| ▶ Run once       | Recurring and live (`PENDING` or `ACTIVE`), no fire in flight | Fires immediately; the next scheduled run is unchanged. Greyed out while paused. A paused task's fire body is skipped, so running it would do nothing. |
 | ⏹ Cancel running fire | Recurring with a fire in flight                      | Stops that fire at the next safe point; the schedule is untouched.                    |
-| ⏸ Pause          | Any live task (`PENDING`/`ACTIVE`), recurring or one-off   | A toggle, not a one-way action: click to suspend the schedule, click again to resume. It stays a pause icon and lights amber while engaged, and the row's status reads `PAUSED`. On a one-off it is the reversible alternative to **Cancel**. |
+| ⏸ Pause          | Any live task (`PENDING` or `ACTIVE`), recurring or one-off   | A toggle, not a one-way action: click to suspend the schedule, click again to resume. It stays a pause icon and lights amber while engaged, and the row's status reads `PAUSED`. On a one-off it is the reversible alternative to **Cancel**. |
 | 🚫 Cancel        | One-off with status `PENDING`                             | Stops it firing. The row is kept; **Re-enable** or `runNow` revives it.               |
 | ↺ Re-enable      | Status is `CANCELLED`                                     | Re-arms a one-off's fire, or resumes a recurring task at its next scheduled fire.     |
 | ↻ Retry          | Status is `FAILED` or `LOST`                              | Requeues for another attempt.                                                         |

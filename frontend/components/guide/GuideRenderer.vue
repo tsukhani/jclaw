@@ -17,13 +17,15 @@
  *                                         derived from heading text.
  *   - Internal links (href starting `/`) — intercepted on click and
  *     pushed through the Nuxt router so we stay an SPA.
+ *   - Tables — wrapped in `.guide-table`, with the cells of each short
+ *     column marked `.guide-cell-held` for the stylesheet to keep on one line.
  *
  * Per-section anchor namespacing keeps deep links stable across sections:
  * an `h2 "Tips"` in subagents.md generates `#subagents-tips`, distinct
  * from an `h2 "Tips"` in any other section.
  */
 import { computed } from 'vue'
-import { marked, Renderer, type Tokens } from 'marked'
+import { marked, Renderer, type Token, type Tokens } from 'marked'
 import DOMPurify from 'dompurify'
 import { useRouter } from '#imports'
 
@@ -113,6 +115,35 @@ function escapeHtml(s: string): string {
     .replaceAll('"', '&quot;')
 }
 
+/** A column whose longest cell is over this many characters is prose, and wraps. */
+const HELD_COLUMN_MAX_CHARS = 50
+
+/** Length of a cell's rendered text: its inline tokens, without the markdown around them. */
+function textLength(tokens: Token[]): number {
+  let length = 0
+  for (const token of tokens) {
+    if ('tokens' in token && Array.isArray(token.tokens)) length += textLength(token.tokens)
+    else if ('text' in token && typeof token.text === 'string') length += token.text.length
+  }
+  return length
+}
+
+/**
+ * Which columns the stylesheet holds to one line: every short one but the longest, which is left
+ * to wrap. A table with three or more prose columns has no width to lend and holds none.
+ */
+function heldColumns(table: Tokens.Table): boolean[] {
+  const lengths = table.header.map((head, i) =>
+    Math.max(textLength(head.tokens), ...table.rows.map(row => textLength(row[i]?.tokens ?? []))))
+  const longest = lengths.indexOf(Math.max(...lengths))
+  const held = lengths.map((length, i) => i !== longest && length <= HELD_COLUMN_MAX_CHARS)
+  return proseColumns(held) <= 2 ? held : held.map(() => false)
+}
+
+function proseColumns(held: boolean[]): number {
+  return held.filter(isHeld => !isHeld).length
+}
+
 /**
  * Marked heading renderer override:
  *   - Strips a trailing `{#explicit-id}` from the heading text and uses
@@ -164,6 +195,29 @@ function buildRenderer(sectionId: string, suppressFirstH1: boolean) {
   // A code block wider than the section scrolls sideways; tabindex lets a keyboard reach that scroll (WCAG 2.1.1).
   const renderCode = renderer.code.bind(renderer)
   renderer.code = (token: Tokens.Code) => renderCode(token).replace('<pre>', '<pre tabindex="0">')
+
+  const heldCells = new WeakSet<Tokens.TableCell>()
+  const renderTable = renderer.table.bind(renderer)
+  renderer.table = (token: Tokens.Table) => {
+    const held = heldColumns(token)
+    for (const row of [token.header, ...token.rows]) {
+      row.forEach((cell, i) => {
+        if (held[i]) heldCells.add(cell)
+      })
+    }
+    const variant = proseColumns(held) === 2 ? ' guide-table-two-prose' : ''
+    return `<div class="guide-table${variant}">${renderTable(token)}</div>\n`
+  }
+
+  const renderCell = renderer.tablecell.bind(renderer)
+  renderer.tablecell = (cell: Tokens.TableCell) => {
+    const html = renderCell(cell)
+    if (!heldCells.has(cell)) return html
+    // The <wbr> after each dot is where a config key too long for its column breaks, instead of mid-word.
+    return html
+      .replaceAll(/<code>([^<]*)<\/code>/g, (_match, code: string) => `<code>${code.replaceAll('.', '.<wbr>')}</code>`)
+      .replace(/^(<t[hd][^>]*>)([\s\S]*)(<\/t[hd]>\n)$/, '$1<span class="guide-cell-held">$2</span>$3')
+  }
   return renderer
 }
 
@@ -350,6 +404,37 @@ html.dark .guide-section blockquote {
     display: block;
     overflow-x: auto;
   }
+}
+
+/* The query container its held cells measure against, so it carries the table's margin. A held
+   first column may claim all but 18rem of the table, and never less than 45% of a narrow one;
+   a later held column, 65% of that room. */
+.guide-section .guide-table {
+  --guide-held-room: calc(100cqi - 18rem);
+  --guide-held-floor: 45cqi;
+
+  container-type: inline-size;
+  margin: 1rem 0;
+}
+
+/* Two prose columns need more room and cannot spare a share: 45cqi of a 430px table pushed them out. */
+.guide-section .guide-table-two-prose {
+  --guide-held-room: calc(100cqi - 20rem);
+  --guide-held-floor: 4rem;
+}
+.guide-section .guide-table > table { margin: 0; }
+
+/* Auto layout shares width by content length, so a long Meaning squeezed a short Field column until
+   its identifiers broke mid-word. A held cell claims its full width instead, up to its cap, and
+   wraps only past it. */
+.guide-section .guide-cell-held {
+  display: inline-block;
+  width: max-content;
+  max-width: max(var(--guide-held-room) * 0.65, 4rem);
+}
+
+.guide-section :is(th, td):first-child > .guide-cell-held {
+  max-width: max(var(--guide-held-room), var(--guide-held-floor));
 }
 .guide-section thead tr { border-bottom: 1px solid var(--border); }
 .guide-section tbody tr { border-bottom: 1px solid hsl(0 0% 80% / 40%); }

@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach, vi } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import Guide from '~/pages/guide.vue'
+import GuideRenderer from '~/components/guide/GuideRenderer.vue'
 import { sections } from '~/components/guide/sections'
 
 /**
@@ -248,3 +249,56 @@ describe('User Guide page', () => {
 // in the suite (~500ms). The pre-push hook runs them beside the backend suite,
 // where one hit 5.9s against the 5s default. Headroom for contention, not a budget.
 }, 20_000)
+
+describe('User Guide tables', () => {
+  const PROSE = 'How many tool rounds one turn may run before the agent has to stop and answer.'
+  const render = (content: string) => mountSuspended(GuideRenderer, { props: { sectionId: 't', content } })
+  const held = (component: Awaited<ReturnType<typeof render>>) =>
+    component.findAll('th, td').map(cell => cell.find('.guide-cell-held').exists())
+
+  it('holds the short columns of a table and leaves its prose column to wrap', async () => {
+    const component = await render(`| Key | Default | Meaning |\n|---|---|---|\n| \`chat.maxToolRounds\` | \`10\` | ${PROSE} |\n`)
+
+    expect(held(component)).toEqual([true, true, false, true, true, false])
+    expect(component.find('.guide-table > table').exists()).toBe(true)
+    expect(component.find('.guide-table').classes()).not.toContain('guide-table-two-prose')
+  })
+
+  it('lets a held config key break after a dot', async () => {
+    const component = await render(`| Key | Meaning |\n|---|---|\n| \`chat.maxToolRounds\` | ${PROSE} \`chat.other\` |\n`)
+
+    // Asserted after DOMPurify, which would drop a tag it does not allow.
+    const [key, inProse] = component.findAll('td code').map(code => code.element.innerHTML)
+    expect(key).toBe('chat.<wbr>maxToolRounds')
+    expect(inProse).toBe('chat.other')
+  })
+
+  it('gives a table with two prose columns the larger reserve', async () => {
+    const component = await render(`| Icon | Appears when | Effect |\n|---|---|---|\n| Run once | ${PROSE} | ${PROSE} More. |\n`)
+
+    expect(held(component)).toEqual([true, false, false, true, false, false])
+    expect(component.find('.guide-table').classes()).toContain('guide-table-two-prose')
+  })
+
+  it('holds nothing in a table with three prose columns', async () => {
+    const component = await render(`| | A | B | C |\n|---|---|---|---|\n| Who decides | ${PROSE} | ${PROSE} | ${PROSE} More. |\n`)
+
+    expect(component.find('.guide-cell-held').exists()).toBe(false)
+  })
+
+  it('holds every Field cell of the app manifest table', async () => {
+    // The reported case: `version`, `creator` and `description` each broke across two lines.
+    const component = await mountSuspended(Guide)
+    await flushPromises()
+
+    const rows = component.find('[data-section-id="apps"] table').findAll('tr')
+    expect(rows.length).toBeGreaterThan(8)
+    for (const row of rows) expect(row.find(':first-child > .guide-cell-held').exists()).toBe(true)
+  })
+
+  it('sizes a held cell to its content', async () => {
+    // jsdom lays nothing out, so this pins the declaration that keeps the cell on one line.
+    const rendererSrc = (await import('../components/guide/GuideRenderer.vue?raw')).default as string
+    expect(rendererSrc).toMatch(/\.guide-cell-held\s*\{[^}]*width:\s*max-content/)
+  })
+})
