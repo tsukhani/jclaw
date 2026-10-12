@@ -1,24 +1,24 @@
 # Subagents
 
-So far, every chat turn has been one user talking to one agent. **Subagents** are the first way to break that 1:1 — the agent you're chatting with can spawn child agents that do focused work on its behalf. Each child has its own conversation, its own model context, and its own tools; when it finishes, its final reply comes back to the parent (and to you).
+Until now, every chat turn has been one user talking to one agent. **Subagents** are the first way to break that 1:1 pattern. The agent you are chatting with can spawn child agents that do focused work on its behalf. Each child has its own conversation, its own model context, and its own tools. When it finishes, its final reply comes back to the parent, and to you.
 
-Reach for a subagent when:
+Use a subagent when:
 
-- The task is well-scoped and benefits from an isolated context — long research, exploratory work, anything that would otherwise crowd the parent's context window.
+- The task is well-scoped and benefits from an isolated context. Examples: long research, exploratory work, anything that would otherwise crowd the parent's context window.
 - You want to fan out work in parallel without blocking the main conversation.
-- You want a separate transcript that's easy to inspect on its own.
+- You want a separate transcript that is easy to inspect on its own.
 
-This section covers the three spawn modes, the two context modes, the optional model override, the async-plus-yield pattern, the limits, and the five ways to inspect what a child did. Subagents are one of three "outside-this-turn" abstractions — [Tasks](/guide#tasks) and [Reminders](/guide#reminders) are the other two; jump to [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) for the side-by-side comparison.
+This section covers the three spawn modes, the two context modes, the optional model override, the async-plus-yield pattern, the limits, and the five ways to inspect what a child did. Subagents are one of three "outside-this-turn" abstractions. [Tasks](/guide#tasks) and [Reminders](/guide#reminders) are the other two. For the side-by-side comparison, jump to [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders).
 
 ## The simplest case
 
-You don't have to think about any of the parameters. Just ask:
+You do not have to think about any of the parameters. Just ask:
 
 > "Spawn a subagent to research nose trimmers on Lazada and Shopee, then summarize."
 
-The parent agent picks sensible defaults: a new conversation of its own, no inherited context, blocking until done, with a 5-minute idle budget (or whatever `subagent.defaultRunTimeoutSeconds` is set to in Settings → **Subagents**). You'll see the child appear on the [Chat](/chat) page as a row in the subagent list under the chat header, and when it finishes the parent reads its reply and continues.
+The parent agent picks sensible defaults: a new conversation of its own, no inherited context, blocking until done, with a 5-minute idle budget (or whatever `subagent.defaultRunTimeoutSeconds` is set to in Settings → **Subagents**). You will see the child appear on the [Chat](/chat) page as a row in the subagent list under the chat header. When it finishes, the parent reads its reply and continues.
 
-The rest of this section is what you reach for when the defaults aren't quite right.
+The rest of this section is what you reach for when the defaults are not quite right.
 
 ## Spawn modes
 
@@ -26,21 +26,21 @@ Pick a mode based on **how you want the child's work surfaced**.
 
 ### `mode=session` (default)
 
-The child runs in its own brand-new conversation. It shows up as a row in the [Chat](/chat) page's subagent list, which expands to its own message history. The parent waits for it to finish and reads its final reply as the tool result.
+The child runs in its own brand-new conversation. It shows up as a row in the subagent list on the [Chat](/chat) page. The row expands to the child's own message history. The parent waits for it to finish and reads its final reply as the tool result.
 
-**Use when:** you want the child's conversation to be a first-class, navigable artifact you can come back to later — long research, code generation, multi-step tool work.
+**Use when:** you want the child's conversation to be a first-class, navigable artifact you can come back to later. Examples: long research, code generation, multi-step tool work.
 
 ### `mode=inline`
 
-The child's messages get folded into the parent's conversation as a collapsible block. You see a `Subagent: <label>` pill where the child ran; click to expand and read the entire nested transcript inline.
+The child's messages get folded into the parent's conversation as a collapsible block. You see a `Subagent: <label>` pill where the child ran. Click it to expand and read the entire nested transcript inline.
 
 **Use when:** the child's work is part of the conversational flow and you want to read everything in one place without navigating away. Best for short, focused subtasks.
 
 ### `mode=async`
 
-The child runs in the background. The parent gets control back immediately and can keep responding to you. When the child finishes (success, failure, or timeout), its row in the chat's **subagent list** — the shade under the chat header — shows the outcome: status, how long ago it ended, and for a failed, timed-out, or killed run the reason. No announce card lands in your conversation unless the parent waits on the run with `subagent_yield` (see [Async plus yield](/guide#subagents-async-yield)).
+The child runs in the background. The parent gets control back immediately and can keep responding to you. When the child finishes (success, failure, or timeout), its row in the chat's **subagent list** (the shade under the chat header) shows the outcome: status, how long ago it ended, and for a failed, timed-out, or killed run, the reason. No announce card lands in your conversation unless the parent waits on the run with `subagent_yield` (see [Async plus yield](/guide#subagents-async-yield)).
 
-**Use when:** the child's work is going to take a while and you want to keep talking to the parent, or you want to fan out multiple children at once.
+**Use when:** the child's work will take a while and you want to keep talking to the parent, or you want to fan out multiple children at once.
 
 :::tip Quick defaults
 - "Do this for me" → `session`
@@ -50,54 +50,54 @@ The child runs in the background. The parent gets control back immediately and c
 
 ## Context modes
 
-Controls **what the child knows about the parent's history and tools**.
+Context modes control **what the child knows about the parent's history and tools**.
 
 ### `context=fresh` (default)
 
-The child starts with an empty history and only its own configured tools. It knows what the `task` parameter tells it; nothing else from your conversation leaks in.
+The child starts with an empty history and only its own configured tools. It knows what the `task` parameter tells it. Nothing else from your conversation leaks in.
 
-**Use when:** the task is self-contained and you don't want parent context to bias the child. This is also the cheapest option because no summarization runs.
+**Use when:** the task is self-contained and you do not want parent context to bias the child. This is also the cheapest option because no summarization runs.
 
 ### `context=inherit`
 
-Before the child starts, JClaw runs a brief summarization pass over the parent's recent turns and injects the result into the child's system prompt. The child also gets the union of the parent's enabled tools and its own.
+Before the child starts, JClaw runs a brief summarization pass over the parent's recent turns. It injects the result into the child's system prompt. The child also gets the union of the parent's enabled tools and its own.
 
-**Use when:** the child needs to pick up where the parent left off — for example, "spawn a subagent to keep working on the file we were editing" or "have a subagent extend the analysis we just did."
+**Use when:** the child needs to pick up where the parent left off. For example: "spawn a subagent to keep working on the file we were editing", or "have a subagent extend the analysis we just did."
 
 If the summarization call fails, JClaw falls back to `fresh` and notes the reason. The spawn still succeeds.
 
 ## Per-spawn model override
 
-By default the child runs on the same model as the parent. You can override the model for a single spawn:
+By default, the child runs on the same model as the parent. You can override the model for a single spawn:
 
 > "Spawn a subagent on `ollama-cloud` with model `qwen3-coder` to refactor this function."
 
-**Use when:** the child's task is better served by a different model than the parent's — a large-context model for research, a code-tuned model for refactoring, a cheap model for bulk classification. The override lives only on the child's conversation; the parent's model stays the same.
+**Use when:** the child's task is better served by a different model than the parent's. Examples: a large-context model for research, a code-tuned model for refactoring, a cheap model for bulk classification. The override lives only on the child's conversation. The parent's model stays the same.
 
-The parent's behavior settings (system prompt, granted tools when `context=inherit`) still apply; only the model identity changes.
+The parent's behavior settings (system prompt, granted tools when `context=inherit`) still apply. Only the model identity changes.
 
 ## Async plus yield (the two-stage pattern) {#async-yield}
 
 For long-running async work where the parent eventually needs the child's reply, pair `subagent_spawn` with the companion tool `subagent_yield`:
 
-1. Parent calls `subagent_spawn` with `async=true, mode=session, task="..."`. Receives a `runId` immediately.
-2. Parent does whatever else is useful — talks to you, calls other tools, summarizes the spawn intent.
+1. Parent calls `subagent_spawn` with `async=true, mode=session, task="..."`. It receives a `runId` immediately.
+2. Parent does whatever else is useful. For example, it can talk to you, call other tools, or summarize the spawn intent.
 3. When the parent needs the child's result, it calls `subagent_yield` with that `runId`. The parent's turn ends without emitting a final assistant reply.
 4. When the child terminates, JClaw delivers the child's reply back as the parent's next user-role message and resumes the parent's loop. The parent picks up the conversation seamlessly with the child's output as fresh user input.
 
 :::note
-Without `subagent_yield`, the parent never gets to use the child's reply — the outcome surfaces to *you* in the chat's subagent list, not back into the parent. With yield, the reply arrives as an announce card in the conversation, and that card is the parent's next input. Use yield when you want the parent to keep working with the result.
+Without `subagent_yield`, the parent never gets to use the child's reply. The outcome surfaces to *you* in the chat's subagent list, not back into the parent. With yield, the reply arrives as an announce card in the conversation, and that card is the parent's next input. Use yield when you want the parent to keep working with the result.
 :::
 
-**Batch fan-out.** `tasks` starts one async child per entry in a single call. An entry is a task string, or an object `{task, label, agentId}` that gives that child its own label and agent. Mode, context, runtime, model and run timeout apply to the whole batch. The call returns `run_ids` at once, plus `skipped` for any child that failed to start. Collect the batch with one `subagent_yield`: pass `runIds`, or `all: true` for every uncollected batch child in this conversation. A batch collect doesn't suspend the turn. It waits for every child and returns `{results: [...]}` inline, with each child's `run_id`, `status` and `reply`, and posts no announce card. A run id that was already collected comes back as `UNKNOWN` without failing the rest.
+**Batch fan-out.** `tasks` starts one async child per entry in a single call. An entry is a task string, or an object `{task, label, agentId}` that gives that child its own label and agent. Mode, context, runtime, model, and run timeout apply to the whole batch. The call returns `run_ids` at once, plus `skipped` for any child that failed to start. Collect the batch with one `subagent_yield` call: pass `runIds`, or pass `all: true` for every uncollected batch child in this conversation. A batch collect does not suspend the turn. It waits for every child and returns `{results: [...]}` inline, with each child's `run_id`, `status`, and `reply`, and it posts no announce card. A run id that was already collected comes back as `UNKNOWN` without failing the rest.
 
-**Inside a task fire.** A fire has no conversation to resume, so an `async` spawn there is collected inline too: `subagent_yield` with its `runId` waits for the child and returns the same result a blocking spawn would, and the fire carries on without an announce card. A task fire needs the `runId` and refuses a `conversationId` alone, and `all: true` collects every uncollected async child of the fire. Neither inline collect uses yield's `timeoutSeconds`; each child is bounded by its own run timeout.
+**Inside a task fire.** A fire has no conversation to resume, so an `async` spawn there is collected inline too. `subagent_yield` with its `runId` waits for the child and returns the same result a blocking spawn would, and the fire carries on without an announce card. A task fire needs the `runId` and refuses a `conversationId` alone, and `all: true` collects every uncollected async child of the fire. Neither inline collect uses yield's `timeoutSeconds`; each child is bounded by its own run timeout.
 
 ## External coding harness (`runtime=acp`) {#acp-harness}
 
-By default a child runs on JClaw's own native agent loop. You can instead delegate the child to an **external coding harness** — a standalone CLI agent such as [Pi](https://github.com/pi-labs/pi), Claude Code, or the Codex CLI — by passing `runtime:"acp"`. JClaw launches the operator-configured harness command as a subprocess and captures its output as the child's reply. How the two talk is set by `subagent.acp.mode`: **batch** (the default) hands the `task` over on stdin and reads stdout when the harness exits; **json** streams the harness's line protocol as it runs; **rpc** opens a bidirectional session so the harness's mid-run permission prompts are routed through JClaw's approval gate (a harness that can't do that falls back to one-way streaming). A harness that speaks ACP natively over stdio is driven over that protocol directly, whichever mode is set.
+By default, a child runs on JClaw's own native agent loop. You can instead delegate the child to an **external coding harness**. That is a standalone CLI agent such as [Pi](https://github.com/pi-labs/pi), Claude Code, or the Codex CLI. Pass `runtime:"acp"` to do this. JClaw launches the operator-configured harness command as a subprocess and captures its output as the child's reply. How the two talk is set by `subagent.acp.mode`: **batch** (the default) hands the `task` over on stdin and reads stdout when the harness exits. **json** streams the harness's line protocol as it runs. **rpc** opens a bidirectional session so the harness's mid-run permission prompts route through JClaw's approval gate (a harness that cannot do that falls back to one-way streaming). A harness that speaks ACP natively over stdio is driven over that protocol directly, whichever mode is set.
 
-**Use when:** the child's job is better handled by a purpose-built coding agent with its own tools and sandbox than by JClaw's native loop — for example, a large refactor or a repo-wide edit you'd rather run through Pi.
+**Use when:** the child's job is better handled by a purpose-built coding agent with its own tools and sandbox than by JClaw's native loop. For example: a large refactor, or a repo-wide edit you would rather run through Pi.
 
 ### Operator setup
 
@@ -107,29 +107,29 @@ By default a child runs on JClaw's own native agent loop. You can instead delega
    subagent.acp.command = /usr/local/bin/pi
    ```
 
-   The command is whitespace-split into an argv, so fixed flags are fine (`/usr/local/bin/pi --headless`). It is read from config **only** — never from the model — so a subagent can't steer JClaw into running arbitrary shell.
+   The command is whitespace-split into an argv, so fixed flags are fine (`/usr/local/bin/pi --headless`). It is read from config **only**, never from the model. This is why a subagent cannot steer JClaw into running arbitrary shell.
 
-   Alongside it, `subagent.acp.harness` names the adapter for that CLI — `pi`, `claude`, `codex`, `gemini`, `opencode`, `antigravity`, or `generic` (the default) — and `subagent.acp.mode` picks `batch` (the default), `json`, or `rpc`. Both are checked up front when a spawn is attempted: a value outside those sets refuses the spawn with an error naming the allowed values rather than silently falling back. Settings → **Coding** can also auto-detect the harnesses installed on the server and fill in the command and adapter for you in one click. `subagent.acp.mode` has no field in Settings; set it with `POST /api/config`.
+   Alongside it, `subagent.acp.harness` names the adapter for that CLI: `pi`, `claude`, `codex`, `gemini`, `opencode`, `antigravity`, or `generic` (the default). And `subagent.acp.mode` picks `batch` (the default), `json`, or `rpc`. Both are checked up front when a spawn is attempted. A value outside those sets refuses the spawn with an error naming the allowed values, rather than silently falling back. Settings → **Coding** can also auto-detect the harnesses installed on the server and fill in the command and adapter for you in one click. `subagent.acp.mode` has no field in Settings; set it with `POST /api/config`.
 
-   **Permission flags.** In `json` and `rpc` modes JClaw appends the adapter's default permission flags to the command. Only Claude Code has defaults, `--allowedTools Read,Edit,Write,Glob,Grep`, which keep file editing and search but leave out the shell. `subagent.acp.permissionArgs` replaces the defaults with its own flags, split on whitespace; `none` sends no flags at all. It has no Settings field either. `batch` mode and harnesses driven over native ACP get no permission flags.
+   **Permission flags.** In `json` and `rpc` modes, JClaw appends the adapter's default permission flags to the command. Only Claude Code has defaults: `--allowedTools Read,Edit,Write,Glob,Grep`. These keep file editing and search but leave out the shell. `subagent.acp.permissionArgs` replaces the defaults with its own flags, split on whitespace. The value `none` sends no flags at all. `subagent.acp.permissionArgs` has no Settings field either. `batch` mode and harnesses driven over native ACP get no permission flags.
 
-   **Optionally, pick the model the harness runs with.** By default the harness uses its own default model and its own login. The `acp.model` picker in Settings → **Coding** (`subagent.acp.modelProvider` / `subagent.acp.modelId`) pins it to one of your configured providers' models instead, and a per-spawn `modelProvider` / `modelId` on `subagent_spawn` — "run this through Codex on `ollama` with `qwen3-coder`" — overrides that for one run. How the override reaches the harness depends on the CLI: **Claude Code** gets `--model` plus the `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` environment pointed at the provider (so the endpoint must speak the Anthropic Messages API — Ollama and OpenRouter do); **Codex** gets `-m` plus an inline `model_providers` config block naming the provider's endpoint; **Pi** and **Gemini CLI** take the model only, so a provider override is refused for them; **opencode** and custom commands take neither and refuse any override. Pass `modelId` alone to change only the model and keep the harness's own endpoint and login. The run's transcript records the override as its first step.
+   **Optionally, pick the model the harness runs with.** By default, the harness uses its own default model and its own login. The `acp.model` picker in Settings → **Coding** (`subagent.acp.modelProvider` / `subagent.acp.modelId`) pins it to one of your configured providers' models instead. A per-spawn `modelProvider` / `modelId` on `subagent_spawn` ("run this through Codex on `ollama` with `qwen3-coder`") overrides that for one run. How the override reaches the harness depends on the CLI: **Claude Code** gets `--model` plus the `ANTHROPIC_BASE_URL` / `ANTHROPIC_AUTH_TOKEN` environment pointed at the provider (so the endpoint must speak the Anthropic Messages API; Ollama and OpenRouter do). **Codex** gets `-m` plus an inline `model_providers` config block naming the provider's endpoint. **Pi** and **Gemini CLI** take the model only, so a provider override is refused for them. **opencode** and custom commands take neither and refuse any override. Pass `modelId` alone to change only the model and keep the harness's own endpoint and login. The run's transcript records the override as its first step.
 
-2. **Grant the spawning agent the `acp` capability.** The harness runs as an external process *outside* JClaw's tool gating and workspace confinement, so it's a privileged capability. The **main agent** may always request it; a **custom agent** must have `acpAllowed = true` set on its [Agents](/agents) page. Without the grant, an `acp` spawn is refused on permission. The gate is on the *spawning* agent, so a confined custom agent can't break out by delegating to `acp`.
+2. **Grant the spawning agent the `acp` capability.** The harness runs as an external process *outside* JClaw's tool gating and workspace confinement. For that reason it is a privileged capability. The **main agent** may always request it. A **custom agent** must have `acpAllowed = true` set on its [Agents](/agents) page. Without the grant, an `acp` spawn is refused on permission. The gate is on the *spawning* agent, so a confined custom agent cannot break out by delegating to `acp`.
 
-3. **Spawn with `runtime:"acp"`.** From chat, just ask the agent to delegate to the harness — it emits, for a background run:
+3. **Spawn with `runtime:"acp"`.** From chat, just ask the agent to delegate to the harness. For a background run, the agent emits:
 
    ```json
    subagent_spawn { "runtime": "acp", "async": true, "task": "..." }
    ```
 
-   `async:true` returns a `runId` immediately, and the run's outcome shows in the chat's subagent list when the harness finishes; drop it for a blocking run.
+   `async:true` returns a `runId` immediately, and the run's outcome shows in the chat's subagent list when the harness finishes. Drop it for a blocking run.
 
 ### Bounds and failure
 
-- **Wall-clock ceiling.** The harness is bounded by `subagent.maxWallClockSeconds` (default **1800** = 30 min). A harness that overruns is force-killed (`destroyForcibly`) and the run records `TIMEOUT`/`FAILED`. Set it to `0` to wait indefinitely (not recommended for an unattended instance).
-- **Output cap.** Captured stdout is bounded; a harness that floods stdout is truncated rather than allowed to exhaust memory.
-- **Non-zero exit.** If the harness exits non-zero, the spawn is `FAILED` and the harness's stderr is surfaced as the failure reason on the [Subagents](/subagents) page.
+- **Wall-clock ceiling.** The harness is bounded by `subagent.maxWallClockSeconds` (default **1800**, which is 30 minutes). A harness that overruns is force-killed (`destroyForcibly`), and the run records `TIMEOUT`/`FAILED`. Set it to `0` to wait indefinitely. This is not recommended for an unattended instance.
+- **Output cap.** Captured stdout is bounded. A harness that floods stdout is truncated rather than allowed to exhaust memory.
+- **Non-zero exit.** If the harness exits non-zero, the spawn is `FAILED`, and the harness's stderr is surfaced as the failure reason on the [Subagents](/subagents) page.
 
 :::gotcha
 `runtime:"acp"` needs `subagent.acp.command` configured *and* the spawning agent to hold the `acp` grant. A spawn that clears the permission gate but finds no configured command is refused with a message telling the operator to set the key.
@@ -137,38 +137,38 @@ By default a child runs on JClaw's own native agent loop. You can instead delega
 
 ## Recursion limits
 
-To stop a subagent from spawning grandchildren that spawn great-grandchildren, JClaw enforces two caps. Both are runtime-configurable in the **Subagents** section of the [Settings](/settings) page, and both fail closed: a spawn that would breach the cap is refused with a clear error before anything is created.
+To stop a subagent from spawning grandchildren that spawn great-grandchildren, JClaw enforces two caps. Both are runtime-configurable in the **Subagents** section of the [Settings](/settings) page, and both fail closed. A spawn that would breach the cap is refused with a clear error before anything is created.
 
 | Setting key                     | Default | Meaning                                                          |
 |---------------------------------|---------|------------------------------------------------------------------|
 | `subagent.maxDepth`             | 1       | How deep the parent → child → grandchild chain can go.           |
 | `subagent.maxChildrenPerParent` | 5       | How many concurrently-running children a single parent can have. |
 
-A depth limit of `1` means the top-level agent can spawn children, but those children cannot spawn further children. Bump it for explicit fan-in patterns; keep it conservative for runaway protection.
+A depth limit of `1` means the top-level agent can spawn children, but those children cannot spawn further children. Bump it for explicit fan-in patterns. Keep it conservative for runaway protection.
 
-The same Settings section also holds `subagent.defaultRunTimeoutSeconds` (default 300) and `subagent.defaultYieldTimeoutSeconds` (default 300) — the fallbacks for a spawn or yield that omits its own timeout — and an optional global subagent model (`subagent.modelProvider` / `subagent.modelId`) that pins every child to one model instead of inheriting the parent's. The harness command and its model override live in Settings → **Coding**.
+The same Settings section also holds `subagent.defaultRunTimeoutSeconds` (default 300) and `subagent.defaultYieldTimeoutSeconds` (default 300). These are the fallbacks for a spawn or yield that omits its own timeout. The section also holds an optional global subagent model (`subagent.modelProvider` / `subagent.modelId`) that pins every child to one model instead of inheriting the parent's. The harness command and its model override live in Settings → **Coding**.
 
 ## Inspecting what a child did
 
-Five surfaces, each with its own audience.
+Five surfaces exist, each with its own audience.
 
 ### 1. The announce card (in [Chat](/chat))
 
-Lands in your conversation when an `async` subagent the parent waited on with `subagent_yield` terminates; a run nobody waited on reports in the chat's subagent list instead (surface 5). Shows label, terminal status (`COMPLETED`, `FAILED`, or `TIMEOUT`), and the child's reply rendered as markdown. Includes a "View full →" link that opens the child's full transcript in the standard chat viewer — read-only, because the child is no longer accepting input.
+This lands in your conversation when an `async` subagent the parent waited on with `subagent_yield` terminates. A run nobody waited on reports in the chat's subagent list instead (surface 5). The card shows the label, the terminal status (`COMPLETED`, `FAILED`, or `TIMEOUT`), and the child's reply rendered as markdown. It includes a "View full →" link. That link opens the child's full transcript in the standard chat viewer, read-only, because the child is no longer accepting input.
 
-If the child's reply was cut off by the model's output budget, the announce card shows a small amber *"Reply was truncated by the model"* marker so you know the summary isn't complete.
+If the child's reply was cut off by the model's output budget, the announce card shows a small amber *"Reply was truncated by the model"* marker. That marker tells you the summary is not complete.
 
 ### 2. The [Subagents](/subagents) page
 
-Lists every run — `RUNNING`, `COMPLETED`, `FAILED`, `KILLED`, `TIMEOUT` — across all parent agents. Filter by parent agent, status, and start time. Each row links to the child's transcript. Use this when you want a fleet view across multiple parents and time ranges.
+This page lists every run (`RUNNING`, `COMPLETED`, `FAILED`, `KILLED`, `TIMEOUT`), across all parent agents. Filter by parent agent, status, and start time. Each row links to the child's transcript. Use this page when you want a fleet view across multiple parents and time ranges.
 
-The **Conversation** column shows the conversation each run was spawned from, as a link that opens that conversation in [Chat](/chat). By default the list is sorted by that column, so runs from the same conversation sit together under a *Conversation #ID* header row, newest conversation first and newest run first within it. The order comes from the server, so grouping holds across pages: a conversation whose runs spill onto the next page repeats its header at the top of that page. Clicking another column header sorts by that column instead and shows the plain, ungrouped list; click **Conversation** to group again.
+The **Conversation** column shows the conversation each run was spawned from. It is a link that opens that conversation in [Chat](/chat). By default, the list is sorted by that column, so runs from the same conversation sit together under a *Conversation #ID* header row, newest conversation first and newest run first within it. The order comes from the server, so the grouping holds across pages. A conversation whose runs spill onto the next page repeats its header at the top of that page. Clicking another column header sorts by that column instead and shows the plain, ungrouped list. Click **Conversation** to group again.
 
-To see only one conversation's runs, either click the funnel button beside an id in the Conversation column or type `parentConversation:ID` in the filter bar. A *Conversation #ID* chip beside the bar shows the active conversation filter, and its **×** clears it; removing the `parentConversation` token from the bar clears it too. Opening the page from a chat's subagent link applies the same filter. **Delete all matching** honours it, deleting only that conversation's terminal runs.
+To see only one conversation's runs, either click the funnel button beside an id in the Conversation column, or type `parentConversation:ID` in the filter bar. A *Conversation #ID* chip beside the bar shows the active conversation filter, and its **×** clears it. Removing the `parentConversation` token from the bar clears it too. Opening the page from a chat's subagent link applies the same filter. **Delete all matching** honors it and deletes only that conversation's terminal runs.
 
 ### 3. The `/subagent` slash command (in [Chat](/chat))
 
-Operator surface for subagent runs. `list` covers the current conversation, `history` only runs the current agent spawned, and `info`, `log` and `kill` any run on the instance. Five subcommands:
+This is the operator surface for subagent runs. `list` covers the current conversation. `history` covers only runs the current agent spawned. `info`, `log`, and `kill` address any run on the instance. Five subcommands:
 
 | Command                  | What it does                                                                   |
 |--------------------------|--------------------------------------------------------------------------------|
@@ -178,15 +178,15 @@ Operator surface for subagent runs. `list` covers the current conversation, `his
 | `/subagent kill <id>`    | Cooperatively cancel a running child.                                          |
 | `/subagent history <id>` | Inline render of the child's transcript (capped to ~20 messages, 500 chars).   |
 
-On a channel, `/subagent` answers *Only the operator can use this command.* to anyone the channel cannot prove is you: a Telegram group member who @mentions the bot, every WhatsApp sender, anyone but the owner on a Slack binding, and everyone — you included — on a Slack binding with no owner configured. Web chat is always you.
+On a channel, `/subagent` answers *Only the operator can use this command.* to anyone the channel cannot prove is you: a Telegram group member who @mentions the bot, every WhatsApp sender, anyone but the owner on a Slack binding, and everyone (you included) on a Slack binding with no owner configured. Web chat is always you.
 
 ### 4. The `conversation_history` tool
 
-For the parent agent itself to recall what a previous child did. Returns the full message list (role, content, tool calls and results, timestamps) for a child conversation given the run id. Useful when the parent wants to summarize across multiple historical runs, debug its own delegation pattern, or splice intermediate results into a follow-up turn. The calling agent must be the run's parent.
+The parent agent itself uses this to recall what a previous child did. Given the run id, this returns the full message list (role, content, tool calls and results, timestamps) for a child conversation. It is useful when the parent wants to summarize across multiple historical runs, debug its own delegation pattern, or splice intermediate results into a follow-up turn. The calling agent must be the run's parent.
 
 ### 5. The subagent list (in [Chat](/chat))
 
-A shade under the chat header, headed *N subagents · N running*, lists the runs the current conversation spawned. Each row shows the run's label, its status, and how long it has been running or how long ago it ended; a failed, timed-out, or killed run gets a coloured status pill with the reason as its tooltip. Expand a row to read its transcript (a failure reason also shows above it), click the header to collapse the list, or click **View all →** to open this conversation's runs on the [Subagents](/subagents) page.
+A shade under the chat header, headed *N subagents · N running*, lists the runs the current conversation spawned. Each row shows the run's label, its status, and how long it has been running or how long ago it ended. A failed, timed-out, or killed run gets a colored status pill with the reason as its tooltip. Expand a row to read its transcript (a failure reason also shows above it). Click the header to collapse the list, or click **View all →** to open this conversation's runs on the [Subagents](/subagents) page.
 
 ## Quick reference
 
@@ -220,7 +220,7 @@ conversation_history
 ## Tips and gotchas
 
 :::gotcha
-`async=true` requires `mode=session`. Inline mode embeds child messages directly; returning control before the child finishes would leave a half-written nested block dangling. The runtime rejects the combination with a clear error.
+`async=true` requires `mode=session`. Inline mode embeds child messages directly. If the runtime returned control before the child finished, it would leave a half-written nested block dangling. The runtime rejects the combination with a clear error.
 :::
 
 :::note
@@ -228,7 +228,7 @@ A child gets a fresh clone of the parent's agent by default. Pass `agentId` if y
 :::
 
 :::gotcha
-`context=inherit` costs an extra model call for the summarization pass before the child even starts. Not free; use when you need it.
+`context=inherit` costs an extra model call for the summarization pass before the child even starts. It is not free. Use it when you need it.
 :::
 
 :::gotcha Truncation
@@ -236,64 +236,31 @@ If the child's reply ends abruptly with a "Reply was truncated by the model" mar
 :::
 
 :::note
-Killed runs don't get an announce card. The `/subagent kill` response *is* your confirmation; suppressing the announce avoids double-rendering "Killed by operator" twice.
+Killed runs do not get an announce card. The `/subagent kill` response *is* your confirmation. Suppressing the announce avoids double-rendering "Killed by operator" twice.
 :::
 
 :::tip Scoping
-Every subagent run belongs to you. JClaw Pro has a single **admin** operator, so the [Subagents](/subagents) page shows and controls every run on the instance, as do `/subagent info`, `log` and `kill`; `/subagent list` stays scoped to the current conversation and `history` to runs the current agent spawned.
+Every subagent run belongs to you. JClaw Pro has a single **admin** operator, so the [Subagents](/subagents) page shows and controls every run on the instance. The same is true of `/subagent info`, `log`, and `kill`. `/subagent list` stays scoped to the current conversation, and `history` stays scoped to runs the current agent spawned.
 :::
 
 ## Where coding output lands
 
-Every `runtime=acp` coding session runs inside its own directory under the
-child agent's workspace: `workspace/<agent>/coding/<session>/`, where
-`<session>` is derived from the task (the task "create fibonacci program"
-runs in `coding/create-fibonacci-program/`). A repeated task never reuses a
-previous session's directory — collisions get `-2`, `-3`, … suffixes.
-The run's directory is recorded on the run itself (visible in the run
-monitor), and because artifacts live in the workspace, the agent's
-filesystem and documents tools can read them directly in later turns.
-Setting `subagent.acp.workdir` overrides this entirely and confines every
-session to the configured directory.
-
+Every `runtime=acp` coding session runs inside its own directory under the child agent's workspace: `workspace/<agent>/coding/<session>/`. Here, `<session>` is derived from the task. The task "create fibonacci program" runs in `coding/create-fibonacci-program/`. A repeated task never reuses a previous session's directory. Collisions get `-2`, `-3`, and so on as suffixes. The run's directory is recorded on the run itself (visible in the run monitor). Because the artifacts live in the workspace, the agent's filesystem and documents tools can read them directly in later turns. Setting `subagent.acp.workdir` overrides this entirely and confines every session to the configured directory.
 
 ## Sandboxing coding runs (opt-in)
 
-By default a coding harness runs with the operator's own account permissions,
-scoped only by its `coding/<slug>/` working directory (which organizes output
-but confines nothing) and by the harness's permission flags. For a real OS
-boundary, set `subagent.acp.sandbox` with the **acp.sandbox** control in
-[Settings → Coding](/guide#settings-coding). It takes three values: `false` (the
-default — never confine), `true` (confine every run), or `untrusted` (confine
-only runs whose origin channel is not your own web chat — inbound Telegram or
-Slack, the prompt-injection surface — while your own web-driven runs stay
-unconfined):
+By default, a coding harness runs with the operator's own account permissions. It is scoped only by its `coding/<slug>/` working directory (which organizes output but confines nothing) and by the harness's permission flags. For a real OS boundary, set `subagent.acp.sandbox` with the **acp.sandbox** control in [Settings → Coding](/guide#settings-coding). It takes three values: `false` (the default; never confine), `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat, which means inbound Telegram or Slack, the prompt-injection surface; your own web-driven runs stay unconfined):
 
-* **macOS** wraps the harness in `sandbox-exec` — writes are confined to the
-  session directory, the system temp directories, `/dev`, and the harness's
-  declared state paths (its own config, e.g. `~/.claude`), and reads of
-  `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube` and
-  `~/.netrc` are denied; everything else stays readable.
-* **Linux** wraps it in `bwrap` — the visible filesystem is built from nothing,
-  so secrets are absent rather than merely denied; only the session directory
-  is writable and only the harness's declared state paths (its own config,
-  e.g. `~/.claude`) are bound back.
-* **Windows** is supported via **WSL2** (it uses the Linux path). Native
-  Windows and WSL1 have no sandbox.
+* **macOS** wraps the harness in `sandbox-exec`. Writes are confined to the session directory, the system temp directories, `/dev`, and the harness's declared state paths (its own config, for example `~/.claude`). Reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube`, and `~/.netrc` are denied. Everything else stays readable.
+* **Linux** wraps it in `bwrap`. The visible filesystem is built from nothing, so secrets are absent rather than merely denied. Only the session directory is writable, and only the harness's declared state paths (its own config, for example `~/.claude`) are bound back.
+* **Windows** is supported through **WSL2** (it uses the Linux path). Native Windows and WSL1 have no sandbox.
 
-The sandbox **fails closed**: if enabled where no mechanism is available (native
-Windows, WSL1, or a WSL2 kernel with unprivileged user namespaces disabled),
-the run is aborted with an actionable error rather than launched unsandboxed;
-the **acp.sandbox** control says when this host lacks `sandbox-exec` or `bwrap`
-(it cannot detect a `bwrap` whose namespaces are disabled).
-Network egress stays open — the harness needs its API. Off by default; see the
-JCLAW-671 spike for the measured confinement results and limitations.
-
+The sandbox **fails closed**. If it is enabled where no mechanism is available (native Windows, WSL1, or a WSL2 kernel with unprivileged user namespaces disabled), the run is aborted with an actionable error rather than launched unsandboxed. The **acp.sandbox** control says when this host lacks `sandbox-exec` or `bwrap` (it cannot detect a `bwrap` whose namespaces are disabled). Network egress stays open; the harness needs its API. Off by default. See the JCLAW-671 spike for the measured confinement results and limitations.
 
 ## Where to go next
 
 Subagents fan out work *now*, in this turn. The next two sections cover fanning out *later*:
 
-- [Tasks](/guide#tasks) — scheduled work the agent figures out at fire time.
-- [Reminders](/guide#reminders) — scheduled pre-written nudges that skip the LLM entirely.
-- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) — side-by-side comparison.
+- [Tasks](/guide#tasks): scheduled work the agent figures out at fire time.
+- [Reminders](/guide#reminders): scheduled pre-written nudges that skip the LLM entirely.
+- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders): side-by-side comparison.

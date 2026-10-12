@@ -1,41 +1,41 @@
 # Subagents, Tasks, or Reminders?
 
-JClaw gives you three ways to make work happen outside the flow of a live conversation. They look superficially similar — all three "do something that isn't the message you just sent" — but they sit on three orthogonal axes: *what* runs, *when* it runs, and *what you see*.
+JClaw gives you three ways to make work happen outside the flow of a live conversation. They look superficially similar. All three "do something that is not the message you just sent". But they sit on three orthogonal axes: *what* runs, *when* it runs, and *what you see*.
 
 ## The mental model
 
 - **Subagent** = "fan out *this* turn." Parallelism in the *now*.
 - **Task** = "fan out *later*, and have the agent figure out what to do then." Parallelism across *time*.
-- **Reminder** = "fan out *later*, but I already know what to say — just don't forget to tell me." Pure scheduling, no thinking.
+- **Reminder** = "fan out *later*, but I already know what to say. Just do not forget to tell me." Pure scheduling, no thinking.
 
-That's the whole story. The rest of this section is the detail behind each axis.
+That is the whole story. The rest of this section is the detail behind each axis.
 
 ## Side by side
 
 |                                  | [Subagent](/guide#subagents)                                                       | [Task](/guide#tasks)                                                                  | [Reminder](/guide#reminders)                                              |
 |----------------------------------|------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
-| **What's the work?**             | A second LLM turn in a child context — agent reasoning, tool calls, a real reply.   | An agent turn fired in the background — same LLM-driven work, just deferred.          | **No work.** A pre-written message delivered verbatim.                     |
+| **What's the work?**             | A second LLM turn in a child context: agent reasoning, tool calls, a real reply.   | An agent turn fired in the background: same LLM-driven work, just deferred.          | **No work.** A pre-written message delivered verbatim.                     |
 | **When does it run?**            | Right now (or shortly, via `async`), inside the current conversation's "thinking." | On a schedule: immediate / once at a time / every N / cron.                            | On a schedule (same shapes as a task).                                     |
 | **Who triggers it?**             | The parent agent during its own turn.                                              | The agent via `task_manager`, in response to "do X every morning."                     | The agent via `task_manager` with `payloadType="reminder"`, in response to "remind me to X." |
-| **LLM at fire time?**            | Yes — that's the whole point.                                                      | Yes — runs the full agent loop against a fresh task run (not a conversation).          | **No** — fire path skips the LLM entirely.                                  |
+| **LLM at fire time?**            | Yes: that is the whole point.                                                       | Yes: runs the full agent loop against a fresh task run (not a conversation).           | **No**: the fire path skips the LLM entirely.                                   |
 | **Lives across server restarts?**| No (in-flight runs die with the JVM).                                              | Yes (recurring schedules survive).                                                     | Yes.                                                                       |
-| **Where does the output land?**  | Inline block, the child's own conversation, or — for `async` — the chat's subagent list (an announce card only when the parent waits with `subagent_yield`). | The run's trace on the [Tasks](/tasks) page (expand the task's row) — never the [Conversations](/conversations) page; optional `delivery` channel for the final message. | Top-right toast (web) or 🔔-prefixed Telegram message; never enters chat history. |
-| **Visible to the LLM next turn?**| Yes — the reply comes back into the parent (or via `subagent_yield`); an `async` run the parent never yields on stays out of its context. | **No** — the trace is stored on the task run, not in any conversation's history.        | **No** — invisible by design.                                              |
+| **Where does the output land?**  | Inline block, the child's own conversation, or (for `async`) the chat's subagent list (an announce card only when the parent waits with `subagent_yield`). | The run's trace on the [Tasks](/tasks) page (expand the task's row); never the [Conversations](/conversations) page; optional `delivery` channel for the final message. | Top-right toast (web) or 🔔-prefixed Telegram message; never enters chat history. |
+| **Visible to the LLM next turn?**| Yes: the reply comes back into the parent (or via `subagent_yield`); an `async` run the parent never yields on stays out of its context. | **No**: the trace is stored on the task run, not in any conversation's history.        | **No**: invisible by design.                                               |
 
 ## The load-bearing distinction
 
-"**LLM at fire time?**" is the row that does most of the work. Tasks and reminders look identical from the outside — both are scheduled, both persist across restarts, both are created through the `task_manager` tool. The difference is whether the firing event burns tokens to *decide what to do*:
+"**LLM at fire time?**" is the row that does most of the work. From the outside, tasks and reminders look identical. Both are scheduled. Both persist across restarts. Both are created through the `task_manager` tool. The difference is whether the firing event burns tokens to *decide what to do*:
 
 - A **task** fires the agent loop. Use it when the schedule is "do this work later" and you want the agent to figure out *how* at fire time. The schedule is the trigger; the work is open-ended.
 - A **reminder** skips the loop. Use it when the schedule is "tell me this later" and you already know the message. The schedule is the trigger; the message is fixed.
 
-Every other difference between tasks and reminders (cascade-delete behavior, toast vs run-trace surface, the 🔔 prefix on Telegram, the fact that reminders never enter LLM context on the next turn) falls out of that one choice.
+Every other difference between tasks and reminders falls out of that one choice: cascade-delete behavior, toast vs run-trace surface, the 🔔 prefix on Telegram, and the fact that reminders never enter LLM context on the next turn.
 
-The subagent's "axis" is different. It's not about *when* — subagents always fire as part of the current turn (the `async` variant just lets the parent keep working in parallel). It's about *what context the work runs in*: a child conversation, a child agent, a child tool set, a child reply that can either come back to the parent (`subagent_yield`) or surface only to *you*, in the chat's subagent list.
+The subagent's "axis" is different. It is not about *when*. Subagents always fire as part of the current turn (the `async` variant just lets the parent keep working in parallel). It is about *what context the work runs in*: a child conversation, a child agent, a child tool set, a child reply. That reply can either come back to the parent (`subagent_yield`) or surface only to *you*, in the chat's subagent list.
 
 ## Choosing in practice
 
-| If you'd say…                                                                  | Reach for…                |
+| If you'd say                                                                  | Reach for                 |
 |--------------------------------------------------------------------------------|---------------------------|
 | "Research this in the background while we keep talking"                        | **Subagent**, `async`     |
 | "Spawn three helpers to compare these options in parallel"                     | **Subagent**, `async` × 3 |
@@ -46,21 +46,21 @@ The subagent's "axis" is different. It's not about *when* — subagents always f
 | "Pull up everything you know about X and write a one-pager I can edit"         | **Subagent**, `session`   |
 | "Every Friday at 6pm, generate the weekend on-call summary and post it"        | **Task** (CRON)           |
 
-When in doubt: if the schedule is "tell me this," it's a reminder; if the schedule is "do this work," it's a task; if it's happening as part of this turn, it's a subagent.
+When in doubt, use this test. If the schedule is "tell me this", it is a reminder. If the schedule is "do this work", it is a task. If it happens as part of this turn, it is a subagent.
 
 ## Nesting
 
-The three layers compose cleanly because they don't overlap. A common pattern:
+The three layers compose cleanly because they do not overlap. A common pattern:
 
 > "Every weekday at 9am, spawn three subagents to scan Slack/Email/Calendar and have them post a combined briefing to my Telegram."
 
-That's one **task** (the daily 9am schedule) whose description tells the agent to **spawn three subagents** (the parallel scans), whose combined output is delivered to a channel via the task's `delivery` field. Reminders don't fit here because the work is open-ended — but if the *result* of that briefing produces a follow-up nudge ("at 11am, remind me to review the briefing"), the agent can schedule that as a reminder during the task's run.
+That is one **task** (the daily 9am schedule). Its description tells the agent to **spawn three subagents** (the parallel scans). The combined output is delivered to a channel through the task's `delivery` field. Reminders do not fit here because the work is open-ended. But if the *result* of that briefing produces a follow-up nudge ("at 11am, remind me to review the briefing"), the agent can schedule that as a reminder during the task's run.
 
 ## Where to go next
 
 Now that you can pick the right abstraction, the next layer is about giving the agent itself more powers:
 
-- [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) — extend what your agents can do at the capability layer.
-- [Subagents](/guide#subagents) — the three spawn modes, two context modes, and the `async` + `yield` pattern.
-- [Tasks](/guide#tasks) — the four task types, nine `task_manager` actions, and Spring 6-field cron.
-- [Reminders](/guide#reminders) — toast and Telegram delivery surfaces, cascade-delete semantics.
+- [Skills, Tools & MCP Servers](/guide#skills-tools-mcp): extend what your agents can do at the capability layer.
+- [Subagents](/guide#subagents): the three spawn modes, two context modes, and the `async` + `yield` pattern.
+- [Tasks](/guide#tasks): the four task types, nine `task_manager` actions, and Spring 6-field cron.
+- [Reminders](/guide#reminders): toast and Telegram delivery surfaces, cascade-delete semantics.

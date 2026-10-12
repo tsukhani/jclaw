@@ -1,10 +1,10 @@
 # Settings
 
-The [Settings](/settings) page is the operator's control panel. Configuration is split into sections you reach from a grouped table-of-contents rail — **System**, **Providers**, **Audio**, **Image**, **Video**, **Agents & Automation**, **Memory**, and **Security** — and selecting a section shows just that panel. Most knobs apply live — sections that need a JVM restart say so inline.
+The [Settings](/settings) page is the operator's control panel. Configuration is split into sections you reach from a grouped table-of-contents rail: **System**, **Providers**, **Audio**, **Image**, **Video**, **Agents & Automation**, **Memory**, and **Security**. Selecting a section shows just that panel. Most knobs apply live. Sections that need a JVM restart say so inline.
 
 This page summarizes each section. The settings page itself is the source of truth for current defaults and available knobs; hover any field's info icon for an inline tooltip.
 
-A saved secret (an API key, token, password or secret header) is never shown back, in Settings or on the channel pages: it appears as `••••••••` with a pencil. The pencil opens an empty field for a whole new value; saving it blank keeps the one already saved, and where a secret can be removed, the editor's **Remove** button does it. A value that is only the saved one's mask, as the API reads it back, is refused rather than saved over it.
+A saved secret (an API key, token, password or secret header) is never shown back, in Settings or on the channel pages. It appears as `••••••••` with a pencil. The pencil opens an empty field for a whole new value; saving it blank keeps the one already saved, and where a secret can be removed, the editor's **Remove** button does it. JClaw refuses a value that is only the saved one's mask, as the API reads it back, rather than saving it over the saved value.
 
 ## Timezone
 
@@ -16,12 +16,12 @@ Operator-wide settings.
 
 ## Logging
 
-Per-logger log-level overrides for the running JVM — the operator counterpart to the [Logs](/logs) page. Add a row naming a logger and the level you want; the change applies **live** (no restart) and persists across restarts.
+Per-logger log-level overrides for the running JVM, the operator counterpart to the [Logs](/logs) page. Add a row naming a logger and the level you want; the change applies **live** (no restart) and persists across restarts.
 
-- **Logger** — any dotted name: a single class (`controllers.ApiChatController`) or a whole subtree (`play`). The alias **`root`** targets the root logger (the global floor). An autocomplete list suggests loggers that have already emitted a line; a name that hasn't logged yet is accepted with a soft amber hint, not rejected.
-- **Level** — one of `OFF`, `FATAL`, `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, `ALL` (least to most verbose).
+- **Logger**: any dotted name: a single class (`controllers.ApiChatController`) or a whole subtree (`play`). The alias **`root`** targets the root logger (the global floor). An autocomplete list suggests loggers that have already emitted a line; JClaw accepts a name that has not logged yet with a soft amber hint, and does not reject it.
+- **Level**: one of `OFF`, `FATAL`, `ERROR`, `WARN`, `INFO`, `DEBUG`, `TRACE`, `ALL` (least to most verbose).
 
-Overrides are applied through log4j2 *after* Play's own logging init, so a row here **wins over both `conf/log4j2.xml` and `application.conf`**. Deleting a row reverts that logger to its inherited (parent) level; deleting the `root` override restores the baseline captured before you first changed it (falling back to `INFO`). They're stored under reserved `logging.level.<logger>` config keys, so they never show up in the [Unmanaged keys](#settings-unmanaged-keys) list.
+JClaw applies the overrides through log4j2 *after* Play's own logging init, so a row here **wins over both `conf/log4j2.xml` and `application.conf`**. Deleting a row reverts that logger to its inherited (parent) level; deleting the `root` override restores the baseline captured before you first changed it (falling back to `INFO`). The overrides are stored under reserved `logging.level.<logger>` config keys, so they never show up in the [Unmanaged keys](#settings-unmanaged-keys) list.
 
 ### Event log retention
 
@@ -29,25 +29,25 @@ Overrides are applied through log4j2 *after* Play's own logging init, so a row h
 
 ### Disk used by logs
 
-At the foot of the same section, a **Logs** block reports what the levels above are costing you on disk: the current log file, how many archives exist and what they occupy, and a total for the whole directory. The total covers every file in `logs/`, not just those two categories, so an ad-hoc file left behind by a test run can't hide from it.
+At the foot of the same section, a **Logs** block reports what the levels above are costing you on disk: the current log file, how many archives exist and what they occupy, and a total for the whole directory. The total covers every file in `logs/`, not just those two categories, so an ad-hoc file left behind by a test run cannot hide from it.
 
-The current file is capped and rolled over automatically, so it is never the thing that grows — the archives are. They're deleted once they pass 30 days, at the next daily rollover, which means an instance that built up a backlog carries it until each file individually ages out. **Delete archives** clears them now.
+The current file is capped and rolled over automatically, so it is never the thing that grows; the archives are. JClaw deletes them once they pass 30 days, at the next daily rollover, which means an instance that built up a backlog carries it until each file individually ages out. **Delete archives** clears them now.
 
-That button removes only the rolled-over `.gz` archives. The file currently being written is kept: log4j2 holds it open, and deleting it would leave the instance logging into a file nothing can read until the next rollover. The confirmation says so, because "delete logs" is otherwise ambiguous about exactly that file. Nothing here is required maintenance — it only reclaims disk sooner than retention would.
+That button removes only the rolled-over `.gz` archives. The file currently being written is kept: log4j2 holds it open, and deleting it would leave the instance logging into a file nothing can read until the next rollover. The confirmation says so, because "delete logs" is otherwise ambiguous about exactly that file. Nothing here is required maintenance. It only reclaims disk sooner than retention would.
 
 ## Performance
 
 ### Runtime
 
-Live state of the JVM serving the page, refreshed every few seconds while the section is open, above the caps you'd tune against it.
+Live state of the JVM serving the page, refreshed every few seconds while the section is open, above the caps you would tune against it.
 
 Memory appears as three separate figures, because they measure different things and only one of them answers "how much RAM is this using?":
 
-- **Heap** — used, currently held, and the ceiling. What the JVM allocates inside its own arena.
-- **Non-heap** — metaspace, code cache and direct buffers. Invisible to every heap figure, and where the outbound HTTP stack's buffers live.
-- **Process memory** — what the operating system charges JClaw, and the figure to compare against the machine's RAM. It sits **well above** the heap, because the JVM also holds non-heap memory and reserves address space the heap hasn't filled. A large gap is normal and is not a leak. On a platform with no supported way to read it, this shows a dash rather than a substituted heap number.
+- **Heap**: used, currently held, and the ceiling. What the JVM allocates inside its own arena.
+- **Non-heap**: metaspace, code cache and direct buffers. Invisible to every heap figure, and where the outbound HTTP stack's buffers live.
+- **Process memory**: what the operating system charges JClaw, and the figure to compare against the machine's RAM. It sits **well above** the heap, because the JVM also holds non-heap memory and reserves address space the heap has not filled. A large gap is normal and is not a leak. On a platform with no supported way to read it, this shows a dash rather than a substituted heap number.
 
-Alongside those: processor share and core count, garbage collections (both the running total and how many happened since the last sample — the total alone says little), **LLM calls in flight** with how many are queued behind the dispatcher cap below, uptime, **platform threads** with their high-water mark, and the **JVM** itself — the Java version, with the vendor and its build string beneath it. The platform-threads label is deliberate: it excludes virtual threads, which is where chat turns and tool calls actually run, so a low flat count here does not mean the instance is idle.
+Alongside those: processor share and core count, garbage collections (both the running total and how many happened since the last sample; the total alone says little), **LLM calls in flight** with how many are queued behind the dispatcher cap below, uptime, **platform threads** with their high-water mark, and the **JVM** itself: the Java version, with the vendor and its build string beneath it. The platform-threads label is deliberate. It excludes virtual threads, which is where chat turns and tool calls actually run, so a low flat count here does not mean the instance is idle.
 
 OkHttp dispatcher concurrency caps for outbound LLM calls:
 
@@ -60,11 +60,11 @@ Auto-tuned at first start; transiently bumped during loadtest if `--concurrency`
 
 ### Chat streaming
 
-`chat.stream.token_coalesce_chars` (default 0) batches the web chat stream: tokens accumulate until at least that many characters are waiting, then go out as one frame. Every frame costs a network flush, so a value of 16 to 32 helps with very fast models at the cost of per-token smoothness. `0` sends every token as it arrives, and the first token of a reply is always sent at once.
+`chat.stream.token_coalesce_chars` (default 0) batches the web chat stream: tokens accumulate until at least that many characters are waiting, then go out as one frame. Every frame costs a network flush, so a value of 16 to 32 helps with very fast models, at the cost of per-token smoothness. `0` sends every token as it arrives, and the first token of a reply is always sent at once.
 
 ## Uploads
 
-Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIME decides which limit applies — images, audio, or everything else.
+Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIME decides which limit applies: images, audio, or everything else.
 
 | Key                | Default | Bound                                                          |
 |--------------------|---------|----------------------------------------------------------------|
@@ -73,45 +73,45 @@ Per-MIME-bucket attachment size caps and per-message file count. The sniffed MIM
 | `maxFileBytes`     | 100 MB  | Every other attachment type (PDFs, text, archives, etc.).      |
 | `maxFiles`         | 5       | Max files per chat message. System-wide ceiling is 5.          |
 
-The panel only lowers a cap: each size is entered in MB from 1 up to its default, and a larger number is saved as the default. `maxFiles` is held between 1 and 5 by the server as well, but a byte cap above its default written with `POST /api/config` is not refused, and uploads are then checked against it.
+The panel only lowers a cap: you enter each size in MB from 1 up to its default, and a larger number is saved as the default. The server also holds `maxFiles` between 1 and 5, but a byte cap above its default written with `POST /api/config` is not refused, and uploads are then checked against it.
 
-Takes effect without a restart; raise `play.netty.maxContentLength` in `conf/application.conf` if you need over the bundled 512 MB transport-layer ceiling.
+A change here takes effect without a restart; raise `play.netty.maxContentLength` in `conf/application.conf` if you need over the bundled 512 MB transport-layer ceiling.
 
 ## Printers
 
-The default printer the `printer` tool targets, and the job options that default carries. Per-agent enable/disable lives on the [Agents](/agents) page — printing is off for every agent until you turn it on. See [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) for the tool itself.
+The default printer the `printer` tool targets, and the job options that default carries. Per-agent enable/disable lives on the [Agents](/agents) page; printing is off for every agent until you turn it on. See [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) for the tool itself.
 
-**Find printers** runs an mDNS browse of the local network and lists what answers; pick one to make it the default. Discovery is an explicit action rather than something the page does on open — a browse takes seconds, and opening Settings to change the timezone shouldn't pay for it. You can also enter a host and port directly, which is the fallback when mDNS is blocked (it's link-local, so VPNs and containers without a multicast route routinely drop it).
+**Find printers** runs an mDNS browse of the local network and lists what answers; pick one to make it the default. Discovery is an explicit action rather than something the page does on open. A browse takes seconds, and opening Settings to change the timezone should not pay for it. You can also enter a host and port directly. That is the fallback when mDNS is blocked (it is link-local, so VPNs and containers without a multicast route routinely drop it).
 
-A reachability badge probes the saved default and reports whether it still answers. This matters because a default outlives the DHCP lease it was saved under; without the probe the only symptom of a moved printer is a print that times out with no hint why.
+A reachability badge probes the saved default and reports whether it still answers. This matters because a default outlives the DHCP lease it was saved under; without the probe, the only symptom of a moved printer is a print that times out with no hint why.
 
-**Job options** are read from the selected printer, not from a list JClaw carries — the page offers `sides`, `media`, `copies`, quality and whatever else the device announces, with its own default preselected. Leave any of them blank to use the printer's default. Options are re-queried whenever you change the selected printer, so a device that reports one-sided-only never lets you save a duplex default it would have to reject.
+JClaw reads the **Job options** from the selected printer, not from a list JClaw carries. The page offers `sides`, `media`, `copies`, quality and whatever else the device announces, with its own default preselected. Leave any of them blank to use the printer's default. JClaw re-asks for the options whenever you change the selected printer, so a device that reports one-sided-only never lets you save a duplex default it would have to reject.
 
 ## Telemetry
 
-Exports traces and metrics to an OpenTelemetry collector over OTLP. Off by default — nothing leaves the process until you turn it on. Found under **System → Telemetry** in the rail.
+JClaw exports traces and metrics to an OpenTelemetry collector over OTLP. Off by default; nothing leaves the process until you turn it on. Found under **System → Telemetry** in the rail.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `otel.enabled` | `false` | Master switch. |
 | `otel.exporter.endpoint` | `http://localhost:4318` | Collector base URL; `/v1/traces` and `/v1/metrics` are appended for http/protobuf. |
 | `otel.exporter.protocol` | `http/protobuf` | `http/protobuf` or `grpc`. |
-| `otel.exporter.secretHeaders` | (empty) | Comma-separated `name=value` pairs sent with every export — vendor auth goes here. Shown as dots once saved; **Remove** clears them. |
+| `otel.exporter.secretHeaders` | (empty) | Comma-separated `name=value` pairs sent with every export (vendor auth goes here). Shown as dots once saved; **Remove** clears them. |
 | `otel.service.name` | `jclaw` | How this instance is named in the collector. |
 | `otel.traces.sampler.ratio` | `1.0` | Share of root spans recorded, 0–1. |
-| `otel.metrics.interval.seconds` | `60` | Seconds between metric exports. Has no row in the panel and is **read at JVM start only** — set it through `POST /api/config` and restart. |
+| `otel.metrics.interval.seconds` | `60` | Seconds between metric exports. Has no row in the panel and is **read at JVM start only**: set it through `POST /api/config` and restart. |
 
-Changes to the endpoint, headers, protocol and sampling ratio apply live — the exporter is swapped for the next span and the next metric collection, no restart. **Send test span** emits one span and waits for the collector's verdict, so you can tell "saved" from "reaching the collector": it reports **Delivered** with the trace id, or the exporter's own error.
+Changes to the endpoint, headers, protocol and sampling ratio apply live: JClaw swaps the exporter for the next span and the next metric collection, no restart. **Send test span** emits one span and waits for the collector's verdict, so you can tell "saved" from "reaching the collector": it reports **Delivered** with the trace id, or the exporter's own error.
 
-Beside the export switch, the panel shows where export is going — `→ <endpoint> (<protocol>)` — or **not exporting**. When a background export has failed, **Last export failed:** with the exporter's error appears beside **Send test span** until a test result replaces it. The error is kept until the next export setting is saved or a test span is sent, so a later successful export does not clear it.
+Beside the export switch, the panel shows where export is going, `→ <endpoint> (<protocol>)`, or **not exporting**. When a background export has failed, **Last export failed:** with the exporter's error appears beside **Send test span** until a test result replaces it. The error is kept until the next export setting is saved or a test span is sent, so a later successful export does not clear it.
 
 What leaves the process once enabled: an HTTP server span per request, named from the route (`GET /api/config/{key}` is one name however many keys are read); a `turn` span per agent turn, with each model call beneath it as a GenAI-convention client span carrying provider, model, token counts and cache reads; HTTP-client and JDBC spans under those; the `gen_ai.client.*` histograms (operation duration, token usage, time to first chunk) and `jclaw.turn.segment.duration`, the per-segment turn timings behind the Dashboard's Chat Performance panel; and the `jvm.*` runtime metrics. Prompt and completion text are never exported.
 
-When the OpenTelemetry Java agent is attached to the JVM, the panel says so and disables the export toggle: the agent's own `OTEL_*` settings decide where telemetry goes, and the keys here are read once at start rather than live.
+When the OpenTelemetry Java agent is attached to the JVM, the panel says so and disables the export toggle: the agent's own `OTEL_*` settings decide where telemetry goes, and JClaw reads the keys here once at start rather than live.
 
 ## Alerts
 
-Sends you a message on a channel you choose when work that runs without you fails. Off by default. Found under **System → Alerts** in the rail.
+JClaw sends you a message on a channel you choose when work that runs without you fails. Off by default. Found under **System → Alerts** in the rail.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
@@ -123,11 +123,11 @@ Alerts are sent through the `main` agent's channel connections, so the channel y
 - **It recovers**, but only if you were told it went down.
 - **A run of a recurring task fails for good**, after its retries. The message names the task, the error and when it runs next. The task itself keeps its schedule (see [Tasks](/guide#tasks)).
 
-Isolating a provider yourself (tripping its breaker by hand) sends nothing. A destination that can't be used is refused when you save it; an alert that can't be delivered at the time is written to the event log under `OPERATOR_ALERT` instead.
+Isolating a provider yourself (tripping its breaker by hand) sends nothing. When you save a destination that cannot be used, JClaw refuses it; an alert that cannot be delivered at the time is written to the event log under `OPERATOR_ALERT` instead.
 
 ## Database
 
-Everything on this instance — conversations, agents, tasks, memories, config — lives in one H2 data file, `data/jclaw.mv.db`, except each agent's memory graph, which is kept beside it under `data/memory-graph/`. This section is the place to see how that file is doing and to keep a copy of it. It sits beside Maintenance because two of its actions, restore and repair, take the instance down the way a restart does.
+Everything on this instance (conversations, agents, tasks, memories, config) lives in one H2 data file, `data/jclaw.mv.db`, except each agent's memory graph, which is kept beside it under `data/memory-graph/`. This section is the place to see how that file is doing and to keep a copy of it. It sits beside Maintenance because two of its actions, restore and repair, take the instance down the way a restart does.
 
 ### The health strip
 
@@ -136,26 +136,26 @@ The top of the panel is one line: the **verdict**, the **size** of the data file
 | Verdict | What it means |
 |---------|---------------|
 | **Healthy** | Queries answer and H2's trace file shows no read failures in the last seven days. |
-| **Attention** | The trace file has logged read failures — `File corrupted`, `Unable to read the page` — in the last day or week. Pages are going bad. Back up now, then consider Repair. |
+| **Attention** | The trace file has logged read failures (`File corrupted`, `Unable to read the page`) in the last day or week. Pages are going bad. Back up now, then consider Repair. |
 | **Critical** | The probe query failed: the database is closed or unreadable and every request is failing with it. Repair or Restore. |
 
-Attention is the state worth knowing about. On 2026-09-09 the live database turned out to have had damaged pages since July; the trace file had been logging a handful of read failures a day for two months, and nothing surfaced them until a boot-time read of a damaged page closed the database. The verdict reads that file so the warning arrives before the outage does.
+Attention is the state worth knowing about. On 2026-09-09 the live database turned out to have had damaged pages since July; the trace file had been logging a handful of read failures a day for two months, and nothing surfaced them until a boot-time read of a damaged page closed the database. The verdict reads that file, so the warning arrives before the outage does.
 
 ### Backups
 
-**Back up now** writes an H2 online backup — a zip containing the data file and the memory graph — to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted.
+**Back up now** writes an H2 online backup, a zip containing the data file and the memory graph, to `data/backups/` without stopping anything. The list shows each backup with its date and size; each can be downloaded, restored, or deleted.
 
 **Schedule** sits under the list and takes a time of day, in this instance's timezone (the one set under Timezone, or the server's when none is), for a daily backup. The times in the backup list are shown in that same zone, whatever zone the browser is in. Pick a time and **Save**, and the line beneath says what will happen and when the last scheduled backup ran; **Turn off** goes back to no automatic backup, which is the default. A scheduled backup that fails says so there and is logged to the event log. The schedule counts a day as done once a backup has been written at or after its time, so restarting the instance later that day does not write another; an instance that was down at the scheduled time catches up once, on its first minute back up.
 
-**retention** — how many of the panel's own backups to keep; the oldest is pruned after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
+**retention**: how many of the panel's own backups to keep; JClaw prunes the oldest after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
 
 Backups are plain zips: `unzip -l` lists the `jclaw.mv.db` inside, with the memory graph under `memory-graph/`, and H2's own tools open it.
 
 ### Restore
 
-Restore replaces the database with a backup — one from the list, or a zip you pick with **Restore from a file…**. The file is checked first: anything that is not an H2 backup is refused with the reason and nothing on disk changes. The confirmation names the backup's date, because everything written since it is lost.
+Restore replaces the database with a backup: one from the list, or a zip you pick with **Restore from a file…**. JClaw checks the file first. Anything that is not an H2 backup is refused with the reason, and nothing on disk changes. The confirmation names the backup's date, because everything written since it is lost.
 
-Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to `jclaw.sh restart`: the instance stops, the file is swapped, the instance starts. The page reconnects on its own, and the strip then says which backup is live. The memory graph is swapped with it. The displaced file is kept as `data/jclaw.mv.db.pre-restore`, and the displaced graph as `data/memory-graph.pre-restore`, until the next successful backup, so a restore is itself reversible until you have moved on.
+Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to `jclaw.sh restart`: the instance stops, the file is swapped, the instance starts. The page reconnects on its own, and the strip then says which backup is live. The memory graph is swapped with it. JClaw keeps the displaced file as `data/jclaw.mv.db.pre-restore`, and the displaced graph as `data/memory-graph.pre-restore`, until the next successful backup, so a restore is itself reversible until you have moved on.
 
 ### Repair
 
@@ -164,13 +164,13 @@ Repair is the procedure from the September incident, run for you rather than by 
 Two limits are worth knowing:
 
 - **Rows on pages that cannot be read are lost.** The report names the tables that came back short, with how many rows were expected. Back up first if the database still answers.
-- **A loss H2 has already rolled back is invisible.** When the newest chunk of the file is damaged, H2 falls back to an older version silently, and the recovery tool sees that older version too. The repair reads the damaged file read-only before it starts so it can compare; when the file will not open at all there is no reference to compare against, and the report says so.
+- **A loss H2 has already rolled back is invisible.** When the newest chunk of the file is damaged, H2 falls back to an older version silently, and the recovery tool sees that older version too. The repair reads the damaged file read-only before it starts so it can compare; when the file will not open at all, there is no reference to compare against, and the report says so.
 
-Repair is shown prominently when the verdict is Attention or Critical and is available at any time — on a healthy file it rebuilds and compacts, which is how a file grown large after a hand rebuild is brought back to size.
+JClaw shows Repair prominently when the verdict is Attention or Critical. Repair is available at any time. On a healthy file, Repair rebuilds and compacts, which is how a file grown large after a hand rebuild is brought back to size.
 
 ### Cleaning up after a repair
 
-Everything a repair creates is kept in `data/` — the damaged file, its trace, the recovery script and dump — because the damaged file is the only route to a second attempt. The panel shows their total size and offers **Clean up repair files** once the repair succeeded and the verdict is Healthy, with no read failure logged since and every restored table readable. Until then the button is disabled with the reason. Cleanup deletes exactly what the manifest lists, after checking each file's checksum, and the manifest last; the live file, the lock, the trace and `backups/` are never touched.
+Everything a repair creates stays in `data/` (the damaged file, its trace, the recovery script and dump) because the damaged file is the only route to a second attempt. The panel shows their total size and offers **Clean up repair files** once the repair succeeded and the verdict is Healthy, with no read failure logged since and every restored table readable. Until then the button is disabled with the reason. Cleanup deletes exactly what the manifest lists, after checking each file's checksum, and the manifest last; the live file, the lock, the trace and `backups/` are never touched.
 
 ### From the command line
 
@@ -183,61 +183,61 @@ jclaw db-clean                   # delete what the last successful repair left b
 jclaw db-status                  # the health strip as text
 ```
 
-The CLI and the panel share one implementation. With the instance running, `backup` and `db-status` go through the API — the button's code path — so retention and the health verdict come from the running JVM. With the instance stopped, the same engine runs directly against the file on the H2 and Gson jars and JClaw's compiled classes alone, which is what makes `repair` usable when the database will not open. Helper output goes to `logs/database.log`.
+The CLI and the panel share one implementation. With the instance running, `backup` and `db-status` go through the API, the button's code path, so retention and the health verdict come from the running JVM. With the instance stopped, the same engine runs directly against the file on the H2 and Gson jars and JClaw's compiled classes alone, which is what makes `repair` usable when the database will not open. Helper output goes to `logs/database.log`.
 
 ## Maintenance
 
 The operator actions that change this instance, ordered by how often one is wanted: upgrading is the reason to open this page, restarting is the follow-up, and a password reset is rare enough that it sits last.
 
-This section was previously three — **Password**, **Upgrade** and **Restart**. Links to the old `?section=password`, `?section=upgrade` and `?section=restart` addresses all still resolve here.
+This section was previously three, **Password**, **Upgrade** and **Restart**. Links to the old `?section=password`, `?section=upgrade` and `?section=restart` addresses all still resolve here.
 
 ### Upgrade and restart
 
-Installs the newest JClaw release over this one, without a shell. The button hands off to `jclaw.sh upgrade` — the same command you'd run by hand — so the CLI and the UI take exactly the same path.
+Installs the newest JClaw release over this one, without a shell. The button hands off to `jclaw.sh upgrade`, the same command you would run by hand, so the CLI and the UI take exactly the same path.
 
-The panel shows the version you're running and the newest published release. **Check again** forces a fresh lookup; otherwise the answer is cached for an hour, because GitHub allows only 60 unauthenticated API calls an hour per address and this panel is polled on every visit.
+The panel shows the version you are running and the newest published release. **Check again** forces a fresh lookup; otherwise the answer is cached for an hour, because GitHub allows only 60 unauthenticated API calls an hour per address and this panel is polled on every visit.
 
-**What's new in** opens the newest release's notes: those of the release on offer, or, once it is installed, of the version you're running. A checkout running ahead of the newest published release shows none, because those notes describe an older version.
+**What's new in** opens the newest release's notes: those of the release on offer, or, once it is installed, of the version you are running. A checkout running ahead of the newest published release shows none, because those notes describe an older version.
 
-When JClaw is served from a git checkout, the panel also names the commit it's running, marked when the working tree has uncommitted changes. A checkout keeps the same version number across many commits, so the version alone can't tell you which build is live. A packaged install has no repository and shows nothing here.
+When JClaw is served from a git checkout, the panel also names the commit it is running, marked when the working tree has uncommitted changes. A checkout keeps the same version number across many commits, so the version alone cannot tell you which build is live. A packaged install has no repository and shows nothing here.
 
-**The download happens while JClaw keeps serving.** The release (~190 MB for a bundle install) is fetched, checked against the release's signature and unpacked before anything is stopped, so a network failure, a download that fails verification or a full disk costs no downtime at all — you're told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.
+**The download happens while JClaw keeps serving.** The release (~190 MB for a bundle install) is fetched, checked against the release's signature and unpacked before anything is stopped, so a network failure, a download that fails verification or a full disk costs no downtime at all. You are told about it with the instance still running. Only once the new version is staged and verified is the instance stopped, the tree replaced, and JClaw started again. You can navigate away during the download and come back.
 
 ### What is kept
 
-Everything the release doesn't ship is carried across, so an upgrade never resets your instance:
+JClaw carries across everything the release does not ship, so an upgrade never resets your instance:
 
 | Kept | What's in it |
 |------|--------------|
 | `data/` | the database, uploaded attachments, the search index |
 | `workspace/` | the agent workspace, including per-skill credentials |
 | `certs/` | the application secret (your sessions survive) and any TLS cert+key |
-| `public/apps/` | apps you've installed |
+| `public/apps/` | apps you have installed |
 | `logs/` | the existing application, GC and upgrade logs |
 | `sidecar/*/.venv` | Python environments and downloaded models |
 | skills you installed | bundled skills are updated; yours are left alone |
 
-The rule is inverted on purpose: rather than listing directories to preserve — a list that goes stale the moment a release adds one — the upgrade keeps *anything the new release does not ship*. The exceptions are build outputs (`precompiled/`, `lib/`, `framework/`, `public/spa/`), which must come from the release verbatim: merging those would leave a deleted class on the classpath or two versions of a jar side by side.
+The rule is inverted on purpose. Rather than listing directories to preserve, a list that goes stale the moment a release adds one, the upgrade keeps *anything the new release does not ship*. The exceptions are build outputs (`precompiled/`, `lib/`, `framework/`, `public/spa/`), which must come from the release verbatim: merging those would leave a deleted class on the classpath or two versions of a jar side by side.
 
 `conf/application.conf` is handled separately. If you never edited it, the release's copy is installed so new settings take effect. If you did, **your file is kept** and the release's copy is written beside it as `conf/application.conf.new-<version>` so you can see what changed. The panel tells you when this happens.
 
 ### If it goes wrong
 
-The database is copied to `data/backups/` before the swap — this matters because the new version migrates the schema on first boot, and that isn't undone by putting the old files back. The three most recent backups are kept.
+JClaw copies the database to `data/backups/` before the swap. This matters because the new version migrates the schema on first boot, and putting the old files back does not undo that. The three most recent backups are kept.
 
-If the new version doesn't answer within four minutes of starting, the upgrade **rolls itself back**: the old tree is restored, the pre-upgrade database is restored over it, and the previous version is started again. The panel then reports the rollback rather than showing an unchanged version number with no explanation. Helper output goes to `logs/upgrade.log`.
+If the new version does not answer within four minutes of starting, the upgrade **rolls itself back**: the old tree is restored, the pre-upgrade database is restored over it, and the previous version is started again. The panel then reports the rollback rather than showing an unchanged version number with no explanation. Helper output goes to `logs/upgrade.log`.
 
-### When the button isn't there
+### When the button is not there {#when-the-button-isn-t-there}
 
 Upgrade only applies to installs made by the one-line installer or from an unzipped release archive. In these cases the panel explains itself instead of offering a button:
 
-- **A source checkout** — update it with `git pull`.
-- **A container** — the image is the upgrade unit; use `docker compose pull && docker compose up -d`. A tree swap inside the container would be thrown away on the next start.
-- **No shell to run `jclaw.sh`** — on Windows, install Git for Windows (which provides Git Bash), or run JClaw under WSL.
-- **`jclaw.sh` missing or not executable** in the install directory — the installation is not managed by `jclaw.sh`.
-- **The install directory, or the directory above it, is not writable** — the upgrade replaces the install directory in place by swapping it within its parent.
+- **A source checkout**: update it with `git pull`.
+- **A container**: the image is the upgrade unit; use `docker compose pull && docker compose up -d`. A tree swap inside the container would be thrown away on the next start.
+- **No shell to run `jclaw.sh`**: on Windows, install Git for Windows (which provides Git Bash), or run JClaw under WSL.
+- **`jclaw.sh` missing or not executable** in the install directory: the installation is not managed by `jclaw.sh`.
+- **The install directory, or the directory above it, is not writable**: the upgrade replaces the install directory in place by swapping it within its parent.
 
-Whatever the reason, the release check still runs, and the explanation only appears when there is a newer release to explain. An install already on the newest release reports just that — **up to date** — with nothing to do.
+Whatever the reason, the release check still runs, and the explanation only appears when there is a newer release to explain. An install already on the newest release reports just that, **up to date**, with nothing to do.
 
 ### From the command line
 
@@ -251,56 +251,56 @@ Re-running the one-line installer over an existing install now delegates here to
 
 ### Restart
 
-Reboots this JClaw instance without a shell. The **Restart** button hands off to `jclaw.sh restart` — the same command you'd run by hand — so the stop/start sequencing, stale-lock cleanup and port checks are identical either way.
+Reboots this JClaw instance without a shell. The **Restart** button hands off to `jclaw.sh restart`, the same command you would run by hand, so the stop/start sequencing, stale-lock cleanup and port checks are identical either way.
 
-Before it acts, the panel shows what the reboot will interrupt: task runs and subagent runs currently in flight. Restart is deliberately **not** blocked when work is running — the moment you most want to reboot is usually the moment something is stuck — so the counts are there to inform the confirmation, not to veto it. In-flight chat streams are cut as well.
+Before it acts, the panel shows what the reboot will interrupt: task runs and subagent runs currently in flight. Restart is deliberately **not** blocked when work is running, because the moment you most want to reboot is usually the moment something is stuck. So the counts are there to inform the confirmation, not to veto it. In-flight chat streams are cut as well.
 
 The page reconnects on its own: it waits for the backend to go down, then polls until it answers again, then reloads. Two details worth knowing:
 
-- **In dev mode** only the Play backend is restarted. The Nuxt dev server on port 3000 keeps running — bouncing it would kill the very server that rendered the page you clicked from.
-- **In a source checkout** a production restart may recompile Java sources and rebuild the SPA. Both steps are gated on staleness and skipped when nothing changed, so this is usually quick. Two timed restarts on a developer clone: **48 s** with both steps skipped, **58 s** with a full SPA rebuild — the SPA is worth about ten seconds, not minutes. A cold Java recompile is the step that can take substantially longer, and it wasn't exercised in either measurement. The panel errs long when sizing how long it waits for the backend to return (15 minutes for a source checkout), so a genuinely slow restart is still survivable.
+- **In dev mode** only the Play backend is restarted. The Nuxt dev server on port 3000 keeps running; bouncing it would kill the very server that rendered the page you clicked from.
+- **In a source checkout** a production restart may recompile Java sources and rebuild the SPA. Both steps are gated on staleness and skipped when nothing changed, so this is usually quick. Two timed restarts on a developer clone: **48 s** with both steps skipped, **58 s** with a full SPA rebuild; the SPA is worth about ten seconds, not minutes. A cold Java recompile is the step that can take substantially longer, and it was not exercised in either measurement. The panel errs long when sizing how long it waits for the backend to return (15 minutes for a source checkout), so a genuinely slow restart is still survivable.
 
-If the instance wasn't started by `jclaw.sh`, the button is disabled and says so — there's nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app doesn't come back.
+If the instance was not started by `jclaw.sh`, the button is disabled and says so; there is nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app does not come back.
 
 ### Password
 
-The admin password is stored as a PBKDF2-SHA256 hash in the Config DB. The **Reset** button wipes the stored hash and signs you out — on the next access you'll be routed to the setup screen to choose a new password.
+JClaw stores the admin password as a PBKDF2-SHA256 hash in the Config DB. The **Reset** button wipes the stored hash and signs you out. On the next access you will be routed to the setup screen to choose a new password.
 
-When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols — length matters most), and the setup screen shows a live strength meter as you type. Passwords found in a known public breach are rejected: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity — only a short prefix of the password's hash leaves the host, never the password itself — and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
+When you choose a password it must be **at least 12 characters** (longer passphrases beat added symbols; length matters most), and the setup screen shows a live strength meter as you type. JClaw rejects passwords found in a known public breach: the check uses [Have I Been Pwned](https://haveibeenpwned.com/) via k-anonymity (only a short prefix of the password's hash leaves the host, never the password itself) and falls back to a bundled common-password list when that lookup is unavailable. Repeated failed logins from the same source are temporarily throttled.
 
 ## Auto-update model prices
 
-A **Pricing** subsection at the top of LLM Providers, with one opt-in toggle: **Auto-update model prices nightly**. When on, JClaw fetches the community-maintained `model_prices_and_context_window.json` from `github.com/BerriAI/litellm` nightly and fills in missing prices on your configured models. Prices you've set manually are never overwritten. Off by default — the toggle is explicit so the outbound GitHub call is a deliberate opt-in. A **Refresh now** button forces an immediate fetch; it is disabled while the toggle is off.
+A **Pricing** subsection at the top of LLM Providers, with one opt-in toggle: **Auto-update model prices nightly**. When on, JClaw fetches the community-maintained `model_prices_and_context_window.json` from `github.com/BerriAI/litellm` nightly and fills in missing prices on your configured models. It never overwrites prices you have set manually. Off by default; the toggle is explicit so the outbound GitHub call is a deliberate opt-in. A **Refresh now** button forces an immediate fetch; it is disabled while the toggle is off.
 
 ## LLM Providers
 
 The most important section. Each row is a model provider JClaw can talk to:
 
-- **OpenAI** — the first-party API. Paste in your API key and toggle **Enabled**.
-- **Ollama (local or cloud)** — runs models on your hardware or on Ollama's cloud. Set the base URL; no API key needed for local.
-- **LM Studio, vLLM, llama.cpp** — other self-hosted, OpenAI-compatible servers running on your own hardware. Set the base URL (vLLM defaults to `http://localhost:8000/v1`, llama.cpp to `http://localhost:8080/v1`); no API key needed. With Ollama Local these make up the **Local** group of the provider list.
-- **OpenRouter, TogetherAI** — aggregators serving many vendors' models. Same shape: base URL + API key.
+- **OpenAI**: the first-party API. Paste in your API key and toggle **Enabled**.
+- **Ollama (local or cloud)**: runs models on your hardware or on Ollama's cloud. Set the base URL; no API key needed for local.
+- **LM Studio, vLLM, llama.cpp**: other self-hosted, OpenAI-compatible servers running on your own hardware. Set the base URL (vLLM defaults to `http://localhost:8000/v1`, llama.cpp to `http://localhost:8080/v1`); no API key needed. With Ollama Local these make up the **Local** group of the provider list.
+- **OpenRouter, TogetherAI**: aggregators serving many vendors' models. Same shape: base URL + API key.
 
 Those are the rows a new install starts with. Any other OpenAI-compatible provider gets a card of its own once you write its `provider.<name>.baseUrl` and `provider.<name>.apiKey` with `POST /api/config`.
 
 For each provider you can:
 
-- Set the **API key** — stored as plain text in the Config DB, because it is a credential for the provider's API and has to be sent as written, and never shown back once saved.
+- Set the **API key**: stored as plain text in the Config DB, because it is a credential for the provider's API and has to be sent as written, and never shown back once saved.
 - Set the **base URL** (most providers ship with a sensible default).
 - Mark **Enabled / disabled** to hide the provider from the agent picker.
-- Edit **local** — the provider's Remote/Local classification (`provider.<name>.local`). It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp, so only their cards have a **local** row; absent means remote, and a remote card has no row, so declaring one local takes `POST /api/config`. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.
-- Set the **paymentModality** — how the provider bills you. `PER_TOKEN` estimates cost per turn from model pricing; `SUBSCRIPTION` ignores per-token pricing and pro-rates a flat monthly fee instead. A provider that supports only one billing model shows it locked.
-- Set **subscriptionMonthlyUsd** — shown only when the modality is `SUBSCRIPTION`: the monthly USD you pay the provider, which the Dashboard's Chat Cost **Subscription** block pro-rates to the selected window (`monthly × window_days / 30`).
-- Set **keepAlive** — Ollama Local only (`provider.ollama-local.keepAlive`, default `5m`): how long a model stays loaded between requests. `-1` keeps it loaded for good; longer values hold GPU memory per model.
-- Toggle **useNativeApi** — Ollama providers only (`provider.<name>.useNativeApi`, default off): send chat requests to the daemon's native `/api/chat` instead of the OpenAI-compatible endpoint. Same request semantics; the response adds the daemon's per-request timings (model load, prompt evaluation, generation), shown in each message's [usage popover](/guide#chat-per-message-usage) and as histograms on the Chat Performance dashboard. A local daemon reports all of them; Ollama Cloud reports total duration only. If the address serves no `/api/chat` (a gateway that exposes only the OpenAI surface), the request falls back to the OpenAI-compatible endpoint and the event log says so.
-- **Manage models** — expand the row to see every model you've registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability pills (thinking, vision, audio, video, and **no tools** for a model that cannot call tools). Editing or adding a model also sets:
-  - **Context Window** — the model's context in tokens. `0` means unknown and is flagged, because compaction and `/usage` depend on it; enter it from the provider's docs.
-  - **Max Tokens** — the output cap sent with each request, lowered to what fits in the context window beside the prompt. `0` sends no cap, leaving the provider's default.
-  - **Levels** — shown with **Supports Thinking**: the reasoning-effort levels the model accepts, comma-separated, lowest first (`low, high, max`). Blank means `low`, `medium`, `high`; the first level is what an always-thinking model uses when none is chosen.
-- Set **leaderboardUrl** (`provider.<name>.leaderboardUrl`) — the page whose ranking orders **Discover models** and feeds its leaderboard filter. Seeded as `https://openrouter.ai/rankings` for OpenRouter and blank for Ollama Cloud and TogetherAI, the only providers with this row; another provider takes it through `POST /api/config`. Blank, or a page that cannot be fetched, leaves the catalog in name order.
-- **Discover models** — pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in. Each catalog entry's capability badges are confirmed by the provider or guessed from the model name (a trailing `?`, e.g. `video?`, marks a guess). Filter the catalog by capability (vision / audio / video / thinking), by cost (free / paid, offered when the provider has free models), and by leaderboard rank.
+- Edit **local**: the provider's Remote/Local classification (`provider.<name>.local`). It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp, so only their cards have a **local** row; absent means remote, and a remote card has no row, so declaring one local takes `POST /api/config`. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.
+- Set the **paymentModality**: how the provider bills you. `PER_TOKEN` estimates cost per turn from model pricing; `SUBSCRIPTION` ignores per-token pricing and pro-rates a flat monthly fee instead. A provider that supports only one billing model shows it locked.
+- Set **subscriptionMonthlyUsd**: shown only when the modality is `SUBSCRIPTION`: the monthly USD you pay the provider, which the Dashboard's Chat Cost **Subscription** block pro-rates to the selected window (`monthly × window_days / 30`).
+- Set **keepAlive**: Ollama Local only (`provider.ollama-local.keepAlive`, default `5m`): how long a model stays loaded between requests. `-1` keeps it loaded for good; longer values hold GPU memory per model.
+- Toggle **useNativeApi**: Ollama providers only (`provider.<name>.useNativeApi`, default off): send chat requests to the daemon's native `/api/chat` instead of the OpenAI-compatible endpoint. The request semantics are the same; the response adds the daemon's per-request timings (model load, prompt evaluation, generation), shown in each message's [usage popover](/guide#chat-per-message-usage) and as histograms on the Chat Performance dashboard. A local daemon reports all of them; Ollama Cloud reports total duration only. If the address serves no `/api/chat` (a gateway that exposes only the OpenAI surface), the request falls back to the OpenAI-compatible endpoint and the event log says so.
+- **Manage models**: expand the row to see every model you have registered for the provider, with its prompt/completion/cached/cache-write prices, thinking-mode classification (always-thinks / capable / off), and capability pills (thinking, vision, audio, video, and **no tools** for a model that cannot call tools). Editing or adding a model also sets:
+  - **Context Window**: the model's context in tokens. `0` means unknown and is flagged, because compaction and `/usage` depend on it; enter it from the provider's docs.
+  - **Max Tokens**: the output cap sent with each request, lowered to what fits in the context window beside the prompt. `0` sends no cap, leaving the provider's default.
+  - **Levels**: shown with **Supports Thinking**: the reasoning-effort levels the model accepts, comma-separated, lowest first (`low, high, max`). Blank means `low`, `medium`, `high`; the first level is what an always-thinking model uses when none is chosen.
+- Set **leaderboardUrl** (`provider.<name>.leaderboardUrl`): the page whose ranking orders **Discover models** and feeds its leaderboard filter. Seeded as `https://openrouter.ai/rankings` for OpenRouter and blank for Ollama Cloud and TogetherAI, the only providers with this row; another provider takes it through `POST /api/config`. Blank, or a page that cannot be fetched, leaves the catalog in name order.
+- **Discover models**: pull the provider's live model catalog and pick which to register, with the provider's own price hints filled in. Each catalog entry's capability badges are confirmed by the provider or guessed from the model name (a trailing `?`, e.g. `video?`, marks a guess). Filter the catalog by capability (vision / audio / video / thinking), by cost (free / paid, offered when the provider has free models), and by leaderboard rank.
 
-If no provider is configured, no agent can answer — that's the most common cause of "the agent isn't replying." The [Agents](/agents) page shows a yellow **provider not configured** badge on rows whose provider is missing its key.
+If no provider is configured, no agent can answer. That is the most common cause of "the agent is not replying." The [Agents](/agents) page shows a yellow **provider not configured** badge on rows whose provider is missing its key.
 
 ### Primary provider
 
@@ -311,16 +311,16 @@ If no provider is configured, no agent can answer — that's the most common cau
 Every model call runs through the same four-link chain, so a slow or broken provider costs you a bounded amount of time and then gets routed around:
 
 1. **Timeout.** A single HTTP attempt gives up after 180 s.
-2. **Retry.** A failed attempt is retried up to three times with a short backoff (a `Retry-After` header from the provider is honoured, capped). A 4xx — a request JClaw got wrong, or an exhausted balance — is not retried at all.
-3. **Circuit breaker.** Each provider has its own breaker. Three exhausted calls in a row, or half of the last ten, open it; while it is open every call to that provider fails in microseconds instead of spending another retry loop. After 60 s it lets three probe calls through, closes again if they all succeed, and re-opens if one does not. A 4xx never counts against the breaker, so a bug in a prompt cannot trip it on a healthy provider.
-4. **Fallback.** If the agent has a fallback provider and model set on its [Agents](/guide#agents) page, a turn whose primary is refused by its breaker runs there instead, on the fallback's own model. Without one, the turn fails fast. The synchronous path (tool loops) fails over on every round; the streaming path fails over only when the breaker refuses the call *before any token has been sent* — including the continuation round after a tool call — because once tokens have reached the screen another provider cannot silently take over. It is one hop: the fallback's own breaker is honoured and nothing chains further. Memory auto-capture follows the same fallback, unless the agent has its own auto-capture model override, in which case that override is the whole choice; and it stands aside while a provider's breaker is probing, so the next user turn is the probe rather than a background extraction.
+2. **Retry.** JClaw retries a failed attempt up to three times with a short backoff (a `Retry-After` header from the provider is honored, capped). A 4xx (a request JClaw got wrong, or an exhausted balance) is not retried at all.
+3. **Circuit breaker.** Each provider has its own breaker. Three exhausted calls in a row, or half of the last ten, open it. While it is open, every call to that provider fails in microseconds instead of spending another retry loop. After 60 s it lets three probe calls through, closes again if they all succeed, and re-opens if one does not. A 4xx never counts against the breaker, so a bug in a prompt cannot trip it on a healthy provider.
+4. **Fallback.** If the agent has a fallback provider and model set on its [Agents](/guide#agents) page, a turn whose primary is refused by its breaker runs there instead, on the fallback's own model. Without one, the turn fails fast. The synchronous path (tool loops) fails over on every round; the streaming path fails over only when the breaker refuses the call *before any token has been sent*, including the continuation round after a tool call, because once tokens have reached the screen another provider cannot silently take over. It is one hop: the fallback's own breaker is honored and nothing chains further. Memory auto-capture follows the same fallback, unless the agent has its own auto-capture model override, in which case that override is the whole choice; and it stands aside while a provider's breaker is probing, so the next user turn is the probe rather than a background extraction.
 
 Streaming has two hazards a timeout alone cannot see, and each has its own budget:
 
-- **A stream that never starts.** A provider (or a proxy in front of it) that keeps the connection alive with SSE comments while producing nothing resets the read timeout for ever. JClaw abandons a stream that has produced no chunk for **10 minutes**, records it as a failure, ends the turn with an error and hangs up the socket. The budget is generous on purpose: a cold local model loading weights legitimately takes minutes before its first token.
-- **A stream that stalls mid-answer.** A gap of more than **30 s** between chunks marks the call as slow, and enough slow calls open the breaker just as failures do. The stream itself is only ended — turn released, socket closed — after **5 minutes** of silence, because a local model re-evaluating its context mid-generation pauses for tens of seconds and that is not yet a reason to lose the rest of the answer. A stream that resumes in between keeps its turn.
+- **A stream that never starts.** A provider (or a proxy in front of it) that keeps the connection alive with SSE comments while producing nothing resets the read timeout forever. JClaw abandons a stream that has produced no chunk for **10 minutes**, records it as a failure, ends the turn with an error and hangs up the socket. The budget is generous on purpose: a cold local model loading weights legitimately takes minutes before its first token.
+- **A stream that stalls mid-answer.** A gap of more than **30 s** between chunks marks the call as slow, and enough slow calls open the breaker just as failures do. The stream itself is only ended, turn released, socket closed, after **5 minutes** of silence, because a local model re-evaluating its context mid-generation pauses for tens of seconds and that is not yet a reason to lose the rest of the answer. A stream that resumes in between keeps its turn.
 
-Once a provider has been called, its card shows its breaker's state, with **Isolate** or **Restore** to move it by hand; the [Dashboard](/) lists every breaker that is not serving under **Circuit Breakers** — see [Logs & Dashboard](/guide#logs-and-dashboard). The thresholds above are the defaults; change them under **Circuit breaker tuning** at the foot of this section. Saving re-tunes every provider breaker that is currently closed. An open or recovering breaker, including one you isolated, keeps its state and its old tuning until JClaw restarts. The stream budgets apply from the next stream.
+Once a provider has been called, its card shows its breaker's state, with **Isolate** or **Restore** to move it by hand; the [Dashboard](/) lists every breaker that is not serving under **Circuit Breakers** (see [Logs & Dashboard](/guide#logs-and-dashboard)). The thresholds above are the defaults; change them under **Circuit breaker tuning** at the foot of this section. Saving re-tunes every provider breaker that is currently closed. An open or recovering breaker, including one you isolated, keeps its state and its old tuning until JClaw restarts. The stream budgets apply from the next stream.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
@@ -335,7 +335,7 @@ Once a provider has been called, its card shows its breaker's state, with **Isol
 | `llm.breaker.stall-abort-seconds` | 300 | A stream silent this long mid-answer is ended and its turn released. `0` never ends one. |
 | `llm.breaker.first-chunk-seconds` | 600 | A stream that sends nothing this long after dispatch is abandoned and counted as a failure. `0` never abandons one. |
 
-Every value is a whole number; a write outside these bounds is refused.
+Every value is a whole number; JClaw refuses a write outside these bounds.
 
 ## Decision Providers
 
@@ -347,7 +347,7 @@ There are two: **JEV (TypeSafe AI)** and **Ollama**. The JEV card shows **config
 |-----------------------|-----------|--------------------------------------------------------------------------------------------------|
 | `decision.jev.apiKey` | *(unset)* | Your TypeSafe AI key. Masked like every other secret, and refused if it contains spaces or characters outside printable ASCII. |
 
-Saving the key editor without typing anything leaves the stored key as it was. A key saved in the Browser section before this version is moved here when JClaw starts, so it does not need entering again.
+Saving the key editor without typing anything leaves the stored key as it was. A key saved in the Browser section before this version moves here when JClaw starts, so it does not need entering again.
 
 **Used by** lists the two features that call JEV, each marked **in use** when it has chosen JEV:
 
@@ -356,13 +356,13 @@ Saving the key editor without typing anything leaves the stored key as it was. A
 
 TypeSafe AI may record or retain what it is sent.
 
-Both features share one **circuit breaker**, shown on the card once JEV has been called, with **Isolate** or **Restore** to move it by hand. Three failures in a row, or half of the last ten, open it for 60 seconds. A failure is a request that could not reach TypeSafe, timed out, or got HTTP 429 or a 5xx; a browser step's retries count as one. A refused key (401 or 403), any other 4xx, or an answer JClaw cannot read never counts. A Model Router classifier timeout counts too, so with JEV keep that timeout at 3 seconds or more. While the breaker is open or isolated nothing is sent: the Model Router uses its keyword rules, and a Jev browser run ends with an error naming the breaker. Isolating it lasts until the 60-second cooldown ends or you restore it. The thresholds are fixed. An open breaker is also listed on the [Dashboard](/) under **Circuit Breakers**.
+Both features share one **circuit breaker**, shown on the card once JEV has been called, with **Isolate** or **Restore** to move it by hand. Three failures in a row, or half of the last ten, open it for 60 seconds. A failure is a request that could not reach TypeSafe, timed out, or got HTTP 429 or a 5xx; a browser step's retries count as one. A refused key (401 or 403), any other 4xx, or an answer JClaw cannot read never counts. A Model Router classifier timeout counts too, so with JEV keep that timeout at 3 seconds or more. While the breaker is open or isolated, nothing is sent: the Model Router uses its keyword rules, and a Jev browser run ends with an error naming the breaker. Isolating it lasts until the 60-second cooldown ends or you restore it. The thresholds are fixed. The [Dashboard](/) also lists an open breaker under **Circuit Breakers**.
 
 ### Ollama
 
 The **Ollama** card is for System One decision models, such as `tev1` and `nimble`, running on your own Ollama server. Its card shows **reachable** or **not reachable** for that server.
 
-- **Server address** defaults to the Ollama Local LLM provider's server without `/v1` (marked **from Ollama Local**), or `http://localhost:11434` when Ollama Local has none. **Change** sets a different one; the address is stored only when it differs from that default.
+- **Server address** defaults to the Ollama Local LLM provider's server without `/v1` (marked **from Ollama Local**), or `http://localhost:11434` when Ollama Local has none. **Change** sets a different one; JClaw stores the address only when it differs from that default.
 - **Decision models** lists the installed models whose Ollama capabilities include `decision`. Tick the ones you want; only a ticked model can be chosen as the Model Router's classifier. A ticked model the server no longer lists stays, marked **not installed**, so you can clear it.
 - **Used by** lists the [Model Router](#settings-model-router)'s prompt classifier, marked **in use** with the model's name when the classifier is one of these models. It sends the first 4000 characters of each prompt, only to this server.
 
@@ -376,13 +376,13 @@ JClaw loads the classifier's model itself, on a request of its own: at startup, 
 
 ## Search Providers
 
-Web search engines available to the `web_search` tool. Drag rows to **reorder priority** — providers are tried in order, and the next one is tried automatically if the first fails. Each row shows three states:
+Web search engines available to the `web_search` tool. Drag rows to **reorder priority**; JClaw tries the providers in order, and tries the next one automatically if the first fails. Each row shows three states:
 
-- **active** — enabled *and* API key configured.
-- **needs API key** — enabled but the key is missing.
-- **disabled** — turned off.
+- **active**: enabled *and* API key configured.
+- **needs API key**: enabled but the key is missing.
+- **disabled**: turned off.
 
-Available providers: **Exa**, **Brave**, **Tavily**, **Perplexity**, **Ollama**, and **Felo**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM doesn't echo stale snippets.
+Available providers: **Exa**, **Brave**, **Tavily**, **Perplexity**, **Ollama**, and **Felo**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM does not echo stale snippets.
 
 ## Proxy Providers
 
@@ -392,7 +392,7 @@ The proxy that `web_fetch` and `web_scrape` send their requests through. It cove
 - **DataImpulse** fills in DataImpulse's gateway and login syntax from a few fields.
 - **Manual** takes any proxy's address and credentials as they are.
 
-The card marked **saved** is the one in effect. Whichever card you use, only the `web_scrape.proxy.*` keys below are stored: a card writes them from its fields and reads them back when the page opens, and the **enabled** switch below the cards turns the proxy on and off. Saving a proxy also switches it on. A saved password stays with the host it was saved for: it shows as dots and is kept while the host stays the same, and saving a different host clears the stored username and password before the new URL is written, so a password never reaches another proxy. A proxy is shown in the DataImpulse card when its address is `http://gw.dataimpulse.com` or `http://74.81.81.81` on port 823 or on a sticky port from 10000 to 20000; any other address opens in Manual.
+The card marked **saved** is the one in effect. Whichever card you use, only the `web_scrape.proxy.*` keys below are stored: a card writes them from its fields and reads them back when the page opens, and the **enabled** switch below the cards turns the proxy on and off. Saving a proxy also switches it on. A saved password stays with the host it was saved for: it shows as dots and is kept while the host stays the same, and saving a different host clears the stored username and password before the new URL is written, so a password never reaches another proxy. JClaw shows a proxy in the DataImpulse card when its address is `http://gw.dataimpulse.com` or `http://74.81.81.81` on port 823 or on a sticky port from 10000 to 20000; any other address opens in Manual.
 
 **DataImpulse**
 
@@ -408,13 +408,13 @@ DataImpulse gives each plan type its own login and password, under **Proxy Acces
 | session minutes   | Sticky only: how long one address is kept, 1 to 120. Empty uses DataImpulse's default of 30. |
 | gateway           | Where JClaw connects: `gw.dataimpulse.com`, which DataImpulse recommends, or `74.81.81.81`, the same gateway by its address, for a network whose DNS blocks the name. DataImpulse says the address may change. A plan's password is only ever sent to DataImpulse, so it is kept when you switch. |
 
-The card shows what it will connect with. Sticky, in the United States, for 45 minutes, for example, connects to `http://gw.dataimpulse.com:10000` with the username `LOGIN__cr.us;sessttl.45`, where `LOGIN` is the chosen plan's login. It always connects over HTTP, which every kind of fetch can use: DataImpulse needs your login, and a `socks5://` proxy is used without credentials. A targeting parameter added by hand that the card does not show is kept when you save. DataImpulse's state, city, ZIP and ASN targeting cost extra, so the card does not offer them.
+The card shows what it will connect with. Sticky, in the United States, for 45 minutes, for example, connects to `http://gw.dataimpulse.com:10000` with the username `LOGIN__cr.us;sessttl.45`, where `LOGIN` is the chosen plan's login. It always connects over HTTP, which every kind of fetch can use: DataImpulse needs your login, and JClaw uses a `socks5://` proxy without credentials. When you save, JClaw keeps a targeting parameter added by hand that the card does not show. DataImpulse's state, city, ZIP and ASN targeting cost extra, so the card does not offer them.
 
-A save with no plan chosen, a login with parameters in it or ending in an underscore, a country that is not a two-letter code, or a session outside 1 to 120 minutes is refused beside the field, and nothing is written.
+JClaw refuses, beside the field, a save with no plan chosen, a login with parameters in it or ending in an underscore, a country that is not a two-letter code, or a session outside 1 to 120 minutes. Nothing is written.
 
 **Manual**
 
-The Manual card edits the URL, username and password directly. A URL, username or password the backend would refuse is named beside its field before anything is written, and an empty URL is refused there too; choose None to connect directly.
+The Manual card edits the URL, username and password directly. If the backend would refuse a URL, username or password, JClaw names it beside its field before anything is written. JClaw refuses an empty URL there too; choose None to connect directly.
 
 | Key                          | Default   | Meaning                                                                                  |
 |------------------------------|-----------|------------------------------------------------------------------------------------------|
@@ -429,7 +429,7 @@ The Manual card edits the URL, username and password directly. A URL, username o
 
 A DataImpulse proxy saved before plans existed moves to the Residential plan when JClaw starts: its login and password become that plan's, and the parameters in its username become the targeting.
 
-Credentials belong in the username and password settings, never in the URL, which is shown unmasked; a `socks5://` proxy is used without credentials. A proxy on this machine or your local network is fine; link-local, multicast and unspecified addresses are refused. Saving a `socks5://` address in the Manual card clears the stored username and password first.
+Credentials belong in the username and password settings, never in the URL, which is shown unmasked; JClaw uses a `socks5://` proxy without credentials. A proxy on this machine or your local network is fine; link-local, multicast and unspecified addresses are refused. Saving a `socks5://` address in the Manual card clears the stored username and password first.
 
 Behind a proxy, JClaw still checks every address before a request leaves, and refuses anything private or unresolvable. The proxy then looks the name up itself, so a DNS record that changes between the two lookups can reach whatever the proxy's own network can reach. That trade-off is accepted because the proxy is an exit you chose. With `socks5://`, the browser-impersonating fetch resolves names locally, which narrows it further.
 
@@ -439,39 +439,39 @@ Behind a proxy, JClaw still checks every address before a request leaves, and re
 
 ## Transcription
 
-Pairs every audio attachment with a text transcript before it reaches the LLM. Audio-capable models still receive native audio; text-only models receive the transcript as text.
+This pairs every audio attachment with a text transcript before it reaches the LLM. Audio-capable models still receive native audio; text-only models receive the transcript as text.
 
-Master toggle, then a backend radio group:
+JClaw offers a master toggle, then a backend radio group:
 
-- **OpenRouter** — reuses your OpenRouter API key from LLM Providers.
-- **OpenAI** — reuses your OpenAI API key.
-- **Local** — runs a speech-recognition model in the local ASR sidecar (a Python process; needs `uv` on PATH): Whisper **Small**, **Medium**, **Large v3 Turbo** or **Large v3** (all multilingual), or **MERaLiON-3 3B**, tuned for Southeast Asian speech. The chosen model (~950 MB to ~6.6 GB) downloads from Hugging Face on first use with a progress bar. Requires `ffmpeg` on PATH; the page warns inline if it's missing.
+- **OpenRouter**: reuses your OpenRouter API key from LLM Providers.
+- **OpenAI**: reuses your OpenAI API key.
+- **Local**: runs a speech-recognition model in the local ASR sidecar (a Python process; needs `uv` on PATH): Whisper **Small**, **Medium**, **Large v3 Turbo** or **Large v3** (all multilingual), or **MERaLiON-3 3B**, tuned for Southeast Asian speech. The chosen model (~950 MB to ~6.6 GB) downloads from Hugging Face on first use with a progress bar. Requires `ffmpeg` on PATH; the page warns inline if it is missing.
 
-With OpenRouter or OpenAI chosen, a **Model** field (`transcription.model`) names the model on that provider's `/audio/transcriptions` endpoint — blank means `whisper-1`, and `gpt-4o-transcribe` and `gpt-4o-mini-transcribe` are suggested.
+With OpenRouter or OpenAI chosen, a **Model** field (`transcription.model`) names the model on that provider's `/audio/transcriptions` endpoint (blank means `whisper-1`), and `gpt-4o-transcribe` and `gpt-4o-mini-transcribe` are suggested.
 
 Cloud backends are disabled in the radio group until their underlying provider key is configured in LLM Providers. An **Active:** status line above the toggle shows the current backend (cloud provider, or Local with the chosen model), or that transcription is off.
 
 Below the backend picker, a **Diarization** subsection covers the who-spoke-when pipeline (independent of the master transcription toggle, since the `diarize_audio` tool runs its own local pipeline). It has its own on/off toggle, which is the `transcription.diarization.provider` key: turning it on picks OpenRouter when its key is set, else OpenAI, and turning it off clears the provider, after which `diarize_audio` reports that no diarization model is configured.
 
-- **Diarization** — who-said-what transcripts come from one of five providers you pick here. Ordinary voice-note transcription stays local (whisper) and works without any of this.
-  - **Audio-capable chat model** — pick a provider — **OpenRouter** or **OpenAI** (cloud, using the API keys from LLM Providers), or **llama.cpp** or **vLLM** (local, over their OpenAI-compatible APIs; audio input is experimental upstream) — and one of its audio-capable models (the picker lists only models that accept audio input — the same ones showing an "Audio" badge in the chat model picker). The recording is sent to that model with a verbatim-diarization prompt; tell the agent who the speakers are ("the host is Anthony") and the transcript uses real names.
-  - **Local** (`pyannote-local`) — fully offline. `pyannote/speaker-diarization-community-1` produces speaker turns, which are fused with the local ASR transcript; **no audio leaves the host**. It labels speakers by voice within the recording (Speaker 1, Speaker 2) rather than by name, so the chat-model path remains the option when you need named speakers. The gated weights need a Hugging Face token — the same one Image Generation uses. The panel shows download status and live progress for the diarizer and emotion weights, and only contacts the sidecar when this path is active.
-- **Emotion labels on diarized transcripts** — when the `diarize_audio` tool asks for them, each turn on the on-device path is tagged with how it was said (7 categories plus valence / arousal / dominance), classified locally from the voice's tone. The model is operator-selectable (`transcription.diarization.emotionModel`) from a fixed set: **MERaLiON-SER v1** (the default — multilingual, covering English, Chinese, Malay, Tamil and Indonesian), or one of two English-trained wav2vec2 alternatives. Match the model to your audio: the English models load fine on other languages but misclassify them. Best-effort — a failure returns turns without labels. Ordinary voice-note transcription is unaffected.
+- **Diarization**: who-said-what transcripts come from one of five providers you pick here. Ordinary voice-note transcription stays local (whisper) and works without any of this.
+  - **Audio-capable chat model**: pick a provider: **OpenRouter** or **OpenAI** (cloud, using the API keys from LLM Providers), or **llama.cpp** or **vLLM** (local, over their OpenAI-compatible APIs; audio input is experimental upstream), and one of its audio-capable models (the picker lists only models that accept audio input, the same ones showing an "Audio" badge in the chat model picker). The recording is sent to that model with a verbatim-diarization prompt; tell the agent who the speakers are ("the host is Anthony") and the transcript uses real names.
+  - **Local** (`pyannote-local`): fully offline. `pyannote/speaker-diarization-community-1` produces speaker turns, which are fused with the local ASR transcript; **no audio leaves the host**. It labels speakers by voice within the recording (Speaker 1, Speaker 2) rather than by name, so the chat-model path remains the option when you need named speakers. The gated weights need a Hugging Face token, the same one Image Generation uses. The panel shows download status and live progress for the diarizer and emotion weights, and only contacts the sidecar when this path is active.
+- **Emotion labels on diarized transcripts**: when the `diarize_audio` tool asks for them, each turn on the on-device path is tagged with how it was said (7 categories plus valence / arousal / dominance), classified locally from the voice's tone. The model is operator-selectable (`transcription.diarization.emotionModel`) from a fixed set: **MERaLiON-SER v1** (the default: multilingual, covering English, Chinese, Malay, Tamil and Indonesian), or one of two English-trained wav2vec2 alternatives. Match the model to your audio: the English models load fine on other languages but misclassify them. Best-effort: a failure returns turns without labels. Ordinary voice-note transcription is unaffected.
 
 ## Speech
 
-Text-to-speech for reading replies aloud (the **speaker icon** on a message) and for real-time [Voice mode](/guide#chat). Pick an **engine**, a **model**, and — where the model offers presets — a **voice**. Changes apply on the next read-aloud, no restart.
+Text-to-speech for reading replies aloud (the **speaker icon** on a message) and for real-time [Voice mode](/guide#chat). Pick an **engine**, a **model**, and, where the model offers presets, a **voice**. Changes apply on the next read-aloud, no restart.
 
 An **Active:** status line at the top names the selected engine and its state: for the sidecar **running**, **ready — starts on first use**, or that it needs `uv` on PATH, with the reason; for JVM-native **ready**, **downloading model**, or **model downloads on first use**.
 
 Two engines:
 
-- **Sidecar** — quality-first; runs a local Python process (needs `uv` on PATH), and weights download from Hugging Face on first use. Models: **Qwen3-TTS 0.6B** (plus a 4-bit variant), **Kokoro-82M**, and **Chatterbox** (a PyTorch model on Apple Silicon MPS or NVIDIA CUDA — the most natural voice, but noticeably slower than the others). Its radio carries a **quality** badge, which turns to an amber **needs uv** when `uv` isn't found; the radio stays selectable.
-- **JVM-native** — runs in-process via sherpa-onnx, no Python or sidecar. Models: **Piper Amy** (tiny, fast, English) and **Kokoro-82M multilingual**; the chosen voice downloads once (a button in the panel) then synthesizes on CPU.
+- **Sidecar**: quality-first; runs a local Python process (needs `uv` on PATH), and weights download from Hugging Face on first use. Models: **Qwen3-TTS 0.6B** (plus a 4-bit variant), **Kokoro-82M**, and **Chatterbox** (a PyTorch model on Apple Silicon MPS or NVIDIA CUDA; it is the most natural voice, but noticeably slower than the others). Its radio carries a **quality** badge, which turns to an amber **needs uv** when `uv` is not found; the radio stays selectable.
+- **JVM-native**: runs in-process via sherpa-onnx, no Python or sidecar. Models: **Piper Amy** (tiny, fast, English) and **Kokoro-82M multilingual**; the chosen voice downloads once (a button in the panel) then synthesizes on CPU.
 
-**Voice** — models with preset speakers show a voice dropdown under the model. The sidecar **Kokoro** offers American and British, male and female voices; **Qwen3-TTS** offers **Voice 1** to **Voice 4**. **Chatterbox** has no preset voices, and both it and **Qwen3-TTS** can take their voice from a reference clip — **Record** a few seconds of clean speech in the panel or **Upload** one (WAV, MP3, FLAC, M4A or OGG, under 10 MB), and **Clear** it to return to the model default. Models with neither (Piper and the JVM-native Kokoro) hide the control, and **Default** keeps the model's own voice. Your choice is remembered per engine.
+**Voice**: models with preset speakers show a voice dropdown under the model. The sidecar **Kokoro** offers American and British, male and female voices; **Qwen3-TTS** offers **Voice 1** to **Voice 4**. **Chatterbox** has no preset voices, and both it and **Qwen3-TTS** can take their voice from a reference clip: **Record** a few seconds of clean speech in the panel or **Upload** one (WAV, MP3, FLAC, M4A or OGG, under 10 MB), and **Clear** it to return to the model default. Models with neither (Piper and the JVM-native Kokoro) hide the control, and **Default** keeps the model's own voice. JClaw remembers your choice per engine.
 
-**Keep warm** — sidecar engine only (`tts.local.idleTimeoutMinutes`, default 15, 0–1440): minutes idle before the sidecar unloads its model, `0` never unloads. Longer keeps the first reply fast but holds the model in RAM (Chatterbox is ~3 GB); shorter frees memory but makes the next reply after a gap pay the load again. Takes effect the next time the sidecar starts.
+**Keep warm**: sidecar engine only (`tts.local.idleTimeoutMinutes`, default 15, 0–1440): minutes idle before the sidecar unloads its model; `0` never unloads. Longer keeps the first reply fast but holds the model in RAM (Chatterbox is ~3 GB); shorter frees memory but makes the next reply after a gap pay the load again. Takes effect the next time the sidecar starts.
 
 ## Voice Mode
 
@@ -499,13 +499,13 @@ How a real-time [Voice mode](/guide#chat) conversation decides you have finished
 
 Optical character recognition for image and scanned-PDF attachments via the `documents` tool. Each backend (e.g. Tesseract) shows its detection status:
 
-- **active** — binary detected on PATH *and* enabled.
-- **disabled** — detected but turned off.
-- **not detected** — binary missing on PATH; install hint shown inline.
+- **active**: binary detected on PATH *and* enabled.
+- **disabled**: detected but turned off.
+- **not detected**: binary missing on PATH; install hint shown inline.
 
-Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built — useful when the model itself isn't vision-capable.
+Backends can only be toggled when their system dependency is present; install the missing binary and restart the JVM to enable. With OCR on, images and scanned PDFs get a text layer extracted before the prompt is built, which is useful when the model itself is not vision-capable.
 
-A missing backend prints the install command for the operating system JClaw is running on, so you don't have to pick your line out of the table below — the same words the server logs at startup.
+A missing backend prints the install command for the operating system JClaw is running on, so you do not have to pick your line out of the table below; the same words the server logs at startup.
 
 Installing Tesseract:
 
@@ -515,7 +515,7 @@ Installing Tesseract:
 | Debian/Ubuntu | `apt-get install tesseract-ocr` |
 | Windows | `winget install -e --id UB-Mannheim.TesseractOCR` |
 
-**On Windows the installer does not add Tesseract to your PATH.** Either add its folder yourself and open a new terminal, or — simpler — set `ocr.tesseract.path` in `conf/application.conf` to the install directory (`C:\Program Files\Tesseract-OCR`) and restart. Point it at the folder, not the `.exe`. A path that isn't a directory is refused at startup rather than ignored, so a typo tells you instead of silently leaving OCR off.
+**On Windows the installer does not add Tesseract to your PATH.** Either add its folder yourself and open a new terminal, or, simpler, set `ocr.tesseract.path` in `conf/application.conf` to the install directory (`C:\Program Files\Tesseract-OCR`) and restart. Point it at the folder, not the `.exe`. At startup, JClaw refuses a path that is not a directory rather than ignoring it, so a typo tells you instead of silently leaving OCR off.
 
 ### Tesseract tuning
 
@@ -529,29 +529,29 @@ Changes apply to the next document read; no restart needed.
 
 ## Image Captioning
 
-The vision analogue of Transcription: non-vision chat models get a short **text description** of an uploaded image before it reaches the LLM. Vision-capable models still receive the image natively. WebP and other formats are transcoded to PNG first so every backend can read them.
+The vision analogue of Transcription: non-vision chat models get a short **text description** of an uploaded image before it reaches the LLM. Vision-capable models still receive the image natively. JClaw transcodes WebP and other formats to PNG first so every backend can read them.
 
-Master toggle, then a backend radio group:
+JClaw offers a master toggle, then a backend radio group:
 
-- **OpenRouter** — reuses your OpenRouter API key from LLM Providers; captions with a vision model on OpenRouter.
-- **OpenAI** — reuses your OpenAI API key.
-- **Local VLM (Ollama)** — captions with a vision model you run in your own local Ollama (at `localhost:11434/v1`). There is **no bundled model**: pull a vision model in Ollama (e.g. `ollama pull moondream` or `llava`), add it under [LLM Providers](#settings-llm-providers) and mark it **supports vision**, then pick it here.
+- **OpenRouter**: reuses your OpenRouter API key from LLM Providers; captions with a vision model on OpenRouter.
+- **OpenAI**: reuses your OpenAI API key.
+- **Local VLM (Ollama)**: captions with a vision model you run in your own local Ollama (at `localhost:11434/v1`). There is **no bundled model**: pull a vision model in Ollama (e.g. `ollama pull moondream` or `llava`), add it under [LLM Providers](#settings-llm-providers) and mark it **supports vision**, then pick it here.
 
-The model picker is a dropdown of that backend's **vision-tagged** models — cloud backends are disabled until their key is set. An **Active:** status line shows the current backend and model. With captioning off, non-vision models receive a "description unavailable" note for images.
+The model picker is a dropdown of that backend's **vision-tagged** models; cloud backends are disabled until their key is set. An **Active:** status line shows the current backend and model. With captioning off, non-vision models receive a "description unavailable" note for images.
 
 ## Image Generation
 
-Backend for the agent's `generate_image` tool (off per-agent by default; turn it on for an agent on its [Agents](/agents) page). The tool stays hidden from agents until you pick a backend here — the master switch is the `imagegen.provider` key, unset by default.
+Backend for the agent's `generate_image` tool (off per-agent by default; turn it on for an agent on its [Agents](/agents) page). The tool stays hidden from agents until you pick a backend here; the master switch is the `imagegen.provider` key, unset by default.
 
-Master toggle, then a backend radio group:
+JClaw offers a master toggle, then a backend radio group:
 
-- **BFL (Black Forest Labs)** — the Flux image API. Paste the BFL key **in this panel** — it's image-generation-only, separate from [LLM Providers](#settings-llm-providers).
-- **OpenAI** — reuses your OpenAI key from LLM Providers; renders with `gpt-image-1`.
-- **Replicate** — hosted models. Set the Replicate key **in this panel** (it's shared with [Video Generation](#settings-video-generation)). The model dropdown is live-discovered from Replicate's curated text-to-image collection, split into **text-to-image** and **image-to-image (Kontext style transfer)** groups; leave it on *Provider default* (`black-forest-labs/flux-schnell`) to let Replicate pick.
-- **Self-Hosted (Flux 2 Klein)** — runs the local image sidecar on your own GPU, no API key. Three runtime gates must clear, each shown inline:
-  1. **uv on PATH** — the sidecar runs under [uv](https://astral.sh/uv); install it and restart if the panel reports it missing.
-  2. **GPU capability** — click **detect GPU** to probe VRAM. The verdict (runnable, free/total VRAM, and a reason) decides whether the radio is selectable.
-  3. **Model download** — pull `black-forest-labs/FLUX.2-klein-4B` (~13 GB, Apache-2.0) with a progress bar; weights land under `data/image-models/` and are recognized across restarts.
+- **BFL (Black Forest Labs)**: the Flux image API. Paste the BFL key **in this panel**; it is image-generation-only, separate from [LLM Providers](#settings-llm-providers).
+- **OpenAI**: reuses your OpenAI key from LLM Providers; renders with `gpt-image-1`.
+- **Replicate**: hosted models. Set the Replicate key **in this panel** (it is shared with [Video Generation](#settings-video-generation)). The model dropdown is live-discovered from Replicate's curated text-to-image collection, split into **text-to-image** and **image-to-image (Kontext style transfer)** groups; leave it on *Provider default* (`black-forest-labs/flux-schnell`) to let Replicate pick.
+- **Self-Hosted (Flux 2 Klein)**: runs the local image sidecar on your own GPU, no API key. Three runtime gates must clear, each shown inline:
+  1. **uv on PATH**: the sidecar runs under [uv](https://astral.sh/uv); install it and restart if the panel reports it missing.
+  2. **GPU capability**: click **detect GPU** to probe VRAM. The verdict (runnable, free/total VRAM, and a reason) decides whether the radio is selectable.
+  3. **Model download**: pull `black-forest-labs/FLUX.2-klein-4B` (~13 GB, Apache-2.0) with a progress bar; weights land under `data/image-models/` and are recognized across restarts.
 
   With Self-Hosted selected, an optional **Hugging Face token** row (`imagegen.local.hfToken`) takes a Read token, which lifts Hugging Face rate limits, speeds downloads and unlocks gated models. Klein 4B downloads without one. The on-device diarization path under [Transcription](#settings-transcription) reuses this token for its gated weights.
 
@@ -561,30 +561,30 @@ Cloud radios are disabled until their key is set (amber **no API key** badge). C
 
 How JClaw makes a video attachment legible to your chat model. The strategy is chosen automatically, in this order:
 
-1. **The chat model handles video natively** — it watches the clip directly; nothing else runs.
-2. **A dedicated video-interpretation model is configured** — when the chat model can't do video, this model interprets the clip and its description is spliced into the conversation as text.
-3. **The chat model has vision** — JClaw samples still frames from the clip and sends them as images.
-4. **Text-only chat model with [Image Captioning](#settings-image-captioning) on** — sampled frames are captioned into a timestamped text summary.
+1. **The chat model handles video natively**: it watches the clip directly; nothing else runs.
+2. **A dedicated video-interpretation model is configured**: when the chat model cannot do video, this model interprets the clip and its description is spliced into the conversation as text.
+3. **The chat model has vision**: JClaw samples still frames from the clip and sends them as images.
+4. **Text-only chat model with [Image Captioning](#settings-image-captioning) on**: sampled frames are captioned into a timestamped text summary.
 
-The **dedicated video-interpretation model** has a master toggle, then a provider — OpenRouter, vLLM (offered only while it answers), Ollama Local or Ollama Cloud — and a model picker; the picker is live-discovered from the provider, the same shape as Image Captioning above. OpenRouter lists its **video-capable** models, which watch the clip; vLLM and Ollama list their **vision-capable** models, which interpret frames sampled from it.
+The **dedicated video-interpretation model** has a master toggle, then a provider (OpenRouter, vLLM (offered only while it answers), Ollama Local or Ollama Cloud) and a model picker; the picker is live-discovered from the provider, the same shape as Image Captioning above. OpenRouter lists its **video-capable** models, which watch the clip; vLLM and Ollama list their **vision-capable** models, which interpret frames sampled from it.
 
 Two knobs govern frame sampling, for the fallbacks (strategies 3 and 4) and for a vLLM or Ollama dedicated model:
 
 | Key             | Default | Meaning                                                                                                 |
 |-----------------|---------|---------------------------------------------------------------------------------------------------------|
-| `video.secondsPerFrame` | 10    | Sampling density — one frame is grabbed per this many seconds of video (1–60). Lower = denser sampling, more detail, higher cost. |
+| `video.secondsPerFrame` | 10    | Sampling density: one frame is grabbed per this many seconds of video (1–60). Lower = denser sampling, more detail, higher cost. |
 | `video.sampleFrames`    | 8     | Hard ceiling on frames extracted from a single clip (2–32), regardless of length.                        |
 
-The effective frame count is `clamp(round(duration ÷ secondsPerFrame), 2, sampleFrames)`; a captioned summary (strategy 4) also stops at `video.textSummaryMaxFrames` (default 8, no row in the panel). A status line shows which strategy your current main-agent model would use — watch, summarize, sample, or caption. If none apply, the video comes through with a note telling you to enable one of the above.
+The effective frame count is `clamp(round(duration ÷ secondsPerFrame), 2, sampleFrames)`; a captioned summary (strategy 4) also stops at `video.textSummaryMaxFrames` (default 8, no row in the panel). A status line shows which strategy your current main-agent model would use: watch, summarize, sample, or caption. If none apply, the video comes through with a note telling you to enable one of the above.
 
 ## Video Generation
 
-Backend for the agent's `generate_video` tool (off per-agent by default). Like image generation, the tool is hidden from agents until you pick a backend — `videogen.provider` is unset by default. Video generation is **asynchronous**: the chat shows a placeholder and polls job status until the clip is ready.
+Backend for the agent's `generate_video` tool (off per-agent by default). Like image generation, the tool is hidden from agents until you pick a backend; `videogen.provider` is unset by default. Video generation is **asynchronous**: the chat shows a placeholder and polls job status until the clip is ready.
 
-Master toggle, then a backend radio group:
+JClaw offers a master toggle, then a backend radio group:
 
-- **Replicate** — hosted text-to-video models, live-discovered from Replicate's curated collection (leave on *Provider default*, `wan-video/wan-2.2-t2v-fast`, to let Replicate pick). The Replicate key is **not** set here — it reuses the one from [Image Generation](#settings-image-generation), so this radio is disabled until that key is configured.
-- **Self-Hosted (on this machine)** — runs the local video sidecar. Gated on **uv on PATH**; click **detect GPU** to probe. The probe returns the WAN / LTX engine variants your hardware can run, each tagged **ready** (green), **runs slow** (amber, still selectable), or unavailable (disabled, with the reason). Picking Self-Hosted auto-selects the best runnable engine; the per-engine radios refine the variant.
+- **Replicate**: hosted text-to-video models, live-discovered from Replicate's curated collection (leave on *Provider default*, `wan-video/wan-2.2-t2v-fast`, to let Replicate pick). The Replicate key is **not** set here; it reuses the one from [Image Generation](#settings-image-generation), so this radio is disabled until that key is configured.
+- **Self-Hosted (on this machine)**: runs the local video sidecar. Gated on **uv on PATH**; click **detect GPU** to probe. The probe returns the WAN / LTX engine variants your hardware can run, each tagged **ready** (green), **runs slow** (amber, still selectable), or unavailable (disabled, with the reason). Picking Self-Hosted auto-selects the best runnable engine; the per-engine radios refine the variant.
 
 | Key                      | Default | Meaning                                                                                        |
 |--------------------------|---------|------------------------------------------------------------------------------------------------|
@@ -601,7 +601,7 @@ Behavior limits for the in-app [Chat](/chat) surface:
 | `maxToolRounds`        | 100     | Maximum tool calls the agent can make per turn before it must give a final answer.               |
 | `maxContextMessages`   | 50      | How many recent messages get sent with each LLM request. Older messages are dropped to stay in the context window. |
 
-An **Advanced — context window & compaction** collapsible reveals four lower-level knobs: the three `compaction*` rows and the jtokkit multiplier. The three `pruneToolResults*` keys below (stored as `chat.pruneToolResults`, `chat.pruneToolResultsMinChars`, `chat.pruneToolResultsProtectRecent`) have no row in the panel — set them with `POST /api/config`.
+An **Advanced — context window & compaction** collapsible reveals four lower-level knobs: the three `compaction*` rows and the jtokkit multiplier. The three `pruneToolResults*` keys below (stored as `chat.pruneToolResults`, `chat.pruneToolResultsMinChars`, `chat.pruneToolResultsProtectRecent`) have no row in the panel; set them with `POST /api/config`.
 
 | Key                          | Default | Meaning                                                                                                 |
 |------------------------------|---------|---------------------------------------------------------------------------------------------------------|
@@ -625,14 +625,14 @@ An **Advanced — context window & compaction** collapsible reveals four lower-l
 | **Reasoning** | Proofs, trade-offs, root causes and math. |
 | **Coding** | Code blocks, stack traces and code-heavy requests. |
 
-Each list is stored as `router.<class>.models` (`chat`, `summarize`, `agentic`, `reasoning`, `coding`); add models from the dropdown and reorder them with the arrows. A list naming a model that isn't registered under LLM Providers is refused.
+Each list is stored as `router.<class>.models` (`chat`, `summarize`, `agentic`, `reasoning`, `coding`); add models from the dropdown and reorder them with the arrows. JClaw refuses a list naming a model that is not registered under LLM Providers.
 
-- **Prefer subscription and self-hosted models** (`router.preferPrepaid`, on by default) — a model on a subscription or a self-hosted provider is tried before a per-token one, whatever the order, so included credit is spent before money. A per-token model in a list that also holds a prepaid one is badged **fallback only**. Off, the lists are followed exactly as written; the budget guard applies either way.
-- **Classifier model** (`router.classifier.provider` / `.model`, default **Keyword rules**) — the built-in rules are free and instant but read words rather than intent. A named model is asked for the class and a reasoning effort in one extra call before the reply starts, and sees the first 4000 characters of the prompt. If it is unreachable, slower than **Classifier timeout** (`router.classifier.timeoutSeconds`, 1 to 60 seconds, default 8, shown once a model or JEV is picked) or answers with something else, the keyword rules decide.
-- **JEV (TypeSafe AI)** (stored as provider `jev`, model `jev-latest`) — TypeSafe AI's decision model as the classifier. One request asks the same two questions, class and effort, about the first 4000 characters of the prompt and nothing else, and JEV answers each with a probability per choice. When its top class is below `router.classifier.jev.minConfidence` (0 to 1, default 0.50, no row in the panel), the keyword rules choose the class and its default effort, and the route notes that JEV was unsure. It uses the TypeSafe API key from [Decision Providers](#settings-decision-providers), and the option is disabled until one is set. The request is tried once within `router.classifier.timeoutSeconds`, never retried; a failure, a timeout, an invalid answer or a missing key falls back to the keyword rules. While JEV's circuit breaker is open or isolated, nothing is sent: the keyword rules decide, and the route notes that the JEV breaker is open. TypeSafe may record or retain the prompts it is sent. Measured on 60 prompts, JEV answered in 0.45 s at the median and 1.4 s at worst; earlier, larger browser-step requests saw about one in nine hang, and the timeout is what bounds that wait. Its default of 8 seconds is sized for LLM classifiers; with JEV, a lower value such as 3 bounds a hang sooner. With JEV, a timeout counts toward the circuit breaker the browser engine shares (see [Decision Providers](#settings-decision-providers)), so keep it at 3 seconds or more. The provider name `jev` is reserved, so no LLM provider can take it.
-- **Ollama decision models** (stored as provider `ollama-decision`, model the model's name) — each model ticked on the Ollama card in [Decision Providers](#settings-decision-providers) is listed as **Ollama decision / *model***, and only a ticked one is accepted. It answers the same two questions as JEV, under the same `router.classifier.jev.minConfidence` and classifier timeout, and falls back to the keyword rules the same way; the prompt goes only to your Ollama server. The provider name `ollama-decision` is reserved too.
-- **Reasoning effort** — a thinking model reasons at the effort the router chose for the prompt: the classifier's, or else the class default — low for Chat and Summarize, medium for Agent work and Coding, high for Reasoning. It is fitted to the levels the model offers. A thinking level chosen on the conversation still wins, including off.
-- **Budget guard** — usage is read from each Ollama Cloud provider's quota windows. Past **Downshift at** (`router.budget.downshiftAt`, default 0.75, shown as 75%) the four heavier classes stop using that provider and fall back to the Chat list; past **Exhausted at** (`router.budget.exhaustedAt`, default 0.95) no class uses it. Downshift must stay below Exhausted. Any provider that answers a call with "out of credit" is also benched for a while.
+- **Prefer subscription and self-hosted models** (`router.preferPrepaid`, on by default): JClaw tries a model on a subscription or a self-hosted provider before a per-token one, whatever the order, so included credit is spent before money. A per-token model in a list that also holds a prepaid one is badged **fallback only**. Off, JClaw follows the lists exactly as written; the budget guard applies either way.
+- **Classifier model** (`router.classifier.provider` / `.model`, default **Keyword rules**): the built-in rules are free and instant but read words rather than intent. A named model is asked for the class and a reasoning effort in one extra call before the reply starts, and sees the first 4000 characters of the prompt. If it is unreachable, slower than **Classifier timeout** (`router.classifier.timeoutSeconds`, 1 to 60 seconds, default 8, shown once a model or JEV is picked) or answers with something else, the keyword rules decide.
+- **JEV (TypeSafe AI)** (stored as provider `jev`, model `jev-latest`): TypeSafe AI's decision model as the classifier. One request asks the same two questions, class and effort, about the first 4000 characters of the prompt and nothing else, and JEV answers each with a probability per choice. When its top class is below `router.classifier.jev.minConfidence` (0 to 1, default 0.50, no row in the panel), the keyword rules choose the class and its default effort, and the route notes that JEV was unsure. It uses the TypeSafe API key from [Decision Providers](#settings-decision-providers), and the option is disabled until one is set. The request is tried once within `router.classifier.timeoutSeconds`, never retried; a failure, a timeout, an invalid answer or a missing key falls back to the keyword rules. While JEV's circuit breaker is open or isolated, nothing is sent: the keyword rules decide, and the route notes that the JEV breaker is open. TypeSafe may record or retain the prompts it is sent. Measured on 60 prompts, JEV answered in 0.45 s at the median and 1.4 s at worst; earlier, larger browser-step requests saw about one in nine hang, and the timeout is what bounds that wait. Its default of 8 seconds is sized for LLM classifiers; with JEV, a lower value such as 3 bounds a hang sooner. With JEV, a timeout counts toward the circuit breaker the browser engine shares (see [Decision Providers](#settings-decision-providers)), so keep it at 3 seconds or more. The provider name `jev` is reserved, so no LLM provider can take it.
+- **Ollama decision models** (stored as provider `ollama-decision`, model the model's name): JClaw lists each model ticked on the Ollama card in [Decision Providers](#settings-decision-providers) as **Ollama decision / *model***, and accepts only a ticked one. A ticked model answers the same two questions as JEV, under the same `router.classifier.jev.minConfidence` and classifier timeout, and falls back to the keyword rules the same way; the prompt goes only to your Ollama server. The provider name `ollama-decision` is reserved too.
+- **Reasoning effort**: a thinking model reasons at the effort the router chose for the prompt: the classifier's, or else the class default. The class default is low for Chat and Summarize, medium for Agent work and Coding, and high for Reasoning. It is fitted to the levels the model offers. A thinking level chosen on the conversation still wins, including off.
+- **Budget guard**: JClaw reads usage from each Ollama Cloud provider's quota windows. Past **Downshift at** (`router.budget.downshiftAt`, default 0.75, shown as 75%) the four heavier classes stop using that provider and fall back to the Chat list; past **Exhausted at** (`router.budget.exhaustedAt`, default 0.95) no class uses it. Downshift must stay below Exhausted. Any provider that answers a call with "out of credit" is also benched for a while.
 
 Beneath the thresholds, a table lists each provider on your lists as **Prepaid** or **Per-token**, with each quota window's usage (amber past downshift, red past exhausted), and names anything benched for running out of credit with the time it returns. A provider with no usage API shows that it is benched only after an out-of-credit reply.
 
@@ -646,7 +646,7 @@ Caps, timeout defaults and the model for [Subagents](/guide#subagents):
 | `subagent.maxChildrenPerParent`   | 5       | How many concurrently `RUNNING` children a single parent can have in flight.           |
 | `subagent.defaultRunTimeoutSeconds` | 300   | Idle budget (seconds with no activity) for a `subagent_spawn` call that omits `runTimeoutSeconds`. A call-site value overrides. Must be positive; anything else falls back to 300. |
 | `subagent.defaultYieldTimeoutSeconds` | 300 | Resume budget for a `subagent_yield` call that omits `timeoutSeconds`, capped at 3600. `0` turns the yield watchdog off, so the parent waits until the child ends on its own run timeout. |
-| `subagent.modelProvider` / `subagent.modelId` | *(unset)* | The **model** row. Unset (**Conversation default**) runs subagents on the model the chat is using; a specific model pins every fan-out to it — e.g. a cheaper one for large evaluations. |
+| `subagent.modelProvider` / `subagent.modelId` | *(unset)* | The **model** row. Unset (**Conversation default**) runs subagents on the model the chat is using; a specific model pins every fan-out to it (e.g. a cheaper one for large evaluations). |
 
 Violations emit `SUBAGENT_LIMIT_EXCEEDED` on the [Logs](/logs) page and return a plain-text refusal to the model. Changes apply live; no restart needed.
 
@@ -658,12 +658,12 @@ Delegating a subagent to an **external coding harness** (such as Claude Code, Co
 |------------------------|------------|-----------------------------------------------------------------------------------------------------|
 | `subagent.acp.command` | *(unset)*  | The harness command line run for `subagent_spawn { runtime:"acp" }` (e.g. `claude -p` or `codex exec`). Empty refuses every `runtime:"acp"` spawn. Read from config only, never the model. |
 | `subagent.acp.modelProvider` / `subagent.acp.modelId` | *(unset)* | Provider/model the harness runs with instead of its own default (the `acp.model` picker). Claude Code and Codex are pointed at the provider's endpoint and model; Pi and Gemini CLI take the model only; opencode and custom harnesses refuse the override. A per-spawn `modelProvider` / `modelId` wins over it. |
-| `subagent.acp.sandbox` | `false`    | OS-level confinement for harness runs, set with the **acp.sandbox** control: *Off* (`false`), *Untrusted channels only* (`untrusted`) or *Every run* (`true`). A save of any other value is refused, and the control says when this host has no `sandbox-exec`/`bwrap`. See [Sandboxing coding runs](/guide#subagents-sandboxing-coding-runs-opt-in). |
-| `subagent.acp.mode`    | `batch`    | How JClaw talks to the harness, set with the **acp.mode** control: `batch` (send the task, read the whole output), `json` (parse a streamed line protocol) or `rpc` (a two-way session, for a harness that supports one; any other runs as `json`). A save of any other value is refused. |
+| `subagent.acp.sandbox` | `false`    | OS-level confinement for harness runs, set with the **acp.sandbox** control: *Off* (`false`), *Untrusted channels only* (`untrusted`) or *Every run* (`true`). JClaw refuses a save of any other value, and the control says when this host has no `sandbox-exec`/`bwrap`. See [Sandboxing coding runs](/guide#subagents-sandboxing-coding-runs-opt-in). |
+| `subagent.acp.mode`    | `batch`    | How JClaw talks to the harness, set with the **acp.mode** control: `batch` (send the task, read the whole output), `json` (parse a streamed line protocol) or `rpc` (a two-way session, for a harness that supports one; any other runs as `json`). JClaw refuses a save of any other value. |
 
-The **detected** row lists the harness CLIs found on this host's PATH — one click fills `subagent.acp.command` and `subagent.acp.harness` — and accepts a custom command, which is probed before it is stored.
+The **detected** row lists the harness CLIs found on this host's PATH. One click fills `subagent.acp.command` and `subagent.acp.harness`. The row also accepts a custom command, which is probed before it is stored.
 
-The model override is never written into `subagent.acp.command`: each harness takes it differently (a `--model` flag, an inline TOML provider block, or environment variables), so JClaw appends it at launch and the panel shows the resulting command underneath as **launches**. That line is also where you see a harness whose ACP adapter replaces the configured command entirely.
+JClaw never writes the model override into `subagent.acp.command`: each harness takes it differently (a `--model` flag, an inline TOML provider block, or environment variables), so JClaw appends it at launch and the panel shows the resulting command underneath as **launches**. That line is also where you see a harness whose ACP adapter replaces the configured command entirely.
 
 The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](/agents) page; the main agent always may), and each run is bounded by `subagent.maxWallClockSeconds` (default 1800). See [External coding harness](/guide#subagents-acp-harness) for the full setup.
 
@@ -671,15 +671,15 @@ The spawning agent must also hold the `acp` grant (`acpAllowed` on its [Agents](
 
 The optional AFK factory builds Jira stories labelled `afk` unattended in sandboxes on this Mac and returns each as a local `agent/<KEY>` branch. **Setup** stays open until the factory is installed, every prerequisite passes and the model and Jira credentials are set; after that it sits behind a **Setup** button.
 
-- **Prerequisites** — macOS, Docker Desktop running, Node 24 or newer, pnpm 12 or newer, and this JClaw checkout. Each shows ok, missing (with the fix) or unknown when its check could not run.
-- **Credentials** — a Claude OAuth token or an Anthropic API key (saving one removes the other: only one is used, and the factory takes the OAuth token when both are present), the Jira URL and personal token, and an optional GitHub token. They are written owner-only to `.env`, `jira.env` and `github.env` in the factory home. A saved value is never shown again; enter a new one to replace it.
-- **Run installer** — runs the factory's installer and streams its output, for up to 15 minutes. It cannot start while another install or a harness start/stop is running. Running it restarts the factory, so a story being built is interrupted; it keeps its branch and resumes on the next round. The factory counts as installed once its LaunchAgent (`~/Library/LaunchAgents/com.jclaw.factory.plist`) exists.
+- **Prerequisites**: macOS, Docker Desktop running, Node 24 or newer, pnpm 12 or newer, and this JClaw checkout. Each shows ok, missing (with the fix) or unknown when its check could not run.
+- **Credentials**: a Claude OAuth token or an Anthropic API key (saving one removes the other: only one is used, and the factory takes the OAuth token when both are present), the Jira URL and personal token, and an optional GitHub token. JClaw writes them owner-only to `.env`, `jira.env` and `github.env` in the factory home. A saved value is never shown again; enter a new one to replace it.
+- **Run installer**: runs the factory's installer and streams its output, for up to 15 minutes. It cannot start while another install or a harness start/stop is running. Running it restarts the factory, so a story being built is interrupted; it keeps its branch and resumes on the next round. The factory counts as installed once its LaunchAgent (`~/Library/LaunchAgents/com.jclaw.factory.plist`) exists.
 
 Below Setup:
 
-- **Status** — **Harness** is the factory process: **Start** runs the installer, and **Stop** unloads and removes its LaunchAgent, so any story it is building fails. **Gateway** is the container the sandboxes' network traffic passes through: **Pause** stops it, so no new story starts and running ones fail, and **Resume** starts it again. **Sandboxes** lists the running sandboxes and the story each is building, each with its own **Stop**. Every stop and pause asks first, and a command that fails shows its output under the rows.
-- **Settings** — **Stories built at once** (default 2), **CPUs per sandbox** (6, and no more than Docker has), **Poll interval (seconds)** (120) and **Model** (`claude-opus-5-5`), saved to `settings.env` in the factory home. The factory reads them when it starts, so after a save it restarts itself as soon as no story is running.
-- **Story board** — every story the factory knows, grouped as **Running**, **Waiting**, **In review**, **Blocked or refused** and **Merged**; select a group's heading to fold or unfold it. A running story shows its phase and how long it has been in it; a blocked or refused one shows why; a merged one shows its commit and whether the factory or a person merged it. A story labelled `afk-merge`, or in an epic so labelled, carries an **Auto-merge** badge: once it passes, the factory merges it, signed, into this checkout's `main` and moves it to Done, without pushing. Select a story to read its logs in a panel that slides in from the right, one tab per log; drag the panel's left edge to widen it, and a running story's log refreshes as it grows.
+- **Status**: **Harness** is the factory process: **Start** runs the installer, and **Stop** unloads and removes its LaunchAgent, so any story it is building fails. **Gateway** is the container the sandboxes' network traffic passes through: **Pause** stops it, so no new story starts and running ones fail, and **Resume** starts it again. **Sandboxes** lists the running sandboxes and the story each is building, each with its own **Stop**. Every stop and pause asks first, and a command that fails shows its output under the rows.
+- **Settings**: **Stories built at once** (default 2), **CPUs per sandbox** (6, and no more than Docker has), **Poll interval (seconds)** (120) and **Model** (`claude-opus-5-5`), saved to `settings.env` in the factory home. The factory reads them when it starts, so after a save it restarts itself as soon as no story is running.
+- **Story board**: every story the factory knows, grouped as **Running**, **Waiting**, **In review**, **Blocked or refused** and **Merged**; select a group's heading to fold or unfold it. A running story shows its phase and how long it has been in it; a blocked or refused one shows why; a merged one shows its commit and whether the factory or a person merged it. A story labelled `afk-merge`, or in an epic so labelled, carries an **Auto-merge** badge: once it passes, the factory merges it, signed, into this checkout's `main` and moves it to Done, without pushing. Select a story to read its logs in a panel that slides in from the right, one tab per log; drag the panel's left edge to widen it, and a running story's log refreshes as it grows.
 
 The factory home is `~/.jclaw-factory`, unless the `factory.home` key or the `FACTORY_HOME` environment variable names another directory. On a machine that is not a Mac, the panel says the factory cannot run there instead of showing Status.
 
@@ -698,13 +698,13 @@ Every setting the `web_scrape` tool reads, in four groups, except the proxy, whi
 | `web_scrape.max-escalations`   | 5       | Pages per crawl that may be retried with a slower fetcher (browser impersonation or a full render) when a plain fetch is blocked or comes back empty. `0` never escalates. |
 | `web_scrape.language`          | `en`    | Preferred language on sites that publish translations, as an hreflang code (`en`, `ja`, `pt-BR`). Other translations of a page are skipped. |
 
-`max-pages` and `max-depth` are both the default, when the agent's call leaves `maxPages` / `maxDepth` out, and the ceiling, when it asks for more — an agent can request a smaller crawl, never a larger one. A call's own `language` argument overrides the language setting.
+`max-pages` and `max-depth` are both the default, when the agent's call leaves `maxPages` / `maxDepth` out, and the ceiling, when it asks for more; an agent can request a smaller crawl, never a larger one. A call's own `language` argument overrides the language setting.
 
 **Robots & Sitemaps**
 
 | Key                                | Default | Meaning                                                                              |
 |------------------------------------|---------|--------------------------------------------------------------------------------------|
-| `web_scrape.respect-robots`        | on      | Honour each site's `robots.txt`. A call can still turn it off for one request when you ask. Per-host pacing stays on either way. |
+| `web_scrape.respect-robots`        | on      | Honor each site's `robots.txt`. A call can still turn it off for one request when you ask. Per-host pacing stays on either way. |
 | `web_scrape.seed-from-sitemap`     | on      | Add URLs from the sitemaps a site's `robots.txt` declares. Only applies while `robots.txt` is respected. |
 | `web_scrape.max-sitemap-urls`      | 50      | Most URLs one crawl takes from sitemaps. `0` seeds nothing.                           |
 | `web_scrape.max-sitemap-documents` | 3       | Most sitemap files one crawl fetches, counting nested sitemap indexes. `0` fetches none. |
@@ -736,13 +736,13 @@ Chooses what drives the `browser` tool, for every agent at once.
 
 | Key              | Default      | Meaning                                                             |
 |------------------|--------------|---------------------------------------------------------------------|
-| `browser.engine` | `playwright` | `playwright` or `jev`. Any other value is refused when you save it. |
+| `browser.engine` | `playwright` | `playwright` or `jev`. JClaw refuses any other value when you save it. |
 
 **Playwright**, the default, works as it always has: the agent's own model reads the page and writes CSS selectors and JavaScript, one tool call per step.
 
-**Jev** hands the steps to TypeSafe AI's Jev model. The agent calls `run` with a URL and a goal, and Jev chooses each click, text entry, dropdown choice and scroll until it judges the goal done or blocked. Each step is one request to Jev rather than a round of the agent's own model. The agent's own model still writes any text that is typed. Jev needs a TypeSafe API key, set in [Decision Providers](#settings-decision-providers) because the [Model Router](#settings-model-router)'s JEV classifier uses the same key; with Jev selected and no key set, this section links there and agents keep the Playwright actions. See [Jev mode](/guide#skills-tools-mcp-jev-mode) for what the agent sees.
+**Jev** hands the steps to TypeSafe AI's Jev model. The agent calls `run` with a URL and a goal, and Jev chooses each click, text entry, dropdown choice and scroll until it judges the goal done or blocked. Each step is one request to Jev, rather than a round of the agent's own model. The agent's own model still writes any text that is typed. Jev needs a TypeSafe API key, set in [Decision Providers](#settings-decision-providers) because the [Model Router](#settings-model-router)'s JEV classifier uses the same key; with Jev selected and no key set, this section links there and agents keep the Playwright actions. See [Jev mode](/guide#skills-tools-mcp-jev-mode) for what the agent sees.
 
-With Jev, every step sends TypeSafe AI the goal, the page's address and title, what is visible on it (its text, element labels and form values, but not hidden password fields) and the text typed earlier in the run, and TypeSafe may record or retain them. Keep Playwright for pages whose content must not leave this instance. Switching back to Playwright leaves the key in Decision Providers, so you can switch again without re-entering it.
+With Jev, every step sends TypeSafe AI the goal, the page's address and title, what is visible on it (its text, element labels and form values, but not hidden password fields) and the text typed earlier in the run, and TypeSafe may record or retain them. Keep Playwright for pages whose content must not leave this instance. Switching back to Playwright leaves the key in Decision Providers, so you can switch again without entering it again.
 
 ### Browser components
 
@@ -765,14 +765,14 @@ Three knobs for the [Tasks](/guide#tasks) subsystem:
 | Key                       | Default | Meaning                                                                                                |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------|
 | `retentionDays`           | 30      | Days a terminal task (`COMPLETED` / `FAILED` / `CANCELLED` / `LOST`) stays in the DB before `TaskCleanupJob` hard-deletes it along with its run history. `0` disables auto-cleanup entirely. Active tasks (`PENDING` / `ACTIVE` / `RUNNING`) are never touched. Max: 3650 (≈10 years). |
-| `defaultTimezone`         | *(unset)* | IANA timezone applied to `CRON` / `SCHEDULED` tasks that don't specify their own. Unset, tasks follow the [Timezone](#settings-timezone) setting (`app.timezone`); set it only to run tasks in a different zone. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
-| `fireMaxDurationSeconds`  | 600     | Longest one task run may take. When it elapses the run is cancelled at its next safe point, so a wedged run cannot go on for ever. `0` turns the limit off. |
+| `defaultTimezone`         | *(unset)* | IANA timezone applied to `CRON` / `SCHEDULED` tasks that do not specify their own. Unset, tasks follow the [Timezone](#settings-timezone) setting (`app.timezone`); set it only to run tasks in a different zone. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
+| `fireMaxDurationSeconds`  | 600     | Longest one task run may take. When it elapses JClaw cancels the run at its next safe point, so a wedged run cannot go on forever. `0` turns the limit off. |
 
-The retention TTL is also displayed next to the [Tasks](/tasks) page title so you don't get surprised by auto-deletes.
+The retention TTL is also shown next to the [Tasks](/tasks) page title, so auto-deletes do not surprise you.
 
 ## Skills Promotion
 
-LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) page. Promoted skills run an LLM pass that redacts embedded secrets and personal data — API keys, tokens, passwords, webhook URLs, names, emails, phone numbers, usernames — replacing each with a placeholder such as `[API_KEY]`.
+LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) page. Promoted skills run an LLM pass that redacts embedded secrets and personal data (API keys, tokens, passwords, webhook URLs, names, emails, phone numbers, usernames), replacing each with a placeholder such as `[API_KEY]`.
 
 | Key                                | Default                    | Meaning                                                                       |
 |------------------------------------|----------------------------|-------------------------------------------------------------------------------|
@@ -783,7 +783,7 @@ LLM sanitization for the **promote-to-global** flow on the [Skills](/skills) pag
 
 ## Memory: Limits
 
-How many memories reach the prompt. These two counts are the *only* bound on their blocks, so between them they decide memory's entire footprint in a turn — which is why they sit here rather than in the config table alone. Both count whole memories; a value below 1 disables that block.
+How many memories reach the prompt. These two counts are the *only* bound on their blocks, so between them they decide memory's entire footprint in a turn, which is why they sit here rather than in the config table alone. Both count whole memories; a value below 1 disables that block.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
@@ -792,13 +792,13 @@ How many memories reach the prompt. These two counts are the *only* bound on the
 
 ## Memory: Embeddings
 
-Vector memory — recall finds a memory by meaning rather than wording, and capture recognizes a fact you already stored even when you phrase it differently. Off by default; with it off memory still works, falling back to keyword matching for both recall and duplicate detection.
+Vector memory. Recall finds a memory by meaning rather than wording, and capture recognizes a fact you already stored even when you phrase it differently. Off by default; with it off memory still works, falling back to keyword matching for both recall and duplicate detection.
 
-Enable the toggle, then pick a provider and model. **Only providers in the Local section of [LLM Providers](#settings-llm-providers) are offered.** Embedding a memory sends its full text to the provider, so it has to run on hardware you control for memory text not to leave it; the backend rejects any other provider even if the key is set directly through `POST /api/config`. If no local provider is configured the panel says so instead of listing models.
+Enable the toggle, then pick a provider and model. **Only providers in the Local section of [LLM Providers](#settings-llm-providers) are offered.** Embedding a memory sends its full text to the provider, so it has to run on hardware you control for memory text not to leave it; the backend rejects any other provider even if the key is set directly through `POST /api/config`. If no local provider is configured, the panel says so instead of listing models.
 
 The classification is yours to make, not something read off the base URL. An address cannot answer it in either direction: a server on a VPN or tailnet looks remote (Tailscale's `100.64.0.0/10` is shared carrier-NAT space, indistinguishable from another subscriber's), while a cloud API behind a local proxy looks local but runs someone else's model. You say which providers you host.
 
-Models are discovered live from the provider rather than read from the stored catalog, because embedding models generally aren't registered there. Saving is gated on a probe that confirms the model actually embeds and records its dimension. Changing the model later marks the corpus **needs re-embedding** and offers a re-embed action that rewrites existing vectors against the new model.
+JClaw discovers models live from the provider rather than reading them from the stored catalog, because embedding models generally are not registered there. Saving is gated on a probe that confirms the model actually embeds and records its dimension. Changing the model later marks the corpus **needs re-embedding** and offers a re-embed action that rewrites existing vectors against the new model.
 
 ## Memory: Reranker
 
@@ -814,30 +814,30 @@ Restricted to the same providers as embeddings, for the same reason: the reranke
 
 ## Tool Approvals
 
-What a dangerous action does when it can't reach you for approval. It covers every action the approval gate holds — the shell tool, launching a coding-harness subagent, installing an app, a write through the `jclaw_api` tool, printing to an address that is neither a found printer nor your default, and calls to an MCP server marked as needing approval, among them — and it is instance-wide: there is no per-agent override.
+What a dangerous action does when it cannot reach you for approval. It covers every action the approval gate holds (among them the shell tool, launching a coding-harness subagent, installing an app, a write through the `jclaw_api` tool, printing to an address that is neither a found printer nor your default, and calls to an MCP server marked as needing approval), and it is instance-wide: there is no per-agent override.
 
 | Key | Default | Meaning |
 |-----|---------|---------|
-| `tool.approval.offChannelPolicy` | `allow` | `allow`, `ask`, or `deny` — see below. |
+| `tool.approval.offChannelPolicy` | `allow` | `allow`, `ask`, or `deny` (see below). |
 | `telegram.approval.timeout-seconds` | 300 | How long an approval prompt in Telegram or Slack waits for your answer before it expires unanswered. Minimum 1. |
 
-This setting is a **fallback, not a replacement for the approval prompt**. When *someone else* messages the agent on Telegram or Slack and that agent has a working binding, you are asked in that chat regardless of what is set here. Your own messages are not prompted — the channel already established that the sender was you — so this policy is what decides them:
+This setting is a **fallback, not a replacement for the approval prompt**. When *someone else* messages the agent on Telegram or Slack and that agent has a working binding, you are asked in that chat regardless of what is set here. Your own messages are not prompted (the channel already established that the sender was you), so this policy is what decides them:
 
 | Who sent the turn | `allow` | `ask` | `deny` |
 |--------|---------|-------|--------|
-| You — the web UI, or a Telegram/Slack message the channel proves is yours | Runs. | Sends a confirmation to the agent's bound Telegram DM. | Refused. |
+| You (the web UI, or a Telegram/Slack message the channel proves is yours) | Runs. | Sends a confirmation to the agent's bound Telegram DM. | Refused. |
 | Someone else, on a channel that can reach you | Prompted in that chat. | Prompted in that chat. | Prompted in that chat. |
-| Someone else with no way to ask — WhatsApp, a binding that cannot prompt, or a task whose origin was never recorded | Refused. | Sends a confirmation to the bound Telegram DM; refused if there is none. | Refused. |
+| Someone else with no way to ask (WhatsApp, a binding that cannot prompt, or a task whose origin was never recorded) | Refused. | Sends a confirmation to the bound Telegram DM; refused if there is none. | Refused. |
 
 :::gotcha
-`allow` only ever loosens **your own** turns. Someone else on a channel that can reach you is prompted either way, and one that cannot fails closed under both `allow` and `deny` — so raising the setting cannot weaken it. Only `ask` gives an unaskable origin any route through, and only by confirming with you first.
+`allow` only ever loosens **your own** turns. Someone else on a channel that can reach you is prompted either way, and one that cannot fails closed under both `allow` and `deny`, so raising the setting cannot weaken it. Only `ask` gives an unaskable origin any route through, and only by confirming with you first.
 
-Separately, an agent you have granted **always allow** for a tool runs it with no prompt on your own turns — the web UI, or a Telegram/Slack message the channel proves is yours. That standing grant is checked before this policy and overrides it — so if an agent stopped asking you, a grant is why, not this setting. It never covers someone else's turn, which is prompted or refused as the table above says.
+Separately, an agent you have granted **always allow** for a tool runs it with no prompt on your own turns (the web UI, or a Telegram/Slack message the channel proves is yours). JClaw checks that standing grant before this policy, and the grant overrides this policy. So if an agent stopped asking you, a grant is why, not this setting. A standing grant never covers someone else's turn, which is prompted or refused as the table above says.
 
-A standing grant is created when you tap **always allow** on an approval prompt, and it lasts until you revoke it. Tap it only for a tool you are content for that agent to run on your behalf without asking.
+JClaw creates a standing grant when you tap **always allow** on an approval prompt, and it lasts until you revoke it. Tap it only for a tool you are content for that agent to run on your behalf without asking.
 :::
 
-Under its two settings rows, the panel lists every standing grant: how many there are, and which tools each agent holds, with a link to that agent. The list is read-only — revoke a grant from the **Standing Tool Approvals** block on the agent's own [Agents](/agents) page.
+Under its two settings rows, the panel lists every standing grant: how many there are, and which tools each agent holds, with a link to that agent. The list is read-only; revoke a grant from the **Standing Tool Approvals** block on the agent's own [Agents](/agents) page.
 
 ## Shell Execution
 
@@ -847,31 +847,31 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on each
 |--------------------------------|---------|------------------------------------------------------------------------------------------------------|
 | `shell.allowlist`              | seeded list | Comma-separated command names the agent may run. A command passes when its first word, or that word's file name, is listed; arguments are not checked. First start seeds common commands (`git`, `ls`, `grep`, `curl`, `python3`, `node`, …). |
 | `shell.defaultTimeoutSeconds`  | 30      | Wall-clock budget for a command whose call sets no timeout (1–300 s in the panel). A call may set its own, capped at `shell.maxTimeoutSeconds` (300). |
-| `shell.maxTimeoutSeconds`      | 300     | The longest timeout a call may set; a longer one is cut to this. Has no row in the panel — set it with `POST /api/config`. |
-| `shell.maxOutputBytes`         | 102400  | How much of a command's output reaches the agent (100 KB); the rest is cut, with a note giving the full length. Has no row in the panel — set it with `POST /api/config`. |
-| `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Set it with the **sandbox** control: *Off*, *Untrusted channels only* or *Every run*. A save of any other value is refused. When this host has no `sandbox-exec` (macOS) or `bwrap` (Linux), the control says so: with the key on, runs are then refused rather than run unconfined. |
+| `shell.maxTimeoutSeconds`      | 300     | The longest timeout a call may set; JClaw cuts a longer one to this. Has no row in the panel; set it with `POST /api/config`. |
+| `shell.maxOutputBytes`         | 102400  | How much of a command's output reaches the agent (100 KB); the rest is cut, with a note giving the full length. Has no row in the panel; set it with `POST /api/config`. |
+| `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Set it with the **sandbox** control: *Off*, *Untrusted channels only* or *Every run*. JClaw refuses a save of any other value. When this host has no `sandbox-exec` (macOS) or `bwrap` (Linux), the control says so: with the key on, runs are then refused rather than run unconfined. |
 
 :::gotcha
-The allowlist is the safety floor for shell access, and the seeded list is broad: it includes interpreters and network tools such as `python3`, `node`, `curl` and `wget`. Trim it to what your agents need, and be deliberate about what you add. Emptying it, with no per-agent **Bypass allowlist**, means agents can't run anything via the shell tool.
+The allowlist is the safety floor for shell access, and the seeded list is broad: it includes interpreters and network tools such as `python3`, `node`, `curl` and `wget`. Trim it to what your agents need, and be deliberate about what you add. Emptying it, with no per-agent **Bypass allowlist**, means agents cannot run anything via the shell tool.
 :::
 
 `shell.sandbox` covers `exec`, `diarize_audio`'s ffmpeg extraction, and the ffmpeg transcode of an audio attachment on its way to a model. On macOS the process runs under `sandbox-exec`: writes are denied outside the agent's workspace and the system temp directories (the two ffmpeg runs get only their temp directory), and reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube` and `~/.netrc` are refused. On Linux it runs under `bwrap`, which builds the visible filesystem from nothing, so those secrets are absent rather than denied.
 
 :::gotcha
-The sandbox bounds **reach**, not grammar: the allowlist above is unchanged, so `echo hi; rm -rf ~/Documents` still passes it and still runs both statements — the `rm` now fails on every path outside the workspace. It also fails closed. With the key on and no mechanism on the host (native Windows, or a machine missing `sandbox-exec`/`bwrap`), the run is refused rather than launched unconfined.
+The sandbox bounds **reach**, not grammar: the allowlist above is unchanged, so `echo hi; rm -rf ~/Documents` still passes it and still runs both statements; the `rm` now fails on every path outside the workspace. It also fails closed. With the key on and no mechanism on the host (native Windows, or a machine missing `sandbox-exec`/`bwrap`), JClaw refuses the run rather than launching it unconfined.
 :::
 
 ## Malware and Virus Scanners
 
-Hash-based reputation lookups that scan every binary inside a skill before it's installed. Each scanner hashes the file with SHA-256 and asks an external service whether that hash appears in its known-malware catalog — **file bytes never leave the host**.
+Hash-based reputation lookups that scan every binary inside a skill before it is installed. Each scanner hashes the file with SHA-256 and asks an external service whether that hash appears in its known-malware catalog. **File bytes never leave the host.**
 
-Multiple scanners run independently and compose under OR: a skill is rejected if any enabled scanner flags any binary. A scanner is only active when both **enabled** is on *and* its API key is configured. Each row links to the provider's signup page.
+JClaw runs multiple scanners independently and they compose under OR: a skill is rejected if any enabled scanner flags any binary. A scanner is only active when both **enabled** is on *and* its API key is configured. Each row links to the provider's signup page.
 
 Off by default; turn on for environments where users can upload arbitrary skill bundles.
 
 ## Source-only controls
 
-Two operator controls have no panel on this page. They're set and read through the API rather than the UI, so they're listed here to keep them findable.
+Two operator controls have no panel on this page. They are set and read through the API rather than the UI, so they are listed here to keep them findable.
 
 | Key / endpoint            | Default        | Meaning                                                                                       |
 |---------------------------|----------------|-----------------------------------------------------------------------------------------------|
@@ -887,24 +887,24 @@ curl -X POST http://localhost:9000/api/config \
   -d '{"key": "web_fetch.allowlist", "value": "example.com, docs.example.org"}'
 ```
 
-An entry matches that exact host and any subdomain of it, so `example.com` covers `docs.example.com` but not `notexample.com`. The check runs on the initial URL **and on every redirect hop**, so an allowed host can't bounce a fetch onward to one you never listed. Delete the key (or set it blank) to go back to unrestricted.
+An entry matches that exact host and any subdomain of it, so `example.com` covers `docs.example.com` but not `notexample.com`. The check runs on the initial URL **and on every redirect hop**, so an allowed host cannot bounce a fetch onward to one you never listed. Delete the key (or set it blank) to go back to unrestricted.
 
 :::gotcha
-The allowlist is off by default, and that default is the shipped state on every install. `SsrfGuard` already blocks `web_fetch` from reaching loopback, link-local and private ranges — but nothing constrains what *leaves*. An agent following a prompt injection can encode conversation content into a URL on any public host it's allowed to reach. If that matters for your install, set the allowlist; leaving it empty is a choice, not a safe default.
+The allowlist is off by default, and that default is the shipped state on every install. `SsrfGuard` already blocks `web_fetch` from reaching loopback, link-local and private ranges, but nothing constrains what *leaves*. An agent following a prompt injection can encode conversation content into a URL on any public host it is allowed to reach. If that matters for your install, set the allowlist; leaving it empty is a choice, not a safe default.
 :::
 
 For the pool endpoint, `awaiting` is the number that signals trouble: a sustained non-zero value means callers are blocking on `db.pool.timeout` waiting for a connection. `active` sitting near `max` is normal on a busy system.
 
 ## Unmanaged keys
 
-A read-only diagnostic list that appears only when the Config DB contains keys not owned by any section above. Usually stale rows from a prior schema or mid-migration state — a signal that something needs cleanup, not a place to add new config.
+A read-only diagnostic list that appears only when the Config DB contains keys not owned by any section above. Usually these are stale rows from a prior schema or mid-migration state. The list is a signal that something needs cleanup, not a place to add new config.
 
 ---
 
 ## Tips
 
 :::tip Add keys you actually need
-The provider list is long. Don't enable a provider you're not using — every enabled provider with a missing key becomes a "configure me" badge somewhere in the UI. Start with one, get an agent working end-to-end, then add more.
+The provider list is long. Do not enable a provider you are not using; every enabled provider with a missing key becomes a "configure me" badge somewhere in the UI. Start with one, get an agent working end to end, then add more.
 :::
 
 :::note Restart sensitivity
@@ -913,6 +913,6 @@ Most settings take effect immediately. A handful (some OCR backends, a few provi
 
 ## Where to go next
 
-- [Getting Started](/guide#getting-started) — the canonical first-time setup walkthrough.
-- [Agents](/guide#agents) — once a provider is configured, the next stop.
-- [Logs & Dashboard](/guide#logs-and-dashboard) — for operator visibility into what JClaw is doing.
+- [Getting Started](/guide#getting-started): the canonical first-time setup walkthrough.
+- [Agents](/guide#agents): once a provider is configured, the next stop.
+- [Logs & Dashboard](/guide#logs-and-dashboard): for operator visibility into what JClaw is doing.

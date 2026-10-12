@@ -1,11 +1,11 @@
 # Skills, Tools & MCP Servers
 
-Out of the box, an agent can read your messages, reason, and reply. To do anything else — search the web, run a shell command, query Postgres, write a file, talk to your team's Jira — it needs **capabilities**. This section covers the three ways JClaw lets you add capabilities to an agent.
+Out of the box, an agent can read your messages, reason, and reply. To do anything else (search the web, run a shell command, query Postgres, write a file, talk to your team's Jira) it needs **capabilities**. This section covers the three ways JClaw lets you add capabilities to an agent.
 
 | Page                             | What it provides                                                  |
 |----------------------------------|-------------------------------------------------------------------|
 | [Skills](/skills)                | Reusable instruction bundles you attach to agents (markdown the agent reads when a task calls for it). |
-| [Tools](/tools)                  | First-party capabilities baked into JClaw (web fetch, shell, file system, search, etc.). |
+| [Tools](/tools)                  | First-party capabilities built into JClaw (web fetch, shell, file system, search, etc.). |
 | [MCP Servers](/mcp-servers)      | External servers that expose additional tools via the Model Context Protocol. |
 
 Each page is a catalog. The actual binding of "which agent gets which capability" happens on the [Agents](/agents) page.
@@ -14,39 +14,39 @@ Each page is a catalog. The actual binding of "which agent gets which capability
 
 ## Skills
 
-A skill is a chunk of markdown — instructions, examples, a methodology — that an agent reads when a task calls for it; its system prompt lists each attached skill's name and description, not the body. Use skills for capabilities you want to reuse across multiple agents:
+A skill is a chunk of markdown: instructions, examples, a methodology. An agent reads it when a task calls for it. Its system prompt lists each attached skill's name and description, not the body. Use skills for capabilities you want to reuse across multiple agents:
 
 - A coding style guide.
 - A research methodology ("always cite, always cross-check").
 - An output template ("respond in JSON with these fields").
 - A persona ("you are a careful, thorough technical reviewer").
 
-Skills can also contribute shell commands to an agent's effective allowlist (visible on the [Agents](/guide#agents) edit form under *Shell Allowlist*) — so a "git wrangler" skill can grant the commands it needs without you hand-editing the global allowlist.
+Skills can also contribute shell commands to an agent's effective allowlist (visible on the [Agents](/guide#agents) edit form under *Shell Allowlist*). So a "git wrangler" skill can grant the commands it needs, without you editing the global allowlist by hand.
 
-### Global skills vs Agent skills
+### Global skills vs agent skills
 
 The [Skills](/skills) page splits into two columns:
 
-- **Global Skills** (left) — the library you've built. Drag any global skill onto an agent on the right to assign it.
-- **Agents** (right) — every agent, with the skills currently attached to each.
+- **Global Skills** (left): the library you have built. Drag any global skill onto an agent on the right to assign it.
+- **Agents** (right): every agent, with the skills currently attached to each.
 
-Assigning a skill runs two checks before anything is copied, and a failure shows as a banner on the page. First, every tool the skill's `tools:` frontmatter lists must exist and be enabled for that agent — otherwise you get *Cannot add skill '…' to agent '…': missing tools — disabled: […]; unknown: […]. Enable the required tools for this agent and try again.* Second, every binary file in the skill is malware-scanned by SHA-256 hash with the scanners configured in [Settings → Malware and Virus Scanners](/guide#settings-malware-and-virus-scanners), and a hit refuses with *malware detected*. With no scanner enabled the scan is skipped, and a scanner that errors or times out fails open, so the skill is added; verdicts are logged under category `scanner` in [Logs](/logs). Dragging a skill the agent already holds at the same or a newer version only re-enables it, and neither check runs.
+Assigning a skill runs two checks before anything is copied, and a failure shows as a banner on the page. First, every tool the skill's `tools:` frontmatter lists must exist and be enabled for that agent. Otherwise you get *Cannot add skill '…' to agent '…': missing tools — disabled: […]; unknown: […]. Enable the required tools for this agent and try again.* Second, JClaw malware-scans every binary file in the skill by SHA-256 hash, with the scanners configured in [Settings → Malware and Virus Scanners](/guide#settings-malware-and-virus-scanners), and a hit refuses with *malware detected*. With no scanner enabled, the scan is skipped. A scanner that errors or times out fails open. In both cases the skill is added. Verdicts are logged under category `scanner` in [Logs](/logs). Dragging a skill the agent already holds at the same or a newer version only re-enables it, and neither check runs.
 
-You can also **promote** an agent-specific skill back into the global library by dragging it from the right column to the left. This is the workflow for refining a skill on one agent first, then making it reusable everywhere. Promotion routes the skill through an LLM sanitization pass — see [Settings → Skills Promotion](/guide#settings) for the provider/model/timeout knobs.
+You can also **promote** an agent-specific skill back into the global library by dragging it from the right column to the left. This is the workflow for refining a skill on one agent first, then making it reusable everywhere. Promotion routes the skill through an LLM sanitization pass; see [Settings → Skills Promotion](/guide#settings) for the provider/model/timeout knobs.
 
 ### Creating a skill
 
-Skills aren't written on this page. Two ways to get one:
+Skills are not written on this page. Two ways to get one:
 
-- **Browse catalog** — the button above the Global Skills column opens the importable-skills catalogs: static ones (the GitHub/Mastra index, with search, sort and category facets) and the dynamic ClawHub registry (search plus paging). **Import** pulls a skill straight into **Global Skills** in one click.
-- **Author it** with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body the agent reads when it uses the skill). Once it's good, drag it from the agent's column to **Global Skills** to promote it for reuse.
+- **Browse catalog**: the button above the Global Skills column opens the importable-skills catalogs: static ones (the GitHub/Mastra index, with search, sort and category facets) and the dynamic ClawHub registry (search plus paging). **Import** pulls a skill straight into **Global Skills** in one click.
+- **Author it** with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill, and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body the agent reads when it uses the skill). Once it is good, drag it from the agent's column to **Global Skills** to promote it for reuse.
 
 ### Viewing
 
-Click any skill row to open a **read-only** viewer of its files. A global skill can be **renamed** inline (double-click its name in the Global Skills column) and **deleted** from its row; to change its content, edit it via the skill-creator skill in an agent's workspace (then re-promote if it's a global skill). Each agent runs its own copy of a skill, made when the skill was assigned, so a re-promoted global skill reaches an agent only once you assign it to that agent again; past conversations keep the prompt they were created with.
+Click any skill row to open a **read-only** viewer of its files. A global skill can be **renamed** inline (double-click its name in the Global Skills column) and **deleted** from its row; to change its content, edit it via the skill-creator skill in an agent's workspace (then re-promote if it is a global skill). Each agent runs its own copy of a skill, made when the skill was assigned. So a re-promoted global skill reaches an agent only once you assign it to that agent again; past conversations keep the prompt they were created with.
 
 :::tip Start broad, then split
-A skill that's too narrow gets duplicated. A skill that's too broad gets attached to agents that don't need most of it. When in doubt, start broad and split when you notice an agent ignoring half the skill's content.
+A skill that is too narrow gets duplicated. A skill that is too broad gets attached to agents that do not need most of it. When in doubt, start broad and split when you notice an agent ignoring half the skill's content.
 :::
 
 ---
@@ -56,9 +56,9 @@ A skill that's too narrow gets duplicated. A skill that's too broad gets attache
 The [Tools](/tools) page is a catalog of every built-in capability JClaw ships with. Each card shows:
 
 - **Icon and name.**
-- **Category** — `System`, `Web`, `Files`, or `Utilities`. (MCP-server tools aren't listed here — they live on the [MCP Servers](#skills-tools-mcp-mcp-servers) page.)
-- **Description** — what the tool does in one or two sentences.
-- **Functions** — the individual actions the tool exposes. Expand the card to see the per-function detail.
+- **Category**: `System`, `Web`, `Files`, or `Utilities`. (MCP-server tools are not listed here; they live on the [MCP Servers](#skills-tools-mcp-mcp-servers) page.)
+- **Description**: what the tool does in one or two sentences.
+- **Functions**: the individual actions the tool exposes. Expand the card to see the per-function detail.
 
 Use the **category pills** at the top of the page to filter, and **Expand all** / **Collapse all** to control density.
 
@@ -73,43 +73,43 @@ Tools listed here are *available*. To make a tool *active* for a specific agent:
 
 A few tools require extra setup (an API key, a workspace path, a shell allowlist entry); that config lives under the matching [Settings](/guide#settings) section.
 
-When `exec`, `filesystem`, `web_fetch` or `web_scrape` fails, the agent gets the error in three parts — what broke, what to check, and how to retry — so it can correct the call rather than repeat it.
+When `exec`, `filesystem`, `web_fetch` or `web_scrape` fails, the agent gets the error in three parts (what broke, what to check, and how to retry), so it can correct the call rather than repeat it.
 
-:::note Why isn't this just one page?
-Tools are a *catalog* and binding tools to agents is an *agent* concern. Keeping them on separate pages means the catalog stays clean as your roster of agents grows.
+:::note Why is this not just one page?
+Tools are a *catalog*, and binding tools to agents is an *agent* concern. Keeping them on separate pages means the catalog stays clean as your roster of agents grows.
 :::
 
 ### Printing
 
-The `printer` tool discovers printers on the local network and sends jobs to them, with no CUPS, no `lp`, and no OS printing subsystem — it is JVM-native end to end, so it behaves identically on macOS, Linux and Windows, and works inside a container that has no print stack at all.
+The `printer` tool discovers printers on the local network and sends jobs to them, with no CUPS, no `lp`, and no OS printing subsystem. It is JVM-native end to end, so it behaves identically on macOS, Linux, and Windows, and works inside a container that has no print stack at all.
 
 Four actions: `discover` (mDNS/Bonjour scan), `print` (a workspace file by path, or literal text), `status`, and `cancel`.
 
-Three backends are tried in order, and the order is about **how much each can tell you**, not speed:
+JClaw tries three backends in order, and the order is about **how much each can tell you**, not speed:
 
 | Backend | Port | Reports back? |
 |---|---|---|
-| IPP | 631 | Yes — job id and printer-reported state |
-| Raw socket (JetDirect) | 9100 | No — a successful write only proves the bytes left this machine |
-| LPD (RFC 1179) | 515 | Barely — a one-byte acknowledgement of receipt |
+| IPP | 631 | Yes: job id and printer-reported state |
+| Raw socket (JetDirect) | 9100 | No: a successful write only proves the bytes left this machine |
+| LPD (RFC 1179) | 515 | Barely: a one-byte acknowledgement of receipt |
 
 An agent can pass `protocol` (`IPP`, `IPPS`, `RAW` or `LPD`) to use that one backend, with no fallback.
 
-That difference is surfaced, not hidden. When a job goes out over raw socket or LPD, the tool's reply says explicitly that the backend cannot confirm the document printed. An agent reporting "printed successfully" off a blind write would be stating something it has no way to know.
+JClaw surfaces that difference rather than hiding it. When a job goes out over raw socket or LPD, the tool's reply says explicitly that the backend cannot confirm the document printed. An agent reporting "printed successfully" off a blind write would be stating something it has no way to know.
 
 **Job options.** `sides` (one-sided, two-sided-long-edge, two-sided-short-edge), `color` (color, monochrome, auto) and `media` (a paper size like `iso_a4_210x297mm`, or a tray name the printer advertises). Omit any of them to use the job options saved in [Settings → Printers](/guide#settings-printers), then the printer's own default.
 
-These are **IPP-only** — they travel as RFC 8011 job-template attributes, and the byte-stream backends have nowhere to put them. If a job asks for double-sided and then falls back to raw socket or LPD, it prints single-sided; the tool says so explicitly rather than letting you discover it from the paper.
+These options are **IPP-only**. They travel as RFC 8011 job-template attributes, and the byte-stream backends have nowhere to put them. If a job asks for double-sided and then falls back to raw socket or LPD, it prints single-sided; the tool says so explicitly rather than letting you discover it from the paper.
 
 :::caution Printing is physical and irreversible
-Paper comes out of a device in someone's room and there is no undo. The tool never guesses a target — `print` goes to the printer the agent names, or to the default saved in [Settings → Printers](/guide#settings-printers), and refuses when there is neither — and it is **off by default for every agent**. Turn it on deliberately, per agent, on the [Agents](/agents) page.
+Paper comes out of a device in someone's room and there is no undo. The tool never guesses a target. `print` goes to the printer the agent names, or to the default saved in [Settings → Printers](/guide#settings-printers), and refuses when there is neither. The tool is **off by default for every agent**. Turn it on deliberately, per agent, on the [Agents](/agents) page.
 :::
 
 If `discover` returns nothing, that is often the network rather than the printer: mDNS is link-local, so it is routinely blocked on VPNs and in containers without a multicast route. Pass the printer's address as `host` to bypass discovery. An address that is neither a discovered printer nor the saved default is treated as a dangerous action and goes through the same approval gate as `exec` (see [Settings → Tool Approvals](/guide#settings-tool-approvals)); a link-local, multicast or `0.0.0.0` address is refused outright.
 
 ### Image generation
 
-`generate_image` draws an image from a text prompt and shows it inline in the reply. It is **off by default for every agent**, and it works only once a backend is chosen in [Settings → Image Generation](/guide#settings-image-generation); until then a call returns an error asking you to pick one. An agent can set a size or an aspect ratio, restyle the image the user last uploaded in the conversation (`use_reference_image`), and write a copy to its workspace with `save_to`.
+`generate_image` draws an image from a text prompt and shows it inline in the reply. It is **off by default for every agent**, and it works only once you choose a backend in [Settings → Image Generation](/guide#settings-image-generation); until then a call returns an error asking you to pick one. An agent can set a size or an aspect ratio, restyle the image the user last uploaded in the conversation (`use_reference_image`), and write a copy to its workspace with `save_to`.
 
 On the Replicate backend, `model` picks the model for one image, as an owner/name slug such as `black-forest-labs/flux-kontext-pro`; the configured model is left as it is. The call is refused, and nothing is sent to the provider, when the backend is not Replicate, when the slug is not in the Replicate catalog (the refusal lists the ones that are), or when that catalog cannot be loaded.
 
@@ -117,7 +117,7 @@ On the Replicate backend, `model` picks the model for one image, as an owner/nam
 
 ### Web fetching and scraping
 
-`web_fetch` reads one page and `web_scrape` reads a page and the pages it links to. Both return readable Markdown by default, and an agent can ask for something else:
+`web_fetch` reads one page. `web_scrape` reads a page and the pages it links to. Both return readable Markdown by default, and an agent can ask for something else:
 
 - **`format`**: `text` for the content without Markdown markup, or `json` for a record per page (address, which fetcher succeeded, content, and for a single page its links). `web_fetch` also offers `html` for the raw page source.
 - **`extract`**: named values instead of the whole page. Each field is a CSS selector, with `@attr` to read an attribute, for example `{"price": ".price", "next": "a.next@href"}`. Every page comes back as those fields only, which keeps a crawl small.
@@ -134,12 +134,12 @@ A job can be paused and resumed. Pausing lets the pages being fetched finish and
 
 The `browser` tool drives a headless Chromium for pages that need JavaScript, and by default the agent's own model steers it one selector at a time. If this machine does not have the browser yet, the first call downloads it and the chat shows the progress under that reply; [Settings → Browser](/guide#settings-browser) can download it ahead of time. When [Settings → Browser](/guide#settings-browser) selects Jev and a TypeSafe key is set in [Settings → Decision Providers](/guide#settings-decision-providers), the tool changes shape. It offers only two actions:
 
-- **`run`** with a `url` and a `goal`, both required. JClaw opens the URL through the same checks as `navigate`, then Jev works through the goal: clicking, typing, choosing from dropdowns, scrolling and waiting, one decision at a time. Jev can act only on what it saw on the page. Nothing it answers becomes a selector or a script, and every action is checked against the current page just before it happens.
+- **`run`** with a `url` and a `goal`, both required. JClaw opens the URL through the same checks as `navigate`, then Jev works through the goal: clicking, typing, choosing from dropdowns, scrolling and waiting, one decision at a time. Jev can act only on what it saw on the page. Nothing it answers becomes a selector or a script, and JClaw checks every action against the current page just before it happens.
 - **`close`**, as before.
 
 The other actions (`navigate`, `click`, `fill`, `getText`, `screenshot`, `evaluate`) are hidden while Jev is selected, and calling one returns an error listing `run` and `close`.
 
-Jev follows explicit instructions best, so the tool asks the agent for a step-by-step goal that names the controls: fill the fields, submit the search, set the filters, then open the result. "Use the destination search: type Lisbon, submit it, set the category to Design, tick Free cancellation, then open Casa Flora" works where "Find Design stays in Lisbon" can leave the search unsubmitted. Text is written by the calling agent's own model from the goal, so the goal should carry every value to enter.
+Jev follows explicit instructions best, so the tool asks the agent for a step-by-step goal that names the controls: fill the fields, submit the search, set the filters, then open the result. "Use the destination search: type Lisbon, submit it, set the category to Design, tick Free cancellation, then open Casa Flora" works where "Find Design stays in Lisbon" can leave the search unsubmitted. The calling agent's own model writes the text, from the goal, so the goal should carry every value to enter.
 
 The model answers with `{"text": "…"}`, at most 2,000 characters. Reasoning before that object, or a code fence around it, is ignored. Anything after it, a key other than `text`, or an empty value types nothing and ends the run with an error. When the goal gives no value for a field, the model answers `{"text": null}`, and the run ends with an error saying so; put the value in the goal and run again.
 
@@ -161,11 +161,11 @@ Jev never sees or fills password fields, so logins do not work in Jev mode: swit
 
 ### Browser network checks
 
-The `browser` tool's Chromium runs behind a proxy inside JClaw, and every TCP connection it opens is put through the SSRF guard before it is made. The guard refuses loopback, link-local (including the cloud metadata address) and private-network addresses. Because the check sits below the page rather than in it, it covers the pages the browser loads, their resources and redirects, pop-up windows and new tabs, WebSockets, whatever a worker or a shared worker opens, and requests from cross-site frames — and nothing on the page can reach around a check that is not on the page. WebRTC is UDP, which the proxy cannot carry, so the browser is started with WebRTC's non-proxied UDP switched off. A page can still create a peer connection, and a call will simply never connect: nothing reaches an address — on the internet, on your network, or on this machine — without going through the check.
+The `browser` tool's Chromium runs behind a proxy inside JClaw, and JClaw puts every TCP connection that Chromium opens through the SSRF guard before it is made. The guard refuses loopback, link-local (including the cloud metadata address) and private-network addresses. Because the check sits below the page rather than in it, it covers the pages the browser loads, their resources and redirects, pop-up windows and new tabs, WebSockets, whatever a worker or a shared worker opens, and requests from cross-site frames. Nothing on the page can reach around a check that is not on the page. WebRTC is UDP, which the proxy cannot carry, so the browser is started with WebRTC's non-proxied UDP switched off. A page can still create a peer connection, and a call will simply never connect: nothing reaches an address (on the internet, on your network, or on this machine) without going through the check.
 
 Pop-ups are closed as soon as they open, because the tool never reads them. A link that opens in a new tab is therefore not followed. The result of the action that opened the tab says so and gives the tab's address, which the agent can `navigate` to (or `run`, in Jev mode). A blank tab, a tab at an address that is not http(s) such as `blob:`, and a tab whose address the guard refused are reported without one. Results also name the hosts of any requests the page made that the guard refused since the previous result. An action that opens a tab can take up to 5 seconds longer while the tool waits for the tab to load, and a tab slower than that is reported on a later result instead.
 
-The browser's own event-log lines name hosts only, never a full address. A browser session logs at most 20 refusal lines and 10 closed-tab lines, then one line for each saying that later ones are not logged. For requests the page makes, a host is logged as a warning the first time a request to it is refused as a blocked address, and as info the first time one is refused for another reason, such as the host not resolving. A closed tab is logged once per host; all blank tabs share one of the 10 lines, and all refused tabs another. A URL passed to `navigate` or `run` that the guard refuses is reported only in the result.
+The browser's own event-log lines name hosts only, never a full address. A browser session logs at most 20 refusal lines and 10 closed-tab lines, then one line for each saying that later ones are not logged. For requests the page makes, JClaw logs a host as a warning the first time a request to it is refused as a blocked address, and as info the first time one is refused for another reason, such as the host not resolving. JClaw logs a closed tab once per host; all blank tabs share one of the 10 lines, and all refused tabs another. A URL passed to `navigate` or `run` that the guard refuses is reported only in the result.
 
 Service workers are kept from running, since a worker's own requests would bypass the page-level URL check the tool applies on top of the proxy.
 
@@ -173,7 +173,7 @@ Every host is pinned to the address that was checked, not just the one in the UR
 
 ## MCP Servers
 
-The Model Context Protocol (MCP) is an open standard that lets external programs expose tools to LLM apps like JClaw. Examples: a server that wraps your team's Jira instance, one that talks to Postgres, one that drives a browser. An MCP server's tools are managed on the [MCP Servers](/mcp-servers) page — not the Tools page, which lists only JClaw's first-party tools.
+The Model Context Protocol (MCP) is an open standard that lets external programs expose tools to LLM apps such as JClaw. Examples: a server that wraps your team's Jira instance, one that talks to Postgres, one that drives a browser. An MCP server's tools are managed on the [MCP Servers](/mcp-servers) page, not the Tools page, which lists only JClaw's first-party tools.
 
 The [MCP Servers](/mcp-servers) page is where you register and configure those servers. Once registered, an MCP server's tools become available to any agent that has the server switched on in its config.
 
@@ -181,8 +181,8 @@ The [MCP Servers](/mcp-servers) page is where you register and configure those s
 
 When you click **Add server**, you pick one:
 
-- **STDIO** — JClaw launches the server as a local subprocess and talks to it over stdin/stdout. Best for servers distributed as command-line tools (npm packages, Python scripts).
-- **HTTP (Streamable)** — JClaw connects to a running server over HTTP using MCP's streamable-HTTP transport. Best for hosted servers, or anything you'd rather run independently.
+- **STDIO**: JClaw launches the server as a local subprocess and talks to it over stdin/stdout. Best for servers distributed as command-line tools (npm packages, Python scripts).
+- **HTTP (Streamable)**: JClaw connects to a running server over HTTP using MCP's streamable-HTTP transport. Best for hosted servers, or anything you would rather run independently.
 
 ### STDIO configuration
 
@@ -205,18 +205,18 @@ Once saved, a header value and an environment variable whose name marks it as a 
 
 ### Testing a server
 
-Each row has a **Test connection** button, and the add/edit form has one too. JClaw connects, lists the server's tools, and reports back, including which MCP protocol version it connected with and whether the server offers 2026-07-28. A successful test means the server is reachable and speaks MCP; if it fails, the error message is surfaced inline so you can fix the config. The test uses a connection of its own and leaves the live one alone.
+Each row has a **Test connection** button, and the add/edit form has one too. JClaw connects, lists the server's tools, and reports back, including which MCP protocol version it connected with and whether the server offers 2026-07-28. A successful test means the server is reachable and speaks MCP; if it fails, the error message is shown inline so you can fix the config. The test uses a connection of its own and leaves the live one alone.
 
-A successful test doesn't guarantee a server's tools will work end-to-end — you still need to attach it to an agent and try one.
+A successful test does not guarantee a server's tools will work end to end. You still need to attach it to an agent and try one.
 
 ### Protocol versions
 
 MCP has two generations of protocol: the older one, which opens every connection with a handshake, and 2026-07-28, which drops the handshake. JClaw speaks both. The version a server last connected with shows beside its status, and its edit form has a **Protocol** setting:
 
-- **Automatic** (the default) asks the server on every connect whether it speaks 2026-07-28, and uses it if so. A server that doesn't is connected the older way, at the cost of one extra round trip.
+- **Automatic** (the default) asks the server on every connect whether it speaks 2026-07-28, and uses it if so. A server that does not is connected the older way, at the cost of one extra round trip.
 - **Handshake** always connects the older way and never asks.
 
-If a server that offered 2026-07-28 then fails on it while the older protocol still works, JClaw moves it to Handshake by itself, logs a warning, and sends an [alert](/guide#settings-alerts). The form shows when and why until you change the setting; setting it back to Automatic tries 2026-07-28 again. A tool call the server refused when that happened fails with a message saying so, and is not retried for you. Use Handshake yourself for a server that answers on 2026-07-28 without an error but answers wrongly, which JClaw can't detect.
+If a server that offered 2026-07-28 then fails on it while the older protocol still works, JClaw moves it to Handshake by itself, logs a warning, and sends an [alert](/guide#settings-alerts). The form shows when and why until you change the setting; setting it back to Automatic tries 2026-07-28 again. A tool call the server refused when that happened fails with a message saying so, and is not retried for you. Use Handshake yourself for a server that answers on 2026-07-28 without an error but answers wrongly, which JClaw cannot detect.
 
 ### Binding a server to an agent
 
@@ -224,36 +224,36 @@ Same flow as tools: open [Agents](/agents), open the agent, scroll to **MCP Serv
 
 ### Enabling and disabling
 
-Each server has an **enabled** toggle. A disabled server keeps its config saved, but agents can't use its tools. Convenient when you want to temporarily silence a noisy server without losing how you set it up.
+Each server has an **enabled** toggle. A disabled server keeps its config saved, but agents cannot use its tools. This is convenient when you want to temporarily silence a noisy server without losing how you set it up.
 
 ### When a server stops answering
 
 Two independent guards keep a misbehaving server from taking a whole turn down with it:
 
-- **The connection watchdog** reacts to a transport that died. A STDIO process that exits or an HTTP server that closes the connection is reconnected with a backoff, and the server's row shows the disconnect and the last error.
-- **The circuit breaker** reacts to a server that is still connected but not answering — the case the watchdog cannot see. Every tool call has a 30 s timeout; only the connection handshake, which has to wait for a cold server to install and start, gets two minutes. Three timeouts (or other server-side failures) in a row, or half of the last ten calls, open the server's breaker; for the next 30 s every call to it fails in microseconds with an error the agent can read — `MCP server 'name' is failing fast: too many recent tool-call failures` — instead of costing another 30 s each. Two probe calls then decide whether it closes again. Each server has its own breaker, so one hung server never slows a healthy one.
+- **The connection watchdog** reacts to a transport that died. JClaw reconnects a STDIO process that exits, or an HTTP server that closes the connection, with a backoff, and the server's row shows the disconnect and the last error.
+- **The circuit breaker** reacts to a server that is still connected but not answering, the case the watchdog cannot see. Every tool call has a 30 s timeout; only the connection handshake, which has to wait for a cold server to install and start, gets two minutes. Three timeouts (or other server-side failures) in a row, or half of the last ten calls, open the server's breaker; for the next 30 s every call to it fails in microseconds with an error the agent can read, `MCP server 'name' is failing fast: too many recent tool-call failures`, instead of costing another 30 s each. Two probe calls then decide whether it closes again. Each server has its own breaker, so one hung server never slows a healthy one.
 
 A tool that runs and reports its own error (a file that does not exist, a query that fails) does not count against the breaker: the server answered, and that is tool-level semantics. A successful reconnect clears a breaker that opened on its own, since the dead client's failures say nothing about the fresh one.
 
-An MCP tool error names the server and says which of three things failed: the connection (the server never answered — its row on this page shows the connection state), the protocol (it answered with a JSON-RPC error, broke the contract, or timed out — its own log is the place to look), or the tool itself (it ran and rejected the arguments). Like the built-in tools' errors, each comes as what broke, what to check, and how to retry.
+An MCP tool error names the server and says which of three things failed: the connection (the server never answered; its row on this page shows the connection state), the protocol (it answered with a JSON-RPC error, broke the contract, or timed out; its own log is the place to look), or the tool itself (it ran and rejected the arguments). Like the built-in tools' errors, each comes as what broke, what to check, and how to retry.
 
-Once a server has been called, a bolt beside its status on the [MCP Servers](/mcp-servers) page shows its breaker's state — grey while it serves, amber while it probes, red when open. A breaker that is not serving opens a row beneath its server by itself; click the bolt to open a serving one, where you can **Isolate** it by hand — useful to take a flaky server out of an agent's reach for a cooldown without disabling it. An isolated server's tool calls fail with `isolated by the operator`, so neither the agent nor the log reads your decision as the server having broken, and a reconnect does not undo it. **Restore** lifts it early, there or from the [Dashboard](/)'s **Circuit Breakers** panel, which lists every breaker that is not serving.
+Once a server has been called, a bolt beside its status on the [MCP Servers](/mcp-servers) page shows its breaker's state: grey while it serves, amber while it probes, red when open. A breaker that is not serving opens a row beneath its server by itself; click the bolt to open a serving one, where you can **Isolate** it by hand. That is useful to take a flaky server out of an agent's reach for a cooldown without disabling it. An isolated server's tool calls fail with `isolated by the operator`, so neither the agent nor the log reads your decision as the server having broken, and a reconnect does not undo it. **Restore** lifts it early, there or from the [Dashboard](/)'s **Circuit Breakers** panel, which lists every breaker that is not serving.
 
-With [Alerts](/guide#settings-alerts) on, you're sent a message when a server's breaker opens and again when it recovers; isolating one yourself sends nothing.
+With [Alerts](/guide#settings-alerts) on, JClaw sends you a message when a server's breaker opens and again when it recovers; isolating one yourself sends nothing.
 
 :::gotcha STDIO servers run with your user's permissions
-A STDIO server is just a subprocess. It inherits the JClaw server's environment and process privileges. Only register servers you trust to run code on your behalf — the same care you'd take installing a CLI from npm. For the same reason, only you and the `main` agent can add a STDIO server or change its command, arguments or environment; any other agent calling the API is refused and can configure HTTP servers only.
+A STDIO server is just a subprocess. It inherits the JClaw server's environment and process privileges. Register only servers you trust to run code on your behalf, the same care you would take installing a CLI from npm. For the same reason, only you and the `main` agent can add a STDIO server or change its command, arguments or environment; any other agent calling the API is refused and can configure HTTP servers only.
 :::
 
 :::tip Start with the official servers
-The MCP project's GitHub org publishes a growing list of well-tested servers (filesystem, git, postgres, sqlite, fetch, time). Start there before reaching for community servers; they'll surface most of the productive workflows with the least setup overhead.
+The MCP project's GitHub org publishes a growing list of well-tested servers (filesystem, git, postgres, sqlite, fetch, time). Start there before reaching for community servers; they will surface most of the productive workflows with the least setup overhead.
 :::
 
 ---
 
 ## Where to go next
 
-You've covered the full layered model: base chat, the agents behind it, where conversations live, three flavors of "outside-the-turn" work, and three ways to extend what agents can do. The last two sections of the guide are about operating the platform:
+You have covered the full layered model: base chat, the agents behind it, where conversations live, three flavors of "outside-the-turn" work, and three ways to extend what agents can do. The last two sections of the guide are about operating the platform:
 
-- [Settings](/guide#settings) — the platform control panel where API keys and per-feature knobs live.
-- [Logs & Dashboard](/guide#logs-and-dashboard) — operator visibility into what JClaw is doing.
+- [Settings](/guide#settings): the platform control panel where API keys and per-feature knobs live.
+- [Logs & Dashboard](/guide#logs-and-dashboard): operator visibility into what JClaw is doing.

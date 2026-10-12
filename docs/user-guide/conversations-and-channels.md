@@ -1,15 +1,15 @@
 # Conversations & Channels
 
-So far this guide has been about chatting *inside the JClaw web app*. This section covers two things that extend the base loop:
+So far, this guide has covered chat inside the JClaw web app. This section covers two things that extend the base loop:
 
-- **Conversations** — every thread the platform has ever had, searchable and exportable.
-- **Channels** — how to make an agent reachable outside the web app, over Slack, Telegram, or WhatsApp.
+- **Conversations**: every thread the platform has ever had, searchable and exportable.
+- **Channels**: how to make an agent reachable outside the web app, over Slack, Telegram, or WhatsApp.
 
 JClaw separates these two concepts on purpose: a **conversation** is a thread of messages; a **channel** is the surface that thread came in on. [Chat](/chat) is the built-in surface, and external channels are the extra layer.
 
 ## Conversations
 
-The [Conversations](/conversations) page is a searchable archive of every top-level thread you've ever had — across [Chat](/chat), Slack, Telegram, and WhatsApp, plus the threads owned by [voice-mode](/guide#chat) sessions and by [app](/guide#apps) invocations. Subagent-run transcripts are owned by their parent conversation and live on the [Subagents](/subagents) page instead, not here.
+The [Conversations](/conversations) page is a searchable archive of every top-level thread you have ever had. It spans [Chat](/chat), Slack, Telegram, and WhatsApp, plus the threads owned by [voice-mode](/guide#chat) sessions and by [app](/guide#apps) invocations. Subagent-run transcripts belong to their parent conversation and live on the [Subagents](/subagents) page, not here.
 
 ### Filtering and search
 
@@ -24,151 +24,151 @@ The filter bar at the top of the page accepts free-text keywords and typed keys:
 | `peer:`      | `peer:123456789`       | The chat the thread belongs to: a Telegram user or group chat id, a Slack DM or channel id, a WhatsApp number or group id, an app's slug, or your username for web chat. |
 | `starred:`   | `starred:true`         | Only starred conversations. `starred:false` shows only unstarred ones.  |
 
-Tokens combine — `q:retro agent:scrum-bot channel:slack` shows Slack conversations from the scrum-bot agent whose messages mention "retro." Clear a filter chip with the **×** on it, or remove the token from the bar.
+Tokens combine. `q:retro agent:scrum-bot channel:slack` shows Slack conversations from the scrum-bot agent whose messages mention "retro". Clear a filter chip with the **×** on it, or remove the token from the bar.
 
 ### What each row shows
 
 | Column                | Meaning                                                                              |
 |-----------------------|--------------------------------------------------------------------------------------|
-| **Name**              | The conversation's name — its first user message (truncated) until you rename it.    |
+| **Name**              | The conversation's name: its first user message (truncated) until you rename it.    |
 | **Channel**           | Where it came in from.                                                               |
 | **Agent**             | Which agent answered.                                                                |
-| **Peer**              | The chat the thread belongs to — see `peer:` above.                                  |
+| **Peer**              | The chat the thread belongs to. See `peer:` above.                                   |
 | **Messages**          | How many messages are in the thread.                                                 |
 | **Last Activity**     | When the thread last changed.                                                        |
-| **Actions**           | Rename, Pin, **View details** (a read-only page for the thread) and **Quick preview**. |
+| **Actions**           | Rename, Pin, **View details** (a read-only page for the thread), and **Quick preview**. |
 
-Click any row to open the conversation in [Chat](/chat) (read-only if it came from a subagent run; fully editable if it's your own thread).
+Click any row to open the conversation in [Chat](/chat). It is read-only if it came from a subagent run. It is fully editable if it is your own thread.
 
-**View details** opens a read-only page for the thread: its channel, agent, peer, message count and dates, token totals (input, cached, output, average speed, cost and cache savings), then every message. Assistant replies render as Markdown, math included, the same as in Chat, and name the model that answered — a routed reply adds `(auto: <class>)`; user and tool messages show as raw text. **Open in Chat** and **Export conversation as Markdown** sit in its header.
+**View details** opens a read-only page for the thread: its channel, agent, peer, message count and dates, token totals (input, cached, output, average speed, cost, and cache savings), then every message. Assistant replies render as Markdown, math included, the same as in Chat, and name the model that answered. A routed reply adds `(auto: <class>)`. User and tool messages show as raw text. **Open in Chat** and **Export conversation as Markdown** sit in the page header.
 
-### Naming, starring and pinning
+### Naming, starring, and pinning
 
-Three per-row actions let you organize the archive as it grows:
+Three per-row actions help you organize the archive as it grows:
 
-- **Rename** — the pencil icon turns the name into a text field. Enter saves, Escape discards, and clicking away saves. The new name is at most 100 characters and shows up everywhere the conversation is named: this list, the [Chat](/chat) header, the command palette, and the conversation's own page.
-- **Star** — the star beside the name marks a conversation as a favorite. Starring changes nothing about the thread; it just gives you `starred:true` as a filter, which combines with every other filter key.
-- **Pin** — the pushpin icon lifts a conversation into a **Pinned** section above the list, where it stays regardless of which page of results you're on. Up to **10** conversations can be pinned at once; pinning an eleventh is refused rather than silently unpinning one of the others. Pinned conversations are still filtered by the filter bar — a pinned thread that doesn't match your filter drops out of the section along with everything else.
+- **Rename**: the pencil icon turns the name into a text field. Enter saves. Escape discards. Clicking away saves. The new name is at most 100 characters and shows up everywhere the platform names the conversation: this list, the [Chat](/chat) header, the command palette, and the conversation's own page.
+- **Star**: the star beside the name marks a conversation as a favorite. Starring changes nothing about the thread. It gives you `starred:true` as a filter, which combines with every other filter key.
+- **Pin**: the pushpin icon lifts a conversation into a **Pinned** section above the list. It stays there on every page of results. Up to **10** conversations can be pinned at once. JClaw refuses an eleventh rather than silently unpinning one of the others. Pinned conversations still obey the filter bar: a pinned thread that does not match your filter drops out of the section with everything else.
 
-Starring and pinning are independent: a conversation can be either, both, or neither.
+Starring and pinning are independent. A conversation can be either, both, or neither.
 
 ### Exporting
 
-The **Export** button in the filter bar downloads `conversations.csv`: the pinned conversations plus the rows on the current page of results — useful for audit, sharing, or feeding into another tool.
+The **Export** button in the filter bar downloads `conversations.csv`: the pinned conversations plus the rows on the current page of results. It is useful for audit, sharing, or feeding into another tool.
 
 ### Deleting
 
-Select one or more rows and click **Delete N** to delete them. Deletion removes the thread and all its messages permanently; there's no undo.
+Select one or more rows and click **Delete N** to delete them. Deletion removes the thread and all its messages permanently. There is no undo.
 
-**Delete all matching** skips pinned conversations, the same way it skips subagent transcripts — it deletes exactly the rows the list is showing you a count of. To delete a pinned conversation, unpin it first.
+**Delete all matching** skips pinned conversations, the same way it skips subagent transcripts. It deletes exactly the rows the list shows you a count of. To delete a pinned conversation, unpin it first.
 
 :::gotcha Cascade
-Deleting a conversation cascade-deletes every subagent run spawned from it — both the child transcripts and their audit rows on the [Subagents](/subagents) page. If you want to keep a child transcript, open it from [Subagents](/subagents) and use [Chat](/chat) → **Export as Markdown** *before* deleting the parent.
+Deleting a conversation cascade-deletes every subagent run spawned from it. That removes both the child transcripts and their audit rows on the [Subagents](/subagents) page. If you want to keep a child transcript, open it from [Subagents](/subagents) and use [Chat](/chat) → **Export as Markdown** *before* you delete the parent.
 :::
 
 ## Channels
 
 [Channels](/channels) lets you reach the same agents from outside JClaw. The page shows three cards, one per supported external surface:
 
-- **Telegram** — per-bot bindings, each routed to its own agent.
-- **Slack** — per-app bindings (one Slack app per agent), each routed to its own agent.
-- **WhatsApp** — per-number bindings (one WhatsApp number per agent), each routed to its own agent.
+- **Telegram**: per-bot bindings. Each routes to its own agent.
+- **Slack**: per-app bindings (one Slack app per agent). Each routes to its own agent.
+- **WhatsApp**: per-number bindings (one WhatsApp number per agent). Each routes to its own agent.
 
 Each card shows its current status: `<N> active` (one or more enabled bindings) or `not configured` (no bindings yet).
 
-The shared mental model is the same across all three:
+The basic idea is the same across all three:
 
-1. On the channel's card you create one or more **bindings**. Each binding holds that channel's credentials (bot tokens, signing secrets, webhook strings) **and** the [agent](/guide#agents) it routes to — agent selection is required (there is no "unbound → Main Agent" default for external channels).
-2. Add as many bindings as you like — one per agent — so multiple bots/numbers can coexist, each running a different agent.
+1. On the channel's card, you create one or more **bindings**. Each binding holds that channel's credentials (bot tokens, signing secrets, webhook strings) **and** the [agent](/guide#agents) it routes to. Agent selection is required. There is no "unbound → Main Agent" default for external channels.
+2. Add as many bindings as you like, one per agent, so multiple bots or numbers can coexist. Each runs a different agent.
 3. JClaw routes incoming messages to the binding's agent and streams replies back over the same channel.
 
-External messages flow into the same [Conversations](/conversations) page as web chat, so you can read the full history in-app without bouncing between Slack and Telegram.
+External messages flow into the same [Conversations](/conversations) page as web chat. So you can read the full history in-app without bouncing between Slack and Telegram.
 
-Below the three cards sits a **Public access — Tailscale Funnel** card. One switch exposes this instance to the public internet over HTTPS through Tailscale Funnel, so the webhook transports below (a Telegram webhook, the Slack Events API, the WhatsApp Cloud API) get a reachable URL with no manual tunnel — Funnel publishes the whole port, so the one switch covers every channel. The card shows the public URL while it's on, reports when Tailscale is disconnected, and resumes on its own once it reconnects.
+Below the three cards sits a **Public access — Tailscale Funnel** card. One switch exposes this instance to the public internet over HTTPS through Tailscale Funnel. The webhook transports below (a Telegram webhook, the Slack Events API, the WhatsApp Cloud API) then get a reachable URL with no manual tunnel. Funnel publishes the whole port, so the one switch covers every channel. The card shows the public URL while the switch is on, reports a Tailscale disconnect, and resumes on its own once Tailscale reconnects.
 
 ### Telegram
 
-Click the **Telegram** card to open the per-bot binding list. Each binding is a Telegram bot token paired with the agent that bot should run as. Add as many bindings as you have bots; disable a binding to temporarily silence a bot without losing its config.
+Click the **Telegram** card to open the per-bot binding list. Each binding is a Telegram bot token paired with the agent that bot runs as. Add as many bindings as you have bots. Disable a binding to silence a bot temporarily without losing its config.
 
-You'll need:
+You need:
 
 - A bot token from Telegram's BotFather.
-- Your numeric Telegram user id (**telegramUserId**) — DM `@userinfobot` and it replies with it. Save stays disabled until it's filled in.
+- Your numeric Telegram user id (**telegramUserId**). DM `@userinfobot`, and it replies with it. Save stays disabled until you fill this in.
 - An [agent](/agents) you want this bot to run as.
 
-The bot starts receiving messages as soon as you save and enable the binding. **Test** on a binding's card checks its token against Telegram right away: it reports **OK — connected as @**_bot username_ or Telegram's error, and for a webhook binding also the pending-update count and the last webhook delivery error, if any. Telegram surfaces JClaw's [slash commands](/guide#chat) (`/new`, `/reset`, `/compact`, …) in its native autocomplete dropdown automatically.
+The bot receives messages as soon as you save and enable the binding. **Test** on a binding's card checks the token against Telegram at once. It reports **OK — connected as @**_bot username_, or Telegram's error. For a webhook binding it also reports the pending-update count and the last webhook delivery error, if any. Telegram shows JClaw's [slash commands](/guide#chat) (`/new`, `/reset`, `/compact`, …) in its native autocomplete dropdown automatically.
 
-Each binding also picks a **transport**: **Polling** (the default — JClaw pulls updates from Telegram, nothing to expose) or **Webhook**, which needs a public HTTPS **webhookBaseUrl** (pre-filled from a live Tailscale Funnel, or the page's own origin when that is already public). The webhook path is fixed — `/api/webhooks/telegram/{bindingId}` — and the secret is generated for you and checked from Telegram's `X-Telegram-Bot-Api-Secret-Token` header, so the base URL is the only part you enter.
+Each binding also picks a **transport**: **Polling** (the default; JClaw pulls updates from Telegram, so nothing to expose) or **Webhook**, which needs a public HTTPS **webhookBaseUrl**. The URL comes pre-filled from a live Tailscale Funnel, or from the page's own origin when that is already public. The webhook path is fixed: `/api/webhooks/telegram/{bindingId}`. The secret is generated for you and checked from Telegram's `X-Telegram-Bot-Api-Secret-Token` header. So the base URL is the only part you enter.
 
 Below the bindings, **Channel defaults** set how every Telegram binding behaves:
 
 - whether replies quote the message being answered, and whether link previews appear
 - the 👀 / ✅ / ❌ progress reaction
 - delivery-failure notices and their cooldown
-- which message reactions the agent hears about — in a private chat only the binding owner's reactions reach it, whatever this is set to
+- which message reactions the agent hears about. In a private chat, only the binding owner's reactions reach it, whatever this is set to.
 - how long pastes and forwarded bursts are joined into one turn
 - group-chat wake words, and where inline keyboards work
-- which message actions the agent may take: reply, edit, delete, react, poll and pin. Pinning starts off, because it changes the chat for everyone; the rest start on.
+- which message actions the agent may take: reply, edit, delete, react, poll, and pin. Pinning starts off, because it changes the chat for everyone. The rest start on.
 
-A binding's own reply mode, error reply policy and notifier cooldown override the matching default. Changes apply from the next message.
+A binding's own reply mode, error reply policy, and notifier cooldown override the matching default. Changes apply from the next message.
 
 ### Slack
 
 Click the **Slack** card to open its per-app binding list, then **+ New binding**. Each binding pairs one Slack app with the agent it runs as, so multiple Slack apps can coexist (one per agent):
 
-- **botToken** — your Slack app's bot token (`xoxb-…`).
-- **signingSecret** — the signing secret from your Slack app's Basic Information page (Events API transport).
-- **agent** — the [agent](/agents) this Slack app routes to (required).
-- **owner user id** — your Slack member id (`U…`), required when the agent is the Main Agent. Set, the bot is private to you (DMs, and channels where you @mention it) and you approve its dangerous-tool requests; blank, anyone can DM or @mention it, and `/subagent`, `/prompt` and the `/model` switch are refused to everyone, you included.
+- **botToken**: your Slack app's bot token (`xoxb-…`).
+- **signingSecret**: the signing secret from your Slack app's Basic Information page (Events API transport).
+- **agent**: the [agent](/agents) this Slack app routes to (required).
+- **owner user id**: your Slack member id (`U…`). It is required when the agent is the Main Agent. When set, the bot is private to you (DMs, and channels where you @mention it), and you approve its dangerous-tool requests. When blank, anyone can DM or @mention it. In that case, `/subagent`, `/prompt`, and the `/model` switch are refused to everyone, you included.
 
-The binding's **transport** decides how messages reach JClaw. **Events API** (the default) is a webhook: it needs the signing secret and a public HTTPS **webhookBaseUrl** for the app's Request URL (pre-filled from a live Tailscale Funnel, or the page's own origin when that is already public). **Socket Mode** opens a WebSocket from JClaw instead — no public URL and no signing secret, just the app-level **appToken** (`xapp-…`).
+The binding's **transport** decides how messages reach JClaw. **Events API** (the default) is a webhook: it needs the signing secret and a public HTTPS **webhookBaseUrl** for the app's Request URL. The **webhookBaseUrl** comes pre-filled from a live Tailscale Funnel, or from the page's own origin when that is already public. **Socket Mode** opens a WebSocket from JClaw instead: no public URL and no signing secret, just the app-level **appToken** (`xapp-…`).
 
-Save and toggle **Enabled** on; the bot starts serving immediately. **Test** on the binding's card checks the bot token against Slack (`auth.test`) and reports **OK — connected as** the bot user id and workspace, or Slack's error; a pass also fills in the card's **Bot user**.
+Save and toggle **Enabled** on; the bot serves immediately. **Test** on the binding's card checks the bot token against Slack (`auth.test`). It reports **OK — connected as** the bot user id and workspace, or Slack's error. A pass also fills in the card's **Bot user**.
 
 ### WhatsApp
 
-Cloud-API integration via Meta's WhatsApp Business Platform. Like Slack and Telegram it's per-binding — click the **WhatsApp** card, then **+ New binding** (one number per agent; multiple numbers can coexist). Each Cloud-API binding needs:
+Cloud-API integration uses Meta's WhatsApp Business Platform. Like Slack and Telegram, it works per binding. Click the **WhatsApp** card, then **+ New binding** (one number per agent; multiple numbers can coexist). Each Cloud-API binding needs:
 
-- **phoneNumberId** — from the WhatsApp Business Platform.
-- **accessToken** — a long-lived access token for the same number.
-- **appSecret** — your Meta app's secret.
-- **verifyToken** — any string you choose; you paste the same string into Meta's webhook config so JClaw can verify incoming traffic.
-- **agent** — the [agent](/agents) this number routes to (required).
+- **phoneNumberId**: from the WhatsApp Business Platform.
+- **accessToken**: a long-lived access token for the same number.
+- **appSecret**: your Meta app's secret.
+- **verifyToken**: any string you choose. You paste the same string into Meta's webhook config, so JClaw can verify incoming traffic.
+- **agent**: the [agent](/agents) this number routes to (required).
 
-Save, enable, and point Meta's webhook at JClaw per the WhatsApp Cloud API docs.
+Save, enable, and point Meta's webhook at JClaw, per the WhatsApp Cloud API docs.
 
-Meta delivers a number's messages only when your Meta app is subscribed to that number's WhatsApp Business Account — a binding can pass the credential check and Meta's webhook verification and still receive nothing without it. Each enabled Cloud API binding's card checks this when the page loads and after the list refreshes: when the app isn't subscribed, the card warns that Meta will not deliver the number's messages, naming the account id, and **Subscribe** subscribes the app to it (the access token needs the `whatsapp_business_management` permission; if Meta refuses, the card shows Meta's message). JClaw never subscribes on its own. If the check can't run, the card shows why in one muted line.
+Meta delivers a number's messages only when your Meta app is subscribed to that number's WhatsApp Business Account. A binding can pass the credential check and Meta's webhook verification, and still receive nothing without that subscription. Each enabled Cloud-API binding's card checks this when the page loads and after the list refreshes. When the app is not subscribed, the card warns that Meta will not deliver the number's messages and names the account id. **Subscribe** subscribes the app to it. To subscribe, the access token needs the `whatsapp_business_management` permission. If Meta refuses, the card shows Meta's message. JClaw never subscribes on its own. If the check cannot run, the card shows why in one muted line.
 
-When Meta refuses a reply or reports that it could not be delivered, the binding's card shows a warning for 24 hours saying how long ago it happened, with Meta's error code and title when Meta gave them, and each failed delivery is recorded as a warning under `channel` in the event log. Since October 2026 the common cause is error 131042, a problem with the WhatsApp Business Account's payment method: Meta stops delivering replies for an account past its free allowance with no payment method. JClaw doesn't retry the reply or tell the customer. Only a send Meta refuses immediately because the 24-hour window has closed is left off the card (see below).
+When Meta refuses a reply or reports it was not delivered, the binding's card shows a warning for 24 hours that says how long ago it happened. It shows Meta's error code and title when Meta gave them. Each failed delivery is also recorded as a warning under `channel` in the event log. Since October 2026, the common cause is error 131042, a problem with the WhatsApp Business Account's payment method: Meta stops delivering replies for an account past its free allowance with no payment method. JClaw does not retry the reply or tell the customer. Only a send Meta refuses immediately because the 24-hour window closed stays off the card (see below).
 
-Since October 2026 Meta charges for replies sent inside the 24-hour window beyond 1,000 free replies per business number per calendar month. Each enabled Cloud API binding's card shows a bar such as "412 of 1,000 free replies this month", which turns amber from 800; past the allowance it is full and reads, for example, "1,240 replies this month, 240 billed". The figures are Meta's own, read from its pricing analytics each time the page loads rather than counted by JClaw, so they may lag recent replies; the month is the calendar month in UTC. If Meta's figure can't be read, the card shows why in one muted line. The bar needs the number's display number, which JClaw records when it verifies the binding's credentials.
+Since October 2026, Meta charges for replies sent inside the 24-hour window beyond 1,000 free replies per business number per calendar month. Each enabled Cloud-API binding's card shows a bar such as "412 of 1,000 free replies this month". It turns amber from 800. Past the allowance, it is full and reads, for example, "1,240 replies this month, 240 billed". The figures are Meta's own. JClaw reads them from Meta's pricing analytics each time the page loads; it does not count them itself, so they may lag recent replies. The month is the calendar month in UTC. If Meta's figure cannot be read, the card shows why in one muted line. The bar needs the number's display number. JClaw records it when it verifies the binding's credentials.
 
-A Cloud-API binding takes two optional extras: a pre-approved **messaging template** (name + language) used for replies sent outside WhatsApp's 24-hour window, and a **default target** (an E.164 number) the agent sends to proactively when a send names no recipient and there is no live conversation peer. The binding's **transport** is **Cloud API (official)** by default and can instead be **WhatsApp-Web (unofficial)** — a QR-paired session through the Cobalt bridge that needs no Cloud-API credentials at all; proactive sends go to the owner number when one is set, otherwise to the paired number itself.
+A Cloud-API binding takes two optional extras: a pre-approved **messaging template** (name + language), used for replies sent outside WhatsApp's 24-hour window, and a **default target** (an E.164 number) the agent sends to proactively when a send names no recipient and there is no live conversation peer. The binding's **transport** is **Cloud API (official)** by default. It can instead be **WhatsApp-Web (unofficial)**, a QR-paired session through the Cobalt bridge that needs no Cloud-API credentials at all. On WhatsApp-Web, proactive sends go to the owner number when one is set, and otherwise to the paired number itself.
 
-The form warns before you save a WhatsApp-Web binding: the client is unofficial and numbers get banned, so use a dedicated secondary number. To link it, save and enable the binding, then click **Pair** on its card. On the phone, open WhatsApp → Settings → Linked Devices → Link a Device and scan the code; it refreshes every few seconds until you do, and the panel shows **Connected ✓** once the session is paired. The account that scanned is the bot's own number, not its owner, and its own messages are ignored. To restrict direct messages to you, set the WhatsApp-Web binding's optional **owner number** (E.164, e.g. `+15551234567`) to your own phone; without one, anyone may message the bot directly, except on a Main Agent binding (see the table below). The QR code is drawn in your browser — the pairing string is never sent to an outside service.
+The form warns you before you save a WhatsApp-Web binding: the client is unofficial, and numbers get banned, so use a dedicated secondary number. To link it, save and enable the binding, then click **Pair** on its card. On the phone, open WhatsApp → Settings → Linked Devices → Link a Device and scan the code. The code refreshes every few seconds until you scan it, and the panel shows **Connected ✓** once the session is paired. The account that scanned is the bot's own number, not its owner, and its own messages are ignored. To restrict direct messages to you, set the WhatsApp-Web binding's optional **owner number** (E.164, for example `+15551234567`) to your own phone. Without one, anyone may message the bot directly, except on a Main Agent binding (see the table below). The QR code is drawn in your browser. The pairing string is never sent to an outside service.
 
-Replies are converted from the agent's Markdown to WhatsApp formatting on both transports: bold, italics, strikethrough, code, lists and quotes use WhatsApp's own markers, and a heading becomes a bold line. WhatsApp has no table or link syntax, so a table arrives as one line per row, each cell labelled with its column header, and a link shows its address in parentheses after its text.
+Replies are converted from the agent's Markdown to WhatsApp formatting on both transports: bold, italics, strikethrough, code, lists, and quotes use WhatsApp's own markers, and a heading becomes a bold line. WhatsApp has no table or link syntax. So a table arrives as one line per row, each cell labeled with its column header, and a link shows its address after its text.
 
-WhatsApp has no **Test** button. Instead, saving a Cloud-API binding checks its credentials with Meta and refuses ones that fail, and the card then shows **Verified** with Meta's business name and number.
+WhatsApp has no **Test** button. Instead, saving a Cloud-API binding checks its credentials with Meta and refuses ones that fail. The card then shows **Verified** with Meta's business name and number.
 
-When Meta refuses a Cloud-API reply because the 24-hour window has closed (its error 131047), JClaw doesn't retry it: the refusal is logged at `INFO` under `channel`, saying whether the binding has a template and what to do next.
+When Meta refuses a Cloud-API reply because the 24-hour window closed (its error 131047), JClaw does not retry it. The refusal is logged at `INFO` under `channel`. It says whether the binding has a template and what to do next.
 
 ### Who a bot answers
 
-Each binding decides who reaches its agent; any other message is dropped without a reply.
+Each binding decides who reaches its agent. Any other message is dropped without a reply.
 
 | Binding | Direct messages | Groups and channels |
 |---|---|---|
 | Telegram | Only the owner (**telegramUserId**). | Any member who addresses the bot: an @mention, a reply to one of its messages, or a wake word (**mentionPatterns** in **Channel defaults**). |
 | Slack, owner user id set | Only the owner. | Only the owner, with an @mention. |
-| Slack, no owner | Anyone in the workspace, except on a Main Agent binding, which answers no one until an owner is set. | Any member, with an @mention; on a Main Agent binding, no one. |
-| WhatsApp Cloud API | Anyone. | — the Cloud API has no groups. |
+| Slack, no owner | Anyone in the workspace, except on a Main Agent binding. That binding answers no one until an owner is set. | Any member, with an @mention; on a Main Agent binding, no one. |
+| WhatsApp Cloud API | Anyone. | None; the Cloud API has no groups. |
 | WhatsApp-Web, owner number set | Only the owner. | Any member who @mentions the bot. |
-| WhatsApp-Web, no owner | Anyone, except on a Main Agent binding, which answers no direct message until an owner is set. | Any member who @mentions the bot. |
+| WhatsApp-Web, no owner | Anyone, except on a Main Agent binding. That binding answers no direct message until an owner is set. | Any member who @mentions the bot. |
 
 On Slack, a reply in the thread of a post JClaw delivered, such as a task result, counts as an @mention (see [Sending a message](/guide#chat-sending-a-message)). Wake words are Telegram only.
 
-Being answered is not being trusted. A turn is yours — it can spend a standing approval granted with **✓ Always** and use `/subagent`, `/prompt` and the `/model` switch — only when its sender is the binding's owner, on Telegram or on a Slack binding with an owner set. Everyone else the bot answers is a guest: their dangerous-tool requests wait for your approval or fall to the [off-channel policy](/guide#settings-tool-approvals), and those commands are refused. Every WhatsApp sender is a guest, the owner number included. On Telegram, only the owner's taps on an inline keyboard count.
+Being answered is not being trusted. A turn is yours (it can spend a standing approval granted with **✓ Always** and use `/subagent`, `/prompt`, and the `/model` switch) only when its sender is the binding's owner, on Telegram or on a Slack binding with an owner set. Everyone else the bot answers is a guest. Their dangerous-tool requests wait for your approval or fall to the [off-channel policy](/guide#settings-tool-approvals), and those commands are refused. Every WhatsApp sender is a guest, the owner number included. On Telegram, only the owner's taps on an inline keyboard count.
 
 ## How channels and conversations connect
 
@@ -178,23 +178,23 @@ When a message arrives over an external channel, JClaw:
 2. Routes the message to the binding's agent.
 3. Streams the reply back over the same channel.
 
-If the turn fails, the person on the channel gets a generic reply — the message could not be answered, nothing on their side, try again later — that says nothing about your provider or setup. What broke and how to fix it goes to the [Logs](/logs) instead; only the web chat, whose reader is you, shows the full explanation.
+If the turn fails, the person on the channel gets a generic reply: the message could not be answered, nothing on their side, try again later. It says nothing about your provider or setup. What broke, and how to fix it, goes to the [Logs](/logs). Only the web chat, whose reader is you, shows the full explanation.
 
-The end result: each chat — a direct message, or a group or channel the bot is in — has one persistent thread with the agent, and you see all of it consolidated in [Conversations](/conversations) and [Chat](/chat).
+The end result: each chat, whether a direct message or a group or channel the bot is in, has one persistent thread with the agent. You see all of it consolidated in [Conversations](/conversations) and [Chat](/chat).
 
 :::tip Test in the web app first
-A new agent is much easier to iterate on inside [Chat](/chat) than over Telegram or Slack. Get the system prompt and tools right in-app, then bind a bot to it once you're happy.
+A new agent is much easier to iterate on inside [Chat](/chat) than over Telegram or Slack. Get the system prompt and tools right in-app. Then bind a bot to it once you are happy.
 :::
 
 :::note Peer scoping
-Conversations are kept per chat, not per person. A direct message gets its own thread, while everyone in a group or channel shares that chat's thread, on Telegram, Slack and WhatsApp alike. Who may start a turn is in [Who a bot answers](/guide#conversations-and-channels-who-a-bot-answers).
+Conversations are kept per chat, not per person. A direct message gets its own thread. Everyone in a group or channel shares that chat's thread, on Telegram, Slack, and WhatsApp alike. Who may start a turn is covered in [Who a bot answers](/guide#conversations-and-channels-who-a-bot-answers).
 :::
 
 ## Where to go next
 
-Now that you've covered live and external chat, the next layers are about *what happens outside of a chat turn* — work that runs in parallel, on a schedule, or as a pure nudge:
+Now you have covered live and external chat. The next layers cover *what happens outside of a chat turn*: work that runs in parallel, work that runs on a schedule, and pure nudges:
 
-- [Subagents](/guide#subagents) — fan out child agents from inside a conversation.
-- [Tasks](/guide#tasks) — schedule background work an agent figures out at fire time.
-- [Reminders](/guide#reminders) — schedule pre-written nudges that skip the LLM.
-- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) — side-by-side comparison.
+- [Subagents](/guide#subagents): fan out child agents from inside a conversation.
+- [Tasks](/guide#tasks): schedule background work an agent works out at fire time.
+- [Reminders](/guide#reminders): schedule pre-written nudges that skip the LLM.
+- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders): a side-by-side comparison.

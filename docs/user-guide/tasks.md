@@ -1,17 +1,17 @@
 # Tasks
 
-[Subagents](/guide#subagents) fan work out *now*. **Tasks** fan work out *later*. A task is a unit of background work the agent runs on a schedule — outside the flow of a live conversation. Tasks come in four flavors:
+[Subagents](/guide#subagents) fan work out *now*. **Tasks** fan work out *later*. A task is a unit of background work. The agent runs it on a schedule, outside the flow of a live conversation. Tasks come in four flavors:
 
-- **Immediate** — runs as soon as it's created.
-- **Scheduled** — runs once, at a specific date and time.
-- **Interval** — runs every N minutes, hours, or days, with no calendar awareness.
-- **Cron** — runs on a Spring 6-field cron schedule, or one of the `@hourly` / `@daily` / `@weekly` / `@monthly` / `@yearly` shortcuts.
+- **Immediate**: runs as soon as it is created.
+- **Scheduled**: runs once, at a specific date and time.
+- **Interval**: runs every N minutes, hours, or days. It has no calendar awareness.
+- **Cron**: runs on a Spring 6-field cron schedule, or on one of the shortcuts `@hourly`, `@daily`, `@weekly`, `@monthly`, or `@yearly`.
 
-The [Tasks](/tasks) page is where you observe and manage every task across all your agents. For schedule-and-nudge work that doesn't need an agent turn — "remind me in 30 minutes to take the laundry out" — reach for [Reminders](/guide#reminders) instead. If you're trying to choose between tasks, reminders, and subagents, the [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) section lays out the three side by side.
+The [Tasks](/tasks) page is where you observe and manage every task across all your agents. For schedule-and-nudge work that does not need an agent turn, such as "remind me in 30 minutes to take the laundry out", use [Reminders](/guide#reminders) instead. If you are choosing between tasks, reminders, and subagents, the [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) section lays out the three side by side.
 
 ## How tasks get created
 
-You don't create tasks from the [Tasks](/tasks) page directly — it's a viewer, not an editor. Tasks are created by **agents** through the built-in `task_manager` tool. The natural way is to ask an agent in [Chat](/chat):
+You do not create tasks from the [Tasks](/tasks) page directly. The page is a viewer, not an editor. **Agents** create tasks through the built-in `task_manager` tool. The natural way is to ask an agent in [Chat](/chat):
 
 > "Every weekday at 9am, summarize my unread Slack DMs and send me the summary on Telegram."
 
@@ -19,7 +19,7 @@ The agent calls `task_manager` with a `createTask` action, translates your phras
 
 ### The unified schedule string
 
-There is one creation action — `createTask` — that takes a single `schedule` parameter. The agent picks one of four shapes:
+There is one creation action, `createTask`. It takes a single `schedule` parameter, and the agent picks one of four shapes:
 
 | Shorthand                                       | Type      | Meaning                                                |
 |-------------------------------------------------|-----------|--------------------------------------------------------|
@@ -29,25 +29,25 @@ There is one creation action — `createTask` — that takes a single `schedule`
 | `every 30m` / `every 2h` / `every 1d`           | INTERVAL  | Recur every N (minimum 1 minute via shorthand).        |
 | Spring 6-field cron (`0 0 9 * * *`) or `@daily` | CRON      | Calendar-aligned recurrence.                           |
 
-Your original input is stored verbatim, so the **Schedule** column reads "every 30m" back to you — not the normalized "every 1800 seconds."
+JClaw stores your original input verbatim, so the **Schedule** column reads "every 30m" back to you, not the normalized "every 1800 seconds."
 
-For something that should happen **once** on a given day, use the absolute date-time — *not* a cron. It produces a one-shot `SCHEDULED` task that shows `PENDING`, fires once, then `COMPLETED`. A cron with a fixed month and day (e.g. `0 0 15 13 6 *`) would silently repeat *every year* and show as recurring (`ACTIVE`).
+For something that should happen **once** on a given day, use the absolute date-time, **not** a cron. The date-time produces a one-shot `SCHEDULED` task. It shows `PENDING`, fires once, then shows `COMPLETED`. A cron with a fixed month and day (e.g. `0 0 15 13 6 *`) would silently repeat *every year* and show as recurring (`ACTIVE`).
 
 ### What `task_manager` exposes
 
 | Action                | What it does                                                                                                |
 |-----------------------|-------------------------------------------------------------------------------------------------------------|
 | `createTask`          | Create a task with any of the schedule shapes above.                                                        |
-| `updateTask`          | Partial update by name — fields you don't provide stay as-is.                                               |
+| `updateTask`          | Partial update by name. Fields you do not provide stay as-is.                                               |
 | `pause`               | Stop a task from firing while keeping its schedule. Resume later without re-typing it.                      |
 | `resume`              | Re-enable a paused task, re-arming a one-off fire that lapsed during the pause.                              |
 | `runNow`              | Fire a task immediately by name. Revives `CANCELLED` rows on the way through.                               |
-| `cancelTask`          | Set status to `CANCELLED` — stops fires but keeps the row so `runNow` can revive it later.                  |
+| `cancelTask`          | Set status to `CANCELLED`, which stops fires but keeps the row so `runNow` can revive it later. |
 | `deleteTask`          | Permanently delete the task and its run history. Irreversible.                                              |
 | `listRecurringTasks`  | List every recurring task currently configured for this agent.                                              |
 | `listReminders`       | List every reminder (`payloadType="reminder"`) currently scheduled for this agent.                          |
 
-`createTask` and `updateTask` also take `enabledToolNames`, a JSON array of the tools a fire may use: the agent's other tools are withheld from that task, and leaving it unset gives the task all of them. They also take `modelProvider` and `modelId`, which pin the task to that model (see **Model** under *Editing a task's instructions*); set both, because a pin with only one is ignored.
+`createTask` and `updateTask` also take `enabledToolNames`, a JSON array of the tools a fire may use. The agent's other tools are withheld from that task, and leaving it unset gives the task all of them. They also take `modelProvider` and `modelId`, which pin the task to that model (see **Model** under *Editing a task's instructions*). Set both, because a pin with only one is ignored.
 
 For the agent to be able to use any of these actions, **Tools → task_manager** must be switched on for that agent on the [Agents](/agents) page.
 
@@ -55,30 +55,30 @@ For the agent to be able to use any of these actions, **Tools → task_manager**
 
 Two ways to stop a task. They are not the same:
 
-- **Cancel** keeps the row around. The task stops firing but you can revive it later with `runNow` (it pops back to `PENDING` or `ACTIVE`) or by editing the schedule. Use when you might want it back.
-- **Delete** is permanent. Removes the `Task` row and every `TaskRun` underneath it. Use when you are done with it for good.
+- **Cancel** keeps the row around. The task stops firing, but you can revive it later with `runNow` (it pops back to `PENDING` or `ACTIVE`) or by editing the schedule. Use this when you might want it back.
+- **Delete** is permanent. It removes the `Task` row and every `TaskRun` underneath it. Use this when you are done with it for good.
 
 ## The Tasks page
 
-The [Tasks](/tasks) page shows every task, with two view modes — Table and Calendar — switched from the tab strip on the right. Calendar persists in the URL (`?view=calendar`), so refresh and shareable links survive; Table is the default and writes nothing.
+The [Tasks](/tasks) page shows every task. It has two view modes, Table and Calendar. You switch between them from the tab strip on the right. Calendar persists in the URL (`?view=calendar`), so refresh and shareable links survive. Table is the default and writes nothing.
 
 ### Dashboard stats
 
-A KPI strip above the list shows eight tiles: **Runs today**, **Success rate**, **Avg duration**, and the live **Running / Paused / Active / Pending / Failed** task counts. **Paused** counts schedules you've suspended; they're excluded from **Active** and **Pending** so a paused task is counted once, not twice. The first three are derived from your task **run history**. To clear them, click the **Reset stats** control (the circular-arrow icon in the page header, next to the retention label): it deletes completed/failed/cancelled run history — in-flight runs are kept — so the run-derived KPIs reset. The live task-status counts are unaffected, since they reflect current task state, not history.
+A KPI strip above the list shows eight tiles: **Runs today**, **Success rate**, **Avg duration**, and the live **Running / Paused / Active / Pending / Failed** task counts. **Paused** counts schedules you have suspended. They are excluded from **Active** and **Pending**, so a paused task is counted once, not twice. The first three are derived from your task **run history**. To clear them, click the **Reset stats** control (the circular-arrow icon in the page header, next to the retention label): it deletes completed/failed/cancelled run history, so the run-derived KPIs reset. It keeps in-flight runs. The live task-status counts are unaffected, because they reflect current task state, not history.
 
 ### Filters
 
-The top of the page is a filter bar accepting free-text keywords and typed keys:
+The top of the page is a filter bar. It accepts free-text keywords and typed keys:
 
 | Key       | Example              | Matches                                                                          |
 |-----------|----------------------|----------------------------------------------------------------------------------|
 | `q:`      | `q:summary`          | Lucene full-text on task name + description.                                     |
-| `status:` | `status:PENDING`     | One of `PENDING`, `ACTIVE`, `RUNNING`, `LOST`, `COMPLETED`, `FAILED`, `CANCELLED` — or `PAUSED`, which matches suspended live schedules. |
+| `status:` | `status:PENDING`     | One of `PENDING`, `ACTIVE`, `RUNNING`, `LOST`, `COMPLETED`, `FAILED`, `CANCELLED`, or `PAUSED`, which matches suspended live schedules. |
 | `type:`   | `type:CRON`          | `IMMEDIATE`, `SCHEDULED`, `INTERVAL`, or `CRON`.                                 |
 | `agent:`  | `agent:morning-bot`  | Tasks owned by an agent matching this string.                                    |
 | `transcript:` | `transcript:"daily briefing"` | Full-text search over the transcripts of past fires. Hits are listed in a panel below the bar rather than filtering the table; click one to open that run's trace. Quote phrases; `AND` / `OR` / `NOT` and a trailing `*` prefix wildcard work. |
 
-Tokens combine — `q:summary status:PENDING type:CRON` shows pending cron tasks containing "summary."
+Tokens combine. `q:summary status:PENDING type:CRON` shows pending cron tasks containing "summary."
 
 ### Columns (Table view)
 
@@ -86,7 +86,7 @@ Tokens combine — `q:summary status:PENDING type:CRON` shows pending cron tasks
 |---------------|---------------------------------------------------------------------------------------------------------|
 | **Name**      | Short identifier the agent gave the task.                                                               |
 | **Type**      | `IMMEDIATE`, `SCHEDULED`, `INTERVAL`, or `CRON`.                                                        |
-| **Schedule**  | Human-readable form of the schedule (the operator's original input — "every 30m", "0 0 9 * * *").       |
+| **Schedule**  | Human-readable form of the schedule (the operator's original input: "every 30m", "0 0 9 * * *").       |
 | **Status**    | Color-coded; see *Status states* below.                                                                 |
 | **Agent**     | Which agent owns the task.                                                                              |
 | **Channel**   | Where the task's output is delivered (e.g. a Telegram/Slack target, or `none`), shown as a humanized name. Editable inline when the row is expanded. |
@@ -105,11 +105,11 @@ Tokens combine — `q:summary status:PENDING type:CRON` shows pending cron tasks
 | `COMPLETED` | Terminal for one-shot tasks. Recurring tasks never reach `COMPLETED` unless explicitly cancelled.              |
 | `FAILED`    | A one-shot that hit the retry cap or a non-recoverable error. Click **Retry** to requeue. A recurring task does not end here: a failed occurrence waits for the next one, unless its schedule has no next fire (a malformed cron, say). |
 | `CANCELLED` | `cancelTask` was called. Row is preserved; `runNow` revives it.                                                |
-| `PAUSED`    | Shown in place of `PENDING`/`ACTIVE` while you've suspended the schedule. Display-only — pause sets a flag and keeps the underlying state, which is why **Resume** picks a recurring cadence straight back up. A one-off whose moment passes while paused has its fire dropped; resuming re-arms it (immediately, if that moment is now in the past). |
+| `PAUSED`    | Shown in place of `PENDING`/`ACTIVE` while you have suspended the schedule. Display-only. Pause sets a flag and keeps the underlying state, which is why **Resume** picks a recurring cadence straight back up. A one-off whose moment passes while paused has its fire dropped; resuming re-arms it (immediately, if that moment is now in the past). |
 
 ### Lifecycle
 
-Those states aren't independent — a task moves between them on a fixed set of transitions. One-shot tasks (`IMMEDIATE` / `SCHEDULED`) begin at `PENDING`; recurring tasks (`CRON` / `INTERVAL`) begin at `ACTIVE`. Both flip to `RUNNING` for the duration of each fire and back out when it ends:
+These states are not independent. A task moves between them on a fixed set of transitions. One-shot tasks (`IMMEDIATE` / `SCHEDULED`) begin at `PENDING`. Recurring tasks (`CRON` / `INTERVAL`) begin at `ACTIVE`. Both flip to `RUNNING` for the duration of each fire, and back out when it ends:
 
 ```text
 one-shot     PENDING ──▶ RUNNING ──▶ COMPLETED        (done — a fired one-shot is terminal)
@@ -124,25 +124,25 @@ crash        RUNNING ──▶ LOST ──▶ (auto re-fire) ──▶ RUNNING �
 operator     PENDING/ACTIVE ──▶ CANCELLED ──▶ (runNow / re-enable) ──▶ PENDING/ACTIVE
 ```
 
-Walking the transitions:
+The transitions, one by one:
 
-- **Fire starts.** At the scheduled moment the task flips to `RUNNING` and a fresh run opens — you'll see the blue `RUNNING` pill and a live elapsed-time counter in the run history.
-- **Success.** A one-shot ends `COMPLETED` (it has served its purpose); a recurring task drops back to `ACTIVE` to await its next cadence. If the task has a delivery target, the reply is pushed afterward.
-- **Transient failure.** A recoverable error (network blip, rate-limit) bumps the **Retries** counter and reschedules on a backoff — `30s → 60s → 5m → 15m → 1h`. The task returns to its waiting state between attempts, then re-enters `RUNNING` on the retry.
-- **Permanent failure.** A non-recoverable error, or the retry cap reached, ends a one-shot task `FAILED`; **Retry** requeues it. A recurring task ends only that occurrence: the run is recorded as failed, the error shows on the task, and it returns to `ACTIVE` for its next occurrence with a full retry budget. With [Alerts](/guide#settings-alerts) on, you're sent a message when this happens.
-- **Crash recovery.** If the server stops mid-fire, the task is left `RUNNING` with a stale scheduler heartbeat. JClaw marks it `LOST` after ~1 minute so you can see it stalled, then the scheduler automatically re-fires it (~2 minutes) — `LOST → RUNNING → COMPLETED/FAILED` — with no action from you. **Retry** skips the wait.
-- **Time limit.** A single fire may run for at most `fireMaxDurationSeconds` seconds, set at **Settings → Tasks** (default `600`, ten minutes). When it elapses, the fire is cancelled at its next safe point — the top of a model round or between tool calls — so a wedged fire can't run forever. `0` turns the limit off.
-- **Operator stop.** *Cancel* moves a task to `CANCELLED` (the row is kept; `runNow` or **Re-enable** revives it). Cancelling a single in-flight **run** stops only that fire and returns the task to its waiting state — the recurring schedule is left intact.
+- **Fire starts.** At the scheduled moment the task flips to `RUNNING` and a fresh run opens. You will see the blue `RUNNING` pill and a live elapsed-time counter in the run history.
+- **Success.** A one-shot ends `COMPLETED`; it has served its purpose. A recurring task drops back to `ACTIVE` to await its next cadence. If the task has a delivery target, the reply is pushed afterward.
+- **Transient failure.** A recoverable error (network blip, rate-limit) bumps the **Retries** counter and reschedules on a backoff: `30s → 60s → 5m → 15m → 1h`. The task returns to its waiting state between attempts, then re-enters `RUNNING` on the retry.
+- **Permanent failure.** A non-recoverable error, or a reached retry cap, ends a one-shot task `FAILED`; **Retry** requeues it. A recurring task ends only that occurrence: the run is recorded as failed, the error shows on the task, and it returns to `ACTIVE` for its next occurrence with a full retry budget. With [Alerts](/guide#settings-alerts) on, JClaw sends you a message when this happens.
+- **Crash recovery.** If the server stops mid-fire, the task is left `RUNNING` with a stale scheduler heartbeat. JClaw marks it `LOST` after about 1 minute so you can see it stalled, then the scheduler automatically re-fires it (about 2 minutes): `LOST → RUNNING → COMPLETED/FAILED`, with no action from you. **Retry** skips the wait.
+- **Time limit.** A single fire may run for at most `fireMaxDurationSeconds` seconds, set at **Settings → Tasks** (default `600`, ten minutes). When the limit elapses, the fire is cancelled at its next safe point, the top of a model round or between tool calls, so a wedged fire cannot run forever. `0` turns the limit off.
+- **Operator stop.** *Cancel* moves a task to `CANCELLED` (the row is kept; `runNow` or **Re-enable** revives it). Cancelling a single in-flight **run** stops only that fire and returns the task to its waiting state. The recurring schedule is left intact.
 
 :::note Reminders ride the same machine
-[Reminders](/guide#reminders) move through these exact states; only the *body* of a fire differs — a verbatim nudge instead of an agent turn. So a one-off reminder goes `PENDING → RUNNING → COMPLETED` (and removes itself right after if auto-delete is on), while a recurring reminder cycles `ACTIVE → RUNNING → ACTIVE` like any recurring task.
+[Reminders](/guide#reminders) move through these exact states. Only the *body* of a fire differs: a verbatim nudge instead of an agent turn. So a one-off reminder goes `PENDING → RUNNING → COMPLETED` (and removes itself right after if auto-delete is on), while a recurring reminder cycles `ACTIVE → RUNNING → ACTIVE` like any recurring task.
 :::
 
 ### Per-row actions
 
 | Icon             | Appears when                                              | Effect                                                                                |
 |------------------|-----------------------------------------------------------|---------------------------------------------------------------------------------------|
-| ▶ Run once       | Recurring and live (`PENDING`/`ACTIVE`), no fire in flight | Fires immediately; the next scheduled run is unchanged. Greyed out while paused — a paused task's fire body is skipped, so running it would do nothing. |
+| ▶ Run once       | Recurring and live (`PENDING`/`ACTIVE`), no fire in flight | Fires immediately; the next scheduled run is unchanged. Greyed out while paused. A paused task's fire body is skipped, so running it would do nothing. |
 | ⏹ Cancel running fire | Recurring with a fire in flight                      | Stops that fire at the next safe point; the schedule is untouched.                    |
 | ⏸ Pause          | Any live task (`PENDING`/`ACTIVE`), recurring or one-off   | A toggle, not a one-way action: click to suspend the schedule, click again to resume. It stays a pause icon and lights amber while engaged, and the row's status reads `PAUSED`. On a one-off it is the reversible alternative to **Cancel**. |
 | 🚫 Cancel        | One-off with status `PENDING`                             | Stops it firing. The row is kept; **Re-enable** or `runNow` revives it.               |
@@ -152,11 +152,11 @@ Walking the transitions:
 
 For bulk delete, click the trash icon in the page header to enter multi-select mode, tick rows, then click **Delete N**.
 
-To keep an audit copy, click **Export** in the filter bar: it downloads a JSON bundle (`jclaw-tasks-audit-<timestamp>.json`) of the tasks currently listed, each with its run history. An open run trace has its own **Export JSON** button for that one run.
+To keep an audit copy, click **Export** in the filter bar. It downloads a JSON bundle (`jclaw-tasks-audit-<timestamp>.json`) of the tasks currently listed, each with its run history. An open run trace has its own **Export JSON** button for that one run.
 
 ### Calendar view
 
-**Calendar** view projects every `CRON` and `INTERVAL` fire in the visible range, and pins `SCHEDULED` and `IMMEDIATE` tasks to their next run, on a month, week, or day grid, handy for spotting double-bookings before a task fires.
+**Calendar** view projects every `CRON` and `INTERVAL` fire in the visible range, and pins `SCHEDULED` and `IMMEDIATE` tasks to their next run, on a month, week, or day grid. It is handy for spotting double-bookings before a task fires.
 
 ## Cron syntax
 
@@ -178,44 +178,44 @@ A few examples:
 | `@daily`         | Midnight every day.                 |
 | `@hourly`        | Top of every hour.                  |
 
-When in doubt, ask the agent — `task_manager` knows Spring cron and can translate a plain-English schedule into a valid expression for you.
+When in doubt, ask the agent. `task_manager` knows Spring cron and can translate a plain-English schedule into a valid expression for you.
 
 ## Timezones
 
 `CRON` and `SCHEDULED` tasks need a wall-clock interpretation. The effective zone resolves through this chain:
 
-1. Per-task `timezone` (set by the agent or `updateTask`, validated as IANA — `America/New_York`, `Asia/Tokyo`, etc.).
+1. Per-task `timezone` (set by the agent or `updateTask`, validated as IANA: `America/New_York`, `Asia/Tokyo`, etc.).
 2. Operator default at **Settings → Tasks → Default timezone**.
 3. The `tasks.defaultTimezone` line in `application.conf` (shipped commented-out; uncomment to pin a zone).
 4. The app timezone at **Settings → Timezone** (`app.timezone`), which itself defaults to the server's JVM zone.
 
-`INTERVAL` and `IMMEDIATE` tasks ignore timezone — their schedule is duration-based, not wall-clock.
+`INTERVAL` and `IMMEDIATE` tasks ignore timezone. Their schedule is duration-based, not wall-clock.
 
 ## Retention
 
-Completed, failed, cancelled and lost tasks are kept for **N days**, then swept by a daily cleanup job. The retention TTL is configured at **Settings → Tasks → Retention** and shown next to the page title so you don't get surprised by auto-deletes. Setting retention to `0` disables the sweep.
+Completed, failed, cancelled, and lost tasks are kept for **N days**, then swept by a daily cleanup job. The retention TTL is configured at **Settings → Tasks → Retention** and shown next to the page title, so auto-deletes do not surprise you. Setting retention to `0` disables the sweep.
 
-Independently of that day-based TTL, JClaw keeps only the **10 most recent runs per task** — each new fire prunes older run history for that task. A frequently-recurring task (an every-30-minutes labeler, say) therefore never grows its run table without bound: you always have the latest ten fires, while the day-based sweep removes whole terminal (completed/failed/cancelled/lost) tasks past the TTL.
+Independently of that day-based TTL, JClaw keeps only the **10 most recent runs per task**. Each new fire prunes older run history for that task. A frequently recurring task (an every-30-minutes labeler, say) therefore never grows its run table without bound: you always have the latest ten fires, while the day-based sweep removes whole terminal (completed/failed/cancelled/lost) tasks past the TTL.
 
 ## Editing a task's instructions
 
-Expand a task's row to see its **Instructions** — the description the agent runs on. If the description is stored as a step list (a JSON array of strings), it renders as numbered steps; a plain description, even one spanning several lines, renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The owning agent, the inline **Channel** editor, and inline editors for the task's **name** and **timezone** live in the same expanded detail.
+Expand a task's row to see its **Instructions**, the description the agent runs on. If the description is stored as a step list (a JSON array of strings), it renders as numbered steps. A plain description, even one spanning several lines, renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The owning agent, the inline **Channel** editor, and inline editors for the task's **name** and **timezone** live in the same expanded detail.
 
 The same detail has a **Permissions** block:
 
-- **Origin** — the channel the task was created from, which no edit raises; only the **Trust** button beside a non-`web` origin raises it to `web`. `web` lets a fire's dangerous tools follow the [Tool Approvals](/guide#settings-tool-approvals) policy; any other channel, or `unrecorded`, is untrusted, so they fail closed (for a channel origin, unless that policy is `ask`).
-- **Model** — *follows the agent* when nothing is pinned: a fire runs on the owning agent's current model, so changing the agent's model changes the task's too. A task created with its own model shows that model instead and always fires on it; if that model's provider is no longer configured, the fire falls back to the agent's model.
-- **Tools** — the `enabledToolNames` allow-list as pills, or *all the agent's tools* when there is none.
+- **Origin**: the channel the task was created from, which no edit raises; only the **Trust** button beside a non-`web` origin raises it to `web`. `web` lets a fire's dangerous tools follow the [Tool Approvals](/guide#settings-tool-approvals) policy; any other channel, or `unrecorded`, is untrusted, so they fail closed (for a channel origin, unless that policy is `ask`).
+- **Model**: *follows the agent* when nothing is pinned: a fire runs on the owning agent's current model, so changing the agent's model changes the task's too. A task created with its own model shows that model instead and always fires on it; if that model's provider is no longer configured, the fire falls back to the agent's model.
+- **Tools**: the `enabledToolNames` allow-list as pills, or *all the agent's tools* when there is none.
 
 ## What a task run looks like
 
-When a task fires, JClaw runs the owning agent with the task description as its input and lets it run until the task completes or fails. The turn-by-turn transcript is saved as the **run's trace** — not as a chat. A task fire does **not** create an entry on the [Conversations](/conversations) page: each fire appears in that task's **run history** (expand the task's row on the [Tasks](/tasks) page), and clicking a run there opens its full trace in a side panel. While a run is in flight you can watch it — see *Watching a fire live* below. Failed fires log the error against the run and trigger a retry up to the configured cap.
+When a task fires, JClaw runs the owning agent with the task description as its input, and lets it run until the task completes or fails. The turn-by-turn transcript is saved as the **run's trace**, not as a chat. A task fire does **not** create an entry on the [Conversations](/conversations) page. Each fire appears in that task's **run history** (expand the task's row on the [Tasks](/tasks) page), and clicking a run there opens its full trace in a side panel. While a run is in flight you can watch it; see *Watching a fire live* below. Failed fires log the error against the run and trigger a retry up to the configured cap.
 
-If you want the task to ping you when it's done, build that into the task description:
+If you want the task to ping you when it is done, build that into the task description:
 
 > "Every weekday at 9am, summarize my unread Slack DMs and send me the summary on Telegram."
 
-For a **schedule-with-no-LLM** path — pure notifications, no agent turn — schedule a [reminder](/guide#reminders) instead.
+For a **schedule-with-no-LLM** path, pure notifications with no agent turn, schedule a [reminder](/guide#reminders) instead.
 
 ## Tips and gotchas
 
@@ -224,11 +224,11 @@ Names are how `cancelTask`, `pause`, `deleteTask`, and `runNow` find the right r
 :::
 
 :::tip Pause beats cancel for "be quiet for a week"
-`pause` keeps the schedule and just no-ops the next fires. `resume` later picks up where you left off without re-typing cron. `cancelTask` is the heavier hammer; reach for it when you're not sure you want the task back.
+`pause` keeps the schedule and just no-ops the next fires. `resume` later picks up where you left off without re-typing cron. `cancelTask` is the heavier hammer; reach for it when you are not sure you want the task back.
 :::
 
 :::gotcha Tasks survive restarts
-A recurring task stays scheduled across server restarts. If you bind a noisy task to a flaky tool, it'll keep firing on its schedule. Pause or cancel it from the [Tasks](/tasks) page or ask the agent to delete it.
+A recurring task stays scheduled across server restarts. If you bind a noisy task to a flaky tool, it will keep firing on its schedule. Pause or cancel it from the [Tasks](/tasks) page, or ask the agent to delete it.
 :::
 
 :::gotcha Recurring tasks need unique names
@@ -236,17 +236,17 @@ The agent rejects a `createTask` call when an agent already has a non-cancelled 
 :::
 
 :::note Per-agent scoping
-The `task_manager` tool is scoped to the owning agent: through it, one agent never sees, pauses, or cancels another agent's tasks, and its `runNow` and `cancelTask` actions only operate on tasks the calling agent owns. The Tasks API itself is instance-wide, so an agent that has the `jclaw_api` tool can reach any task; its writes go through the same dangerous-action approval as every other `jclaw_api` write.
+The `task_manager` tool is scoped to the owning agent. Through it, one agent never sees, pauses, or cancels another agent's tasks, and its `runNow` and `cancelTask` actions only operate on tasks the calling agent owns. The Tasks API itself is instance-wide, so an agent that has the `jclaw_api` tool can reach any task; its writes go through the same dangerous-action approval as every other `jclaw_api` write.
 :::
 
 :::note Watching a fire live
-A task fire doesn't appear on the [Conversations](/conversations) page — its transcript is the **run's trace**, not a chat — but you *can* watch it as it runs. Expand the task's row on the [Tasks](/tasks) page: an in-flight fire shows up in the **run history** as a `RUNNING` entry with a live elapsed timer and a one-line preview of its latest step. Click that entry to open the **trace panel**, which fills in turn-by-turn as the fire proceeds (refreshed every couple of seconds), then settles on the complete trace when the run finishes.
+A task fire does not appear on the [Conversations](/conversations) page. Its transcript is the **run's trace**, not a chat. But you *can* watch it as it runs. Expand the task's row on the [Tasks](/tasks) page: an in-flight fire shows up in the **run history** as a `RUNNING` entry with a live elapsed timer and a one-line preview of its latest step. Click that entry to open the **trace panel**. It fills in turn-by-turn as the fire proceeds (refreshed every couple of seconds), then settles on the complete trace when the run finishes.
 :::
 
 ## Where to go next
 
 Tasks fire an agent turn on a schedule. The third outside-the-turn flavor strips even the agent out of the loop:
 
-- [Reminders](/guide#reminders) — schedule-with-no-LLM nudges that surface as toasts or Telegram messages.
-- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) — side-by-side comparison.
-- [Agents](/guide#agents) — to enable `task_manager` on the agents that should be able to schedule work.
+- [Reminders](/guide#reminders): schedule-with-no-LLM nudges that surface as toasts or Telegram messages.
+- [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders): side-by-side comparison.
+- [Agents](/guide#agents): to enable `task_manager` on the agents that should be able to schedule work.

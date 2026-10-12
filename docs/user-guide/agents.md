@@ -1,17 +1,17 @@
 # Agents
 
-Chat works because an agent is on the other end. The [Agents](/agents) page is where you configure those agents — which model they speak to, what system prompt they have, what tools they can use, what skills are attached, and which MCP servers they can call.
+Chat works because an agent sits on the other end. The [Agents](/agents) page is where you configure those agents. There you set the model, the system prompt, the tools, the attached skills, and the MCP servers the agent can call.
 
-Every agent appears in the **Agent** dropdown on [Chat](/chat); once an agent is **enabled**, it can also be bound to external channels on [Channels](/channels).
+Every agent appears in the **Agent** dropdown on [Chat](/chat). Once an agent is **enabled**, you can also bind it to external channels on [Channels](/channels).
 
-## Main Agent vs Custom Agents
+## Main Agent vs custom agents
 
 The page splits into two sections:
 
-- **Main Agent** — the built-in singleton. Always enabled, can't be renamed or deleted. It's the agent [Chat](/chat) opens on; external [channels](/channels) reach it only through a binding, the same as any other agent.
-- **Custom Agents** — every agent you create yourself. You can enable or disable, edit, or delete these freely; **Delete All** in the section header removes every custom agent at once, behind a typed confirmation, and leaves the Main Agent alone.
+- **Main Agent**: the built-in singleton. It is always enabled. You cannot rename it or delete it. It is the agent [Chat](/chat) opens on. External [channels](/channels) reach it only through a binding, the same as any other agent.
+- **Custom Agents**: every agent you create yourself. You can enable, disable, edit, or delete these freely. **Delete All** in the section header removes every custom agent at once. It asks for a typed confirmation first, and it leaves the Main Agent alone.
 
-Both kinds use the same configuration surface, with a single difference: you can't change the Main Agent's **Name**, and the Main Agent gets a couple of extra knobs that custom agents don't need (see *Shell Exec Privileges* below).
+Both kinds use the same configuration surface, with a single difference. You cannot change the Main Agent's **Name**. The Main Agent also gets a couple of extra shell privilege controls that custom agents do not need (see "Shell Exec Privileges" below).
 
 ## Creating or editing an agent
 
@@ -19,37 +19,37 @@ Click **New Agent** at the top of the page, or click an existing agent's name to
 
 ### Basics
 
-| Field                | What it controls                                                                                              |
-|----------------------|---------------------------------------------------------------------------------------------------------------|
-| **Name**             | How the agent appears in the Chat Agent dropdown and breadcrumbs.                                              |
-| **Description**      | A short blurb shown under the name. Optional but useful when you have many agents.                             |
-| **Agent type**       | **Personal** or **Service**. A personal agent works for one person; a service agent works for whoever is talking to it, such as the members of a shared channel. The difference is two workspace files — see *Workspace file contents* below — and changing the type later changes them: to **Service** deletes them, after a confirmation; to **Personal** adds blank ones. |
-| **Default Provider** | Which model provider to use. Must be configured in [Settings → LLM Providers](/guide#settings) first.          |
-| **Default Model**    | The specific model id within that provider. The capability pills (thinking / vision / audio / video / no tools) update to reflect what that model supports. Once the [Model Router](/guide#settings-model-router) lists a model for its Chat class, provider **router** with model **Auto (best value)** is offered too, and picks a model per prompt. |
-| **Fallback Provider** | Optional. Where a turn goes when the default provider's circuit breaker refuses it — any configured provider other than the default. Leave it at **None** and a refused turn fails fast instead. See [When a provider misbehaves](/guide#settings-when-a-provider-misbehaves). |
-| **Fallback Model**   | The model to use on the fallback provider. It is your choice, not the default model's id: the fallback need not offer the same models. Set together with the provider. |
+| Field | What it controls |
+|----------------------|-----------------------------------------------------------------------------------------------------------------|
+| **Name** | How the agent appears in the Chat Agent dropdown and breadcrumbs. |
+| **Description** | A short blurb shown under the name. Optional, but useful when you have many agents. |
+| **Agent type** | **Personal** or **Service**. A personal agent works for one person. A service agent works for whoever is talking to it, such as the members of a shared channel. The difference is two workspace files (see "Workspace file contents" below). Changing the type later changes them: a change to **Service** deletes them, after a confirmation; a change to **Personal** adds blank ones. |
+| **Default Provider** | The model provider to use. You must configure it first in [Settings → LLM Providers](/guide#settings). |
+| **Default Model** | The specific model id within that provider. The capability pills (thinking / vision / audio / video / no tools) update to show what that model supports. Once the [Model Router](/guide#settings-model-router) lists a model for its Chat class, provider **router** with model **Auto (best value)** is offered too, and picks a model per prompt. |
+| **Fallback Provider** | Optional. When the default provider's circuit breaker refuses a turn, the turn goes here. Pick any configured provider other than the default. Leave it at **None**, and a refused turn fails fast instead. See [When a provider misbehaves](/guide#settings-when-a-provider-misbehaves). |
+| **Fallback Model** | The model to use on the fallback provider. You choose it. It is not the default model's id, because the fallback need not offer the same models. Set it together with the provider. |
 
 ### System prompt
 
-There is no free-form prompt field: what the model sees before every turn is assembled from this agent's workspace files (see *Workspace file contents* below), its skills, its core memories and the platform's own standing context. Set the agent's voice, role, constraints, and any context that doesn't change between conversations in those files — `AGENT.md` and `SOUL.md` are the usual places.
+There is no free-form prompt field. The platform assembles what the model sees before every turn from this agent's workspace files (see "Workspace file contents" below), its skills, its core memories, and the platform's own standing context. Set the agent's voice, role, constraints, and any context that does not change between conversations in those files. `AGENT.md` and `SOUL.md` are the usual places.
 
-You can preview exactly what the agent will receive — including any standing context the platform adds from workspace files and skills — by clicking **Inspect prompt** at the top of the edit form. The breakdown shows each section with character and token counts.
+You can preview exactly what the agent will receive, including any standing context the platform adds from workspace files and skills. Click **Inspect prompt** at the top of the edit form. The breakdown shows each section with character and token counts.
 
 ### Queue Mode
 
-Controls what happens when a new message arrives while the agent is already busy on this conversation:
+This controls what happens when a new message arrives while the agent is already busy on this conversation:
 
-| Mode              | Effect                                                                                            |
-|-------------------|---------------------------------------------------------------------------------------------------|
-| **Queue (FIFO)**  | Queue the new message; the agent processes it after the current turn finishes. The default.       |
+| Mode | Effect |
+|-------------------|-----------------------------------------------------------------------------------------------------|
+| **Queue (FIFO)** | Queue the new message; the agent processes it after the current turn finishes. The default. |
 | **Collect (batch)** | Hold the new message until the current turn finishes, then process all queued messages as a single batched turn. Best for noisy channels where rapid follow-ups read as one thought. |
-| **Interrupt**     | Cancel the in-flight generation and start over with the latest message.                            |
+| **Interrupt** | Cancel the in-flight generation and start over with the latest message. |
 
-Use **Queue (FIFO)** by default; **Collect** when users tend to send a burst of related messages; **Interrupt** for live-feeling chat where the latest message always wins.
+Use **Queue (FIFO)** by default. Use **Collect** when users tend to send a burst of related messages. Use **Interrupt** for live-feeling chat where the latest message always wins.
 
 ### Tools
 
-Every tool available to the agent, grouped by category — **System**, **Files**, **Web**, **Utilities** — each with its own toggle, plus a master toggle in the section header that enables or disables all of them at once. Tools are first-party capabilities (web fetch, file system, code execution, search, etc.) and any third-party tools from [MCP Servers](/mcp-servers) ticked on this agent; each MCP server appears as a single group row whose toggle flips every tool that server contributes.
+Every tool available to the agent appears here, grouped by category: **System**, **Files**, **Web**, **Utilities**. Each tool has its own toggle. A master toggle in the section header enables or disables all of them at once. Tools are first-party capabilities (web fetch, file system, code execution, search, and others), plus any third-party tools that come from the [MCP Servers](/mcp-servers) you ticked for this agent. Each MCP server appears as a single group row whose toggle flips every tool that server contributes.
 
 Tools that need extra setup (an API key, a workspace path, a shell allowlist entry) are configured under the matching [Settings](/guide#settings) section.
 
@@ -57,50 +57,50 @@ See [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) for the full catalog.
 
 ### Skills
 
-Skills are reusable instruction bundles you've published on the [Skills](/skills) page. Attaching a skill to an agent injects its content into the agent's system prompt. Use skills for capabilities you want to reuse across multiple agents — a coding style guide, a research methodology, an output format, a persona.
+Skills are reusable instruction bundles you published on the [Skills](/skills) page. Attaching a skill to an agent injects its content into the agent's system prompt. Use skills for capabilities you want to reuse across multiple agents: a coding style guide, a research methodology, an output format, a persona.
 
-Skills can also contribute to the agent's effective shell allowlist (see *Shell Allowlist* below).
+Skills can also contribute to the agent's effective shell allowlist (see "Shell Allowlist" below).
 
 ### MCP Servers
 
-Servers you've connected on [MCP Servers](/mcp-servers) also get their own **MCP Servers** sub-section below Tools, shown once the agent has been saved and at least one server is connected: one row per server with a single server-level toggle — the same switch as that server's group row in Tools — and a chevron that expands a read-only list of the actions the server exposes. There is no per-action toggling; the agent gets the whole server or nothing.
+Servers you connected on [MCP Servers](/mcp-servers) get their own **MCP Servers** sub-section below Tools. It appears once the agent has been saved and at least one server is connected. It shows one row per server. The row has a single server-level toggle (the same switch as that server's group row in Tools) and a chevron. The chevron expands a read-only list of the actions the server exposes. There is no per-action toggling. The agent gets the whole server or nothing.
 
 ### Workspace file contents
 
-A small workspace of named markdown files the platform reads into every turn's system prompt. Five canonical files, switchable via the tab strip:
+The platform reads a small workspace of named markdown files into every turn's system prompt. There are five canonical files, switchable via the tab strip:
 
-| File              | Conventional use                                                          |
-|-------------------|---------------------------------------------------------------------------|
-| `SOUL.md`         | Long-running identity / values material — the "who is this agent" bedrock. |
-| `IDENTITY.md`     | Self-description, voice, mannerisms.                                       |
-| `USER.md`         | What the agent knows about *you*, the operator. Its `Name:` line is how the agent and its memories refer to you. |
-| `BOOTSTRAP.md`    | First-run scaffolding the agent re-reads at the start of every fresh conversation. Until `USER.md` has your name, it asks for it once, in a direct chat. |
-| `AGENT.md`        | Project / repo / workspace notes you want the agent to carry into every turn. |
+| File | Conventional use |
+|-----------------|----------------------------------------------------------------------------------------|
+| `SOUL.md` | Long-running identity and values material: the "who is this agent" bedrock. |
+| `IDENTITY.md` | Self-description, voice, mannerisms. |
+| `USER.md` | What the agent knows about you, the operator. Its `Name:` line is how the agent and its memories refer to you. |
+| `BOOTSTRAP.md` | First-run scaffolding the agent re-reads at the start of every fresh conversation. Until `USER.md` has your name, it asks for it once, in a direct chat. |
+| `AGENT.md` | Project, repo, and workspace notes you want the agent to carry into every turn. |
 
-A **Service** agent has no `USER.md` or `BOOTSTRAP.md`, and its tab strip shows only the other three. Nothing tells it who it works for, it is not prompted to ask anyone's name, and a name someone gives it is never recorded as its owner's. Changing a personal agent to Service deletes the two files but keeps the memories it already holds; review them on [Memories](/memories) if they should not carry over.
+A **Service** agent has no `USER.md` or `BOOTSTRAP.md`. Its tab strip shows only the other three. Nothing tells it who it works for, it is not prompted to ask anyone's name, and a name someone gives it is never recorded as its owner's. Changing a personal agent to Service deletes the two files but keeps the memories it already holds. Review them on [Memories](/memories) if they should not carry over.
 
-These files are read on every turn when the system prompt is assembled, through a 30-second cache that is invalidated the moment you save, so an edit is picked up on the agent's next turn without a conversation reset or a restart.
+The platform reads these files on every turn when the system prompt is assembled. A 30-second cache holds them, and saving invalidates it at the moment you save. So an edit takes effect on the agent's next turn, without a conversation reset or a restart.
 
 ### Workspace manager
 
-Below the editor, once the agent has been saved, the **Workspace** panel lists everything on disk under this agent's workspace — whatever the agent has written, not only the five files above:
+Below the editor, once the agent has been saved, the **Workspace** panel lists everything on disk under this agent's workspace. That includes whatever the agent has written, not only the five files above:
 
-- **Tree and sizes** — folders expand in place, every row shows its size (a folder's is everything under it), and the header shows the workspace **Total**. Folders, text files and other files each get their own color and icon.
-- **Filter** — the filter bar narrows the tree to the entries whose name matches, keeping open the folders that lead to them. A very large tree shows its first 1,000 rows.
-- **Auto-refresh** — the tree reloads every 10 seconds while the tab is visible, so a file a running agent writes shows up on its own.
-- **Download** — a file downloads as itself; a folder downloads as a zip.
-- **Back up** — in the panel header, downloads the whole workspace as one zip, Standing Orders included.
-- **Delete** — the trash icon asks for an inline **Confirm**; a folder goes with everything in it, and a symlink is removed without touching what it points to. The five files above, the Standing Orders, are marked **protected** and can't be deleted — edit them in the tabs instead.
+- **Tree and sizes**: folders expand in place, and every row shows its size (a folder's is everything under it). The header shows the workspace **Total**. Folders, text files, and other files each get their own color and icon.
+- **Filter**: the filter bar narrows the tree to the entries whose name matches, and keeps open the folders that lead to them. A very large tree shows its first 1,000 rows.
+- **Auto-refresh**: the tree reloads every 10 seconds while the tab is visible, so a file a running agent writes shows up on its own.
+- **Download**: a file downloads as itself; a folder downloads as a zip.
+- **Back up**: in the panel header, downloads the whole workspace as one zip, Standing Orders included.
+- **Delete**: the trash icon asks for an inline **Confirm**. A folder goes with everything in it. A symlink is removed without touching what it points to. The five files above are the Standing Orders. They are marked **protected** and cannot be deleted. Edit them in the tabs instead.
 
 ### Other sections
 
-Five more sections on the same page, one line each:
+Five more sections sit on the same page, one line each:
 
-- **ACP External Harness** (custom agents only) — sets `acpAllowed`, letting this agent spawn [`runtime=acp` subagents](/guide#subagents-acp-harness) under an external coding harness, outside JClaw's tool and workspace confinement.
-- **Memory Autocapture** — automatically capture durable facts from this agent's conversations into long-term memory.
-- **Core memories** — the memories always loaded into this agent's prompt, independent of autocapture, with a cap and a **Migrate excess** action that refiles anything over it.
-- **Content Compression** — shrink large tool output (JSON arrays, code, prose) before it reaches the model: a master toggle, per-type sub-toggles, and an aggressiveness slider.
-- **Standing Tool Approvals** — the tools this agent may run without being asked, each granted by an "always allow" tap, with **Revoke** on every row. A grant counts only on a turn you started — your web chat, or a channel turn the binding proved is yours; a guest's turn in a group chat still goes through the approval prompt or the off-channel policy.
+- **ACP External Harness** (custom agents only): sets `acpAllowed`, letting this agent spawn [`runtime=acp` subagents](/guide#subagents-acp-harness) under an external coding harness, outside JClaw's tool and workspace confinement.
+- **Memory Autocapture**: automatically capture durable facts from this agent's conversations into long-term memory.
+- **Core memories**: the memories always loaded into this agent's prompt, independent of autocapture, with a cap and a **Migrate excess** action that refiles anything over it.
+- **Content Compression**: shrink large tool output (JSON arrays, code, prose) before it reaches the model: a master toggle, per-type sub-toggles, and an aggressiveness slider.
+- **Standing Tool Approvals**: the tools this agent may run without being asked, each granted by an "always allow" tap, with **Revoke** on every row. A grant counts only on a turn you started: your web chat, or a channel turn the binding proved is yours. A guest's turn in a group chat still goes through the approval prompt or the off-channel policy.
 
 :::note Tool Approvals
 Whether a dangerous action (such as `exec`) runs at all when nobody can be asked is decided platform-wide under [Settings → Security → Tool Approvals](/guide#settings) (`tool.approval.offChannelPolicy`: `allow`, `deny`, or `ask`). The two per-agent toggles below only widen what the Main Agent's shell may reach.
@@ -108,25 +108,25 @@ Whether a dangerous action (such as `exec`) runs at all when nobody can be asked
 
 ### Shell Exec Privileges (Main Agent only)
 
-Two toggles that govern how strictly the Main Agent's shell tools enforce safety. Custom agents don't see this section — they inherit the standard policy.
+Two toggles govern how strictly the Main Agent's shell tools enforce safety. Custom agents do not see this section. They inherit the standard policy.
 
-| Setting              | Default | Effect                                                                                       |
-|----------------------|---------|----------------------------------------------------------------------------------------------|
-| **Bypass allowlist** | off     | When on, the Main Agent can run any shell command, not just the operator-curated allowlist.   |
-| **Allow global paths** | off   | When on, the Main Agent can read/write outside its workspace directory.                       |
+| Setting | Default | Effect |
+|------------------------|---------|--------------------------------------------------------------------------------------------|
+| **Bypass allowlist** | off | When on, the Main Agent can run any shell command, not just the operator-curated allowlist. |
+| **Allow global paths** | off | When on, the Main Agent can read and write outside its workspace directory. |
 
 :::gotcha
-**Bypass allowlist** removes the safety floor. Only enable it on a Main Agent you trust on a machine where you're comfortable letting the model run arbitrary commands. The system-wide allowlist itself is edited in [Settings → Shell Execution](/guide#settings).
+**Bypass allowlist** removes the safety floor. Enable it only on a Main Agent you trust, on a machine where you are comfortable letting the model run arbitrary commands. The system-wide allowlist itself is edited in [Settings → Shell Execution](/guide#settings).
 :::
 
-Neither toggle loosens the OS sandbox: with `shell.sandbox` set by the **sandbox** control in [Settings → Security → Shell Execution](/guide#settings-shell-execution), a confined `exec` run can write only inside the agent's workspace, whatever these privileges say.
+Neither toggle loosens the OS sandbox. With `shell.sandbox` set by the **sandbox** control in [Settings → Security → Shell Execution](/guide#settings-shell-execution), a confined `exec` run can write only inside the agent's workspace, whatever these privileges say.
 
 ### Shell Allowlist (effective view)
 
-A derived, read-only view of every shell command this agent can actually run, expandable inline on the edit page. It aggregates:
+This is a derived, read-only view of every shell command this agent can actually run. It expands inline on the edit page. It aggregates:
 
-- The **global** allowlist edited in [Settings → Shell Execution](/guide#settings).
-- Per-skill grants — each enabled skill can contribute commands at install time. The view groups grants by the skill that contributed them.
+- The **global** allowlist, edited in [Settings → Shell Execution](/guide#settings).
+- Per-skill grants: each enabled skill can contribute commands at install time. The view groups grants by the skill that contributed them.
 
 To remove a per-skill grant, disable or remove the skill. To change the global allowlist, edit [Settings](/settings).
 
@@ -134,44 +134,44 @@ To remove a per-skill grant, disable or remove the skill. To change the global a
 
 Each Custom Agent has a toggle on its row. Disabled agents:
 
-- Can't be picked as a new [channel binding](/channels) target (existing bindings keep working until you remove them).
-- Still exist — toggle back on to restore.
+- Cannot be picked as a new [channel binding](/channels) target. Existing bindings keep working until you remove them.
+- Still exist. Toggle back on to restore.
 
-The Main Agent can't be disabled.
+The Main Agent cannot be disabled.
 
 ## Capability pills
 
-Each agent row shows a strip of capability pills derived from the chosen model; a pill only appears when the model supports it:
+Each agent row shows a strip of capability pills derived from the chosen model. A pill only appears when the model supports it:
 
-- **thinking** — the model surfaces its internal thought process.
-- **vision** — the model accepts image inputs natively.
-- **audio** — the model handles voice notes directly (no transcript pre-step).
-- **video** — the model accepts video inputs natively (others fall back to the dedicated video model or frame extraction).
-- **no tools** — the model cannot call tools, so this agent's tools and skills will stay silent.
+- **thinking**: the model surfaces its internal thought process.
+- **vision**: the model accepts image inputs natively.
+- **audio**: the model handles voice notes directly (no transcript pre-step).
+- **video**: the model accepts video inputs natively. Other models fall back to the dedicated video model or frame extraction.
+- **no tools**: the model cannot call tools, so this agent's tools and skills will stay silent.
 
-Only the **thinking** pill is clickable: clicking it toggles the agent's reasoning mode on or off and saves it immediately. The other pills are informational. A model that always thinks shows a locked-on thinking pill that can't be toggled.
+Only the **thinking** pill is clickable. Clicking it toggles the agent's reasoning mode on or off and saves immediately. The other pills are informational. A model that always thinks shows a locked-on thinking pill that you cannot toggle.
 
-This page is the only place the defaults change. The model picker and Think pill in [Chat](/guide#chat-model-and-thinking-for-this-conversation), and `/model` and `/think` on the other channels (the `/model` switch only from the binding's owner — see [Slash commands](/guide#chat-slash-commands)), override them for one conversation and leave the agent as it is here.
+This page is the only place the defaults change. The model picker and Think pill in [Chat](/guide#chat-model-and-thinking-for-this-conversation), and `/model` and `/think` on the other channels (the `/model` switch only from the binding's owner, see [Slash commands](/guide#chat-slash-commands)), override them for one conversation. The agent stays as you set it here.
 
 ## Tips and gotchas
 
 :::tip Start with one agent
-You don't need many agents to be productive. A single well-tuned agent with the right tools and skills usually beats five overlapping ones. Add specialized agents only when you find yourself wishing for a different tool surface or system prompt for a recurring kind of work.
+You do not need many agents to be productive. A single well-tuned agent with the right tools and skills usually beats five overlapping ones. Add specialized agents only when you find yourself wishing for a different tool surface or system prompt for a recurring kind of work.
 :::
 
 :::gotcha "provider not configured"
-A small amber **provider not configured** pill on an agent row means the agent's selected provider doesn't have an API key (or its local provider isn't reachable). Visit [Settings → LLM Providers](/guide#settings-llm-providers) to fix it; until you do, the status dot on [Chat](/chat)'s model picker turns grey (**Model offline**) for that agent.
+A small amber **provider not configured** pill on an agent row means the agent's selected provider does not have an API key, or its local provider is not reachable. Visit [Settings → LLM Providers](/guide#settings-llm-providers) to fix it. Until you do, the status dot on [Chat](/chat)'s model picker turns gray (**Model offline**) for that agent.
 :::
 
-:::note Editing doesn't rewrite history
-Editing an agent doesn't retroactively change past replies — they keep the model and prompt they were answered with. The next turn in any conversation, old or new, uses the updated config, unless that conversation carries its own model or thinking override.
+:::note Editing does not rewrite history
+Editing an agent does not retroactively change past replies. They keep the model and prompt they were answered with. The next turn in any conversation, old or new, uses the updated config. The exception is a conversation that carries its own model or thinking override.
 :::
 
 ## Where to go next
 
-Now that you've shaped an agent, the next questions are *where* it can be reached and *what extra power* you can give it:
+You have now shaped an agent. The next questions are where the agent can be reached and what extra power you can give it:
 
-- [Chat](/guide#chat) — use the agent you just created.
-- [Conversations & Channels](/guide#conversations-and-channels) — connect your agent to Slack, Telegram, or WhatsApp.
-- [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) — extend what your agents can do.
-- [Settings](/guide#settings) — configure providers, API keys, and platform-wide caps.
+- [Chat](/guide#chat): use the agent you just created.
+- [Conversations & Channels](/guide#conversations-and-channels): connect your agent to Slack, Telegram, or WhatsApp.
+- [Skills, Tools & MCP Servers](/guide#skills-tools-mcp): extend what your agents can do.
+- [Settings](/guide#settings): configure providers, API keys, and platform-wide caps.
