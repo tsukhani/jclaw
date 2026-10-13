@@ -145,16 +145,30 @@ class SubagentSpawnToolTest extends UnitTest {
         assertNull(run.childConversation.peerId);
     }
 
+    // An inline child embeds in a conversation and a fire has none. It runs as a session and says
+    // so: an error would cost an unattended run a round, and the old behaviour wrote the child's
+    // turns into whichever chat was most recent.
     @Test
-    void inlineModeIsRefusedInATaskFire() {
+    void anInlineSpawnInATaskFireRunsAsASessionAndSaysSo() throws Exception {
+        startLlmServer(simpleResponse("child done"));
+        configureProvider();
         var parent = createAgent("p-task-inline", "spawn-provider", "test-model");
-        ConversationService.create(parent, "web", "u-task-inline");
+        var chat = ConversationService.create(parent, "web", "u-task-inline");
+        var taskRunId = seedTaskRun(parent);
+        commitAndReopen();
 
-        var reply = agents.ToolContext.withScope(null, 6100L, () ->
-                new SubagentSpawnTool().execute("{\"task\":\"x\",\"mode\":\"inline\"}", parent));
+        var json = JsonParser.parseString(spawnInTaskFire(parent.id, taskRunId, "web",
+                "{\"task\":\"do work\",\"mode\":\"inline\"}")).getAsJsonObject();
 
-        assertTrue(reply.startsWith("Error: mode=\"inline\"") && reply.contains("task fire"), reply);
-        assertEquals(0, SubagentRun.count("parentAgent = ?1", parent), "a refused spawn writes no run");
+        assertEquals("COMPLETED", json.get("status").getAsString(), json.toString());
+        assertEquals("child done", json.get("reply").getAsString());
+        assertTrue(json.get("note").getAsString().contains("ran as mode=\"session\""), json.toString());
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(Long.parseLong(json.get("run_id").getAsString()));
+        assertNull(run.parentConversation);
+        assertNotEquals(chat.id, run.childConversation.id, "the child has a conversation of its own");
+        assertEquals(0L, Message.count("conversation.id = ?1", chat.id),
+                "nothing is written into a chat the fire has nothing to do with");
     }
 
     @Test

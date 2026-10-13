@@ -34,6 +34,12 @@ record SubagentSpawnArgs(
     /** Valid only once {@link #error()} has been checked null — {@code fail()} carries no request. */
     String resolvedContext() { return require(context, "context"); }
 
+    /** This request as a session spawn, for a caller with no conversation an inline child could embed into. */
+    SubagentSpawnArgs asSession() {
+        return new SubagentSpawnArgs(error, task, label, requestedAgentId, modelProvider, modelId,
+                SubagentSpawnTool.MODE_SESSION, context, timeoutSeconds, asyncRequested);
+    }
+
     private String require(@Nullable String v, String field) {
         if (v == null) throw new IllegalStateException("spawn args rejected before '" + field + "': " + error);
         return v;

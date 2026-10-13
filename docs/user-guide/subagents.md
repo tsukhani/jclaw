@@ -36,7 +36,7 @@ The child's messages get folded into the parent's conversation as a collapsible 
 
 **Use when:** the child's work is part of the conversational flow and you want to read everything in one place without navigating away. Best for short, focused subtasks.
 
-Inline needs a conversation to fold the child into. A [task fire](/guide#subagents-task-fires) has none, so it refuses `mode=inline`.
+Inline needs a conversation to fold the child into. A [task fire](/guide#subagents-task-fires) has none, so there an inline request runs as `session`.
 
 ### `mode=async`
 
@@ -132,7 +132,7 @@ This keeps task history bounded. A task that starts a subagent on every fire doe
 
 | Setting | In a chat | In a task fire |
 |---------|-----------|----------------|
-| `mode=inline` | Folds the child into the conversation. | Refused, because there is no conversation to fold it into. The agent gets `Error: mode="inline" embeds the child in a conversation and a task fire has none; use mode="session".` |
+| `mode=inline` | Folds the child into the conversation. | Runs as `session`, because there is no conversation to fold the child into. The agent gets the same reply, with a `note` that says the mode changed. |
 | `context=inherit` | Summarizes the parent's recent turns and grants the union of tools. | Grants the union of tools only. There are no conversation turns to summarize. |
 | Default model | The model the parent conversation is on. | The model the task is pinned to, or the agent's model when the task has no pin. |
 | Tools | The child agent's own tools. | The same, cut down to the task's tool list when the task has one. The list follows a child of that child too. |

@@ -112,8 +112,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  and the row exists purely as the child's audit-trail container. */
     public static final String SUBAGENT_CHANNEL = "subagent";
 
-    static final String INLINE_NEEDS_A_CONVERSATION =
-            "Error: mode=\"inline\" embeds the child in a conversation and a task fire has none; use mode=\"session\".";
+    static final String FIELD_NOTE = "note";
+    static final String INLINE_RAN_AS_SESSION =
+            "mode=\"inline\" ran as mode=\"session\": a task fire has no conversation to embed the child into.";
 
     static final String FIELD_STATUS = "status";
     static final String FIELD_LABEL = "label";
@@ -330,7 +331,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 "Spawn mode: \"session\" (default) creates a child Conversation that "
                         + "renders as a separate row in the operator's sidebar, or "
                         + "\"inline\" to run the child within the parent's conversation "
-                        + "as a collapsible nested-turn block."));
+                        + "as a collapsible nested-turn block. A task fire has no conversation, "
+                        + "so there \"inline\" runs as \"session\"."));
         props.put(ARG_MODEL_PROVIDER, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Optional provider override for the child (a configured JClaw provider name). With "
@@ -400,11 +402,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         if (args.has(ARG_TASKS) && !args.get(ARG_TASKS).isJsonNull()) {
             return executeBatch(args, parentAgent);
         }
-        var parsed = SubagentSpawnArgs.parse(args);
-        if (parsed.error() != null) return parsed.error();
-        if (ToolContext.taskRunId() != null && MODE_INLINE.equals(parsed.resolvedMode())) {
-            return INLINE_NEEDS_A_CONVERSATION;
-        }
+        var requested = SubagentSpawnArgs.parse(args);
+        if (requested.error() != null) return requested.error();
+        // Not refused: the fire gets the same reply either way, and an unattended run that loses a
+        // round to an error can lose the run with it.
+        final boolean inlineRanAsSession = ToolContext.taskRunId() != null && MODE_INLINE.equals(requested.resolvedMode());
+        final var parsed = inlineRanAsSession ? requested.asSession() : requested;
         // JCLAW-499: validate the runtime (native | acp) before any DB work.
         var acpError = SubagentAcpRunner.acpRuntimeError(args, parentAgent);
         if (acpError != null) return acpError;
@@ -544,6 +547,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         payload.put(FIELD_STATUS, runOutcome.terminalStatus().name());
         var failure = runOutcome.failure();
         if (failure != null) payload.put(FIELD_ERROR, failure);
+        if (inlineRanAsSession) payload.put(FIELD_NOTE, INLINE_RAN_AS_SESSION);
         // JCLAW-291: hint to the parent LLM that the child's reply was cut
         // off — useful when the parent decides whether to re-summarize or
         // to surface the truncation to the user.
