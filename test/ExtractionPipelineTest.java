@@ -729,7 +729,8 @@ class ExtractionPipelineTest extends UnitTest {
             var failed = timedOut.decisions().getFirst();
             assertTrue(failed.failed());
             assertTrue(failed.failure().contains("did not answer"), failed.failure());
-            assertEquals(1, sent.subList(before, sent.size()).stream()
+            // stream() reads a snapshot; a subList view throws when the background pin adds its request.
+            assertEquals(1, sent.stream().skip(before)
                     .filter(r -> r.url().encodedPath().equals("/v1/systemone")).count(),
                     "a loaded model's timeout is not asked again: it counts against the shared breaker");
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
