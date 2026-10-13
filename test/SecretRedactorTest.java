@@ -67,13 +67,56 @@ class SecretRedactorTest extends UnitTest {
         assertEquals(plain, SecretRedactor.redact(plain), "an ordinary config write is left alone");
     }
 
-    @Test
-    void aLongRunOfWordCharactersIsScannedInLinearTime() {
-        // A base64 blob in a tool result: the name patterns must not backtrack through it.
-        var blob = "secret".repeat(3) + "A".repeat(400_000);
+    @ParameterizedTest(name = "{0}")
+    @ValueSource(strings = {
+            "password", "secret", "token", "api_key", "authorization", "cookie", "x-a-key", "A_KEY", "bearer ", " --token ",
+            "sshpass -p", "://a:", " -u a:", "\"key\":\"", "?key", "sk-", "eyJaaaaaaaa-", "-----BEGIN PRIVATE KEY-----", "12345678:", "\\\\\\\\"})
+    void aTextThatRepeatsATriggerIsScannedInLinearTime(String trigger) {
+        // The text is model-controlled; a pattern that rescans from every trigger is quadratic, minutes at this size.
+        var text = trigger.repeat(400_000 / trigger.length()) + "A".repeat(100_000);
         var started = System.nanoTime();
-        SecretRedactor.redact("Tool 'filesystem' returned: " + blob);
-        assertTrue((System.nanoTime() - started) / 1_000_000 < 2_000, "400,000 characters took over 2 s");
+        SecretRedactor.redact(text);
+        var millis = (System.nanoTime() - started) / 1_000_000;
+        assertTrue(millis < 3_000, () -> "500,000 characters of '" + trigger + "' took " + millis + " ms");
+    }
+
+    @Test
+    void masksAValueWrittenWithJsonUnicodeEscapes() {
+        // An HTML-safe serializer writes = as \u003d and & as \u0026 inside logged arguments.
+        var out = SecretRedactor.redact("args: {\"command\":\"curl https://x.example.com/api?apikey\\u003d" + KEY
+                + "\\u0026page\\u003d2 MEDIA_TOKEN\\u003dabc12345\"}");
+        assertFalse(out.contains(KEY) || out.contains("abc12345"), out);
+        assertTrue(out.contains("page\\u003d2"), "the other parameter stays: " + out);
+    }
+
+    @Test
+    void masksAQuotedValueUpToItsClosingQuote() {
+        assertMasked("args: {\"password\":\"correct horse battery staple\"}", "horse battery staple", "\"password\"");
+        assertMasked("args: {\"client_secret\":\"a1,b2;c3}d4\",\"scope\":\"read\"}", "b2;c3}d4", "client_secret");
+        assertTrue(SecretRedactor.redact("args: {\"client_secret\":\"a1,b2\",\"scope\":\"read\"}").contains("\"scope\":\"read\""),
+                "what follows the closing quote is kept");
+    }
+
+    @Test
+    void neverJudgesAValueByItsShape() {
+        assertMasked("exec: curl https://x/?token=12345678", "12345678", "token=");
+        assertMasked("args: {\"access_token\": 99887766}", "99887766", "access_token");
+        assertMasked("args: {\"password\":\"true\"}", "\"true\"", "\"password\"");
+        assertMasked("exec: PIN_SECRET=42 ./run.sh", "=42", "PIN_SECRET=");
+    }
+
+    @Test
+    void masksTheOtherPlacesACommandCarriesACredential() {
+        assertMasked("exec: curl -H \"Cookie: session=abc123; theme=dark\" https://x", "session=abc123; theme=dark", "Cookie:");
+        assertMasked("exec: mytool --password hunter2 --verbose", "hunter2", "--password");
+        assertMasked("exec: mytool --token 'tk_98765' run", "tk_98765", "--token");
+        assertMasked("exec: sshpass -p 'pw12345' ssh host", "pw12345", "sshpass -p");
+        assertMasked("exec: curl \"https://x/login?user=sam&pass=hunter2&pwd=x1y2\"", "hunter2", "pass=");
+        assertMasked("exec: SERVICE_KEY=abc123xyz ./deploy.sh", "abc123xyz", "SERVICE_KEY=");
+        assertMasked("exec: curl -H 'X-Functions-Key: fk-123456' https://x", "fk-123456", "X-Functions-Key:");
+        assertMasked("exec: curl -H 'Ocp-Apim-Subscription-Key: sub-123456' https://x", "sub-123456", "Subscription-Key:");
+        assertMasked("Tool 'filesystem' returned: -----BEGIN RSA PRIVATE KEY-----\\nMIIEowIBAAKCAQEA7x\\n-----END RSA PRIVATE KEY----- ok",
+                "MIIEowIBAAKCAQEA7x", "returned:");
     }
 
     @ParameterizedTest
@@ -101,7 +144,9 @@ class SecretRedactorTest extends UnitTest {
             "Task 'weekly-report' (id=4352) updated via API",
             "Tool 'filesystem' returned: wrote 41 bytes to notes/keynote-outline.md",
             "exec: curl -s https://example.com/search?q=secret+garden&page=2",
-            "Tool 'jclaw_api' returned: HTTP 200 {\"id\":7,\"hasAppSecret\":true,\"hasBotToken\":false,\"password\":null}"})
+            "Rescheduled Task 'nightly' next CRON fire for 2026-10-18T04:00:00Z; primary_key: 42, sort-key: name",
+            "Operator updated factory credentials: jiraUrl, jiraPersonalToken, githubToken",
+            "args: {\"tool\":\"search_messages\",\"args\":{\"page_token\":\"CAESBggCEAEYAQ\",\"nextPageToken\":\"abc123def456\"}}"})
     void leavesOrdinaryLogTextAlone(String line) {
         assertEquals(line, SecretRedactor.redact(line));
     }
