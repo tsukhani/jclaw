@@ -247,13 +247,13 @@ final class SubagentAcpRunner {
      * {@link SubagentSpawnTool#ACP_WORKDIR_KEY}, else the child agent's workspace), so a real
      * coding harness, whose file writes are outside JClaw's tool confinement, starts there rather
      * than in the backend's CWD. A spawn that names {@code folder} continues in that one.
-     * Returns {@code null} — inherit the server CWD — only for an unnamed folder that cannot be
-     * resolved or created; a named one that cannot be opened fails the run instead.
+     * A folder that cannot be resolved or created fails the run: the harness never falls back
+     * to the server's own directory, which on a source install is the JClaw checkout.
      */
-    private static @Nullable File resolveAcpWorkdir(Long runId, Agent childAgent, String task, @Nullable String folder) {
+    private static File resolveAcpWorkdir(Long runId, Agent childAgent, String task, @Nullable String folder) {
         var name = folder == null || folder.isBlank() ? null : folder.strip();
         var parent = CodingRunFolders.parent(childAgent == null ? null : childAgent.name);
-        if (parent == null) return null;
+        if (parent == null) throw new IllegalStateException("no folder is configured for the coding run to work in");
         try {
             var run = CodingRunFolders.open(parent, task, name);
             if (name != null) {
@@ -263,22 +263,18 @@ final class SubagentAcpRunner {
             }
             return run.dir().toFile();
         } catch (IOException e) {
-            if (name != null) {
-                throw new IllegalStateException("coding folder '%s' could not be opened: %s"
-                        .formatted(name, e.getMessage()), e);
-            }
-            EventLogger.warn(SubagentSpawnTool.SUBAGENT_CHANNEL, null, null,
-                    "acp workdir under '%s' could not be created (%s); harness inherits the server CWD"
-                            .formatted(parent, e.getMessage()));
-            return null;
+            throw new IllegalStateException(name != null
+                    ? "coding folder '%s' could not be opened: %s".formatted(name, e.getMessage())
+                    : "no folder could be created for the coding run under '%s' (%s); check acp.workdir in Settings, Coding"
+                            .formatted(parent, e.getMessage()), e);
         }
     }
 
     /** JCLAW-666: persist the resolved session directory on the run row so the
      *  operator and the CodingRunMonitor can find the coding artifacts (they
      *  live in the workspace, not in MessageAttachment). Best-effort. */
-    private static void recordWorkdir(Long runId, @Nullable File workdir) {
-        if (runId == null || workdir == null) return;
+    private static void recordWorkdir(Long runId, File workdir) {
+        if (runId == null) return;
         try {
             Tx.run(() -> {
                 SubagentRun run = SubagentRun.findById(runId);
@@ -303,7 +299,7 @@ final class SubagentAcpRunner {
      * records a FAILED outcome.
      */
     private static AgentRunner.RunResult runAcpBatch(Long runId, List<String> command, String task,
-                                                     @Nullable File workdir, Map<String, String> env) {
+                                                     File workdir, Map<String, String> env) {
         Process proc = null;
         try {
             // JCLAW-672: batch mode has no streaming adapter; sandbox with the
@@ -312,7 +308,7 @@ final class SubagentAcpRunner {
             var launched = HarnessSandbox.wrap(
                     command, workdir, new GenericAdapter(), sandboxTrustedOrigin(runId));
             var pb = new ProcessBuilder(launched);
-            if (workdir != null) pb.directory(workdir);
+            pb.directory(workdir);
             SubprocessEnv.apply(pb, env);   // JCLAW-779: strip inherited host secrets; the model-override env wins
             proc = pb.start();
             // JCLAW-664: track the live process so SubagentRegistry.kill (and the
@@ -366,7 +362,7 @@ final class SubagentAcpRunner {
      * harness's stderr so the spawn records a FAILED outcome.
      */
     private static AgentRunner.RunResult runAcpStreaming(List<String> command, String task,
-                                                         Long runId, HarnessAdapter adapter, @Nullable File workdir,
+                                                         Long runId, HarnessAdapter adapter, File workdir,
                                                          List<String> modelArgs, Map<String, String> env) {
         var argv = concat(SubagentSpawnTool.withPermissionArgs(adapter, adapter.launchArgs(command, task)), modelArgs);
         // The adapter delivers the task on stdin unless it placed it in the argv.
@@ -375,7 +371,7 @@ final class SubagentAcpRunner {
         try {
             var pb = new ProcessBuilder(
                     HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId)));
-            if (workdir != null) pb.directory(workdir);
+            pb.directory(workdir);
             SubprocessEnv.apply(pb, env);   // JCLAW-779: strip inherited host secrets; the model-override env wins
             proc = pb.start();
             // JCLAW-664: track the live process so SubagentRegistry.kill and the
@@ -427,7 +423,7 @@ final class SubagentAcpRunner {
      * {@link #runAcpStreaming}.
      */
     private static AgentRunner.RunResult runAcpRpc(Long runId, List<String> command, String task,
-                                                   HarnessAdapter adapter, Agent childAgent, @Nullable File workdir,
+                                                   HarnessAdapter adapter, Agent childAgent, File workdir,
                                                    List<String> modelArgs, Map<String, String> env) {
         var argv = concat(SubagentSpawnTool.withPermissionArgs(adapter, adapter.launchArgs(command, task)), modelArgs);
         boolean taskOnStdin = !argv.contains(task);
@@ -440,7 +436,7 @@ final class SubagentAcpRunner {
         try {
             var pb = new ProcessBuilder(
                     HarnessSandbox.wrap(argv, workdir, adapter, sandboxTrustedOrigin(runId)));
-            if (workdir != null) pb.directory(workdir);
+            pb.directory(workdir);
             SubprocessEnv.apply(pb, env);   // JCLAW-779: strip inherited host secrets; the model-override env wins
             proc = pb.start();
             // JCLAW-664: track the live process so the kill / idle-timeout paths can
@@ -491,7 +487,7 @@ final class SubagentAcpRunner {
      * subprocess and unblocking the blocking {@code prompt()}.
      */
     private static AgentRunner.RunResult runAcpSdk(Long runId, String acpCommand, String task,
-                                                   Agent childAgent, @Nullable File workdir,
+                                                   Agent childAgent, File workdir,
                                                    @Nullable HarnessModel model, Map<String, String> env) {
         var conversationId = parentConversationId(runId);
         var acc = new ReplyAccumulator();
@@ -547,8 +543,7 @@ final class SubagentAcpRunner {
         SubagentRegistry.registerCloser(runId, client);
         try (client) {
             client.initialize();
-            var cwd = workdir != null ? workdir.getAbsolutePath() : System.getProperty("user.dir");
-            var session = client.newSession(new AcpSchema.NewSessionRequest(cwd, List.of()));
+            var session = client.newSession(new AcpSchema.NewSessionRequest(workdir.getAbsolutePath(), List.of()));
             if (model != null) {
                 var note = selectSessionModel(client, session, model.modelId());
                 synchronized (acc) {

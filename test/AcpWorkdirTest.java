@@ -100,6 +100,25 @@ class AcpWorkdirTest extends UnitTest {
     }
 
     @Test
+    void anUnnamedRunFailsWhenItsFolderCannotBeCreated() throws Exception {
+        // A parent under a file: the setting's shape is valid, and creating the folder still fails.
+        Path blocker = Files.createTempFile("jclaw-acp-not-a-dir-", ".txt");
+        try {
+            ConfigService.set(SubagentSpawnTool.ACP_WORKDIR_KEY, blocker.resolve("coding").toString());
+
+            var run = JsonParser.parseString(
+                    spawnRaw("workdir-unusable", "{\"task\":\"where-are-you\",\"runtime\":\"acp\"}")).getAsJsonObject();
+
+            assertEquals("FAILED", run.get("status").getAsString(), run.toString());
+            assertTrue(run.get("error").getAsString().contains("no folder could be created"), run.toString());
+            assertFalse(run.toString().contains(System.getProperty("user.dir")),
+                    "the harness must not have started in the server's own directory: " + run);
+        } finally {
+            Files.deleteIfExists(blocker);
+        }
+    }
+
+    @Test
     void aFolderMustBeOneNameAndNeedsTheAcpRuntime() throws Exception {
         var asPath = spawnRaw("folder-path", "{\"task\":\"x\",\"runtime\":\"acp\",\"folder\":\"../outside\"}");
         assertTrue(asPath.startsWith("Error:") && asPath.contains("one folder name"), asPath);
