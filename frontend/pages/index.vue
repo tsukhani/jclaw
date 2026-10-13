@@ -234,7 +234,7 @@ const { data: recentCodingRuns, refresh: refreshCodingRuns } = useFetch<Subagent
 const openCodingRunId = ref<number | null>(null)
 const openCodingRun = computed(() => recentCodingRuns.value?.find(r => r.id === openCodingRunId.value))
 function codingRunName(run: SubagentRunView): string {
-  return run.label || run.workdir?.split('/').filter(Boolean).pop() || `Run #${run.id}`
+  return run.label || run.workdir?.split('/').findLast(Boolean) || `Run #${run.id}`
 }
 type ActivityView = 'all' | 'video' | 'scrapes' | 'coding'
 const activityView = ref<ActivityView>('all')

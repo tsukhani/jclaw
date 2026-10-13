@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
  * writes those to the log file and the event table. The name of the header, parameter or variable
  * is kept, so a masked line still says which credential was used.
  *
- * <p>A pattern finds the name; {@link #valueEnd} then decides where the value ends by following the
+ * <p>A pattern finds the name; {@link #valueAfter} then decides where the value ends by following the
  * quoting, since a regex cannot: a quoted value runs to its closing quote at the same escape depth,
  * a value inside a quoted string (a header in {@code -H "..."}) runs to that string's end, and a
  * bare one is a shell word. Where the two readings differ it takes the longer, so it over-masks
@@ -58,7 +58,7 @@ public final class SecretRedactor {
             // Authorization: Bearer ..., Cookie: a=b; c=d
             new Named(Pattern.compile("(?i)\\b(?:authorization|cookie)" + SEPARATOR + "(?:(?:bearer|basic|token|digest)\\s{1,4}+)?"), Bare.LINE, true),
             // a bearer or basic credential with no header beside it; sixteen token characters tell it from prose
-            new Named(Pattern.compile("(?i)\\b(?:bearer|basic)\\s{1,4}+(?=[A-Za-z0-9._~+/=-]{16})"), Bare.WORD, false),
+            new Named(Pattern.compile("(?i)\\b(?:bearer|basic)\\s{1,4}+(?=[a-z0-9._~+/=-]{16})"), Bare.WORD, false),
             // X-Api-Key: ..., MEDIA_API_KEY=..., "client_secret": "...", "password": "..."
             new Named(Pattern.compile("(?i)(?:api[-_ ]?key|access[-_]?key|private[-_]?key|subscription[-_]?key|secret|password|passwd"
                     + "|passphrase)" + NAME_TAIL + SEPARATOR), Bare.WORD, true),
@@ -95,15 +95,19 @@ public final class SecretRedactor {
                     + "\\s{0,4}+,\\s{0,4}+" + QUOTE + "value" + QUOTE + "\\s{0,4}+:\\s{0,4}+"), Bare.WORD, false);
     private static final Pattern CREDENTIAL_NAME = Pattern.compile("(?i)api[-_]?key|token(?!s)|secret|password|passwd|credential");
 
-    /**
-     * Formats recognizable with no name beside them: OpenAI-style, GitHub, Slack, AWS, JWT, Telegram bot,
-     * and a PEM private key. A JWT's first segment is bounded because a start can recur inside the run
-     * it scans; the later segments cannot hold a start, so they need no bound.
-     */
-    private static final Pattern TOKEN_SHAPE = Pattern.compile(
-            "(?<![A-Za-z0-9_])(?:sk-[A-Za-z0-9_-]{20,}+|gh[pousr]_[A-Za-z0-9]{20,}+|xox[abprs]-[A-Za-z0-9-]{10,}+|AKIA[0-9A-Z]{16}"
-                    + "|eyJ[A-Za-z0-9_-]{8,512}+\\.[A-Za-z0-9_-]{8,}+\\.[A-Za-z0-9_-]{8,}+|\\d{8,10}:[A-Za-z0-9_-]{35})"
-                    + "|-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[^-]*+(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?");
+    // Formats recognizable with no name beside them.
+    private static final String OPENAI_KEY = "sk-[A-Za-z0-9_-]{20,}+";
+    private static final String GITHUB_TOKEN = "gh[pousr]_[A-Za-z0-9]{20,}+";
+    private static final String SLACK_TOKEN = "xox[abprs]-[A-Za-z0-9-]{10,}+";
+    private static final String AWS_KEY_ID = "AKIA[0-9A-Z]{16}";
+    // The first segment is bounded because a start can recur inside the run it scans; the later ones cannot hold a start.
+    private static final String JWT = "eyJ[A-Za-z0-9_-]{8,512}+\\.[A-Za-z0-9_-]{8,}+\\.[A-Za-z0-9_-]{8,}+";
+    private static final String TELEGRAM_BOT_TOKEN = "\\d{8,10}:[A-Za-z0-9_-]{35}";
+    private static final String PEM_PRIVATE_KEY = "-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[^-]*+(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?";
+
+    /** One pass over every format: where two overlap the leftmost takes the whole run, which separate passes would split. */
+    private static final Pattern TOKEN_SHAPE = Pattern.compile("(?<!\\w)(?:" + OPENAI_KEY + "|" + GITHUB_TOKEN + "|" + SLACK_TOKEN
+            + "|" + AWS_KEY_ID + "|" + JWT + "|" + TELEGRAM_BOT_TOKEN + ")|" + PEM_PRIVATE_KEY);
 
     /** {@code text} with every recognized credential's value replaced by {@link #MASK}; unchanged when it holds none. */
     public static String redact(String text) {
@@ -128,30 +132,12 @@ public final class SecretRedactor {
             if (rule == TOKEN && !namesACredential(text, m)) continue;
             if (rule == CONFIG_WRITE && !CREDENTIAL_NAME.matcher(m.group("cfg")).find()) continue;
             // A value an earlier pass masked is scanned again: that pass may have stopped short of its end.
-            var quote = quoteAt(text, m.end());
-            int from = quote == null ? m.end() : m.end() + quote.depth() + quote.token().length();
-            if (quote == null) quote = quotes.around(m.end());
-            int parameter = rule == PARAMETER ? m.start() : parameterStart(text, m.start());
-            boolean jsonKey = rule.keyed() && m.group("kq") != null;
-            int to;
-            var closer = "";
-            if (parameter >= 0) {
-                to = endOfParameter(text, parameter, from, quote);
-            } else if (quote != null) {
-                int close = closing(text, from, quote);
-                to = jsonKey ? close : pastShellConcatenation(text, close, quote);
-                // The mask took the quote that closed the value: write it back, or the next quote pairs wrongly.
-                if (to > close) closer = "\\".repeat(quote.depth()) + quote.token();
-            } else if (jsonKey) {
-                to = endOfJsonValue(text, from);
-            } else {
-                to = rule.bare() == Bare.LINE ? endOfLine(text, from) : endOfWord(text, from);
-            }
-            if (to <= from) continue;
+            var value = valueAfter(text, rule, m, quotes);
+            if (value.to() <= value.from()) continue;
             if (out == null) out = new StringBuilder(text.length());
-            out.append(text, copied, from).append(MASK).append(closer);
-            copied = to;
-            at = to;
+            out.append(text, copied, value.from()).append(MASK).append(value.closer());
+            copied = value.to();
+            at = value.to();
         }
         return out == null ? text : out.append(text, copied, text.length()).toString();
     }
@@ -172,6 +158,27 @@ public final class SecretRedactor {
     }
 
     // ---------------------------------------------------------------- where a value ends
+
+    /** {@code closer}: the quote the mask writes back when the value ran past the one that closed it. */
+    private record Value(int from, int to, String closer) {}
+
+    /** The value that follows the name {@code m} matched. {@code quotes} is read forward, so call with rising matches. */
+    private static Value valueAfter(String text, Named rule, MatchResult m, LineQuotes quotes) {
+        var own = quoteAt(text, m.end());
+        int from = own == null ? m.end() : m.end() + own.depth() + own.token().length();
+        var quote = own == null ? quotes.around(m.end()) : own;
+        int parameter = rule == PARAMETER ? m.start() : parameterStart(text, m.start());
+        boolean jsonKey = rule.keyed() && m.group("kq") != null;
+        if (parameter >= 0) return new Value(from, endOfParameter(text, parameter, from, quote), "");
+        if (quote != null) {
+            int close = closing(text, from, quote);
+            int to = jsonKey ? close : pastShellConcatenation(text, close, quote);
+            // The mask took the quote that closed the value: write it back, or the next quote pairs wrongly.
+            return new Value(from, to, to > close ? "\\".repeat(quote.depth()) + quote.token() : "");
+        }
+        if (jsonKey) return new Value(from, endOfJsonValue(text, from), "");
+        return new Value(from, rule.bare() == Bare.LINE ? endOfLine(text, from) : endOfWord(text, from), "");
+    }
 
     /** A quote as it is written at one escape depth: the character (or its unicode escape) behind {@code depth} backslashes. */
     private record Quote(String token, int depth) {}
@@ -211,16 +218,19 @@ public final class SecretRedactor {
      */
     private static int endOfParameter(String s, int separator, int from, @Nullable Quote quote) {
         boolean url = s.charAt(separator) == '?' || inAQuery(s, separator);
-        for (int i = from; i < s.length(); i++) {
+        int i = from;
+        while (i < s.length()) {
             char c = s.charAt(i);
             if (c == '&' || (url && c == '#')) return i;
             if (quote != null ? closesAt(s, i, quote) : Character.isWhitespace(c) || c == '"' || c == '\'') return i;
+            int next = i + 1;
             if (c == '\\') {
                 int run = i;
                 while (run < s.length() && s.charAt(run) == '\\' && run - i <= MAX_DEPTH) run++;
                 if (s.startsWith("u0026", run)) return i;
-                if (quote == null) i = Math.min(s.length(), run + 1) - 1;   // an escaped character belongs to a bare word
+                if (quote == null) next = Math.min(s.length(), run + 1);   // an escaped character belongs to a bare word
             }
+            i = next;
         }
         return s.length();
     }

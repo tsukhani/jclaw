@@ -486,6 +486,7 @@ public final class SubagentRegistry {
      * @param taskRunWhere the JPQL predicate over {@code TaskRun r} the caller deletes by
      * @param bind         binds that predicate's parameters
      */
+    @SuppressWarnings("java:S2077") // taskRunWhere is a constant at every call site and its values arrive through bind
     public static void deleteRunsStartedBy(String taskRunWhere, Consumer<Query> bind) {
         var query = JPA.em().createQuery("SELECT sr.id, sr.status FROM SubagentRun sr WHERE sr.parentTaskRun.id IN "
                 + "(SELECT r.id FROM TaskRun r WHERE " + taskRunWhere + ")", Object[].class);

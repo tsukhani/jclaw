@@ -504,16 +504,25 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                     parentAgent.name, parsed, runIdStr);
         }
 
+        return runSyncSpawn(runId, bootstrap, parentConvIdFinal, parentAgent.name, parsed,
+                SubagentAcpRunner.isAcpRuntime(args), inlineRanAsSession);
+    }
+
+    private static String runSyncSpawn(Long runId, SubagentChildBootstrap.Bootstrap child, @Nullable Long parentConvId,
+                                       String parentAgentName, SubagentSpawnArgs parsed,
+                                       boolean acpBridged, boolean inlineRanAsSession) {
+        var runIdStr = String.valueOf(runId);
+        var childConvId = child.childConvId();
+        final boolean inlineMode = MODE_INLINE.equals(parsed.resolvedMode());
         // Step 4: synchronous AgentRunner.run on a VT so we can enforce the
         // wall-clock budget via Future.get(timeout).
         // JCLAW-661: for an acp coding run, bridge the open chat SSE (if any) to
         // this run so the harness's live steps stream into the turn that spawned
         // it; always unbind in the finally so a finished run can't leak callbacks.
-        boolean acpBridged = SubagentAcpRunner.isAcpRuntime(args);
         if (acpBridged) SubagentChatBridge.bindChatCallbacksToRun(runId);
         SyncRunOutcome runOutcome;
         try {
-            runOutcome = SubagentSyncRunner.runChildSynchronously(runId, childAgentId, childConvId,
+            runOutcome = SubagentSyncRunner.runChildSynchronously(runId, child.childAgentId(), childConvId,
                     parsed.resolvedTask(), parsed.timeoutSeconds(), inlineMode);
         } finally {
             if (acpBridged) SubagentChatBridge.clearRunCallbacks(runId);
@@ -526,15 +535,15 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
         // JCLAW-267: inline-mode boundary-end marker. Skipped on kill (see
         // writeInlineEndMarker javadoc for the double-render rationale).
-        if (inlineMode && parentConvIdFinal != null && !runOutcome.killedByOperator()) {
-            SubagentResponses.writeInlineEndMarker(parentConvIdFinal, runId, runOutcome.terminalStatus(),
+        if (inlineMode && parentConvId != null && !runOutcome.killedByOperator()) {
+            SubagentResponses.writeInlineEndMarker(parentConvId, runId, runOutcome.terminalStatus(),
                     runOutcome.reply(), runOutcome.replyTruncated());
         }
 
         // Step 6: emit the terminal lifecycle event. JCLAW-291: kill path
         // already emitted SUBAGENT_KILL — don't duplicate as SUBAGENT_ERROR.
         if (!runOutcome.killedByOperator()) {
-            SubagentResponses.emitTerminalEvent(parentAgent.name, childAgentName, runIdStr,
+            SubagentResponses.emitTerminalEvent(parentAgentName, child.childAgentName(), runIdStr,
                     parsed.resolvedMode(), parsed.resolvedContext(),
                     runOutcome.terminalStatus(), runOutcome.errorReason());
         }
