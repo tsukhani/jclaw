@@ -1,6 +1,11 @@
 import com.agentclientprotocol.sdk.spec.AcpSchema.AgentMessageChunk;
 import com.agentclientprotocol.sdk.spec.AcpSchema.AgentThoughtChunk;
 import com.agentclientprotocol.sdk.spec.AcpSchema.TextContent;
+import com.agentclientprotocol.sdk.spec.AcpSchema.ToolCall;
+import com.agentclientprotocol.sdk.spec.AcpSchema.ToolCallLocation;
+import com.agentclientprotocol.sdk.spec.AcpSchema.ToolCallStatus;
+import com.agentclientprotocol.sdk.spec.AcpSchema.ToolCallUpdateNotification;
+import com.agentclientprotocol.sdk.spec.AcpSchema.ToolKind;
 import com.agentclientprotocol.sdk.spec.AcpSchema.UsageUpdate;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
@@ -49,6 +54,26 @@ class AcpThoughtCoalescerTest extends UnitTest {
         assertEquals(1, out.size());
         assertEquals("tail thought", out.get(0).text());
         assertEquals(List.of(), c.flush(), "a flushed block is not emitted twice");
+    }
+
+    @Test
+    void aToolCallIsAnnouncedThenReportedWhenItFinishesBehindAnyPendingThought() {
+        var c = new AcpThoughtCoalescer();
+        var announced = c.accept(new ToolCall(null, "w1", "Preparing file…", null, ToolKind.EDIT, ToolCallStatus.PENDING,
+                null, List.of(), null, null, null));
+        assertEquals(1, announced.size());
+        assertEquals("Preparing file… (pending)", announced.get(0).text());
+
+        assertEquals(List.of(), c.accept(new ToolCallUpdateNotification(null, "w1", "Write a.txt", null, null, null,
+                null, List.of(new ToolCallLocation("/work/a.txt", null)), null, null, null)));
+        c.accept(thought("checking the result"));
+
+        var out = c.accept(new ToolCallUpdateNotification(null, "w1", null, null, null, ToolCallStatus.COMPLETED,
+                null, null, null, null, null));
+        assertEquals(2, out.size(), out.toString());
+        assertEquals(HarnessEvent.THOUGHT, out.get(0).kind());
+        assertEquals(HarnessEvent.TOOL_CALL, out.get(1).kind());
+        assertEquals("Write a.txt: /work/a.txt (completed)", out.get(1).text());
     }
 
     @Test

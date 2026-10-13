@@ -2,6 +2,8 @@ package tools;
 
 import com.agentclientprotocol.sdk.spec.AcpSchema.AgentThoughtChunk;
 import com.agentclientprotocol.sdk.spec.AcpSchema.SessionUpdate;
+import com.agentclientprotocol.sdk.spec.AcpSchema.ToolCall;
+import com.agentclientprotocol.sdk.spec.AcpSchema.ToolCallUpdateNotification;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,11 +15,13 @@ import java.util.List;
  * live event per fragment — 145 rows of "The", " user", " wants" around two tool calls in
  * a trivial run. Thought chunks are buffered here; the first non-thought update (or
  * {@link #flush()} at the end of the turn) emits the buffered block as a single step ahead
- * of that update's own event. Not thread-safe: callers serialize on the reply accumulator.
+ * of that update's own event. A tool call's updates go to an {@link AcpToolCallTracker}, which
+ * answers with the call's finishing line. Not thread-safe: callers serialize on the reply accumulator.
  */
 public final class AcpThoughtCoalescer {
 
     private final StringBuilder thought = new StringBuilder();
+    private final AcpToolCallTracker tools = new AcpToolCallTracker();
 
     /** The events to dispatch for {@code update}: none while a thought block is still
      *  growing, else the finished block (if any) followed by the update's own event (if any). */
@@ -28,7 +32,8 @@ public final class AcpThoughtCoalescer {
         }
         var out = new ArrayList<HarnessEvent>(2);
         out.addAll(flush());
-        var ev = AcpEventMapper.toHarnessEvent(update);
+        if (update instanceof ToolCall call) tools.started(call);
+        var ev = update instanceof ToolCallUpdateNotification u ? tools.updated(u) : AcpEventMapper.toHarnessEvent(update);
         if (ev != null) out.add(ev);
         return List.copyOf(out);
     }
