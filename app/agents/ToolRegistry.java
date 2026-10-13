@@ -561,6 +561,21 @@ public class ToolRegistry {
         return executeRich(toolName, argsJson, agent, null).text();
     }
 
+    /**
+     * The disabled set a system prompt is assembled with when its turn carries a tool allow-list:
+     * the agent's own, widened by every registered tool the list leaves out. The prompt's tool
+     * and MCP catalogs then list what the turn can call, not what the agent could. Null when
+     * there is no list, which leaves the assembler on the agent's own set and the prompt unchanged.
+     */
+    public static @Nullable Set<String> fencedDisabled(Agent agent, @Nullable Set<String> allowed) {
+        if (allowed == null) return null;
+        var disabled = new HashSet<>(loadDisabledTools(agent));
+        for (var tool : listTools()) {
+            if (!allowed.contains(tool.name())) disabled.add(tool.name());
+        }
+        return disabled;
+    }
+
     /** Get tool definitions filtered by agent's tool configuration. */
     public static List<ToolDef> getToolDefsForAgent(Agent agent) {
         return getToolDefsForAgent(agent, (Conversation) null);

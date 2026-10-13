@@ -545,7 +545,7 @@ public class AgentRunner {
         record Prelude(SystemPromptAssembler.AssembledPrompt assembled, List<ToolDef> tools) {
         }
         var prelude = Tx.run(() -> new Prelude(
-                SystemPromptAssembler.assemble(agent, userPrompt, null, null),
+                SystemPromptAssembler.assemble(agent, userPrompt, ToolRegistry.fencedDisabled(agent, allowedTools), null),
                 TaskToolPolicy.restrict(ToolRegistry.getToolDefsForAgent(agent),
                         allowedTools, taskName, agent.name)));
         var assembled = prelude.assembled();

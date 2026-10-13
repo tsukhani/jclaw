@@ -134,14 +134,18 @@ public final class TaskToolPolicy {
         return kept;
     }
 
+    /** The allow-list a conversation carries ({@code Conversation.enabledToolNames}), or null when it carries none. */
+    public static @Nullable Set<String> allowListOf(@Nullable String allowListJson) {
+        return allowListJson == null || allowListJson.isBlank() ? null : parse(allowListJson);
+    }
+
     /**
      * Hold a subagent's turn to the allow-list its conversation inherited from a fenced task
      * ({@code Conversation.enabledToolNames}). Null or blank, the usual case, leaves
      * {@code defs} untouched; a malformed list fails open as it does for the fire itself.
      */
     public static List<ToolDef> restrictSubagent(List<ToolDef> defs, @Nullable String allowListJson, String agentName) {
-        if (allowListJson == null || allowListJson.isBlank()) return defs;
-        var allowed = parse(allowListJson);
+        var allowed = allowListOf(allowListJson);
         if (allowed == null) return defs;
         var kept = defs.stream().filter(d -> allowed.contains(d.function().name())).toList();
         if (kept.size() < defs.size()) {

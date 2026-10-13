@@ -11,6 +11,7 @@ import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
+import services.TaskToolPolicy;
 import services.Tx;
 
 import java.util.List;
@@ -140,7 +141,9 @@ public final class CompactionGate {
         return Tx.run(() -> {
             var conv = ConversationService.findById(conversationId);
             if (conv == null) return current;
-            var assembled = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, conv.channelType);
+            var promptDisabled = disabledTools != null ? disabledTools
+                    : ToolRegistry.fencedDisabled(agent, TaskToolPolicy.allowListOf(conv.enabledToolNames));
+            var assembled = SystemPromptAssembler.assemble(agent, userMessage, promptDisabled, conv.channelType);
             var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
             sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);

@@ -108,8 +108,9 @@ final class AgentPromptPreparer {
             trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
             trace.agentId(AgentRunner.agentIdOf(agent));
 
-            var assembled = SystemPromptAssembler.assemble(agent, userMessage, null, conv.channelType,
-                    queryEmbedding, conv);
+            var assembled = SystemPromptAssembler.assemble(agent, userMessage,
+                    ToolRegistry.fencedDisabled(agent, TaskToolPolicy.allowListOf(conv.enabledToolNames)),
+                    conv.channelType, queryEmbedding, conv);
             // JCLAW-38: re-inject the latest compaction summary (if any)
             // into the system prompt so the LLM keeps continuity with
             // turns that have since been dropped from the raw history.
@@ -226,9 +227,11 @@ final class AgentPromptPreparer {
         var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
         LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
         return Tx.run(() -> {
-            var disabledTools = ToolRegistry.loadDisabledTools(agent);
             var convo = Objects.requireNonNull(ConversationService.findById(conversation.id),
                     "conversation disappeared mid-turn");
+            // A conversation that carries a tool list is described by it, in the prompt as in the request.
+            var fenced = ToolRegistry.fencedDisabled(agent, TaskToolPolicy.allowListOf(convo.enabledToolNames));
+            var disabledTools = fenced != null ? fenced : ToolRegistry.loadDisabledTools(agent);
             var promptChannel = channelType != null ? channelType : convo.channelType;
             var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, promptChannel,
                     queryEmbedding, convo);
