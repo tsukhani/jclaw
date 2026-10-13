@@ -232,6 +232,7 @@ const { data: recentCodingRuns, refresh: refreshCodingRuns } = useFetch<Subagent
   '/api/subagent-runs?coding=true&limit=10', { immediate: false, default: () => [] },
 )
 const openCodingRunId = ref<number | null>(null)
+const openCodingRun = computed(() => recentCodingRuns.value?.find(r => r.id === openCodingRunId.value))
 function codingRunName(run: SubagentRunView): string {
   return run.label || run.workdir?.split('/').filter(Boolean).pop() || `Run #${run.id}`
 }
@@ -1093,6 +1094,8 @@ onBeforeUnmount(() => {
         v-if="openCodingRunId !== null"
         :key="openCodingRunId"
         :run-id="openCodingRunId"
+        :recorded-status="openCodingRun?.status"
+        :recorded-outcome="openCodingRun?.outcome"
         expanded
       />
     </PeekPanel>

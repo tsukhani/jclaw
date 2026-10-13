@@ -256,8 +256,8 @@ describe('Dashboard — Recent Activity coding runs view', () => {
       ]
     })
     const monitor = defineComponent({
-      props: { runId: { type: Number, required: true }, expanded: Boolean },
-      setup: props => () => h('div', `log of run ${props.runId}`),
+      props: { runId: { type: Number, required: true }, expanded: Boolean, recordedStatus: String },
+      setup: props => () => h('div', `log of run ${props.runId} (${props.recordedStatus})`),
     })
     const c = await mountSuspended(Index, { global: { stubs: { ...STUBS, CodingRunMonitor: monitor } } })
     await flushPromises()
@@ -277,7 +277,8 @@ describe('Dashboard — Recent Activity coding runs view', () => {
 
     await rows.find('button[aria-label="Open the log of coding run demo-project"]').trigger('click')
     await flushPromises()
-    expect(document.body.querySelector('[data-slot="sheet-content"]')?.textContent).toContain('log of run 31')
+    // The row's own status reaches the log: a monitor opened on a finished run cannot learn it otherwise.
+    expect(document.body.querySelector('[data-slot="sheet-content"]')?.textContent).toContain('log of run 31 (RUNNING)')
   })
 
   it('shows the empty state when there are no coding runs', async () => {

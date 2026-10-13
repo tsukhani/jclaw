@@ -22,6 +22,10 @@ const props = defineProps<{
   runId: number
   /** A taller step area, for a panel where the log is the content and not docked above a composer. */
   expanded?: boolean
+  /** The run's recorded status, where the parent holds it: a monitor opened on a finished run hears no codingrun.done. */
+  recordedStatus?: string
+  /** Why a run that did not complete ended, shown as the done event's outcome would be. */
+  recordedOutcome?: string | null
 }>()
 
 /**
@@ -83,6 +87,13 @@ function normalizeStatus(raw?: string | null): string | null {
   const s = raw.toLowerCase()
   return TERMINAL_KINDS[s] ?? s
 }
+
+watch(() => props.recordedStatus, (recorded) => {
+  const next = normalizeStatus(recorded)
+  if (!next) return
+  status.value = next
+  if (next !== 'running' && next !== 'completed' && props.recordedOutcome) outcome.value = props.recordedOutcome
+}, { immediate: true })
 
 /** Insert a step in seq order, deduping by seq, and reflect terminal kinds. */
 function ingest(step: CodingStep): void {

@@ -111,6 +111,35 @@ describe('CodingRunMonitor — catch-up transcript on mount', () => {
   })
 })
 
+describe('CodingRunMonitor — opened on a run that already ended', () => {
+  // No codingrun.done arrives for a finished run, and the transcript holds no terminal step.
+  it('shows the status its parent recorded and withdraws the Kill control', async () => {
+    registerEndpoint('/api/subagent-runs/7/steps', () => [{ seq: 1, kind: 'token', text: 'all done' }])
+
+    const completed = await mountSuspended(CodingRunMonitor, { props: { runId: 7, recordedStatus: 'COMPLETED' } })
+    const failed = await mountSuspended(CodingRunMonitor, {
+      props: { runId: 7, recordedStatus: 'FAILED', recordedOutcome: 'harness exited 3' },
+    })
+    await flushPromises()
+
+    expect(completed.text()).toContain('Completed')
+    expect(completed.text()).not.toContain('Kill')
+    expect(failed.text()).toContain('Failed')
+    expect(failed.text()).toContain('harness exited 3')
+    expect(failed.text()).not.toContain('Kill')
+  })
+
+  it('still offers Kill while the recorded status is running', async () => {
+    registerEndpoint('/api/subagent-runs/7/steps', () => [])
+
+    const component = await mountSuspended(CodingRunMonitor, { props: { runId: 7, recordedStatus: 'RUNNING' } })
+    await flushPromises()
+
+    expect(component.text()).toContain('Running')
+    expect(component.text()).toContain('Kill')
+  })
+})
+
 describe('CodingRunMonitor — step area height', () => {
   it('stays compact above the composer and grows where the log is the content', async () => {
     registerEndpoint('/api/subagent-runs/7/steps', () => [])

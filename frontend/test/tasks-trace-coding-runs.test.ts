@@ -41,8 +41,8 @@ describe('Tasks page — coding runs in a task run\'s trace', () => {
       }]
     })
     const monitor = defineComponent({
-      props: { runId: { type: Number, required: true } },
-      setup: props => () => h('div', `log of run ${props.runId}`),
+      props: { runId: { type: Number, required: true }, recordedStatus: String },
+      setup: props => () => h('div', `log of run ${props.runId} (${props.recordedStatus})`),
     })
     const component = await mountSuspended(Tasks, { global: { stubs: { CodingRunMonitor: monitor } } })
     await flushPromises()
@@ -55,7 +55,7 @@ describe('Tasks page — coding runs in a task run\'s trace', () => {
     await vi.waitFor(() => {
       const panel = document.body.querySelector('[data-slot="sheet-content"]')?.textContent ?? ''
       expect(panel).toContain('Coding runs')
-      expect(panel).toContain('log of run 501')
+      expect(panel).toContain('log of run 501 (COMPLETED)')
     })
   })
 })

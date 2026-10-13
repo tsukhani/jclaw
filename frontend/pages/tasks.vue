@@ -2008,6 +2008,8 @@ function zoneForTaskRender(task: Task): string | undefined {
           v-for="run in peekCodingRuns"
           :key="run.id"
           :run-id="run.id"
+          :recorded-status="run.status"
+          :recorded-outcome="run.outcome"
         />
       </div>
       <p
