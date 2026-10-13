@@ -120,7 +120,18 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
             var fromTask = persistTaskStartedRun(p, c, taskRun, ConversationService.create(c, "web", null));
             var fromChat = persistRun(p, c, ConversationService.create(p, "web", "u"),
                     ConversationService.create(c, "web", null), SubagentRun.Status.COMPLETED);
-            return new long[]{fromTask, fromChat, taskRun.id, taskRun.task.id};
+            // Refused approval, or no folder could be created: a coding run that never got a working directory.
+            var failedStart = new SubagentRun();
+            failedStart.parentAgent = p;
+            failedStart.childAgent = c;
+            failedStart.parentConversation = ConversationService.create(p, "web", "u2");
+            failedStart.childConversation = ConversationService.create(c, "web", null);
+            failedStart.status = SubagentRun.Status.FAILED;
+            failedStart.endedAt = Instant.now();
+            failedStart.outcome = "no folder could be created";
+            failedStart.runtime = "acp";
+            failedStart.save();
+            return new long[]{fromTask, fromChat, taskRun.id, taskRun.task.id, failedStart.id};
         });
 
         var all = getContent(GET("/api/subagent-runs"));
@@ -136,7 +147,9 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
 
         var coding = getContent(GET("/api/subagent-runs?coding=true"));
         assertTrue(coding.contains("\"id\":" + ids[0]), coding);
-        assertFalse(coding.contains("\"id\":" + ids[1]), "a run with no working directory is not a coding run: " + coding);
+        assertFalse(coding.contains("\"id\":" + ids[1]), "a native run is not a coding run: " + coding);
+        assertTrue(coding.contains("\"id\":" + ids[4]),
+                "a coding run that failed before it got a folder must still be listed: " + coding);
     }
 
     @Test

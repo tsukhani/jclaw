@@ -166,8 +166,8 @@ class SubagentRunEventsTest extends UnitTest {
 
     private static long insert(Seed seed, Long parentConvId, Long parentTaskRunId, String label) throws Exception {
         return (Long) invokeStore("insertSubagentRun",
-                new Class<?>[]{Long.class, Long.class, Long.class, Long.class, Long.class, String.class},
-                seed.parentAgentId(), seed.childAgentId(), parentConvId, parentTaskRunId, seed.childConvId(), label);
+                new Class<?>[]{Long.class, Long.class, Long.class, Long.class, Long.class, String.class, boolean.class},
+                seed.parentAgentId(), seed.childAgentId(), parentConvId, parentTaskRunId, seed.childConvId(), label, false);
     }
 
     private static long seedTaskRun(Long agentId) {

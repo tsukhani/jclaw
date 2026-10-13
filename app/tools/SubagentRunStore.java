@@ -31,7 +31,7 @@ final class SubagentRunStore {
      *  per-run announce-message metadata JSON. */
     static Long insertSubagentRun(Long parentAgentId, @Nullable Long childAgentId,
                                   @Nullable Long parentConvId, @Nullable Long parentTaskRunId,
-                                  @Nullable Long childConvId, @Nullable String label) {
+                                  @Nullable Long childConvId, @Nullable String label, boolean codingHarness) {
         var inserted = Tx.run(() -> {
             var run = new SubagentRun();
             run.parentAgent = Agent.findById(parentAgentId);
@@ -40,6 +40,8 @@ final class SubagentRunStore {
             run.parentTaskRun = parentTaskRunId == null ? null : TaskRun.findById(parentTaskRunId);
             run.childConversation = Conversation.findById(childConvId);
             run.label = label != null && !label.isBlank() ? label : null;
+            // Recorded at the insert: a run refused approval or a folder fails before it has a workdir to show for it.
+            run.runtime = codingHarness ? SubagentSpawnTool.RUNTIME_ACP : null;
             // status defaults to RUNNING, startedAt populated by @PrePersist.
             run.save();
             return run;

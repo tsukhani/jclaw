@@ -253,6 +253,9 @@ describe('Dashboard — Recent Activity coding runs view', () => {
         { ...run, id: 30, label: 'fix the parser', status: 'COMPLETED', startedAt: '2026-10-13T05:00:00Z',
           parentConversationId: 42, parentTaskRunId: null, parentTaskId: null, parentTaskName: null,
           workdir: '/Users/op/coding/fix-the-parser' },
+        // Failed before it got a folder: nothing to name it by but its id.
+        { ...run, id: 29, label: null, status: 'FAILED', startedAt: '2026-10-13T04:00:00Z', outcome: 'no folder could be created',
+          parentConversationId: 41, parentTaskRunId: null, parentTaskId: null, parentTaskName: null, workdir: null },
       ]
     })
     const monitor = defineComponent({
@@ -273,6 +276,7 @@ describe('Dashboard — Recent Activity coding runs view', () => {
     expect(rows.text()).toContain('demo-project')
     expect(rows.text()).toContain('task nightly-build')
     expect(rows.text()).toContain('fix the parser')
+    expect(rows.find('button[aria-label="Open the log of coding run Run #29"]').exists()).toBe(true)
     expect(rows.find('a[href="/chat?conversation=42"]').exists()).toBe(true)
 
     await rows.find('button[aria-label="Open the log of coding run demo-project"]').trigger('click')

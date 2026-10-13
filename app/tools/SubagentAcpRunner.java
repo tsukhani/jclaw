@@ -831,7 +831,7 @@ final class SubagentAcpRunner {
             return SubagentSpawnTool.notBlank(folder)
                     ? "Error: 'folder' names a coding run's folder, so it needs runtime=\"acp\"." : null;
         }
-        if (!"acp".equalsIgnoreCase(runtime)) {
+        if (!SubagentSpawnTool.RUNTIME_ACP.equalsIgnoreCase(runtime)) {
             return "Error: 'runtime' must be \"native\" (default) or \"acp\"" + SubagentSpawnTool.GOT_LITERAL + runtime + "').";
         }
         if (folder != null && !folder.isBlank()) {
@@ -916,7 +916,7 @@ final class SubagentAcpRunner {
     }
 
     static boolean isAcpRuntime(JsonObject args) {
-        return "acp".equalsIgnoreCase(SubagentSpawnArgs.optString(args, SubagentSpawnTool.ARG_RUNTIME));
+        return SubagentSpawnTool.RUNTIME_ACP.equalsIgnoreCase(SubagentSpawnArgs.optString(args, SubagentSpawnTool.ARG_RUNTIME));
     }
 
     /** Operator-configured ACP harness command, whitespace-split. Empty when unset. */

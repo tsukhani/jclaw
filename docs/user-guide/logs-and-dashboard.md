@@ -123,7 +123,7 @@ A segmented toggle in the panel header switches the table between four views:
 - **All** (default): the event tail described above.
 - **Video**: recent video-generation jobs with their state (`PENDING` / `RUNNING` / `SUCCEEDED` / `FAILED`), prompt, submitted time, and a "see in conversation" link to where each was requested. Use it to track `generate_video` jobs as they run, without leaving the dashboard.
 - **Scrape jobs**: the 10 most recent [background scrapes](/guide#scrapes) with their state, site, progress, and start time. The site links to the job's page on [Scrapes](/scrapes).
-- **Coding runs**: the 10 most recent [coding runs](/guide#acp-harness) with their status, name, origin, and start time. A run is named by its label, or by its folder when it has no label. Click the name to open the run's log in a side panel. A run started from a chat has a "see in conversation" link. A run started by a task shows *task NAME*.
+- **Coding runs**: the 10 most recent [coding runs](/guide#acp-harness) with their status, name, origin, and start time. A run is named by its label, or by its folder when it has no label. A run that failed before it got a folder is listed too, as *Run #ID*, and its log gives the reason. Click the name to open the run's log in a side panel. A run started from a chat has a "see in conversation" link. A run started by a task shows *task NAME*.
 
 For full filtering and expansion, click through to the [Logs](/logs) page.
 

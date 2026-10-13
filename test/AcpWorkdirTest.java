@@ -113,6 +113,10 @@ class AcpWorkdirTest extends UnitTest {
             assertTrue(run.get("error").getAsString().contains("no folder could be created"), run.toString());
             assertFalse(run.toString().contains(System.getProperty("user.dir")),
                     "the harness must not have started in the server's own directory: " + run);
+            JPA.em().clear();
+            SubagentRun row = SubagentRun.findById(Long.parseLong(run.get("run_id").getAsString()));
+            assertNull(row.workdir);
+            assertEquals("acp", row.runtime, "a run that failed before it got a folder is still recorded as a coding run");
         } finally {
             Files.deleteIfExists(blocker);
         }

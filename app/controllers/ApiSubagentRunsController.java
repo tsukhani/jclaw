@@ -66,7 +66,9 @@ public class ApiSubagentRunsController extends Controller {
     // Run "status" reused as a filter path, request-body field, and sort-whitelist key.
     private static final String STATUS = "status";
     private static final String COL_STARTED_AT = "r.startedAt";
-    private static final String CODING_RUN = "r.workdir IS NOT NULL";
+    // The workdir arm covers rows written before the runtime column; a run that failed before it got a folder has only the first.
+    private static final String CODING_RUN =
+            "(r.runtime = '" + SubagentSpawnTool.RUNTIME_ACP + "' OR r.workdir IS NOT NULL)";
     // LEFT on the two parents: a run has one or the other, and an inner join would drop the row.
     private static final String RUN_FETCH = "JOIN FETCH r.parentAgent JOIN FETCH r.childAgent "
             + "LEFT JOIN FETCH r.parentConversation JOIN FETCH r.childConversation "
@@ -132,7 +134,6 @@ public class ApiSubagentRunsController extends Controller {
         var ftsRunIds = ftsSubagentRunIds(q);
 
         var where = filter.toWhereClause();
-        // The row stores no runtime; a recorded working directory is what marks a coding-harness run.
         if (Boolean.TRUE.equals(coding)) {
             where = where.isEmpty() ? CODING_RUN : where + " AND " + CODING_RUN;
         }

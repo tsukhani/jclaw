@@ -403,6 +403,40 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void aBatchChildOnTheCodingHarnessIsRecordedAsACodingRun() throws Exception {
+        ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, "cat");
+        var parent = createAgent("p-batch-acp", "spawn-provider", "test-model");
+        parent.acpAllowed = true;
+        parent.save();
+        var conv = ConversationService.create(parent, "web", "u-batch-acp");
+        commitAndReopen();
+
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
+                resultRef.set(agents.ToolContext.withScope(conv.id, null, () -> {
+                    new SubagentSpawnTool().execute("{\"tasks\":[\"ACP_BATCH_PING\"],\"runtime\":\"acp\"}", p);
+                    return new tools.SubagentYieldTool().execute("{\"all\":true}", p);
+                }));
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(60_000);
+        assertFalse(thread.isAlive(), "batch spawn + yield must complete within 60s");
+        if (errorRef.get() != null) throw errorRef.get();
+
+        var result = JsonParser.parseString(resultRef.get()).getAsJsonObject()
+                .get("results").getAsJsonArray().get(0).getAsJsonObject();
+        assertEquals("COMPLETED", result.get("status").getAsString(), result.toString());
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(Long.parseLong(result.get("run_id").getAsString()));
+        assertEquals("acp", run.runtime, "the batch path must record the runtime the same way a single spawn does");
+    }
+
+    @Test
     void aFailedAcpRunTellsTheParentWhyAndEndsTheMonitor() throws Exception {
         var failing = Files.createTempFile("jclaw-acp-failing-harness-", ".sh");
         Files.writeString(failing, "#!/bin/sh\ncat >/dev/null\necho harness-boom >&2\nexit 3\n");

@@ -135,6 +135,10 @@ public class SubagentRun extends Model {
     @Column(length = 512)
     public String workdir;
 
+    /** {@code acp} for a run handed to the external coding harness; null for a native run and for a row written before this column. */
+    @Column(length = 16)
+    public String runtime;
+
     /**
      * JCLAW-273: yield-resume flag for async spawns. When the parent agent
      * invokes {@code subagent_yield} mid-turn with this run id, the tool

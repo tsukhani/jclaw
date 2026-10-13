@@ -469,7 +469,7 @@ public final class SubagentRegistry {
 
     /**
      * The coding-run monitor's terminal signal: the run's recorded status, and why when it did
-     * not complete. Sent for every run because the row carries no runtime; only a monitor listens.
+     * not complete. Sent for every run, coding or not: only a monitor listens, and only for its own run.
      */
     private static void publishCodingRunDone(SubagentRun run) {
         var done = new LinkedHashMap<String, Object>();

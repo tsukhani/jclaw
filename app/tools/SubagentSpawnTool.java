@@ -123,6 +123,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     static final String ARG_CONTEXT = "context";
     static final String ARG_RUN_TIMEOUT_SECONDS = "runTimeoutSeconds";
     static final String ARG_RUNTIME = "runtime";
+    /** The {@code runtime} value that hands the child to the external coding harness, and what its run row records. */
+    public static final String RUNTIME_ACP = "acp";
     static final String ARG_FOLDER = "folder";
     static final String FIELD_RUN_ID = "run_id";
     static final String FIELD_CONVERSATION_ID = "conversation_id";
@@ -448,7 +450,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // its own short Tx so the row commits and is visible from any thread
         // we hand the run to.
         var runId = SubagentRunStore.insertSubagentRun(parentAgentId, childAgentId, parentConvIdFinal,
-                parentTaskRunId, childConvId, parsed.label());
+                parentTaskRunId, childConvId, parsed.label(), SubagentAcpRunner.isAcpRuntime(args));
         var runIdStr = String.valueOf(runId);
         EventLogger.recordSubagentSpawn(
                 parentAgent.name, childAgentName,
@@ -646,7 +648,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 continue; // the rest of the fan-out still runs
             }
             var runId = SubagentRunStore.insertSubagentRun(parentAgentId, bootstrap.childAgentId(),
-                    parentConvIdFinal, parentTaskRunId, bootstrap.childConvId(), spec.label());
+                    parentConvIdFinal, parentTaskRunId, bootstrap.childConvId(), spec.label(), acpLaunch != null);
             EventLogger.recordSubagentSpawn(parentAgent.name, bootstrap.childAgentName(),
                     String.valueOf(runId), fMode, fContext);
             if (acpLaunch != null) {
