@@ -5,6 +5,7 @@ import org.jspecify.annotations.Nullable;
 import play.Logger;
 import utils.AppClock;
 import utils.GsonHolder;
+import utils.SecretRedactor;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -125,7 +126,10 @@ public class EventLogger {
 
     @SuppressWarnings("java:S6213") // 'record' as method name predates the restricted identifier; rename would churn callers/tests with no real ambiguity
     public static void record(String level, String category, @Nullable String agentId, @Nullable String channel,
-                              String message, @Nullable String details) {
+                              String rawMessage, @Nullable String rawDetails) {
+        // Agents pass credentials on command lines and in tool arguments: neither the file nor the table keeps them.
+        var message = rawMessage == null ? rawMessage : SecretRedactor.redact(rawMessage);
+        var details = rawDetails == null ? null : SecretRedactor.redact(rawDetails);
         // Log to SLF4J first (always safe)
         var logMessage = "[%s/%s] %s".formatted(category, level, message);
         switch (level) {

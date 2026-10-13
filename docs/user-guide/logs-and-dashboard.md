@@ -131,6 +131,8 @@ For full filtering and expansion, click through to the [Logs](/logs) page.
 
 The [Logs](/logs) page is the operator's microscope. Every meaningful event is logged with a category, a level, a message, and, for some events, a JSON details blob. These events are agent runs, tool calls, subagent spawns, task fires, channel webhooks, configuration changes, and notifications.
 
+JClaw masks credentials before it writes an event. An agent often puts a key on a command line or in a tool call, for example `curl -H "X-Api-Key: ..."` or `?apikey=...`. The event keeps the name of the header, parameter or variable and shows `[redacted]` in place of the value. The log file `logs/application.log` gets the same masked text. Masking covers key headers, bearer and basic credentials, keys and tokens in a URL, `user:password` pairs, and common token formats. It does not change the conversation itself: a command an agent ran is still stored in full in that conversation's history. Older events, written before masking was added, are not masked.
+
 ### Filters
 
 Three filters sit across the top:
