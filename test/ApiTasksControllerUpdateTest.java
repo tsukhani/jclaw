@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,9 +10,11 @@ import play.mvc.Http.Response;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.EventLogger;
+import services.TaskSteps;
 import services.Tx;
 
 import java.io.ByteArrayInputStream;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -115,6 +118,19 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
         // Schedule fields untouched.
         assertContentMatch("\"type\":\"IMMEDIATE\"", resp);
         assertContentMatch("\"scheduleDisplay\":\"now\"", resp);
+    }
+
+    @Test
+    void updateDescriptionAsAListStoresTheSteps() {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "steps", "now");
+
+        var resp = PATCH("/api/tasks/" + taskId, "application/json", """
+                {"description": ["Fetch the orders", "Post a summary"]}
+                """);
+        assertIsOk(resp);
+        var stored = JsonParser.parseString(getContent(resp)).getAsJsonObject().get("description").getAsString();
+        assertEquals(List.of("Fetch the orders", "Post a summary"), TaskSteps.parse(stored));
     }
 
     @Test

@@ -82,7 +82,7 @@ public final class TaskWriteService {
         var t = new Task();
         t.agent = agent;
         t.name = name;
-        t.description = readOptionalString(body, KEY_DESCRIPTION);
+        t.description = readTextOrList(body, KEY_DESCRIPTION);
         if (t.description == null) t.description = "";
 
         t.type = spec.type();
@@ -103,7 +103,7 @@ public final class TaskWriteService {
         t.payloadType = readOptionalString(body, KEY_PAYLOAD_TYPE);
         t.modelProvider = readOptionalString(body, KEY_MODEL_PROVIDER);
         t.modelId = readOptionalString(body, KEY_MODEL_ID);
-        t.enabledToolNames = readToolNameList(body, KEY_ENABLED_TOOL_NAMES);
+        t.enabledToolNames = readTextOrList(body, KEY_ENABLED_TOOL_NAMES);
         if (body.has(KEY_PAUSED) && !body.get(KEY_PAUSED).isJsonNull()) {
             t.paused = body.get(KEY_PAUSED).getAsBoolean();
         }
@@ -130,13 +130,14 @@ public final class TaskWriteService {
     }
 
     /**
-     * JCLAW-1068: {@code enabledToolNames} is stored as a JSON array string but arrives
-     * either way — {@code ApiTasksController.TaskRequest} declares it {@code List<String>}
-     * while {@code TaskTool} sends the already-encoded string. {@link #readOptionalString}
+     * A field stored as a JSON array string that arrives either way: {@code enabledToolNames}
+     * (JCLAW-1068: {@code ApiTasksController.TaskRequest} declares it {@code List<String>}
+     * while {@code TaskTool} sends the already-encoded string) and {@code description},
+     * whose steps (JCLAW-260) a model sends as a real list. {@link #readOptionalString}
      * cannot take the array form: {@code JsonArray.getAsString()} throws for any size but
-     * one, so a two-tool allow-list 500'd instead of persisting.
+     * one, so a two-element list 500'd instead of persisting.
      */
-    public static @Nullable String readToolNameList(JsonObject body, String key) {
+    public static @Nullable String readTextOrList(JsonObject body, String key) {
         if (!body.has(key)) return null;
         var el = body.get(key);
         if (el.isJsonNull()) return null;
@@ -176,7 +177,7 @@ public final class TaskWriteService {
     private static boolean applyOptionalStringFields(Task task, JsonObject body) {
         boolean changed = false;
         if (body.has(KEY_DESCRIPTION)) {
-            var v = readOptionalString(body, KEY_DESCRIPTION);
+            var v = readTextOrList(body, KEY_DESCRIPTION);
             task.description = v != null ? v : "";
             changed = true;
         }
@@ -184,7 +185,7 @@ public final class TaskWriteService {
         if (body.has(KEY_PAYLOAD_TYPE))        { task.payloadType       = readOptionalString(body, KEY_PAYLOAD_TYPE);        changed = true; }
         if (body.has(KEY_MODEL_PROVIDER))      { task.modelProvider     = readOptionalString(body, KEY_MODEL_PROVIDER);      changed = true; }
         if (body.has(KEY_MODEL_ID))            { task.modelId           = readOptionalString(body, KEY_MODEL_ID);            changed = true; }
-        if (body.has(KEY_ENABLED_TOOL_NAMES))  { task.enabledToolNames  = readToolNameList(body, KEY_ENABLED_TOOL_NAMES);  changed = true; }
+        if (body.has(KEY_ENABLED_TOOL_NAMES))  { task.enabledToolNames  = readTextOrList(body, KEY_ENABLED_TOOL_NAMES);    changed = true; }
         // JCLAW-1106: an explicit null clears the override and returns the task to the
         // default chain. The controller's rejectInvalidTimezone guard covers this path too.
         if (body.has(KEY_TIMEZONE)) {

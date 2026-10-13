@@ -1,3 +1,4 @@
+import com.google.gson.JsonParser;
 import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -7,7 +8,9 @@ import org.junit.jupiter.params.provider.CsvSource;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.EventLogger;
+import services.TaskSteps;
 
+import java.util.List;
 import java.util.regex.Pattern;
 
 /**
@@ -133,6 +136,18 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
         assertContentMatch("\"modelProvider\":\"openrouter\"", resp);
         assertContentMatch("\"modelId\":\"claude-sonnet-4-6\"", resp);
         assertContentMatch("\"noAgent\":false", resp);
+    }
+
+    @Test
+    void createWithDescriptionAsAListStoresTheSteps() {
+        var agentId = seedAgent();
+        var resp = POST("/api/tasks", "application/json", """
+                {"agentId": %d, "name": "steps-task", "schedule": "@hourly",
+                 "description": ["Fetch the orders", "Post a summary"]}
+                """.formatted(agentId));
+        assertIsOk(resp);
+        var stored = JsonParser.parseString(getContent(resp)).getAsJsonObject().get("description").getAsString();
+        assertEquals(List.of("Fetch the orders", "Post a summary"), TaskSteps.parse(stored));
     }
 
     /** JCLAW-1407: nothing at fire time reads these, so the write refuses rather than stores them. */
