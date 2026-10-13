@@ -120,6 +120,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     static final String ARG_CONTEXT = "context";
     static final String ARG_RUN_TIMEOUT_SECONDS = "runTimeoutSeconds";
     static final String ARG_RUNTIME = "runtime";
+    static final String ARG_FOLDER = "folder";
     static final String FIELD_RUN_ID = "run_id";
     static final String FIELD_CONVERSATION_ID = "conversation_id";
     static final String FIELD_REPLY = "reply";
@@ -243,11 +244,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         return ACP_MODE_KEY + " must be 'batch', 'json' or 'rpc'; blank means batch.";
     }
 
-    /** JCLAW-657 (finding A): working directory the acp harness process runs in.
-     *  Operator-configured (Config DB); when unset, defaults to the child agent's
-     *  own workspace so a real harness — whose file writes are OUTSIDE JClaw's
-     *  tool/workspace confinement — is scoped there rather than the backend's CWD
-     *  (the repo root). */
+    /** JCLAW-657 (finding A): the directory coding-run folders are created in, one per
+     *  run ({@link services.CodingRunFolders}). Operator-configured (Config DB); when
+     *  unset, the child agent's own workspace, so a real harness — whose file writes are
+     *  OUTSIDE JClaw's tool/workspace confinement — starts there rather than in the
+     *  backend's CWD (the repo root). */
     public static final String ACP_WORKDIR_KEY = "subagent.acp.workdir";
 
     /** Settings default for the provider/model an acp harness runs with instead of its own
@@ -358,6 +359,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         + "operator-configured external agent harness (e.g. a Codex/Claude/Gemini CLI) "
                         + "with your task on stdin, capturing its output as the reply. Composes with "
                         + "sync, async, and batch."));
+        props.put(ARG_FOLDER, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+                SchemaKeys.DESCRIPTION,
+                "With runtime=\"acp\" only: the name of the folder the coding harness works in. Name an "
+                        + "existing folder to continue a project there; a new name creates it. Omit it "
+                        + "for a fresh folder named from the task. One folder name, never a path."));
         return Map.of(
                 SchemaKeys.TYPE, SchemaKeys.OBJECT,
                 SchemaKeys.PROPERTIES, props,

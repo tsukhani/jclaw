@@ -55,6 +55,13 @@ const acpModeValue = computed(() => {
   return v === 'json' || v === 'rpc' ? v : 'batch'
 })
 
+// The directory coding-run folders are created in; unset is each agent's own workspace.
+const DEFAULT_WORKDIR_LABEL = 'workspace/<agent>/coding (default)'
+const acpWorkdirValue = computed(() => {
+  const raw = configData.value?.entries?.find(e => e.key === 'subagent.acp.workdir')?.value
+  return (raw ?? '').trim()
+})
+
 // Lazy: the backend probes the sandbox binary, which must not suspend the panel.
 const { data: sandboxData } = useLazyFetch<{ available: boolean, mechanism: string, reason: string }>('/api/sandbox')
 
@@ -456,6 +463,66 @@ async function saveAcpModel(value: string) {
               {{ o.label }}
             </option>
           </select>
+        </div>
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5">
+            acp.workdir
+            <InfoTip
+              label="About acp.workdir"
+              content-class="w-72 font-mono"
+            >
+              The folder coding runs work under. Each run gets its own folder there, named from the task. In chat, name a folder to continue in it. Use an absolute path or one starting with ~/. Empty uses each agent's own workspace.
+            </InfoTip>
+          </span>
+          <template v-if="editingField === 'acpWorkdir'">
+            <input
+              v-model="fieldEdit"
+              type="text"
+              :placeholder="DEFAULT_WORKDIR_LABEL"
+              aria-label="Coding run folder"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+            >
+            <button
+              class="p-1 text-fg-muted hover:text-emerald-700 dark:hover:text-emerald-400 transition-colors"
+              title="Save"
+              aria-label="Save coding run folder"
+              @click="saveField('subagent.acp.workdir', fieldEdit.trim())"
+            >
+              <CheckIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Cancel"
+              aria-label="Cancel editing coding run folder"
+              @click="editingField = null"
+            >
+              <XMarkIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
+          <template v-else>
+            <span
+              data-testid="acp-workdir"
+              class="flex-1 min-w-0 block text-sm font-mono break-all"
+              :class="acpWorkdirValue ? 'text-fg-primary' : 'text-fg-muted'"
+            >{{ acpWorkdirValue || DEFAULT_WORKDIR_LABEL }}</span>
+            <button
+              class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+              title="Edit"
+              aria-label="Edit coding run folder"
+              @click="editingField = 'acpWorkdir'; fieldEdit = acpWorkdirValue"
+            >
+              <PencilIcon
+                class="w-3.5 h-3.5"
+                aria-hidden="true"
+              />
+            </button>
+          </template>
         </div>
         <div class="px-4 py-2.5 flex max-sm:flex-wrap items-start gap-3">
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5 pt-1">

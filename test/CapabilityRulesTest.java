@@ -106,7 +106,7 @@ class CapabilityRulesTest extends UnitTest {
     // ===== Capability: resolve a model-controlled filesystem path =====
 
     /** Files under {@code tools..} building a path directly when the baseline was frozen (JCLAW-1152). */
-    private static final int FROZEN_DIRECT_PATH_FILES = 4;
+    private static final int FROZEN_DIRECT_PATH_FILES = 3;
 
     private static final DescribedPredicate<JavaAccess<?>> DIRECT_PATH_CONSTRUCTION = DescribedPredicate.describe(
             "a call or method reference that builds a filesystem path directly",
@@ -125,7 +125,7 @@ class CapabilityRulesTest extends UnitTest {
      * <p>Bytecode cannot tell a tool argument from a compile-time constant, so the rule bans
      * direct construction across the package and freezes what is already there: two genuinely
      * model-controlled sites in {@code ShellExecTool} (the command token and the {@code workdir}
-     * argument) and three that read an env var, a config key or a literal. The coarseness is
+     * argument) and two that build a fixed path under the application directory. The coarseness is
      * deliberate — a new {@code Path.of} in this package is worth a look either way.
      *
      * <p>Scoped to model-controlled paths on purpose: application-internal file access — config,

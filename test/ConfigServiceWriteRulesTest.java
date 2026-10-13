@@ -248,6 +248,15 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
+    void theCodingRunParentIsAnAbsolutePathOrOneUnderHome() {
+        for (var value : List.of("", "~", "~/coding-runs", "/tmp/jclaw-coding-runs")) {
+            assertAccepted(SubagentSpawnTool.ACP_WORKDIR_KEY, value);
+        }
+        assertRefused("subagent.acp.workdir must be an absolute path or start with ~/; blank means each agent's "
+                + "own workspace.", SubagentSpawnTool.ACP_WORKDIR_KEY, "coding-runs");
+    }
+
+    @Test
     void anAcpModeOutsideBatchJsonRpcIsRefused() {
         for (var value : List.of("batch", "json", "rpc", "RPC", " json ", "")) {
             assertAccepted(SubagentSpawnTool.ACP_MODE_KEY, value);

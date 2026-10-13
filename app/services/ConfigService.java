@@ -391,7 +391,9 @@ public class ConfigService {
             // A typo in either sandbox key reads as off and leaves processes unconfined.
             HarnessSandbox::rejectionFor,
             // An unknown mode silently falls back to batch.
-            (key, value) -> key.equals(SubagentSpawnTool.ACP_MODE_KEY) ? SubagentSpawnTool.modeRejectionFor(value) : null);
+            (key, value) -> key.equals(SubagentSpawnTool.ACP_MODE_KEY) ? SubagentSpawnTool.modeRejectionFor(value) : null,
+            // A relative path would put coding runs under the server's own directory.
+            (key, value) -> key.equals(SubagentSpawnTool.ACP_WORKDIR_KEY) ? CodingRunFolders.parentRejection(value) : null);
 
     private static KeyRule under(String prefix, KeyRule rule) {
         return (key, value) -> key.startsWith(prefix) ? rule.rejectionFor(key, value) : null;

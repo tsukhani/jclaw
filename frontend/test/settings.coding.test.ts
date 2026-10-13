@@ -299,6 +299,35 @@ describe('SettingsCodingPanel — effective launch preview', () => {
   })
 })
 
+describe('SettingsCodingPanel — coding run folder', () => {
+  it('shows the workspace default while the key is unset', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find('[data-testid="acp-workdir"]').text()).toBe('workspace/<agent>/coding (default)')
+  })
+
+  it('shows the saved folder', async () => {
+    extraEntries = [{ key: 'subagent.acp.workdir', value: '~/Programming' }]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find('[data-testid="acp-workdir"]').text()).toBe('~/Programming')
+  })
+
+  it('POSTs the folder the operator types', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    await c.find('button[aria-label="Edit coding run folder"]').trigger('click')
+    await c.find('input[aria-label="Coding run folder"]').setValue(' ~/jclaw-coding-runs ')
+    await c.find('button[aria-label="Save coding run folder"]').trigger('click')
+    await flushPromises()
+
+    expect(configPosts).toContainEqual({ key: 'subagent.acp.workdir', value: '~/jclaw-coding-runs' })
+  })
+})
+
 describe('SettingsCodingPanel — sandbox and mode', () => {
   const sandboxSelect = 'select[aria-label="Coding harness sandbox"]'
   const modeSelect = 'select[aria-label="Coding harness mode"]'

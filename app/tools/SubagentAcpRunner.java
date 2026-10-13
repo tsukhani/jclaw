@@ -16,7 +16,7 @@ import models.MessageRole;
 import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
 import services.AcpCapabilityCatalog;
-import services.AgentService;
+import services.CodingRunFolders;
 import services.ConfigService;
 import services.ConversationService;
 import services.EventLogger;
@@ -32,8 +32,6 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -75,7 +73,7 @@ final class SubagentAcpRunner {
 
     /** What a {@code runtime=acp} spawn resolved at validation time: the operator's harness
      *  command and, when one applies, the provider/model the harness is pinned to. */
-    record AcpLaunch(List<String> command, @Nullable HarnessModel model) {}
+    record AcpLaunch(List<String> command, @Nullable HarnessModel model, @Nullable String folder) {}
 
     /** Reply text a run has streamed since its last non-token event. Tokens reach the chat
      *  one by one (Rail A); the monitor and the transcript get the block as one {@code
@@ -193,7 +191,7 @@ final class SubagentAcpRunner {
             // CWD. This ORGANIZES output; it does not confine the process —
             // containment is JCLAW-669/670/671 (channel gating, permission
             // flags, sandboxing). acpAllowed is the security boundary today.
-            var workdir = resolveAcpWorkdir(childAgent, task);
+            var workdir = resolveAcpWorkdir(runId, childAgent, task, launch.folder());
             recordWorkdir(runId, workdir);
             // Stage 2: if the configured harness speaks real ACP (natively or via
             // a detected adapter) over stdio, drive it over the protocol via the
@@ -246,42 +244,36 @@ final class SubagentAcpRunner {
     }
 
     /**
-     * JCLAW-657 (finding A): resolve the directory the acp harness process runs
-     * in. An operator-set {@link SubagentSpawnTool#ACP_WORKDIR_KEY} wins; otherwise
-     * the child agent's own workspace, so a real coding harness (whose file writes
-     * are outside JClaw's tool confinement) is scoped there rather than the
-     * backend's CWD. Returns {@code null} — inherit the server CWD — only when
-     * neither is resolvable or the directory can't be created.
+     * JCLAW-657 (finding A), JCLAW-666: resolve the directory the acp harness process runs in —
+     * this run's own folder under the parent {@link CodingRunFolders} resolves (the operator's
+     * {@link SubagentSpawnTool#ACP_WORKDIR_KEY}, else the child agent's workspace), so a real
+     * coding harness, whose file writes are outside JClaw's tool confinement, starts there rather
+     * than in the backend's CWD. A spawn that names {@code folder} continues in that one.
+     * Returns {@code null} — inherit the server CWD — only for an unnamed folder that cannot be
+     * resolved or created; a named one that cannot be opened fails the run instead.
      */
-    private static @Nullable File resolveAcpWorkdir(Agent childAgent, String task) {
-        var configured = ConfigService.get(SubagentSpawnTool.ACP_WORKDIR_KEY);
-        Path dir;
-        if (configured != null && !configured.isBlank()) {
-            dir = Path.of(configured.strip());
-        } else if (childAgent != null && childAgent.name != null) {
-            // JCLAW-666: each coding session gets its own directory under the
-            // agent workspace's coding/ parent, named from the task ("create
-            // fibonacci program" -> coding/create-fibonacci-program/). An
-            // existing directory is never reused — collisions get -2, -3, …
-            // so consecutive sessions' artifacts don't interleave.
-            var base = AgentService.workspacePath(childAgent.name).resolve("coding");
-            var slug = SubagentSpawnTool.codingSlug(task);
-            dir = base.resolve(slug);
-            for (int n = 2; Files.exists(dir); n++) {
-                dir = base.resolve(slug + "-" + n);
-            }
-        } else {
-            return null;
-        }
+    private static @Nullable File resolveAcpWorkdir(Long runId, Agent childAgent, String task, @Nullable String folder) {
+        var name = folder == null || folder.isBlank() ? null : folder.strip();
+        var parent = CodingRunFolders.parent(childAgent == null ? null : childAgent.name);
+        if (parent == null) return null;
         try {
-            Files.createDirectories(dir);
+            var run = CodingRunFolders.open(parent, task, name);
+            if (name != null) {
+                // Seq -2 keeps it ahead of the model-override and channel-approval steps.
+                dispatchHarnessEvent(runId, new HarnessEvent(HarnessEvent.STEP,
+                        (run.existing() ? "continuing in " : "new folder ") + run.dir(), null), -2);
+            }
+            return run.dir().toFile();
         } catch (IOException e) {
+            if (name != null) {
+                throw new IllegalStateException("coding folder '%s' could not be opened: %s"
+                        .formatted(name, e.getMessage()), e);
+            }
             EventLogger.warn(SubagentSpawnTool.SUBAGENT_CHANNEL, null, null,
-                    "acp workdir '%s' could not be created (%s); harness inherits the server CWD"
-                            .formatted(dir, e.getMessage()));
+                    "acp workdir under '%s' could not be created (%s); harness inherits the server CWD"
+                            .formatted(parent, e.getMessage()));
             return null;
         }
-        return dir.toFile();
     }
 
     /** JCLAW-666: persist the resolved session directory on the run row so the
@@ -841,11 +833,17 @@ final class SubagentAcpRunner {
      */
     static @Nullable String acpRuntimeError(JsonObject args, Agent spawningAgent) {
         var runtime = SubagentSpawnArgs.optString(args, SubagentSpawnTool.ARG_RUNTIME);
+        var folder = SubagentSpawnArgs.optString(args, SubagentSpawnTool.ARG_FOLDER);
         if (runtime == null || runtime.isBlank() || "native".equalsIgnoreCase(runtime)) {
-            return null;
+            return SubagentSpawnTool.notBlank(folder)
+                    ? "Error: 'folder' names a coding run's folder, so it needs runtime=\"acp\"." : null;
         }
         if (!"acp".equalsIgnoreCase(runtime)) {
             return "Error: 'runtime' must be \"native\" (default) or \"acp\"" + SubagentSpawnTool.GOT_LITERAL + runtime + "').";
+        }
+        if (folder != null && !folder.isBlank()) {
+            var rejection = CodingRunFolders.nameRejection(folder);
+            if (rejection != null) return "Error: " + rejection;
         }
         if (spawningAgent != null && !spawningAgent.isMain() && !spawningAgent.acpAllowed) {
             return "Error: runtime=\"acp\" is not permitted for agent '" + spawningAgent.name
@@ -936,12 +934,13 @@ final class SubagentAcpRunner {
     }
 
     /** The launch a validated ({@link #acpRuntimeError} returned null) acp spawn registers:
-     *  the harness command plus the model override the same precedence resolved. */
+     *  the harness command, the model override the same precedence resolved, and the folder
+     *  the spawn named, if any. */
     static AcpLaunch resolveAcpLaunch(JsonObject args) {
         var requested = requestedModel(args);
         var modelId = requested.modelId();
         var model = modelId == null || modelId.isBlank() ? null : resolveHarnessModel(requested.provider(), modelId);
-        return new AcpLaunch(resolveAcpCommand(), model);
+        return new AcpLaunch(resolveAcpCommand(), model, SubagentSpawnArgs.optString(args, SubagentSpawnTool.ARG_FOLDER));
     }
 
     /** A model-only override when {@code provider} is blank; otherwise the named JClaw

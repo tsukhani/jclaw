@@ -245,7 +245,9 @@ Every subagent run belongs to you. JClaw Pro has a single **admin** operator, so
 
 ## Where coding output lands
 
-Every `runtime=acp` coding session runs inside its own directory under the child agent's workspace: `workspace/<agent>/coding/<session>/`. Here, `<session>` is derived from the task. The task "create fibonacci program" runs in `coding/create-fibonacci-program/`. A repeated task never reuses a previous session's directory. Collisions get `-2`, `-3`, and so on as suffixes. The run's directory is recorded on the run itself (visible in the run monitor). Because the artifacts live in the workspace, the agent's filesystem and documents tools can read them directly in later turns. Setting `subagent.acp.workdir` overrides this entirely and confines every session to the configured directory.
+Every `runtime=acp` coding session runs inside its own directory under the child agent's workspace: `workspace/<agent>/coding/<session>/`. Here, `<session>` is derived from the task. The task "create fibonacci program" runs in `coding/create-fibonacci-program/`. A repeated task never reuses a previous session's directory. Collisions get `-2`, `-3`, and so on as suffixes. The run's directory is recorded on the run itself (visible in the run monitor). Because the artifacts live in the workspace, the agent's filesystem and documents tools can read them directly in later turns. Setting `subagent.acp.workdir` (the **acp.workdir** field in Settings → **Coding**) moves these directories under the folder you name: `<workdir>/<session>/`. The agent's tools can then read the output only if that folder is inside its workspace.
+
+To continue in a folder from an earlier session, name it in chat. For example, say "continue in create-fibonacci-program". The agent passes the name as the `folder` argument of `subagent_spawn`. An existing folder is reused. A new name creates that folder. `folder` is one folder name, never a path.
 
 ## Sandboxing coding runs (opt-in)
 
