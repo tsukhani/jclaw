@@ -739,6 +739,9 @@ final class SubagentAcpRunner {
     private static void publishAndPersist(Long runId, HarnessEvent ev, int seq) {
         var payload = new LinkedHashMap<String, Object>();
         payload.put(SubagentSpawnTool.BUS_RUN_ID, runId);
+        // Every connected chat page hears this event; the page shows the run only in this conversation.
+        var startedFrom = parentConversationId(runId);
+        if (startedFrom != null) payload.put("conversationId", startedFrom);
         payload.put("seq", seq);
         payload.put("kind", ev.kind());
         payload.put("text", ev.text());

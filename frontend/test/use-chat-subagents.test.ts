@@ -157,5 +157,11 @@ describe('useChatSubagents', () => {
       selectedConvoId.value = 2
       expect(api.activeCodingRunId.value).toBe(3)
     })
+
+    it('ignores a step that names no conversation rather than adopting the open one', () => {
+      const { api } = mountSubagents([], 1)
+      bus.stepHandler?.({ runId: 5 }, 'codingrun.step')
+      expect(api.activeCodingRunId.value).toBeNull()
+    })
   })
 })

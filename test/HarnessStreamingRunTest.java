@@ -113,6 +113,14 @@ class HarnessStreamingRunTest extends UnitTest {
         assertEquals(STEP_COUNT, stepEvents,
                 "each streamed line must publish exactly one BUS_CODINGRUN_STEP event for this run");
 
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(Long.parseLong(json.get("run_id").getAsString()));
+        var inStartingChat = "\"conversationId\":" + run.parentConversation.id + ",";
+        assertTrue(received.stream()
+                        .filter(s -> s.contains(NotificationBus.BUS_CODINGRUN_STEP) && s.contains(nonce))
+                        .allMatch(s -> s.contains(inStartingChat)),
+                "each step must name the conversation the run was started from, so only that chat shows it");
+
         var completedRun = "\"runId\":" + json.get("run_id").getAsString() + ",\"status\":\"COMPLETED\"";
         boolean done = received.stream()
                 .anyMatch(s -> s.contains(NotificationBus.BUS_CODINGRUN_DONE) && s.contains(completedRun));

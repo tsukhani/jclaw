@@ -36,7 +36,8 @@ public class NotificationBus {
     private NotificationBus() {}
 
     /** JCLAW-662: bus event type for one persisted step of a coding-harness run
-     *  (Rail B). Payload carries {@code runId}, {@code seq}, {@code kind}, {@code text}. */
+     *  (Rail B). Payload carries {@code runId}, {@code conversationId} (the chat the run
+     *  was started from), {@code seq}, {@code kind}, {@code text}. */
     public static final String BUS_CODINGRUN_STEP = "codingrun.step";
     /** JCLAW-662: bus event type signaling a run reached its terminal status, so a live
      *  coding-run monitor can stop tailing. Payload carries {@code runId}, {@code status}

@@ -92,11 +92,11 @@ export function useChatSubagents(
   })
   useEventBus().onEvent('codingrun.step', (data) => {
     const d = data as { runId?: number, conversationId?: number }
-    if (!d.runId) return
-    // conversationId is the parent (chat) conversation; fall back to the open
-    // conversation when the harness omits it (run triggered in this chat).
-    const cid = d.conversationId ?? selectedConvoId.value
-    if (cid == null || codingRunByConversation.value[cid] === d.runId) return
+    // conversationId is the chat the run was started from. Every open tab hears every
+    // run's steps, so one that names no chat is dropped, never given to the open one.
+    if (!d.runId || d.conversationId == null) return
+    const cid = d.conversationId
+    if (codingRunByConversation.value[cid] === d.runId) return
     codingRunByConversation.value = { ...codingRunByConversation.value, [cid]: d.runId }
   })
 
