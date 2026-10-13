@@ -56,7 +56,7 @@ For the agent to be able to use any of these actions, **Tools → task_manager**
 Two ways to stop a task. They are not the same:
 
 - **Cancel** keeps the row around. The task stops firing, but you can revive it later with `runNow` (it pops back to `PENDING` or `ACTIVE`) or by editing the schedule. Use this when you might want it back.
-- **Delete** is permanent. It removes the `Task` row and every `TaskRun` underneath it. Use this when you are done with it for good.
+- **Delete** is permanent. It removes the `Task` row and every `TaskRun` underneath it. The subagent and coding runs that those fires started go with it. Use this when you are done with it for good.
 
 ## The Tasks page
 
@@ -197,6 +197,8 @@ Completed, failed, cancelled, and lost tasks are kept for **N days**, then swept
 
 Independently of that day-based TTL, JClaw keeps only the **10 most recent runs per task**. Each new fire prunes older run history for that task. A frequently recurring task (an every-30-minutes labeler, say) therefore never grows its run table without bound: you always have the latest ten fires, while the day-based sweep removes whole terminal (completed/failed/cancelled/lost) tasks past the TTL.
 
+A run that is pruned or swept takes the subagent and coding runs it started with it: their records, their logs, and the temporary agents made for them. The folder a coding run worked in stays on disk. See [Subagents inside a task fire](/guide#subagents-task-fires).
+
 ## Editing a task's instructions
 
 Expand a task's row to see its **Instructions**, the description the agent runs on. If the description is stored as a step list (a JSON array of strings), it renders as numbered steps. A plain description, even one spanning several lines, renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The owning agent, the inline **Channel** editor, and inline editors for the task's **name** and **timezone** live in the same expanded detail.
@@ -204,12 +206,14 @@ Expand a task's row to see its **Instructions**, the description the agent runs 
 The same detail has a **Permissions** block:
 
 - **Origin**: the channel the task was created from, which no edit raises; only the **Trust** button beside a non-`web` origin raises it to `web`. `web` lets a fire's dangerous tools follow the [Tool Approvals](/guide#settings-tool-approvals) policy; any other channel, or `unrecorded`, is untrusted, so they fail closed (for a channel origin, unless that policy is `ask`).
-- **Model**: *follows the agent* when nothing is pinned: a fire runs on the owning agent's current model, so changing the agent's model changes the task's too. A task created with its own model shows that model instead and always fires on it; if that model's provider is no longer configured, the fire falls back to the agent's model.
+- **Model**: *follows the agent* when nothing is pinned: a fire runs on the owning agent's current model, so changing the agent's model changes the task's too. A task created with its own model shows that model instead and always fires on it; if that model's provider is no longer configured, the fire falls back to the agent's model. A subagent that a fire starts runs on the same model, unless the spawn names its own or Settings → **Subagents** pins every subagent to one model.
 - **Tools**: the `enabledToolNames` allow-list as pills, or *all the agent's tools* when there is none.
 
 ## What a task run looks like
 
 When a task fires, JClaw runs the owning agent with the task description as its input, and lets it run until the task completes or fails. The turn-by-turn transcript is saved as the **run's trace**, not as a chat. A task fire does **not** create an entry on the [Conversations](/conversations) page. Each fire appears in that task's **run history** (expand the task's row on the [Tasks](/tasks) page), and clicking a run there opens its full trace in a side panel. While a run is in flight you can watch it; see *Watching a fire live* below. Failed fires log the error against the run and trigger a retry up to the configured cap.
+
+A task can spawn [subagents](/guide#subagents), including coding runs. The fire starts them and waits for their results. Those runs belong to that task run, not to a chat. You open a coding run's log from the trace panel, and JClaw deletes the runs when the task run goes. A few subagent settings also behave differently in a fire. See [Subagents inside a task fire](/guide#subagents-task-fires).
 
 If you want the task to ping you when it is done, build that into the task description:
 
@@ -240,7 +244,7 @@ The `task_manager` tool is scoped to the owning agent. Through it, one agent nev
 :::
 
 :::note Watching a fire live
-A task fire does not appear on the [Conversations](/conversations) page. Its transcript is the **run's trace**, not a chat. But you *can* watch it as it runs. Expand the task's row on the [Tasks](/tasks) page: an in-flight fire shows up in the **run history** as a `RUNNING` entry with a live elapsed timer and a one-line preview of its latest step. Click that entry to open the **trace panel**. It fills in turn-by-turn as the fire proceeds (refreshed every couple of seconds), then settles on the complete trace when the run finishes. If the fire started a [coding run](/guide#acp-harness), the panel lists it at the top under **Coding runs**, with the harness's steps and a **Kill** control while it runs.
+A task fire does not appear on the [Conversations](/conversations) page. Its transcript is the **run's trace**, not a chat. But you *can* watch it as it runs. Expand the task's row on the [Tasks](/tasks) page: an in-flight fire shows up in the **run history** as a `RUNNING` entry with a live elapsed timer and a one-line preview of its latest step. Click that entry to open the **trace panel**. It fills in turn-by-turn as the fire proceeds (refreshed every couple of seconds), then settles on the complete trace when the run finishes. If the fire started a coding run, the panel lists it at the top under **Coding runs**, with the harness's steps and a **Kill** control while it runs. See [Watching a coding run](/guide#subagents-coding-run-log).
 :::
 
 ## Where to go next

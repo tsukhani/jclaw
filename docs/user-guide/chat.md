@@ -150,6 +150,12 @@ Click a row to expand it and read that run's transcript in place, read-only. A f
 
 The list holds a conversation's newest 100 runs. **View all →** in its header opens the full list on the [Subagents](/subagents) page, filtered to that conversation.
 
+## Coding runs
+
+When the agent hands work to an [external coding harness](/guide#subagents-acp-harness), a **Coding run** panel docks above the composer. It shows the run's log as the harness works: the folder, each tool call with the file it touched, and the harness's replies. **Kill** stops the run. The panel shows the final status when the run ends, with the reason if the run did not complete.
+
+Only the conversation that started the run shows the panel. A coding run that a [task](/guide#tasks) started has no conversation, so no chat shows it. See [Watching a coding run](/guide#subagents-coding-run-log) for what each line means, and for the other places the log opens.
+
 ## Subagent transcripts are read-only
 
 If you arrive at a conversation that was created by a subagent run (for example, via **Open full transcript** in an expanded subagent row, the "View full →" link on an announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it. The full page loads the transcript once. So a running subagent's transcript shows the messages as of when you opened it. To follow a run live, expand its row in the conversation that spawned it. **← Back to conversation** in the banner returns you to the conversation that spawned it.

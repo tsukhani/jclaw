@@ -54,7 +54,7 @@ The three layers compose cleanly because they do not overlap. A common pattern:
 
 > "Every weekday at 9am, spawn three subagents to scan Slack/Email/Calendar and have them post a combined briefing to my Telegram."
 
-That is one **task** (the daily 9am schedule). Its description tells the agent to **spawn three subagents** (the parallel scans). The combined output is delivered to a channel through the task's `delivery` field. Reminders do not fit here because the work is open-ended. But if the *result* of that briefing produces a follow-up nudge ("at 11am, remind me to review the briefing"), the agent can schedule that as a reminder during the task's run.
+That is one **task** (the daily 9am schedule). Its description tells the agent to **spawn three subagents** (the parallel scans). The combined output is delivered to a channel through the task's `delivery` field. Those three runs belong to that fire, not to a chat. See [Subagents inside a task fire](/guide#subagents-task-fires). Reminders do not fit here because the work is open-ended. But if the *result* of that briefing produces a follow-up nudge ("at 11am, remind me to review the briefing"), the agent can schedule that as a reminder during the task's run.
 
 ## Where to go next
 

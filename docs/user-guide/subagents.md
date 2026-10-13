@@ -8,7 +8,7 @@ Use a subagent when:
 - You want to fan out work in parallel without blocking the main conversation.
 - You want a separate transcript that is easy to inspect on its own.
 
-This section covers the three spawn modes, the two context modes, the optional model override, the async-plus-yield pattern, the limits, and the five ways to inspect what a child did. Subagents are one of three "outside-this-turn" abstractions. [Tasks](/guide#tasks) and [Reminders](/guide#reminders) are the other two. For the side-by-side comparison, jump to [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders).
+This section covers the three spawn modes, the two context modes, the optional model override, the async-plus-yield pattern, the limits, and the five ways to inspect what a child did. It also covers what changes when a scheduled task starts the subagent, and how to follow a coding run while it works. Subagents are one of three "outside-this-turn" abstractions. [Tasks](/guide#tasks) and [Reminders](/guide#reminders) are the other two. For the side-by-side comparison, jump to [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders).
 
 ## The simplest case
 
@@ -35,6 +35,8 @@ The child runs in its own brand-new conversation. It shows up as a row in the su
 The child's messages get folded into the parent's conversation as a collapsible block. You see a `Subagent: <label>` pill where the child ran. Click it to expand and read the entire nested transcript inline.
 
 **Use when:** the child's work is part of the conversational flow and you want to read everything in one place without navigating away. Best for short, focused subtasks.
+
+Inline needs a conversation to fold the child into. A [task fire](/guide#subagents-task-fires) has none, so it refuses `mode=inline`.
 
 ### `mode=async`
 
@@ -66,9 +68,11 @@ Before the child starts, JClaw runs a brief summarization pass over the parent's
 
 If the summarization call fails, JClaw falls back to `fresh` and notes the reason. The spawn still succeeds.
 
+Inside a [task fire](/guide#subagents-task-fires) there is no conversation to summarize. The child still gets the union of tools, but no summary.
+
 ## Per-spawn model override
 
-By default, the child runs on the same model as the parent. You can override the model for a single spawn:
+By default, the child runs on the same model as the parent. In a [task fire](/guide#subagents-task-fires), that is the model the task is pinned to, or the agent's model when the task has no pin. You can override the model for a single spawn:
 
 > "Spawn a subagent on `ollama-cloud` with model `qwen3-coder` to refactor this function."
 
@@ -93,7 +97,49 @@ Without `subagent_yield`, the parent never gets to use the child's reply. The ou
 
 **Inside a task fire.** A fire has no conversation to resume, so an `async` spawn there is collected inline too. `subagent_yield` with its `runId` waits for the child and returns the same result a blocking spawn would, and the fire carries on without an announce card. A task fire needs the `runId` and refuses a `conversationId` alone, and `all: true` collects every uncollected async child of the fire. Neither inline collect uses yield's `timeoutSeconds`; each child is bounded by its own run timeout.
 
-A run that a task fire starts belongs to that task run, not to a chat. It has no parent conversation, so no chat shows it. Find it in the task run's trace panel on [Tasks](/tasks), or on the [Subagents](/subagents) page. JClaw deletes it with that task run: when you delete the task, when you clear the task history, or when the task run drops out of the task's kept history. The folder a coding run worked in stays. Two settings behave differently in a fire. `mode=inline` is refused, because a fire has no conversation to fold the child into. `context=inherit` gives the child the parent's tools but no summary, because there is no conversation to summarize. If the task is pinned to a model, the child runs on that model too.
+A run that a fire starts also has a different owner and a different lifetime. The next section covers both.
+
+## Subagents inside a task fire {#task-fires}
+
+A [task](/guide#tasks) can tell its agent to spawn subagents. When the task fires, the agent starts them the same way it does in a chat. A fire runs outside any conversation, though, and that changes four things.
+
+### The run belongs to the task run
+
+A run that a chat starts is filed under that chat. A run that a fire starts is filed under that fire's **task run**. It has no parent conversation, so no chat shows it: it gets no row in a subagent list, no **Coding run** panel, and no announce card.
+
+You find it in these places:
+
+- **The task run's trace panel.** Expand the task on the [Tasks](/tasks) page and click the run. The spawn call and its result are part of the trace. A coding run is also listed at the top under **Coding runs**, with its log.
+- **The [Dashboard](/).** The **Recent Activity** panel has a **Coding runs** view. A run that a task started shows *task NAME* there. This view lists coding runs only.
+- **The [Subagents](/subagents) page.** The run's row shows *task NAME* in the **Conversation** column.
+
+### The run is deleted with the task run
+
+A task run owns the runs it started, the same way a chat owns the runs it started. When the task run goes, JClaw deletes its subagent runs with it. A task run goes in four ways:
+
+- You delete the task.
+- You click **Reset stats** on the [Tasks](/tasks) page, which deletes finished run history.
+- The task fires again and its oldest run drops out of the [10 most recent](/guide#tasks-retention).
+- The retention sweep removes a finished task.
+
+Deleting a run removes its record, its transcript, and the temporary agent that was made for it. JClaw first stops a run that is still going. Two things stay: the folder a coding run worked in, and any agent of your own that the run used through `agentId`.
+
+:::note
+This keeps task history bounded. A task that starts a subagent on every fire does not leave one run behind for each fire. It also means a run's log does not outlive its task run. To keep a result, have the task write it to a file or deliver it to a channel.
+:::
+
+### What behaves differently
+
+| Setting | In a chat | In a task fire |
+|---------|-----------|----------------|
+| `mode=inline` | Folds the child into the conversation. | Refused, because there is no conversation to fold it into. The agent gets `Error: mode="inline" embeds the child in a conversation and a task fire has none; use mode="session".` |
+| `context=inherit` | Summarizes the parent's recent turns and grants the union of tools. | Grants the union of tools only. There are no conversation turns to summarize. |
+| Default model | The model the parent conversation is on. | The model the task is pinned to, or the agent's model when the task has no pin. |
+| `async=true` | The outcome shows in the chat's subagent list, or returns through `subagent_yield`. | `subagent_yield` waits and returns the result inline. See [Async plus yield](/guide#subagents-async-yield). |
+
+### Trust follows the task
+
+A child that a fire starts is trusted as much as the fire is, and no more. The fire's trust comes from the task's **Origin**, the channel the task was created from. See [Editing a task's instructions](/guide#tasks-editing-a-task-s-instructions). A task created from Telegram therefore cannot gain your web chat's trust by spawning a subagent.
 
 ## External coding harness (`runtime=acp`) {#acp-harness}
 
@@ -127,11 +173,40 @@ By default, a child runs on JClaw's own native agent loop. You can instead deleg
 
    `async:true` returns a `runId` immediately, and the run's outcome shows in the chat's subagent list when the harness finishes. Drop it for a blocking run.
 
+   To work in a folder you choose, or to continue in one from an earlier run, name the folder. See [Where coding output lands](/guide#subagents-where-coding-output-lands).
+
+### Watching a coding run {#coding-run-log}
+
+A coding run keeps a **log**: one line for each step, in order. You can open it in three places, and it reads the same in each.
+
+- **In [Chat](/chat).** A **Coding run** panel docks above the composer of the conversation that started the run. It appears when the run records its first step. Only that conversation shows it. Another chat that is open at the same time does not.
+- **On the [Tasks](/tasks) page.** For a run that a task started, open the task run's trace panel. The log is at the top under **Coding runs**.
+- **On the [Dashboard](/).** In the **Recent Activity** panel, switch to the **Coding runs** view and click a run's name. The **Coding run log** panel opens.
+
+The header shows `Coding run #ID` and the status: **Running**, **Completed**, **Failed**, **Timed out**, or **Killed**. Each line below it has a label:
+
+| Label        | What it is                                                                                                   |
+|--------------|--------------------------------------------------------------------------------------------------------------|
+| **Step**     | Something JClaw did to set the run up: the folder it opened when you named one, a model override, or an approval. |
+| **Tool**     | A tool the harness used, with the file it touched and how the call ended. For example: `Write notes.txt: /Users/you/coding/demo/notes.txt (completed)`. |
+| **Message**  | Text the harness wrote back.                                                                                 |
+| **Thinking** | The harness's reasoning, when it reports any.                                                                |
+
+A harness can announce a tool call before it has the details, so one call can show twice: first as a short line marked `(pending)`, then as the full line when the call ends. A **Diff** or **Error** line appears when the harness reports one.
+
+A run that did not complete shows the reason at the bottom. While a run is going, **Kill** stops it. JClaw asks you to confirm, then force-terminates the harness.
+
+How much the log holds depends on how JClaw talks to the harness. Over ACP, and in `json` and `rpc` modes, the harness reports its steps as it works, and each one becomes a line. In `batch` mode the harness reports nothing until it exits. The log then holds only JClaw's own steps, and the reply comes back as the run's result.
+
 ### Bounds and failure
 
 - **Wall-clock ceiling.** The harness is bounded by `subagent.maxWallClockSeconds` (default **1800**, which is 30 minutes). A harness that overruns is force-killed (`destroyForcibly`), and the run records `TIMEOUT`/`FAILED`. Set it to `0` to wait indefinitely. This is not recommended for an unattended instance.
 - **Output cap.** Captured stdout is bounded. A harness that floods stdout is truncated rather than allowed to exhaust memory.
-- **Non-zero exit.** If the harness exits non-zero, the spawn is `FAILED`, and the harness's stderr is surfaced as the failure reason on the [Subagents](/subagents) page.
+- **Non-zero exit.** If the harness exits non-zero, the spawn is `FAILED`, and the harness's stderr is the failure reason.
+- **No folder.** If JClaw cannot create the run's folder, the run is `FAILED` before the harness starts. The reason names the folder and the **acp.workdir** setting. JClaw never runs the harness in another folder instead.
+- **Approval.** Launching a coding harness is an action the approval gate holds. A run that starts from your own web chat passes. A run from any other origin follows [Tool Approvals](/guide#settings-tool-approvals). If the gate refuses it, the run is `FAILED` before the harness starts.
+
+A failed run gives its reason in three places: in the log, on the [Subagents](/subagents) page, and in the result the parent agent gets back, so the agent can tell you why. A run that fails before the harness starts is still a coding run. The **Coding runs** views list it, and its log holds the reason.
 
 :::gotcha
 `runtime:"acp"` needs `subagent.acp.command` configured *and* the spawning agent to hold the `acp` grant. A spawn that clears the permission gate but finds no configured command is refused with a message telling the operator to set the key.
@@ -152,7 +227,7 @@ The same Settings section also holds `subagent.defaultRunTimeoutSeconds` (defaul
 
 ## Inspecting what a child did
 
-Five surfaces exist, each with its own audience.
+Five surfaces exist, each with its own audience. A coding run has one more, its log. See [Watching a coding run](/guide#subagents-coding-run-log).
 
 ### 1. The announce card (in [Chat](/chat))
 
@@ -168,7 +243,13 @@ The **Conversation** column shows the conversation each run was spawned from. It
 
 A run that a task fire started has no conversation. Its row shows *task NAME* instead, and these runs sit together under a *No parent conversation* header.
 
-To see only one conversation's runs, either click the funnel button beside an id in the Conversation column, or type `parentConversation:ID` in the filter bar. A *Conversation #ID* chip beside the bar shows the active conversation filter, and its **×** clears it. Removing the `parentConversation` token from the bar clears it too. Opening the page from a chat's subagent link applies the same filter. **Delete all matching** honors it and deletes only that conversation's terminal runs. Deleting a run removes its transcript and the temporary agent made for it. An agent of your own that a run used through `agentId` is never deleted, and neither is a chat that an inline run wrote into.
+To see only one conversation's runs, either click the funnel button beside an id in the Conversation column, or type `parentConversation:ID` in the filter bar. A *Conversation #ID* chip beside the bar shows the active conversation filter, and its **×** clears it. Removing the `parentConversation` token from the bar clears it too. Opening the page from a chat's subagent link applies the same filter. **Delete all matching** honors it and deletes only that conversation's terminal runs.
+
+Deleting a run, alone or in bulk, removes its record, its transcript, and the temporary agent that was made for it. A run that is still `RUNNING` is skipped, so kill it first. Three things are never deleted with a run:
+
+- An agent of your own that the run used through `agentId`.
+- A chat that an inline run wrote into.
+- The folder a coding run worked in.
 
 ### 3. The `/subagent` slash command (in [Chat](/chat))
 
@@ -203,6 +284,7 @@ subagent_spawn
   mode              string   "session" (default) | "inline" | (async via async=true)
   context           string   "fresh" (default) | "inherit"
   runtime           string   "native" (default) | "acp"
+  folder            string   acp only: the folder the harness works in; an existing name continues there, a new name creates it
   modelProvider     string   override child's provider (acp: points the harness at that endpoint — claude/codex only)
   modelId           string   override child's model (acp: replaces the harness's own default model)
   async             bool     return run id immediately (session mode only)
@@ -249,9 +331,23 @@ Every subagent run belongs to you. JClaw Pro has a single **admin** operator, so
 
 ## Where coding output lands
 
-Every `runtime=acp` coding session runs inside its own directory under the child agent's workspace: `workspace/<agent>/coding/<session>/`. Here, `<session>` is derived from the task. The task "create fibonacci program" runs in `coding/create-fibonacci-program/`. A repeated task never reuses a previous session's directory. Collisions get `-2`, `-3`, and so on as suffixes. The run's directory is recorded on the run itself (visible in the run monitor). Because the artifacts live in the workspace, the agent's filesystem and documents tools can read them directly in later turns. Setting `subagent.acp.workdir` (the **acp.workdir** field in Settings → **Coding**) moves these directories under the folder you name: `<workdir>/<session>/`. The agent's tools can then read the output only if that folder is inside its workspace.
+Every `runtime=acp` coding run works inside its own folder. JClaw picks the folder in this order:
 
-To continue in a folder from an earlier session, name it in chat. For example, say "continue in create-fibonacci-program". The agent passes the name as the `folder` argument of `subagent_spawn`. An existing folder is reused. A new name creates that folder. `folder` is one folder name, never a path.
+1. **The folder you name.** Name it in chat. For example, say "continue in create-fibonacci-program". The agent passes the name as the `folder` argument of `subagent_spawn`. An existing folder is reused, so a run can continue an earlier one. A new name creates that folder. `folder` is one folder name of at most 100 characters, never a path.
+2. **A new folder named from the task.** The task "create fibonacci program" runs in `create-fibonacci-program/`. A repeated task never reuses an earlier run's folder. Collisions get `-2`, `-3`, and so on as suffixes.
+
+Both sit under one parent folder. By default, the parent is in the child agent's workspace: `workspace/<agent>/coding/`. Because the files live in the workspace, the agent's filesystem and documents tools can read them directly in later turns. Setting `subagent.acp.workdir` (the **acp.workdir** field in Settings → **Coding**) moves the parent to the folder you name: `<workdir>/<folder>/`. The agent's tools can then read the output only if that folder is inside its workspace.
+
+JClaw records the folder on the run. When you named the folder, it is the first line of the [log](/guide#subagents-coding-run-log): `new folder PATH` or `continuing in PATH`. A **Tool** line shows the full path of the file it touched.
+
+Two rules protect your files:
+
+- **JClaw never falls back to another folder.** If it cannot create the run's folder, the run fails and says why. A typo in **acp.workdir** or a drive that is not connected causes this.
+- **JClaw never deletes a coding folder.** Deleting a run, a chat, or a task removes the run's record and log. The folder and the files in it stay until you remove them.
+
+:::tip Running JClaw from a source checkout
+The default parent, `workspace/<agent>/coding/`, is inside the folder JClaw runs from. If that folder is a Git checkout, a harness that looks upward for a repository finds JClaw's own, with its instruction files. Set **acp.workdir** to a folder outside the checkout, for example `~/coding-runs`, so that each run starts in a clean folder.
+:::
 
 ## Sandboxing coding runs (opt-in)
 

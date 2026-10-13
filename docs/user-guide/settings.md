@@ -662,6 +662,8 @@ Delegating a subagent to an **external coding harness** (such as Claude Code, Co
 | `subagent.acp.sandbox` | `false`    | OS-level confinement for harness runs, set with the **acp.sandbox** control: *Off* (`false`), *Untrusted channels only* (`untrusted`) or *Every run* (`true`). JClaw refuses a save of any other value, and the control says when this host has no `sandbox-exec`/`bwrap`. See [Sandboxing coding runs](/guide#subagents-sandboxing-coding-runs-opt-in). |
 | `subagent.acp.mode`    | `batch`    | How JClaw talks to the harness, set with the **acp.mode** control: `batch` (send the task, read the whole output), `json` (parse a streamed line protocol) or `rpc` (a two-way session, for a harness that supports one; any other runs as `json`). JClaw refuses a save of any other value. |
 
+To follow a run as it works, see [Watching a coding run](/guide#subagents-coding-run-log). For where its files go, see [Where coding output lands](/guide#subagents-where-coding-output-lands).
+
 The **detected** row lists the harness CLIs found on this host's PATH. One click fills `subagent.acp.command` and `subagent.acp.harness`. The row also accepts a custom command, which is probed before it is stored.
 
 JClaw never writes the model override into `subagent.acp.command`: each harness takes it differently (a `--model` flag, an inline TOML provider block, or environment variables), so JClaw appends it at launch and the panel shows the resulting command underneath as **launches**. That line is also where you see a harness whose ACP adapter replaces the configured command entirely.
@@ -765,7 +767,7 @@ Three knobs for the [Tasks](/guide#tasks) subsystem:
 
 | Key                       | Default | Meaning                                                                                                |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------|
-| `retentionDays`           | 30      | Days a terminal task (`COMPLETED` / `FAILED` / `CANCELLED` / `LOST`) stays in the DB before `TaskCleanupJob` hard-deletes it along with its run history. `0` disables auto-cleanup entirely. Active tasks (`PENDING` / `ACTIVE` / `RUNNING`) are never touched. Max: 3650 (≈10 years). |
+| `retentionDays`           | 30      | Days a terminal task (`COMPLETED` / `FAILED` / `CANCELLED` / `LOST`) stays in the DB before `TaskCleanupJob` hard-deletes it along with its run history and the subagent runs its fires started. `0` disables auto-cleanup entirely. Active tasks (`PENDING` / `ACTIVE` / `RUNNING`) are never touched. Max: 3650 (≈10 years). |
 | `defaultTimezone`         | *(unset)* | IANA timezone applied to `CRON` / `SCHEDULED` tasks that do not specify their own. Unset, tasks follow the [Timezone](#settings-timezone) setting (`app.timezone`); set it only to run tasks in a different zone. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
 | `fireMaxDurationSeconds`  | 600     | Longest one task run may take. When it elapses JClaw cancels the run at its next safe point, so a wedged run cannot go on forever. `0` turns the limit off. |
 
