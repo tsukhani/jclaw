@@ -1,13 +1,16 @@
 import agents.ToolAction;
 import agents.ToolRegistry;
+import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import mcp.McpServerTool;
+import mcp.McpToolDef;
 import models.Agent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -298,6 +301,88 @@ class McpServerToolTest extends UnitTest {
                 "{\"tool\":\"ping\",\"args\":\"unexpected-string\"}", null);
         assertEquals("FAKE-RESULT[ping]", result.text());
         assertEquals("{}", adapter.lastArgs);
+    }
+
+    // ==================== the action list: whole when small, an index when large ====================
+
+    private static McpToolDef def(String name, String description, int schemaProperties) {
+        var props = new JsonObject();
+        for (int i = 0; i < schemaProperties; i++) {
+            var p = new JsonObject();
+            p.addProperty("type", "string");
+            p.addProperty("description", "Property " + i + " of " + name + ", described at some length.");
+            props.add("field_" + i, p);
+        }
+        var schema = new JsonObject();
+        schema.addProperty("type", "object");
+        schema.add("properties", props);
+        return new McpToolDef(name, description, schema);
+    }
+
+    private static List<McpToolDef> largeServer() {
+        var defs = new ArrayList<McpToolDef>();
+        for (int i = 0; i < 40; i++) {
+            defs.add(def("action_" + i, "Does thing " + i + " to a file.\n\nArgs:\n    a long docstring follows", 6));
+        }
+        return defs;
+    }
+
+    @Test
+    void aSmallServerListsEveryActionWithItsSchema() {
+        var result = McpServerTool.catalog("tiny", List.of(def("ping", "Pings.", 1), def("pong", "Pongs.", 1)));
+        var actions = JsonParser.parseString(result.text()).getAsJsonObject().getAsJsonArray("actions");
+        assertEquals(2, actions.size());
+        assertTrue(actions.get(0).getAsJsonObject().has("inputSchema"),
+                "a list this small costs less than a second call would: " + result.text());
+    }
+
+    @Test
+    void aLargeServerListsNamesAndSummariesAndPointsAtDescribe() {
+        var defs = largeServer();
+        var whole = 0;
+        for (var d : defs) whole += d.inputSchema().toString().length();
+        var result = McpServerTool.catalog("big", defs);
+        var payload = JsonParser.parseString(result.text()).getAsJsonObject();
+        var actions = payload.getAsJsonArray("actions");
+        assertEquals(40, actions.size(), "every action is named, or the model cannot pick one");
+        var first = actions.get(0).getAsJsonObject();
+        assertEquals("action_0", first.get("name").getAsString());
+        assertEquals("Does thing 0 to a file.", first.get("description").getAsString(),
+                "the summary is the description's first line");
+        assertFalse(result.text().contains("inputSchema\":{"), "no schema in the index: " + result.text());
+        assertTrue(result.text().contains("\\\"describe\\\""), "the index says how to get a schema: " + result.text());
+        assertTrue(result.text().length() < whole / 3,
+                "the index is a fraction of the schemas it leaves out: " + result.text().length() + " vs " + whole);
+    }
+
+    @Test
+    void describeReturnsTheSchemasOfTheNamedActionsOnly() {
+        var result = McpServerTool.describe("big", largeServer(), List.of("action_3", "action_7", "nope"));
+        var payload = JsonParser.parseString(result.text()).getAsJsonObject();
+        var actions = payload.getAsJsonArray("actions");
+        assertEquals(2, actions.size());
+        var third = actions.get(0).getAsJsonObject();
+        assertEquals("action_3", third.get("name").getAsString());
+        assertTrue(third.getAsJsonObject("inputSchema").getAsJsonObject("properties").has("field_5"));
+        assertTrue(third.get("description").getAsString().contains("Args:"), "describe carries the whole description");
+        assertEquals("nope", payload.getAsJsonArray("unknown").get(0).getAsString(),
+                "a name the server does not have is reported, not dropped");
+    }
+
+    @Test
+    void describeWithNoConnectionSaysSo() {
+        var result = new McpServerTool("absent-" + System.nanoTime())
+                .executeRich("{\"describe\":[\"create_issue\"]}", null);
+        assertTrue(result.text().contains("not currently connected"), result.text());
+    }
+
+    @Test
+    void onlyDiscoveryCallsAreVerbatim() {
+        var tool = new McpServerTool("github");
+        assertTrue(tool.verbatimResult("{}"), "the action list");
+        assertTrue(tool.verbatimResult("{\"describe\":[\"create_issue\"]}"), "the schemas of chosen actions");
+        assertFalse(tool.verbatimResult("{\"tool\":\"create_issue\",\"args\":{}}"), "an action's own output");
+        assertFalse(tool.verbatimResult("not json"), "unreadable arguments make no claim");
     }
 
     // ==================== unknown action with no live connection ====================

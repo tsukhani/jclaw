@@ -31,8 +31,8 @@ This skill ingests a stranger's personal data and contacts them. Honour every ru
 Do this before touching the image. If there is nowhere to put the contact, there is no reason to process a stranger's personal data at all.
 
 1. Look through your own tool catalogue for MCP server handles — every one takes the form `mcp_<server>`. The server you need may be called `google-workspace`, `workspace-mcp`, `gws` or anything else; judge it by what it does, never by its name.
-2. Call each plausible candidate as `mcp_<server>` with no arguments to enumerate its actions and their input schemas.
-3. Choose the server whose actions cover **both** appending to a Google Sheet **and** sending Gmail. Use that handle for Steps 3 and 4, and build every call from the schemas you just enumerated.
+2. Call each plausible candidate as `mcp_<server>` with no arguments to list its actions. A large server lists names and summaries only.
+3. Choose the server whose actions cover **both** appending to a Google Sheet **and** sending Gmail. Use that handle for Steps 3 and 4. Call it with `{"describe": ["<action>", ...]}` for the input schemas of the actions you will use, and build every call from those schemas.
 4. If two servers qualify, ask the user which Google account to use rather than choosing for them.
 5. If none qualifies, **stop here.** Tell the user the skill needs a Google Workspace MCP server connected, and name which of the two capabilities you could not find. Do not run the OCR.
 
