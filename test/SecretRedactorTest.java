@@ -5,6 +5,12 @@ import play.test.UnitTest;
 import services.EventLogger;
 import utils.SecretRedactor;
 
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.UnaryOperator;
+
 /**
  * {@link SecretRedactor}: a credential on a logged command line or in logged tool arguments loses its
  * value and keeps its name, and ordinary log text (token counts, paths, prose) is left alone.
@@ -70,14 +76,103 @@ class SecretRedactorTest extends UnitTest {
     @ParameterizedTest(name = "{0}")
     @ValueSource(strings = {
             "password", "secret", "token", "api_key", "authorization", "cookie", "x-a-key", "A_KEY", "bearer ", " --token ",
-            "sshpass -p", "://a:", " -u a:", "\"key\":\"", "?key", "sk-", "eyJaaaaaaaa-", "-----BEGIN PRIVATE KEY-----", "12345678:", "\\\\\\\\"})
+            "sshpass -p", "://a:", " -u a:", " -u a:b", "\"key\":\"", "?key", "&key=a", "?key=a#", "sk-", "eyJaaaaaaaa-",
+            "-----BEGIN PRIVATE KEY-----", "12345678:", "\\\\\\\\", "password=\"", "password: \"a ", "password=a\n", "password=''",
+            "token: ", "\"x\":\"y\",", "'", "x'\\''", "X-Api-Key: a\\\"", "credentials=", "credentials\":"})
     void aTextThatRepeatsATriggerIsScannedInLinearTime(String trigger) {
-        // The text is model-controlled; a pattern that rescans from every trigger is quadratic, minutes at this size.
-        var text = trigger.repeat(400_000 / trigger.length()) + "A".repeat(100_000);
-        var started = System.nanoTime();
-        SecretRedactor.redact(text);
-        var millis = (System.nanoTime() - started) / 1_000_000;
-        assertTrue(millis < 3_000, () -> "500,000 characters of '" + trigger + "' took " + millis + " ms");
+        // The text is model-controlled. Bare, and again inside one long quoted string, where every match
+        // shares one far closing quote: a scan that restarts from each match is quadratic, minutes at this size.
+        for (var open : List.of("", "\"", "'", "{\"command\":\"curl \\\"")) {
+            var text = open + trigger.repeat(400_000 / trigger.length()) + "A".repeat(100_000);
+            var started = System.nanoTime();
+            SecretRedactor.redact(text);
+            var millis = (System.nanoTime() - started) / 1_000_000;
+            assertTrue(millis < 3_000, () -> "500,000 characters of '" + trigger + "' after '" + open + "' took " + millis + " ms");
+        }
+    }
+
+    // ---- a secret holding awkward characters, written the way each context escapes it ----
+
+    private static String shellDoubleQuoted(String s) { return s.replaceAll("([\\\\\"$`])", "\\\\$1"); }
+
+    private static String shellSingleQuoted(String s) { return s.replace("'", "'\\''"); }
+
+    private static String shellBare(String s) { return s.replaceAll("([^A-Za-z0-9])", "\\\\$1"); }
+
+    private static String json(String s) { return s.replace("\\", "\\\\").replace("\"", "\\\""); }
+
+    /** As an HTML-safe serializer writes it, which is how tool arguments reach the log. */
+    private static String htmlSafeJson(String s) {
+        return json(s).replace("=", "\\u003d").replace("&", "\\u0026").replace("'", "\\u0027").replace("<", "\\u003c").replace(">", "\\u003e");
+    }
+
+    private static String url(String s) { return URLEncoder.encode(s, StandardCharsets.UTF_8); }
+
+    private record Context(String name, UnaryOperator<String> command, String after) {}
+
+    private static final List<Context> COMMANDS = List.of(
+            new Context("header in double quotes", s -> "curl -s \"https://x.example.com/v1\" -H \"X-Api-Key: " + shellDoubleQuoted(s) + "\" --max-time 5", "--max-time 5"),
+            new Context("header in single quotes", s -> "curl -H 'X-Api-Key: " + shellSingleQuoted(s) + "' https://x.example.com", "https://x.example.com"),
+            new Context("bare assignment", s -> "API_KEY=" + shellBare(s) + " ./run.sh --flag", "./run.sh --flag"),
+            new Context("--password 'x'", s -> "mytool --password '" + shellSingleQuoted(s) + "' --verbose", "--verbose"),
+            new Context("--password=\"x\"", s -> "mytool --password=\"" + shellDoubleQuoted(s) + "\" --verbose", "--verbose"),
+            new Context("URL parameter", s -> "curl \"https://x.example.com/v1?apikey=" + url(s) + "&page=2\"", "page=2"),
+            new Context("curl -u in quotes", s -> "curl -u 'admin:" + shellSingleQuoted(s) + "' https://x.example.com", "https://x.example.com"),
+            new Context("bearer header", s -> "curl -H \"Authorization: Bearer " + shellDoubleQuoted(s) + "\" https://x", "https://x"),
+            new Context("cookie header", s -> "curl -H \"Cookie: session=" + shellDoubleQuoted(s) + "; theme=dark\" https://x", "https://x"),
+            new Context("sshpass", s -> "sshpass -p '" + shellSingleQuoted(s) + "' ssh host", "ssh host"),
+            new Context("token variable with a suffix", s -> "export GITHUB_TOKEN_2=" + shellBare(s) + " && ./deploy", "./deploy"),
+            new Context("form body in quotes", s -> "curl -d \"user=sam&password=" + shellDoubleQuoted(s) + "\" https://x", "https://x"),
+            new Context("URL userinfo", s -> "git clone https://sam:" + url(s) + "@git.example.com/r.git", "git.example.com"));
+
+    private static void collect(List<String> leaks, String where, String separator, String text) {
+        var out = SecretRedactor.redact(text);
+        if (out.contains("S3x9") || out.contains("cr3T") || out.contains("t41L")) {
+            leaks.add(where + " with '" + separator + "' between the parts: " + out);
+        } else if (!out.equals(SecretRedactor.redact(out))) {
+            leaks.add(where + " with '" + separator + "' is not stable when masked twice: " + out);
+        }
+    }
+
+    @Test
+    void aSecretIsMaskedWholeHoweverItsContextEscapesIt() {
+        var leaks = new ArrayList<String>();
+        var lost = new ArrayList<String>();
+        for (var separator : List.of(" ", ",", ";", "&", "|", ")", "}", "=", ":", "$", "#", "\"", "'", "\\", "%", "+", "/", "!", "*", "@")) {
+            var secret = "S3x9" + separator + "cr3T" + separator + "t41L";
+            for (var context : COMMANDS) {
+                // A raw & separates the fields of a form body, so one field cannot hold it.
+                if (separator.equals("&") && context.name().startsWith("form body")) continue;
+                var command = context.command().apply(secret);
+                collect(leaks, "exec: " + context.name(), separator, "exec: " + command);
+                collect(leaks, "logged arguments: " + context.name(), separator,
+                        "Executing tool 'exec' (id: call_1, args: {\"command\":\"" + json(command) + "\",\"why\":\"testing\"})");
+                collect(leaks, "HTML-safe logged arguments: " + context.name(), separator,
+                        "Executing tool 'exec' (id: call_1, args: {\"command\":\"" + htmlSafeJson(command) + "\",\"why\":\"testing\"})");
+                if (!SecretRedactor.redact("exec: " + command).contains(context.after())) lost.add(context.name() + " with '" + separator + "'");
+            }
+            var body = "{\"username\":\"sam\",\"password\":\"" + json(secret) + "\",\"remember\":true}";
+            collect(leaks, "JSON body", separator, "args: " + body);
+            collect(leaks, "JSON body inside a JSON string", separator, "args: {\"method\":\"POST\",\"body\":\"" + json(body) + "\"}");
+            collect(leaks, "JSON header map", separator, "args: {\"headers\":{\"X-Api-Key\":\"" + json(secret) + "\"},\"url\":\"https://x\"}");
+            collect(leaks, "config write", separator, "args: {\"key\":\"provider.acme.apiKey\",\"value\":\"" + json(secret) + "\"}");
+            collect(leaks, "JSON credentials", separator, "args: {\"credentials\": \"" + json(secret) + "\", \"x\": 1}");
+            if (!SecretRedactor.redact("args: " + body).contains("\"remember\":true")) lost.add("JSON body with '" + separator + "'");
+        }
+        assertEquals(List.of(), leaks, "part of a secret survived");
+        assertEquals(List.of(), lost, "the mask ran past the value and took what follows it");
+    }
+
+    @Test
+    void masksWhatTheFirstVersionsMissed() {
+        assertMasked("exec: credentials=dXNlcjpwYXNz ./run", "dXNlcjpwYXNz", "credentials=");
+        assertMasked("args: {\"credentials\": \"s3cr3tValue\"}", "s3cr3tValue", "credentials");
+        assertMasked("exec: HF_TOKEN_READ=hf_abc123 TOKEN_VALUE=tv_456 ./run", "hf_abc123", "HF_TOKEN_READ=");
+        assertFalse(SecretRedactor.redact("exec: HF_TOKEN_READ=hf_abc123 TOKEN_VALUE=tv_456 ./run").contains("tv_456"));
+        assertMasked("exec: password        =    hunter2x ./run", "hunter2x", "password");
+        assertMasked("args: {\\\\\\\"password\\\\\\\":\\\\\\\"deepNested9\\\\\\\"}", "deepNested9", "password");
+        assertMasked("exec: curl 'https://x/?a=1' password=ab|cd)ef;gh next", "cd)ef;gh", "password=");
+        assertMasked("exec: curl -H \"X-Note: a-sk-proj-abcdefghijklmnopqrstuvwx0123\" https://x", "sk-proj-abcdefghijklmnopqrstuvwx0123", "X-Note");
     }
 
     @Test
@@ -146,6 +241,9 @@ class SecretRedactorTest extends UnitTest {
             "exec: curl -s https://example.com/search?q=secret+garden&page=2",
             "Rescheduled Task 'nightly' next CRON fire for 2026-10-18T04:00:00Z; primary_key: 42, sort-key: name",
             "Operator updated factory credentials: jiraUrl, jiraPersonalToken, githubToken",
+            "TOKEN_LIMIT=8000 tokensUsed: 12 Tokens: 500 tokenizer=jtokkit MAX_TOKENS=4096 ./run",
+            "args: {\"key\":\"chat.compression.firstViewMaxTokens\",\"value\":\"6000\"}",
+            "Executing tool 'jclaw_api' (id: call_z0, args: {\"action\":\"call\",\"method\":\"GET\",\"path\":\"/api/tasks/4352/runs\",\"query\":{\"limit\":3}})",
             "args: {\"tool\":\"search_messages\",\"args\":{\"page_token\":\"CAESBggCEAEYAQ\",\"nextPageToken\":\"abc123def456\"}}"})
     void leavesOrdinaryLogTextAlone(String line) {
         assertEquals(line, SecretRedactor.redact(line));
