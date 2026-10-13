@@ -1,10 +1,15 @@
 import agents.CompressionPipeline;
+import agents.ToolRegistry;
 import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.FunctionCall;
+import llm.LlmTypes.ToolCall;
+import models.Agent;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.compression.ContentHash;
 
 import java.util.List;
+import java.util.Map;
 
 /**
  * JCLAW-465 (core): the compression pipeline's routing and guards. Exercises
@@ -130,6 +135,89 @@ class CompressionPipelineTest extends UnitTest {
         assertTrue(content.contains("public class Service"), "signature preserved: " + content);
         assertTrue(content.contains("ccr_retrieve(\"" + ContentHash.handle(sb.toString()) + "\")"),
                 "ccr handle present");
+    }
+
+    // ---- first view: a result the model has not read yet stays whole ----
+
+    private static final int FIRST_VIEW_CAP = 6_000;
+
+    /** About 2,000 tokens: above the floor, under the first-view cap. */
+    private static String mediumJsonArray() {
+        var sb = new StringBuilder("[");
+        for (int i = 0; i < 100; i++) {
+            if (i > 0) sb.append(',');
+            sb.append("{\"id\":").append(i)
+                    .append(",\"title\":\"Result number ").append(i)
+                    .append(" with a fairly long descriptive title that repeats\"}");
+        }
+        return sb.append(']').toString();
+    }
+
+    private static ChatMessage call(String id, String tool, String args) {
+        return ChatMessage.assistant("", List.of(new ToolCall(id, "function", new FunctionCall(tool, args))));
+    }
+
+    @Test
+    void leavesAResultTheModelHasNotSeenWhole() {
+        var msgs = List.of(ChatMessage.user("find it"), call("c1", "web_search", "{}"),
+                ChatMessage.toolResult("c1", "web_search", mediumJsonArray()));
+        var out = CompressionPipeline.compressMessages(msgs, MODEL, 250, FIRST_VIEW_CAP);
+        assertSame(msgs, out, "a result that follows the last assistant message has not been read yet");
+    }
+
+    @Test
+    void compressesAResultOnceTheModelHasSeenIt() {
+        var result = ChatMessage.toolResult("c1", "web_search", mediumJsonArray());
+        var msgs = List.of(ChatMessage.user("find it"), call("c1", "web_search", "{}"), result,
+                call("c2", "web_search", "{}"), ChatMessage.toolResult("c2", "web_search", "{\"ok\":true}"));
+        var out = CompressionPipeline.compressMessages(msgs, MODEL, 250, FIRST_VIEW_CAP);
+        assertNotSame(result, out.get(2), "a later assistant message means the model has read it");
+        assertTrue(((String) out.get(2).content()).contains(
+                "ccr_retrieve(\"" + ContentHash.handle(mediumJsonArray()) + "\")"), "ccr handle present");
+    }
+
+    @Test
+    void compressesAnUnseenResultAboveTheFirstViewCap() {
+        var result = ChatMessage.toolResult("c1", "web_search", bigJsonArray());
+        var out = CompressionPipeline.compressMessages(
+                List.of(call("c1", "web_search", "{}"), result), MODEL, 250, FIRST_VIEW_CAP);
+        assertNotSame(result, out.get(1), "an unseen result above the cap is compressed straight away");
+    }
+
+    @Test
+    void aFirstViewCapOfZeroCompressesUnseenResults() {
+        var result = ChatMessage.toolResult("c1", "web_search", mediumJsonArray());
+        var out = CompressionPipeline.compressMessages(
+                List.of(call("c1", "web_search", "{}"), result), MODEL, 250, 0);
+        assertNotSame(result, out.get(1), "0 turns the first-view rule off");
+    }
+
+    // ---- verbatim: a call whose tool declares its result a catalog is never compressed ----
+
+    /** Declares its result verbatim only for the {@code list} mode, the way an MCP server handle does. */
+    private static final class CatalogStub implements ToolRegistry.Tool {
+        @Override public String name() { return "catalog_stub"; }
+        @Override public String description() { return "stub"; }
+        @Override public Map<String, Object> parameters() { return Map.of("type", "object"); }
+        @Override public String execute(String argsJson, Agent agent) { return ""; }
+        @Override public boolean verbatimResult(String argsJson) { return argsJson.contains("\"list\""); }
+    }
+
+    @Test
+    void neverCompressesAResultItsToolDeclaresVerbatim() {
+        ToolRegistrySync.publishForTest(List.of(new CatalogStub()));
+        try {
+            var catalog = ChatMessage.toolResult("c1", "catalog_stub", mediumJsonArray());
+            var data = ChatMessage.toolResult("c2", "catalog_stub", mediumJsonArray());
+            var msgs = List.of(call("c1", "catalog_stub", "{\"mode\":\"list\"}"), catalog,
+                    call("c2", "catalog_stub", "{\"mode\":\"call\"}"), data,
+                    ChatMessage.assistant("done"));
+            var out = CompressionPipeline.compressMessages(msgs, MODEL, 250, FIRST_VIEW_CAP);
+            assertSame(catalog, out.get(1), "a catalog stays whole in every round, seen or not");
+            assertNotSame(data, out.get(3), "the same tool's other calls are still compressed once seen");
+        } finally {
+            ToolRegistrySync.release();
+        }
     }
 
     @Test

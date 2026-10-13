@@ -33,6 +33,14 @@ class JClawApiToolTest extends UnitTest {
     // ==================== argument validation ====================
 
     @Test
+    void onlyTheEndpointListIsVerbatim() {
+        assertTrue(tool.verbatimResult("{\"action\":\"discover\",\"filter\":\"tasks\"}"));
+        assertFalse(tool.verbatimResult("{\"action\":\"call\",\"method\":\"GET\",\"path\":\"/api/tasks\"}"));
+        assertFalse(tool.verbatimResult("{\"method\":\"GET\",\"path\":\"/api/tasks\"}"), "call is the default action");
+        assertFalse(tool.verbatimResult("not json"));
+    }
+
+    @Test
     void rejectsMalformedJson() {
         var result = tool.execute("this is not json", null);
         assertTrue(result.startsWith("Error: arguments are not valid JSON"),

@@ -277,6 +277,11 @@ public class ToolRegistry {
          *  will receive, so the classification matches the call that would run. */
         default boolean dangerous(String argsJson) { return dangerous(); }
 
+        /** Whether this call's result is a catalog the model picks from across rounds (an MCP
+         *  server's action list, the API's endpoint list) and must therefore reach it whole every
+         *  time: {@link CompressionPipeline} would cut such a list to its first entries. */
+        default boolean verbatimResult(String argsJson) { return false; }
+
         /** Serialization-group key for the parallel tool dispatcher. Tools
          *  returning the same non-null key are placed in the same serial
          *  queue and execute in LLM-declared order on a single virtual

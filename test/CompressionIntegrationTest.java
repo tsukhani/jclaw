@@ -44,6 +44,30 @@ class CompressionIntegrationTest extends UnitTest {
     }
 
     @Test
+    void aResultIsWholeOnFirstViewAndCompressedOnceSeen() {
+        var sb = new StringBuilder("[");
+        for (int i = 0; i < 100; i++) {
+            if (i > 0) sb.append(',');
+            sb.append("{\"id\":").append(i).append(",\"title\":\"item ").append(i)
+                    .append(" with a longish repeated description\"}");
+        }
+        var result = ChatMessage.toolResult("c1", "web_search", sb.append(']').toString());
+        // Compression defaults on for main only; a custom agent opts in.
+        var on = AgentService.create("integ-on", "openrouter", "gpt-4o");
+        on.compressionEnabled = true;
+        on.save();
+
+        var seen = List.of(ChatMessage.user("find it"), ChatMessage.assistant("searching"), result,
+                ChatMessage.assistant("found it"));
+        assertNotSame(result, CompressionPipeline.compress(seen, on, conv).get(2),
+                "once the model has read it, every later round sends the compressed view");
+
+        var unseen = List.of(ChatMessage.user("find it"), ChatMessage.assistant("searching"), result);
+        assertSame(unseen, CompressionPipeline.compress(unseen, on, conv),
+                "the round after the call delivers the result whole");
+    }
+
+    @Test
     void pipelineIsANoOpWhenTheAgentHasCompressionDisabled() {
         // Regression: a master-off agent leaves the message list instance
         // untouched, so downstream compaction/trim see exactly the original.

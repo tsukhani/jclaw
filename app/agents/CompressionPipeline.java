@@ -19,6 +19,7 @@ import services.compression.TextCompressor;
 
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
 
@@ -40,6 +41,11 @@ import java.util.Set;
  * text compressor's aggressiveness. {@link #enabledTypesFor} and the agent's
  * ratio fold into the {@link CompressionSettings} passed to the router.
  *
+ * <p><b>First view:</b> a tool result the model has not read yet (it follows the
+ * last assistant message) stays whole up to {@code chat.compression.firstViewMaxTokens}
+ * and is compressed from the next round on. A call whose tool declares
+ * {@link ToolRegistry.Tool#verbatimResult} is never compressed.
+ *
  * <p><b>Safety:</b> only TOOL-role messages with plain String content are
  * touched — USER / ASSISTANT / SYSTEM turns (intent, instructions) are never
  * compressed. Token measurement is authoritative (jtokkit via
@@ -57,6 +63,9 @@ public final class CompressionPipeline {
     // Literal rather than tools.CcrRetrieveTool.TOOL_NAME to avoid an
     // agents <-> tools package cycle.
     private static final String CCR_RETRIEVE_TOOL = "ccr_retrieve";
+
+    static final String FIRST_VIEW_MAX_TOKENS_KEY = "chat.compression.firstViewMaxTokens";
+    static final int DEFAULT_FIRST_VIEW_MAX_TOKENS = 6_000;
 
     /** Enabled content types, the text compressor's aggressiveness, and the metrics agent id + channel. */
     private record CompressionSettings(Set<ContentType> types, double targetRatio,
@@ -90,6 +99,7 @@ public final class CompressionPipeline {
         var channel = conversation != null ? conversation.channelType : null;
         return compressMessages(messages, modelId,
                 ConfigService.getInt("chat.compression.minTokens", 250),
+                ConfigService.getInt(FIRST_VIEW_MAX_TOKENS_KEY, DEFAULT_FIRST_VIEW_MAX_TOKENS),
                 new CompressionSettings(types, ratio, agentId, channel));
     }
 
@@ -110,27 +120,57 @@ public final class CompressionPipeline {
      * default target ratio, so routing and the token-level inflation guard can be
      * exercised without an {@link Agent} / {@link Conversation} or per-agent
      * config. Returns the same list instance when nothing was compressed, so
-     * callers can cheaply detect a no-op.
+     * callers can cheaply detect a no-op. The first-view rule is off here, so a
+     * lone tool message is compressed.
      */
     public static List<ChatMessage> compressMessages(List<ChatMessage> messages, String modelId, int minTokens) {
-        return compressMessages(messages, modelId, minTokens,
+        return compressMessages(messages, modelId, minTokens, 0);
+    }
+
+    /** The same seam with the first-view rule on: an unread result of at most {@code firstViewMaxTokens} stays whole. */
+    public static List<ChatMessage> compressMessages(List<ChatMessage> messages, String modelId, int minTokens,
+                                                     int firstViewMaxTokens) {
+        return compressMessages(messages, modelId, minTokens, firstViewMaxTokens,
                 new CompressionSettings(EnumSet.allOf(ContentType.class), TextCompressor.DEFAULT_TARGET_RATIO, null, null));
     }
 
     private static List<ChatMessage> compressMessages(List<ChatMessage> messages, String modelId, int minTokens,
-                                                      CompressionSettings settings) {
+                                                      int firstViewMaxTokens, CompressionSettings settings) {
+        // Tool results after the last assistant message have not reached the model yet.
+        int lastAssistant = lastAssistantIndex(messages);
+        var argsByCallId = new HashMap<String, String>();
         var out = new ArrayList<ChatMessage>(messages.size());
         var anyChanged = false;
-        for (var msg : messages) {
-            var compressed = maybeCompress(msg, modelId, minTokens, settings);
+        for (int i = 0; i < messages.size(); i++) {
+            var msg = messages.get(i);
+            if (msg.toolCalls() != null) {
+                for (var call : msg.toolCalls()) {
+                    if (call.id() != null) argsByCallId.put(call.id(), call.function().arguments());
+                }
+            }
+            var callArgs = msg.toolCallId() == null ? null : argsByCallId.get(msg.toolCallId());
+            var compressed = maybeCompress(msg, modelId, minTokens, i > lastAssistant ? firstViewMaxTokens : 0,
+                    callArgs, settings);
             anyChanged |= compressed != msg;
             out.add(compressed);
         }
         return anyChanged ? out : messages;
     }
 
-    private static ChatMessage maybeCompress(ChatMessage msg, String modelId, int minTokens,
-                                             CompressionSettings settings) {
+    private static int lastAssistantIndex(List<ChatMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (MessageRole.ASSISTANT.value.equals(messages.get(i).role())) return i;
+        }
+        return -1;
+    }
+
+    private static boolean declaredVerbatim(@Nullable String toolName, String argsJson) {
+        var tool = ToolRegistry.lookupTool(toolName);
+        return tool != null && tool.verbatimResult(argsJson);
+    }
+
+    private static ChatMessage maybeCompress(ChatMessage msg, String modelId, int minTokens, int wholeUpToTokens,
+                                             @Nullable String callArgs, CompressionSettings settings) {
         // Only TOOL-role messages with plain String content are eligible:
         // structured tool outputs are where the redundancy lives, and leaving
         // user/assistant/system turns untouched preserves intent + instructions.
@@ -139,9 +179,13 @@ public final class CompressionPipeline {
         // view it called the tool to escape — a retrieval loop. Pass it through.
         if (CCR_RETRIEVE_TOOL.equals(msg.toolName())) return msg;
         if (!(msg.content() instanceof String content) || content.isBlank()) return msg;
+        // A catalog compressed to its first entries is fetched back whole, and then sent twice.
+        if (callArgs != null && declaredVerbatim(msg.toolName(), callArgs)) return msg;
 
         var before = TokenUsageEstimator.estimateMessage(modelId, msg).tokens();
         if (before < minTokens) return msg; // below the floor — not worth the work
+        // Compressed unread, most results were fetched back through ccr_retrieve in the next round.
+        if (before <= wholeUpToTokens) return msg;
 
         var type = ContentTypeDetector.detect(content);
         if (!settings.types().contains(type)) return msg; // type disabled for this agent

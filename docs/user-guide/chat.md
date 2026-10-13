@@ -106,7 +106,12 @@ The first `browser` call on an install that has not yet fetched the browser show
 
 Reasoning-capable models (the ones that surface their internal thought before answering) render their reasoning in a separate, distinctively styled block above the final reply. Reasoning collapses by default. Click to expand. You can copy the reasoning text on its own.
 
-Tool results are kept in full in the conversation history. But what the model sees on later turns is trimmed: a long result from an earlier turn (4,000 characters or more by default) is replaced by a one-line stub naming the tool, the original size, and a `ccr_retrieve` handle. The agent fetches the full text back with that handle when it needs it. The current turn's results are always sent whole. The thresholds are in [Settings → Chat](/guide#settings-chat).
+Tool results are kept in full in the conversation history. What the model sees is smaller, in two steps.
+
+- **Within a turn.** The model reads each result whole once, in the round after the tool runs. From the next round on, an agent with [Content Compression](/guide#agents) on sees a shorter view of a large result, with a `ccr_retrieve` handle. A very large result (about 24,000 characters or more by default) is shortened from the start.
+- **On later turns.** A long result from an earlier turn (4,000 characters or more by default) is replaced by a one-line stub naming the tool, the original size, and a `ccr_retrieve` handle.
+
+The agent fetches the full text back with a handle when it needs it. A list of actions or endpoints that the agent asked for is never shortened. The thresholds are in [Settings → Chat](/guide#settings-chat).
 
 ## Per-message usage
 

@@ -194,6 +194,16 @@ public class JClawApiTool implements ToolRegistry.Tool {
         return method != null && MUTATING_METHODS.contains(method.toUpperCase(Locale.ROOT));
     }
 
+    /** The endpoint list is what the model builds its calls from. */
+    @Override
+    public boolean verbatimResult(String argsJson) {
+        try {
+            return ACTION_DISCOVER.equalsIgnoreCase(stringField(JsonParser.parseString(argsJson).getAsJsonObject(), KEY_ACTION));
+        } catch (RuntimeException _) {
+            return false;
+        }
+    }
+
     @Override
     public String execute(String argsJson, Agent agent) {
         JsonObject args;
