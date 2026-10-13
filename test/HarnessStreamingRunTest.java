@@ -98,9 +98,9 @@ class HarnessStreamingRunTest extends UnitTest {
         var parent = createAcpAgent("p-stream-bus");
         commitAndReopen();
 
-        // Subscribe BEFORE spawning: the harness reader publishes each step (and the
-        // terminal DONE) synchronously within the spawn, so by the time execute
-        // returns every event has been delivered to this listener.
+        // Subscribe BEFORE spawning: the harness reader publishes each step, and the
+        // spawn's terminal write the DONE, synchronously within the spawn, so by the
+        // time execute returns every event has been delivered to this listener.
         var received = new CopyOnWriteArrayList<String>();
         subscribe(received::add);
 
@@ -113,9 +113,10 @@ class HarnessStreamingRunTest extends UnitTest {
         assertEquals(STEP_COUNT, stepEvents,
                 "each streamed line must publish exactly one BUS_CODINGRUN_STEP event for this run");
 
+        var completedRun = "\"runId\":" + json.get("run_id").getAsString() + ",\"status\":\"COMPLETED\"";
         boolean done = received.stream()
-                .anyMatch(s -> s.contains(NotificationBus.BUS_CODINGRUN_DONE) && s.contains(nonce));
-        assertTrue(done, "the run's terminal must publish a BUS_CODINGRUN_DONE event");
+                .anyMatch(s -> s.contains(NotificationBus.BUS_CODINGRUN_DONE) && s.contains(completedRun));
+        assertTrue(done, "the run's terminal must publish a BUS_CODINGRUN_DONE event carrying its status");
     }
 
     @Test

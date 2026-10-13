@@ -576,7 +576,6 @@ final class SubagentAcpRunner {
                 flushTokens(runId);   // the reply block the turn ended on
                 reply = acc.reply();
             }
-            publishRunDone(runId, seq.get(), reply);
             return new AgentRunner.RunResult(reply.isBlank() ? NO_OUTPUT : reply, null);
         } catch (RuntimeException e) {
             throw new IllegalStateException("ACP harness failed: " + e.getMessage(), e);
@@ -617,17 +616,6 @@ final class SubagentAcpRunner {
         out.addAll(head);
         out.addAll(tail);
         return List.copyOf(out);
-    }
-
-    /** JCLAW-662: signal terminal once per run so a live monitor stops tailing
-     *  and falls back to the persisted transcript on reconnect — the SDK path's
-     *  equivalent of {@link #streamStdout}'s EOF publish. */
-    private static void publishRunDone(Long runId, int seq, String reply) {
-        var done = new LinkedHashMap<String, Object>();
-        done.put(SubagentSpawnTool.BUS_RUN_ID, runId);
-        done.put("seq", seq);
-        done.put(SubagentSpawnTool.FIELD_REPLY, reply);
-        NotificationBus.publish(NotificationBus.BUS_CODINGRUN_DONE, done);
     }
 
     /**
@@ -718,14 +706,6 @@ final class SubagentAcpRunner {
             }
             String reply = acc.reply();
             flushTokens(runId);   // the reply block the stream ended on
-            // JCLAW-662: the harness output stream has ended — signal terminal once
-            // per run (every adapter) so a live monitor stops tailing and, on
-            // reconnect, falls back to the persisted transcript.
-            var done = new LinkedHashMap<String, Object>();
-            done.put(SubagentSpawnTool.BUS_RUN_ID, runId);
-            done.put("seq", seq);
-            done.put(SubagentSpawnTool.FIELD_REPLY, reply);
-            NotificationBus.publish(NotificationBus.BUS_CODINGRUN_DONE, done);
             f.complete(reply);
         });
         return f;

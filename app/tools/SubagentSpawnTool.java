@@ -123,6 +123,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     static final String FIELD_RUN_ID = "run_id";
     static final String FIELD_CONVERSATION_ID = "conversation_id";
     static final String FIELD_REPLY = "reply";
+    static final String FIELD_ERROR = "error";
     /** JCLAW-662 bus-event key — camelCase, consumed by the frontend
      *  (chat.vue d.runId / CodingRunMonitor envelope.runId). NOT the
      *  snake_case FIELD_RUN_ID of the spawn-response payload. */
@@ -524,6 +525,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         payload.put(FIELD_CONVERSATION_ID, String.valueOf(childConvId));
         payload.put(FIELD_REPLY, runOutcome.reply());
         payload.put(FIELD_STATUS, runOutcome.terminalStatus().name());
+        var failure = runOutcome.failure();
+        if (failure != null) payload.put(FIELD_ERROR, failure);
         // JCLAW-291: hint to the parent LLM that the child's reply was cut
         // off — useful when the parent decides whether to re-summarize or
         // to surface the truncation to the user.
@@ -675,7 +678,13 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     public record SyncRunOutcome(
             String reply, SubagentRun.Status terminalStatus,
             String terminalOutcome, @Nullable String errorReason,
-            boolean killedByOperator, boolean replyTruncated) {}
+            boolean killedByOperator, boolean replyTruncated) {
+
+        /** Why the run did not complete, for the parent's tool result; null when it completed. */
+        public @Nullable String failure() {
+            return terminalStatus == SubagentRun.Status.COMPLETED ? null : terminalOutcome;
+        }
+    }
 
     /** Resolved (provider, modelId) pair for a spawned subagent. */
     public record SubagentModel(@Nullable String provider, @Nullable String modelId) {}

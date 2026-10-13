@@ -150,6 +150,25 @@ describe('CodingRunMonitor — live codingrun.step routing by runId', () => {
   })
 })
 
+describe('CodingRunMonitor — terminal status from codingrun.done', () => {
+  it('shows a failed run as Failed with its reason and withdraws the Kill control', async () => {
+    registerEndpoint('/api/subagent-runs/7/steps', () => [])
+
+    const component = await mountSuspended(CodingRunMonitor, { props: { runId: 7 } })
+    await flushPromises()
+    expect(component.text()).toContain('Running')
+
+    emitBus('codingrun.done', { runId: 7, status: 'FAILED', outcome: 'ACP harness failed: harness refused model x' })
+    await flushPromises()
+
+    const text = component.text()
+    expect(text).toContain('Failed')
+    expect(text).not.toContain('Running')
+    expect(text).toContain('harness refused model x')
+    expect(component.findAll('button').some(b => b.text().includes('Kill'))).toBe(false)
+  })
+})
+
 describe('CodingRunMonitor — Kill control', () => {
   it('POSTs the kill endpoint after the operator confirms', async () => {
     let killPosted = false

@@ -463,6 +463,19 @@ public final class SubagentRegistry {
         data.put("status", run.status.name());
         data.put("label", run.label);
         NotificationBus.publishAfterCommit(type, data);
+        if (NotificationBus.BUS_SUBAGENT_RUN_ENDED.equals(type)) publishCodingRunDone(run);
+    }
+
+    /**
+     * The coding-run monitor's terminal signal: the run's recorded status, and why when it did
+     * not complete. Sent for every run because the row carries no runtime; only a monitor listens.
+     */
+    private static void publishCodingRunDone(SubagentRun run) {
+        var done = new LinkedHashMap<String, Object>();
+        done.put("runId", run.id);
+        done.put("status", run.status.name());
+        if (run.status != SubagentRun.Status.COMPLETED && run.outcome != null) done.put("outcome", run.outcome);
+        NotificationBus.publishAfterCommit(NotificationBus.BUS_CODINGRUN_DONE, done);
     }
 
     /**

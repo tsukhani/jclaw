@@ -18,12 +18,15 @@ import services.ConfigService;
 import services.ConversationQueue;
 import services.ConversationService;
 import services.EventLogger;
+import services.NotificationBus;
 import services.SessionCompactor;
 import services.SubagentRegistry;
 import services.Tx;
 import tools.SubagentSpawnTool;
 
+import java.nio.file.Files;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -332,6 +335,45 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals("COMPLETED", json.get("status").getAsString());
         assertEquals("ACP_PING", json.get("reply").getAsString(),
                 "ACP harness (cat) must echo the task from stdin back as the reply (JCLAW-499)");
+    }
+
+    @Test
+    void aFailedAcpRunTellsTheParentWhyAndEndsTheMonitor() throws Exception {
+        var failing = Files.createTempFile("jclaw-acp-failing-harness-", ".sh");
+        Files.writeString(failing, "#!/bin/sh\ncat >/dev/null\necho harness-boom >&2\nexit 3\n");
+        failing.toFile().setExecutable(true, false);
+        var events = new CopyOnWriteArrayList<String>();
+        var unsubscribe = NotificationBus.subscribe(events::add);
+        try {
+            ConfigService.set(SubagentSpawnTool.ACP_COMMAND_KEY, failing.toString());
+            var parent = createAgent("p-acp-fail", "spawn-provider", "test-model");
+            parent.acpAllowed = true;
+            parent.save();
+            ConversationService.create(parent, "web", "u-acp-fail");
+            commitAndReopen();
+
+            var json = JsonParser.parseString(
+                    invokeOnVirtualThread(parent.id, "{\"task\":\"x\",\"runtime\":\"acp\"}")).getAsJsonObject();
+
+            assertEquals("FAILED", json.get("status").getAsString(), json.toString());
+            assertTrue(json.get("error").getAsString().contains("harness-boom"),
+                    "the parent must be told why the run failed: " + json);
+            var failedRun = "\"runId\":" + json.get("run_id").getAsString() + ",\"status\":\"FAILED\"";
+            var doneEvents = events.stream().filter(e -> e.contains(NotificationBus.BUS_CODINGRUN_DONE)).toList();
+            assertTrue(doneEvents.stream().anyMatch(e -> e.contains(failedRun) && e.contains("harness-boom")),
+                    "the monitor must be told the run failed, and why: " + doneEvents);
+        } finally {
+            unsubscribe.run();
+            Files.deleteIfExists(failing);
+        }
+    }
+
+    @Test
+    void anOutcomeNamesItsFailureUnlessItCompleted() {
+        var completed = new SubagentSpawnTool.SyncRunOutcome("ok", SubagentRun.Status.COMPLETED, "ok", null, false, false);
+        var killed = new SubagentSpawnTool.SyncRunOutcome("", SubagentRun.Status.KILLED, "Killed by operator", null, true, false);
+        assertNull(completed.failure());
+        assertEquals("Killed by operator", killed.failure());
     }
 
     @Test
@@ -962,6 +1004,8 @@ class SubagentSpawnToolTest extends UnitTest {
             var parsed = JsonParser.parseString(reply).getAsJsonObject();
             assertEquals("TIMEOUT", parsed.get("status").getAsString(),
                     "1s budget vs blocked LLM must yield TIMEOUT, got reply=" + reply);
+            assertTrue(parsed.get("error").getAsString().contains("idle budget"),
+                    "the parent must be told which budget ran out: " + reply);
 
             var runId = Long.parseLong(parsed.get("run_id").getAsString());
             JPA.em().clear();

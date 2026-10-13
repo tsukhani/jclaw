@@ -35,8 +35,6 @@ import java.util.concurrent.TimeoutException;
  */
 final class SubagentAsyncRunner {
 
-    private static final String FIELD_ERROR = "error";
-
     /** JCLAW-497/498: detached async subagent OUTCOMES, keyed by runId, handed off
      *  from a spawn (single async-in-task or a batch fan-out) to the inline
      *  block-await in subagent_yield. These children have no persistent
@@ -192,6 +190,8 @@ final class SubagentAsyncRunner {
         m.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
         m.put(SubagentSpawnTool.FIELD_REPLY, outcome.reply());
         m.put(SubagentSpawnTool.FIELD_STATUS, outcome.terminalStatus().name());
+        var failure = outcome.failure();
+        if (failure != null) m.put(SubagentSpawnTool.FIELD_ERROR, failure);
         if (outcome.replyTruncated()) m.put(SubagentSpawnTool.FIELD_TRUNCATED, Boolean.TRUE);
         return m;
     }
@@ -233,7 +233,7 @@ final class SubagentAsyncRunner {
                 var miss = new LinkedHashMap<String, Object>();
                 miss.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
                 miss.put(SubagentSpawnTool.FIELD_STATUS, "UNKNOWN");
-                miss.put(FIELD_ERROR, "no pending async subagent (already collected, or not an async spawn)");
+                miss.put(SubagentSpawnTool.FIELD_ERROR, "no pending async subagent (already collected, or not an async spawn)");
                 results.add(miss);
                 continue;
             }
@@ -244,13 +244,13 @@ final class SubagentAsyncRunner {
                 var err = new LinkedHashMap<String, Object>();
                 err.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
                 err.put(SubagentSpawnTool.FIELD_STATUS, "FAILED");
-                err.put(FIELD_ERROR, "interrupted while awaiting");
+                err.put(SubagentSpawnTool.FIELD_ERROR, "interrupted while awaiting");
                 results.add(err);
             } catch (Exception e) {
                 var err = new LinkedHashMap<String, Object>();
                 err.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
                 err.put(SubagentSpawnTool.FIELD_STATUS, "FAILED");
-                err.put(FIELD_ERROR, e.getMessage());
+                err.put(SubagentSpawnTool.FIELD_ERROR, e.getMessage());
                 results.add(err);
             }
         }
