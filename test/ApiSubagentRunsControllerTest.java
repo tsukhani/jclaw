@@ -470,7 +470,7 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
         login();
         var data = commitInFreshTx(() -> {
             var p = AgentService.create("api-del-p", "openrouter", "gpt-4.1");
-            var c = AgentService.create("api-del-c", "openrouter", "gpt-4.1");
+            var c = spawnedChild("api-del-c", p);
             var pc = ConversationService.create(p, "web", "u");
             var cc = ConversationService.create(c, "subagent", null);
             var runId = persistRun(p, c, pc, cc, SubagentRun.Status.COMPLETED);
@@ -489,6 +489,56 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
         assertNull(SubagentRun.findById(runId), "run row gone");
         assertNull(Agent.findById(childAgentId),
                 "child agent swept by AgentService.delete cascade");
+    }
+
+    // A spawn that names agentId runs on one of the operator's own agents; deleting the run used to delete that agent.
+    @Test
+    void deletingARunKeepsAnAgentItOnlyReused() {
+        login();
+        var data = commitInFreshTx(() -> {
+            var p = AgentService.create("api-del-reuse-p", "openrouter", "gpt-4.1");
+            var reused = AgentService.create("api-del-reuse-own-agent", "openrouter", "gpt-4.1");
+            var pc = ConversationService.create(p, "web", "u");
+            var cc = ConversationService.create(reused, "web", null);
+            cc.parentConversation = pc;
+            cc.save();
+            var single = persistRun(p, reused, pc, cc, SubagentRun.Status.COMPLETED);
+            var cc2 = ConversationService.create(reused, "web", null);
+            cc2.parentConversation = pc;
+            cc2.save();
+            var inBulk = persistRun(p, reused, pc, cc2, SubagentRun.Status.COMPLETED);
+            return new long[]{single, inBulk, reused.id, cc.id, cc2.id, pc.id};
+        });
+
+        assertIsOk(DELETE("/api/subagent-runs/" + data[0]));
+        assertIsOk(deleteWithJsonBody("/api/subagent-runs", "{\"ids\":[" + data[1] + "]}"));
+
+        JPA.em().clear();
+        assertNull(SubagentRun.findById(data[0]), "the run is gone");
+        assertNull(SubagentRun.findById(data[1]), "and so is the one deleted in bulk");
+        assertNull(Conversation.findById(data[3]), "with its transcript");
+        assertNull(Conversation.findById(data[4]));
+        assertNotNull(Agent.findById(data[2]), "the operator's own agent was reused by the run, not created for it");
+        assertNotNull(Conversation.findById(data[5]), "the chat that started the runs stays");
+    }
+
+    // Inline mode writes the child's turns into the parent chat, so the run's "transcript" is that chat.
+    @Test
+    void deletingAnInlineRunOfAReusedAgentKeepsTheChatItRanIn() {
+        login();
+        var data = commitInFreshTx(() -> {
+            var p = AgentService.create("api-del-inline-p", "openrouter", "gpt-4.1");
+            var reused = AgentService.create("api-del-inline-own-agent", "openrouter", "gpt-4.1");
+            var chat = ConversationService.create(p, "web", "u");
+            return new long[]{persistRun(p, reused, chat, chat, SubagentRun.Status.COMPLETED), reused.id, chat.id};
+        });
+
+        assertIsOk(DELETE("/api/subagent-runs/" + data[0]));
+
+        JPA.em().clear();
+        assertNull(SubagentRun.findById(data[0]), "the run is gone");
+        assertNotNull(Conversation.findById(data[2]), "the chat an inline run wrote into is the operator's");
+        assertNotNull(Agent.findById(data[1]));
     }
 
     @Test
@@ -532,7 +582,7 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
         login();
         var data = commitInFreshTx(() -> {
             var p = AgentService.create("api-bulk-ids-p", "openrouter", "gpt-4.1");
-            var c1 = AgentService.create("api-bulk-ids-c1", "openrouter", "gpt-4.1");
+            var c1 = spawnedChild("api-bulk-ids-c1", p);
             var c2 = AgentService.create("api-bulk-ids-c2", "openrouter", "gpt-4.1");
             var pc = ConversationService.create(p, "web", "u");
             var cc1 = ConversationService.create(c1, "subagent", null);
@@ -937,6 +987,11 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
         }
         run.save();
         return run.id;
+    }
+
+    /** A child agent as a spawn creates it: linked to the agent that spawned it. */
+    private static Agent spawnedChild(String name, Agent parent) {
+        return AgentService.create(name, "openrouter", "gpt-4.1", null, null, false, parent);
     }
 
     private static models.TaskRun persistTaskRun(Agent agent, String taskName) {

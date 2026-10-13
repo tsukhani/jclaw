@@ -250,6 +250,34 @@ class CascadeLuceneCleanupTest extends UnitTest {
                 "the parent agent owns the conversation but must survive its deletion");
     }
 
+    // A run that named agentId ran on an agent the operator made; deleting the chat used to delete it.
+    @Test
+    void conversationDeleteKeepsAnAgentARunOnlyReused() {
+        var ids = commitInFreshTx(() -> {
+            var parent = newAgent("cl-rparent");
+            parent.save();
+            var reused = newAgent("cl-rreused");
+            reused.save();
+            var chat = ConversationService.create(parent, "web", "p-" + System.nanoTime());
+
+            var inline = new SubagentRun();
+            inline.parentAgent = parent;
+            inline.childAgent = reused;
+            inline.parentConversation = chat;
+            inline.childConversation = chat;
+            inline.status = SubagentRun.Status.COMPLETED;
+            inline.endedAt = Instant.now();
+            inline.save();
+            return List.of(chat.id, reused.id, inline.id);
+        });
+
+        commitInFreshTx(() -> ConversationService.deleteByIds(List.of(ids.get(0))));
+
+        assertNull(commitInFreshTx(() -> SubagentRun.<SubagentRun>findById(ids.get(2))), "the run goes with its chat");
+        assertNotNull(commitInFreshTx(() -> Agent.<Agent>findById(ids.get(1))),
+                "an agent the run reused is the operator's, not the run's to delete");
+    }
+
     // ── TASK_RUN_MESSAGE via TaskExecutor.pruneRunHistory ─────────────────
 
     @Test

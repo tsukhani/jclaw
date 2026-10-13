@@ -16,7 +16,6 @@ import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import play.mvc.Controller;
 import play.mvc.With;
-import services.AgentService;
 import services.EventLogger;
 import services.SubagentRegistry;
 import services.search.LuceneIndexer;
@@ -269,23 +268,16 @@ public class ApiSubagentRunsController extends Controller {
     }
 
     /**
-     * DELETE /api/subagent-runs/{id} — remove a subagent run row and the
-     * child agent it spawned (which cascades to the child conversation,
-     * its messages, the run row itself, and any other rows the agent
-     * delete chain touches).
+     * DELETE /api/subagent-runs/{id} — remove a subagent run with its transcript
+     * and the child agent its spawn created; see {@link SubagentRegistry#deleteRun}
+     * for what a run that reused an agent, or ran inline, leaves in place.
      *
      * <p>Restricted to terminal runs so an active stream isn't left
      * pointing at a deleted row. Operators wanting to drop a RUNNING
      * row should kill it first via {@link #kill(Long)} and then delete.
-     *
-     * <p>Cleanup happens by delegating to {@link services.AgentService#delete}
-     * on the child Agent — the child is unique to the run (post the
-     * JCLAW spawn fix that stopped reusing pre-existing operator agents
-     * as children), and {@code AgentService.delete}'s SubagentRun cascade
-     * sweeps the run row as part of the agent's FK chain.
      */
     @ApiResponse(responseCode = "200")
-    @Operation(summary = "Delete a terminal subagent run and its child agent")
+    @Operation(summary = "Delete a terminal subagent run with its transcript and the agent it spawned")
     @AgentAccess(value = OWN_ONLY,
             reason = "an agent may erase runs it started; main reaches every agent's (JCLAW-1270)")
     public static void delete(Long id) {
@@ -307,16 +299,7 @@ public class ApiSubagentRunsController extends Controller {
                     "Run " + id + " is still RUNNING. Kill it first, then delete.");
             return;
         }
-        var childAgent = run.childAgent;
-        if (childAgent == null) {
-            // Defensive — schema says NOT NULL but historical rows from
-            // pre-FK-tightening might exist. Drop just the run row in
-            // that case so the operator isn't stuck with an orphan.
-            run.delete();
-            ApiResponses.ok("id", id);
-            return;
-        }
-        AgentService.delete(childAgent);
+        SubagentRegistry.deleteRun(run);
         ApiResponses.ok("id", id);
     }
 
@@ -332,8 +315,7 @@ public class ApiSubagentRunsController extends Controller {
      * <p>RUNNING rows are skipped, never rejected: a "delete all" over a mixed
      * set silently leaves live runs intact (kill-then-delete remains the path
      * for those, exactly as {@link #delete(Long)} enforces per-row). Each
-     * removed run cascades through {@link services.AgentService#delete} on its
-     * child agent, sweeping the child conversation, transcript, and run row.
+     * removed run goes through {@link SubagentRegistry#deleteRun}.
      */
     @RequestBody(content = @Content(schema = @Schema(implementation = DeleteBulkRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DeletedCountResponse.class)))
@@ -415,15 +397,13 @@ public class ApiSubagentRunsController extends Controller {
     /**
      * Cascade-delete every terminal run in {@code targets}, returning the count
      * actually removed. RUNNING rows are skipped (kill-first), never rejected —
-     * each removed run cascades through {@link services.AgentService#delete}.
+     * each removed run goes through {@link SubagentRegistry#deleteRun}.
      */
     private static int deleteTerminalRuns(List<SubagentRun> targets) {
         int deleted = 0;
         for (var run : targets) {
             if (run.status == SubagentRun.Status.RUNNING) continue; // live rows: kill first
-            var childAgent = run.childAgent;
-            if (childAgent == null) run.delete();
-            else AgentService.delete(childAgent);
+            SubagentRegistry.deleteRun(run);
             deleted++;
         }
         return deleted;

@@ -8,6 +8,7 @@ import utils.AppClock;
 
 import java.lang.ScopedValue.CallableOp;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -448,6 +449,24 @@ public final class SubagentRegistry {
         var run = killed.get();
         if (run != null) publishRunEvent(NotificationBus.BUS_SUBAGENT_RUN_ENDED, run);
         return status;
+    }
+
+    /**
+     * Remove a finished run: its record, its transcript, and the agent its spawn created. An
+     * agent the run only reused (a spawn that named {@code agentId}) and a chat an inline run
+     * wrote into are the operator's, and stay.
+     */
+    public static void deleteRun(SubagentRun run) {
+        var child = run.childAgent;
+        if (child != null && child.parentAgent != null) {
+            AgentService.delete(child);   // its cascade takes the child's conversation and the run row
+            return;
+        }
+        var transcript = run.childConversation;
+        boolean inline = transcript != null && run.parentConversation != null
+                && transcript.id.equals(run.parentConversation.id);
+        if (transcript == null || inline) run.delete();
+        else ConversationDeletionCascade.deleteByIds(List.of(transcript.id));
     }
 
     /**
