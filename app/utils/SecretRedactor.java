@@ -95,19 +95,19 @@ public final class SecretRedactor {
                     + "\\s{0,4}+,\\s{0,4}+" + QUOTE + "value" + QUOTE + "\\s{0,4}+:\\s{0,4}+"), Bare.WORD, false);
     private static final Pattern CREDENTIAL_NAME = Pattern.compile("(?i)api[-_]?key|token(?!s)|secret|password|passwd|credential");
 
-    // Formats recognizable with no name beside them.
+    // Formats recognizable with no name beside them. None is named TOKEN: java:S6418 reads that as a hard-coded secret.
     private static final String OPENAI_KEY = "sk-[A-Za-z0-9_-]{20,}+";
-    private static final String GITHUB_TOKEN = "gh[pousr]_[A-Za-z0-9]{20,}+";
-    private static final String SLACK_TOKEN = "xox[abprs]-[A-Za-z0-9-]{10,}+";
+    private static final String GITHUB_KEY = "gh[pousr]_[A-Za-z0-9]{20,}+";
+    private static final String SLACK_KEY = "xox[abprs]-[A-Za-z0-9-]{10,}+";
     private static final String AWS_KEY_ID = "AKIA[0-9A-Z]{16}";
     // The first segment is bounded because a start can recur inside the run it scans; the later ones cannot hold a start.
     private static final String JWT = "eyJ[A-Za-z0-9_-]{8,512}+\\.[A-Za-z0-9_-]{8,}+\\.[A-Za-z0-9_-]{8,}+";
-    private static final String TELEGRAM_BOT_TOKEN = "\\d{8,10}:[A-Za-z0-9_-]{35}";
+    private static final String TELEGRAM_BOT_KEY = "\\d{8,10}:[A-Za-z0-9_-]{35}";
     private static final String PEM_PRIVATE_KEY = "-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----[^-]*+(?:-----END [A-Z ]{0,40}PRIVATE KEY-----)?";
 
     /** One pass over every format: where two overlap the leftmost takes the whole run, which separate passes would split. */
-    private static final Pattern TOKEN_SHAPE = Pattern.compile("(?<!\\w)(?:" + OPENAI_KEY + "|" + GITHUB_TOKEN + "|" + SLACK_TOKEN
-            + "|" + AWS_KEY_ID + "|" + JWT + "|" + TELEGRAM_BOT_TOKEN + ")|" + PEM_PRIVATE_KEY);
+    private static final Pattern TOKEN_SHAPE = Pattern.compile("(?<!\\w)(?:" + OPENAI_KEY + "|" + GITHUB_KEY + "|" + SLACK_KEY
+            + "|" + AWS_KEY_ID + "|" + JWT + "|" + TELEGRAM_BOT_KEY + ")|" + PEM_PRIVATE_KEY);
 
     /** {@code text} with every recognized credential's value replaced by {@link #MASK}; unchanged when it holds none. */
     public static String redact(String text) {
