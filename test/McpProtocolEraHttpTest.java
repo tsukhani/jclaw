@@ -116,10 +116,20 @@ class McpProtocolEraHttpTest extends UnitTest {
                 // notifications/initialized and tools/list are separate POSTs and may arrive in either order.
                 assertEquals(c.methods(), seen.stream().map(Seen::method)
                         .filter(m -> !m.equals("notifications/initialized")).toList(), c.name());
+                if (!c.modern()) awaitInitialized();
                 assertEquals(!c.modern(), seen.stream().anyMatch(x -> x.method().equals("notifications/initialized")),
                         c.name());
                 assertEquals(1, client.tools().size(), c.name());
             }
+        }
+    }
+
+    /** The transport enqueues each POST, so the notification can still be in flight when open() returns. */
+    private void awaitInitialized() throws InterruptedException {
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline
+                && seen.stream().noneMatch(x -> x.method().equals("notifications/initialized"))) {
+            Thread.sleep(10);
         }
     }
 
