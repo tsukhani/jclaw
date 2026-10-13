@@ -191,6 +191,79 @@ class SubagentSpawnToolTest extends UnitTest {
                 "inherit still grants the parent's tools: that part needs no conversation");
     }
 
+    // A task's tool list fences its fire. A subagent the fire starts is the fire's delegate, so it
+    // is held to the same list; otherwise a fenced task leaves the fence by spawning one.
+    @Test
+    void aSubagentOfATaskWithAToolListIsHeldToThatList() throws Exception {
+        var allowed = java.util.Set.of("subagent_spawn", "web_search");
+        var offered = new CopyOnWriteArrayList<java.util.Set<String>>();
+        startLlmServer(exchange -> {
+            var request = JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes())).getAsJsonObject();
+            var names = new java.util.TreeSet<String>();
+            if (request.has("tools")) {
+                for (var tool : request.getAsJsonArray("tools")) {
+                    names.add(tool.getAsJsonObject().getAsJsonObject("function").get("name").getAsString());
+                }
+            }
+            offered.add(names);
+            var body = simpleResponse("child done").getBytes();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        configureProvider();
+        var open = createAgent("p-task-tools-open", "spawn-provider", "test-model");
+        var fenced = createAgent("p-task-tools-fenced", "spawn-provider", "test-model");
+        var openRun = seedTaskRun(open);
+        var fencedRun = seedTaskRun(fenced, null, null, "[\"subagent_spawn\",\"web_search\"]");
+        commitAndReopen();
+
+        spawnInTaskFire(open.id, openRun, "web", "{\"task\":\"do work\"}");
+        var ofAnOpenTask = offered.getLast();
+        spawnInTaskFire(fenced.id, fencedRun, "web", "{\"task\":\"do work\"}");
+        var ofAFencedTask = offered.getLast();
+
+        assertTrue(ofAnOpenTask.stream().anyMatch(name -> !allowed.contains(name)),
+                "control: without a list the child holds tools outside it, so the check below can fail: " + ofAnOpenTask);
+        assertTrue(allowed.containsAll(ofAFencedTask),
+                "a subagent must not be offered tools its task was denied: " + ofAFencedTask);
+        assertTrue(ofAFencedTask.contains("web_search"), "and it keeps the ones the task allows: " + ofAFencedTask);
+    }
+
+    // The list follows the chain: a child of a fenced child reads it off its parent conversation.
+    @Test
+    void aNestedSubagentInheritsTheToolListItsParentConversationCarries() throws Exception {
+        startLlmServer(simpleResponse("child done"));
+        configureProvider();
+        var parent = createAgent("p-nested-tools", "spawn-provider", "test-model");
+        var fencedChildConversation = ConversationService.create(parent, "web", "u-nested-tools");
+        fencedChildConversation.enabledToolNames = "[\"subagent_spawn\",\"web_search\"]";
+        fencedChildConversation.save();
+        commitAndReopen();
+
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
+                resultRef.set(agents.ToolContext.withScope(fencedChildConversation.id, null, () ->
+                        new SubagentSpawnTool().execute("{\"task\":\"do work\"}", p)));
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(30_000);
+        assertFalse(thread.isAlive(), "subagent_spawn must complete within 30s");
+        if (errorRef.get() != null) throw errorRef.get();
+
+        var json = JsonParser.parseString(resultRef.get()).getAsJsonObject();
+        assertEquals("COMPLETED", json.get("status").getAsString(), json.toString());
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(Long.parseLong(json.get("run_id").getAsString()));
+        assertEquals("[\"subagent_spawn\",\"web_search\"]", run.childConversation.enabledToolNames);
+    }
+
     @Test
     void aSubagentOfAPinnedTaskRunsOnTheTasksModel() throws Exception {
         startLlmServer(simpleResponse("child done"));
@@ -2558,9 +2631,14 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     private static Long seedTaskRun(Agent agent, String pinnedProvider, String pinnedModelId) {
+        return seedTaskRun(agent, pinnedProvider, pinnedModelId, null);
+    }
+
+    private static Long seedTaskRun(Agent agent, String pinnedProvider, String pinnedModelId, String enabledToolNames) {
         var task = new models.Task();
         task.modelProvider = pinnedProvider;
         task.modelId = pinnedModelId;
+        task.enabledToolNames = enabledToolNames;
         task.agent = agent;
         task.name = "nightly-" + agent.name;
         task.type = models.Task.Type.IMMEDIATE;

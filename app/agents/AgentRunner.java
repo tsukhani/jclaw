@@ -496,12 +496,12 @@ public class AgentRunner {
     }
 
     /**
-     * The model a fire of {@code taskRunId}'s task runs on, as the unsaved conversation
-     * {@link #runForTask} carries it on: its overrides hold the task's pin, or nothing for an
-     * unpinned task. Null outside a task fire. A subagent the fire starts reads its parent's
-     * model from it, as a chat-started one reads its parent conversation.
+     * What a subagent inherits from the fire of {@code taskRunId}'s task, on an unsaved
+     * conversation so a fire-started child reads it the way a chat-started one reads its parent
+     * conversation: the task's model pin as the overrides {@link #runForTask} fires on, and the
+     * task's tool allow-list. Null outside a task fire.
      */
-    public static @Nullable Conversation taskFireModel(@Nullable Long taskRunId) {
+    public static @Nullable Conversation taskFireParent(@Nullable Long taskRunId) {
         if (taskRunId == null) return null;
         return Tx.run(() -> {
             TaskRun run = TaskRun.findById(taskRunId);
@@ -509,6 +509,7 @@ public class AgentRunner {
             var carrier = new Conversation();
             carrier.agent = run.task.agent;
             applyTaskModelPin(carrier, run.task.agent, run.task.name, run.task.modelProvider, run.task.modelId);
+            carrier.enabledToolNames = run.task.enabledToolNames;
             return carrier;
         });
     }

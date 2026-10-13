@@ -135,9 +135,12 @@ This keeps task history bounded. A task that starts a subagent on every fire doe
 | `mode=inline` | Folds the child into the conversation. | Refused, because there is no conversation to fold it into. The agent gets `Error: mode="inline" embeds the child in a conversation and a task fire has none; use mode="session".` |
 | `context=inherit` | Summarizes the parent's recent turns and grants the union of tools. | Grants the union of tools only. There are no conversation turns to summarize. |
 | Default model | The model the parent conversation is on. | The model the task is pinned to, or the agent's model when the task has no pin. |
+| Tools | The child agent's own tools. | The same, cut down to the task's tool list when the task has one. The list follows a child of that child too. |
 | `async=true` | The outcome shows in the chat's subagent list, or returns through `subagent_yield`. | `subagent_yield` waits and returns the result inline. See [Async plus yield](/guide#subagents-async-yield). |
 
 ### Trust follows the task
+
+A task's tool list limits JClaw's own tools. It cannot limit what an [external coding harness](/guide#subagents-acp-harness) does once it runs, because the harness is a separate program. To stop a task from starting one, leave `subagent_spawn` out of its tool list.
 
 A child that a fire starts is trusted as much as the fire is, and no more. The fire's trust comes from the task's **Origin**, the channel the task was created from. See [Editing a task's instructions](/guide#tasks-editing-a-task-s-instructions). A task created from Telegram therefore cannot gain your web chat's trust by spawning a subagent.
 

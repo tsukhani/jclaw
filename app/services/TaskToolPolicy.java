@@ -134,6 +134,23 @@ public final class TaskToolPolicy {
         return kept;
     }
 
+    /**
+     * Hold a subagent's turn to the allow-list its conversation inherited from a fenced task
+     * ({@code Conversation.enabledToolNames}). Null or blank, the usual case, leaves
+     * {@code defs} untouched; a malformed list fails open as it does for the fire itself.
+     */
+    public static List<ToolDef> restrictSubagent(List<ToolDef> defs, @Nullable String allowListJson, String agentName) {
+        if (allowListJson == null || allowListJson.isBlank()) return defs;
+        var allowed = parse(allowListJson);
+        if (allowed == null) return defs;
+        var kept = defs.stream().filter(d -> allowed.contains(d.function().name())).toList();
+        if (kept.size() < defs.size()) {
+            EventLogger.info(EVENT_CATEGORY, agentName, null,
+                    "Subagent '%s' held to its task's tool list: %d of %d tools".formatted(agentName, kept.size(), defs.size()));
+        }
+        return kept;
+    }
+
     private static String truncate(String s) {
         return s.length() <= MESSAGE_LIMIT ? s : s.substring(0, MESSAGE_LIMIT - 3) + "...";
     }

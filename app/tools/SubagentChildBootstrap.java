@@ -302,9 +302,11 @@ final class SubagentChildBootstrap {
         // spend to the actually-used model. The resolver tracks the model the
         // operator is ACTUALLY using (the parent conversation's override),
         // not just the agent's base — see resolveSubagentModel.
-        // In a task fire the model actually in use is the task's pin, carried the way the fire carries it.
-        var modelSource = parentConv != null ? parentConv : AgentRunner.taskFireModel(ToolContext.taskRunId());
-        var resolved = resolveSubagentModel(modelSource, childAgent, modelProviderOverride, modelIdOverride);
+        // In a task fire the parent is the fire: its model is the task's pin and its tools the task's list.
+        var inherited = parentConv != null ? parentConv : AgentRunner.taskFireParent(ToolContext.taskRunId());
+        // The list rides down with every child, or a fenced task would leave its fence by delegating.
+        if (inherited != null) childConv.enabledToolNames = inherited.enabledToolNames;
+        var resolved = resolveSubagentModel(inherited, childAgent, modelProviderOverride, modelIdOverride);
         // Only stamp an override when the resolved model DIFFERS from the child
         // agent's base — the plain inherit case keeps a null override (matches
         // prior behavior and the cost dashboard's COALESCE(override, base)).

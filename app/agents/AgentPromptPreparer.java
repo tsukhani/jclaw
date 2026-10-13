@@ -12,6 +12,7 @@ import services.AttachmentService;
 import services.ConversationService;
 import services.EventLogger;
 import services.SessionCompactor;
+import services.TaskToolPolicy;
 import services.Tx;
 import utils.LatencyTrace;
 
@@ -137,7 +138,8 @@ final class AgentPromptPreparer {
             // Conversation-aware overload: lazy-load MCP tool schemas
             // based on which servers the model has discovered via
             // list_mcp_tools. Native tools always ship.
-            var tools = ToolRegistry.getToolDefsForAgent(agent, conv);
+            var tools = TaskToolPolicy.restrictSubagent(
+                    ToolRegistry.getToolDefsForAgent(agent, conv), conv.enabledToolNames, agent.name);
 
             EventLogger.info("llm", agent.name, conv.channelType,
                     "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
@@ -238,7 +240,8 @@ final class AgentPromptPreparer {
             // Conversation-aware overload: applies the loadtest-agent
             // short-circuit AND the lazy MCP discovery gate (only ship
             // schemas for servers the model has called list_mcp_tools on).
-            var toolDefs = ToolRegistry.getToolDefsForAgent(agent, convo);
+            var toolDefs = TaskToolPolicy.restrictSubagent(
+                    ToolRegistry.getToolDefsForAgent(agent, convo), convo.enabledToolNames, agent.name);
             return new PreparedPrologue(assembled0, hydration.messages(), toolDefs, disabledTools,
                     hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
         });

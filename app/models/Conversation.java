@@ -188,6 +188,14 @@ public class Conversation extends TimestampedModel {
     @Column(name = "parent_context", columnDefinition = "TEXT")
     public String parentContext;
 
+    /**
+     * The tool allow-list a subagent's conversation inherits, in {@code Task.enabledToolNames}'
+     * format: the list of the fenced task whose fire it descends from. Every turn here is held
+     * to it. Null, the usual case, leaves the agent's own tools.
+     */
+    @Column(name = "enabled_tool_names", columnDefinition = "TEXT")
+    public String enabledToolNames;
+
     // Hibernate PersistentBag isn't Serializable, but JClaw never serializes
     // JPA entities off-heap (no session replication, no caching). The
     // Serializable on GenericModel is incidental — fields are JPA-tracked.

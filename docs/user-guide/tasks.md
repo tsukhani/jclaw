@@ -47,7 +47,7 @@ For something that should happen **once** on a given day, use the absolute date-
 | `listRecurringTasks`  | List every recurring task currently configured for this agent.                                              |
 | `listReminders`       | List every reminder (`payloadType="reminder"`) currently scheduled for this agent.                          |
 
-`createTask` and `updateTask` also take `enabledToolNames`, a JSON array of the tools a fire may use. The agent's other tools are withheld from that task, and leaving it unset gives the task all of them. They also take `modelProvider` and `modelId`, which pin the task to that model (see **Model** under *Editing a task's instructions*). Set both, because a pin with only one is ignored.
+`createTask` and `updateTask` also take `enabledToolNames`, a JSON array of the tools a fire may use. The agent's other tools are withheld from that task, and leaving it unset gives the task all of them. A subagent that a fire starts is held to the same list, and so is any subagent that one starts. A [coding harness](/guide#subagents-acp-harness) is an external program with its own tools, so the list does not bind it. Leave `subagent_spawn` out of the list if the task must not start one. They also take `modelProvider` and `modelId`, which pin the task to that model (see **Model** under *Editing a task's instructions*). Set both, because a pin with only one is ignored.
 
 For the agent to be able to use any of these actions, **Tools → task_manager** must be switched on for that agent on the [Agents](/agents) page.
 
@@ -207,7 +207,7 @@ The same detail has a **Permissions** block:
 
 - **Origin**: the channel the task was created from, which no edit raises; only the **Trust** button beside a non-`web` origin raises it to `web`. `web` lets a fire's dangerous tools follow the [Tool Approvals](/guide#settings-tool-approvals) policy; any other channel, or `unrecorded`, is untrusted, so they fail closed (for a channel origin, unless that policy is `ask`).
 - **Model**: *follows the agent* when nothing is pinned: a fire runs on the owning agent's current model, so changing the agent's model changes the task's too. A task created with its own model shows that model instead and always fires on it; if that model's provider is no longer configured, the fire falls back to the agent's model. A subagent that a fire starts runs on the same model, unless the spawn names its own or Settings → **Subagents** pins every subagent to one model.
-- **Tools**: the `enabledToolNames` allow-list as pills, or *all the agent's tools* when there is none.
+- **Tools**: the `enabledToolNames` allow-list as pills, or *all the agent's tools* when there is none. The list also binds every subagent that a fire starts.
 
 ## What a task run looks like
 
