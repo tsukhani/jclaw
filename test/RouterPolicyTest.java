@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
 
 import java.util.List;
@@ -136,6 +137,45 @@ class RouterPolicyTest extends UnitTest {
         } finally {
             ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
             ConfigService.delete(OllamaDecision.MODELS_KEY);
+        }
+    }
+
+    @Test
+    void aLayaClassifierModelMustBeATickedCheckpoint() {
+        // JCLAW-1447. No other class writes decision.laya.models, and only one classifier half is stored.
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, LayaDecision.PROVIDER),
+                "laya is not a registered provider, and needs none");
+        ConfigService.set(LayaDecision.MODELS_KEY, "[\"english\",\"multilingual\"]");
+        ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, LayaDecision.PROVIDER);
+        try {
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "english"));
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, " multilingual "));
+            // typed-decisions is a checkpoint, but not a ticked one.
+            for (var bad : new String[] {"typed-decisions", "tev1", "jev-latest", "English"}) {
+                var rejected = RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, bad);
+                assertNotNull(rejected, () -> "accepted " + bad);
+                assertTrue(rejected.contains(LayaDecision.MODELS_KEY), rejected);
+            }
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+            ConfigService.delete(LayaDecision.MODELS_KEY);
+        }
+        assertNotNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, "rp-nope"),
+                "another unregistered name is still refused");
+    }
+
+    @Test
+    void aStoredLayaSelectionTicksOnlyTheNamesThatAreCheckpoints() {
+        // set() skips the write rules, as a row edited by hand would.
+        ConfigService.set(LayaDecision.MODELS_KEY, "[\"laya-next\",\"english\"]");
+        ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, LayaDecision.PROVIDER);
+        try {
+            assertEquals(List.of("english"), LayaDecision.selectedModels());
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "english"));
+            assertNotNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "laya-next"));
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+            ConfigService.delete(LayaDecision.MODELS_KEY);
         }
     }
 

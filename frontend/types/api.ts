@@ -483,6 +483,17 @@ export interface OllamaDecisionStatus {
   models: string[]
 }
 
+/** GET /api/decision/laya: the Laya decision server and what it reports of itself (JCLAW-1447). */
+export interface LayaDecisionStatus {
+  baseUrl: string
+  reachable: boolean
+  error: string | null
+  /** The checkpoints in the server's memory; empty when it wants a key it was not sent. */
+  loaded: string[]
+  /** Where they compute, such as `cpu`; null when the server wants a key it was not sent. */
+  device: string | null
+}
+
 /** A single histogram for a latency segment, as returned by /api/metrics/latency. */
 export interface LatencyHistogram {
   count: number

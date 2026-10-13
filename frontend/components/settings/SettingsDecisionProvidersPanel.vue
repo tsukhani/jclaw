@@ -4,7 +4,8 @@
 // consumers share — its key and its circuit breaker — and links to each consumer, where the settings
 // that belong to that consumer alone stay.
 import { SpeakerWaveIcon } from '@heroicons/vue/24/outline'
-import type { OllamaDecisionStatus } from '~/types/api'
+import type { LayaDecisionStatus, OllamaDecisionStatus } from '~/types/api'
+import type { LayaCheckpoint } from '~/utils/decision-models'
 
 const { configData, saving, refresh, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
 
@@ -97,6 +98,84 @@ const routerOllamaModel = computed(() =>
     ? configValue('router.classifier.model').trim()
     : '')
 const ollamaBreaker = computed(() => breakersByName.value.get('decision:ollama'))
+
+// JCLAW-1447: the operator's laya-serve. JClaw calls its address and starts nothing.
+const LAYA_ADDRESS = 'decision.laya.baseUrl'
+const LAYA_API_KEY = 'decision.laya.apiKey'
+const LAYA_MODELS = 'decision.laya.models'
+const LAYA_PROVIDER = 'laya'
+const layaSave = useSaveAttempt()
+const layaError = layaSave.saveError
+// Lazy, as Ollama's: the read dials the server.
+const { data: laya, pending: layaPending, refresh: refreshLaya }
+  = useLazyFetch<LayaDecisionStatus>('/api/decision/laya')
+
+const layaAddress = computed(() =>
+  laya.value?.baseUrl ?? (configValue(LAYA_ADDRESS).trim().replace(/\/+$/, '') || LAYA_DEFAULT_ADDRESS))
+const editingLayaAddress = ref(false)
+const layaAddressEdit = ref('')
+
+function startLayaAddressEdit() {
+  layaAddressEdit.value = layaAddress.value
+  editingLayaAddress.value = true
+}
+
+function cancelLayaAddressEdit() {
+  editingLayaAddress.value = false
+  layaError.value = null
+}
+
+async function saveLayaAddress() {
+  const value = layaAddressEdit.value.trim().replace(/\/+$/, '')
+  saving.value = true
+  const saved = await layaSave.attempt(async () => {
+    // Saving the default back clears the key instead of storing what absence already means.
+    if (!value || value === LAYA_DEFAULT_ADDRESS) {
+      await $fetch(`/api/config/${LAYA_ADDRESS}`, { method: 'DELETE' })
+    }
+    else {
+      await $fetch('/api/config', { method: 'POST', body: { key: LAYA_ADDRESS, value } })
+    }
+  })
+  if (saved) editingLayaAddress.value = false
+  await refresh()
+  saving.value = false
+  await refreshLaya()
+}
+
+const layaKeyConfigured = computed(() => configValue(LAYA_API_KEY).trim().length > 0)
+
+// A server started with a key tells a caller that sends it more, so the status is read again.
+async function saveLayaKey() {
+  await updateEntry(LAYA_API_KEY)
+  await refreshLaya()
+}
+
+const tickedCheckpoints = computed(() => tickedLayaCheckpoints(configValue(LAYA_MODELS)).map(c => c.name))
+
+function checkpointNote(c: LayaCheckpoint) {
+  return laya.value?.loaded.includes(c.name) ? `${layaContext(c)}, loaded` : layaContext(c)
+}
+
+async function toggleCheckpoint(name: string, box: HTMLInputElement) {
+  const next = LAYA_CHECKPOINTS.map(c => c.name)
+    .filter(n => n === name ? box.checked : tickedCheckpoints.value.includes(n))
+  saving.value = true
+  const saved = await layaSave.attempt(async () => {
+    if (next.length === 0) await $fetch(`/api/config/${LAYA_MODELS}`, { method: 'DELETE' })
+    else await $fetch('/api/config', { method: 'POST', body: { key: LAYA_MODELS, value: JSON.stringify(next) } })
+  })
+  await refresh()
+  // Vue does not re-patch a `checked` that never changed, so a refused write would leave the box as clicked.
+  if (!saved) box.checked = tickedCheckpoints.value.includes(name)
+  saving.value = false
+}
+
+const routerLayaCheckpoint = computed(() =>
+  configValue('router.classifier.provider').trim() === LAYA_PROVIDER
+    ? configValue('router.classifier.model').trim()
+    : '')
+const layaBreaker = computed(() => breakersByName.value.get('decision:laya'))
 
 // Each clip's transcript, so what it says reaches a reader who cannot hear it (WCAG 1.2.1).
 const JEV_CLIP_LABEL = 'Play JEV saying “My name is Jev”'
@@ -437,6 +516,217 @@ function playClip(audio: HTMLAudioElement | undefined) {
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">circuit breaker</span>
           <BreakerControl
             :breaker="ollamaBreaker"
+            class="flex-1"
+            @changed="refreshBreakers()"
+          />
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="bg-surface-elevated border border-border"
+      data-testid="decision-provider-laya"
+    >
+      <div class="px-4 py-2.5 border-b border-border flex items-center gap-2">
+        <span class="text-sm font-medium text-fg-strong">Laya</span>
+        <span
+          v-if="layaPending && !laya"
+          class="text-xs text-fg-muted border border-input px-1"
+          data-testid="decision-laya-status"
+        >checking…</span>
+        <span
+          v-else-if="laya?.reachable"
+          class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+          data-testid="decision-laya-status"
+        >reachable</span>
+        <span
+          v-else
+          class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
+          data-testid="decision-laya-status"
+        >not reachable</span>
+      </div>
+      <div class="px-4 py-2.5 space-y-2 text-xs text-fg-muted leading-relaxed border-b border-border">
+        <p data-testid="decision-laya-about">
+          An open-weight decision model under the Apache-2.0 license, which answers the same questions JEV does.
+          You run its server, <code>laya-serve</code>, yourself; JClaw calls the address below and starts nothing.
+          The Model Router's classifier sends the first 4000 characters of each prompt, only to this server; how
+          much of them a checkpoint reads is under Context below.
+        </p>
+        <ul
+          class="list-disc pl-4 space-y-1"
+          aria-label="Laya's limits"
+          data-testid="decision-laya-limits"
+        >
+          <li
+            v-for="limit in LAYA_LIMITS"
+            :key="limit.topic"
+            :data-testid="`decision-laya-limit-${limit.topic.toLowerCase()}`"
+          >
+            <span class="font-medium text-fg-strong">{{ limit.topic }}.</span> {{ layaLimitText(limit) }}
+          </li>
+        </ul>
+      </div>
+      <div class="divide-y divide-border">
+        <div
+          class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
+          data-testid="decision-laya-address"
+        >
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">server address</span>
+          <template v-if="editingLayaAddress">
+            <input
+              v-model="layaAddressEdit"
+              type="url"
+              aria-label="Laya server address"
+              :placeholder="LAYA_DEFAULT_ADDRESS"
+              class="flex-1 min-w-0 bg-surface border border-input px-2 py-1 text-sm font-mono"
+              data-testid="decision-laya-address-input"
+              @keydown.enter="saveLayaAddress()"
+            >
+            <button
+              type="button"
+              class="text-xs text-fg-strong underline"
+              :disabled="saving"
+              data-testid="decision-laya-address-save"
+              @click="saveLayaAddress()"
+            >
+              Save
+            </button>
+            <button
+              type="button"
+              class="text-xs text-fg-muted underline"
+              data-testid="decision-laya-address-cancel"
+              @click="cancelLayaAddressEdit()"
+            >
+              Cancel
+            </button>
+          </template>
+          <template v-else>
+            <span class="flex-1 min-w-0 text-sm font-mono text-fg-strong truncate">{{ layaAddress }}</span>
+            <button
+              type="button"
+              class="text-xs text-fg-strong underline"
+              data-testid="decision-laya-address-edit"
+              @click="startLayaAddressEdit()"
+            >
+              Change
+            </button>
+          </template>
+        </div>
+        <ApiErrorAlert
+          :error="layaError"
+          class="px-4 py-2.5"
+        />
+        <div class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">apiKey (optional)</span>
+          <SecretField
+            v-model="editValue"
+            :saved="layaKeyConfigured"
+            :editing="editingKey === LAYA_API_KEY"
+            label="Laya API key"
+            placeholder="Only if laya-serve was started with LAYA_API_KEY"
+            removable
+            :busy="saving"
+            data-testid="decision-laya-key"
+            @edit="editingKey = LAYA_API_KEY"
+            @save="saveLayaKey()"
+            @cancel="editingKey = null"
+            @remove="editValue = ''; saveLayaKey()"
+          />
+        </div>
+        <ApiErrorAlert
+          v-if="editingKey === LAYA_API_KEY"
+          :error="editError"
+          class="px-4 py-2.5"
+        />
+        <div
+          class="px-4 py-2 flex max-sm:flex-wrap items-start gap-3"
+          data-testid="decision-laya-checkpoints"
+        >
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 py-0.5">checkpoints</span>
+          <div class="flex-1 min-w-0 space-y-1">
+            <p
+              v-if="laya && !laya.reachable"
+              class="text-xs text-amber-700 dark:text-amber-400"
+              data-testid="decision-laya-error"
+            >
+              {{ laya.error }}
+            </p>
+            <p
+              v-else-if="laya && !laya.device"
+              class="text-xs text-fg-muted"
+              data-testid="decision-laya-keyed"
+            >
+              The server answers /health but says no more. If it is laya-serve started with a key, set or correct
+              the key above to see what it has loaded.
+            </p>
+            <p
+              v-else-if="laya"
+              class="text-xs text-fg-muted"
+              data-testid="decision-laya-device"
+            >
+              Server device: <span class="font-mono">{{ laya.device }}</span>
+            </p>
+            <label
+              v-for="c in LAYA_CHECKPOINTS"
+              :key="c.name"
+              class="flex flex-wrap items-center gap-2 text-sm text-fg-strong"
+              :for="`decision-laya-checkpoint-${c.name}`"
+              :data-testid="`decision-laya-checkpoint-${c.name}`"
+            >
+              <input
+                :id="`decision-laya-checkpoint-${c.name}`"
+                type="checkbox"
+                :checked="tickedCheckpoints.includes(c.name)"
+                :disabled="saving || routerLayaCheckpoint === c.name"
+                @change="toggleCheckpoint(c.name, $event.target as HTMLInputElement)"
+              >
+              <!-- One line: the space between the two is what a screen reader hears between name and context. -->
+              <span class="font-mono">{{ c.name }}</span> <span class="text-xs text-fg-muted">{{ checkpointNote(c) }}</span>
+            </label>
+            <p
+              class="text-xs text-fg-muted"
+              data-testid="decision-laya-cut"
+            >
+              Each reads that many tokens per question; a longer prompt is cut, not refused (Laya's model card).
+              Only a ticked checkpoint can be the Model Router's classifier, and the one it is using cannot be
+              unticked.
+            </p>
+          </div>
+        </div>
+        <div
+          class="px-4 py-2 flex max-sm:flex-wrap items-start gap-3"
+          data-testid="decision-laya-used-by"
+        >
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 py-0.5">used by</span>
+          <ul class="flex-1 min-w-0 space-y-1">
+            <li
+              class="flex flex-wrap items-center gap-x-2 gap-y-1"
+              data-testid="decision-laya-consumer-model-router"
+            >
+              <NuxtLink
+                to="/settings?section=model-router"
+                class="text-sm text-fg-strong underline"
+              >Model Router</NuxtLink>
+              <span class="text-xs text-fg-muted">prompt classifier{{ routerLayaCheckpoint ? ` (${routerLayaCheckpoint})` : '' }}</span>
+              <span
+                v-if="routerLayaCheckpoint"
+                class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+              >in use</span>
+              <span
+                v-else
+                class="text-xs text-fg-muted border border-input px-1"
+              >not in use</span>
+            </li>
+          </ul>
+        </div>
+        <div
+          v-if="layaBreaker"
+          class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
+          data-testid="decision-laya-breaker"
+        >
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">circuit breaker</span>
+          <BreakerControl
+            :breaker="layaBreaker"
             class="flex-1"
             @changed="refreshBreakers()"
           />

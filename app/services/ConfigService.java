@@ -29,6 +29,7 @@ import play.cache.Caches;
 import play.db.jpa.JPA;
 import services.database.DatabaseService;
 import services.decision.DecisionSettings;
+import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
 import services.telemetry.OtelConfig;
 import services.telemetry.OtelRuntime;
@@ -476,6 +477,9 @@ public class ConfigService {
         }
         if (key.startsWith(PROVIDER_KEY_PREFIX + OllamaDecision.PROVIDER + ".")) {
             return reservedProviderName(OllamaDecision.PROVIDER, "the model router's Ollama classifier");
+        }
+        if (key.startsWith(PROVIDER_KEY_PREFIX + LayaDecision.PROVIDER + ".")) {
+            return reservedProviderName(LayaDecision.PROVIDER, "the model router's Laya classifier");
         }
         return null;
     }

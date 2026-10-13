@@ -9,6 +9,7 @@ import llm.ProviderRegistry;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.decision.JevApi;
+import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
 
 import java.util.ArrayList;
@@ -25,7 +26,8 @@ import java.util.Map;
  *                    and drop to the chat list
  * @param exhaustedAt usage fraction at which a prepaid provider is skipped for every class
  * @param classifier  the model that labels each prompt, {@link #JEV} for TypeSafe's judge,
- *                    {@link OllamaDecision#PROVIDER} for an Ollama System One model, or null to use the
+ *                    {@link OllamaDecision#PROVIDER} for an Ollama System One model,
+ *                    {@link LayaDecision#PROVIDER} for a Laya checkpoint, or null to use the
  *                    local keyword rules
  * @param classifierTimeoutSeconds how long a classifier call may take before the rules answer instead
  * @param preferPrepaid whether subscriptions and self-hosted models are tried before per-token ones
@@ -154,9 +156,10 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
     /**
      * The classifier is a pair, so each half is checked against the other's stored value: a provider
      * that is not configured, a model it does not register, or the router itself — which would ask the
-     * router to classify the prompt it is routing — is refused. {@link #JEV} and
-     * {@link OllamaDecision#PROVIDER} are not registered providers, so their provider write is not
-     * checked against the stored model; an Ollama model must be one selected in Decision Providers.
+     * router to classify the prompt it is routing — is refused. {@link #JEV},
+     * {@link OllamaDecision#PROVIDER} and {@link LayaDecision#PROVIDER} are not registered providers, so their
+     * provider write is not checked against the stored model; an Ollama model or a Laya checkpoint must be one
+     * selected in Decision Providers.
      */
     private static @Nullable String classifierRejection(String key, @Nullable String value) {
         if (value == null || value.isBlank()) return null;
@@ -171,17 +174,22 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
                     ? CLASSIFIER_MODEL + " needs " + CLASSIFIER_PROVIDER + " as well." : null;
         }
         var named = provider.strip();
-        if (JEV.equals(named) || OllamaDecision.PROVIDER.equals(named)) {
+        if (JEV.equals(named) || OllamaDecision.PROVIDER.equals(named) || LayaDecision.PROVIDER.equals(named)) {
             return key.equals(CLASSIFIER_PROVIDER) ? null : decisionModelRejection(named, v);
         }
         return registeredModelRejection(provider, model);
     }
 
-    /** A model the decision provider does not serve: anything but JEV's one, or an Ollama model not selected. */
+    /** A model the decision provider does not serve: anything but JEV's one, or one not selected on Ollama's or Laya's card. */
     private static @Nullable String decisionModelRejection(String provider, String model) {
         if (JEV.equals(provider)) {
             return JevApi.MODEL.equals(model) ? null
                     : "%s must be %s when %s is %s.".formatted(CLASSIFIER_MODEL, JevApi.MODEL, CLASSIFIER_PROVIDER, JEV);
+        }
+        if (LayaDecision.PROVIDER.equals(provider)) {
+            return LayaDecision.selectedModels().contains(model) ? null
+                    : "%s must be a Laya checkpoint ticked in Settings > Decision Providers (%s)."
+                            .formatted(CLASSIFIER_MODEL, LayaDecision.MODELS_KEY);
         }
         return OllamaDecision.selectedModels().contains(model) ? null
                 : "%s must be an Ollama decision model selected in Settings > Decision Providers (%s)."

@@ -9,6 +9,7 @@ import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.EventLogger;
 import services.decision.DecisionSettings;
+import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
 
 import java.util.ArrayList;
@@ -28,8 +29,8 @@ import java.util.regex.Pattern;
  * Labels a prompt with its {@link TaskClass} and the {@link ReasoningEffort} it deserves, through a model when the operator has named one
  * ({@code router.classifier.provider} / {@code .model}), TypeSafe's JEV judge when that pair is
  * {@code jev} / {@code jev-latest} (JCLAW-1300), an Ollama System One model when it is
- * {@code ollama-decision} / the model (JCLAW-1336), and through {@link PromptClassifier}'s local
- * rules otherwise (JCLAW-1222).
+ * {@code ollama-decision} / the model (JCLAW-1336), a Laya checkpoint when it is {@code laya} / the
+ * checkpoint (JCLAW-1447), and through {@link PromptClassifier}'s local rules otherwise (JCLAW-1222).
  *
  * <p>The rules cost nothing and explain themselves, but they read words rather than intent, so a
  * demanding prompt phrased outside their vocabulary stays on the cheap model. A small model asked one
@@ -116,6 +117,11 @@ public final class RouterClassifier {
         if (OllamaDecision.PROVIDER.equals(classifier.provider())) {
             return orRules(JevRouterClassifier.classifyWithOllama(message, OllamaDecision.baseUrl(), classifier.model(),
                     policy.jevMinConfidence(), policy.classifierTimeoutSeconds()), message, priorClass, priorToolCalls);
+        }
+        if (LayaDecision.PROVIDER.equals(classifier.provider())) {
+            return orRules(JevRouterClassifier.classifyWithLaya(message, LayaDecision.baseUrl(), LayaDecision.apiKey(),
+                    classifier.model(), policy.jevMinConfidence(), policy.classifierTimeoutSeconds()),
+                    message, priorClass, priorToolCalls);
         }
 
         var answer = askModel(message, classifier, policy.classifierTimeoutSeconds());
