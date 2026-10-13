@@ -2,7 +2,9 @@ package utils;
 
 import org.jspecify.annotations.Nullable;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -24,8 +26,7 @@ import java.util.regex.Pattern;
  * own shape; a count or a cursor is told apart by its name ({@code tokens}, {@code page_token}).
  *
  * <p>The text is model-controlled, so the work is linear: a pattern's quantifier is bounded or
- * possessive, the scan after a name moves forward only, and the look back for an enclosing quote is
- * capped at {@link #LOOK_BACK} characters.
+ * possessive, and each pass reads forward once, for the value and for the quotes before it alike.
  */
 public final class SecretRedactor {
 
@@ -56,6 +57,8 @@ public final class SecretRedactor {
     private static final List<Named> NAMED = List.of(
             // Authorization: Bearer ..., Cookie: a=b; c=d
             new Named(Pattern.compile("(?i)\\b(?:authorization|cookie)" + SEPARATOR + "(?:(?:bearer|basic|token|digest)\\s{1,4}+)?"), Bare.LINE, true),
+            // a bearer or basic credential with no header beside it; sixteen token characters tell it from prose
+            new Named(Pattern.compile("(?i)\\b(?:bearer|basic)\\s{1,4}+(?=[A-Za-z0-9._~+/=-]{16})"), Bare.WORD, false),
             // X-Api-Key: ..., MEDIA_API_KEY=..., "client_secret": "...", "password": "..."
             new Named(Pattern.compile("(?i)(?:api[-_ ]?key|access[-_]?key|private[-_]?key|subscription[-_]?key|secret|password|passwd"
                     + "|passphrase)" + NAME_TAIL + SEPARATOR), Bare.WORD, true),
@@ -83,12 +86,8 @@ public final class SecretRedactor {
             "(?i)^[-_.]?(?:count|budget|limit|usage|used|type|len|length|size|total|estimate|estimated|window|ratio|rate)s?$");
     private static final Pattern PAGE = Pattern.compile("(?i)(?:^|[^a-z0-9])(?:next[-_]?)?page[-_]?$");
 
-    /** Patterns whose value needs no scan: {@code keep} stays, {@code v} is the credential. */
-    private static final List<Pattern> SELF_DELIMITED = List.of(
-            // a bearer or basic credential named in prose, with no header beside it
-            Pattern.compile("(?i)(?<keep>\\b(?:bearer|basic)\\s{1,4}+)(?<v>[A-Za-z0-9._~+/=-]{16,}+)"),
-            // https://user:password@host
-            Pattern.compile("(?<keep>://[^/\\s:@\"'\\\\]{1,256}+:)(?<v>[^@\\s/\"'\\\\]{1,1024}+)(?=@)"));
+    /** https://user:password@host: percent-encoded, so it ends at the {@code @}. */
+    private static final Pattern USERINFO = Pattern.compile("(?<keep>://[^/\\s:@\"'\\\\]{1,256}+:)(?<v>[^@\\s/\"'\\\\]{1,1024}+)(?=@)");
 
     /** A config write: {"key": "provider.x.apiKey", "value": "..."}. Masked when the key names a credential. */
     private static final Named CONFIG_WRITE = new Named(Pattern.compile(
@@ -108,10 +107,7 @@ public final class SecretRedactor {
 
     /** {@code text} with every recognized credential's value replaced by {@link #MASK}; unchanged when it holds none. */
     public static String redact(String text) {
-        var out = text;
-        for (var pattern : SELF_DELIMITED) {
-            out = pattern.matcher(out).replaceAll(m -> Matcher.quoteReplacement(m.group("keep") + MASK));
-        }
+        var out = USERINFO.matcher(text).replaceAll(m -> Matcher.quoteReplacement(m.group("keep") + MASK));
         out = maskAfter(out, PARAMETER);
         for (var named : NAMED) {
             out = maskAfter(out, named);
@@ -123,6 +119,7 @@ public final class SecretRedactor {
 
     private static String maskAfter(String text, Named rule) {
         var m = rule.name().matcher(text).useTransparentBounds(true).useAnchoringBounds(false);
+        var quotes = new LineQuotes(text);
         StringBuilder out = null;
         int copied = 0;
         int at = 0;
@@ -130,13 +127,29 @@ public final class SecretRedactor {
             at = m.end() > m.start() ? m.end() : m.end() + 1;
             if (rule == TOKEN && !namesACredential(text, m)) continue;
             if (rule == CONFIG_WRITE && !CREDENTIAL_NAME.matcher(m.group("cfg")).find()) continue;
-            int from = contentStart(text, m.end());
-            int to = text.startsWith(MASK, from) ? from + MASK.length()
-                    : rule == PARAMETER ? endOfParameter(text, m.start(), m.end(), from)
-                    : valueEnd(text, m.end(), from, rule.bare(), rule.keyed() && m.group("kq") != null);
+            // A value an earlier pass masked is scanned again: that pass may have stopped short of its end.
+            var quote = quoteAt(text, m.end());
+            int from = quote == null ? m.end() : m.end() + quote.depth() + quote.token().length();
+            if (quote == null) quote = quotes.around(m.end());
+            int parameter = rule == PARAMETER ? m.start() : parameterStart(text, m.start());
+            boolean jsonKey = rule.keyed() && m.group("kq") != null;
+            int to;
+            var closer = "";
+            if (parameter >= 0) {
+                to = endOfParameter(text, parameter, from, quote);
+            } else if (quote != null) {
+                int close = closing(text, from, quote);
+                to = jsonKey ? close : pastShellConcatenation(text, close, quote);
+                // The mask took the quote that closed the value: write it back, or the next quote pairs wrongly.
+                if (to > close) closer = "\\".repeat(quote.depth()) + quote.token();
+            } else if (jsonKey) {
+                to = endOfJsonValue(text, from);
+            } else {
+                to = rule.bare() == Bare.LINE ? endOfLine(text, from) : endOfWord(text, from);
+            }
             if (to <= from) continue;
             if (out == null) out = new StringBuilder(text.length());
-            out.append(text, copied, from).append(MASK);
+            out.append(text, copied, from).append(MASK).append(closer);
             copied = to;
             at = to;
         }
@@ -163,12 +176,6 @@ public final class SecretRedactor {
     /** A quote as it is written at one escape depth: the character (or its unicode escape) behind {@code depth} backslashes. */
     private record Quote(String token, int depth) {}
 
-    /** The index just past the quote that opens the value at {@code at}, or {@code at} when it opens with none. */
-    private static int contentStart(String s, int at) {
-        var quote = quoteAt(s, at);
-        return quote == null ? at : at + quote.depth() + quote.token().length();
-    }
-
     /** The quote written at {@code at}: its backslashes first, then the character or escape. Null when there is none. */
     private static @Nullable Quote quoteAt(String s, int at) {
         int depth = 0;
@@ -183,45 +190,30 @@ public final class SecretRedactor {
     }
 
     /**
-     * Where the value ends. {@code at} is where it starts as written and {@code from} is past its own
-     * opening quote, when it has one. {@code jsonKey}: the name was a quoted key, so a bare value is JSON.
+     * A shell joins adjacent quoted stretches into one word: {@code 'it'\''s'} for a quote inside single
+     * quotes, {@code "ab""cd"}. The word then goes on past the quote that closed. A double quote that closes
+     * a JSON string is followed by neither, so it ends the value.
      */
-    private static int valueEnd(String s, int at, int from, Bare bare, boolean jsonKey) {
-        var quote = quoteAt(s, at);
-        if (quote == null) quote = enclosing(s, at);
-        if (quote != null) {
-            int close = closing(s, from, quote);
-            return jsonKey ? close : pastShellQuoteIdiom(s, close, quote);
-        }
-        if (jsonKey) return endOfJsonValue(s, from);
-        return bare == Bare.LINE ? endOfLine(s, from) : endOfWord(s, from);
-    }
-
-    /**
-     * A shell writes a quote inside single quotes as {@code 'it'\''s'}: the word goes on past the quote that
-     * closed. Only that idiom continues; a double quote closing a JSON string does not.
-     */
-    private static int pastShellQuoteIdiom(String s, int close, Quote quote) {
-        boolean single = quote.token().equals("'") || quote.token().equals("u0027");
+    private static int pastShellConcatenation(String s, int close, Quote quote) {
         int after = close + quote.depth() + quote.token().length();
-        if (!single || close >= s.length() || s.charAt(close) == '\n' || after > s.length()) return close;
+        if (close >= s.length() || after >= s.length()) return close;
+        boolean single = quote.token().equals("'") || quote.token().equals("u0027");
         int i = after;
         while (i < s.length() && s.charAt(i) == '\\' && i - after <= MAX_DEPTH) i++;
-        boolean anotherQuote = i < s.length() && (s.charAt(i) == '\'' || s.startsWith("u0027", i));
-        return anotherQuote ? endOfWord(s, after) : close;
+        boolean anotherSingle = i < s.length() && (s.charAt(i) == '\'' || s.startsWith("u0027", i));
+        boolean sameAgain = quote.equals(quoteAt(s, after));
+        return (single && anotherSingle) || sameAgain ? endOfWord(s, after) : close;
     }
 
     /**
      * A field ends at the next {@code &}, written plainly or as an escape, in a URL also at {@code #}, and
      * otherwise where its quoting ends. One forward scan: stopping early must not cost a scan to the far quote.
      */
-    private static int endOfParameter(String s, int nameStart, int at, int from) {
-        boolean url = s.charAt(nameStart) == '?' || inAQuery(s, nameStart);
-        var quote = quoteAt(s, at);
-        if (quote == null) quote = enclosing(s, at);
+    private static int endOfParameter(String s, int separator, int from, @Nullable Quote quote) {
+        boolean url = s.charAt(separator) == '?' || inAQuery(s, separator);
         for (int i = from; i < s.length(); i++) {
             char c = s.charAt(i);
-            if (c == '&' || c == '\n' || (url && c == '#')) return i;
+            if (c == '&' || (url && c == '#')) return i;
             if (quote != null ? closesAt(s, i, quote) : Character.isWhitespace(c) || c == '"' || c == '\'') return i;
             if (c == '\\') {
                 int run = i;
@@ -231,6 +223,21 @@ public final class SecretRedactor {
             }
         }
         return s.length();
+    }
+
+    /**
+     * The index of the {@code ?} or {@code &} that makes the name at {@code nameAt} a URL or form field, written
+     * plainly or as an escape; -1 when the name is not one.
+     */
+    private static int parameterStart(String s, int nameAt) {
+        int i = nameAt;
+        while (i > 0 && nameAt - i < 128 && (Character.isLetterOrDigit(s.charAt(i - 1)) || "_.-".indexOf(s.charAt(i - 1)) >= 0)) i--;
+        if (i > 0 && (s.charAt(i - 1) == '?' || s.charAt(i - 1) == '&')) return i - 1;
+        if (i > 0 && s.charAt(i - 1) == '\\' && s.startsWith("u0026", i)) {
+            while (i > 0 && s.charAt(i - 1) == '\\') i--;
+            return i;
+        }
+        return -1;
     }
 
     /** Whether the text behind {@code at} reaches a {@code ?} before a space or a quote: a URL's query, not a form body. */
@@ -243,17 +250,20 @@ public final class SecretRedactor {
         return false;
     }
 
-    /** A number, true, false or null after a JSON key. */
+    /** A number, true, false or null after a JSON key. An earlier mask is stepped over: its own ] is not the end. */
     private static int endOfJsonValue(String s, int from) {
-        int i = from;
+        int i = s.startsWith(MASK, from) ? from + MASK.length() : from;
         while (i < s.length() && ",}]\"'\\".indexOf(s.charAt(i)) < 0 && !Character.isWhitespace(s.charAt(i))) i++;
         return i;
     }
 
-    /** The index of the quote that closes one opened as {@code quote}: same token, same depth. Stops at a line end. */
+    /**
+     * The index of the quote that closes one opened as {@code quote}: same token, same depth. A quoted value
+     * may span lines, so only its quote ends it; with none, it runs to the end of the text.
+     */
     private static int closing(String s, int from, Quote quote) {
         for (int i = from; i < s.length(); i++) {
-            if (s.charAt(i) == '\n' || closesAt(s, i, quote)) return i;
+            if (closesAt(s, i, quote)) return i;
         }
         return s.length();
     }
@@ -269,37 +279,42 @@ public final class SecretRedactor {
     }
 
     /**
-     * The quoted string {@code at} sits inside, if any: the nearest quote before it on the line is an
-     * opening one when an odd number of its kind precede {@code at}. A JSON key's own two quotes cancel out.
+     * The quotes of the current line, read once as a pass moves forward. A position sits inside a quoted
+     * string when the nearest quote before it is an opening one: an odd number of its kind precede it. A JSON
+     * key's own two quotes cancel out.
      */
-    private static @Nullable Quote enclosing(String s, int at) {
-        int start = Math.max(0, at - LOOK_BACK);
-        for (int i = at - 1; i >= start; i--) {
-            if (s.charAt(i) == '\n') {
-                start = i + 1;
-                break;
-            }
-        }
-        Quote nearest = null;
-        for (int i = at - 1; i >= start && nearest == null; i--) nearest = quoteEndingAt(s, i, start, at);
-        if (nearest == null) return null;
-        int ofItsKind = 0;
-        for (int i = start; i < at; i++) {
-            if (nearest.equals(quoteEndingAt(s, i, start, at))) ofItsKind++;
-        }
-        return ofItsKind % 2 == 1 ? nearest : null;
-    }
+    private static final class LineQuotes {
+        private final String s;
+        private final Map<Quote, Integer> counts = new HashMap<>();
+        private @Nullable Quote nearest;
+        private int lineStart;
+        private int read;
 
-    /** The quote whose character (or the u of whose escape) is at {@code i}, with the backslashes before it. */
-    private static @Nullable Quote quoteEndingAt(String s, int i, int start, int limit) {
-        char c = s.charAt(i);
-        boolean plain = c == '"' || c == '\'';
-        boolean escape = c == 'u' && i + 5 <= limit && (s.startsWith("u0022", i) || s.startsWith("u0027", i));
-        if (!plain && !escape) return null;
-        int depth = 0;
-        while (i - depth - 1 >= start && s.charAt(i - depth - 1) == '\\' && depth <= MAX_DEPTH) depth++;
-        if (escape && depth == 0) return null;
-        return new Quote(plain ? String.valueOf(c) : s.substring(i, i + 5), depth);
+        LineQuotes(String s) {
+            this.s = s;
+        }
+
+        /** The quoted string {@code at} sits inside, if any. Call with rising positions. */
+        @Nullable Quote around(int at) {
+            for (; read < at; read++) {
+                char c = s.charAt(read);
+                if (c == '\n') {
+                    counts.clear();
+                    nearest = null;
+                    lineStart = read + 1;
+                    continue;
+                }
+                boolean plain = c == '"' || c == '\'';
+                boolean escape = c == 'u' && (s.startsWith("u0022", read) || s.startsWith("u0027", read));
+                if (!plain && !escape) continue;
+                int depth = 0;
+                while (read - depth - 1 >= lineStart && s.charAt(read - depth - 1) == '\\' && depth <= MAX_DEPTH) depth++;
+                if (escape && depth == 0) continue;
+                nearest = new Quote(plain ? String.valueOf(c) : s.substring(read, read + 5), depth);
+                counts.merge(nearest, 1, Integer::sum);
+            }
+            return nearest != null && counts.getOrDefault(nearest, 0) % 2 == 1 ? nearest : null;
+        }
     }
 
     /** A shell word: to the next unquoted whitespace. An escaped character and a quoted stretch belong to it. */

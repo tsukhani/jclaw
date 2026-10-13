@@ -99,7 +99,7 @@ class SecretRedactorTest extends UnitTest {
 
     private static String shellBare(String s) { return s.replaceAll("([^A-Za-z0-9])", "\\\\$1"); }
 
-    private static String json(String s) { return s.replace("\\", "\\\\").replace("\"", "\\\""); }
+    private static String json(String s) { return s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n"); }
 
     /** As an HTML-safe serializer writes it, which is how tool arguments reach the log. */
     private static String htmlSafeJson(String s) {
@@ -123,7 +123,13 @@ class SecretRedactorTest extends UnitTest {
             new Context("sshpass", s -> "sshpass -p '" + shellSingleQuoted(s) + "' ssh host", "ssh host"),
             new Context("token variable with a suffix", s -> "export GITHUB_TOKEN_2=" + shellBare(s) + " && ./deploy", "./deploy"),
             new Context("form body in quotes", s -> "curl -d \"user=sam&password=" + shellDoubleQuoted(s) + "\" https://x", "https://x"),
-            new Context("URL userinfo", s -> "git clone https://sam:" + url(s) + "@git.example.com/r.git", "git.example.com"));
+            new Context("URL userinfo", s -> "git clone https://sam:" + url(s) + "@git.example.com/r.git", "git.example.com"),
+            new Context("field far into a long form body", s -> "curl -d \"note=" + "x".repeat(900) + "&password=" + shellDoubleQuoted(s) + "\" https://x", "https://x"),
+            new Context("header after a long quoted URL", s -> "curl \"https://x.example.com/" + "p/".repeat(400) + "\" -H \"X-Api-Key: " + shellDoubleQuoted(s) + "\" --max-time 5", "--max-time 5"),
+            new Context("bare bearer in quotes", s -> "notify \"using bearer " + shellDoubleQuoted(s) + "\" now", "now"));
+
+    /** A line break can only be part of a value that is quoted. */
+    private static final List<String> QUOTED_ONLY = List.of("--password 'x'", "--password=\"x\"", "sshpass", "curl -u in quotes");
 
     private static void collect(List<String> leaks, String where, String separator, String text) {
         var out = SecretRedactor.redact(text);
@@ -138,11 +144,13 @@ class SecretRedactorTest extends UnitTest {
     void aSecretIsMaskedWholeHoweverItsContextEscapesIt() {
         var leaks = new ArrayList<String>();
         var lost = new ArrayList<String>();
-        for (var separator : List.of(" ", ",", ";", "&", "|", ")", "}", "=", ":", "$", "#", "\"", "'", "\\", "%", "+", "/", "!", "*", "@")) {
-            var secret = "S3x9" + separator + "cr3T" + separator + "t41L";
+        for (var separator : List.of("\n", " ", ",", ";", "&", "|", ")", "}", "=", ":", "$", "#", "\"", "'", "\\", "%", "+", "/", "!", "*", "@")) {
+            // The first part is long enough to pass for a bearer token on its own.
+            var secret = "S3x9aaaaaaaaaaaaaaaa" + separator + "cr3T" + separator + "t41L";
             for (var context : COMMANDS) {
                 // A raw & separates the fields of a form body, so one field cannot hold it.
-                if (separator.equals("&") && context.name().startsWith("form body")) continue;
+                if (separator.equals("&") && context.name().contains("form body")) continue;
+                if (separator.equals("\n") && !QUOTED_ONLY.contains(context.name())) continue;
                 var command = context.command().apply(secret);
                 collect(leaks, "exec: " + context.name(), separator, "exec: " + command);
                 collect(leaks, "logged arguments: " + context.name(), separator,
@@ -173,6 +181,14 @@ class SecretRedactorTest extends UnitTest {
         assertMasked("args: {\\\\\\\"password\\\\\\\":\\\\\\\"deepNested9\\\\\\\"}", "deepNested9", "password");
         assertMasked("exec: curl 'https://x/?a=1' password=ab|cd)ef;gh next", "cd)ef;gh", "password=");
         assertMasked("exec: curl -H \"X-Note: a-sk-proj-abcdefghijklmnopqrstuvwx0123\" https://x", "sk-proj-abcdefghijklmnopqrstuvwx0123", "X-Note");
+    }
+
+    @Test
+    void aLaterPassFinishesWhatAnEarlierOneStartedAndAQuotedValueCrossesLines() {
+        // A bearer token holding a character outside the usual set: every pass must find the value's own end.
+        assertMasked("exec: curl -H \"Authorization: Bearer abcdefghijklmnopqrstu!vwx9\" https://x", "vwx9", "https://x");
+        assertMasked("exec: mytool --password 'line1\nline2zz' --verbose", "line2zz", "--verbose");
+        assertMasked("exec: mytool --password \"ab12\"\"cd34\" --verbose", "cd34", "--verbose");
     }
 
     @Test
