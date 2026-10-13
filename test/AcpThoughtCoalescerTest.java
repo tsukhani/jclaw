@@ -12,7 +12,7 @@ import java.util.List;
 /** One transcript step per reasoning block on the ACP path, instead of one per streamed fragment. */
 class AcpThoughtCoalescerTest extends UnitTest {
 
-    private static AgentThoughtChunk thought(String s) { return new AgentThoughtChunk("s", new TextContent(s)); }
+    private static AgentThoughtChunk thought(String s) { return new AgentThoughtChunk(new TextContent(s)); }
 
     @Test
     void thoughtFragmentsAreHeldUntilTheNextNonThoughtUpdate() {
@@ -21,7 +21,7 @@ class AcpThoughtCoalescerTest extends UnitTest {
         assertEquals(List.of(), c.accept(thought(" user")));
         assertEquals(List.of(), c.accept(thought(" wants files.")));
 
-        var out = c.accept(new AgentMessageChunk("s", new TextContent("Created")));
+        var out = c.accept(new AgentMessageChunk(new TextContent("Created")));
         assertEquals(2, out.size(), out.toString());
         assertEquals(HarnessEvent.THOUGHT, out.get(0).kind());
         assertEquals("The user wants files.", out.get(0).text());
@@ -33,7 +33,7 @@ class AcpThoughtCoalescerTest extends UnitTest {
     void aDroppedBookkeepingUpdateStillClosesTheBlock() {
         var c = new AcpThoughtCoalescer();
         c.accept(thought("plan"));
-        var out = c.accept(new UsageUpdate("s", 1L, 2L));
+        var out = c.accept(new UsageUpdate(1L, 2L));
         assertEquals(1, out.size(), "the block is emitted even though usage itself maps to nothing");
         assertEquals("plan", out.get(0).text());
     }
@@ -54,7 +54,7 @@ class AcpThoughtCoalescerTest extends UnitTest {
     @Test
     void nonThoughtUpdatesPassThroughUnchangedWhenNothingIsBuffered() {
         var c = new AcpThoughtCoalescer();
-        var out = c.accept(new AgentMessageChunk("s", new TextContent("x")));
+        var out = c.accept(new AgentMessageChunk(new TextContent("x")));
         assertEquals(1, out.size());
         assertEquals(HarnessEvent.TOKEN, out.get(0).kind());
     }

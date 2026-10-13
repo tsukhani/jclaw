@@ -6,7 +6,14 @@ import com.agentclientprotocol.sdk.spec.AcpSchema.PermissionOption;
 import com.agentclientprotocol.sdk.spec.AcpSchema.PermissionOptionKind;
 import com.agentclientprotocol.sdk.spec.AcpSchema.PermissionSelected;
 import com.agentclientprotocol.sdk.spec.AcpSchema.RequestPermissionRequest;
+import com.agentclientprotocol.sdk.spec.AcpSchema.SessionConfigOptionCategory;
+import com.agentclientprotocol.sdk.spec.AcpSchema.SessionConfigSelect;
+import com.agentclientprotocol.sdk.spec.AcpSchema.SessionConfigSelectOption;
+import com.agentclientprotocol.sdk.spec.AcpSchema.SessionConfigSelectOptions;
 import com.agentclientprotocol.sdk.spec.AcpSchema.TextContent;
+import com.agentclientprotocol.sdk.spec.AcpSchema.ToolCall;
+import com.agentclientprotocol.sdk.spec.AcpSchema.ToolCallStatus;
+import com.agentclientprotocol.sdk.spec.AcpSchema.ToolKind;
 import com.agentclientprotocol.sdk.spec.AcpSchema.UsageUpdate;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
@@ -25,7 +32,7 @@ class AcpEventMapperTest extends UnitTest {
 
     @Test
     void agentMessageChunkMapsToTokenWithText() {
-        var ev = AcpEventMapper.toHarnessEvent(new AgentMessageChunk("s", new TextContent("hello")));
+        var ev = AcpEventMapper.toHarnessEvent(new AgentMessageChunk(new TextContent("hello")));
         assertNotNull(ev);
         assertEquals(HarnessEvent.TOKEN, ev.kind());
         assertEquals("hello", ev.text());
@@ -33,15 +40,39 @@ class AcpEventMapperTest extends UnitTest {
 
     @Test
     void agentThoughtChunkMapsToStep() {
-        var ev = AcpEventMapper.toHarnessEvent(new AgentThoughtChunk("s", new TextContent("thinking")));
+        var ev = AcpEventMapper.toHarnessEvent(new AgentThoughtChunk(new TextContent("thinking")));
         assertNotNull(ev);
         assertEquals(HarnessEvent.STEP, ev.kind());
         assertEquals("thinking", ev.text());
     }
 
     @Test
+    void toolCallMapsToToolCallLabelledWithItsWireStatus() {
+        var call = new ToolCall(null, "tc-1", "Read build.gradle.kts", null, ToolKind.READ, ToolCallStatus.IN_PROGRESS,
+                null, null, null, null, null);
+        var ev = AcpEventMapper.toHarnessEvent(call);
+        assertNotNull(ev);
+        assertEquals(HarnessEvent.TOOL_CALL, ev.kind());
+        assertEquals("Read build.gradle.kts (in_progress)", ev.text());
+    }
+
+    @Test
+    void theModelOptionIsTheSelectInTheModelCategory() {
+        var mode = select("mode", SessionConfigOptionCategory.MODE, "default");
+        var model = select("model", SessionConfigOptionCategory.MODEL, "sonnet");
+        assertSame(model, AcpEventMapper.modelOption(List.of(mode, model)));
+        assertNull(AcpEventMapper.modelOption(List.of(mode)));
+        assertNull(AcpEventMapper.modelOption(null));
+    }
+
+    private static SessionConfigSelect select(String id, String category, String current) {
+        return new SessionConfigSelect("select", id, id, null, category, current,
+                SessionConfigSelectOptions.ungrouped(List.of(new SessionConfigSelectOption(current, current))), null);
+    }
+
+    @Test
     void bookkeepingAndNullUpdatesAreDropped() {
-        assertNull(AcpEventMapper.toHarnessEvent(new UsageUpdate("s", 10L, 20L)));
+        assertNull(AcpEventMapper.toHarnessEvent(new UsageUpdate(10L, 20L)));
         assertNull(AcpEventMapper.toHarnessEvent(null));
     }
 

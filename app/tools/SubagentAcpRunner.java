@@ -34,7 +34,6 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -521,19 +520,6 @@ final class SubagentAcpRunner {
                 sandboxTrustedOrigin(runId));
         var params = AgentParameters.builder(argv.getFirst()).args(argv.subList(1, argv.size())).env(env).build();
 
-        // The acp-core SDK applies its per-request timeout (default 30s) to EVERY
-        // request — including prompt(), which in ACP spans the whole agent turn
-        // (minutes for a real coding build). JClaw's own idle + wall-clock budget
-        // (SubagentSyncRunner.awaitFuture, which closes this client on timeout via
-        // the registered closer) is the real governor, so size the SDK's request
-        // timeout to the wall-clock ceiling — a generous fallback when the ceiling
-        // is disabled — so it never preempts a legitimate long turn. Without this,
-        // the 30s default aborted every substantial harness prompt ~40s in, right
-        // after initialize + newSession (JCLAW-768 UAT).
-        int ceilingSeconds = ConfigService.getInt(SubagentSpawnTool.MAX_WALLCLOCK_KEY,
-                SubagentSpawnTool.DEFAULT_MAX_WALLCLOCK_SECONDS);
-        var requestTimeout = Duration.ofSeconds(ceilingSeconds > 0 ? ceilingSeconds : 21600L);
-
         // JCLAW-779: the SDK's StdioAcpClientTransport spawns the harness with
         // pb.environment().putAll(params.getEnv()) on top of the FULL inherited
         // host env — putAll never removes, so host secrets would survive. Override
@@ -547,10 +533,11 @@ final class SubagentAcpRunner {
                 return pb;
             }
         };
+        // No promptTimeout: SubagentSyncRunner.awaitFuture's idle and wall-clock budget bounds the
+        // turn and closes this client through the registered closer.
         var client = AcpClient.sync(transport)
-                .requestTimeout(requestTimeout)                           // JClaw's idle/ceiling budget governs, not the SDK's 30s default
                 .clientCapabilities(new AcpSchema.ClientCapabilities())   // decline fs + terminal
-                .sessionUpdateConsumer(n -> {
+                .sessionUpdateHandler(n -> {
                     SubagentRegistry.touch(runId);   // harness activity resets the idle clock
                     synchronized (acc) {   // keep seq + dispatch + fold ordered; the coalescer rides the same lock
                         for (var ev : thoughts.accept(n.update())) {
@@ -600,31 +587,28 @@ final class SubagentAcpRunner {
     }
 
     /**
-     * Pin the ACP session to the requested model through the protocol ({@code
-     * session/set_model}) when the harness lists it; a model the harness does not list
-     * — a custom endpoint's model under claude-agent-acp, say — is left to the launch
-     * env and flags already applied. A harness that lists the model but refuses to
-     * switch fails the run: proceeding would silently run on the wrong model.
+     * Pin the ACP session to the requested model through the protocol (the session's
+     * {@code model} config option, set with {@code session/set_config_option}) when the
+     * harness lists it; a model the harness does not list — a custom endpoint's model under
+     * claude-agent-acp, say — is left to the launch env and flags already applied. A harness
+     * that lists the model but refuses to switch fails the run: proceeding would silently
+     * run on the wrong model.
      */
-    // acp-core 0.17 deprecates session/set_model for config options, which the SDK delivers only
-    // as async ConfigOptionUpdate notifications; the session response's model state is the one
-    // surface readable before the prompt goes out.
-    @SuppressWarnings("removal")
     private static String selectSessionModel(AcpSyncClient client, AcpSchema.NewSessionResponse session,
                                              String modelId) {
-        var models = session.models();
-        var listed = models != null && models.availableModels() != null
-                && models.availableModels().stream().anyMatch(m -> modelId.equals(m.modelId()));
-        if (!listed) {
+        var option = AcpEventMapper.modelOption(session.configOptions());
+        if (option == null
+                || option.options().allOptions().stream().noneMatch(o -> modelId.equals(o.value()))) {
             return "harness did not list model " + modelId + " (current: "
-                    + (models == null ? "unknown" : models.currentModelId()) + "); relying on the launch env and flags";
+                    + (option == null ? "unknown" : option.currentValue()) + "); relying on the launch env and flags";
         }
         try {
-            client.setSessionModel(new AcpSchema.SetSessionModelRequest(session.sessionId(), modelId));
+            client.setSessionConfigOption(
+                    AcpSchema.SetSessionConfigOptionRequest.select(session.sessionId(), option.id(), modelId));
         } catch (RuntimeException e) {
             throw new IllegalStateException("harness refused model " + modelId + ": " + e.getMessage(), e);
         }
-        return "harness switched to model " + modelId + " (session/set_model)";
+        return "harness switched to model " + modelId + " (session/set_config_option)";
     }
 
     private static List<String> concat(List<String> head, List<String> tail) {

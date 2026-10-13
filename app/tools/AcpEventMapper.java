@@ -11,6 +11,9 @@ import com.agentclientprotocol.sdk.spec.AcpSchema.PermissionSelected;
 import com.agentclientprotocol.sdk.spec.AcpSchema.Plan;
 import com.agentclientprotocol.sdk.spec.AcpSchema.RequestPermissionRequest;
 import com.agentclientprotocol.sdk.spec.AcpSchema.RequestPermissionResponse;
+import com.agentclientprotocol.sdk.spec.AcpSchema.SessionConfigOption;
+import com.agentclientprotocol.sdk.spec.AcpSchema.SessionConfigOptionCategory;
+import com.agentclientprotocol.sdk.spec.AcpSchema.SessionConfigSelect;
 import com.agentclientprotocol.sdk.spec.AcpSchema.SessionUpdate;
 import com.agentclientprotocol.sdk.spec.AcpSchema.TextContent;
 import com.agentclientprotocol.sdk.spec.AcpSchema.ToolCall;
@@ -54,7 +57,7 @@ public final class AcpEventMapper {
         return content instanceof TextContent t && t.text() != null ? t.text() : "";
     }
 
-    private static String toolLabel(String title, Object kind, Object status) {
+    private static String toolLabel(String title, @Nullable Object kind, @Nullable Object status) {
         String label;
         if (title != null && !title.isBlank()) {
             label = title;
@@ -62,6 +65,18 @@ public final class AcpEventMapper {
             label = kind != null ? kind.toString() : "tool";
         }
         return status != null ? label + " (" + status + ")" : label;
+    }
+
+    /** The session's model selector: its select option in the {@code model} category, if it has one. */
+    public static @Nullable SessionConfigSelect modelOption(@Nullable List<SessionConfigOption> options) {
+        if (options == null) return null;
+        for (var option : options) {
+            if (option instanceof SessionConfigSelect select
+                    && SessionConfigOptionCategory.MODEL.equals(select.category())) {
+                return select;
+            }
+        }
+        return null;
     }
 
     // ---- permission bridge (session/request_permission ⇄ DangerousActionGate) ----

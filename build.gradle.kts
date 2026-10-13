@@ -314,7 +314,7 @@ dependencies {
     // path (Stage 2) to speak real ACP instead of the stdin/stdout wrapper.
     // Pulls Jackson + Reactor transitively. Verified full round-trip against
     // claude-agent-acp.
-    val acpVersion = "0.18.0"
+    val acpVersion = "0.80.0"
     implementation("com.agentclientprotocol:acp-core:$acpVersion")
     // acp-core finds its JSON implementation by ServiceLoader and since 0.18 ships none:
     // without this the stdio transport's constructor throws ServiceConfigurationError.
