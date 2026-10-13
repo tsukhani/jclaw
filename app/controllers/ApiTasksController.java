@@ -164,10 +164,12 @@ public class ApiTasksController extends Controller {
      */
     public static @Nullable String nextRunAtForDisplay(Task t, @Nullable Instant lastFiredAt) {
         if (t.paused) return null;
-        // Only live tasks (PENDING one-shot / ACTIVE recurring) have a
-        // meaningful "next fire" — terminal-state tasks fall through to the
-        // stored value since no further fire is expected.
-        if (t.status != Task.Status.PENDING && t.status != Task.Status.ACTIVE) {
+        // Only live tasks (PENDING one-shot, ACTIVE recurring, RUNNING mid-fire)
+        // have a meaningful "next fire" — terminal-state tasks fall through to
+        // the stored value since no further fire is expected.
+        boolean live = t.status == Task.Status.PENDING || t.status == Task.Status.ACTIVE
+                || t.status == Task.Status.RUNNING;
+        if (!live) {
             return t.nextRunAt != null ? t.nextRunAt.toString() : null;
         }
         try {
