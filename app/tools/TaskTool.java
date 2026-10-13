@@ -15,6 +15,7 @@ import services.DeliveryDispatcher;
 import services.DeliverySpec;
 import services.EventLogger;
 import services.ScheduleShorthandParser;
+import services.SubagentRegistry;
 import services.TaskSchedulingService;
 import services.TaskWriteService;
 import services.Tx;
@@ -833,6 +834,7 @@ public class TaskTool implements ToolRegistry.Tool {
             final String taskIdParam = "taskId";
             for (var task : tasks) {
                 var taskId = task.id;
+                SubagentRegistry.deleteRunsStartedBy("r.task.id = :taskId", q -> q.setParameter(taskIdParam, taskId));
                 // JCLAW-994: collect before the bulk DELETE — it never fires @PostRemove.
                 @SuppressWarnings("unchecked")
                 List<Long> transcriptIds = em.createQuery(
@@ -842,7 +844,8 @@ public class TaskTool implements ToolRegistry.Tool {
                         .setParameter(taskIdParam, taskId).executeUpdate();
                 em.createQuery("DELETE FROM TaskRun r WHERE r.task.id = :taskId")
                         .setParameter(taskIdParam, taskId).executeUpdate();
-                task.delete();
+                // Re-read: deleting the runs above can clear the persistence context and detach `task`.
+                Task.<Task>findById(taskId).delete();
                 ids.add(taskId);
                 LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, transcriptIds);
             }

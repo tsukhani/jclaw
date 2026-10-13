@@ -299,7 +299,7 @@ public class ApiSubagentRunsController extends Controller {
                     "Run " + id + " is still RUNNING. Kill it first, then delete.");
             return;
         }
-        SubagentRegistry.deleteRun(run);
+        SubagentRegistry.deleteRun(run.id);
         ApiResponses.ok("id", id);
     }
 
@@ -403,7 +403,7 @@ public class ApiSubagentRunsController extends Controller {
         int deleted = 0;
         for (var run : targets) {
             if (run.status == SubagentRun.Status.RUNNING) continue; // live rows: kill first
-            SubagentRegistry.deleteRun(run);
+            SubagentRegistry.deleteRun(run.id);
             deleted++;
         }
         return deleted;

@@ -127,6 +127,13 @@ public final class TaskStatsService {
         @SuppressWarnings("unchecked")
         List<Long> transcriptIds = idQ.getResultList();
 
+        SubagentRegistry.deleteRunsStartedBy(
+                "r.status <> :running" + payloadTypeWhere(RUN_TASK_ALIAS, payloadType, excludePayloadType),
+                q -> {
+                    q.setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);
+                    bindPayloadType(q, payloadType, excludePayloadType);
+                });
+
         var msgQ = em.createQuery("DELETE FROM TaskRunMessage m WHERE m.taskRun.status <> :running"
                         + payloadTypeWhere("m.taskRun.task", payloadType, excludePayloadType))
                 .setParameter(PARAM_RUNNING, TaskRun.Status.RUNNING);

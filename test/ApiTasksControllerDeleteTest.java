@@ -111,6 +111,42 @@ class ApiTasksControllerDeleteTest extends FunctionalTest {
     }
 
     @Test
+    void deletingATaskDeletesTheSubagentRunsItsFiresStarted() {
+        var agentId = seedAgent();
+        var taskId = seedTask(agentId, "delete-with-subagent-run", "every 1h");
+        persistTaskRun(taskId);
+        var ids = new java.util.concurrent.atomic.AtomicReference<long[]>();
+        var seeded = Thread.ofVirtual().start(() -> ids.set(Tx.run(() -> {
+            var parent = (models.Agent) models.Agent.findById(agentId);
+            var child = services.AgentService.create("delete-test-spawned-child", "openrouter", "gpt-4.1",
+                    null, null, false, parent);
+            var run = new models.SubagentRun();
+            run.parentAgent = parent;
+            run.childAgent = child;
+            run.parentTaskRun = TaskRun.find("task.id = ?1", taskId).first();
+            run.childConversation = services.ConversationService.create(child, "web", null);
+            run.status = models.SubagentRun.Status.COMPLETED;
+            run.endedAt = java.time.Instant.now();
+            run.save();
+            return new long[]{run.id, child.id};
+        })));
+        try {
+            seeded.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+
+        assertIsOk(DELETE("/api/tasks/" + taskId));
+
+        JPA.em().clear();
+        assertNull(Task.findById(taskId), "the task is gone");
+        assertNull(models.SubagentRun.findById(ids.get()[0]), "with the subagent run its fire started");
+        assertNull(models.Agent.findById(ids.get()[1]), "and the agent that run's spawn created");
+        assertNotNull(models.Agent.findById(agentId), "the agent that owned the task stays");
+    }
+
+    @Test
     void deletePendingTaskRemovesTheRow() {
         var agent = seedAgent();
         var taskId = seedTask(agent, "delete-pending", "every 1h");

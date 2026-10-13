@@ -93,7 +93,7 @@ Without `subagent_yield`, the parent never gets to use the child's reply. The ou
 
 **Inside a task fire.** A fire has no conversation to resume, so an `async` spawn there is collected inline too. `subagent_yield` with its `runId` waits for the child and returns the same result a blocking spawn would, and the fire carries on without an announce card. A task fire needs the `runId` and refuses a `conversationId` alone, and `all: true` collects every uncollected async child of the fire. Neither inline collect uses yield's `timeoutSeconds`; each child is bounded by its own run timeout.
 
-A run that a task fire starts belongs to that task run, not to a chat. It has no parent conversation, so no chat shows it. Find it in the task run's trace panel on [Tasks](/tasks), or on the [Subagents](/subagents) page. Two settings behave differently in a fire. `mode=inline` is refused, because a fire has no conversation to fold the child into. `context=inherit` runs the child fresh, because there is no conversation to summarize.
+A run that a task fire starts belongs to that task run, not to a chat. It has no parent conversation, so no chat shows it. Find it in the task run's trace panel on [Tasks](/tasks), or on the [Subagents](/subagents) page. JClaw deletes it with that task run: when you delete the task, when you clear the task history, or when the task run drops out of the task's kept history. The folder a coding run worked in stays. Two settings behave differently in a fire. `mode=inline` is refused, because a fire has no conversation to fold the child into. `context=inherit` gives the child the parent's tools but no summary, because there is no conversation to summarize. If the task is pinned to a model, the child runs on that model too.
 
 ## External coding harness (`runtime=acp`) {#acp-harness}
 
@@ -168,7 +168,7 @@ The **Conversation** column shows the conversation each run was spawned from. It
 
 A run that a task fire started has no conversation. Its row shows *task NAME* instead, and these runs sit together under a *No parent conversation* header.
 
-To see only one conversation's runs, either click the funnel button beside an id in the Conversation column, or type `parentConversation:ID` in the filter bar. A *Conversation #ID* chip beside the bar shows the active conversation filter, and its **×** clears it. Removing the `parentConversation` token from the bar clears it too. Opening the page from a chat's subagent link applies the same filter. **Delete all matching** honors it and deletes only that conversation's terminal runs.
+To see only one conversation's runs, either click the funnel button beside an id in the Conversation column, or type `parentConversation:ID` in the filter bar. A *Conversation #ID* chip beside the bar shows the active conversation filter, and its **×** clears it. Removing the `parentConversation` token from the bar clears it too. Opening the page from a chat's subagent link applies the same filter. **Delete all matching** honors it and deletes only that conversation's terminal runs. Deleting a run removes its transcript and the temporary agent made for it. An agent of your own that a run used through `agentId` is never deleted, and neither is a chat that an inline run wrote into.
 
 ### 3. The `/subagent` slash command (in [Chat](/chat))
 

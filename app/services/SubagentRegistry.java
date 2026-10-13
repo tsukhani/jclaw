@@ -1,9 +1,11 @@
 package services;
 
+import jakarta.persistence.Query;
 import mcp.McpAllowlist;
 import models.Agent;
 import models.SubagentRun;
 import org.jspecify.annotations.Nullable;
+import play.db.jpa.JPA;
 import utils.AppClock;
 
 import java.lang.ScopedValue.CallableOp;
@@ -22,6 +24,7 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 
 /**
  * JCLAW-271: in-memory mapping from {@link SubagentRun} id to the
@@ -456,7 +459,11 @@ public final class SubagentRegistry {
      * agent the run only reused (a spawn that named {@code agentId}) and a chat an inline run
      * wrote into are the operator's, and stay.
      */
-    public static void deleteRun(SubagentRun run) {
+    public static void deleteRun(Long runId) {
+        // Read here, not by the caller: deleting a spawned agent clears the persistence context,
+        // and can already have taken this run with it when two runs shared one child.
+        SubagentRun run = SubagentRun.findById(runId);
+        if (run == null) return;
         var child = run.childAgent;
         if (child != null && child.parentAgent != null) {
             AgentService.delete(child);   // its cascade takes the child's conversation and the run row
@@ -467,6 +474,27 @@ public final class SubagentRegistry {
                 && transcript.id.equals(run.parentConversation.id);
         if (transcript == null || inline) run.delete();
         else ConversationDeletionCascade.deleteByIds(List.of(transcript.id));
+    }
+
+    /**
+     * Delete the subagent runs that the task runs matching {@code taskRunWhere} started, stopping
+     * any still in flight. A task run owns the runs it started the way a chat does, so the caps and
+     * retention that bound task history bound them too. Call it before the task runs themselves
+     * go: the runs are found through them. It clears the persistence context when it deletes a
+     * spawned agent, so re-read any entity used afterwards.
+     *
+     * @param taskRunWhere the JPQL predicate over {@code TaskRun r} the caller deletes by
+     * @param bind         binds that predicate's parameters
+     */
+    public static void deleteRunsStartedBy(String taskRunWhere, Consumer<Query> bind) {
+        var query = JPA.em().createQuery("SELECT sr.id, sr.status FROM SubagentRun sr WHERE sr.parentTaskRun.id IN "
+                + "(SELECT r.id FROM TaskRun r WHERE " + taskRunWhere + ")", Object[].class);
+        bind.accept(query);
+        for (var row : query.getResultList()) {
+            var runId = (Long) row[0];
+            if (row[1] == SubagentRun.Status.RUNNING) kill(runId, "The task run that started it was deleted");
+            deleteRun(runId);
+        }
     }
 
     /**

@@ -152,26 +152,45 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
                 "a coding run that failed before it got a folder must still be listed: " + coding);
     }
 
+    // A task run owns the runs it started, as a chat does: without this the per-task cap and the
+    // retention window bounded task history while the runs piled up behind it.
     @Test
-    void clearingTaskHistoryKeepsTheRunAndItsConversationStaysOutOfTheList() {
+    void clearingTaskHistoryDeletesTheRunsItStartedAndNothingElse() {
         login();
         var ids = commitInFreshTx(() -> {
-            var p = AgentService.create("api-task-kept-parent", "openrouter", "gpt-4.1");
-            var c = AgentService.create("api-task-kept-child", "openrouter", "gpt-4.1");
-            var taskRun = persistTaskRun(p, "kept-build");
-            var childConv = ConversationService.create(c, "web", null);
-            var topLevel = ConversationService.create(p, "web", "u");
-            return new long[]{persistTaskStartedRun(p, c, taskRun, childConv), childConv.id, topLevel.id, taskRun.id};
+            var p = AgentService.create("api-task-owned-parent", "openrouter", "gpt-4.1");
+            var taskRun = persistTaskRun(p, "owned-build");
+            var spawned = spawnedChild("api-task-owned-child", p);
+            var spawnedConv = ConversationService.create(spawned, "web", null);
+            var finished = persistTaskStartedRun(p, spawned, taskRun, spawnedConv);
+            // Still in flight when its task run is cleared: stopped, then deleted.
+            var stillRunning = spawnedChild("api-task-owned-running", p);
+            var live = new SubagentRun();
+            live.parentAgent = p;
+            live.childAgent = stillRunning;
+            live.parentTaskRun = taskRun;
+            live.childConversation = ConversationService.create(stillRunning, "web", null);
+            live.save();
+            var chat = ConversationService.create(p, "web", "u");
+            var chatChild = spawnedChild("api-task-owned-chat-child", p);
+            var chatChildConv = ConversationService.create(chatChild, "web", null);
+            chatChildConv.parentConversation = chat;
+            chatChildConv.save();
+            var fromChat = persistRun(p, chatChild, chat, chatChildConv, SubagentRun.Status.COMPLETED);
+            return new long[]{finished, live.id, fromChat, spawned.id, spawnedConv.id, p.id, chat.id};
         });
-        assertEquals(java.util.Set.of(ids[2]), listedConversationIds(),
+        assertEquals(java.util.Set.of(ids[6]), listedConversationIds(),
                 "a task-started subagent's conversation is not one the operator started");
 
         assertIsOk(POST("/api/task-runs/reset"));
 
-        var runs = getContent(GET("/api/subagent-runs"));
-        assertTrue(runs.contains("\"id\":" + ids[0]), "clearing task history must keep the run: " + runs);
-        assertTrue(runs.contains("\"parentTaskRunId\":null"), "its link to the deleted task run is cleared: " + runs);
-        assertEquals(java.util.Set.of(ids[2]), listedConversationIds());
+        JPA.em().clear();
+        assertNull(SubagentRun.findById(ids[0]), "the run goes with the task run that started it");
+        assertNull(SubagentRun.findById(ids[1]), "and so does one that was still running");
+        assertNull(Agent.findById(ids[3]), "with the agent its spawn created");
+        assertNull(Conversation.findById(ids[4]), "and its transcript");
+        assertNotNull(SubagentRun.findById(ids[2]), "a run a chat started is not task history");
+        assertNotNull(Agent.findById(ids[5]), "the agent that owns the task stays");
     }
 
     @Test

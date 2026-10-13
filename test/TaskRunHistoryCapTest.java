@@ -1,10 +1,12 @@
 import models.Agent;
+import models.SubagentRun;
 import models.Task;
 import models.TaskRun;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.ConversationService;
 import services.TaskExecutor;
 
 import java.time.Instant;
@@ -43,6 +45,25 @@ class TaskRunHistoryCapTest extends UnitTest {
         assertEquals(0L, TaskRun.count("id = ?1", ids.get(1)), "second-oldest run pruned");
         assertEquals(1L, TaskRun.count("id = ?1", ids.get(2)), "third-oldest run retained");
         assertEquals(1L, TaskRun.count("id = ?1", ids.getLast()), "newest run retained");
+    }
+
+    @Test
+    void aPrunedRunTakesTheSubagentRunItStartedAndAKeptRunKeepsIts() {
+        var task = persistTask("cap-with-subagents");
+        var base = Instant.parse("2026-01-01T00:00:00Z");
+        var runIds = new ArrayList<Long>();
+        for (int i = 0; i < TaskExecutor.MAX_RUNS_PER_TASK + 1; i++) {
+            runIds.add(persistRun(task, base.plusSeconds(i)));
+        }
+        var ofThePruned = persistSubagentRun(task, runIds.getFirst(), "cap-child-old");
+        var ofAKept = persistSubagentRun(task, runIds.getLast(), "cap-child-new");
+
+        TaskExecutor.pruneRunHistory(task.id);
+
+        assertEquals(0L, SubagentRun.count("id = ?1", ofThePruned[0]),
+                "a recurring task must not leave one subagent run behind for every fire it prunes");
+        assertEquals(0L, Agent.count("id = ?1", ofThePruned[1]), "nor the agent that run's spawn created");
+        assertEquals(1L, SubagentRun.count("id = ?1", ofAKept[0]), "a run in the kept history stays");
     }
 
     @Test
@@ -91,6 +112,26 @@ class TaskRunHistoryCapTest extends UnitTest {
         t.status = Task.Status.ACTIVE;
         t.save();
         return t;
+    }
+
+    /** A finished subagent run that {@code taskRunId} started, on a child agent spawned for it. */
+    private static long[] persistSubagentRun(Task task, Long taskRunId, String childName) {
+        var child = new Agent();
+        child.name = childName;
+        child.modelProvider = "test-provider";
+        child.modelId = "test-model";
+        child.enabled = true;
+        child.parentAgent = task.agent;
+        child.save();
+        var run = new SubagentRun();
+        run.parentAgent = task.agent;
+        run.childAgent = child;
+        run.parentTaskRun = TaskRun.findById(taskRunId);
+        run.childConversation = ConversationService.create(child, "web", null);
+        run.status = SubagentRun.Status.COMPLETED;
+        run.endedAt = Instant.now();
+        run.save();
+        return new long[]{run.id, child.id};
     }
 
     private static Long persistRun(Task task, Instant startedAt) {

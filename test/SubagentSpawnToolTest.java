@@ -158,7 +158,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void inheritInATaskFireRunsTheChildFreshWithoutSummarizingAChat() throws Exception {
+    void inheritInATaskFireGrantsTheParentsToolsWithoutSummarizingAChat() throws Exception {
         var calls = new AtomicInteger();
         startLlmServer(exchange -> {
             calls.incrementAndGet();
@@ -173,6 +173,9 @@ class SubagentSpawnToolTest extends UnitTest {
         var chat = ConversationService.create(parent, "web", "u-task-inherit");
         ConversationService.appendUserMessage(chat, "a turn from an unrelated chat");
         ConversationService.appendAssistantMessage(chat, "its reply", null);
+        var parentBrowser = AgentToolConfig.findByAgentAndTool(parent, "browser");
+        parentBrowser.enabled = true;
+        parentBrowser.save();
         var taskRunId = seedTaskRun(parent);
         commitAndReopen();
 
@@ -184,6 +187,26 @@ class SubagentSpawnToolTest extends UnitTest {
         JPA.em().clear();
         SubagentRun run = SubagentRun.findById(Long.parseLong(json.get("run_id").getAsString()));
         assertNull(run.childConversation.parentContext);
+        assertTrue(AgentToolConfig.findByAgentAndTool(run.childAgent, "browser").enabled,
+                "inherit still grants the parent's tools: that part needs no conversation");
+    }
+
+    @Test
+    void aSubagentOfAPinnedTaskRunsOnTheTasksModel() throws Exception {
+        startLlmServer(simpleResponse("child done"));
+        configureProvider();
+        var parent = createAgent("p-task-pin", "spawn-provider", "test-model");
+        var taskRunId = seedTaskRun(parent, "spawn-provider", "pinned-model");
+        commitAndReopen();
+
+        var json = JsonParser.parseString(
+                spawnInTaskFire(parent.id, taskRunId, "web", "{\"task\":\"do work\"}")).getAsJsonObject();
+
+        assertEquals("COMPLETED", json.get("status").getAsString(), json.toString());
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(Long.parseLong(json.get("run_id").getAsString()));
+        assertEquals("pinned-model", run.childConversation.modelIdOverride,
+                "the child follows the model its parent is actually running on, which in a fire is the task's pin");
     }
 
     @Test
@@ -2531,7 +2554,13 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     private static Long seedTaskRun(Agent agent) {
+        return seedTaskRun(agent, null, null);
+    }
+
+    private static Long seedTaskRun(Agent agent, String pinnedProvider, String pinnedModelId) {
         var task = new models.Task();
+        task.modelProvider = pinnedProvider;
+        task.modelId = pinnedModelId;
         task.agent = agent;
         task.name = "nightly-" + agent.name;
         task.type = models.Task.Type.IMMEDIATE;

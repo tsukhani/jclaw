@@ -7,6 +7,7 @@ import play.jobs.Every;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
+import services.SubagentRegistry;
 import services.TaskSchedulingService;
 import services.Tx;
 import services.search.LuceneIndexer;
@@ -143,6 +144,7 @@ public class TaskCleanupJob extends Job<Void> {
         // Drop the FK descendants first, then scheduled_tasks rows, then
         // the Task rows themselves. Same dependency order the per-task
         // ApiTasksController.delete uses.
+        SubagentRegistry.deleteRunsStartedBy("r.task.id IN :ids", q -> q.setParameter("ids", expiredIds));
         // JCLAW-994: collect before the bulk DELETE — it never fires @PostRemove.
         @SuppressWarnings("unchecked")
         List<Long> transcriptIds = em.createQuery(

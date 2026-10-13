@@ -227,6 +227,7 @@ public final class TaskWriteService {
         final String taskIdParam = "taskId";
 
         var em = JPA.em();
+        SubagentRegistry.deleteRunsStartedBy("r.task.id = :taskId", q -> q.setParameter(taskIdParam, taskId));
         // JCLAW-994: collect before the bulk DELETE — it never fires @PostRemove.
         @SuppressWarnings("unchecked")
         List<Long> transcriptIds = em.createQuery(
@@ -245,7 +246,8 @@ public final class TaskWriteService {
         // state and its scheduler row was already removed by cancel.
         TaskSchedulingService.cancel(taskId);
 
-        task.delete();
+        // Re-read: deleting the runs above can clear the persistence context and detach `task`.
+        Task.<Task>findById(taskId).delete();
         // Last, so a constraint failure in any DB work above aborts before the
         // non-transactional index is touched.
         LuceneIndexer.removeAll(LuceneIndexer.Scope.TASK_RUN_MESSAGE, transcriptIds);

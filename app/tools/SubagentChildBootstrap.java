@@ -1,6 +1,8 @@
 package tools;
 
+import agents.AgentRunner;
 import agents.DangerousActionGate;
+import agents.ToolContext;
 import agents.ToolRegistry;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
@@ -46,9 +48,6 @@ final class SubagentChildBootstrap {
         static final InheritSummary NONE = new InheritSummary(null, null);
     }
 
-    static final String INHERIT_NEEDS_A_CONVERSATION =
-            "context=\"inherit\" summarizes a conversation and a task fire has none; the child ran fresh";
-
     /**
      * JCLAW-268: inherit-mode pre-step. Snapshot the parent's recent messages
      * inside a short Tx, then call the LLM synchronously to produce the
@@ -60,7 +59,7 @@ final class SubagentChildBootstrap {
     static InheritSummary buildInheritSummary(Agent parentAgent, @Nullable Long parentConvId,
                                               @Nullable String context) {
         if (!SubagentSpawnTool.CONTEXT_INHERIT.equals(context)) return InheritSummary.NONE;
-        if (parentConvId == null) return new InheritSummary(null, INHERIT_NEEDS_A_CONVERSATION);
+        if (parentConvId == null) return InheritSummary.NONE;
         try {
             var text = buildParentContextSummary(parentAgent, parentConvId);
             return new InheritSummary(text, null);
@@ -77,7 +76,8 @@ final class SubagentChildBootstrap {
     static Bootstrap bootstrapChildInTx(Agent parentAgent, @Nullable Conversation parentConv,
                                         SubagentSpawnArgs parsed, InheritSummary summary) {
         final boolean inheritRequested = SubagentSpawnTool.CONTEXT_INHERIT.equals(parsed.context());
-        final boolean applyInheritGrants = inheritRequested && summary.text() != null;
+        // A task fire has no conversation to summarize, but the tool union reads only the two agents.
+        final boolean applyInheritGrants = inheritRequested && (summary.text() != null || parentConv == null);
         final boolean inlineMode = SubagentSpawnTool.MODE_INLINE.equals(parsed.mode());
         return Tx.run(() -> bootstrapChild(
                 parentAgent, parentConv, parsed.requestedAgentId(),
@@ -302,7 +302,9 @@ final class SubagentChildBootstrap {
         // spend to the actually-used model. The resolver tracks the model the
         // operator is ACTUALLY using (the parent conversation's override),
         // not just the agent's base — see resolveSubagentModel.
-        var resolved = resolveSubagentModel(parentConv, childAgent, modelProviderOverride, modelIdOverride);
+        // In a task fire the model actually in use is the task's pin, carried the way the fire carries it.
+        var modelSource = parentConv != null ? parentConv : AgentRunner.taskFireModel(ToolContext.taskRunId());
+        var resolved = resolveSubagentModel(modelSource, childAgent, modelProviderOverride, modelIdOverride);
         // Only stamp an override when the resolved model DIFFERS from the child
         // agent's base — the plain inherit case keeps a null override (matches
         // prior behavior and the cost dashboard's COALESCE(override, base)).

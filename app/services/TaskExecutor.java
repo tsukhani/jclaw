@@ -287,6 +287,8 @@ public final class TaskExecutor {
                         .setMaxResults(MAX_RUNS_PER_TASK)
                         .getResultList();
                 if (keepIds.size() < MAX_RUNS_PER_TASK) return null;
+                SubagentRegistry.deleteRunsStartedBy("r.task.id = :tid AND r.id NOT IN :keep",
+                        q -> q.setParameter("tid", taskId).setParameter("keep", keepIds));
                 // JCLAW-673: collect the pruned transcript ids first so their
                 // TASK_RUN_MESSAGE full-text docs can be evicted — the bulk JPQL
                 // DELETE below never fires TaskRunMessage.@PostRemove.
@@ -631,6 +633,7 @@ public final class TaskExecutor {
                 // their TASK_RUN_MESSAGE full-text docs can be evicted — bulk JPQL
                 // deletes never fire TaskRunMessage.@PostRemove, nor does the Task
                 // delete fire Task.@PostRemove for its TASK doc.
+                SubagentRegistry.deleteRunsStartedBy("r.task.id = :tid", q -> q.setParameter("tid", task.id));
                 List<Long> messageIds = em.createQuery(
                         "SELECT m.id FROM TaskRunMessage m WHERE m.taskRun.task.id = :tid",
                         Long.class)

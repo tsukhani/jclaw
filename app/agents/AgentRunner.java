@@ -495,6 +495,24 @@ public class AgentRunner {
                 () -> runTaskTurn(agent, userPrompt, sink, allowedTools, taskName, stubConv));
     }
 
+    /**
+     * The model a fire of {@code taskRunId}'s task runs on, as the unsaved conversation
+     * {@link #runForTask} carries it on: its overrides hold the task's pin, or nothing for an
+     * unpinned task. Null outside a task fire. A subagent the fire starts reads its parent's
+     * model from it, as a chat-started one reads its parent conversation.
+     */
+    public static @Nullable Conversation taskFireModel(@Nullable Long taskRunId) {
+        if (taskRunId == null) return null;
+        return Tx.run(() -> {
+            TaskRun run = TaskRun.findById(taskRunId);
+            if (run == null || run.task == null) return null;
+            var carrier = new Conversation();
+            carrier.agent = run.task.agent;
+            applyTaskModelPin(carrier, run.task.agent, run.task.name, run.task.modelProvider, run.task.modelId);
+            return carrier;
+        });
+    }
+
     // The pin rides the conversation override, so routing, the fire log and the call all see it.
     // A pin naming an unconfigured provider would otherwise reach getPrimary() with a foreign model id.
     private static void applyTaskModelPin(Conversation stubConv, Agent agent, @Nullable String taskName,

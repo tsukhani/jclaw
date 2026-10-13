@@ -86,7 +86,11 @@ public class SubagentRun extends Model {
     @OnDelete(action = OnDeleteAction.CASCADE)
     public Conversation parentConversation;
 
-    /** The task fire that started the run. Clearing task history keeps the run and its transcript. */
+    /**
+     * The task fire that started the run, which is deleted with it
+     * ({@code SubagentRegistry.deleteRunsStartedBy}). SET NULL is only the net for a run that
+     * starts while its task run is being deleted.
+     */
     @ManyToOne
     @JoinColumn(name = "parent_task_run_id")
     @OnDelete(action = OnDeleteAction.SET_NULL)
