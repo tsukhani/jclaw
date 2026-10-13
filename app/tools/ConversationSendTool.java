@@ -283,7 +283,7 @@ public class ConversationSendTool implements ToolRegistry.Tool {
                                         String message, String payloadType) {
         var parentConv = run.parentConversation;
         if (parentConv == null) {
-            return ERR_RUN_ID + run.id + " has no parent conversation (audit row is malformed).";
+            return ERR_RUN_ID + run.id + " was started by a task fire and has no parent conversation to send to.";
         }
         var metadata = new LinkedHashMap<String, Object>();
         metadata.put("source", TARGET_CHILD);

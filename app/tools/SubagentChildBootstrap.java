@@ -1,5 +1,6 @@
 package tools;
 
+import agents.DangerousActionGate;
 import agents.ToolRegistry;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
@@ -45,6 +46,9 @@ final class SubagentChildBootstrap {
         static final InheritSummary NONE = new InheritSummary(null, null);
     }
 
+    static final String INHERIT_NEEDS_A_CONVERSATION =
+            "context=\"inherit\" summarizes a conversation and a task fire has none; the child ran fresh";
+
     /**
      * JCLAW-268: inherit-mode pre-step. Snapshot the parent's recent messages
      * inside a short Tx, then call the LLM synchronously to produce the
@@ -53,9 +57,10 @@ final class SubagentChildBootstrap {
      * deferred SUBAGENT_ERROR. Fresh-mode requests return {@link
      * InheritSummary#NONE} unconditionally.
      */
-    static InheritSummary buildInheritSummary(Agent parentAgent, Long parentConvId,
+    static InheritSummary buildInheritSummary(Agent parentAgent, @Nullable Long parentConvId,
                                               @Nullable String context) {
         if (!SubagentSpawnTool.CONTEXT_INHERIT.equals(context)) return InheritSummary.NONE;
+        if (parentConvId == null) return new InheritSummary(null, INHERIT_NEEDS_A_CONVERSATION);
         try {
             var text = buildParentContextSummary(parentAgent, parentConvId);
             return new InheritSummary(text, null);
@@ -69,7 +74,7 @@ final class SubagentChildBootstrap {
      * Step 1+2 wrapper. Materializes child Agent + Conversation in one short
      * Tx so both rows commit before the SubagentRun row is opened.
      */
-    static Bootstrap bootstrapChildInTx(Agent parentAgent, Conversation parentConv,
+    static Bootstrap bootstrapChildInTx(Agent parentAgent, @Nullable Conversation parentConv,
                                         SubagentSpawnArgs parsed, InheritSummary summary) {
         final boolean inheritRequested = SubagentSpawnTool.CONTEXT_INHERIT.equals(parsed.context());
         final boolean applyInheritGrants = inheritRequested && summary.text() != null;
@@ -80,7 +85,7 @@ final class SubagentChildBootstrap {
                 applyInheritGrants, summary.text(), inlineMode));
     }
 
-    private static Bootstrap bootstrapChild(Agent parentAgent, Conversation parentConv,
+    private static Bootstrap bootstrapChild(Agent parentAgent, @Nullable Conversation parentConv,
                                             @Nullable Long requestedAgentId,
                                             @Nullable String label,
                                             @Nullable String modelProviderOverride,
@@ -256,7 +261,7 @@ final class SubagentChildBootstrap {
      * mode by design.
      */
     private static Conversation resolveChildConversation(Agent childAgent,
-                                                         Conversation parentConv,
+                                                         @Nullable Conversation parentConv,
                                                          @Nullable String modelProviderOverride,
                                                          @Nullable String modelIdOverride,
                                                          @Nullable String parentContextSummary,
@@ -269,7 +274,7 @@ final class SubagentChildBootstrap {
         // No new Conversation row is created. Session mode keeps the existing
         // JCLAW-265 behavior: fresh child Conversation, separate transcript,
         // visible as its own row in the sidebar.
-        if (inlineMode) {
+        if (inlineMode && parentConv != null) {
             return parentConv;
         }
         // JCLAW-327 AC-5: the child Conversation inherits the parent's
@@ -284,8 +289,11 @@ final class SubagentChildBootstrap {
         // regression. The {@code SUBAGENT_CHANNEL} constant survives as
         // an EventLogger category tag (see warn() sites below); it's no
         // longer used as a Conversation column value.
-        var childConv = ConversationService.create(childAgent,
-                parentConv.channelType, parentConv.peerId);
+        // A task-started child has no chat to take a channel from, so it takes the fire's origin
+        // and DangerousActionGate judges its tool calls exactly as it judges the fire's.
+        var childConv = parentConv != null
+                ? ConversationService.create(childAgent, parentConv.channelType, parentConv.peerId)
+                : ConversationService.create(childAgent, taskFireChannel(), null);
         childConv.parentConversation = parentConv;
         // JCLAW-269 / JCLAW-422: persist the resolved model on the child
         // Conversation so AgentRunner's ModelOverrideResolver picks it up for
@@ -330,7 +338,7 @@ final class SubagentChildBootstrap {
      *       agent's stale lm-studio base).</li>
      * </ol>
      */
-    static SubagentModel resolveSubagentModel(Conversation parentConv, Agent childAgent,
+    static SubagentModel resolveSubagentModel(@Nullable Conversation parentConv, Agent childAgent,
                                               @Nullable String overrideProvider, @Nullable String overrideId) {
         if (SubagentSpawnTool.notBlank(overrideProvider) && SubagentSpawnTool.notBlank(overrideId)) {
             return new SubagentModel(overrideProvider, overrideId);
@@ -529,12 +537,17 @@ final class SubagentChildBootstrap {
         return parentName + "-sub-" + suffix;
     }
 
+    private static String taskFireChannel() {
+        var origin = DangerousActionGate.effectiveOrigin(null);
+        return origin != null ? origin : SubagentSpawnTool.SUBAGENT_CHANNEL;
+    }
+
     static @Nullable Conversation resolveParentConversation(Long parentAgentId) {
         var parent = (Agent) Agent.findById(parentAgentId);
         if (parent == null) return null;
-        // The spawning turn's own conversation, else the most recently updated one (a task fire
-        // binds none). A subagent calling spawn nests under its own child conversation, which is
-        // itself an existing Conversation row, so no special case is needed.
+        // The spawning turn's own conversation, else the most recently updated one. A subagent
+        // calling spawn nests under its own child conversation, which is itself an existing
+        // Conversation row, so no special case is needed. A task fire never reaches here.
         return DeliveryResolver.operatingConversation(parent).orElse(null);
     }
 }

@@ -236,7 +236,15 @@ public class ConversationService {
         return Conversation.count("pinned = true AND parentConversation IS NULL");
     }
 
-    public static Conversation create(@Nullable Agent agent, String channelType, String peerId) {
+    /**
+     * JPQL predicate over alias {@code c}: a conversation the lists show. A subagent's child is
+     * out either way — started from a chat it names its parent, started by a task fire its run
+     * names no conversation.
+     */
+    public static final String TOP_LEVEL = "c.parentConversation IS NULL AND NOT EXISTS "
+            + "(SELECT 1 FROM SubagentRun sr WHERE sr.childConversation = c AND sr.parentConversation IS NULL)";
+
+    public static Conversation create(@Nullable Agent agent, String channelType, @Nullable String peerId) {
         return create(agent, channelType, peerId, null);
     }
 
@@ -251,7 +259,7 @@ public class ConversationService {
      * @param chatType    Telegram {@code chat.type}, or null
      * @return the newly-created conversation
      */
-    public static Conversation create(@Nullable Agent agent, String channelType, String peerId, @Nullable String chatType) {
+    public static Conversation create(@Nullable Agent agent, String channelType, @Nullable String peerId, @Nullable String chatType) {
         var convo = new Conversation();
         convo.agent = agent;
         convo.channelType = channelType;
@@ -753,7 +761,7 @@ public class ConversationService {
         // section, outside the paginated set the N came from). Per-id deletes
         // still reach both — those are explicit, scoped operator actions.
         var dynamicWhere = filter.toWhereClause();
-        var baseWhere = "c.parentConversation IS NULL AND c.pinned = false";
+        var baseWhere = TOP_LEVEL + " AND c.pinned = false";
         var fullWhere = dynamicWhere.isEmpty() ? baseWhere : baseWhere + " AND " + dynamicWhere;
         if (conversationIds != null) fullWhere = fullWhere + " AND c.id IN :ids";
         String jpql = "SELECT c.id FROM Conversation c WHERE " + fullWhere;

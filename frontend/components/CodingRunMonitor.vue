@@ -20,6 +20,8 @@ import { formatSize } from '~/utils/format'
 const props = defineProps<{
   /** SubagentRun id of the coding run to monitor. */
   runId: number
+  /** A taller step area, for a panel where the log is the content and not docked above a composer. */
+  expanded?: boolean
 }>()
 
 /**
@@ -244,7 +246,8 @@ function attachmentIcon(kind: MessageAttachment['kind']): typeof DocumentIcon {
       <!-- Step stream. -->
       <div
         ref="scrollEl"
-        class="max-h-72 overflow-y-auto px-3 py-2 space-y-2 text-sm"
+        class="overflow-y-auto px-3 py-2 space-y-2 text-sm"
+        :class="expanded ? 'max-h-[70vh]' : 'max-h-72'"
       >
         <p
           v-if="loadError"

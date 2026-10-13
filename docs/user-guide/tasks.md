@@ -240,7 +240,7 @@ The `task_manager` tool is scoped to the owning agent. Through it, one agent nev
 :::
 
 :::note Watching a fire live
-A task fire does not appear on the [Conversations](/conversations) page. Its transcript is the **run's trace**, not a chat. But you *can* watch it as it runs. Expand the task's row on the [Tasks](/tasks) page: an in-flight fire shows up in the **run history** as a `RUNNING` entry with a live elapsed timer and a one-line preview of its latest step. Click that entry to open the **trace panel**. It fills in turn-by-turn as the fire proceeds (refreshed every couple of seconds), then settles on the complete trace when the run finishes.
+A task fire does not appear on the [Conversations](/conversations) page. Its transcript is the **run's trace**, not a chat. But you *can* watch it as it runs. Expand the task's row on the [Tasks](/tasks) page: an in-flight fire shows up in the **run history** as a `RUNNING` entry with a live elapsed timer and a one-line preview of its latest step. Click that entry to open the **trace panel**. It fills in turn-by-turn as the fire proceeds (refreshed every couple of seconds), then settles on the complete trace when the run finishes. If the fire started a [coding run](/guide#acp-harness), the panel lists it at the top under **Coding runs**, with the harness's steps and a **Kill** control while it runs.
 :::
 
 ## Where to go next

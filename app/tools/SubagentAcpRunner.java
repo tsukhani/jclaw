@@ -149,10 +149,8 @@ final class SubagentAcpRunner {
      * bound by {@link agents.DangerousActionGate#withFireOrigin} when there is one.
      */
     private static void enforceChannelApproval(Long runId, Agent childAgent, String task) {
-        // effectiveOrigin, not the parent conversation's channelType directly: outside a chat turn it is
-        // picked by recency (SubagentChildBootstrap.resolveParentConversation), so inside an untrusted fire it is
-        // typically the operator's own web row — reading it directly would hand a spawned run
-        // operator trust one hop out of the fire that must have floored it.
+        // effectiveOrigin, not the parent conversation's channelType directly: a run a task fire
+        // starts has no parent conversation, and the fire's origin is what has to judge it.
         var originChannel = DangerousActionGate.effectiveOrigin(parentConversationId(runId));
         if (ChannelOriginTrust.isOperatorOrigin(originChannel)) return;
         var decision = DangerousActionGate.guardHarnessPermission(

@@ -111,6 +111,20 @@ describe('CodingRunMonitor — catch-up transcript on mount', () => {
   })
 })
 
+describe('CodingRunMonitor — step area height', () => {
+  it('stays compact above the composer and grows where the log is the content', async () => {
+    registerEndpoint('/api/subagent-runs/7/steps', () => [])
+
+    const docked = await mountSuspended(CodingRunMonitor, { props: { runId: 7 } })
+    const panel = await mountSuspended(CodingRunMonitor, { props: { runId: 7, expanded: true } })
+    await flushPromises()
+
+    expect(docked.find('.max-h-72').exists()).toBe(true)
+    expect(panel.find('.max-h-72').exists()).toBe(false)
+    expect(panel.find('.max-h-\\[70vh\\]').exists()).toBe(true)
+  })
+})
+
 describe('CodingRunMonitor — live codingrun.step routing by runId', () => {
   it('appends a step delivered on the bus for the same runId', async () => {
     registerEndpoint('/api/subagent-runs/7/steps', () => [])

@@ -69,6 +69,18 @@ class SubagentRunEventsTest extends UnitTest {
     }
 
     @Test
+    void aRunATaskFireStartedAnnouncesItsTaskRunAndNoConversation() throws Exception {
+        var seed = seed("task");
+        long taskRunId = seedTaskRun(seed.parentAgentId());
+        long runId = insert(seed, null, taskRunId, null);
+        commitAndReopen();
+
+        var data = single(STARTED, runId);
+        assertTrue(data.get("parentConversationId").isJsonNull(), "no chat started it, so no chat may adopt it: " + data);
+        assertEquals(taskRunId, data.get("parentTaskRunId").getAsLong());
+    }
+
+    @Test
     void terminalWriteAnnouncesEnded() throws Exception {
         var seed = seed("done");
         long runId = insert(seed, null);
@@ -149,9 +161,30 @@ class SubagentRunEventsTest extends UnitTest {
     }
 
     private static long insert(Seed seed, String label) throws Exception {
+        return insert(seed, seed.parentConvId(), null, label);
+    }
+
+    private static long insert(Seed seed, Long parentConvId, Long parentTaskRunId, String label) throws Exception {
         return (Long) invokeStore("insertSubagentRun",
-                new Class<?>[]{Long.class, Long.class, Long.class, Long.class, String.class},
-                seed.parentAgentId(), seed.childAgentId(), seed.parentConvId(), seed.childConvId(), label);
+                new Class<?>[]{Long.class, Long.class, Long.class, Long.class, Long.class, String.class},
+                seed.parentAgentId(), seed.childAgentId(), parentConvId, parentTaskRunId, seed.childConvId(), label);
+    }
+
+    private static long seedTaskRun(Long agentId) {
+        return Tx.run(() -> {
+            var task = new models.Task();
+            task.agent = Agent.findById(agentId);
+            task.name = "ev-task-" + System.nanoTime();
+            task.type = models.Task.Type.IMMEDIATE;
+            task.status = models.Task.Status.RUNNING;
+            task.nextRunAt = Instant.now();
+            task.save();
+            var run = new models.TaskRun();
+            run.task = task;
+            run.startedAt = Instant.now();
+            run.save();
+            return run.id;
+        });
     }
 
     private static void persistTerminalRun(long runId, SubagentRun.Status status) throws Exception {

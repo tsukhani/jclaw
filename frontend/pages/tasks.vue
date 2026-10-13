@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Task, TaskRunView, TaskRunMessageView, TranscriptSearchHit, TaskStats, RecentRunView } from '~/types/api'
+import type { Task, TaskRunView, TaskRunMessageView, TranscriptSearchHit, TaskStats, RecentRunView, SubagentRunView } from '~/types/api'
 import {
   ArrowDownIcon,
   ArrowPathIcon,
@@ -559,6 +559,8 @@ const peekOpen = ref(false)
 const peekTitle = ref('Run trace')
 const peekSubtitle = ref('')
 const peekMessages = ref<TaskRunMessageView[]>([])
+// The coding runs this task run started; each shows its own log above the trace.
+const peekCodingRuns = ref<SubagentRunView[]>([])
 const peekLoading = ref(false)
 const peekError = ref<string | null>(null)
 // The run open in the trace panel, plus its owning task (when opened from a
@@ -569,6 +571,12 @@ const peekTaskId = ref<number | null>(null)
 
 // Opening another run while a trace or its silent refresh is in flight: only the newest answer counts.
 const traceLoads = useLatestRequest()
+function fetchTrace(runId: number): Promise<[TaskRunMessageView[], SubagentRunView[]]> {
+  return Promise.all([
+    $fetch<TaskRunMessageView[]>(`/api/task-runs/${runId}/messages`),
+    $fetch<SubagentRunView[]>(`/api/subagent-runs?coding=true&parentTaskRunId=${runId}`),
+  ])
+}
 async function loadTrace(runId: number, title: string, subtitle: string, taskId: number | null = null) {
   const request = traceLoads.begin()
   peekRunId.value = runId
@@ -577,12 +585,14 @@ async function loadTrace(runId: number, title: string, subtitle: string, taskId:
   peekSubtitle.value = subtitle
   peekOpen.value = true
   peekMessages.value = []
+  peekCodingRuns.value = []
   peekError.value = null
   peekLoading.value = true
   try {
-    const messages = await $fetch<TaskRunMessageView[]>(`/api/task-runs/${runId}/messages`)
+    const [messages, codingRuns] = await fetchTrace(runId)
     if (!traceLoads.isCurrent(request)) return
     peekMessages.value = messages
+    peekCodingRuns.value = codingRuns
   }
   catch (e) {
     if (traceLoads.isCurrent(request)) peekError.value = e instanceof Error ? e.message : 'Failed to load trace'
@@ -598,8 +608,10 @@ async function refreshOpenTrace() {
   if (peekRunId.value == null) return
   const request = traceLoads.begin()
   try {
-    const messages = await $fetch<TaskRunMessageView[]>(`/api/task-runs/${peekRunId.value}/messages`)
-    if (traceLoads.isCurrent(request)) peekMessages.value = messages
+    const [messages, codingRuns] = await fetchTrace(peekRunId.value)
+    if (!traceLoads.isCurrent(request)) return
+    peekMessages.value = messages
+    peekCodingRuns.value = codingRuns
   }
   catch { /* transient — the next tick retries */ }
 }
@@ -1984,6 +1996,20 @@ function zoneForTaskRender(task: Task): string | undefined {
       :description="peekSubtitle"
       @update:open="closeTrace"
     >
+      <div
+        v-if="peekCodingRuns.length"
+        class="mb-4 space-y-2"
+        data-testid="trace-coding-runs"
+      >
+        <h3 class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+          Coding runs
+        </h3>
+        <CodingRunMonitor
+          v-for="run in peekCodingRuns"
+          :key="run.id"
+          :run-id="run.id"
+        />
+      </div>
       <p
         v-if="peekLoading"
         class="text-sm text-fg-muted"

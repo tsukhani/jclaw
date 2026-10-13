@@ -22,6 +22,8 @@ interface SubagentRun {
   childAgentId: number | null
   childAgentName: string | null
   parentConversationId: number | null
+  parentTaskRunId: number | null
+  parentTaskName: string | null
   childConversationId: number | null
   mode: string | null
   status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'KILLED' | 'TIMEOUT'
@@ -741,6 +743,14 @@ function closePeek() {
                   />
                 </button>
               </div>
+              <NuxtLink
+                v-else-if="run.parentTaskRunId != null"
+                to="/tasks"
+                class="text-xs text-emerald-700 dark:text-emerald-400 hover:underline"
+                :title="`Started by run #${run.parentTaskRunId} of this task`"
+              >
+                task {{ run.parentTaskName }}
+              </NuxtLink>
               <span
                 v-else
                 class="text-fg-muted"

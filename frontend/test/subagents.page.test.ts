@@ -48,6 +48,23 @@ describe('Subagents admin page', () => {
     expect(component.text()).toContain('The database is unavailable')
   })
 
+  it('names the task behind a run that a task fire started', async () => {
+    registerEndpoint('/api/subagent-runs', () => [
+      { id: 21, parentAgentId: 1, parentAgentName: 'main',
+        childAgentId: 2, childAgentName: 'main-sub-task',
+        parentConversationId: null, parentTaskRunId: 77, parentTaskName: 'nightly-build', childConversationId: 6,
+        mode: 'session', status: 'COMPLETED',
+        startedAt: '2026-10-13T06:00:00Z', endedAt: '2026-10-13T06:00:20Z', outcome: 'built' },
+    ])
+
+    const component = await mountSuspended(Subagents)
+    await flushPromises()
+
+    const link = component.find('a[title="Started by run #77 of this task"]')
+    expect(link.text()).toBe('task nightly-build')
+    expect(link.attributes('href')).toBe('/tasks')
+  })
+
   it('renders runs from the API including parent/child agent names and statuses', async () => {
     registerEndpoint('/api/subagent-runs', () => [
       { id: 11, parentAgentId: 1, parentAgentName: 'main',

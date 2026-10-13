@@ -428,9 +428,9 @@ public final class DangerousActionGate {
      * {@code channelType}, floored by the origin of the task fire it runs inside.
      * {@code null} when neither is available, which classifies as untrusted.
      *
-     * <p>The fire's origin is a floor rather than a fallback because
-     * {@code SubagentChildBootstrap} picks a spawned child's conversation by recency —
-     * typically the operator's {@code web} one. Honoring a present conversation outright
+     * <p>The fire's origin is a floor rather than a fallback because a conversation reached
+     * from inside a fire says nothing about who started the fire. When a spawned child's was
+     * picked by recency — typically the operator's {@code web} one — honoring it outright
      * let an untrusted fire abort a direct {@code exec}, call {@code agent_spawn}, and run
      * the same {@code exec} ungated in the child on borrowed operator trust (JCLAW-1021).
      *

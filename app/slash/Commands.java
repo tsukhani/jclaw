@@ -1277,7 +1277,9 @@ public final class Commands {
         sb.append("Subagent run #").append(run.id).append('\n');
         sb.append("Parent agent: ").append(run.parentAgent != null ? run.parentAgent.name : "?").append('\n');
         sb.append("Child agent: ").append(run.childAgent != null ? run.childAgent.name : "?").append('\n');
-        sb.append("Parent conversation: ").append(run.parentConversation != null ? run.parentConversation.id : "?").append('\n');
+        sb.append(run.parentTaskRun != null
+                ? "Parent task run: " + run.parentTaskRun.id
+                : "Parent conversation: " + (run.parentConversation != null ? run.parentConversation.id : "?")).append('\n');
         sb.append("Child conversation: ").append(run.childConversation != null ? run.childConversation.id : "?").append('\n');
         sb.append("Mode: ").append(mode != null ? mode : "?").append('\n');
         sb.append("Context: ").append(context != null ? context : "?").append('\n');

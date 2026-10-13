@@ -27,10 +27,10 @@ import java.time.Instant;
  * child terminates with the terminal status and {@link #outcome} (the child's
  * final reply on success, or an error message on failure).
  *
- * <p>The four FKs make the audit log self-contained: which agent spawned
- * which, in which conversation, and where the child's own conversation lives.
- * All four are required (subagents always run inside conversations and always
- * have a parent).
+ * <p>The FKs make the audit log self-contained: which agent spawned which,
+ * from which conversation or task fire, and where the child's own conversation
+ * lives. Both agents and the child conversation are required; a run has a parent
+ * conversation or a parent task run, never both.
  *
  * <p>Indexed on {@code parent_agent_id} for "show me everything a given
  * parent has spawned," {@code started_at} for time-ordered scans, and
@@ -80,10 +80,17 @@ public class SubagentRun extends Model {
     @OnDelete(action = OnDeleteAction.CASCADE)
     public Agent childAgent;
 
-    @ManyToOne(optional = false)
-    @JoinColumn(name = "parent_conversation_id", nullable = false)
+    /** The chat that started the run; null when a task fire did, see {@link #parentTaskRun}. */
+    @ManyToOne
+    @JoinColumn(name = "parent_conversation_id")
     @OnDelete(action = OnDeleteAction.CASCADE)
     public Conversation parentConversation;
+
+    /** The task fire that started the run. Clearing task history keeps the run and its transcript. */
+    @ManyToOne
+    @JoinColumn(name = "parent_task_run_id")
+    @OnDelete(action = OnDeleteAction.SET_NULL)
+    public TaskRun parentTaskRun;
 
     @ManyToOne(optional = false)
     @JoinColumn(name = "child_conversation_id", nullable = false)

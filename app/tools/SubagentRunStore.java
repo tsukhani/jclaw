@@ -6,6 +6,7 @@ import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.SubagentRun;
+import models.TaskRun;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.NotificationBus;
@@ -29,12 +30,14 @@ final class SubagentRunStore {
      *  row so {@code conversation_list} can filter / display without re-parsing
      *  per-run announce-message metadata JSON. */
     static Long insertSubagentRun(Long parentAgentId, @Nullable Long childAgentId,
-                                  Long parentConvId, @Nullable Long childConvId, @Nullable String label) {
+                                  @Nullable Long parentConvId, @Nullable Long parentTaskRunId,
+                                  @Nullable Long childConvId, @Nullable String label) {
         var inserted = Tx.run(() -> {
             var run = new SubagentRun();
             run.parentAgent = Agent.findById(parentAgentId);
             run.childAgent = Agent.findById(childAgentId);
-            run.parentConversation = Conversation.findById(parentConvId);
+            run.parentConversation = parentConvId == null ? null : Conversation.findById(parentConvId);
+            run.parentTaskRun = parentTaskRunId == null ? null : TaskRun.findById(parentTaskRunId);
             run.childConversation = Conversation.findById(childConvId);
             run.label = label != null && !label.isBlank() ? label : null;
             // status defaults to RUNNING, startedAt populated by @PrePersist.

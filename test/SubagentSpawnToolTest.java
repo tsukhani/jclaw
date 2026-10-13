@@ -122,6 +122,71 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void aSpawnInATaskFireNamesItsTaskRunAndNoConversation() throws Exception {
+        startLlmServer(simpleResponse("child done"));
+        configureProvider();
+        var parent = createAgent("p-task-parent", "spawn-provider", "test-model");
+        // The agent's most recent chat, which a task-started run used to be filed under.
+        ConversationService.create(parent, "web", "u-task-parent");
+        var taskRunId = seedTaskRun(parent);
+        commitAndReopen();
+
+        var json = JsonParser.parseString(
+                spawnInTaskFire(parent.id, taskRunId, "telegram", "{\"task\":\"do work\"}")).getAsJsonObject();
+
+        assertEquals("COMPLETED", json.get("status").getAsString(), json.toString());
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(Long.parseLong(json.get("run_id").getAsString()));
+        assertNull(run.parentConversation, "a task fire runs in no conversation");
+        assertEquals(taskRunId, run.parentTaskRun.id, "the run must trace to the task run that started it");
+        assertNull(run.childConversation.parentConversation);
+        assertEquals("telegram", run.childConversation.channelType,
+                "the child takes the fire's origin, not the channel of a chat picked by recency");
+        assertNull(run.childConversation.peerId);
+    }
+
+    @Test
+    void inlineModeIsRefusedInATaskFire() {
+        var parent = createAgent("p-task-inline", "spawn-provider", "test-model");
+        ConversationService.create(parent, "web", "u-task-inline");
+
+        var reply = agents.ToolContext.withScope(null, 6100L, () ->
+                new SubagentSpawnTool().execute("{\"task\":\"x\",\"mode\":\"inline\"}", parent));
+
+        assertTrue(reply.startsWith("Error: mode=\"inline\"") && reply.contains("task fire"), reply);
+        assertEquals(0, SubagentRun.count("parentAgent = ?1", parent), "a refused spawn writes no run");
+    }
+
+    @Test
+    void inheritInATaskFireRunsTheChildFreshWithoutSummarizingAChat() throws Exception {
+        var calls = new AtomicInteger();
+        startLlmServer(exchange -> {
+            calls.incrementAndGet();
+            var body = simpleResponse("child done").getBytes();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        configureProvider();
+        var parent = createAgent("p-task-inherit", "spawn-provider", "test-model");
+        var chat = ConversationService.create(parent, "web", "u-task-inherit");
+        ConversationService.appendUserMessage(chat, "a turn from an unrelated chat");
+        ConversationService.appendAssistantMessage(chat, "its reply", null);
+        var taskRunId = seedTaskRun(parent);
+        commitAndReopen();
+
+        var json = JsonParser.parseString(spawnInTaskFire(parent.id, taskRunId, "web",
+                "{\"task\":\"do work\",\"context\":\"inherit\"}")).getAsJsonObject();
+
+        assertEquals("COMPLETED", json.get("status").getAsString(), json.toString());
+        assertEquals(1, calls.get(), "only the child's own turn calls the model: no chat is summarized for it");
+        JPA.em().clear();
+        SubagentRun run = SubagentRun.findById(Long.parseLong(json.get("run_id").getAsString()));
+        assertNull(run.childConversation.parentContext);
+    }
+
+    @Test
     void batchAsyncFanOutSpawnsParallelAndYieldsAll() throws Exception {
         // JCLAW-498: ONE subagent_spawn with tasks[] spawns N children in parallel;
         // ONE subagent_yield with all=true block-awaits and returns them all inline.
@@ -237,7 +302,7 @@ class SubagentSpawnToolTest extends UnitTest {
                 var p = Tx.run(() -> (Agent) Agent.findById(parent.id));
                 var spawnTool = new SubagentSpawnTool();
                 var yieldTool = new tools.SubagentYieldTool();
-                var yielded = agents.ToolContext.withScope(null, 8889L, () -> {
+                var yielded = agents.ToolContext.withScope(parentConv.id, null, () -> {
                     spawnTool.execute(
                             "{\"tasks\":[\"do A\",\"do B\"],\"mode\":\"session\",\"context\":\"inherit\"}", p);
                     return yieldTool.execute("{\"all\":true}", p);
@@ -2429,6 +2494,41 @@ class SubagentSpawnToolTest extends UnitTest {
             try { Thread.sleep(50); }
             catch (InterruptedException _) { Thread.currentThread().interrupt(); return rows; }
         }
+    }
+
+    private static Long seedTaskRun(Agent agent) {
+        var task = new models.Task();
+        task.agent = agent;
+        task.name = "nightly-" + agent.name;
+        task.type = models.Task.Type.IMMEDIATE;
+        task.status = models.Task.Status.RUNNING;
+        task.nextRunAt = java.time.Instant.now();
+        task.save();
+        var run = new models.TaskRun();
+        run.task = task;
+        run.startedAt = java.time.Instant.now();
+        run.save();
+        return run.id;
+    }
+
+    /** {@link #invokeOnVirtualThread} as a task fire's tool dispatch binds it: the fire's origin and its run id. */
+    private String spawnInTaskFire(Long parentAgentId, Long taskRunId, String origin, String argsJson) throws Exception {
+        var resultRef = new AtomicReference<String>();
+        var errorRef = new AtomicReference<Exception>();
+        var thread = Thread.ofVirtual().start(() -> {
+            try {
+                var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
+                resultRef.set(agents.DangerousActionGate.withFireOrigin(origin, () ->
+                        agents.ToolContext.withScope(null, taskRunId, () ->
+                                new SubagentSpawnTool().execute(argsJson, parent))));
+            } catch (Exception e) {
+                errorRef.set(e);
+            }
+        });
+        thread.join(30_000);
+        assertFalse(thread.isAlive(), "subagent_spawn must complete within 30s");
+        if (errorRef.get() != null) throw errorRef.get();
+        return resultRef.get();
     }
 
     private record Spawned(String reply, java.util.List<EventLogger.Captured> events) {}

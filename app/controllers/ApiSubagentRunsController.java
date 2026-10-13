@@ -66,11 +66,18 @@ public class ApiSubagentRunsController extends Controller {
     // Run "status" reused as a filter path, request-body field, and sort-whitelist key.
     private static final String STATUS = "status";
     private static final String COL_STARTED_AT = "r.startedAt";
+    private static final String CODING_RUN = "r.workdir IS NOT NULL";
+    // LEFT on the two parents: a run has one or the other, and an inner join would drop the row.
+    private static final String RUN_FETCH = "JOIN FETCH r.parentAgent JOIN FETCH r.childAgent "
+            + "LEFT JOIN FETCH r.parentConversation JOIN FETCH r.childConversation "
+            + "LEFT JOIN FETCH r.parentTaskRun tr LEFT JOIN FETCH tr.task";
 
     @SuppressWarnings("java:S107") // each query param is its own filter axis; bundling into a DTO would hide them from OpenAPI generation
     public record SubagentRunView(Long id, @Nullable Long parentAgentId, @Nullable String parentAgentName,
                                   @Nullable Long childAgentId, @Nullable String childAgentName,
-                                  @Nullable Long parentConversationId, @Nullable Long childConversationId,
+                                  @Nullable Long parentConversationId, @Nullable Long parentTaskRunId,
+                                  @Nullable Long parentTaskId, @Nullable String parentTaskName,
+                                  @Nullable Long childConversationId,
                                   @Nullable String label, @Nullable String mode, @Nullable String status, @Nullable String startedAt,
                                   @Nullable String endedAt, String outcome, String workdir) {}
 
@@ -98,7 +105,7 @@ public class ApiSubagentRunsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = SubagentRunView.class))))
     @Operation(summary = "List subagent runs with optional filters and pagination")
     @AgentAccess(OPEN)
-    public static void list(Long parentAgentId, Long parentConversationId,
+    public static void list(Long parentAgentId, Long parentConversationId, Long parentTaskRunId, Boolean coding,
                             String status, String since, String q,
                             String sort, String dir,
                             Integer limit, Integer offset) {
@@ -116,6 +123,7 @@ public class ApiSubagentRunsController extends Controller {
         var filter = new JpqlFilter()
                 .eq("r.parentAgent.id", parentAgentId)
                 .eq("r.parentConversation.id", parentConversationId)
+                .eq("r.parentTaskRun.id", parentTaskRunId)
                 .eq("r." + STATUS, statusEnum)
                 .gte(COL_STARTED_AT, sinceInstant);
 
@@ -124,6 +132,10 @@ public class ApiSubagentRunsController extends Controller {
         var ftsRunIds = ftsSubagentRunIds(q);
 
         var where = filter.toWhereClause();
+        // The row stores no runtime; a recorded working directory is what marks a coding-harness run.
+        if (Boolean.TRUE.equals(coding)) {
+            where = where.isEmpty() ? CODING_RUN : where + " AND " + CODING_RUN;
+        }
         if (ftsRunIds != null) {
             if (ftsRunIds.isEmpty()) {
                 response.setHeader(HDR_TOTAL_COUNT, "0");
@@ -141,14 +153,13 @@ public class ApiSubagentRunsController extends Controller {
         // values through the same single binding path, so the COUNT and the SELECT
         // can never diverge.
         var page = PagedJpqlQuery.of(SubagentRun.class, "SubagentRun r", "r")
-                // JCLAW-806: eagerly join the four optional=false to-one FKs that
-                // toView dereferences per row (parent/child agent + conversation).
+                // JCLAW-806: eagerly join the to-one FKs that toView dereferences per
+                // row (parent/child agent + conversation, and the starting task run).
                 // Without this each row fires ~4 EAGER SELECTs (~2000 on a 500-row
-                // page). All four are to-ONE, so the fetch join is pagination-safe
+                // page). All are to-ONE, so the fetch join is pagination-safe
                 // (no in-memory pagination); the COUNT drops it (see PagedJpqlQuery).
                 // Mirrors ApiConversationsController.listConversations' JOIN FETCH c.agent.
-                .joinFetch("JOIN FETCH r.parentAgent JOIN FETCH r.childAgent "
-                        + "JOIN FETCH r.parentConversation JOIN FETCH r.childConversation")
+                .joinFetch(RUN_FETCH)
                 .where(where)
                 .positionalParams(filter.paramList())
                 .namedParam("fts", ftsRunIds)
@@ -242,6 +253,9 @@ public class ApiSubagentRunsController extends Controller {
                 r.childAgent != null ? r.childAgent.id : null,
                 r.childAgent != null ? r.childAgent.name : null,
                 r.parentConversation != null ? r.parentConversation.id : null,
+                r.parentTaskRun != null ? r.parentTaskRun.id : null,
+                r.parentTaskRun != null && r.parentTaskRun.task != null ? r.parentTaskRun.task.id : null,
+                r.parentTaskRun != null && r.parentTaskRun.task != null ? r.parentTaskRun.task.name : null,
                 r.childConversation != null ? r.childConversation.id : null,
                 r.label,
                 modeByRunId.get(r.id),
@@ -472,10 +486,7 @@ public class ApiSubagentRunsController extends Controller {
         for (int i = 0; i < ids.size(); i += DELETE_CHUNK) {
             var chunk = ids.subList(i, Math.min(i + DELETE_CHUNK, ids.size()));
             var runs = JPA.em()
-                    .createQuery("SELECT r FROM SubagentRun r "
-                            + "JOIN FETCH r.parentAgent JOIN FETCH r.childAgent "
-                            + "JOIN FETCH r.parentConversation JOIN FETCH r.childConversation "
-                            + "WHERE r.id IN :ids", SubagentRun.class)
+                    .createQuery("SELECT r FROM SubagentRun r " + RUN_FETCH + " WHERE r.id IN :ids", SubagentRun.class)
                     .setParameter("ids", chunk)
                     .getResultList();
             deleted += deleteTerminalRuns(runs);

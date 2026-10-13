@@ -457,7 +457,8 @@ public final class SubagentRegistry {
     public static void publishRunEvent(String type, SubagentRun run) {
         var data = new LinkedHashMap<String, Object>();
         data.put("runId", run.id);
-        data.put("parentConversationId", run.parentConversation.id);
+        data.put("parentConversationId", run.parentConversation == null ? null : run.parentConversation.id);
+        data.put("parentTaskRunId", run.parentTaskRun == null ? null : run.parentTaskRun.id);
         data.put("childConversationId", run.childConversation.id);
         data.put("childAgentId", run.childAgent.id);
         data.put("status", run.status.name());

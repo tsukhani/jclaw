@@ -111,6 +111,57 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void aRunATaskStartedListsItsTaskRunAndAnswersTheTaskRunAndCodingFilters() {
+        login();
+        var ids = commitInFreshTx(() -> {
+            var p = AgentService.create("api-task-parent", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-task-child", "openrouter", "gpt-4.1");
+            var taskRun = persistTaskRun(p, "nightly-build");
+            var fromTask = persistTaskStartedRun(p, c, taskRun, ConversationService.create(c, "web", null));
+            var fromChat = persistRun(p, c, ConversationService.create(p, "web", "u"),
+                    ConversationService.create(c, "web", null), SubagentRun.Status.COMPLETED);
+            return new long[]{fromTask, fromChat, taskRun.id, taskRun.task.id};
+        });
+
+        var all = getContent(GET("/api/subagent-runs"));
+        assertTrue(all.contains("\"id\":" + ids[0]) && all.contains("\"id\":" + ids[1]),
+                "a run with no parent conversation must not drop out of the list: " + all);
+        assertTrue(all.contains("\"parentTaskRunId\":" + ids[2]) && all.contains("\"parentTaskId\":" + ids[3])
+                        && all.contains("\"parentTaskName\":\"nightly-build\""),
+                "the run must name the task run and task that started it: " + all);
+
+        var byTaskRun = getContent(GET("/api/subagent-runs?parentTaskRunId=" + ids[2]));
+        assertTrue(byTaskRun.contains("\"id\":" + ids[0]), byTaskRun);
+        assertFalse(byTaskRun.contains("\"id\":" + ids[1]), byTaskRun);
+
+        var coding = getContent(GET("/api/subagent-runs?coding=true"));
+        assertTrue(coding.contains("\"id\":" + ids[0]), coding);
+        assertFalse(coding.contains("\"id\":" + ids[1]), "a run with no working directory is not a coding run: " + coding);
+    }
+
+    @Test
+    void clearingTaskHistoryKeepsTheRunAndItsConversationStaysOutOfTheList() {
+        login();
+        var ids = commitInFreshTx(() -> {
+            var p = AgentService.create("api-task-kept-parent", "openrouter", "gpt-4.1");
+            var c = AgentService.create("api-task-kept-child", "openrouter", "gpt-4.1");
+            var taskRun = persistTaskRun(p, "kept-build");
+            var childConv = ConversationService.create(c, "web", null);
+            var topLevel = ConversationService.create(p, "web", "u");
+            return new long[]{persistTaskStartedRun(p, c, taskRun, childConv), childConv.id, topLevel.id, taskRun.id};
+        });
+        assertEquals(java.util.Set.of(ids[2]), listedConversationIds(),
+                "a task-started subagent's conversation is not one the operator started");
+
+        assertIsOk(POST("/api/task-runs/reset"));
+
+        var runs = getContent(GET("/api/subagent-runs"));
+        assertTrue(runs.contains("\"id\":" + ids[0]), "clearing task history must keep the run: " + runs);
+        assertTrue(runs.contains("\"parentTaskRunId\":null"), "its link to the deleted task run is cleared: " + runs);
+        assertEquals(java.util.Set.of(ids[2]), listedConversationIds());
+    }
+
+    @Test
     void listFilteredByParentAgentExcludesOtherAgents() {
         login();
         var data = commitInFreshTx(() -> {
@@ -873,6 +924,45 @@ class ApiSubagentRunsControllerTest extends FunctionalTest {
         }
         run.save();
         return run.id;
+    }
+
+    private static models.TaskRun persistTaskRun(Agent agent, String taskName) {
+        var task = new models.Task();
+        task.agent = agent;
+        task.name = taskName;
+        task.type = models.Task.Type.IMMEDIATE;
+        task.status = models.Task.Status.COMPLETED;
+        task.nextRunAt = Instant.now();
+        task.save();
+        var run = new models.TaskRun();
+        run.task = task;
+        run.startedAt = Instant.now();
+        run.completedAt = Instant.now();
+        run.status = models.TaskRun.Status.COMPLETED;
+        run.save();
+        return run;
+    }
+
+    private static long persistTaskStartedRun(Agent p, Agent c, models.TaskRun taskRun, Conversation cc) {
+        var run = new SubagentRun();
+        run.parentAgent = p;
+        run.childAgent = c;
+        run.parentTaskRun = taskRun;
+        run.childConversation = cc;
+        run.status = SubagentRun.Status.COMPLETED;
+        run.endedAt = Instant.now();
+        run.outcome = "seeded completed";
+        run.workdir = "/tmp/jclaw-coding/demo-project";
+        run.save();
+        return run.id;
+    }
+
+    private java.util.Set<Long> listedConversationIds() {
+        var ids = new java.util.HashSet<Long>();
+        for (var c : com.google.gson.JsonParser.parseString(getContent(GET("/api/conversations"))).getAsJsonArray()) {
+            ids.add(c.getAsJsonObject().get("id").getAsLong());
+        }
+        return ids;
     }
 
     private static long persistRunStartedAt(Agent p, Agent c, Conversation pc, Conversation cc,

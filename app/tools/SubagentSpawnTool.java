@@ -112,6 +112,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  and the row exists purely as the child's audit-trail container. */
     public static final String SUBAGENT_CHANNEL = "subagent";
 
+    static final String INLINE_NEEDS_A_CONVERSATION =
+            "Error: mode=\"inline\" embeds the child in a conversation and a task fire has none; use mode=\"session\".";
+
     static final String FIELD_STATUS = "status";
     static final String FIELD_LABEL = "label";
     // JCLAW-S1192: request-arg and response-field key constants.
@@ -397,6 +400,9 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
         var parsed = SubagentSpawnArgs.parse(args);
         if (parsed.error() != null) return parsed.error();
+        if (ToolContext.taskRunId() != null && MODE_INLINE.equals(parsed.resolvedMode())) {
+            return INLINE_NEEDS_A_CONVERSATION;
+        }
         // JCLAW-499: validate the runtime (native | acp) before any DB work.
         var acpError = SubagentAcpRunner.acpRuntimeError(args, parentAgent);
         if (acpError != null) return acpError;
@@ -419,13 +425,17 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // the lookup is wrapped in a Tx to dodge detached-entity issues on
         // VT-dispatched tool calls.
         var parentAgentId = parentAgent.id;
-        var parentConv = Tx.run(() -> SubagentChildBootstrap.resolveParentConversation(parentAgentId));
-        if (parentConv == null) {
+        // A task fire runs in no conversation: its runs record the task run, never a chat picked by recency.
+        var parentTaskRunId = ToolContext.taskRunId();
+        var parentConv = parentTaskRunId != null ? null
+                : Tx.run(() -> SubagentChildBootstrap.resolveParentConversation(parentAgentId));
+        if (parentConv == null && parentTaskRunId == null) {
             return "Error: Could not resolve a parent conversation for agent '%s'."
                     .formatted(parentAgent.name);
         }
+        final var parentConvIdFinal = parentConv == null ? null : parentConv.id;
 
-        var summary = SubagentChildBootstrap.buildInheritSummary(parentAgent, parentConv.id, parsed.resolvedContext());
+        var summary = SubagentChildBootstrap.buildInheritSummary(parentAgent, parentConvIdFinal, parsed.resolvedContext());
         // The summary can be a model call: a turn stopped meanwhile starts no child and writes no rows.
         if (ToolContext.cancelled()) return STOPPED_BEFORE_START;
         var bootstrap = SubagentChildBootstrap.bootstrapChildInTx(parentAgent, parentConv, parsed, summary);
@@ -437,9 +447,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // Step 3: insert the SubagentRun audit row (RUNNING + startedAt) in
         // its own short Tx so the row commits and is visible from any thread
         // we hand the run to.
-        final var parentConvIdFinal = parentConv.id;
-        var runId = SubagentRunStore.insertSubagentRun(parentAgentId, childAgentId, parentConvIdFinal, childConvId,
-                parsed.label());
+        var runId = SubagentRunStore.insertSubagentRun(parentAgentId, childAgentId, parentConvIdFinal,
+                parentTaskRunId, childConvId, parsed.label());
         var runIdStr = String.valueOf(runId);
         EventLogger.recordSubagentSpawn(
                 parentAgent.name, childAgentName,
@@ -464,7 +473,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
 
         final boolean inlineMode = MODE_INLINE.equals(parsed.resolvedMode());
-        if (inlineMode
+        if (inlineMode && parentConvIdFinal != null
                 && !SubagentResponses.writeInlineStartMarker(parentConvIdFinal, runId, parsed.label(), parsed.resolvedTask())) {
             SubagentRegistry.kill(runId, SubagentSyncRunner.PARENT_STOPPED_REASON);
             return STOPPED_BEFORE_START;
@@ -482,7 +491,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             // so the announce/resume model can't deliver there. Use a block-await
             // handoff instead — dispatch the child (parallel) and let subagent_yield
             // collect its result inline. Chat keeps the announce/resume path.
-            if (ToolContext.taskRunId() != null) {
+            if (parentConvIdFinal == null) {
                 return SubagentAsyncRunner.launchAsyncSpawnForTask(runId, childAgentId, childConvId,
                         parentAgent.name, parsed, runIdStr);
             }
@@ -512,7 +521,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
 
         // JCLAW-267: inline-mode boundary-end marker. Skipped on kill (see
         // writeInlineEndMarker javadoc for the double-render rationale).
-        if (inlineMode && !runOutcome.killedByOperator()) {
+        if (inlineMode && parentConvIdFinal != null && !runOutcome.killedByOperator()) {
             SubagentResponses.writeInlineEndMarker(parentConvIdFinal, runId, runOutcome.terminalStatus(),
                     runOutcome.reply(), runOutcome.replyTruncated());
         }
@@ -602,11 +611,13 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         }
 
         final var parentAgentId = parentAgent.id;
-        var parentConv = Tx.run(() -> SubagentChildBootstrap.resolveParentConversation(parentAgentId));
-        if (parentConv == null) {
+        final var parentTaskRunId = ToolContext.taskRunId();
+        var parentConv = parentTaskRunId != null ? null
+                : Tx.run(() -> SubagentChildBootstrap.resolveParentConversation(parentAgentId));
+        if (parentConv == null && parentTaskRunId == null) {
             return "Error: Could not resolve a parent conversation for agent '%s'.".formatted(parentAgent.name);
         }
-        final var parentConvIdFinal = parentConv.id;
+        final var parentConvIdFinal = parentConv == null ? null : parentConv.id;
         final var scopeKey = SubagentAsyncRunner.currentScopeKey();
         final var fMode = mode;
         final var fContext = context;
@@ -635,7 +646,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 continue; // the rest of the fan-out still runs
             }
             var runId = SubagentRunStore.insertSubagentRun(parentAgentId, bootstrap.childAgentId(),
-                    parentConvIdFinal, bootstrap.childConvId(), spec.label());
+                    parentConvIdFinal, parentTaskRunId, bootstrap.childConvId(), spec.label());
             EventLogger.recordSubagentSpawn(parentAgent.name, bootstrap.childAgentName(),
                     String.valueOf(runId), fMode, fContext);
             if (acpLaunch != null) {
@@ -700,7 +711,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      * delegator over {@link SubagentChildBootstrap#resolveSubagentModel} for
      * {@code SubagentSpawnToolTest}.
      */
-    public static SubagentModel resolveSubagentModel(Conversation parentConv, Agent childAgent,
+    public static SubagentModel resolveSubagentModel(@Nullable Conversation parentConv, Agent childAgent,
                                                      String overrideProvider, String overrideId) {
         return SubagentChildBootstrap.resolveSubagentModel(parentConv, childAgent, overrideProvider, overrideId);
     }

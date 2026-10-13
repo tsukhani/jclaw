@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import {
   ChartBarIcon,
+  CommandLineIcon,
   GlobeAltIcon,
   HashtagIcon,
   QueueListIcon,
@@ -9,8 +10,9 @@ import {
   VideoCameraIcon,
 } from '@heroicons/vue/24/outline'
 import type { Ref } from 'vue'
-import type { Agent, LatencyHistogram, LogEvent, ScrapeJob } from '~/types/api'
+import type { Agent, LatencyHistogram, LogEvent, ScrapeJob, SubagentRunView } from '~/types/api'
 import { scrapeSite } from '~/utils/scrape-job'
+import { SUBAGENT_STATUS_BADGE } from '~/utils/subagent-status'
 import ScrapeJobProgress from '~/components/scrapes/ScrapeJobProgress.vue'
 import ScrapeJobStateBadge from '~/components/scrapes/ScrapeJobStateBadge.vue'
 
@@ -225,12 +227,21 @@ const { data: recentVideoJobs, refresh: refreshVideoJobs } = useFetch<VideoGenJo
 const { data: recentScrapeJobs, refresh: refreshScrapeJobs } = useFetch<ScrapeJob[]>(
   '/api/scrape-jobs?limit=10', { immediate: false, default: () => [] },
 )
-type ActivityView = 'all' | 'video' | 'scrapes'
+// Coding-harness runs, lazy for the same reason. A row opens the run's log in a peek panel.
+const { data: recentCodingRuns, refresh: refreshCodingRuns } = useFetch<SubagentRunView[]>(
+  '/api/subagent-runs?coding=true&limit=10', { immediate: false, default: () => [] },
+)
+const openCodingRunId = ref<number | null>(null)
+function codingRunName(run: SubagentRunView): string {
+  return run.label || run.workdir?.split('/').filter(Boolean).pop() || `Run #${run.id}`
+}
+type ActivityView = 'all' | 'video' | 'scrapes' | 'coding'
 const activityView = ref<ActivityView>('all')
 function setActivityView(v: ActivityView) {
   activityView.value = v
   if (v === 'video') refreshVideoJobs()
   if (v === 'scrapes') refreshScrapeJobs()
+  if (v === 'coding') refreshCodingRuns()
 }
 
 function formatMs(ms: number): string {
@@ -291,6 +302,7 @@ onMounted(() => {
     // Only poll video jobs while their view is showing — no cost when the operator is on the events feed.
     if (activityView.value === 'video') refreshVideoJobs()
     if (activityView.value === 'scrapes') refreshScrapeJobs()
+    if (activityView.value === 'coding') refreshCodingRuns()
     chatCostRef.value?.refresh()
     // Keep the per-status task counts in lockstep with the rest of the
     // dashboard's 5 s tick. Mostly cheap (3 indexed COUNT queries),
@@ -850,6 +862,24 @@ onBeforeUnmount(() => {
               aria-hidden="true"
             />
           </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="activityView === 'coding'"
+            class="p-1.5 transition-colors"
+            :class="activityView === 'coding'
+              ? 'bg-muted text-fg-strong'
+              : 'text-fg-muted hover:text-fg-strong'"
+            title="Coding runs"
+            aria-label="Coding runs"
+            data-testid="activity-coding-tab"
+            @click="setActivityView('coding')"
+          >
+            <CommandLineIcon
+              class="w-4 h-4"
+              aria-hidden="true"
+            />
+          </button>
         </div>
       </div>
       <!-- Body reserves its last-known height so the events landing don't move
@@ -960,7 +990,7 @@ onBeforeUnmount(() => {
             No video generation jobs yet.
           </div>
         </template>
-        <template v-else>
+        <template v-else-if="activityView === 'scrapes'">
           <div
             v-if="recentScrapeJobs?.length"
             class="divide-y divide-border"
@@ -996,7 +1026,75 @@ onBeforeUnmount(() => {
             No scrape jobs yet.
           </div>
         </template>
+        <template v-else>
+          <div
+            v-if="recentCodingRuns?.length"
+            class="divide-y divide-border"
+            data-testid="activity-coding"
+          >
+            <div
+              v-for="run in recentCodingRuns"
+              :key="run.id"
+              class="px-4 py-2.5 flex flex-wrap sm:flex-nowrap items-center gap-3"
+            >
+              <span
+                class="shrink-0 px-1.5 py-0.5 text-[10px] uppercase tracking-wide border"
+                :class="SUBAGENT_STATUS_BADGE[run.status]"
+              >{{ run.status }}</span>
+              <button
+                type="button"
+                class="grow basis-full sm:basis-0 min-w-0 truncate text-left text-sm text-fg-primary hover:underline cursor-pointer"
+                :title="run.workdir ?? ''"
+                :aria-label="`Open the log of coding run ${codingRunName(run)}`"
+                @click="openCodingRunId = run.id"
+              >
+                {{ codingRunName(run) }}
+              </button>
+              <span class="shrink-0 w-56 truncate text-right text-xs">
+                <NuxtLink
+                  v-if="run.parentConversationId != null"
+                  :to="`/chat?conversation=${run.parentConversationId}`"
+                  class="text-emerald-700 dark:text-emerald-400 hover:underline"
+                >
+                  see in conversation
+                </NuxtLink>
+                <NuxtLink
+                  v-else-if="run.parentTaskRunId != null"
+                  to="/tasks"
+                  class="text-emerald-700 dark:text-emerald-400 hover:underline"
+                  :title="`Started by run #${run.parentTaskRunId} of this task`"
+                >
+                  task {{ run.parentTaskName }}
+                </NuxtLink>
+                <span
+                  v-else
+                  class="text-fg-muted"
+                >—</span>
+              </span>
+              <span class="shrink-0 w-48 text-right text-xs text-fg-muted font-mono">{{ run.startedAt ? formatActivityTimestamp(run.startedAt) : '—' }}</span>
+            </div>
+          </div>
+          <div
+            v-else
+            class="px-4 py-8 text-center text-sm text-fg-muted"
+          >
+            No coding runs yet.
+          </div>
+        </template>
       </div>
     </div>
+
+    <PeekPanel
+      :open="openCodingRunId !== null"
+      title="Coding run log"
+      @update:open="openCodingRunId = null"
+    >
+      <CodingRunMonitor
+        v-if="openCodingRunId !== null"
+        :key="openCodingRunId"
+        :run-id="openCodingRunId"
+        expanded
+      />
+    </PeekPanel>
   </div>
 </template>

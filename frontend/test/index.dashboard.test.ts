@@ -235,6 +235,64 @@ describe('Dashboard — workspace disk footprint line', () => {
   })
 })
 
+describe('Dashboard — Recent Activity coding runs view', () => {
+  beforeEach(() => clearNuxtData())
+
+  it('lists coding runs with where each started, and opens a run\'s log', async () => {
+    setupApi()
+    let query: Record<string, unknown> = {}
+    registerEndpoint('/api/subagent-runs', async (event) => {
+      const { getQuery } = await import('h3')
+      query = getQuery(event)
+      const run = { parentAgentId: 1, parentAgentName: 'main', childAgentId: 2, childAgentName: 'main-sub-a',
+        childConversationId: 9, mode: 'session', endedAt: null, outcome: null }
+      return [
+        { ...run, id: 31, label: null, status: 'RUNNING', startedAt: '2026-10-13T06:00:00Z',
+          parentConversationId: null, parentTaskRunId: 77, parentTaskId: 4, parentTaskName: 'nightly-build',
+          workdir: '/Users/op/coding/demo-project' },
+        { ...run, id: 30, label: 'fix the parser', status: 'COMPLETED', startedAt: '2026-10-13T05:00:00Z',
+          parentConversationId: 42, parentTaskRunId: null, parentTaskId: null, parentTaskName: null,
+          workdir: '/Users/op/coding/fix-the-parser' },
+      ]
+    })
+    const monitor = defineComponent({
+      props: { runId: { type: Number, required: true }, expanded: Boolean },
+      setup: props => () => h('div', `log of run ${props.runId}`),
+    })
+    const c = await mountSuspended(Index, { global: { stubs: { ...STUBS, CodingRunMonitor: monitor } } })
+    await flushPromises()
+
+    await c.find('[data-testid="activity-coding-tab"]').trigger('click')
+    await flushPromises()
+
+    // The stubbed endpoint answers a tick after the click's own promises settle.
+    await vi.waitFor(() => expect(query).toMatchObject({ coding: 'true', limit: '10' }))
+    await flushPromises()
+    const rows = c.find('[data-testid="activity-coding"]')
+    // An unlabelled run is named by its folder.
+    expect(rows.text()).toContain('demo-project')
+    expect(rows.text()).toContain('task nightly-build')
+    expect(rows.text()).toContain('fix the parser')
+    expect(rows.find('a[href="/chat?conversation=42"]').exists()).toBe(true)
+
+    await rows.find('button[aria-label="Open the log of coding run demo-project"]').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('[data-slot="sheet-content"]')?.textContent).toContain('log of run 31')
+  })
+
+  it('shows the empty state when there are no coding runs', async () => {
+    setupApi()
+    registerEndpoint('/api/subagent-runs', () => [])
+    const c = await mountSuspended(Index, { global: { stubs: STUBS } })
+    await flushPromises()
+
+    await c.find('[data-testid="activity-coding-tab"]').trigger('click')
+    await flushPromises()
+
+    expect(c.text()).toContain('No coding runs yet.')
+  })
+})
+
 describe('Dashboard — a failed latency reset (JCLAW-1221)', () => {
   it('says why the latency metrics were not cleared', async () => {
     setupApi()

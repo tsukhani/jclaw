@@ -829,6 +829,31 @@ export interface TaskRunView {
 }
 
 /**
+ * One subagent run from GET /api/subagent-runs. Mirrors the backend SubagentRunView.
+ * A chat started it (parentConversationId) or a task fire did (parentTaskRunId), never both.
+ */
+export interface SubagentRunView {
+  id: number
+  parentAgentId: number | null
+  parentAgentName: string | null
+  childAgentId: number | null
+  childAgentName: string | null
+  parentConversationId: number | null
+  parentTaskRunId: number | null
+  parentTaskId: number | null
+  parentTaskName: string | null
+  childConversationId: number | null
+  label: string | null
+  mode: string | null
+  status: 'RUNNING' | 'COMPLETED' | 'FAILED' | 'KILLED' | 'TIMEOUT'
+  startedAt: string | null
+  endedAt: string | null
+  outcome: string | null
+  /** The coding harness's working directory; null for a native subagent run. */
+  workdir: string | null
+}
+
+/**
  * One task_run_message row as returned by GET /api/task-runs/:id/messages —
  * the turn-by-turn execution trace. Mirrors the backend TaskRunMessageView.
  */

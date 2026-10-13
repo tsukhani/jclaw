@@ -212,7 +212,7 @@ public class ApiConversationsController extends Controller {
         int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, PagedJpqlQuery.MAX_LIMIT) : 20;
         int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
 
-        // Subagent child conversations (parentConversation != null) are
+        // Subagent child conversations (ConversationService.TOP_LEVEL) are
         // scoped to their parent's spawn tree and surface on the dedicated
         // /subagents admin page, not in the user-facing conversation list
         // or the chat sidebar's recent feed. Filtering at the API rather
@@ -221,8 +221,8 @@ public class ApiConversationsController extends Controller {
         // hid subagents from /api/agents (commit 26e2acd).
         var dynamicWhere = filter.toWhereClause();
         var fullWhere = dynamicWhere.isEmpty()
-                ? "c.parentConversation IS NULL"
-                : "c.parentConversation IS NULL AND " + dynamicWhere;
+                ? ConversationService.TOP_LEVEL
+                : ConversationService.TOP_LEVEL + " AND " + dynamicWhere;
         if (ftsConvIds != null) {
             // Empty result set from FTS short-circuits to "no rows" —
             // the JPQL `IN (:fts)` with an empty collection would throw,
