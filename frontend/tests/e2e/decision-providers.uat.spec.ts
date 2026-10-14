@@ -7,7 +7,7 @@ import { test, expect, gotoPage, blockApiWrites } from './helpers'
  *
  * settings.decision-providers.test.ts covers the panel's logic in jsdom, where no asset is served,
  * no media element plays and no stylesheet applies. This spec covers what only a real browser can:
- * the JEV portrait and clip are served and decode, preload="none" fetches nothing before the click,
+ * each card's picture and clip are served and decode, preload="none" fetches nothing before the click,
  * the click plays the clip, and the speaker badge the CSS hides at rest appears on hover, on
  * keyboard focus and on a screen with no hover.
  *
@@ -19,6 +19,13 @@ import { test, expect, gotoPage, blockApiWrites } from './helpers'
 const PLAY = { name: 'Play JEV saying “My name is Jev”' }
 const OLLAMA_PLAY = { name: 'Play a llama’s call' }
 const LAYA_PLAY = { name: 'Play Laya shouting “Liar!”' }
+
+/** Each card's picture and clip, which the picture tests below check alike. */
+const CARDS = [
+  { name: 'JEV', image: 'decision-jev-portrait', note: 'decision-jev-retention', clip: '/jev.mp3', play: PLAY },
+  { name: 'Ollama', image: 'decision-ollama-logo', note: 'decision-ollama-privacy', clip: '/ollama.mp3', play: OLLAMA_PLAY },
+  { name: 'Laya', image: 'decision-laya-portrait', note: 'decision-laya-about', clip: '/laya.mp3', play: LAYA_PLAY },
+] as const
 
 async function openPanel(page: Page) {
   await gotoPage(page, '/settings?section=decision-providers')
@@ -124,40 +131,47 @@ test.describe('UAT-23 decision providers', () => {
     }
   })
 
-  test('the portrait decodes and stands three text lines tall beside the note', async ({ page }) => {
-    const writes = await blockApiWrites(page)
-    await openPanel(page)
-    await expectStandsThreeLinesTall(page, 'decision-jev-portrait', 'decision-jev-retention')
-    expect(writes()).toEqual([])
-  })
+  for (const card of CARDS) {
+    test.describe(`the ${card.name} picture`, () => {
+      // No picture test depends on a real Ollama server.
+      test.beforeEach(({ page }) => stubOllama(page, REACHABLE))
 
-  test('the clip is fetched only once the portrait is clicked, and the click plays it', async ({ page }) => {
-    const writes = await blockApiWrites(page)
-    const fetched: string[] = []
-    page.on('request', (req) => {
-      if (new URL(req.url()).pathname === '/jev.mp3') fetched.push(req.url())
+      test('decodes and stands three text lines tall beside the note', async ({ page }) => {
+        const writes = await blockApiWrites(page)
+        await openPanel(page)
+        await expectStandsThreeLinesTall(page, card.image, card.note)
+        expect(writes()).toEqual([])
+      })
+
+      test('fetches its clip only once clicked, and the click plays it', async ({ page }) => {
+        const writes = await blockApiWrites(page)
+        const fetched: string[] = []
+        page.on('request', (req) => {
+          if (new URL(req.url()).pathname === card.clip) fetched.push(req.url())
+        })
+        await openPanel(page)
+        const picture = page.getByTestId(card.image)
+        await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete)).toBe(true)
+        expect(fetched, 'preload="none" should fetch nothing before the click').toEqual([])
+
+        await page.getByRole('button', card.play).click()
+        const clip = page.locator(`audio[src="${card.clip}"]`)
+        await expect.poll(() => fetched.length).toBeGreaterThan(0)
+        await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.error?.code ?? 0), 'media error code').toBe(0)
+        await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.duration || 0)).toBeGreaterThan(0)
+        await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.played.length), 'the clip never played').toBeGreaterThan(0)
+        expect(writes()).toEqual([])
+      })
+
+      test('hides its speaker badge at rest and shows it on hover and on keyboard focus', async ({ page }) => {
+        // Reduced motion drops the opacity transition, so each read sees the settled value, not a frame of the fade.
+        await page.emulateMedia({ reducedMotion: 'reduce' })
+        await blockApiWrites(page)
+        await openPanel(page)
+        await expectBadgeFollowsHoverAndFocus(page, card.play)
+      })
     })
-    await openPanel(page)
-    const portrait = page.getByTestId('decision-jev-portrait')
-    await expect.poll(() => portrait.evaluate((img: HTMLImageElement) => img.complete)).toBe(true)
-    expect(fetched, 'preload="none" should fetch nothing before the click').toEqual([])
-
-    await page.getByRole('button', PLAY).click()
-    const clip = page.locator('audio[src="/jev.mp3"]')
-    await expect.poll(() => fetched.length).toBeGreaterThan(0)
-    await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.error?.code ?? 0), 'media error code').toBe(0)
-    await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.duration || 0)).toBeGreaterThan(0)
-    await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.played.length), 'the clip never played').toBeGreaterThan(0)
-    expect(writes()).toEqual([])
-  })
-
-  test('the speaker badge is hidden at rest and shown on hover and on keyboard focus', async ({ page }) => {
-    // Reduced motion drops the opacity transition, so each read sees the settled value, not a frame of the fade.
-    await page.emulateMedia({ reducedMotion: 'reduce' })
-    await blockApiWrites(page)
-    await openPanel(page)
-    await expectBadgeFollowsHoverAndFocus(page, PLAY)
-  })
+  }
 
   test.describe('on a screen with no hover', () => {
     test.use({ isMobile: true, hasTouch: true })
@@ -167,9 +181,7 @@ test.describe('UAT-23 decision providers', () => {
       await openPanel(page)
       // Guards the emulation itself: without it this test would pass on a hover device by never asking.
       expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true)
-      await expect.poll(badgeOpacity(page)).toBe('1')
-      await expect.poll(badgeOpacity(page, OLLAMA_PLAY)).toBe('1')
-      await expect.poll(badgeOpacity(page, LAYA_PLAY)).toBe('1')
+      for (const card of CARDS) await expect.poll(badgeOpacity(page, card.play), card.name).toBe('1')
     })
   })
 
@@ -252,42 +264,6 @@ test.describe('UAT-23 decision providers', () => {
       await expect(router).toContainText('not in use')
       await expect(router).not.toContainText('(tev1:latest)')
     })
-
-    test('the llama decodes and stands three text lines tall beside the note, as JEV does', async ({ page }) => {
-      await stubOllama(page, REACHABLE)
-      const writes = await blockApiWrites(page)
-      await openPanel(page)
-      await expectStandsThreeLinesTall(page, 'decision-ollama-logo', 'decision-ollama-privacy')
-      expect(writes()).toEqual([])
-    })
-
-    test('the llama clip is fetched only once the logo is clicked, and the click plays it', async ({ page }) => {
-      await stubOllama(page, REACHABLE)
-      const writes = await blockApiWrites(page)
-      const fetched: string[] = []
-      page.on('request', (req) => {
-        if (new URL(req.url()).pathname === '/ollama.mp3') fetched.push(req.url())
-      })
-      await openPanel(page)
-      await expect(page.getByTestId('decision-ollama-logo')).toBeVisible()
-      expect(fetched, 'preload="none" should fetch nothing before the click').toEqual([])
-
-      await page.getByRole('button', OLLAMA_PLAY).click()
-      const clip = page.locator('audio[src="/ollama.mp3"]')
-      await expect.poll(() => fetched.length).toBeGreaterThan(0)
-      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.error?.code ?? 0), 'media error code').toBe(0)
-      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.duration || 0)).toBeGreaterThan(0)
-      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.played.length), 'the clip never played').toBeGreaterThan(0)
-      expect(writes()).toEqual([])
-    })
-
-    test('the speaker badge is hidden at rest and shown on hover and on keyboard focus', async ({ page }) => {
-      await page.emulateMedia({ reducedMotion: 'reduce' })
-      await stubOllama(page, REACHABLE)
-      await blockApiWrites(page)
-      await openPanel(page)
-      await expectBadgeFollowsHoverAndFocus(page, OLLAMA_PLAY)
-    })
   })
 
   test.describe('the Laya card', () => {
@@ -311,39 +287,6 @@ test.describe('UAT-23 decision providers', () => {
       expect(layaBox!.x).toBe(ollamaBox!.x)
       expect(layaBox!.y).toBeGreaterThanOrEqual(ollamaBox!.y + ollamaBox!.height)
       expect(writes()).toEqual([])
-    })
-
-    test('the portrait decodes and stands three text lines tall beside the note, as JEV\'s does', async ({ page }) => {
-      const writes = await blockApiWrites(page)
-      await openPanel(page)
-      await expectStandsThreeLinesTall(page, 'decision-laya-portrait', 'decision-laya-about')
-      expect(writes()).toEqual([])
-    })
-
-    test('the clip is fetched only once the portrait is clicked, and the click plays it', async ({ page }) => {
-      const writes = await blockApiWrites(page)
-      const fetched: string[] = []
-      page.on('request', (req) => {
-        if (new URL(req.url()).pathname === '/laya.mp3') fetched.push(req.url())
-      })
-      await openPanel(page)
-      await expect(page.getByTestId('decision-laya-portrait')).toBeVisible()
-      expect(fetched, 'preload="none" should fetch nothing before the click').toEqual([])
-
-      await page.getByRole('button', LAYA_PLAY).click()
-      const clip = page.locator('audio[src="/laya.mp3"]')
-      await expect.poll(() => fetched.length).toBeGreaterThan(0)
-      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.error?.code ?? 0), 'media error code').toBe(0)
-      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.duration || 0)).toBeGreaterThan(0)
-      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.played.length), 'the clip never played').toBeGreaterThan(0)
-      expect(writes()).toEqual([])
-    })
-
-    test('the speaker badge is hidden at rest and shown on hover and on keyboard focus', async ({ page }) => {
-      await page.emulateMedia({ reducedMotion: 'reduce' })
-      await blockApiWrites(page)
-      await openPanel(page)
-      await expectBadgeFollowsHoverAndFocus(page, LAYA_PLAY)
     })
 
     test('a reachable server marks its loaded checkpoints and names its device', async ({ page }) => {
