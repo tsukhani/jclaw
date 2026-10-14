@@ -194,8 +194,10 @@ const layaBreaker = computed(() => breakersByName.value.get('decision:laya'))
 // Each clip's transcript, so what it says reaches a reader who cannot hear it (WCAG 1.2.1).
 const JEV_CLIP_LABEL = 'Play JEV saying “My name is Jev”'
 const OLLAMA_CLIP_LABEL = 'Play a llama’s call'
+const LAYA_CLIP_LABEL = 'Play Laya shouting “Liar!”'
 const jevClip = ref<HTMLAudioElement>()
 const ollamaClip = ref<HTMLAudioElement>()
+const layaClip = ref<HTMLAudioElement>()
 function playClip(audio: HTMLAudioElement | undefined) {
   if (!audio) return
   audio.currentTime = 0
@@ -566,26 +568,50 @@ function playClip(audio: HTMLAudioElement | undefined) {
           data-testid="decision-laya-status"
         >not reachable</span>
       </div>
-      <div class="px-4 py-2.5 space-y-2 text-xs text-fg-muted leading-relaxed border-b border-border">
+      <div class="px-4 py-2.5 flex items-start gap-3 text-xs text-fg-muted leading-relaxed border-b border-border">
+        <button
+          type="button"
+          class="group relative shrink-0 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          :aria-label="LAYA_CLIP_LABEL"
+          :title="LAYA_CLIP_LABEL"
+          data-testid="decision-laya-play"
+          @click="playClip(layaClip)"
+        >
+          <!-- 3lh, as JEV's: the text beside it wraps to three lines in a 1330–1660 px window. -->
+          <img
+            src="/laya.webp"
+            alt=""
+            width="200"
+            height="200"
+            class="block h-[3lh] w-auto select-none"
+            data-testid="decision-laya-portrait"
+          >
+          <span
+            class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-safe:transition-opacity"
+            aria-hidden="true"
+          >
+            <!-- JEV's light badge, so the three cards' cues match. -->
+            <span class="rounded-full bg-white/75 p-1 text-neutral-900 shadow-sm backdrop-blur-xs">
+              <SpeakerWaveIcon class="w-3.5 h-3.5" />
+            </span>
+          </span>
+        </button>
+        <!-- eslint-disable-next-line vuejs-accessibility/media-has-caption -- its words are the button's name and tooltip -->
+        <audio
+          ref="layaClip"
+          src="/laya.mp3"
+          preload="none"
+        />
         <p data-testid="decision-laya-about">
           An open-weight decision model under the Apache-2.0 license, which answers the same questions JEV does.
-          You run its server, <code>laya-serve</code>, yourself; JClaw calls the address below and starts nothing.
-          The Model Router's classifier sends the first 4000 characters of each prompt, only to this server; how
-          much of them a checkpoint reads is under Context below.
+          You run its server, <code class="whitespace-nowrap">laya-serve</code>, yourself; JClaw calls the address below and starts nothing.
+          The Model Router's classifier sends the first 4000 characters of each prompt, only to this server. Read
+          <NuxtLink
+            to="/guide#settings-laya-limits"
+            class="text-fg-strong underline"
+            data-testid="decision-laya-limits-link"
+          >Laya's limits</NuxtLink> in the user guide before you rely on it.
         </p>
-        <ul
-          class="list-disc pl-4 space-y-1"
-          aria-label="Laya's limits"
-          data-testid="decision-laya-limits"
-        >
-          <li
-            v-for="limit in LAYA_LIMITS"
-            :key="limit.topic"
-            :data-testid="`decision-laya-limit-${limit.topic.toLowerCase()}`"
-          >
-            <span class="font-medium text-fg-strong">{{ limit.topic }}.</span> {{ layaLimitText(limit) }}
-          </li>
-        </ul>
       </div>
       <div class="divide-y divide-border">
         <div

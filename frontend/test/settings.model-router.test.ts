@@ -331,10 +331,10 @@ describe('SettingsModelRouterPanel', () => {
       + 'multilingual for 23, wrong at probabilities up to 0.96. (measured 2026-10-13 on 40 written test prompts, not live traffic)')
     expect(text).toContain('At a minimum confidence of 0.50, multilingual answered 34 of the 40 prompts and was right on 20 of them.')
     expect(text).toContain('(Laya\'s model card)')
-    // The limits of running the server stay on its card.
+    // The limits of running the server are in the user guide, where the hint links.
     expect(text).not.toContain('LAYA_')
     for (const li of hint.findAll('li')) expect(li.text().trim()).toMatch(/\)$/)
-    expect(hint.find('a').attributes('href')).toBe('/settings?section=decision-providers')
+    expect(hint.find('a').attributes('href')).toBe('/guide#settings-laya-limits')
 
     entries = entries.map(e => e.key === 'router.classifier.model' ? { key: e.key, value: 'multilingual' } : e)
     clearNuxtData()

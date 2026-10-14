@@ -1,6 +1,5 @@
 import type { Page } from '@playwright/test'
 import type { ConfigResponse, LayaDecisionStatus, OllamaDecisionStatus } from '~/types/api'
-import { LAYA_LIMITS, layaLimitText } from '../../utils/decision-models'
 import { test, expect, gotoPage, blockApiWrites } from './helpers'
 
 /**
@@ -19,6 +18,7 @@ import { test, expect, gotoPage, blockApiWrites } from './helpers'
 
 const PLAY = { name: 'Play JEV saying “My name is Jev”' }
 const OLLAMA_PLAY = { name: 'Play a llama’s call' }
+const LAYA_PLAY = { name: 'Play Laya shouting “Liar!”' }
 
 async function openPanel(page: Page) {
   await gotoPage(page, '/settings?section=decision-providers')
@@ -114,7 +114,10 @@ test.describe('UAT-23 decision providers', () => {
 
   test('the clip and the portrait are served as media, not as the SPA fallback', async ({ request }) => {
     // An unknown path answers 200 text/html from the SPA catch-all, so the status alone proves nothing.
-    for (const [path, type] of [['/jev.mp3', 'audio/'], ['/jev.webp', 'image/'], ['/ollama.mp3', 'audio/'], ['/ollama.webp', 'image/']] as const) {
+    for (const [path, type] of [
+      ['/jev.mp3', 'audio/'], ['/jev.webp', 'image/'], ['/ollama.mp3', 'audio/'], ['/ollama.webp', 'image/'],
+      ['/laya.mp3', 'audio/'], ['/laya.webp', 'image/'],
+    ] as const) {
       const res = await request.get(path)
       expect(res.status(), path).toBe(200)
       expect(res.headers()['content-type'], path).toContain(type)
@@ -166,6 +169,7 @@ test.describe('UAT-23 decision providers', () => {
       expect(await page.evaluate(() => matchMedia('(hover: none)').matches)).toBe(true)
       await expect.poll(badgeOpacity(page)).toBe('1')
       await expect.poll(badgeOpacity(page, OLLAMA_PLAY)).toBe('1')
+      await expect.poll(badgeOpacity(page, LAYA_PLAY)).toBe('1')
     })
   })
 
@@ -290,7 +294,7 @@ test.describe('UAT-23 decision providers', () => {
     // The panel re-reads the config after a write, so a stubConfig route.fetch() can still be in flight at teardown.
     test.afterEach(({ page }) => page.unrouteAll({ behavior: 'ignoreErrors' }))
 
-    test('renders directly below the Ollama card, with no portrait and no clip', async ({ page }) => {
+    test('renders directly below the Ollama card', async ({ page }) => {
       await stubOllama(page, REACHABLE)
       const writes = await blockApiWrites(page)
       await openPanel(page)
@@ -306,9 +310,40 @@ test.describe('UAT-23 decision providers', () => {
       }))
       expect(layaBox!.x).toBe(ollamaBox!.x)
       expect(layaBox!.y).toBeGreaterThanOrEqual(ollamaBox!.y + ollamaBox!.height)
-      await expect(laya.locator('img')).toHaveCount(0)
-      await expect(laya.locator('audio')).toHaveCount(0)
       expect(writes()).toEqual([])
+    })
+
+    test('the portrait decodes and stands three text lines tall beside the note, as JEV\'s does', async ({ page }) => {
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      await expectStandsThreeLinesTall(page, 'decision-laya-portrait', 'decision-laya-about')
+      expect(writes()).toEqual([])
+    })
+
+    test('the clip is fetched only once the portrait is clicked, and the click plays it', async ({ page }) => {
+      const writes = await blockApiWrites(page)
+      const fetched: string[] = []
+      page.on('request', (req) => {
+        if (new URL(req.url()).pathname === '/laya.mp3') fetched.push(req.url())
+      })
+      await openPanel(page)
+      await expect(page.getByTestId('decision-laya-portrait')).toBeVisible()
+      expect(fetched, 'preload="none" should fetch nothing before the click').toEqual([])
+
+      await page.getByRole('button', LAYA_PLAY).click()
+      const clip = page.locator('audio[src="/laya.mp3"]')
+      await expect.poll(() => fetched.length).toBeGreaterThan(0)
+      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.error?.code ?? 0), 'media error code').toBe(0)
+      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.duration || 0)).toBeGreaterThan(0)
+      await expect.poll(() => clip.evaluate((a: HTMLAudioElement) => a.played.length), 'the clip never played').toBeGreaterThan(0)
+      expect(writes()).toEqual([])
+    })
+
+    test('the speaker badge is hidden at rest and shown on hover and on keyboard focus', async ({ page }) => {
+      await page.emulateMedia({ reducedMotion: 'reduce' })
+      await blockApiWrites(page)
+      await openPanel(page)
+      await expectBadgeFollowsHoverAndFocus(page, LAYA_PLAY)
     })
 
     test('a reachable server marks its loaded checkpoints and names its device', async ({ page }) => {
@@ -371,13 +406,14 @@ test.describe('UAT-23 decision providers', () => {
       expect(JSON.parse(value)).toEqual(['english'])
     })
 
-    test('the limits list shows while the server is unreachable', async ({ page }) => {
+    test('the limits link opens the user guide at Laya\'s limits', async ({ page }) => {
       const writes = await blockApiWrites(page)
       await openPanel(page)
-      await expect(page.getByTestId('decision-laya-status')).toHaveText('not reachable')
-      const limits = page.getByTestId('decision-laya-limits')
-      await expect(limits).toBeVisible()
-      await expect(limits.locator('li')).toHaveText(LAYA_LIMITS.map(l => `${l.topic}. ${layaLimitText(l)}`))
+      await page.getByTestId('decision-laya-limits-link').click()
+      await expect(page).toHaveURL(/\/guide#settings-laya-limits$/)
+      const heading = page.locator('#settings-laya-limits')
+      await expect(heading).toHaveText('Laya\'s limits')
+      await expect(heading).toBeInViewport()
       expect(writes()).toEqual([])
     })
   })

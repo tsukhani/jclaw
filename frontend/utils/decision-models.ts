@@ -39,8 +39,6 @@ export function layaContext(checkpoint: LayaCheckpoint): string {
 
 export interface LayaLimit {
   topic: string
-  /** A limit of running the server, which choosing a checkpoint as the classifier does not change. */
-  server?: boolean
   /** Each fact names where it comes from, so a measurement is never read as the vendor's claim. */
   facts: readonly { text: string, source: string }[]
 }
@@ -51,13 +49,10 @@ export function layaLimitText(limit: LayaLimit): string {
 }
 
 const MODEL_CARD = 'Laya\'s model card'
-const SERVER_DOCS = 'laya-serve\'s documentation'
 const MEASURED_ROUTER = 'measured 2026-10-13 on 40 written test prompts, not live traffic'
 const MEASURED_PROMPT = 'measured 2026-10-13 on one written test prompt'
-const MEASURED_CPU = 'english on CPU, measured 2026-10-13'
-const MEASURED_MEMORY = 'english, measured 2026-10-13 and 2026-10-14'
 
-/** One copy for the Laya card and the Model Router's classifier hint, so the two cannot disagree. */
+/** The limits a classifier choice takes on, for the Model Router's hint; the user guide's "Laya's limits" states them too, with the server's. */
 export const LAYA_LIMITS: readonly LayaLimit[] = [
   {
     topic: 'Context',
@@ -83,26 +78,5 @@ export const LAYA_LIMITS: readonly LayaLimit[] = [
   {
     topic: 'Language',
     facts: [{ text: 'english is English only.', source: MODEL_CARD }],
-  },
-  {
-    topic: 'Server',
-    server: true,
-    facts: [{ text: 'laya-serve listens on every interface with no key unless LAYA_HOST and LAYA_API_KEY are set.', source: SERVER_DOCS }],
-  },
-  {
-    topic: 'Memory',
-    server: true,
-    facts: [
-      { text: 'A loaded checkpoint held about 2.1 GB on CPU and 3.2 GB on an Apple GPU.', source: MEASURED_MEMORY },
-      { text: 'By default laya-serve loads all three checkpoints at start and keeps two loaded. LAYA_MODELS names the ones to load at start, and LAYA_MAX_LOADED caps how many stay loaded.', source: SERVER_DOCS },
-    ],
-  },
-  {
-    topic: 'Loading',
-    server: true,
-    facts: [
-      { text: 'A checkpoint not in memory is loaded on its first request, and downloaded first if it is not on disk.', source: MODEL_CARD },
-      { text: 'Loading english from disk took 2.4 s, so a first request can outlast a short classifier timeout; the keyword rules answer that turn.', source: MEASURED_CPU },
-    ],
   },
 ]

@@ -472,26 +472,52 @@ describe('Settings page — Decision Providers', () => {
   })
 
   describe('Laya card (JCLAW-1447)', () => {
-    const MODEL_CARD = '(Laya\'s model card)'
-    const SERVER_DOCS = '(laya-serve\'s documentation)'
-    const MEASURED_ROUTER = '(measured 2026-10-13 on 40 written test prompts, not live traffic)'
-    const MEASURED_PROMPT = '(measured 2026-10-13 on one written test prompt)'
-    const MEASURED_CPU = '(english on CPU, measured 2026-10-13)'
-    const MEASURED_MEMORY = '(english, measured 2026-10-13 and 2026-10-14)'
-
     /** Wrapped template text, as it reads on one line. */
     function words(text: string) {
       return text.replace(/\s+/g, ' ').trim()
     }
 
-    it('sits directly below the Ollama card, with no logo and no clip', async () => {
+    it('sits directly below the Ollama card', async () => {
       baseEndpoints()
       const component = await mountDecisionProviders()
       const ollamaCard = component.find('[data-testid="decision-provider-ollama"]').element
       expect(ollamaCard.nextElementSibling?.getAttribute('data-testid')).toBe('decision-provider-laya')
-      const card = component.find('[data-testid="decision-provider-laya"]')
-      expect(card.find('img').exists()).toBe(false)
-      expect(card.find('audio').exists()).toBe(false)
+    })
+
+    it('shows the Laya portrait beside the note, decorative and sized before it loads', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const portrait = component.find('[data-testid="decision-laya-portrait"]')
+      expect(portrait.attributes('src')).toBe('/laya.webp')
+      expect(portrait.attributes('alt')).toBe('')
+      expect([portrait.attributes('width'), portrait.attributes('height')]).toEqual(['200', '200'])
+      const play = component.find('[data-testid="decision-laya-play"]')
+      expect(play.find('[data-testid="decision-laya-portrait"]').exists()).toBe(true)
+      expect(play.element.nextElementSibling?.nextElementSibling?.getAttribute('data-testid')).toBe('decision-laya-about')
+    })
+
+    it('plays the Laya clip from the start when the portrait is clicked, fetching nothing before', async () => {
+      const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+      try {
+        baseEndpoints()
+        const component = await mountDecisionProviders()
+
+        const button = component.find('[data-testid="decision-laya-play"]')
+        expect(button.attributes('type')).toBe('button')
+        expect(button.attributes('aria-label')).toBe('Play Laya shouting “Liar!”')
+        expect(button.attributes('title')).toBe(button.attributes('aria-label'))
+        const audio = component.find('audio[src="/laya.mp3"]')
+        expect(audio.attributes('preload')).toBe('none')
+
+        ;(audio.element as HTMLAudioElement).currentTime = 0.5
+        await button.trigger('click')
+        expect(playSpy).toHaveBeenCalledTimes(1)
+        expect(playSpy.mock.contexts[0]).toBe(audio.element)
+        expect((audio.element as HTMLAudioElement).currentTime).toBe(0)
+      }
+      finally {
+        playSpy.mockRestore()
+      }
     })
 
     it('says the operator runs the server and the prompt goes only to it', async () => {
@@ -504,31 +530,20 @@ describe('Settings page — Decision Providers', () => {
       expect(component.find('[data-testid="decision-provider-laya"]').text()).not.toContain('record or retain')
     })
 
-    it('lists every limit with the source of each fact', async () => {
+    it('points to Laya\'s limits in the user guide instead of listing them', async () => {
       baseEndpoints()
       const component = await mountDecisionProviders()
-      const limits = component.find('[data-testid="decision-laya-limits"]').findAll('li').map(li => words(li.text()))
-      expect(limits).toEqual([
-        `Context. english reads 512 tokens per question, multilingual and typed-decisions 1,024. Text past that is cut, not refused. ${MODEL_CARD} `
-        + 'The router\'s class question and its options take about 170 of them: english read 343 of the 619 tokens in a 3,100-character prompt, '
-        + `and the 1,024-token checkpoints read all of it. ${MEASURED_PROMPT}`,
-        `Accuracy. Its makers call it “a fast base to specialise, not a zero-shot decision engine”. ${MODEL_CARD} `
-        + 'english chose the right class for 33 of 40 prompts, the same as the keyword rules; typed-decisions for 31; '
-        + `multilingual for 23, wrong at probabilities up to 0.96. ${MEASURED_ROUTER}`,
-        `Confidence. Over-confident as shipped. ${MODEL_CARD} `
-        + `At a minimum confidence of 0.50, multilingual answered 34 of the 40 prompts and was right on 20 of them. ${MEASURED_ROUTER}`,
-        `Language. english is English only. ${MODEL_CARD}`,
-        `Server. laya-serve listens on every interface with no key unless LAYA_HOST and LAYA_API_KEY are set. ${SERVER_DOCS}`,
-        `Memory. A loaded checkpoint held about 2.1 GB on CPU and 3.2 GB on an Apple GPU. ${MEASURED_MEMORY} `
-        + 'By default laya-serve loads all three checkpoints at start and keeps two loaded. LAYA_MODELS names the ones to load at start, '
-        + `and LAYA_MAX_LOADED caps how many stay loaded. ${SERVER_DOCS}`,
-        `Loading. A checkpoint not in memory is loaded on its first request, and downloaded first if it is not on disk. ${MODEL_CARD} `
-        + 'Loading english from disk took 2.4 s, so a first request can outlast a short classifier timeout; '
-        + `the keyword rules answer that turn. ${MEASURED_CPU}`,
-      ])
+      const card = component.find('[data-testid="decision-provider-laya"]')
+      const link = card.find('[data-testid="decision-laya-limits-link"]')
+      expect(link.attributes('href')).toBe('/guide#settings-laya-limits')
+      expect(words(component.find('[data-testid="decision-laya-about"]').text()))
+        .toContain('Read Laya\'s limits in the user guide before you rely on it.')
+      for (const fact of ['zero-shot', 'Over-confident', 'English only', 'LAYA_HOST', 'LAYA_MAX_LOADED', '2.4 s']) {
+        expect(card.text()).not.toContain(fact)
+      }
     })
 
-    it('with the server not running, still states each checkpoint\'s context, the cut and the limits', async () => {
+    it('with the server not running, still states each checkpoint\'s context and the cut', async () => {
       laya = { baseUrl: 'http://localhost:8000', reachable: false, error: 'not reachable (ConnectException)', loaded: [], device: null }
       baseEndpoints()
       const component = await mountDecisionProviders()
@@ -541,7 +556,6 @@ describe('Settings page — Decision Providers', () => {
       expect(words(component.find('[data-testid="decision-laya-cut"]').text())).toBe(
         'Each reads that many tokens per question; a longer prompt is cut, not refused (Laya\'s model card). '
         + 'Only a ticked checkpoint can be the Model Router\'s classifier, and the one it is using cannot be unticked.')
-      expect(component.find('[data-testid="decision-laya-limits"]').findAll('li')).toHaveLength(7)
     })
 
     it('marks the checkpoints the server has loaded, and names its device', async () => {

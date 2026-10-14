@@ -141,8 +141,6 @@ const layaOptions = computed(() => tickedLayaCheckpoints(configValue('decision.l
 const layaClassifier = computed(() => configValue('router.classifier.provider').trim() === 'laya'
   ? LAYA_CHECKPOINTS.find(c => c.name === configValue('router.classifier.model').trim())
   : undefined)
-// The limits of running the server stay on its card; these are the ones a classifier choice takes on.
-const layaClassifierLimits = LAYA_LIMITS.filter(l => !l.server)
 
 async function saveClassifier(value: string) {
   saving.value = true
@@ -463,17 +461,17 @@ function usageTone(fraction: number): string {
           </p>
           <ul class="list-disc pl-4 space-y-1">
             <li
-              v-for="limit in layaClassifierLimits"
+              v-for="limit in LAYA_LIMITS"
               :key="limit.topic"
             >
               <span class="font-medium text-fg-strong">{{ limit.topic }}.</span> {{ layaLimitText(limit) }}
             </li>
           </ul>
           <p>
-            The limits of running its server are on the Laya card in <NuxtLink
-              to="/settings?section=decision-providers"
+            The limits of running its server are under <NuxtLink
+              to="/guide#settings-laya-limits"
               class="text-fg-strong underline"
-            >Settings → Decision Providers</NuxtLink>.
+            >Laya's limits</NuxtLink> in the user guide.
           </p>
         </div>
       </div>
