@@ -59,17 +59,17 @@ class ProviderRedirectScreenTest extends UnitTest {
     }
 
     @Test
-    void generalGuardedRefusesARedirectToABlockedLiteral() throws Exception {
+    void generalGuardedRefusesARedirectToABlockedLiteral() {
         assertRedirectRefused("generalGuarded", HttpFactories.generalGuarded());
     }
 
     @Test
-    void llmSingleShotGuardedRefusesARedirectToABlockedLiteral() throws Exception {
+    void llmSingleShotGuardedRefusesARedirectToABlockedLiteral() {
         assertRedirectRefused("llmSingleShotGuarded", HttpFactories.llmSingleShotGuarded());
     }
 
     @Test
-    void llmStreamingGuardedRefusesARedirectToABlockedLiteral() throws Exception {
+    void llmStreamingGuardedRefusesARedirectToABlockedLiteral() {
         assertRedirectRefused("llmStreamingGuarded", HttpFactories.llmStreamingGuarded());
     }
 
@@ -181,7 +181,7 @@ class ProviderRedirectScreenTest extends UnitTest {
     }
 
     /** 302 turns the POST into a GET and 307 keeps it and its body: both must stop before the blocked hop. */
-    private void assertRedirectRefused(String name, OkHttpClient client) throws Exception {
+    private void assertRedirectRefused(String name, OkHttpClient client) {
         for (int code : new int[] {302, 307}) {
             front.enqueue(redirect(code, blockedHop()));
             behind.enqueue(new MockResponse.Builder().code(200).body("metadata").build());
