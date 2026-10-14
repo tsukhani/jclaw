@@ -5,6 +5,7 @@ import models.Message;
 import models.MessageAttachment;
 import models.MessageRole;
 import models.SessionCompaction;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -30,6 +31,15 @@ class ApiConversationsControllerTest extends FunctionalTest {
     void setup() {
         Fixtures.deleteDatabase();
         AuthFixture.seedAdminPassword("changeme");
+    }
+
+    // The registry caches for 60 s past deleteDatabase, so a provider seeded here would answer the turns of later tests.
+    @AfterEach
+    void unregisterOpenRouterProvider() {
+        services.ConfigService.delete("provider.openrouter.baseUrl");
+        services.ConfigService.delete("provider.openrouter.apiKey");
+        services.ConfigService.delete("provider.openrouter.models");
+        llm.ProviderRegistry.refresh();
     }
 
     // --- Auth helper ---
@@ -1011,7 +1021,8 @@ class ApiConversationsControllerTest extends FunctionalTest {
 
     private void seedOpenRouterProvider(String modelsJson) {
         commitInFreshTx(() -> {
-            services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+            // Port 1 refuses, so a turn that reaches this provider fails at once instead of calling openrouter.ai.
+            services.ConfigService.set("provider.openrouter.baseUrl", "http://127.0.0.1:1/v1");
             services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
             services.ConfigService.set("provider.openrouter.models", modelsJson);
             return null;

@@ -1,5 +1,6 @@
 import com.google.gson.JsonParser;
 import models.Agent;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -22,6 +23,15 @@ class ApiAgentsControllerTest extends FunctionalTest {
     void setup() {
         Fixtures.deleteDatabase();
         AuthFixture.seedAdminPassword("changeme");
+    }
+
+    // The registry caches for 60 s past deleteDatabase, and a cached provider is getPrimary() for the classes after this one.
+    @AfterEach
+    void unregisterFallbackProvider() {
+        services.ConfigService.delete("provider.together.baseUrl");
+        services.ConfigService.delete("provider.together.apiKey");
+        services.ConfigService.delete("provider.together.models");
+        llm.ProviderRegistry.refresh();
     }
 
     // --- Auth + helpers ---
@@ -195,9 +205,9 @@ class ApiAgentsControllerTest extends FunctionalTest {
     // Fallback provider and model (JCLAW-1190)
     // =====================
 
-    /** Register a second provider with one model, so a fallback onto it validates. */
+    /** Register a second provider with one model, so a fallback onto it validates; port 1 refuses, so no turn reaches a real API. */
     private void seedFallbackProvider() {
-        services.ConfigService.set("provider.together.baseUrl", "https://api.together.xyz/v1");
+        services.ConfigService.set("provider.together.baseUrl", "http://127.0.0.1:1/v1");
         services.ConfigService.set("provider.together.apiKey", "sk-test");
         services.ConfigService.set("provider.together.models",
                 "[{\"id\":\"fb-model\",\"name\":\"Fallback\",\"contextWindow\":8000,\"maxTokens\":512}]");
