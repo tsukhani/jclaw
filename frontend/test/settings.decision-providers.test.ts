@@ -262,11 +262,12 @@ describe('Settings page — Decision Providers', () => {
   })
 
   describe('Ollama card (JCLAW-1336)', () => {
-    it('sits directly below the JEV card', async () => {
+    it('is the last card, directly below the Laya card', async () => {
       baseEndpoints()
       const component = await mountDecisionProviders()
-      const jev = component.find('[data-testid="decision-provider-jev"]').element
-      expect(jev.nextElementSibling?.getAttribute('data-testid')).toBe('decision-provider-ollama')
+      const laya = component.find('[data-testid="decision-provider-laya"]').element
+      expect(laya.nextElementSibling?.getAttribute('data-testid')).toBe('decision-provider-ollama')
+      expect(laya.nextElementSibling?.nextElementSibling).toBeNull()
     })
 
     it('says the prompt goes only to the operator\'s server, without JEV\'s retention notice', async () => {
@@ -477,11 +478,11 @@ describe('Settings page — Decision Providers', () => {
       return text.replace(/\s+/g, ' ').trim()
     }
 
-    it('sits directly below the Ollama card', async () => {
+    it('sits directly below the JEV card', async () => {
       baseEndpoints()
       const component = await mountDecisionProviders()
-      const ollamaCard = component.find('[data-testid="decision-provider-ollama"]').element
-      expect(ollamaCard.nextElementSibling?.getAttribute('data-testid')).toBe('decision-provider-laya')
+      const jev = component.find('[data-testid="decision-provider-jev"]').element
+      expect(jev.nextElementSibling?.getAttribute('data-testid')).toBe('decision-provider-laya')
     })
 
     it('shows the Laya portrait beside the note, decorative and sized before it loads', async () => {

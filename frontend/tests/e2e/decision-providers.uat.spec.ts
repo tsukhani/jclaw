@@ -23,8 +23,8 @@ const LAYA_PLAY = { name: 'Play Laya shouting “Liar!”' }
 /** Each card's picture and clip, which the picture tests below check alike. */
 const CARDS = [
   { name: 'JEV', image: 'decision-jev-portrait', note: 'decision-jev-retention', clip: '/jev.mp3', play: PLAY },
-  { name: 'Ollama', image: 'decision-ollama-logo', note: 'decision-ollama-privacy', clip: '/ollama.mp3', play: OLLAMA_PLAY },
   { name: 'Laya', image: 'decision-laya-portrait', note: 'decision-laya-about', clip: '/laya.mp3', play: LAYA_PLAY },
+  { name: 'Ollama', image: 'decision-ollama-logo', note: 'decision-ollama-privacy', clip: '/ollama.mp3', play: OLLAMA_PLAY },
 ] as const
 
 async function openPanel(page: Page) {
@@ -64,6 +64,21 @@ async function expectBadgeFollowsHoverAndFocus(page: Page, play: { name: string 
   await page.keyboard.press('Tab')
   await expect(button).toBeFocused()
   await expect.poll(opacity).toBe('1')
+}
+
+/** `lower` is the element right after `upper`, laid out beneath it in the same column. */
+async function expectDirectlyBelow(page: Page, upper: string, lower: string) {
+  // One evaluate, so both rects come from one layout: a card grows as its reads land.
+  const { next, above, below } = await page.evaluate(({ a, b }) => {
+    const box = (id: string) => {
+      const { x, y, height } = document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect()
+      return { x, y, height }
+    }
+    return { next: document.querySelector<HTMLElement>(`[data-testid="${a}"] + *`)?.dataset.testid, above: box(a), below: box(b) }
+  }, { a: upper, b: lower })
+  expect(next).toBe(lower)
+  expect(below.x).toBe(above.x)
+  expect(below.y).toBeGreaterThanOrEqual(above.y + above.height)
 }
 
 const DECISION_MODELS = ['tev1:latest', 'nimble:latest']
@@ -189,15 +204,14 @@ test.describe('UAT-23 decision providers', () => {
     // The panel re-reads the config after a write, so a stubConfig route.fetch() can still be in flight at teardown.
     test.afterEach(({ page }) => page.unrouteAll({ behavior: 'ignoreErrors' }))
 
-    test('renders below the JEV card', async ({ page }) => {
+    test('renders last, directly below the Laya card', async ({ page }) => {
       await stubOllama(page, REACHABLE)
       await stubConfig(page)
       const writes = await blockApiWrites(page)
       await openPanel(page)
-      const ollama = page.getByTestId('decision-provider-ollama')
-      await expect(ollama).toBeVisible()
-      const [jevBox, ollamaBox] = await Promise.all([page.getByTestId('decision-provider-jev').boundingBox(), ollama.boundingBox()])
-      expect(ollamaBox!.y).toBeGreaterThanOrEqual(jevBox!.y + jevBox!.height)
+      await expect(page.getByTestId('decision-provider-ollama')).toBeVisible()
+      await expectDirectlyBelow(page, 'decision-provider-laya', 'decision-provider-ollama')
+      await expect(page.locator('[data-testid="decision-provider-ollama"] + *')).toHaveCount(0)
       expect(writes()).toEqual([])
     })
 
@@ -270,22 +284,13 @@ test.describe('UAT-23 decision providers', () => {
     // The panel re-reads the config after a write, so a stubConfig route.fetch() can still be in flight at teardown.
     test.afterEach(({ page }) => page.unrouteAll({ behavior: 'ignoreErrors' }))
 
-    test('renders directly below the Ollama card', async ({ page }) => {
+    test('renders directly below the JEV card', async ({ page }) => {
       await stubOllama(page, REACHABLE)
       const writes = await blockApiWrites(page)
       await openPanel(page)
-      const ollama = page.getByTestId('decision-provider-ollama')
-      const laya = page.getByTestId('decision-provider-laya')
-      await expect(laya).toBeVisible()
+      await expect(page.getByTestId('decision-provider-laya')).toBeVisible()
       await expect(page.getByTestId('decision-laya-address')).toContainText(LAYA_DOWN.baseUrl)
-      expect(await ollama.evaluate(el => el.nextElementSibling?.getAttribute('data-testid'))).toBe('decision-provider-laya')
-      // One evaluate, so both rects come from one layout: the Ollama card grows as its reads land.
-      const [ollamaBox, layaBox] = await page.evaluate(() => ['decision-provider-ollama', 'decision-provider-laya'].map((id) => {
-        const { x, y, height } = document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect()
-        return { x, y, height }
-      }))
-      expect(layaBox!.x).toBe(ollamaBox!.x)
-      expect(layaBox!.y).toBeGreaterThanOrEqual(ollamaBox!.y + ollamaBox!.height)
+      await expectDirectlyBelow(page, 'decision-provider-jev', 'decision-provider-laya')
       expect(writes()).toEqual([])
     })
 
