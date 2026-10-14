@@ -363,7 +363,7 @@ Both features share one **circuit breaker**, shown on the card once JEV has been
 The **Ollama** card is for System One decision models, such as `tev1` and `nimble`, running on your own Ollama server. Its card shows **reachable** or **not reachable** for that server.
 
 - **Server address** defaults to the Ollama Local LLM provider's server without `/v1` (marked **from Ollama Local**), or `http://localhost:11434` when Ollama Local has none. **Change** sets a different one; JClaw stores the address only when it differs from that default.
-- **Decision models** lists the installed models whose Ollama capabilities include `decision`. Tick the ones you want; only a ticked model can be chosen as the Model Router's classifier. A ticked model the server no longer lists stays, marked **not installed**, so you can clear it.
+- **Decision models** lists the installed models whose Ollama capabilities include `decision`. Tick the ones you want; only a ticked model can be chosen as the Model Router's classifier. You cannot untick the model the Model Router is using; choose another classifier there first. A ticked model the server no longer lists stays, marked **not installed**, so you can clear it.
 - **Used by** lists the [Model Router](#settings-model-router)'s prompt classifier, marked **in use** with the model's name when the classifier is one of these models. It sends the first 4000 characters of each prompt, only to this server.
 
 | Key                         | Default   | Meaning                                                                                          |

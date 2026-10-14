@@ -352,6 +352,59 @@ describe('Settings page — Decision Providers', () => {
       await vi.waitFor(() => expect(deleted).toEqual(['decision.ollama.models']))
     })
 
+    it('the model the Model Router is using cannot be unticked, the card says why, and the others still can', async () => {
+      stored.set('decision.ollama.models', JSON.stringify(['tev1:latest', 'nimble:latest']))
+      stored.set('router.classifier.provider', 'ollama-decision')
+      stored.set('router.classifier.model', 'tev1:latest')
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const box = (name: string) => component.find(`[data-testid="decision-ollama-model-${name}"] input`)
+      await vi.waitFor(() => expect((box('tev1:latest').element as HTMLInputElement).checked).toBe(true))
+      expect(box('tev1:latest').attributes('disabled')).toBeDefined()
+      expect(box('nimble:latest').attributes('disabled')).toBeUndefined()
+      expect(component.find('[data-testid="decision-ollama-selection"]').text().replace(/\s+/g, ' ')).toBe(
+        'Only a ticked model can be the Model Router\'s classifier, and the one it is using cannot be unticked.')
+
+      await box('nimble:latest').setValue(false)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.models', value: '["tev1:latest"]' }]))
+    })
+
+    it('a model the Model Router names but nobody ticked can still be ticked', async () => {
+      stored.set('router.classifier.provider', 'ollama-decision')
+      stored.set('router.classifier.model', 'tev1:latest')
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const box = () => component.find('[data-testid="decision-ollama-model-tev1:latest"] input')
+      await vi.waitFor(() => expect(box().exists()).toBe(true))
+      expect(box().attributes('disabled')).toBeUndefined()
+
+      await box().setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.models', value: '["tev1:latest"]' }]))
+      // Every box is disabled while the save runs, so wait for an unlocked one to clear first.
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-model-nimble:latest"] input').attributes('disabled')).toBeUndefined())
+      expect(box().attributes('disabled')).toBeDefined()
+    })
+
+    it('a refused selection puts the box back to what is stored, with the reason on the card', async () => {
+      ollama = { ...ollama, models: ['tev1:latest', 'tev1:0.8b', 'nimble:latest'] }
+      stored.set('decision.ollama.models', JSON.stringify(['tev1:latest', 'nimble:latest']))
+      baseEndpoints({ failSaves: true })
+      const component = await mountDecisionProviders()
+      const box = (name: string) => component.find(`[data-testid="decision-ollama-model-${name}"] input`)
+      await vi.waitFor(() => expect((box('nimble:latest').element as HTMLInputElement).checked).toBe(true))
+
+      await box('tev1:0.8b').setValue(true)
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-provider-ollama"] [data-testid="api-error"]').exists()).toBe(true))
+      await vi.waitFor(() => expect(box('tev1:0.8b').attributes('disabled')).toBeUndefined())
+      expect((box('tev1:0.8b').element as HTMLInputElement).checked).toBe(false)
+
+      // Unticking one of two is a POST too; unticking the last is a DELETE, which this fixture does not refuse.
+      await box('nimble:latest').setValue(false)
+      await vi.waitFor(() => expect(posted).toHaveLength(2))
+      await vi.waitFor(() => expect(box('nimble:latest').attributes('disabled')).toBeUndefined())
+      expect((box('nimble:latest').element as HTMLInputElement).checked).toBe(true)
+    })
+
     it('keeps a selected model the server no longer lists, so it can be cleared', async () => {
       stored.set('decision.ollama.models', JSON.stringify(['tev1:0.8b']))
       baseEndpoints()
@@ -367,6 +420,7 @@ describe('Settings page — Decision Providers', () => {
       await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-status"]').text()).toBe('not reachable'))
       expect(component.find('[data-testid="decision-ollama-error"]').text()).toBe('not reachable (ConnectException)')
       expect(component.find('[data-testid="decision-ollama-models"]').findAll('label')).toHaveLength(0)
+      expect(component.find('[data-testid="decision-ollama-selection"]').exists()).toBe(false)
       expect(component.find('[data-testid="decision-ollama-address"]').text()).not.toContain('from Ollama Local')
     })
 

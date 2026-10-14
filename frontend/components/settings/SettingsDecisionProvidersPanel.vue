@@ -80,16 +80,18 @@ const modelChoices = computed(() => {
   ]
 })
 
-async function toggleModel(name: string, selected: boolean) {
-  const next = selected
+async function toggleModel(name: string, box: HTMLInputElement) {
+  const next = box.checked
     ? [...selectedModels.value, name]
     : selectedModels.value.filter(m => m !== name)
   saving.value = true
-  await attempt(async () => {
+  const saved = await attempt(async () => {
     if (next.length === 0) await $fetch(`/api/config/${OLLAMA_MODELS}`, { method: 'DELETE' })
     else await $fetch('/api/config', { method: 'POST', body: { key: OLLAMA_MODELS, value: JSON.stringify(next) } })
   })
   await refresh()
+  // Vue does not re-patch a `checked` that never changed, so a refused write would leave the box as clicked.
+  if (!saved) box.checked = selectedModels.value.includes(name)
   saving.value = false
 }
 
@@ -97,6 +99,12 @@ const routerOllamaModel = computed(() =>
   configValue('router.classifier.provider').trim() === OLLAMA_PROVIDER
     ? configValue('router.classifier.model').trim()
     : '')
+
+// Only while ticked, so a router model stored unticked can still be ticked.
+function lockedByRouter(name: string) {
+  return routerOllamaModel.value === name && selectedModels.value.includes(name)
+}
+
 const ollamaBreaker = computed(() => breakersByName.value.get('decision:ollama'))
 
 // JCLAW-1447: the operator's laya-serve. JClaw calls its address and starts nothing.
@@ -471,8 +479,8 @@ function playClip(audio: HTMLAudioElement | undefined) {
                 :id="`decision-ollama-model-${m.name}`"
                 type="checkbox"
                 :checked="selectedModels.includes(m.name)"
-                :disabled="saving"
-                @change="toggleModel(m.name, ($event.target as HTMLInputElement).checked)"
+                :disabled="saving || lockedByRouter(m.name)"
+                @change="toggleModel(m.name, $event.target as HTMLInputElement)"
               >
               <span class="font-mono">{{ m.name }}</span>
               <span
@@ -480,6 +488,13 @@ function playClip(audio: HTMLAudioElement | undefined) {
                 class="text-xs text-fg-muted"
               >not installed</span>
             </label>
+            <p
+              v-if="modelChoices.length > 0"
+              class="text-xs text-fg-muted"
+              data-testid="decision-ollama-selection"
+            >
+              Only a ticked model can be the Model Router's classifier, and the one it is using cannot be unticked.
+            </p>
           </div>
         </div>
         <div

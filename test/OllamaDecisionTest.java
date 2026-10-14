@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.decision.DecisionSettings;
 import services.decision.JevApi;
 import services.decision.OllamaDecision;
 import utils.CircuitBreaker;
@@ -650,6 +651,30 @@ class OllamaDecisionTest extends UnitTest {
         assertTrue(requests.isEmpty());
         assertFalse(status.reachable());
         assertNotNull(status.error());
+    }
+
+    @Test
+    void statusOfAnAddressTheWriteCheckPassesAndOkHttpCannotBuildIsNotReachable() {
+        var address = "http://localhost:99999";
+        assertNull(DecisionSettings.rejectionFor(OllamaDecision.BASE_URL_KEY, address), "the write check lets it through");
+        var status = withOllama(chain -> reply(chain, 200, TAGS), () -> OllamaDecision.status(address));
+        assertTrue(requests.isEmpty());
+        assertEquals(new OllamaDecision.Status(address, false, "not a usable address", List.of()), status);
+    }
+
+    @Test
+    void everyOtherCallOnAnAddressOkHttpCannotBuildAnswersAsIfUnreachable() {
+        ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
+        var address = "http://localhost:99999";
+        Answer any = chain -> reply(chain, 200, INSTALLED);
+        assertAll(
+                () -> assertFalse(withOllama(any, () -> OllamaDecision.pin(address, "tev1")).get(1, TimeUnit.SECONDS)),
+                () -> assertFalse(withOllama(any, () -> OllamaDecision.pin(address, "tev1")).get(1, TimeUnit.SECONDS),
+                        "no pin is left in flight"),
+                () -> assertNull(withOllama(any, () -> OllamaDecision.digest(address, "tev1"))),
+                () -> assertEquals(List.of(), withOllama(any, () -> OllamaDecision.unloadUnused(address, null))),
+                () -> assertFalse(withOllama(any, () -> OllamaDecision.stillLoading(address, "tev1"))));
+        assertTrue(requests.isEmpty());
     }
 
     @Test
