@@ -5,8 +5,15 @@ import okhttp3.OkHttpClient;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
+import javax.net.SocketFactory;
+
+import java.io.IOException;
 import java.net.Inet6Address;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.net.SocketAddress;
+import java.net.SocketException;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.HashMap;
@@ -621,6 +628,70 @@ public final class SsrfGuard {
     };
 
     /**
+     * {@link SocketFactory} wired in beside {@link #PROVIDER_SAFE_DNS}: its sockets refuse an
+     * {@link #isBlockedForProvider} address before the TCP handshake. OkHttp hands the resolver names only, so
+     * without it an IP literal, configured or named by a redirect's {@code Location}, is dialled unscreened
+     * (JCLAW-1448). Redirects stay on: a hop to an allowed address is followed exactly as before.
+     */
+    public static final SocketFactory PROVIDER_SAFE_SOCKETS = new SocketFactory() {
+        @Override
+        public Socket createSocket() {
+            return providerSafeSocket();
+        }
+
+        @Override
+        public Socket createSocket(String host, int port) throws IOException {
+            return connected(new InetSocketAddress(host, port), null);
+        }
+
+        @Override
+        public Socket createSocket(String host, int port, InetAddress localHost, int localPort) throws IOException {
+            return connected(new InetSocketAddress(host, port), new InetSocketAddress(localHost, localPort));
+        }
+
+        @Override
+        public Socket createSocket(InetAddress host, int port) throws IOException {
+            return connected(new InetSocketAddress(host, port), null);
+        }
+
+        @Override
+        public Socket createSocket(InetAddress address, int port, InetAddress localAddress, int localPort)
+                throws IOException {
+            return connected(new InetSocketAddress(address, port), new InetSocketAddress(localAddress, localPort));
+        }
+
+        private static Socket connected(InetSocketAddress remote, @Nullable InetSocketAddress local)
+                throws IOException {
+            var socket = providerSafeSocket();
+            try {
+                if (local != null) socket.bind(local);
+                socket.connect(remote);
+                return socket;
+            } catch (IOException e) {
+                socket.close();
+                throw e;
+            }
+        }
+    };
+
+    private static Socket providerSafeSocket() {
+        return new Socket() {
+            @Override
+            public void connect(SocketAddress endpoint, int timeout) throws IOException {
+                // An unresolved endpoint has no address to screen, and Socket.connect refuses one itself.
+                if (endpoint instanceof InetSocketAddress target && target.getAddress() instanceof InetAddress address
+                        && isBlockedForProvider(address)) {
+                    close();
+                    // Not a ConnectException: OkHttp rewraps that as "Failed to connect to …" and buries the reason.
+                    throw new SocketException(
+                            "SSRF guard: refused to connect to blocked address " + address.getHostAddress());
+                }
+                super.connect(endpoint, timeout);
+            }
+        };
+    }
+
+    /**
      * Pre-connect screen for an agent-settable provider/MCP URL: validate the
      * scheme and, if the host is a literal IP, that it is not in a
      * {@link #isBlockedForProvider} range. Callers invoke this before opening
@@ -629,7 +700,8 @@ public final class SsrfGuard {
      * <p>Mirrors the strict {@link #assertSafeScheme} split: literal-IP hosts
      * are checked here because OkHttp's {@link #PROVIDER_SAFE_DNS} callback
      * never fires for an already-resolved literal (so {@code
-     * http://169.254.169.254/} would otherwise slip through), while hostname
+     * http://169.254.169.254/} would otherwise fail only at connect, in
+     * {@link #PROVIDER_SAFE_SOCKETS}), while hostname
      * resolution is screened at connect by {@link #PROVIDER_SAFE_DNS}. This
      * method deliberately does <em>not</em> resolve hostnames — a not-yet-live
      * provider host must still save/validate, and rebinding is covered at
