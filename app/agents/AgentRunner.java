@@ -1,6 +1,7 @@
 package agents;
 
 import channels.ChannelStreamingSink;
+import llm.FallbackTurn;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolDef;
 import llm.ProviderRegistry;
@@ -62,6 +63,13 @@ public class AgentRunner {
      */
     static final String NO_LLM_PROVIDER_ERROR =
             "No LLM provider configured. Add provider config via Settings.";
+
+    /** What a turn nothing can serve says: {@link #NO_LLM_PROVIDER_ERROR}, naming the provider when the turn has one. */
+    static String missingProviderError(@Nullable String providerName) {
+        if (providerName == null) return NO_LLM_PROVIDER_ERROR;
+        return ("No LLM provider configured: '%s' is not set up, and this agent has no configured fallback. "
+                + "Add it in Settings, or give the agent another provider or a fallback.").formatted(providerName);
+    }
 
     /**
      * Canned response returned when an inbound message can't acquire the conversation queue.
@@ -490,7 +498,10 @@ public class AgentRunner {
             Tx.run(() -> sink.appendAssistantMessage(TurnRouting.ROUTER_UNAVAILABLE_ERROR, null));
             return new ToolCallLoopRunner.LoopOutcome(TurnRouting.ROUTER_UNAVAILABLE_ERROR);
         }
-        if (route == null) return runTaskTurn(agent, userPrompt, sink, allowedTools, taskName, stubConv);
+        if (route == null) {
+            return FallbackTurn.run(agent, stubConv,
+                    () -> runTaskTurn(agent, userPrompt, sink, allowedTools, taskName, stubConv));
+        }
         return RoutedTurn.callWith(route, stubConv,
                 () -> runTaskTurn(agent, userPrompt, sink, allowedTools, taskName, stubConv));
     }
@@ -515,7 +526,7 @@ public class AgentRunner {
     }
 
     // The pin rides the conversation override, so routing, the fire log and the call all see it.
-    // A pin naming an unconfigured provider would otherwise reach getPrimary() with a foreign model id.
+    // A pin naming an unconfigured provider is dropped, so the fire runs on the agent's own model rather than failing.
     private static void applyTaskModelPin(Conversation stubConv, Agent agent, @Nullable String taskName,
                                           @Nullable String provider, @Nullable String modelId) {
         if (provider == null || modelId == null) return;
@@ -559,10 +570,9 @@ public class AgentRunner {
         messages = new ArrayList<>(CurrentTimeInjector.inject(messages));
 
         var providerName = ModelResolver.effectiveModelProvider(agent, stubConv);
-        var agentProvider = providerName != null ? ProviderRegistry.get(providerName) : null;
-        var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
+        var primary = providerName != null ? ProviderRegistry.get(providerName) : null;
         if (primary == null) {
-            var error = NO_LLM_PROVIDER_ERROR;
+            var error = missingProviderError(providerName);
             EventLogger.error("llm", agent.name, null, error);
             Tx.run(() -> sink.appendAssistantMessage(error, null));
             return new ToolCallLoopRunner.LoopOutcome(error);
@@ -656,7 +666,8 @@ public class AgentRunner {
                         Tx.run(() -> ConversationService.findById(conversationId)));
             }
             if (route == null) {
-                return runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace);
+                return FallbackTurn.run(agent, conversation,
+                        () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace));
             }
             return RoutedTurn.callWith(route, conversation,
                     () -> runPreparedTurn(agent, conversation, userMessage, attachments, skipUserAppend, sink, trace));
@@ -686,7 +697,7 @@ public class AgentRunner {
                 skipUserAppend, conversationId, sink, trace);
 
         if (preparedOpt.isEmpty()) {
-            return new RunResult(NO_LLM_PROVIDER_ERROR,
+            return new RunResult(missingProviderError(ModelResolver.effectiveModelProvider(agent, conversation)),
                     Tx.run(() -> ConversationService.findById(conversationId)));
         }
         var prepared = preparedOpt.get();

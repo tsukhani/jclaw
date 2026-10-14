@@ -736,6 +736,29 @@ class AgentServiceTest extends UnitTest {
                 "agent whose provider+model is configured must be flipped to enabled");
     }
 
+    @Test
+    void syncEnabledStatesKeepsAnAgentWhoseProviderIsGoneButWhoseFallbackIsConfigured() {
+        services.ConfigService.set("provider.openrouter.baseUrl", "http://127.0.0.1:1/api/v1");
+        services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
+        services.ConfigService.set("provider.openrouter.models",
+                "[{\"id\":\"sync-fallback-model\",\"name\":\"X\",\"contextWindow\":1000,\"maxTokens\":100}]");
+        llm.ProviderRegistry.refresh();
+
+        var agent = AgentService.create("svc-sync-fallback", "removed-provider", "removed-model");
+        services.Tx.run(() -> {
+            Agent a = (Agent) Agent.findById(agent.id);
+            a.fallbackProvider = "openrouter";
+            a.fallbackModelId = "sync-fallback-model";
+            a.enabled = false;
+            a.save();
+            return null;
+        });
+
+        AgentService.syncEnabledStates();
+        Agent reread = services.Tx.run(() -> (Agent) Agent.findById(agent.id));
+        assertTrue(reread.enabled, "its turns run on the fallback, so the agent stays usable");
+    }
+
     // --- supportsVision branch coverage ---
 
     @Test

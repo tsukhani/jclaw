@@ -334,8 +334,9 @@ public class AgentService {
 
     /**
      * Syncs the enabled state of all agents based on current provider configuration.
-     * Agents whose provider+model are configured get enabled; others get disabled.
-     * The main agent is exempt — it is always enabled regardless of provider state.
+     * Agents whose provider+model, or whose fallback provider+model, are configured get enabled;
+     * others get disabled. The fallback counts because a turn whose provider is gone runs on it
+     * ({@link llm.FallbackTurn}). The main agent is exempt — it is always enabled regardless of provider state.
      */
     public static void syncEnabledStates() {
         ProviderRegistry.refresh();
@@ -350,7 +351,8 @@ public class AgentService {
                 if (!agent.enabled) toEnable.add(agent.id);
                 continue;
             }
-            var shouldBeEnabled = configuredKeys.contains(agent.modelProvider + ":" + agent.modelId);
+            var shouldBeEnabled = configuredKeys.contains(agent.modelProvider + ":" + agent.modelId)
+                    || configuredKeys.contains(agent.fallbackProvider + ":" + agent.fallbackModelId);
             if (agent.enabled != shouldBeEnabled) {
                 (shouldBeEnabled ? toEnable : toDisable).add(agent.id);
             }

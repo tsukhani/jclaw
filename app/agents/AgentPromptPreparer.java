@@ -126,10 +126,9 @@ final class AgentPromptPreparer {
             // from agent.modelProvider directly. Downstream helpers that take
             // (agent, conv, provider) compute their own effective model id.
             var providerName = ModelResolver.effectiveModelProvider(agent, conv);
-            var agentProvider = providerName != null ? ProviderRegistry.get(providerName) : null;
-            var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
+            var primary = providerName != null ? ProviderRegistry.get(providerName) : null;
             if (primary == null) {
-                var error = AgentRunner.NO_LLM_PROVIDER_ERROR;
+                var error = AgentRunner.missingProviderError(providerName);
                 EventLogger.error("llm", agent.name, null, error);
                 sink.appendAssistantMessage(error, null);
                 return Optional.empty();

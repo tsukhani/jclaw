@@ -2,6 +2,7 @@ package slash;
 
 import channels.TelegramModelSelector;
 import com.google.gson.JsonParser;
+import llm.LlmProvider;
 import llm.LlmTypes.ModelInfo;
 import llm.ProviderRegistry;
 import llm.routing.ModelRouter;
@@ -470,20 +471,28 @@ public final class Commands {
             return new Result(null, fallback, Command.COMPACT);
         }
 
-        // Provider selection mirrors AgentRunner.run: override → agent default → registry primary.
+        // Provider selection mirrors AgentRunner.run: override → agent default → the agent's own fallback.
         // The router (JCLAW-1222) resolves to its chat-class model, as for any call outside a turn.
         var configured = ModelOverrideResolver.resolve(current, agent);
         var resolved = ModelRouter.concrete(configured.provider(), configured.modelId());
         var providerName = resolved != null ? resolved.provider() : configured.provider();
         var primary = ProviderRegistry.get(providerName);
-        if (primary == null) primary = ProviderRegistry.getPrimary();
+        var modelId = resolved != null ? resolved.modelId() : configured.modelId();
         if (primary == null) {
-            var msg = "> Compaction failed\n\nNo LLM provider is configured. Add one in Settings.";
+            var fallback = LlmProvider.Fallback.forAgent(agent);
+            if (fallback != null) {
+                primary = fallback.provider();
+                modelId = fallback.modelId();
+            }
+        }
+        if (primary == null) {
+            var msg = "> Compaction failed\n\nNo LLM provider is configured for this agent"
+                    + (providerName != null ? " ('" + providerName + "' is not set up)" : "")
+                    + ", and it has no configured fallback. Add one in Settings.";
             persistCompactAckAndLog(agent, channelType, current, msg, "no-provider");
             return new Result(current, msg, Command.COMPACT);
         }
 
-        var modelId = resolved != null ? resolved.modelId() : configured.modelId();
         var modelLabel = primary.config().name() + "/" + modelId;
         var maxOutput = ConfigService.getInt("chat.compactionMaxTokens", 8192);
 

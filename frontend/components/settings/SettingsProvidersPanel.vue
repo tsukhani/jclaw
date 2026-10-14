@@ -724,7 +724,7 @@ const groupedProviders = computed(() => {
         kind="select"
         fallback=""
         :options="primaryProviderOptions"
-        tip="The provider JClaw falls back to when an agent, voice, memory or a slash command has no provider of its own. Not pinned, it is the first configured provider in alphabetical order."
+        tip="The provider memory embeddings use when none is set for them. Not pinned, it is the first configured provider in alphabetical order. Agents never fall back to it: an agent whose own provider is missing uses its fallback provider."
       />
     </div>
 

@@ -1,5 +1,6 @@
 package services;
 
+import llm.FallbackTurn;
 import llm.routing.RoutedTurn;
 import models.Agent;
 import models.Conversation;
@@ -33,6 +34,9 @@ import org.jspecify.annotations.Nullable;
  * <p><b>Routed turns.</b> Inside a turn the model router is serving (JCLAW-1222), the pair is the
  * model the router chose for that conversation rather than the stored {@code router/auto}, so every
  * helper of the turn sizes, prompts and records for the model actually on the wire.
+ *
+ * <p><b>Missing provider.</b> Inside a turn whose own provider is not configured, the pair is the
+ * agent's fallback, bound by {@link FallbackTurn} for the same reason.
  */
 public final class ModelOverrideResolver {
 
@@ -62,6 +66,8 @@ public final class ModelOverrideResolver {
     public static @Nullable String provider(@Nullable Conversation conversation, @Nullable Agent agent) {
         var routed = RoutedTurn.current(conversation);
         if (routed != null) return routed.active().provider();
+        var substituted = FallbackTurn.current(conversation);
+        if (substituted != null) return substituted.provider();
         if (conversation != null && hasOverride(conversation)) {
             return conversation.modelProviderOverride;
         }
@@ -90,6 +96,8 @@ public final class ModelOverrideResolver {
     public static @Nullable String modelId(@Nullable Conversation conversation, @Nullable Agent agent) {
         var routed = RoutedTurn.current(conversation);
         if (routed != null) return routed.active().modelId();
+        var substituted = FallbackTurn.current(conversation);
+        if (substituted != null) return substituted.modelId();
         if (conversation != null && hasOverride(conversation)) {
             return conversation.modelIdOverride;
         }

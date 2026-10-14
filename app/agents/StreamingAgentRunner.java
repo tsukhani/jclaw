@@ -2,6 +2,7 @@ package agents;
 
 import com.google.gson.JsonObject;
 import io.opentelemetry.context.Context;
+import llm.FallbackTurn;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ModelInfo;
@@ -297,7 +298,10 @@ final class StreamingAgentRunner {
                 cb.onError().accept(new RuntimeException(TurnRouting.ROUTER_UNAVAILABLE_ERROR));
                 return;
             }
-            streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink);
+            FallbackTurn.run(agent, conversation, () -> {
+                streamLlmLoop(agent, conversation, channelType, userMessage, isCancelled, cb, trace, sink);
+                return null;
+            });
             return;
         }
         RoutedTurn.callWith(route, conversation, () -> {
@@ -485,11 +489,11 @@ final class StreamingAgentRunner {
                                                          @Nullable String channelType,
                                                          AgentRunner.StreamingCallbacks cb) {
         var providerName = ModelResolver.effectiveModelProvider(agent, conversation);
-        var agentProvider = providerName != null ? ProviderRegistry.get(providerName) : null;
-        var primary = agentProvider != null ? agentProvider : ProviderRegistry.getPrimary();
+        var primary = providerName != null ? ProviderRegistry.get(providerName) : null;
         if (primary == null) {
-            EventLogger.error("llm", agent.name, channelType, "No LLM provider configured");
-            cb.onError().accept(new RuntimeException("No LLM provider configured"));
+            var error = AgentRunner.missingProviderError(providerName);
+            EventLogger.error("llm", agent.name, channelType, error);
+            cb.onError().accept(new RuntimeException(error));
             return null;
         }
         return primary;

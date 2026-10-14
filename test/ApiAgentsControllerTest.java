@@ -25,7 +25,7 @@ class ApiAgentsControllerTest extends FunctionalTest {
         AuthFixture.seedAdminPassword("changeme");
     }
 
-    // The registry caches for 60 s past deleteDatabase, and a cached provider is getPrimary() for the classes after this one.
+    // The registry caches for 60 s past deleteDatabase, so a provider registered here would still serve the classes after this one.
     @AfterEach
     void unregisterFallbackProvider() {
         services.ConfigService.delete("provider.together.baseUrl");

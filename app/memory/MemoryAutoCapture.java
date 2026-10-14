@@ -238,13 +238,12 @@ public final class MemoryAutoCapture {
             return null;
         }
         if (!channelEligible(conv.channelType)) return null;
-        var provider = resolveProvider(agent);
-        if (provider == null) {
+        var ctx = extractContext(agent, conv.channelType);
+        if (ctx == null) {
             EventLogger.warn(EVENT_CATEGORY, agentName, conv.channelType,
                     "Auto-capture skipped: no LLM provider available");
-            return null;
         }
-        return new ExtractContext(provider, resolveModelId(agent), conv.channelType, resolveFallback(agent));
+        return ctx;
     }
 
     // ─── Async entry point (hooked from AgentRunner) ─────────────────────────
@@ -336,11 +335,10 @@ public final class MemoryAutoCapture {
         if (!captureEligible(agent)) {
             return CaptureResult.skipped("ineligible_agent");
         }
-        var provider = resolveProvider(agent);
-        if (provider == null) {
+        var ctx = extractContext(agent, null);
+        if (ctx == null) {
             return CaptureResult.skipped("no_provider");
         }
-        var ctx = new ExtractContext(provider, resolveModelId(agent), null, resolveFallback(agent));
         int maxOutput = ConfigService.getInt("memory.autocapture.maxTokens", 1024);
         int judgeOutput = ConfigService.getInt("memory.consolidation.maxTokens", 512);
         Extractor extractor = msgs -> chatText(ctx, msgs, maxOutput);
@@ -423,11 +421,14 @@ public final class MemoryAutoCapture {
     // JCLAW-534: the extractor runs on the agent's per-agent autocapture model —
     // the agent's default model unless an operator set an explicit override in the
     // agent's Memory section. No global model knob. An agent on the model router
-    // (JCLAW-1222) extracts on the router's chat-class model.
-    private static @Nullable LlmProvider resolveProvider(Agent agent) {
+    // (JCLAW-1222) extracts on the router's chat-class model. When that provider is not
+    // configured the agent's own fallback extracts, never the first provider configured.
+    private static @Nullable ExtractContext extractContext(Agent agent, @Nullable String channelType) {
         var target = ModelRouter.concrete(agent.autocaptureProviderEffective(), agent.autocaptureModelEffective());
-        var p = target != null ? ProviderRegistry.get(target.provider()) : null;
-        return p != null ? p : ProviderRegistry.getPrimary();
+        var provider = target != null ? ProviderRegistry.get(target.provider()) : null;
+        var fallback = resolveFallback(agent);
+        if (provider != null) return new ExtractContext(provider, resolveModelId(agent), channelType, fallback);
+        return fallback != null ? new ExtractContext(fallback.provider(), fallback.modelId(), channelType, null) : null;
     }
 
     private static String resolveModelId(Agent agent) {

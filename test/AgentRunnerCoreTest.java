@@ -60,6 +60,58 @@ class AgentRunnerCoreTest extends UnitTest {
         assertTrue(messages.size() >= 1, "User message should be persisted even on provider error");
     }
 
+    @Test
+    void anAgentWhoseProviderIsMissingRunsOnItsFallbackModel() throws Exception {
+        var model = new AtomicReference<String>();
+        startLlmServer(exchange -> {
+            var json = com.google.gson.JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes()))
+                    .getAsJsonObject();
+            model.set(json.get("model").getAsString());
+            var resp = simpleResponse("from the fallback");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.getBytes().length);
+            exchange.getResponseBody().write(resp.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+        var agent = createAgent("fallback-serves-agent", "removed-provider", "removed-model");
+        agent.fallbackProvider = "core-provider";
+        agent.fallbackModelId = "test-model";
+        agent.save();
+        var convo = ConversationService.create(agent, "web", "user1");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var result = runOnVirtualThread(agent, convo, "Hello");
+
+        assertEquals("from the fallback", result.response());
+        assertEquals("test-model", model.get(), "the fallback's own model, not the missing provider's");
+    }
+
+    @Test
+    void anAgentWhoseProviderIsMissingNeverReachesAnotherConfiguredProvider() throws Exception {
+        var called = new java.util.concurrent.atomic.AtomicBoolean();
+        startLlmServer(exchange -> {
+            called.set(true);
+            var resp = simpleResponse("from a provider the agent never named");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.getBytes().length);
+            exchange.getResponseBody().write(resp.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+        var agent = createAgent("no-fallback-agent", "removed-provider", "removed-model");
+        var convo = ConversationService.create(agent, "web", "user1");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var result = runOnVirtualThread(agent, convo, "Hello");
+
+        assertTrue(result.response().contains("No LLM provider configured")
+                && result.response().contains("'removed-provider'"), "got: " + result.response());
+        assertFalse(called.get(), "the prompt must not reach a provider the agent never named");
+    }
+
     // --- Simple completion (no tool calls) ---
 
     @Test

@@ -304,7 +304,9 @@ If no provider is configured, no agent can answer. That is the most common cause
 
 ### Primary provider
 
-**Primary Provider** (`llm.primaryProvider`) is the provider JClaw falls back to when an agent, voice, memory or a slash command has no provider of its own. Not pinned, it is the first configured provider in alphabetical order. Only a configured provider can be chosen, and the change applies immediately.
+**Primary Provider** (`llm.primaryProvider`) is the provider memory embeddings use when none is set for them. Not pinned, it is the first configured provider in alphabetical order. Only a configured provider can be chosen, and the change applies immediately.
+
+Agents never fall back to it. An agent whose own provider is not configured runs on its fallback provider and model (step 4 below). Without a fallback, its turn fails with a message that names the missing provider.
 
 ### When a provider misbehaves
 
@@ -313,7 +315,7 @@ Every model call runs through the same four-link chain, so a slow or broken prov
 1. **Timeout.** A single HTTP attempt gives up after 180 s.
 2. **Retry.** JClaw retries a failed attempt up to three times with a short backoff (a `Retry-After` header from the provider is honored, capped). A 4xx (a request JClaw got wrong, or an exhausted balance) is not retried at all.
 3. **Circuit breaker.** Each provider has its own breaker. Three exhausted calls in a row, or half of the last ten, open it. While it is open, every call to that provider fails in microseconds instead of spending another retry loop. After 60 s it lets three probe calls through, closes again if they all succeed, and re-opens if one does not. A 4xx never counts against the breaker, so a bug in a prompt cannot trip it on a healthy provider.
-4. **Fallback.** If the agent has a fallback provider and model set on its [Agents](/guide#agents) page, a turn whose primary is refused by its breaker runs there instead, on the fallback's own model. Without one, the turn fails fast. The synchronous path (tool loops) fails over on every round; the streaming path fails over only when the breaker refuses the call *before any token has been sent*, including the continuation round after a tool call, because once tokens have reached the screen another provider cannot silently take over. It is one hop: the fallback's own breaker is honored and nothing chains further. Memory auto-capture follows the same fallback, unless the agent has its own auto-capture model override, in which case that override is the whole choice; and it stands aside while a provider's breaker is probing, so the next user turn is the probe rather than a background extraction.
+4. **Fallback.** If the agent has a fallback provider and model set on its [Agents](/guide#agents) page, a turn whose primary is refused by its breaker runs there instead, on the fallback's own model. Without one, the turn fails fast. A primary that is not configured at all, because it was deleted or its key was cleared, sends the whole turn to the fallback from the start. With no fallback, the turn fails and names the missing provider. JClaw never sends it to another provider instead. The synchronous path (tool loops) fails over on every round; the streaming path fails over only when the breaker refuses the call *before any token has been sent*, including the continuation round after a tool call, because once tokens have reached the screen another provider cannot silently take over. It is one hop: the fallback's own breaker is honored and nothing chains further. Memory auto-capture follows the same fallback, unless the agent has its own auto-capture model override, in which case that override is the whole choice; and it stands aside while a provider's breaker is probing, so the next user turn is the probe rather than a background extraction.
 
 Streaming has two hazards a timeout alone cannot see, and each has its own budget:
 

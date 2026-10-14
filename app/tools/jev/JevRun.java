@@ -6,6 +6,7 @@ import agents.TruncationDiagnostics;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.microsoft.playwright.PlaywrightException;
+import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ChatResponse;
 import llm.ProviderRegistry;
@@ -307,16 +308,23 @@ public final class JevRun {
     public static TextHelper agentModel(Agent agent) {
         return context -> {
             var target = effectiveModel(agent);
-            // An unregistered provider falls back to the primary, as the turn itself does (AgentRunner).
-            var registered = target != null ? ProviderRegistry.get(target.provider()) : null;
-            var provider = registered != null ? registered : ProviderRegistry.getPrimary();
-            if (target == null || provider == null) {
+            var provider = target != null ? ProviderRegistry.get(target.provider()) : null;
+            var modelId = target != null ? target.modelId() : null;
+            if (provider == null) {
+                // An unregistered provider hands the call to the agent's own fallback, as the turn itself does (FallbackTurn).
+                var fallback = LlmProvider.Fallback.forAgent(agent);
+                if (fallback != null) {
+                    provider = fallback.provider();
+                    modelId = fallback.modelId();
+                }
+            }
+            if (provider == null || modelId == null) {
                 throw new JevException("The agent's model is not configured; nothing typed");
             }
             ChatResponse response;
             String reply;
             try {
-                response = provider.chat(target.modelId(),
+                response = provider.chat(modelId,
                         List.of(ChatMessage.system(JevActionSpace.TEXT_VALUE), ChatMessage.user(context.toString())),
                         List.of(), TEXT_MAX_TOKENS, null, TEXT_TIMEOUT_SECONDS, null);
                 reply = SessionCompactor.firstChoiceText(response);

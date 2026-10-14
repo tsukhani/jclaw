@@ -70,9 +70,9 @@ public final class ProviderRegistry {
     }
 
     /**
-     * The first configured provider, for an agent whose own is missing. There is deliberately no
-     * "secondary" beside it (JCLAW-1190): a turn's fallback is the pair the operator set on the
-     * agent, never whichever provider happens to sort next.
+     * The first configured provider, which memory embeddings use when none is named for them. No
+     * agent turn falls back to it: a turn whose provider is missing runs on the pair the operator set
+     * on the agent ({@link FallbackTurn}, JCLAW-1190), never on whichever provider happens to sort first.
      */
     public static @Nullable LlmProvider getPrimary() {
         var providers = listAll();

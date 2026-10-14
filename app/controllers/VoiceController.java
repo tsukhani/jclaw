@@ -664,7 +664,6 @@ public class VoiceController extends WebSocketController {
      *  a JPA tx: resolves the provider + model info off the agent/conversation. */
     private static boolean modelHearsAudio(Agent agent, Conversation conv) {
         var provider = ProviderRegistry.get(ModelResolver.effectiveModelProvider(agent, conv));
-        if (provider == null) provider = ProviderRegistry.getPrimary();
         if (provider == null) return false;
         return ModelResolver.resolveModelInfo(agent, conv, provider)
                 .map(ModelInfo::supportsAudio).orElse(false);
