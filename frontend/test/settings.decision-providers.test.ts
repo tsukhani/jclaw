@@ -619,6 +619,22 @@ describe('Settings page — Decision Providers', () => {
       await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.models', value: '["english"]' }]))
     })
 
+    it('a checkpoint the Model Router names but nobody ticked can still be ticked', async () => {
+      stored.set('router.classifier.provider', 'laya')
+      stored.set('router.classifier.model', 'english')
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
+      await vi.waitFor(() => expect(box('english').exists()).toBe(true))
+      expect(box('english').attributes('disabled')).toBeUndefined()
+
+      await box('english').setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.models', value: '["english"]' }]))
+      // Every box is disabled while the save runs, so wait for an unlocked one to clear first.
+      await vi.waitFor(() => expect(box('multilingual').attributes('disabled')).toBeUndefined())
+      expect(box('english').attributes('disabled')).toBeDefined()
+    })
+
     it('a refused selection puts the box back to what is stored, with the reason on the card', async () => {
       stored.set('decision.laya.models', JSON.stringify(['english', 'typed-decisions']))
       baseEndpoints({ failSaves: true })

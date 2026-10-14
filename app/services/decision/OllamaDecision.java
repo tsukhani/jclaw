@@ -384,7 +384,7 @@ public final class OllamaDecision {
     }
 
     /** The stored selection, or null when {@code value} is not a JSON array of non-blank names. */
-    static @Nullable List<String> parseModels(@Nullable String value) {
+    public static @Nullable List<String> parseModels(@Nullable String value) {
         if (value == null || value.isBlank()) return List.of();
         JsonArray array;
         try {

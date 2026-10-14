@@ -161,7 +161,11 @@ public class ApiConfigController extends Controller {
             ApiResponses.error(409, ApiResponses.RESERVED_KEY, "The config key prefix '%s' is reserved for internal use"
                     .formatted(RESERVED_KEY_PREFIX));
         }
-        ConfigService.deleteWithSideEffects(key);
+        var rejection = ConfigService.deleteWithSideEffects(key);
+        if (rejection != null) {
+            ApiResponses.errorWithTemplate(403, ApiResponses.FORBIDDEN, rejection,
+                    ApiErrorTemplates.configValueRejected());
+        }
         renderJSON(gson.toJson(new ConfigDeleteResponse("ok", key)));
     }
 

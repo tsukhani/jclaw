@@ -196,6 +196,40 @@ public record RouterPolicy(Map<TaskClass, List<Candidate>> classes, double downs
                         .formatted(CLASSIFIER_MODEL, OllamaDecision.MODELS_KEY);
     }
 
+    /**
+     * The reverse of {@link #decisionModelRejection} (JCLAW-1453): a write of {@link OllamaDecision#MODELS_KEY} or
+     * {@link LayaDecision#MODELS_KEY} may not drop the ticked model the stored classifier uses. Null for any other
+     * key; a null or blank {@code value} selects nothing, which is what a delete leaves.
+     */
+    public static @Nullable String selectionRejection(String key, @Nullable String value) {
+        return selectionRejection(key, value, configuredClassifier());
+    }
+
+    /** {@link #selectionRejection(String, String)} against {@code classifier} rather than the stored one. */
+    public static @Nullable String selectionRejection(String key, @Nullable String value,
+                                                      @Nullable Candidate classifier) {
+        String provider;
+        List<String> stored;
+        if (key.equals(OllamaDecision.MODELS_KEY)) {
+            provider = OllamaDecision.PROVIDER;
+            stored = OllamaDecision.selectedModels();
+        } else if (key.equals(LayaDecision.MODELS_KEY)) {
+            provider = LayaDecision.PROVIDER;
+            stored = LayaDecision.selectedModels();
+        } else {
+            return null;
+        }
+        // A classifier left unticked from before this check stays so, or no other box on its card could change.
+        if (classifier == null || !provider.equals(classifier.provider()) || !stored.contains(classifier.model())) {
+            return null;
+        }
+        // A list that does not parse is DecisionSettings' refusal to give.
+        var next = OllamaDecision.parseModels(value);
+        if (next == null || next.contains(classifier.model())) return null;
+        return ("%s must keep %s while the Model Router uses it as its prompt classifier; choose another classifier "
+                + "in Settings > Model Router first.").formatted(key, classifier.model());
+    }
+
     /** A provider the registry does not configure, or a model it does not register. */
     private static @Nullable String registeredModelRejection(String provider, @Nullable String model) {
         var registered = ProviderRegistry.get(provider);

@@ -1,4 +1,5 @@
 import com.google.gson.JsonParser;
+import llm.routing.RouterPolicy;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
 import okio.Buffer;
@@ -10,6 +11,7 @@ import services.ConfigService;
 import services.Tx;
 import services.decision.LayaDecision;
 
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -17,7 +19,8 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * The operator's read of {@code GET /api/decision/laya} (JCLAW-1447), against a server that answers
  * {@code /health}: the stored address is the one dialed, the stored key is sent, and each field of the
- * server's answer lands in its own field of the route's.
+ * server's answer lands in its own field of the route's. And the delete of a Laya selection the router still
+ * classifies with is refused (JCLAW-1453).
  */
 class ApiDecisionControllerTest extends FunctionalTest {
 
@@ -99,6 +102,29 @@ class ApiDecisionControllerTest extends FunctionalTest {
             assertEquals("GET", recorded.getMethod());
             assertEquals("/health", recorded.getUrl().encodedPath());
             assertEquals("Bearer " + KEY, recorded.getHeaders().get("Authorization"));
+        }
+    }
+
+    @Test
+    void deletingTheSelectionTheRouterClassifiesWithIsRefused() {
+        // JCLAW-1453. Both classifier halves are stored under the lock, which ModelRouterTurnTest's turns also take.
+        login();
+        commitInFreshTx(() -> {
+            ConfigService.set(LayaDecision.MODELS_KEY, "[\"english\"]");
+            ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, LayaDecision.PROVIDER);
+            ConfigService.set(RouterPolicy.CLASSIFIER_MODEL, "english");
+        });
+        try {
+            var resp = DELETE("/api/config/" + LayaDecision.MODELS_KEY);
+            assertEquals(403, resp.status.intValue());
+            assertTrue(getContent(resp).contains("decision.laya.models must keep english"), getContent(resp));
+            assertEquals(List.of("english"), LayaDecision.selectedModels(), "the row is still there");
+        } finally {
+            commitInFreshTx(() -> {
+                ConfigService.delete(RouterPolicy.CLASSIFIER_MODEL);
+                ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+                ConfigService.delete(LayaDecision.MODELS_KEY);
+            });
         }
     }
 }

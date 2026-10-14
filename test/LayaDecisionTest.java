@@ -49,8 +49,8 @@ import java.util.regex.Pattern;
  * failure leaves the keyword rules to answer.
  *
  * <p>This class and {@code ApiDecisionControllerTest} write {@code decision.laya.baseUrl} and
- * {@code decision.laya.apiKey}, each under {@link JevBreakerTestSync}; {@code decision.laya.models} is
- * {@code RouterPolicyTest}'s, so nothing here stores it.
+ * {@code decision.laya.apiKey}, each under {@link JevBreakerTestSync}; {@code decision.laya.models} is stored by
+ * {@code RouterPolicyTest} and {@code ApiDecisionControllerTest}, so nothing here stores it.
  */
 class LayaDecisionTest extends UnitTest {
 

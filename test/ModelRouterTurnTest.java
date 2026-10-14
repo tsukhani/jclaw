@@ -37,8 +37,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * picked, records the route beside the model that actually answered, fails over when that model
  * refuses before saying anything, and is accepted wherever a model is chosen.
  *
- * <p>This is the only class that writes the process-global {@code router.*} keys; every other router
- * test passes its policy explicitly.
+ * <p>This is the only class that writes the process-global {@code router.*} model lists; every other router
+ * test passes its policy explicitly. Its turns read the stored classifier, which {@code RouterPolicyTest} and
+ * {@code ApiDecisionControllerTest} store for a moment, so each test here holds {@link JevBreakerTestSync} as they do.
  */
 class ModelRouterTurnTest extends UnitTest {
 
@@ -57,6 +58,7 @@ class ModelRouterTurnTest extends UnitTest {
 
     @BeforeEach
     void setUp() {
+        JevBreakerTestSync.acquire();
         var id = UUID.randomUUID().toString().substring(0, 8);
         subscription = "rt-sub-" + id;
         perToken = "rt-pt-" + id;
@@ -64,14 +66,18 @@ class ModelRouterTurnTest extends UnitTest {
 
     @AfterEach
     void tearDown() {
-        if (llmServer != null) llmServer.stop(0);
-        for (var c : TaskClass.values()) ConfigService.delete(RouterPolicy.modelsKey(c));
-        for (var name : List.of(subscription, perToken)) {
-            SubscriptionUsage.clearForTest(name);
-            CircuitBreakers.remove(LlmResilience.breakerName(name));
-            for (var suffix : new String[] {".baseUrl", ".apiKey", ".models", ".paymentModality"}) {
-                ConfigService.delete("provider." + name + suffix);
+        try {
+            if (llmServer != null) llmServer.stop(0);
+            for (var c : TaskClass.values()) ConfigService.delete(RouterPolicy.modelsKey(c));
+            for (var name : List.of(subscription, perToken)) {
+                SubscriptionUsage.clearForTest(name);
+                CircuitBreakers.remove(LlmResilience.breakerName(name));
+                for (var suffix : new String[] {".baseUrl", ".apiKey", ".models", ".paymentModality"}) {
+                    ConfigService.delete("provider." + name + suffix);
+                }
             }
+        } finally {
+            JevBreakerTestSync.release();
         }
     }
 

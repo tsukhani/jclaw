@@ -183,6 +183,12 @@ const routerLayaCheckpoint = computed(() =>
   configValue('router.classifier.provider').trim() === LAYA_PROVIDER
     ? configValue('router.classifier.model').trim()
     : '')
+
+// As on the Ollama card: only while ticked, so a router checkpoint stored unticked can still be ticked.
+function checkpointLockedByRouter(name: string) {
+  return routerLayaCheckpoint.value === name && tickedCheckpoints.value.includes(name)
+}
+
 const layaBreaker = computed(() => breakersByName.value.get('decision:laya'))
 
 // Each clip's transcript, so what it says reaches a reader who cannot hear it (WCAG 1.2.1).
@@ -692,7 +698,7 @@ function playClip(audio: HTMLAudioElement | undefined) {
                 :id="`decision-laya-checkpoint-${c.name}`"
                 type="checkbox"
                 :checked="tickedCheckpoints.includes(c.name)"
-                :disabled="saving || routerLayaCheckpoint === c.name"
+                :disabled="saving || checkpointLockedByRouter(c.name)"
                 @change="toggleCheckpoint(c.name, $event.target as HTMLInputElement)"
               >
               <!-- One line: the space between the two is what a screen reader hears between name and context. -->
