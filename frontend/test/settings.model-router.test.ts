@@ -284,6 +284,80 @@ describe('SettingsModelRouterPanel', () => {
     expect(c.findAll('[data-testid="router-ollama-decision-option"]')).toHaveLength(0)
   })
 
+  it('offers each Laya checkpoint ticked in Decision Providers with its context, and writes the pair', async () => {
+    entries = [...entries, { key: 'decision.laya.models', value: JSON.stringify(['multilingual', 'laya-next', 'english']) }]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const options = c.findAll('[data-testid="router-laya-option"]')
+    expect(options.map(o => [o.attributes('value'), o.text()])).toEqual([
+      ['laya::english', 'Laya / english (512 tokens)'],
+      ['laya::multilingual', 'Laya / multilingual (1,024 tokens)'],
+    ])
+    expect(c.find('[data-testid="router-laya-limits"]').exists()).toBe(false)
+
+    await c.find('select[aria-label="Prompt classifier model"]').setValue('laya::english')
+    await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
+    expect(ops).toEqual([
+      'DELETE router.classifier.model',
+      'POST router.classifier.provider=laya',
+      'POST router.classifier.model=english',
+    ])
+  })
+
+  it('offers no Laya checkpoint until one is ticked', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(c.findAll('[data-testid="router-laya-option"]')).toHaveLength(0)
+    expect(c.find('[data-testid="router-laya-limits"]').exists()).toBe(false)
+  })
+
+  it('states the chosen Laya checkpoint\'s context and limits, each fact with its source', async () => {
+    entries = [
+      ...entries,
+      { key: 'decision.laya.models', value: JSON.stringify(['english', 'multilingual']) },
+      { key: 'router.classifier.provider', value: 'laya' },
+      { key: 'router.classifier.model', value: 'english' },
+    ]
+    const english = await mountSuspended(Harness)
+    await flushPromises()
+    expect((english.find('select[aria-label="Prompt classifier model"]').element as HTMLSelectElement).value).toBe('laya::english')
+    const hint = english.find('[data-testid="router-laya-limits"]')
+    const text = hint.text().replace(/\s+/g, ' ')
+    expect(text).toContain('Laya\'s english checkpoint reads 512 tokens of each question; a longer prompt is cut, not refused (Laya\'s model card).')
+    expect(hint.findAll('li').map(li => li.text().split('.')[0])).toEqual(['Context', 'Accuracy', 'Confidence', 'Language'])
+    expect(text).toContain('english read 343 of the 619 tokens in a 3,100-character prompt, and the 1,024-token checkpoints read all of it. '
+      + '(measured 2026-10-13 on one written test prompt)')
+    expect(text).toContain('english chose the right class for 33 of 40 prompts, the same as the keyword rules; typed-decisions for 31; '
+      + 'multilingual for 23, wrong at probabilities up to 0.96. (measured 2026-10-13 on 40 written test prompts, not live traffic)')
+    expect(text).toContain('At a minimum confidence of 0.50, multilingual answered 34 of the 40 prompts and was right on 20 of them.')
+    expect(text).toContain('(Laya\'s model card)')
+    // The limits of running the server stay on its card.
+    expect(text).not.toContain('LAYA_')
+    for (const li of hint.findAll('li')) expect(li.text().trim()).toMatch(/\)$/)
+    expect(hint.find('a').attributes('href')).toBe('/settings?section=decision-providers')
+
+    entries = entries.map(e => e.key === 'router.classifier.model' ? { key: e.key, value: 'multilingual' } : e)
+    clearNuxtData()
+    const multilingual = await mountSuspended(Harness)
+    await flushPromises()
+    expect(multilingual.find('[data-testid="router-laya-limits"]').text().replace(/\s+/g, ' '))
+      .toContain('Laya\'s multilingual checkpoint reads 1,024 tokens of each question;')
+  })
+
+  it('shows no Laya limits while another classifier is chosen', async () => {
+    entries = [
+      ...entries,
+      { key: 'decision.laya.models', value: JSON.stringify(['english']) },
+      { key: 'decision.jev.apiKey', value: 'ts-s****' },
+      { key: 'router.classifier.provider', value: 'jev' },
+      { key: 'router.classifier.model', value: 'jev-latest' },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(c.findAll('[data-testid="router-laya-option"]')).toHaveLength(1)
+    expect(c.find('[data-testid="router-laya-limits"]').exists()).toBe(false)
+  })
+
   it('shows the classifier timeout only once a classifier is picked, at the default until one is stored', async () => {
     const rules = await mountSuspended(Harness)
     await flushPromises()

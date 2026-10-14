@@ -229,8 +229,10 @@ GET     /api/providers/{name}/models            ApiProvidersController.models
 POST    /api/providers/{name}/models            ApiProvidersController.addModel
 POST    /api/providers/refresh-prices           ApiProvidersController.refreshPrices
 
-# Decision providers — the Ollama decision server's reachability and decision models
+# Decision providers — the Ollama decision server's reachability and decision models,
+# and the Laya server's reachability and loaded checkpoints
 GET     /api/decision/ollama                    ApiDecisionController.ollama
+GET     /api/decision/laya                      ApiDecisionController.laya
 
 # OCR backends — availability + enabled state for the Settings page
 GET     /api/ocr/status                         ApiOcrController.status

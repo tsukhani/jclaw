@@ -26,8 +26,9 @@ import java.util.function.Predicate;
 /**
  * One {@code POST /v1/systemone} at a time, for every decision provider that speaks it: TypeSafe AI's
  * JEV, for the Jev browser engine and the router's classifier, and an Ollama server's System One models
- * (JCLAW-1336), for the router's classifier. A port of jev-ultrafast's {@code model.post_json} and
- * {@code model.validate_choice} (MIT, Browser Use; notice in {@code conf/browser/jev-ultrafast-LICENSE}).
+ * (JCLAW-1336) and the operator's {@code laya-serve} (JCLAW-1447), each for the router's classifier. A
+ * port of jev-ultrafast's {@code model.post_json} and {@code model.validate_choice} (MIT, Browser Use;
+ * notice in {@code conf/browser/jev-ultrafast-LICENSE}).
  *
  * <p>Each {@link Target} runs under its own breaker, so an outage of one provider never stops the other.
  * JEV's, {@link #BREAKER_NAME}, is shared by both its consumers, so an outage that one of them

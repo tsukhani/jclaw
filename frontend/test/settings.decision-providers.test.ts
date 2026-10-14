@@ -10,13 +10,15 @@ import { sectionGroups } from '~/components/settings/sections'
  * Settings > Decision Providers (JCLAW-1302): JEV's card holds the TypeSafe key both consumers
  * send, the retention note, which consumers have chosen JEV, and the circuit breaker they share.
  * The key editor keeps the JCLAW-1274 behaviours it had in the Browser panel. Ollama's card (JCLAW-1336)
- * holds the server, its decision models and the router's use of them.
+ * holds the server, its decision models and the router's use of them. Laya's card (JCLAW-1447) holds
+ * the server the operator runs, its optional key, the checkpoints with their context, and its limits.
  */
 
 let stored: Map<string, string>
 let posted: Array<{ key: string, value: string }>
 let breakers: Array<Record<string, unknown>>
 let ollama: Record<string, unknown>
+let laya: Record<string, unknown>
 let deleted: string[]
 
 function jevBreaker(over: Record<string, unknown> = {}) {
@@ -26,14 +28,18 @@ function jevBreaker(over: Record<string, unknown> = {}) {
   }
 }
 
-function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void> } = {}) {
+interface Saved { key: string, value: string }
+
+/** `onSave` runs once an accepted POST is stored, so a test can change what the next read answers. */
+function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void>, onSave?: (saved: Saved) => void } = {}) {
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels', () => [])
   registerEndpoint('/api/ocr/status', () => ({ providers: [] }))
   registerEndpoint('/api/providers', () => [])
   registerEndpoint('/api/breakers', () => breakers)
   registerEndpoint('/api/decision/ollama', () => ollama)
-  for (const key of ['decision.ollama.baseUrl', 'decision.ollama.models']) {
+  registerEndpoint('/api/decision/laya', () => laya)
+  for (const key of ['decision.ollama.baseUrl', 'decision.ollama.models', 'decision.laya.baseUrl', 'decision.laya.models']) {
     registerEndpoint(`/api/config/${key}`, {
       method: 'DELETE',
       handler: () => {
@@ -49,7 +55,7 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void> } 
   registerEndpoint('/api/config', {
     method: 'POST',
     handler: async (event) => {
-      const body = await readBody(event) as { key: string, value: string }
+      const body = await readBody(event) as Saved
       posted.push(body)
       if (opts.holdSaves) await opts.holdSaves
       if (opts.failSaves) {
@@ -58,6 +64,7 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void> } 
       }
       // The API masks a key on read, as ConfigService.maskValue does.
       stored.set(body.key, body.key.endsWith('apiKey') ? `${body.value.slice(0, 4)}****` : body.value)
+      opts.onSave?.(body)
       return { status: 'ok' }
     },
   })
@@ -79,6 +86,7 @@ describe('Settings page — Decision Providers', () => {
     breakers = []
     deleted = []
     ollama = { baseUrl: 'http://localhost:11434', customized: false, reachable: true, error: null, models: ['tev1:latest', 'nimble:latest'] }
+    laya = { baseUrl: 'http://localhost:8000', reachable: true, error: null, loaded: ['english'], device: 'cpu' }
   })
 
   it('sits between LLM Providers and Search Providers in the Providers group', () => {
@@ -344,6 +352,59 @@ describe('Settings page — Decision Providers', () => {
       await vi.waitFor(() => expect(deleted).toEqual(['decision.ollama.models']))
     })
 
+    it('the model the Model Router is using cannot be unticked, the card says why, and the others still can', async () => {
+      stored.set('decision.ollama.models', JSON.stringify(['tev1:latest', 'nimble:latest']))
+      stored.set('router.classifier.provider', 'ollama-decision')
+      stored.set('router.classifier.model', 'tev1:latest')
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const box = (name: string) => component.find(`[data-testid="decision-ollama-model-${name}"] input`)
+      await vi.waitFor(() => expect((box('tev1:latest').element as HTMLInputElement).checked).toBe(true))
+      expect(box('tev1:latest').attributes('disabled')).toBeDefined()
+      expect(box('nimble:latest').attributes('disabled')).toBeUndefined()
+      expect(component.find('[data-testid="decision-ollama-selection"]').text().replace(/\s+/g, ' ')).toBe(
+        'Only a ticked model can be the Model Router\'s classifier, and the one it is using cannot be unticked.')
+
+      await box('nimble:latest').setValue(false)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.models', value: '["tev1:latest"]' }]))
+    })
+
+    it('a model the Model Router names but nobody ticked can still be ticked', async () => {
+      stored.set('router.classifier.provider', 'ollama-decision')
+      stored.set('router.classifier.model', 'tev1:latest')
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const box = () => component.find('[data-testid="decision-ollama-model-tev1:latest"] input')
+      await vi.waitFor(() => expect(box().exists()).toBe(true))
+      expect(box().attributes('disabled')).toBeUndefined()
+
+      await box().setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.models', value: '["tev1:latest"]' }]))
+      // Every box is disabled while the save runs, so wait for an unlocked one to clear first.
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-model-nimble:latest"] input').attributes('disabled')).toBeUndefined())
+      expect(box().attributes('disabled')).toBeDefined()
+    })
+
+    it('a refused selection puts the box back to what is stored, with the reason on the card', async () => {
+      ollama = { ...ollama, models: ['tev1:latest', 'tev1:0.8b', 'nimble:latest'] }
+      stored.set('decision.ollama.models', JSON.stringify(['tev1:latest', 'nimble:latest']))
+      baseEndpoints({ failSaves: true })
+      const component = await mountDecisionProviders()
+      const box = (name: string) => component.find(`[data-testid="decision-ollama-model-${name}"] input`)
+      await vi.waitFor(() => expect((box('nimble:latest').element as HTMLInputElement).checked).toBe(true))
+
+      await box('tev1:0.8b').setValue(true)
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-provider-ollama"] [data-testid="api-error"]').exists()).toBe(true))
+      await vi.waitFor(() => expect(box('tev1:0.8b').attributes('disabled')).toBeUndefined())
+      expect((box('tev1:0.8b').element as HTMLInputElement).checked).toBe(false)
+
+      // Unticking one of two is a POST too; unticking the last is a DELETE, which this fixture does not refuse.
+      await box('nimble:latest').setValue(false)
+      await vi.waitFor(() => expect(posted).toHaveLength(2))
+      await vi.waitFor(() => expect(box('nimble:latest').attributes('disabled')).toBeUndefined())
+      expect((box('nimble:latest').element as HTMLInputElement).checked).toBe(true)
+    })
+
     it('keeps a selected model the server no longer lists, so it can be cleared', async () => {
       stored.set('decision.ollama.models', JSON.stringify(['tev1:0.8b']))
       baseEndpoints()
@@ -359,6 +420,7 @@ describe('Settings page — Decision Providers', () => {
       await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-status"]').text()).toBe('not reachable'))
       expect(component.find('[data-testid="decision-ollama-error"]').text()).toBe('not reachable (ConnectException)')
       expect(component.find('[data-testid="decision-ollama-models"]').findAll('label')).toHaveLength(0)
+      expect(component.find('[data-testid="decision-ollama-selection"]').exists()).toBe(false)
       expect(component.find('[data-testid="decision-ollama-address"]').text()).not.toContain('from Ollama Local')
     })
 
@@ -406,6 +468,303 @@ describe('Settings page — Decision Providers', () => {
       const component = await mountDecisionProviders()
       await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-breaker"]').exists()).toBe(true))
       expect(component.find('[data-testid="decision-jev-breaker"]').exists()).toBe(false)
+    })
+  })
+
+  describe('Laya card (JCLAW-1447)', () => {
+    const MODEL_CARD = '(Laya\'s model card)'
+    const SERVER_DOCS = '(laya-serve\'s documentation)'
+    const MEASURED_ROUTER = '(measured 2026-10-13 on 40 written test prompts, not live traffic)'
+    const MEASURED_PROMPT = '(measured 2026-10-13 on one written test prompt)'
+    const MEASURED_CPU = '(english on CPU, measured 2026-10-13)'
+    const MEASURED_MEMORY = '(english, measured 2026-10-13 and 2026-10-14)'
+
+    /** Wrapped template text, as it reads on one line. */
+    function words(text: string) {
+      return text.replace(/\s+/g, ' ').trim()
+    }
+
+    it('sits directly below the Ollama card, with no logo and no clip', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const ollamaCard = component.find('[data-testid="decision-provider-ollama"]').element
+      expect(ollamaCard.nextElementSibling?.getAttribute('data-testid')).toBe('decision-provider-laya')
+      const card = component.find('[data-testid="decision-provider-laya"]')
+      expect(card.find('img').exists()).toBe(false)
+      expect(card.find('audio').exists()).toBe(false)
+    })
+
+    it('says the operator runs the server and the prompt goes only to it', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const about = words(component.find('[data-testid="decision-laya-about"]').text())
+      expect(about).toContain('Apache-2.0')
+      expect(about).toContain('You run its server, laya-serve, yourself; JClaw calls the address below and starts nothing.')
+      expect(about).toContain('first 4000 characters of each prompt, only to this server')
+      expect(component.find('[data-testid="decision-provider-laya"]').text()).not.toContain('record or retain')
+    })
+
+    it('lists every limit with the source of each fact', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const limits = component.find('[data-testid="decision-laya-limits"]').findAll('li').map(li => words(li.text()))
+      expect(limits).toEqual([
+        `Context. english reads 512 tokens per question, multilingual and typed-decisions 1,024. Text past that is cut, not refused. ${MODEL_CARD} `
+        + 'The router\'s class question and its options take about 170 of them: english read 343 of the 619 tokens in a 3,100-character prompt, '
+        + `and the 1,024-token checkpoints read all of it. ${MEASURED_PROMPT}`,
+        `Accuracy. Its makers call it “a fast base to specialise, not a zero-shot decision engine”. ${MODEL_CARD} `
+        + 'english chose the right class for 33 of 40 prompts, the same as the keyword rules; typed-decisions for 31; '
+        + `multilingual for 23, wrong at probabilities up to 0.96. ${MEASURED_ROUTER}`,
+        `Confidence. Over-confident as shipped. ${MODEL_CARD} `
+        + `At a minimum confidence of 0.50, multilingual answered 34 of the 40 prompts and was right on 20 of them. ${MEASURED_ROUTER}`,
+        `Language. english is English only. ${MODEL_CARD}`,
+        `Server. laya-serve listens on every interface with no key unless LAYA_HOST and LAYA_API_KEY are set. ${SERVER_DOCS}`,
+        `Memory. A loaded checkpoint held about 2.1 GB on CPU and 3.2 GB on an Apple GPU. ${MEASURED_MEMORY} `
+        + 'By default laya-serve loads all three checkpoints at start and keeps two loaded. LAYA_MODELS names the ones to load at start, '
+        + `and LAYA_MAX_LOADED caps how many stay loaded. ${SERVER_DOCS}`,
+        `Loading. A checkpoint not in memory is loaded on its first request, and downloaded first if it is not on disk. ${MODEL_CARD} `
+        + 'Loading english from disk took 2.4 s, so a first request can outlast a short classifier timeout; '
+        + `the keyword rules answer that turn. ${MEASURED_CPU}`,
+      ])
+    })
+
+    it('with the server not running, still states each checkpoint\'s context, the cut and the limits', async () => {
+      laya = { baseUrl: 'http://localhost:8000', reachable: false, error: 'not reachable (ConnectException)', loaded: [], device: null }
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-status"]').text()).toBe('not reachable'))
+      expect(component.find('[data-testid="decision-laya-error"]').text()).toBe('not reachable (ConnectException)')
+      const checkpoints = component.find('[data-testid="decision-laya-checkpoints"]')
+      expect(checkpoints.findAll('label').map(l => words(l.text()))).toEqual([
+        'english 512 tokens', 'multilingual 1,024 tokens', 'typed-decisions 1,024 tokens',
+      ])
+      expect(words(component.find('[data-testid="decision-laya-cut"]').text())).toBe(
+        'Each reads that many tokens per question; a longer prompt is cut, not refused (Laya\'s model card). '
+        + 'Only a ticked checkpoint can be the Model Router\'s classifier, and the one it is using cannot be unticked.')
+      expect(component.find('[data-testid="decision-laya-limits"]').findAll('li')).toHaveLength(7)
+    })
+
+    it('marks the checkpoints the server has loaded, and names its device', async () => {
+      laya = { ...laya, loaded: ['english', 'typed-decisions'], device: 'mps' }
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-status"]').text()).toBe('reachable'))
+      expect(words(component.find('[data-testid="decision-laya-device"]').text())).toBe('Server device: mps')
+      const row = (name: string) => words(component.find(`[data-testid="decision-laya-checkpoint-${name}"]`).text())
+      expect(row('english')).toBe('english 512 tokens, loaded')
+      expect(row('multilingual')).toBe('multilingual 1,024 tokens')
+      expect(row('typed-decisions')).toBe('typed-decisions 1,024 tokens, loaded')
+      expect(component.find('[data-testid="decision-laya-keyed"]').exists()).toBe(false)
+    })
+
+    it('a server that wants a key it was not sent reads as reachable, and says how to see more', async () => {
+      laya = { ...laya, loaded: [], device: null }
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-status"]').text()).toBe('reachable'))
+      expect(words(component.find('[data-testid="decision-laya-keyed"]').text())).toBe(
+        'The server answers /health but says no more. If it is laya-serve started with a key, '
+        + 'set or correct the key above to see what it has loaded.')
+      expect(component.find('[data-testid="decision-laya-device"]').exists()).toBe(false)
+      const rows = component.find('[data-testid="decision-laya-checkpoints"]').findAll('label').map(l => words(l.text()))
+      expect(rows).toEqual(['english 512 tokens', 'multilingual 1,024 tokens', 'typed-decisions 1,024 tokens'])
+    })
+
+    it('ticking a checkpoint stores the selection in the table\'s order, and clearing the last one deletes the key', async () => {
+      stored.set('decision.laya.models', JSON.stringify(['multilingual']))
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
+      await vi.waitFor(() => expect((box('multilingual').element as HTMLInputElement).checked).toBe(true))
+      expect((box('english').element as HTMLInputElement).checked).toBe(false)
+
+      await box('english').setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.models', value: '["english","multilingual"]' }]))
+      await vi.waitFor(() => expect(box('english').attributes('disabled')).toBeUndefined())
+      expect((box('english').element as HTMLInputElement).checked).toBe(true)
+
+      await box('multilingual').setValue(false)
+      await vi.waitFor(() => expect(posted).toHaveLength(2))
+      expect(posted[1]).toEqual({ key: 'decision.laya.models', value: '["english"]' })
+      await vi.waitFor(() => expect(box('english').attributes('disabled')).toBeUndefined())
+      await box('english').setValue(false)
+      await vi.waitFor(() => expect(deleted).toEqual(['decision.laya.models']))
+    })
+
+    it('a stored name that is no checkpoint is neither shown nor written back', async () => {
+      stored.set('decision.laya.models', JSON.stringify(['laya-next', 'english']))
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
+      await vi.waitFor(() => expect((box('english').element as HTMLInputElement).checked).toBe(true))
+      expect(component.find('[data-testid="decision-laya-checkpoints"]').findAll('label')).toHaveLength(3)
+
+      await box('typed-decisions').setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.models', value: '["english","typed-decisions"]' }]))
+    })
+
+    it('the checkpoint the Model Router is using cannot be unticked, and the others still can', async () => {
+      stored.set('decision.laya.models', JSON.stringify(['english', 'multilingual']))
+      stored.set('router.classifier.provider', 'laya')
+      stored.set('router.classifier.model', 'english')
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
+      await vi.waitFor(() => expect((box('english').element as HTMLInputElement).checked).toBe(true))
+      expect(box('english').attributes('disabled')).toBeDefined()
+      expect(box('multilingual').attributes('disabled')).toBeUndefined()
+      expect(box('typed-decisions').attributes('disabled')).toBeUndefined()
+
+      await box('multilingual').setValue(false)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.models', value: '["english"]' }]))
+    })
+
+    it('a checkpoint the Model Router names but nobody ticked can still be ticked', async () => {
+      stored.set('router.classifier.provider', 'laya')
+      stored.set('router.classifier.model', 'english')
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
+      await vi.waitFor(() => expect(box('english').exists()).toBe(true))
+      expect(box('english').attributes('disabled')).toBeUndefined()
+
+      await box('english').setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.models', value: '["english"]' }]))
+      // Every box is disabled while the save runs, so wait for an unlocked one to clear first.
+      await vi.waitFor(() => expect(box('multilingual').attributes('disabled')).toBeUndefined())
+      expect(box('english').attributes('disabled')).toBeDefined()
+    })
+
+    it('a refused selection puts the box back to what is stored, with the reason on the card', async () => {
+      stored.set('decision.laya.models', JSON.stringify(['english', 'typed-decisions']))
+      baseEndpoints({ failSaves: true })
+      const component = await mountDecisionProviders()
+      const box = (name: string) => component.find(`[data-testid="decision-laya-checkpoint-${name}"] input`)
+      await vi.waitFor(() => expect((box('typed-decisions').element as HTMLInputElement).checked).toBe(true))
+
+      await box('multilingual').setValue(true)
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-provider-laya"] [data-testid="api-error"]').exists()).toBe(true))
+      await vi.waitFor(() => expect(box('multilingual').attributes('disabled')).toBeUndefined())
+      expect((box('multilingual').element as HTMLInputElement).checked).toBe(false)
+
+      // Unticking one of two is a POST too; unticking the last is a DELETE, which this fixture does not refuse.
+      await box('typed-decisions').setValue(false)
+      await vi.waitFor(() => expect(posted).toHaveLength(2))
+      await vi.waitFor(() => expect(box('typed-decisions').attributes('disabled')).toBeUndefined())
+      expect((box('typed-decisions').element as HTMLInputElement).checked).toBe(true)
+    })
+
+    it('stores a different address and shows it, and clears the key when laya-serve\'s default is saved back', async () => {
+      // The card shows the address the status read answers with, so only a re-read after the save can show the new one.
+      baseEndpoints({
+        onSave: (saved) => {
+          if (saved.key === 'decision.laya.baseUrl') laya = { ...laya, baseUrl: saved.value }
+        },
+      })
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-address"]').text()).toContain('http://localhost:8000'))
+
+      await component.find('[data-testid="decision-laya-address-edit"]').trigger('click')
+      const input = component.find('[data-testid="decision-laya-address-input"]')
+      expect((input.element as HTMLInputElement).value).toBe('http://localhost:8000')
+      await input.setValue('http://192.168.1.30:8000/')
+      await component.find('[data-testid="decision-laya-address-save"]').trigger('click')
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.baseUrl', value: 'http://192.168.1.30:8000' }]))
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-address"]').text()).toContain('http://192.168.1.30:8000'))
+
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-address-edit"]').exists()).toBe(true))
+      await component.find('[data-testid="decision-laya-address-edit"]').trigger('click')
+      await component.find('[data-testid="decision-laya-address-input"]').setValue('http://localhost:8000')
+      await component.find('[data-testid="decision-laya-address-save"]').trigger('click')
+      await vi.waitFor(() => expect(deleted).toEqual(['decision.laya.baseUrl']))
+      expect(posted).toHaveLength(1)
+    })
+
+    it('a refused address keeps the editor open with the reason on the Laya card alone', async () => {
+      baseEndpoints({ failSaves: true })
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-address-edit"]').exists()).toBe(true))
+      await component.find('[data-testid="decision-laya-address-edit"]').trigger('click')
+      await component.find('[data-testid="decision-laya-address-input"]').setValue('http://169.254.169.254')
+      await component.find('[data-testid="decision-laya-address-save"]').trigger('click')
+
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-provider-laya"] [data-testid="api-error"]').exists()).toBe(true))
+      expect(component.find('[data-testid="decision-laya-address-input"]').exists()).toBe(true)
+      expect(component.find('[data-testid="decision-provider-ollama"] [data-testid="api-error"]').exists()).toBe(false)
+
+      await component.find('[data-testid="decision-laya-address-cancel"]').trigger('click')
+      expect(component.find('[data-testid="decision-laya-address-input"]').exists()).toBe(false)
+      expect(component.find('[data-testid="decision-provider-laya"] [data-testid="api-error"]').exists()).toBe(false)
+    })
+
+    it('the key is optional: unset by default, set through the masked editor, and removable', async () => {
+      // A server started with a key says more once the key is sent, so only a re-read after the save can show it.
+      laya = { ...laya, loaded: [], device: null }
+      baseEndpoints({
+        onSave: (saved) => {
+          if (saved.key === 'decision.laya.apiKey') laya = { ...laya, loaded: ['english'], device: 'cpu' }
+        },
+      })
+      const component = await mountDecisionProviders()
+      expect(component.find('[data-testid="decision-laya-key"]').text()).toBe('(not set)')
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-keyed"]').exists()).toBe(true))
+
+      await component.find('button[aria-label="Edit Laya API key"]').trigger('click')
+      const input = component.find('input[aria-label="Laya API key"]')
+      expect(input.attributes('type')).toBe('password')
+      expect((input.element as HTMLInputElement).value).toBe('')
+      await input.setValue('laya-secret-123')
+      await component.find('button[aria-label="Save Laya API key"]').trigger('click')
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.laya.apiKey', value: 'laya-secret-123' }]))
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-key"]').text()).toBe('••••••••'))
+      expect(component.html()).not.toContain('laya-secret-123')
+      expect(component.find('[data-testid="decision-jev-key"]').text()).toBe('(not set)')
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-laya-device"]').exists()).toBe(true))
+      expect(component.find('[data-testid="decision-laya-keyed"]').exists()).toBe(false)
+
+      await component.find('button[aria-label="Edit Laya API key"]').trigger('click')
+      await component.find('button[aria-label="Remove Laya API key"]').trigger('click')
+      await vi.waitFor(() => expect(posted).toHaveLength(2))
+      expect(posted[1]).toEqual({ key: 'decision.laya.apiKey', value: '' })
+    })
+
+    it('shows the Model Router as not in use until it classifies with a Laya checkpoint, then names it', async () => {
+      stored.set('router.classifier.provider', 'ollama-decision')
+      stored.set('router.classifier.model', 'tev1:latest')
+      baseEndpoints()
+      const idle = await mountDecisionProviders()
+      const row = idle.find('[data-testid="decision-laya-consumer-model-router"]')
+      expect(row.find('a').attributes('href')).toBe('/settings?section=model-router')
+      expect(row.text()).toContain('not in use')
+      expect(idle.find('[data-testid="decision-laya-used-by"]').findAll('li')).toHaveLength(1)
+
+      clearNuxtData()
+      stored.set('router.classifier.provider', 'laya')
+      stored.set('router.classifier.model', 'english')
+      const using = await mountDecisionProviders()
+      const inUse = using.find('[data-testid="decision-laya-consumer-model-router"]').text()
+      expect(inUse).toContain('english')
+      expect(inUse).toContain('in use')
+      expect(inUse).not.toContain('not in use')
+      expect(using.find('[data-testid="decision-ollama-consumer-model-router"]').text()).toContain('not in use')
+    })
+
+    it('shows its own breaker once the router has called it, with Isolate, and Restore once isolated', async () => {
+      breakers = [jevBreaker({ name: 'decision:laya', target: 'laya' })]
+      baseEndpoints()
+      const closed = await mountDecisionProviders()
+      await vi.waitFor(() => expect(closed.find('[data-testid="decision-laya-breaker"]').exists()).toBe(true))
+      expect(closed.find('[data-testid="decision-laya-breaker"] button[aria-label="Isolate laya"]').exists()).toBe(true)
+      expect(closed.find('[data-testid="decision-jev-breaker"]').exists()).toBe(false)
+      expect(closed.find('[data-testid="decision-ollama-breaker"]').exists()).toBe(false)
+
+      clearNuxtData()
+      breakers = [jevBreaker({ name: 'decision:laya', target: 'laya', state: 'OPEN', reason: 'MANUAL_TRIP', manual: true })]
+      const isolated = await mountDecisionProviders()
+      await vi.waitFor(() => expect(isolated.find('[data-testid="decision-laya-breaker"]').exists()).toBe(true))
+      const breaker = isolated.find('[data-testid="decision-laya-breaker"]')
+      expect(breaker.text()).toContain('isolated by you')
+      expect(breaker.find('button[aria-label="Restore laya"]').exists()).toBe(true)
     })
   })
 })

@@ -29,6 +29,7 @@ import play.cache.Caches;
 import play.db.jpa.JPA;
 import services.database.DatabaseService;
 import services.decision.DecisionSettings;
+import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
 import services.telemetry.OtelConfig;
 import services.telemetry.OtelRuntime;
@@ -388,6 +389,8 @@ public class ConfigService {
             under(JevSettings.KEY_PREFIX, JevSettings::rejectionFor),
             // JCLAW-1302, JCLAW-1336: the TypeSafe key rides an Authorization header, and the Ollama address is dialled.
             under(DecisionSettings.KEY_PREFIX, DecisionSettings::rejectionFor),
+            // JCLAW-1453: after the shape check, so a malformed list hears what is wrong with it first.
+            RouterPolicy::selectionRejection,
             // A typo in either sandbox key reads as off and leaves processes unconfined.
             HarnessSandbox::rejectionFor,
             // An unknown mode silently falls back to batch.
@@ -476,6 +479,9 @@ public class ConfigService {
         }
         if (key.startsWith(PROVIDER_KEY_PREFIX + OllamaDecision.PROVIDER + ".")) {
             return reservedProviderName(OllamaDecision.PROVIDER, "the model router's Ollama classifier");
+        }
+        if (key.startsWith(PROVIDER_KEY_PREFIX + LayaDecision.PROVIDER + ".")) {
+            return reservedProviderName(LayaDecision.PROVIDER, "the model router's Laya classifier");
         }
         return null;
     }
@@ -678,8 +684,14 @@ public class ConfigService {
     /**
      * Delete a config key and trigger the same side effects as {@link #setWithSideEffects}.
      * Mirrors save-with-side-effects so controller delete and save stay in sync.
+     *
+     * @return an error message if the delete is refused, or {@code null} on success
      */
-    public static void deleteWithSideEffects(String key) {
+    public static @Nullable String deleteWithSideEffects(String key) {
+        var rejection = RouterPolicy.selectionRejection(key, null);
+        if (rejection != null) {
+            return rejection;
+        }
         delete(key);
         if (key.startsWith(PROVIDER_KEY_PREFIX) || key.startsWith(RouterPolicy.PREFIX)) {
             AgentService.syncEnabledStates();
@@ -717,6 +729,7 @@ public class ConfigService {
         if (isOllamaClassifierKey(key) && !Play.runningInTestMode()) {
             RouterClassifier.settleOllamaModelsInBackground();
         }
+        return null;
     }
 
     /** The keys that decide which Ollama decision model, on which server, the router keeps loaded. */

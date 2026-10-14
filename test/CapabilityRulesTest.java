@@ -15,6 +15,7 @@ import controllers.AgentAccess;
 import org.junit.jupiter.api.Test;
 import play.Play;
 import play.test.UnitTest;
+import utils.SsrfGuard;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -201,6 +202,8 @@ class CapabilityRulesTest extends UnitTest {
      * port is already held — a probe that sends nothing, not traffic.
      * {@code BrowserScreenProxy} is SOCKS5, which is a socket protocol and not HTTP, and it
      * exists to screen what Chromium dials rather than to fetch anything itself (JCLAW-1283).
+     * {@code SsrfGuard.PROVIDER_SAFE_SOCKETS} is the same kind of screen for the guarded OkHttp
+     * clients: its socket refuses a blocked address before it connects (JCLAW-1448).
      */
     @Test
     void rawSocketsAreConfinedToThePrintingStack() {
@@ -208,10 +211,12 @@ class CapabilityRulesTest extends UnitTest {
                 .that().resideOutsideOfPackage(PRINTING_PACKAGE)
                 .and().doNotHaveFullyQualifiedName(PORT_PROBE_CLASS)
                 .and().doNotHaveFullyQualifiedName(BROWSER_PROXY_CLASS)
+                .and().doNotBelongToAnyOf(SsrfGuard.class)
                 .should().accessTargetWhere(RAW_SOCKET_ACCESS)
                 .because("outbound network access goes through HttpFactories' OkHttp clients "
                         + "(JCLAW-1151); services.printing speaks LPD/9100, LocalSidecarDaemon "
-                        + "binds a loopback port probe, and BrowserScreenProxy speaks SOCKS5");
+                        + "binds a loopback port probe, BrowserScreenProxy speaks SOCKS5, and "
+                        + "SsrfGuard's provider sockets screen what OkHttp dials");
         rule.check(APP_CLASSES);
 
         assertTrue(APP_CLASSES.stream()
@@ -224,6 +229,11 @@ class CapabilityRulesTest extends UnitTest {
                         .anyMatch(RAW_SOCKET_ACCESS),
                 BROWSER_PROXY_CLASS + " matches no socket call, so its exemption guards nothing — if it "
                         + "moved to SocketChannel the rule would keep passing while the exemption stood");
+        assertTrue(APP_CLASSES.stream()
+                        .filter(JavaClass.Predicates.belongToAnyOf(SsrfGuard.class))
+                        .flatMap(c -> c.getAccessesFromSelf().stream())
+                        .anyMatch(RAW_SOCKET_ACCESS),
+                "SsrfGuard matches no socket call, so its exemption guards nothing");
     }
 
     /**

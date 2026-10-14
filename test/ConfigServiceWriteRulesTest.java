@@ -10,6 +10,7 @@ import services.OperatorAlerts;
 import services.PrivilegedConfig;
 import services.database.DatabaseService;
 import services.decision.DecisionSettings;
+import services.decision.LayaDecision;
 import services.telemetry.OtelConfig;
 import services.voice.VoiceSettings;
 import tools.HarnessSandbox;
@@ -140,6 +141,8 @@ class ConfigServiceWriteRulesTest extends UnitTest {
                 "provider.jev.apiKey", "x");
         assertRefused("The provider name 'ollama-decision' is reserved for the model router's Ollama "
                 + "classifier.", "provider.ollama-decision.baseUrl", "http://127.0.0.1:1");
+        assertRefused("The provider name 'laya' is reserved for the model router's Laya classifier.",
+                "provider.laya.baseUrl", "http://127.0.0.1:1");
     }
 
     @Test
@@ -233,6 +236,39 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     void decisionKeysAnswerTheirOwnersRule() {
         assertRefusedAsOwnerSays(DecisionSettings.rejectionFor("decision.jclaw1402", "3"), "decision.jclaw1402",
                 "3");
+    }
+
+    @Test
+    void theLayaKeysAreRefusedAtTheWrite() {
+        var linkLocal = "http://169.254.169.254:8000";
+        String guard = null;
+        try {
+            SsrfGuard.assertProviderUrlSafe(linkLocal);
+        } catch (SecurityException e) {
+            guard = e.getMessage();
+        }
+        assertRefusedAsOwnerSays(guard, LayaDecision.BASE_URL_KEY, linkLocal);
+        for (var address : List.of("http://224.0.0.1:8000", "http://0.0.0.0:8000")) {
+            assertRefusedAsOwnerSays(DecisionSettings.rejectionFor(LayaDecision.BASE_URL_KEY, address),
+                    LayaDecision.BASE_URL_KEY, address);
+        }
+        assertAccepted(LayaDecision.BASE_URL_KEY, "http://localhost:8000");
+        assertAccepted(LayaDecision.BASE_URL_KEY, "http://192.168.1.30:8000");
+
+        assertRefused("decision.laya.models must be a JSON array of Laya checkpoints (english, multilingual, "
+                + "typed-decisions), such as [\"english\"].", LayaDecision.MODELS_KEY, "[\"tev1\"]");
+        assertAccepted(LayaDecision.MODELS_KEY, "[\"english\",\"typed-decisions\"]");
+
+        assertRefused("decision.laya.apiKey must be printable ASCII with no spaces.", LayaDecision.API_KEY, "laya key");
+        assertAccepted(LayaDecision.API_KEY, "laya-key_1.2/3+4=");
+    }
+
+    @Test
+    void theLayaKeyIsMaskedAndItsMaskIsNeverSavedOverIt() {
+        assertTrue(ConfigService.isSensitive(LayaDecision.API_KEY));
+        assertEquals("laya****", ConfigService.maskValue(LayaDecision.API_KEY, "laya-secret-0123"));
+        assertRefused("That is the saved value's mask, not a new value. Enter the whole new value, or leave "
+                + "decision.laya.apiKey unchanged.", LayaDecision.API_KEY, "laya****");
     }
 
     @Test

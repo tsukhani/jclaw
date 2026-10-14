@@ -126,9 +126,12 @@ public final class OllamaDecision {
         // A keep_alive of zero unloads the model as soon as it has loaded.
         if (NO_RESIDENCY.matcher(body.get(KEEP_ALIVE_FIELD).getAsString()).matches()) return CompletableFuture.completedFuture(false);
         var base = trimSlash(baseUrl);
+        Request request;
         try {
             SsrfGuard.assertProviderUrlSafe(base);
-        } catch (SecurityException _) {
+            // Built before the entry below, which only a sent request ever removes.
+            request = new Request.Builder().url(base + "/api/generate").post(RequestBody.create(body.toString(), JSON)).build();
+        } catch (SecurityException | IllegalArgumentException _) {
             return CompletableFuture.completedFuture(false);
         }
         var key = base + " " + model;
@@ -136,7 +139,6 @@ public final class OllamaDecision {
         var running = PINNING.putIfAbsent(key, pinning);
         if (running != null) return running;
 
-        var request = new Request.Builder().url(base + "/api/generate").post(RequestBody.create(body.toString(), JSON)).build();
         var call = HttpFactories.generalGuarded().newCall(request);
         call.timeout().timeout(PIN_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         call.enqueue(new Callback() {
@@ -194,7 +196,7 @@ public final class OllamaDecision {
     public static boolean stillLoading(String base, String model) {
         try {
             return !loadedModels(base, PS_TIMEOUT_SECONDS).contains(tagged(model));
-        } catch (IOException | JsonParseException | IllegalStateException | ClassCastException _) {
+        } catch (IOException | JsonParseException | IllegalArgumentException | IllegalStateException | ClassCastException _) {
             return false;
         }
     }
@@ -241,7 +243,7 @@ public final class OllamaDecision {
             for (var name : decisionModels(JsonParser.parseString(get(base, "/api/tags", TAGS_TIMEOUT_SECONDS)))) {
                 decision.add(tagged(name));
             }
-        } catch (IOException | JsonParseException | IllegalStateException | ClassCastException e) {
+        } catch (IOException | JsonParseException | IllegalArgumentException | IllegalStateException | ClassCastException e) {
             Logger.debug("[decision] reading Ollama's loaded models failed: %s", e.getClass().getSimpleName());
             return List.of();
         }
@@ -309,8 +311,14 @@ public final class OllamaDecision {
         } catch (SecurityException e) {
             return unreachable(base, e.getMessage());
         }
-        var request = new Request.Builder().url(base + "/api/tags").header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
-                .get().build();
+        Request request;
+        try {
+            request = new Request.Builder().url(base + "/api/tags").header(HttpKeys.ACCEPT, HttpKeys.APPLICATION_JSON)
+                    .get().build();
+        } catch (IllegalArgumentException _) {
+            // OkHttp refuses an address the write check let through, such as a port above 65535.
+            return unreachable(base, "not a usable address");
+        }
         var call = HttpFactories.generalGuarded().newCall(request);
         call.timeout().timeout(TAGS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
         try (var response = call.execute()) {
@@ -346,7 +354,8 @@ public final class OllamaDecision {
                 }
             }
             return null;
-        } catch (SecurityException | IOException | JsonParseException | IllegalStateException | ClassCastException _) {
+        } catch (SecurityException | IOException | JsonParseException | IllegalArgumentException | IllegalStateException
+                | ClassCastException _) {
             return null;
         }
     }
@@ -375,7 +384,7 @@ public final class OllamaDecision {
     }
 
     /** The stored selection, or null when {@code value} is not a JSON array of non-blank names. */
-    static @Nullable List<String> parseModels(@Nullable String value) {
+    public static @Nullable List<String> parseModels(@Nullable String value) {
         if (value == null || value.isBlank()) return List.of();
         JsonArray array;
         try {

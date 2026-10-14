@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
 
 import java.util.List;
@@ -14,7 +15,7 @@ import java.util.List;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
-/** The Ollama decision provider's server and its installed decision models, for Settings → Decision Providers. */
+/** The Ollama and Laya decision providers' servers and what each reports, for Settings → Decision Providers. */
 @With(AuthCheck.class)
 public class ApiDecisionController extends Controller {
 
@@ -30,5 +31,22 @@ public class ApiDecisionController extends Controller {
         var status = OllamaDecision.status(OllamaDecision.baseUrl());
         renderJSON(GSON.toJson(new OllamaDecisionStatus(status.baseUrl(), OllamaDecision.customized(),
                 status.reachable(), status.error(), status.models())));
+    }
+
+    /**
+     * {@code loaded} is the checkpoints in the server's memory and {@code device} where they compute; a server
+     * that wants a key it was not sent reports neither.
+     */
+    public record LayaDecisionStatus(String baseUrl, boolean reachable, @Nullable String error, List<String> loaded,
+                                     @Nullable String device) {}
+
+    @ApiResponse(responseCode = "200",
+            content = @Content(schema = @Schema(implementation = LayaDecisionStatus.class)))
+    @Operation(summary = "Report whether the Laya decision server answers, and which checkpoints it has loaded")
+    @AgentAccess(OPERATOR_ONLY)
+    public static void laya() {
+        var status = LayaDecision.status(LayaDecision.baseUrl(), LayaDecision.apiKey());
+        renderJSON(GSON.toJson(new LayaDecisionStatus(status.baseUrl(), status.reachable(), status.error(),
+                status.loaded(), status.device())));
     }
 }

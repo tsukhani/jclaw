@@ -135,6 +135,15 @@ const jevKeySet = computed(() => configValue('decision.jev.apiKey').trim().lengt
 const ollamaDecisionOptions = computed(() => parseDecisionModels(configValue('decision.ollama.models'))
   .map(m => ({ value: `ollama-decision::${m}`, label: `Ollama decision / ${m}` })))
 
+// JCLAW-1447: the checkpoints ticked on the Laya card, each offered with the context it reads.
+const layaOptions = computed(() => tickedLayaCheckpoints(configValue('decision.laya.models'))
+  .map(c => ({ value: `laya::${c.name}`, label: `Laya / ${c.name} (${layaContext(c)})` })))
+const layaClassifier = computed(() => configValue('router.classifier.provider').trim() === 'laya'
+  ? LAYA_CHECKPOINTS.find(c => c.name === configValue('router.classifier.model').trim())
+  : undefined)
+// The limits of running the server stay on its card; these are the ones a classifier choice takes on.
+const layaClassifierLimits = LAYA_LIMITS.filter(l => !l.server)
+
 async function saveClassifier(value: string) {
   saving.value = true
   await attempt(async () => {
@@ -416,6 +425,14 @@ function usageTone(fraction: number): string {
               {{ o.label }}
             </option>
             <option
+              v-for="o in layaOptions"
+              :key="o.value"
+              :value="o.value"
+              data-testid="router-laya-option"
+            >
+              {{ o.label }}
+            </option>
+            <option
               v-for="o in modelOptions"
               :key="o.value"
               :value="o.value"
@@ -434,6 +451,31 @@ function usageTone(fraction: number): string {
             class="text-fg-strong underline"
           >Settings → Decision Providers</NuxtLink>.
         </p>
+        <div
+          v-if="layaClassifier"
+          class="px-4 pb-2.5 space-y-1 text-xs text-fg-muted leading-relaxed"
+          data-testid="router-laya-limits"
+        >
+          <p>
+            Laya's <span class="font-mono">{{ layaClassifier.name }}</span> checkpoint reads
+            {{ layaContext(layaClassifier) }} of each question; a longer prompt is cut, not refused (Laya's model
+            card). The route then notes how many of its tokens were read.
+          </p>
+          <ul class="list-disc pl-4 space-y-1">
+            <li
+              v-for="limit in layaClassifierLimits"
+              :key="limit.topic"
+            >
+              <span class="font-medium text-fg-strong">{{ limit.topic }}.</span> {{ layaLimitText(limit) }}
+            </li>
+          </ul>
+          <p>
+            The limits of running its server are on the Laya card in <NuxtLink
+              to="/settings?section=decision-providers"
+              class="text-fg-strong underline"
+            >Settings → Decision Providers</NuxtLink>.
+          </p>
+        </div>
       </div>
       <div
         v-if="classifierValue"

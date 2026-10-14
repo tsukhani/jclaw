@@ -159,6 +159,15 @@ class OperatorOnlyPromotionsTest extends FunctionalTest {
         assertRefusedAsOperatorOnly(resp);
     }
 
+    // --- decision providers: a read that dials an address the operator chose ------------------
+
+    @Test
+    void theLayaServerStatusReadIsRefused() {
+        // JCLAW-1447. Ungated, this dials the Laya server with its stored key; gated, nothing is sent.
+        var resp = asAgent(() -> GET(agentRequest(), "/api/decision/laya"));
+        assertRefusedAsOperatorOnly(resp);
+    }
+
     // --- positive control ----------------------------------------------------------------------
 
     @Test

@@ -1,13 +1,16 @@
 package llm.routing;
 
+import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import llm.routing.PromptClassifier.Classification;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.decision.JevApi;
 import services.decision.JevException;
+import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -17,11 +20,12 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
- * The router's classifier as one decision (JCLAW-1300), by TypeSafe's JEV or, since JCLAW-1336, by a
- * System One model on the operator's Ollama server. A single {@code POST /v1/systemone} asks the two
- * questions the LLM classifier answers in words, {@code task_class} and {@code effort}, about the first
- * {@link RouterClassifier#MAX_PROMPT_CHARS} characters of the prompt and nothing else. The provider
- * gives a probability for every choice, so a class it is unsure of is left to the keyword rules.
+ * The router's classifier as one decision (JCLAW-1300), by TypeSafe's JEV, by a System One model on the
+ * operator's Ollama server (JCLAW-1336) or by a Laya checkpoint on the operator's {@code laya-serve}
+ * (JCLAW-1447). A single {@code POST /v1/systemone} asks the two questions the LLM classifier answers in
+ * words, {@code task_class} and {@code effort}, about the first {@link RouterClassifier#MAX_PROMPT_CHARS}
+ * characters of the prompt and nothing else. The provider gives a probability for every choice, so a
+ * class it is unsure of is left to the keyword rules.
  */
 public final class JevRouterClassifier {
 
@@ -82,6 +86,23 @@ public final class JevRouterClassifier {
                 () -> OllamaDecision.pin(baseUrl, model));
     }
 
+    /**
+     * {@link #classify}, by the checkpoint {@code model} on the Laya server at {@code baseUrl} (JCLAW-1447), under
+     * that provider's own breaker. Never throws.
+     *
+     * @param apiKey sent as a bearer token; null sends none
+     */
+    public static Verdict classifyWithLaya(String message, String baseUrl, @Nullable String apiKey, String model,
+                                           double minConfidence, int timeoutSeconds) {
+        JevApi.Target target;
+        try {
+            target = LayaDecision.target(baseUrl, apiKey);
+        } catch (SecurityException e) {
+            return failed("the Laya classifier's server address is refused (%s)".formatted(e.getMessage()));
+        }
+        return decide("Laya " + model, target, request(message, model), minConfidence, timeoutSeconds, () -> {});
+    }
+
     /** {@code label} names the provider in reasons and signals; {@code onTimeout} runs when the call timed out. */
     private static Verdict decide(String label, JevApi.Target target, JsonObject body, double minConfidence,
                                   int timeoutSeconds, Runnable onTimeout) {
@@ -118,8 +139,37 @@ public final class JevRouterClassifier {
         // Both ids were validated against the choice sets above.
         var taskClass = Objects.requireNonNull(TaskClass.fromId(classId));
         var effort = Objects.requireNonNull(ReasoningEffort.fromId(effortId));
-        return new Verdict(new Classification(taskClass, effort,
-                List.of(String.format(Locale.ROOT, "classified by %s (%s %.2f)", label, classId, probability))), null, false);
+        var signals = new ArrayList<String>();
+        signals.add(String.format(Locale.ROOT, "classified by %s (%s %.2f)", label, classId, probability));
+        var cut = promptCut(label, result.get("usage"));
+        if (cut != null) signals.add(cut);
+        return new Verdict(new Classification(taskClass, effort, List.copyOf(signals)), null, false);
+    }
+
+    /**
+     * The signal for a prompt whose {@code usage} reports a cut as {@code truncated}, {@code state_tokens} and
+     * {@code state_tokens_dropped}, whichever provider answered; only Laya reports one today. Null when there is
+     * no cut it can count.
+     */
+    private static @Nullable String promptCut(String label, @Nullable JsonElement usage) {
+        if (usage == null || !usage.isJsonObject()) return null;
+        var report = usage.getAsJsonObject();
+        var truncated = report.get("truncated");
+        if (truncated == null || !truncated.isJsonPrimitive() || !truncated.getAsJsonPrimitive().isBoolean()
+                || !truncated.getAsBoolean()) {
+            return null;
+        }
+        long total = tokenCount(report.get("state_tokens"));
+        long dropped = tokenCount(report.get("state_tokens_dropped"));
+        if (dropped <= 0 || dropped > total) return null;
+        return String.format(Locale.ROOT, "%s read %d of %d prompt tokens", label, total - dropped, total);
+    }
+
+    /** A whole, non-negative token count, or -1. */
+    private static long tokenCount(@Nullable JsonElement element) {
+        if (element == null || !element.isJsonPrimitive() || !element.getAsJsonPrimitive().isNumber()) return -1;
+        double value = element.getAsDouble();
+        return value >= 0 && value <= Integer.MAX_VALUE && value == Math.rint(value) ? (long) value : -1;
     }
 
     /** The whole request: the model, the truncated prompt as the only state, and the two questions. */

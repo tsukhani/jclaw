@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
 
 import java.util.List;
@@ -20,6 +21,8 @@ class RouterPolicyTest extends UnitTest {
 
     @BeforeEach
     void seedProvider() {
+        // The classifier keys and decision.*.models this class stores are read by ModelRouterTurnTest's turns.
+        JevBreakerTestSync.acquire();
         provider = "rp-" + UUID.randomUUID().toString().substring(0, 8);
         ConfigService.set("provider." + provider + ".baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider." + provider + ".apiKey", "sk-test");
@@ -30,8 +33,12 @@ class RouterPolicyTest extends UnitTest {
 
     @AfterEach
     void removeProvider() {
-        for (var suffix : new String[] {".baseUrl", ".apiKey", ".models"}) {
-            ConfigService.delete("provider." + provider + suffix);
+        try {
+            for (var suffix : new String[] {".baseUrl", ".apiKey", ".models"}) {
+                ConfigService.delete("provider." + provider + suffix);
+            }
+        } finally {
+            JevBreakerTestSync.release();
         }
     }
 
@@ -136,6 +143,103 @@ class RouterPolicyTest extends UnitTest {
         } finally {
             ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
             ConfigService.delete(OllamaDecision.MODELS_KEY);
+        }
+    }
+
+    @Test
+    void aLayaClassifierModelMustBeATickedCheckpoint() {
+        // JCLAW-1447. Only ApiDecisionControllerTest also writes decision.laya.models, under the same lock.
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, LayaDecision.PROVIDER),
+                "laya is not a registered provider, and needs none");
+        ConfigService.set(LayaDecision.MODELS_KEY, "[\"english\",\"multilingual\"]");
+        ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, LayaDecision.PROVIDER);
+        try {
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "english"));
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, " multilingual "));
+            // typed-decisions is a checkpoint, but not a ticked one.
+            for (var bad : new String[] {"typed-decisions", "tev1", "jev-latest", "English"}) {
+                var rejected = RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, bad);
+                assertNotNull(rejected, () -> "accepted " + bad);
+                assertTrue(rejected.contains(LayaDecision.MODELS_KEY), rejected);
+            }
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+            ConfigService.delete(LayaDecision.MODELS_KEY);
+        }
+        assertNotNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, "rp-nope"),
+                "another unregistered name is still refused");
+    }
+
+    @Test
+    void aSelectionCannotDropTheTickedModelTheClassifierUses() {
+        // JCLAW-1453, the reverse of the two tests above. The classifier is passed, not stored: see the class's lock.
+        record Card(String key, Candidate classifier, String other) {}
+        for (var card : List.of(
+                new Card(OllamaDecision.MODELS_KEY, new Candidate(OllamaDecision.PROVIDER, "tev1"), "nimble"),
+                new Card(LayaDecision.MODELS_KEY, new Candidate(LayaDecision.PROVIDER, "english"), "multilingual"))) {
+            var key = card.key();
+            var classifier = card.classifier();
+            var other = card.other();
+            ConfigService.set(key, "[\"" + classifier.model() + "\",\"" + other + "\"]");
+            try {
+                var dropped = RouterPolicy.selectionRejection(key, "[\"" + other + "\"]", classifier);
+                assertEquals(key + " must keep " + classifier.model() + " while the Model Router uses it as its "
+                        + "prompt classifier; choose another classifier in Settings > Model Router first.", dropped);
+                assertEquals(dropped, RouterPolicy.selectionRejection(key, null, classifier), "a delete selects none");
+                assertEquals(dropped, RouterPolicy.selectionRejection(key, "[]", classifier));
+
+                assertNull(RouterPolicy.selectionRejection(key, "[\"" + classifier.model() + "\"]", classifier),
+                        "keeping it, the other may go");
+                assertNull(RouterPolicy.selectionRejection(key, "[\"" + other + "\"]", null), "no classifier");
+                assertNull(RouterPolicy.selectionRejection(key, "[\"" + other + "\"]",
+                        new Candidate(RouterPolicy.JEV, "jev-latest")), "another provider classifies");
+                assertNull(RouterPolicy.selectionRejection(key, "[\"" + other + "\"]",
+                        new Candidate(classifier.provider(), "unticked")), "a classifier already unticked");
+                assertNull(RouterPolicy.selectionRejection(key, "not a list", classifier),
+                        "a malformed list is DecisionSettings' to refuse");
+                assertNull(RouterPolicy.selectionRejection("router.chat.models", "[]", classifier), "another key");
+            } finally {
+                ConfigService.delete(key);
+            }
+        }
+    }
+
+    @Test
+    void theWriteAndTheDeleteOfASelectionBothAskTheRule() {
+        // Both classifier halves are stored only here and under the lock, so no routed turn classifies with them.
+        ConfigService.set(LayaDecision.MODELS_KEY, "[\"english\",\"multilingual\"]");
+        ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, LayaDecision.PROVIDER);
+        ConfigService.set(RouterPolicy.CLASSIFIER_MODEL, "english");
+        try {
+            var written = ConfigService.setWithSideEffects(LayaDecision.MODELS_KEY, "[\"multilingual\"]");
+            assertNotNull(written, "the write was stored");
+            assertTrue(written.contains("must keep english"), written);
+            var deleted = ConfigService.deleteWithSideEffects(LayaDecision.MODELS_KEY);
+            assertNotNull(deleted, "the row was deleted");
+            assertTrue(deleted.contains("must keep english"), deleted);
+            assertEquals(List.of("english", "multilingual"), LayaDecision.selectedModels(), "both were refused");
+
+            assertNull(ConfigService.setWithSideEffects(LayaDecision.MODELS_KEY, "[\"english\"]"));
+            assertEquals(List.of("english"), LayaDecision.selectedModels());
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_MODEL);
+            ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+            ConfigService.delete(LayaDecision.MODELS_KEY);
+        }
+    }
+
+    @Test
+    void aStoredLayaSelectionTicksOnlyTheNamesThatAreCheckpoints() {
+        // set() skips the write rules, as a row edited by hand would.
+        ConfigService.set(LayaDecision.MODELS_KEY, "[\"laya-next\",\"english\"]");
+        ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, LayaDecision.PROVIDER);
+        try {
+            assertEquals(List.of("english"), LayaDecision.selectedModels());
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "english"));
+            assertNotNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, "laya-next"));
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+            ConfigService.delete(LayaDecision.MODELS_KEY);
         }
     }
 

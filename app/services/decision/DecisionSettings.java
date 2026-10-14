@@ -4,6 +4,8 @@ import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import utils.SsrfGuard;
 
+import java.util.List;
+
 /**
  * The {@code decision.*} keys, edited in Settings &gt; Decision Providers, and the rules
  * {@code ConfigService.setWithSideEffects} applies when one is written. Nothing is seeded.
@@ -17,6 +19,9 @@ public final class DecisionSettings {
     /** Where the TypeSafe key lived before JCLAW-1302; {@code DefaultConfigJob} moves it to {@link #API_KEY} on boot. */
     public static final String LEGACY_API_KEY = "browser.jev.apiKey";
 
+    private static final List<String> KEYS = List.of(API_KEY, OllamaDecision.BASE_URL_KEY, OllamaDecision.MODELS_KEY,
+            OllamaDecision.KEEP_ALIVE_KEY, LayaDecision.BASE_URL_KEY, LayaDecision.API_KEY, LayaDecision.MODELS_KEY);
+
     private DecisionSettings() {}
 
     /** The TypeSafe key both the Jev browser engine and the router's JEV classifier send; null when unset. */
@@ -27,31 +32,35 @@ public final class DecisionSettings {
 
     /** A message naming what {@code value} must be, or null when {@code key} accepts it. */
     public static @Nullable String rejectionFor(String key, @Nullable String value) {
-        if (key.equals(OllamaDecision.BASE_URL_KEY)) {
+        if (key.equals(OllamaDecision.BASE_URL_KEY) || key.equals(LayaDecision.BASE_URL_KEY)) {
             return baseUrlRejection(value);
         }
         if (key.equals(OllamaDecision.MODELS_KEY)) {
             return OllamaDecision.parseModels(value) != null ? null
                     : "%s must be a JSON array of model names, such as [\"tev1\"].".formatted(key);
         }
+        if (key.equals(LayaDecision.MODELS_KEY)) {
+            return LayaDecision.isSelection(value) ? null
+                    : "%s must be a JSON array of Laya checkpoints (%s), such as [\"english\"]."
+                            .formatted(key, String.join(", ", LayaDecision.CHECKPOINTS));
+        }
         if (key.equals(OllamaDecision.KEEP_ALIVE_KEY)) {
             return value == null || value.isBlank() || OllamaDecision.isKeepAlive(value.strip()) ? null
                     : "%s must be -1 (keep loaded), 0 (unload at once) or a number followed by s, m or h, such as 30m."
                             .formatted(key);
         }
-        if (!key.equals(API_KEY)) {
-            return "%s is not a decision-provider setting; use %s, %s, %s or %s.".formatted(key, API_KEY,
-                    OllamaDecision.BASE_URL_KEY, OllamaDecision.MODELS_KEY, OllamaDecision.KEEP_ALIVE_KEY);
+        if (!key.equals(API_KEY) && !key.equals(LayaDecision.API_KEY)) {
+            return "%s is not a decision-provider setting; use one of %s.".formatted(key, String.join(", ", KEYS));
         }
         // The key rides an Authorization header, where OkHttp throws on anything but printable ASCII.
         return value == null || value.isBlank() || value.chars().allMatch(c -> c > ' ' && c < 0x7f) ? null
-                : "%s must be printable ASCII with no spaces.".formatted(API_KEY);
+                : "%s must be printable ASCII with no spaces.".formatted(key);
     }
 
     private static @Nullable String baseUrlRejection(@Nullable String value) {
         if (value == null || value.isBlank()) return null;
         try {
-            // Loopback and the LAN are where an Ollama server lives, so the provider screen, not the web one.
+            // Loopback and the LAN are where an Ollama or Laya server lives, so the provider screen, not the web one.
             SsrfGuard.assertProviderUrlSafe(value.strip());
             return null;
         } catch (SecurityException e) {
