@@ -359,12 +359,17 @@ class ApiAgentsControllerTest extends FunctionalTest {
     @Test
     void aSwitchInTheSameRequestAsARenameDeletesFromTheMovedWorkspace() {
         login();
-        var id = createAgent("renamed-and-switched-from");
-
-        assertIsOk(PUT("/api/agents/" + id, "application/json",
-                "{\"name\": \"renamed-and-switched-to\", \"serviceAgent\": true}"));
-        assertEquals(404, GET("/api/agents/" + id + "/workspace/USER.md").status.intValue());
-        assertIsOk(GET("/api/agents/" + id + "/workspace/AGENT.md"));
+        // Unique names: a fixed target meets the workspace an earlier run moved there, and the move refuses it.
+        var suffix = java.util.UUID.randomUUID().toString().substring(0, 8);
+        var id = createAgent("renamed-and-switched-from-" + suffix);
+        try {
+            assertIsOk(PUT("/api/agents/" + id, "application/json",
+                    "{\"name\": \"renamed-and-switched-to-" + suffix + "\", \"serviceAgent\": true}"));
+            assertEquals(404, GET("/api/agents/" + id + "/workspace/USER.md").status.intValue());
+            assertIsOk(GET("/api/agents/" + id + "/workspace/AGENT.md"));
+        } finally {
+            DELETE("/api/agents/" + id); // takes the workspace with it, or every run would leave one behind
+        }
     }
 
     @Test
