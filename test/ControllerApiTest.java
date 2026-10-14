@@ -670,7 +670,7 @@ class ControllerApiTest extends FunctionalTest {
         // args-carrying overload now fires and /model status returns the
         // full model metadata.
         login();
-        services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        services.ConfigService.set("provider.openrouter.baseUrl", "http://127.0.0.1:1/api/v1");
         services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
         services.ConfigService.set("provider.openrouter.models",
                 "[{\"id\":\"gpt-4.1\",\"name\":\"GPT 4.1\",\"contextWindow\":128000,\"maxTokens\":8192}]");
@@ -703,7 +703,7 @@ class ControllerApiTest extends FunctionalTest {
         // summary. We verify by inspecting the confirmation text — the
         // summary and the switch confirmation are visibly distinct.
         login();
-        services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        services.ConfigService.set("provider.openrouter.baseUrl", "http://127.0.0.1:1/api/v1");
         services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
         services.ConfigService.set("provider.openrouter.models",
                 "[{\"id\":\"gpt-4.1\",\"contextWindow\":128000}]");

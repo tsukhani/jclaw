@@ -715,7 +715,7 @@ class AgentServiceTest extends UnitTest {
     @Test
     void syncEnabledStatesEnablesNonMainWithConfiguredProvider() {
         // Pins the "provider:modelId" key format the enable path's bulk lookup relies on.
-        services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        services.ConfigService.set("provider.openrouter.baseUrl", "http://127.0.0.1:1/api/v1");
         services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
         services.ConfigService.set("provider.openrouter.models",
                 "[{\"id\":\"sync-enable-model\",\"name\":\"X\",\"contextWindow\":1000,\"maxTokens\":100}]");
@@ -757,7 +757,7 @@ class AgentServiceTest extends UnitTest {
     void supportsVisionReturnsFalseWhenModelNotInProviderList() {
         // Seed openrouter with a model that does NOT include the agent's
         // model id → findFirst().isEmpty → orElse(false).
-        services.ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        services.ConfigService.set("provider.openrouter.baseUrl", "http://127.0.0.1:1/api/v1");
         services.ConfigService.set("provider.openrouter.apiKey", "sk-test");
         services.ConfigService.set("provider.openrouter.models",
                 "[{\"id\":\"some-other-model\",\"name\":\"X\",\"contextWindow\":1000,\"maxTokens\":100}]");

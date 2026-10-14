@@ -22,7 +22,7 @@ class ProviderRegistryAtomicTest extends UnitTest {
 
     @Test
     void refreshProducesImmutableSnapshot() {
-        ConfigService.set("provider.test-provider.baseUrl", "https://test.ai/v1");
+        ConfigService.set("provider.test-provider.baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider.test-provider.apiKey", "sk-test");
         ConfigService.set("provider.test-provider.models",
                 "[{\"id\":\"model-1\",\"name\":\"Model 1\",\"contextWindow\":100000,\"maxTokens\":4096}]");
@@ -31,14 +31,14 @@ class ProviderRegistryAtomicTest extends UnitTest {
 
         var provider = ProviderRegistry.get("test-provider");
         assertNotNull(provider);
-        assertEquals("https://test.ai/v1", provider.config().baseUrl());
+        assertEquals("http://127.0.0.1:1/v1", provider.config().baseUrl());
         assertEquals(1, provider.config().models().size());
     }
 
     @Test
     void concurrentReadsNeverSeeEmptyCache() throws Exception {
         // Set up a valid provider and ensure cache is warm
-        ConfigService.set("provider.concurrent-test.baseUrl", "https://test.ai/v1");
+        ConfigService.set("provider.concurrent-test.baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider.concurrent-test.apiKey", "sk-test");
         ProviderRegistry.refresh();
 
@@ -112,7 +112,7 @@ class ProviderRegistryAtomicTest extends UnitTest {
         // JCLAW-160 AC #3: a baseUrl-only row (apiKey blank) must not
         // register, so `get("openai")` returns null until the operator
         // pastes a key in Settings.
-        ConfigService.set("provider.openai.baseUrl", "https://api.openai.com/v1");
+        ConfigService.set("provider.openai.baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider.openai.apiKey", "");
         ProviderRegistry.refresh();
 
@@ -125,7 +125,7 @@ class ProviderRegistryAtomicTest extends UnitTest {
         // JCLAW-160 AC #3: with both keys populated the registry produces
         // an OpenAiProvider via the factory's openai entry (not the
         // fallback path).
-        ConfigService.set("provider.openai.baseUrl", "https://api.openai.com/v1");
+        ConfigService.set("provider.openai.baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider.openai.apiKey", "sk-real");
         ProviderRegistry.refresh();
 
@@ -133,12 +133,12 @@ class ProviderRegistryAtomicTest extends UnitTest {
         assertNotNull(provider, "openai must register when both keys are non-blank");
         assertInstanceOf(llm.OpenAiProvider.class, provider,
                 "openai must route to OpenAiProvider");
-        assertEquals("https://api.openai.com/v1", provider.config().baseUrl());
+        assertEquals("http://127.0.0.1:1/v1", provider.config().baseUrl());
     }
 
     @Test
     void refreshAfterProviderRemoved() {
-        ConfigService.set("provider.removable.baseUrl", "https://test.ai/v1");
+        ConfigService.set("provider.removable.baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider.removable.apiKey", "sk-test");
         ProviderRegistry.refresh();
 
@@ -160,7 +160,7 @@ class ProviderRegistryAtomicTest extends UnitTest {
         // We force the cold-start state via reflection (no public reset seam),
         // then assert the very first get() — with no preceding explicit
         // refresh() — already finds the configured provider.
-        ConfigService.set("provider.coldstart-test.baseUrl", "https://test.ai/v1");
+        ConfigService.set("provider.coldstart-test.baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider.coldstart-test.apiKey", "sk-test");
 
         forceColdStart();
@@ -169,7 +169,7 @@ class ProviderRegistryAtomicTest extends UnitTest {
             var provider = ProviderRegistry.get("coldstart-test");
             assertNotNull(provider,
                     "cold-start get() must seed the cache synchronously, not return null");
-            assertEquals("https://test.ai/v1", provider.config().baseUrl());
+            assertEquals("http://127.0.0.1:1/v1", provider.config().baseUrl());
         } finally {
             // Restore a warm, non-zero lastRefresh so we don't leave the shared
             // static registry in the cold-start state for sibling tests.
@@ -188,7 +188,7 @@ class ProviderRegistryAtomicTest extends UnitTest {
 
     @Test
     void doubleCheckedLockingPreventsStampede() throws Exception {
-        ConfigService.set("provider.stampede-test.baseUrl", "https://test.ai/v1");
+        ConfigService.set("provider.stampede-test.baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider.stampede-test.apiKey", "sk-test");
         ProviderRegistry.refresh();
 

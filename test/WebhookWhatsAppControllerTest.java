@@ -69,7 +69,7 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         return ref.get();
     }
 
-    /** Seed an enabled Cloud-API binding with full inbound credentials. */
+    /** Seed an enabled Cloud-API binding with full inbound credentials and no access token, so a reply stops before calling graph.facebook.com. */
     private Long seedBinding(String appSecret) {
         return commitInFreshTx(() -> {
             var agent = new Agent();
@@ -83,7 +83,6 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
             b.agent = agent;
             b.transport = WhatsAppTransport.CLOUD_API;
             b.phoneNumberId = PHONE_NUMBER_ID;
-            b.accessToken = "AT1";
             b.appSecret = appSecret;
             b.verifyToken = VERIFY_TOKEN;
             b.enabled = true;

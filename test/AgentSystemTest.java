@@ -44,7 +44,7 @@ class AgentSystemTest extends UnitTest {
     void thinkingModeIsPersistedWhenModelAdvertisesLevel() {
         // Seed an Ollama provider whose model declares all three levels, then
         // verify the agent row captures the chosen level verbatim.
-        ConfigService.set("provider.ollama-cloud.baseUrl", "https://ollama.com/v1");
+        ConfigService.set("provider.ollama-cloud.baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider.ollama-cloud.apiKey", "test-key");
         ConfigService.set("provider.ollama-cloud.models",
                 "[{\"id\":\"kimi-k2.5\",\"name\":\"Kimi K2.5\",\"supportsThinking\":true,"
@@ -59,7 +59,7 @@ class AgentSystemTest extends UnitTest {
     void thinkingModeUnknownLevelCollapsesToNull() {
         // A level the model doesn't advertise must be silently dropped rather than
         // persisted — we'd otherwise send a bogus value on every LLM call.
-        ConfigService.set("provider.ollama-cloud.baseUrl", "https://ollama.com/v1");
+        ConfigService.set("provider.ollama-cloud.baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider.ollama-cloud.apiKey", "test-key");
         ConfigService.set("provider.ollama-cloud.models",
                 "[{\"id\":\"kimi-k2.5\",\"name\":\"Kimi K2.5\",\"supportsThinking\":true,"

@@ -230,7 +230,7 @@ class ApiProvidersControllerTest extends FunctionalTest {
         // /api/providers must surface it. Exercises the full list+map+toJson
         // path that the 0%-covered lambda$0 lives inside.
         login();
-        ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        ConfigService.set("provider.openrouter.baseUrl", "http://127.0.0.1:1/api/v1");
         ConfigService.set("provider.openrouter.apiKey", "sk-test");
         ConfigService.set("provider.openrouter.models", "[]");
         llm.ProviderRegistry.refresh();

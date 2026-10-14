@@ -234,7 +234,8 @@ class WebhookSlackControllerTest extends FunctionalTest {
             "non-message event   | {\"type\":\"event_callback\",\"event\":{\"type\":\"reaction_added\"}}",
             "plain message       | {\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"hi\"}}",
             "slash command       | {\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"/new\"}}",
-            "file_share          | {\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"pic\",\"files\":[{\"id\":\"F1\",\"name\":\"p.png\",\"mimetype\":\"image/png\",\"size\":10,\"url_private_download\":\"https://files.slack.com/files-pri/T/F1/p.png\"}]}}",
+            // A non-Slack file host is refused before a socket opens; files.slack.com made the inbound thread call Slack.
+            "file_share          | {\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"subtype\":\"file_share\",\"channel\":\"C123\",\"user\":\"U456\",\"text\":\"pic\",\"files\":[{\"id\":\"F1\",\"name\":\"p.png\",\"mimetype\":\"image/png\",\"size\":10,\"url_private_download\":\"https://127.0.0.1/files-pri/T/F1/p.png\"}]}}",
             "bot message dropped | {\"type\":\"event_callback\",\"event\":{\"type\":\"message\",\"channel\":\"C123\",\"bot_id\":\"B789\",\"text\":\"echo\"}}"
     })
     void signedEventReturns200(String label, String body) {

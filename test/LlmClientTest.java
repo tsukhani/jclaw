@@ -218,13 +218,13 @@ class LlmClientTest extends UnitTest {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
 
-        ConfigService.set("provider.openrouter.baseUrl", "https://openrouter.ai/api/v1");
+        ConfigService.set("provider.openrouter.baseUrl", "http://127.0.0.1:1/api/v1");
         ConfigService.set("provider.openrouter.apiKey", "sk-test");
         ConfigService.set("provider.openrouter.models", """
                 [{"id":"openai/gpt-4.1","name":"GPT-4.1","contextWindow":1000000,"maxTokens":32768}]
                 """);
 
-        ConfigService.set("provider.ollama-cloud.baseUrl", "https://ollama.com/v1");
+        ConfigService.set("provider.ollama-cloud.baseUrl", "http://127.0.0.1:1/v1");
         ConfigService.set("provider.ollama-cloud.apiKey", "ollama-key");
 
         ProviderRegistry.refresh();
@@ -234,12 +234,12 @@ class LlmClientTest extends UnitTest {
 
         var openrouter = ProviderRegistry.get("openrouter");
         assertNotNull(openrouter);
-        assertEquals("https://openrouter.ai/api/v1", openrouter.config().baseUrl());
+        assertEquals("http://127.0.0.1:1/api/v1", openrouter.config().baseUrl());
         assertEquals(1, openrouter.config().models().size());
 
         var ollama = ProviderRegistry.get("ollama-cloud");
         assertNotNull(ollama);
-        assertEquals("https://ollama.com/v1", ollama.config().baseUrl());
+        assertEquals("http://127.0.0.1:1/v1", ollama.config().baseUrl());
     }
 
     @Test
@@ -247,9 +247,9 @@ class LlmClientTest extends UnitTest {
         Fixtures.deleteDatabase();
         ConfigService.clearCache();
 
-        ConfigService.set("provider.primary.baseUrl", "https://primary.ai/v1");
+        ConfigService.set("provider.primary.baseUrl", "http://127.0.0.1:1/primary/v1");
         ConfigService.set("provider.primary.apiKey", "pk-1");
-        ConfigService.set("provider.secondary.baseUrl", "https://secondary.ai/v1");
+        ConfigService.set("provider.secondary.baseUrl", "http://127.0.0.1:1/secondary/v1");
         ConfigService.set("provider.secondary.apiKey", "pk-2");
 
         ProviderRegistry.refresh();
