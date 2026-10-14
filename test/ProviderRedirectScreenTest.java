@@ -30,8 +30,8 @@ import java.util.concurrent.TimeUnit;
  * The provider-guarded clients never connect to an address {@code SsrfGuard.isBlockedForProvider} refuses,
  * including one a redirect names as an IP literal, which OkHttp never hands to {@code PROVIDER_SAFE_DNS}
  * (JCLAW-1448). Real clients on real loopback sockets: {@code HttpFactories.runWith} answers for every tier
- * and would hide the defect. Connecting to 0.0.0.0 reaches loopback on macOS and Linux, so an unguarded hop
- * lands on {@link #behind}, which {@link #thePlainTierReachesTheBlockedHop} shows.
+ * and would hide the defect. The JDK dials 0.0.0.0 as {@code InetAddress.getLocalHost()}, so an unguarded hop
+ * lands on {@link #behind}, which listens there, as {@link #thePlainTierReachesTheBlockedHop} shows.
  */
 class ProviderRedirectScreenTest extends UnitTest {
 
@@ -40,14 +40,16 @@ class ProviderRedirectScreenTest extends UnitTest {
 
     private MockWebServer front;
     private MockWebServer behind;
+    private InetAddress dialed;
 
     @BeforeEach
     void startServers() throws IOException {
         front = new MockWebServer();
         front.start();
         behind = new MockWebServer();
-        // 0.0.0.0 reaches the IPv4 loopback, so that is where the server behind the blocked hop listens.
-        behind.start(InetAddress.getByName("127.0.0.1"), 0);
+        // NioSocketImpl.connect swaps 0.0.0.0 for this: 127.0.0.1 on macOS, 127.0.1.1 on a Debian host.
+        dialed = InetAddress.getLocalHost();
+        behind.start(dialed, 0);
     }
 
     @AfterEach
@@ -120,7 +122,7 @@ class ProviderRedirectScreenTest extends UnitTest {
     /** A provider that moves, say from one port to another, keeps working; a 307 re-sends the body to a screened host. */
     @Test
     void aRedirectToAnAllowedAddressIsFollowed() throws Exception {
-        var allowed = "http://127.0.0.1:" + behind.getPort() + "/v1/moved";
+        var allowed = behind.url("/v1/moved").newBuilder().host(dialed.getHostAddress()).build().toString();
         for (var client : guardedClients()) {
             for (int code : new int[] {302, 307}) {
                 front.enqueue(redirect(code, allowed));
