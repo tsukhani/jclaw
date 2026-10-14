@@ -1,5 +1,6 @@
 import type { Page } from '@playwright/test'
-import type { ConfigResponse, OllamaDecisionStatus } from '~/types/api'
+import type { ConfigResponse, LayaDecisionStatus, OllamaDecisionStatus } from '~/types/api'
+import { LAYA_LIMITS, layaLimitText } from '../../utils/decision-models'
 import { test, expect, gotoPage, blockApiWrites } from './helpers'
 
 /**
@@ -11,8 +12,9 @@ import { test, expect, gotoPage, blockApiWrites } from './helpers'
  * the click plays the clip, and the speaker badge the CSS hides at rest appears on hover, on
  * keyboard focus and on a screen with no hover.
  *
- * Read-only: blockApiWrites answers every write, and the key editor is never opened. The Ollama
- * card's reads are stubbed, so no test depends on a real Ollama server or on the instance's settings.
+ * Read-only: blockApiWrites answers every write, and the key editor is never opened. Every test stubs
+ * the Laya status read, and the Ollama card's tests stub that card's reads, so no test depends on a
+ * real Ollama or Laya server or on the instance's settings.
  */
 
 const PLAY = { name: 'Play JEV saying “My name is Jev”' }
@@ -67,9 +69,24 @@ async function stubOllama(page: Page, status: OllamaDecisionStatus) {
   await page.route(url => url.pathname === '/api/decision/ollama', route => route.fulfill({ json: status }))
 }
 
-/** Answer GET /api/config with the real entries, the keys the Ollama card reads replaced by `overrides`. */
+// An address no instance reports, so a test that reads it back shows the default stub answered.
+const LAYA_DOWN: LayaDecisionStatus = {
+  baseUrl: 'http://laya.e2e.invalid:8000', reachable: false, error: 'not reachable (UnknownHostException)', loaded: [], device: null,
+}
+
+const LAYA_UP: LayaDecisionStatus = {
+  baseUrl: 'http://localhost:8000', reachable: true, error: null, loaded: ['english', 'typed-decisions'], device: 'mps',
+}
+
+async function stubLaya(page: Page, status: LayaDecisionStatus) {
+  await page.route(url => url.pathname === '/api/decision/laya', route => route.fulfill({ json: status }))
+}
+
+/** Answer GET /api/config with the real entries, each card's model selection and the router's classifier replaced by `overrides`. */
 async function stubConfig(page: Page, overrides: Record<string, string> = {}) {
-  const replaced = new Set(['decision.ollama.models', 'router.classifier.provider', 'router.classifier.model', ...Object.keys(overrides)])
+  const replaced = new Set([
+    'decision.ollama.models', 'decision.laya.models', 'router.classifier.provider', 'router.classifier.model', ...Object.keys(overrides),
+  ])
   await page.route(url => url.pathname === '/api/config', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback()
     const response = await route.fetch()
@@ -92,6 +109,9 @@ function recordConfigPosts(page: Page) {
 }
 
 test.describe('UAT-23 decision providers', () => {
+  // Otherwise the instance dials its stored Laya address; a test's own stubLaya registers later, so it answers first.
+  test.beforeEach(({ page }) => stubLaya(page, LAYA_DOWN))
+
   test('the clip and the portrait are served as media, not as the SPA fallback', async ({ request }) => {
     // An unknown path answers 200 text/html from the SPA catch-all, so the status alone proves nothing.
     for (const [path, type] of [['/jev.mp3', 'audio/'], ['/jev.webp', 'image/'], ['/ollama.mp3', 'audio/'], ['/ollama.webp', 'image/']] as const) {
@@ -263,6 +283,102 @@ test.describe('UAT-23 decision providers', () => {
       await blockApiWrites(page)
       await openPanel(page)
       await expectBadgeFollowsHoverAndFocus(page, OLLAMA_PLAY)
+    })
+  })
+
+  test.describe('the Laya card', () => {
+    // The panel re-reads the config after a write, so a stubConfig route.fetch() can still be in flight at teardown.
+    test.afterEach(({ page }) => page.unrouteAll({ behavior: 'ignoreErrors' }))
+
+    test('renders directly below the Ollama card, with no portrait and no clip', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      const ollama = page.getByTestId('decision-provider-ollama')
+      const laya = page.getByTestId('decision-provider-laya')
+      await expect(laya).toBeVisible()
+      await expect(page.getByTestId('decision-laya-address')).toContainText(LAYA_DOWN.baseUrl)
+      expect(await ollama.evaluate(el => el.nextElementSibling?.getAttribute('data-testid'))).toBe('decision-provider-laya')
+      // One evaluate, so both rects come from one layout: the Ollama card grows as its reads land.
+      const [ollamaBox, layaBox] = await page.evaluate(() => ['decision-provider-ollama', 'decision-provider-laya'].map((id) => {
+        const { x, y, height } = document.querySelector(`[data-testid="${id}"]`)!.getBoundingClientRect()
+        return { x, y, height }
+      }))
+      expect(layaBox!.x).toBe(ollamaBox!.x)
+      expect(layaBox!.y).toBeGreaterThanOrEqual(ollamaBox!.y + ollamaBox!.height)
+      await expect(laya.locator('img')).toHaveCount(0)
+      await expect(laya.locator('audio')).toHaveCount(0)
+      expect(writes()).toEqual([])
+    })
+
+    test('a reachable server marks its loaded checkpoints and names its device', async ({ page }) => {
+      await stubLaya(page, LAYA_UP)
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      await expect(page.getByTestId('decision-laya-status')).toHaveText('reachable')
+      await expect(page.getByTestId('decision-laya-device')).toHaveText('Server device: mps')
+      await expect(page.getByTestId('decision-laya-checkpoints').locator('label')).toHaveText([
+        'english 512 tokens, loaded', 'multilingual 1,024 tokens', 'typed-decisions 1,024 tokens, loaded',
+      ])
+      await expect(page.getByTestId('decision-laya-error')).toHaveCount(0)
+      await expect(page.getByTestId('decision-laya-keyed')).toHaveCount(0)
+      expect(writes()).toEqual([])
+    })
+
+    test('an unreachable server says so and shows the error', async ({ page }) => {
+      // Not LAYA_DOWN's error, so the test also shows its own stub answering rather than the default.
+      await stubLaya(page, {
+        baseUrl: 'http://192.168.1.30:8000', reachable: false, error: 'not reachable (SocketTimeoutException)', loaded: [], device: null,
+      })
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      await expect(page.getByTestId('decision-laya-status')).toHaveText('not reachable')
+      await expect(page.getByTestId('decision-laya-error')).toHaveText('not reachable (SocketTimeoutException)')
+      await expect(page.getByTestId('decision-laya-device')).toHaveCount(0)
+      await expect(page.getByTestId('decision-laya-checkpoints').locator('label')).toHaveText([
+        'english 512 tokens', 'multilingual 1,024 tokens', 'typed-decisions 1,024 tokens',
+      ])
+      expect(writes()).toEqual([])
+    })
+
+    test('a server that says only that it is up shows the hint about the key', async ({ page }) => {
+      await stubLaya(page, { ...LAYA_UP, loaded: [], device: null })
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      await expect(page.getByTestId('decision-laya-status')).toHaveText('reachable')
+      await expect(page.getByTestId('decision-laya-keyed')).toContainText('set or correct the key above to see what it has loaded')
+      await expect(page.getByTestId('decision-laya-device')).toHaveCount(0)
+      await expect(page.getByTestId('decision-laya-error')).toHaveCount(0)
+      expect(writes()).toEqual([])
+    })
+
+    test('ticking a checkpoint sends one write that stores it in decision.laya.models', async ({ page }) => {
+      await stubLaya(page, LAYA_UP)
+      await stubConfig(page)
+      const writes = await blockApiWrites(page)
+      const posts = recordConfigPosts(page)
+      await openPanel(page)
+      const box = page.getByTestId('decision-laya-checkpoint-english').getByRole('checkbox')
+      await box.click()
+
+      await expect.poll(writes).toEqual(['POST /api/config'])
+      // Enabled again only once the write and its re-read finish, so the count below is final.
+      await expect(box).toBeEnabled()
+      expect(writes()).toEqual(['POST /api/config'])
+      expect(posts()).toHaveLength(1)
+      const { key, value } = posts()[0] as { key: string, value: string }
+      expect(key).toBe('decision.laya.models')
+      expect(JSON.parse(value)).toEqual(['english'])
+    })
+
+    test('the limits list shows while the server is unreachable', async ({ page }) => {
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      await expect(page.getByTestId('decision-laya-status')).toHaveText('not reachable')
+      const limits = page.getByTestId('decision-laya-limits')
+      await expect(limits).toBeVisible()
+      await expect(limits.locator('li')).toHaveText(LAYA_LIMITS.map(l => `${l.topic}. ${layaLimitText(l)}`))
+      expect(writes()).toEqual([])
     })
   })
 })
