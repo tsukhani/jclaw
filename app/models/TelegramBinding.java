@@ -133,6 +133,12 @@ public class TelegramBinding extends AgentBoundBinding {
         return TelegramBinding.find("botTokenLookup IN (?1)", cipher.lookups(botToken)).first();
     }
 
+    /** Why a binding whose stored bot token will not decrypt (it reads as null) cannot send. */
+    public static String unreadableBotToken(String agentName) {
+        return "The Telegram bot token for agent '" + agentName + "' cannot be decrypted with this installation's "
+                + "secret; re-enter it in Settings → Channels → Telegram.";
+    }
+
     @PrePersist
     @PreUpdate
     void sealBotTokenLookup() {

@@ -592,6 +592,9 @@ public class MessageTool implements ToolRegistry.Tool {
         if (!binding.enabled) {
             return "Error: Telegram binding for agent '" + binding.agent.name + "' is disabled.";
         }
+        if (binding.botToken == null) {
+            return "Error: " + TelegramBinding.unreadableBotToken(binding.agent.name);
+        }
         String chatId = resolveChatId(agent, explicitTarget);
         if (chatId == null || chatId.isBlank()) {
             return "Error: no Telegram chat 'target' was passed and none could be "
@@ -641,6 +644,9 @@ public class MessageTool implements ToolRegistry.Tool {
         }
         if (!binding.enabled) {
             return "Error: Telegram binding for agent '" + binding.agent.name + "' is disabled.";
+        }
+        if (binding.botToken == null) {
+            return "Error: " + TelegramBinding.unreadableBotToken(binding.agent.name);
         }
         String chatId = resolveChatId(agent, explicitTarget);
         if (chatId == null || chatId.isBlank()) {

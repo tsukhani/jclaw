@@ -13,6 +13,7 @@ import play.Play;
 import play.db.jpa.JPA;
 import play.test.UnitTest;
 import services.AgentService;
+import services.DeliveryDispatcher;
 import services.Tx;
 import utils.CredentialCipher;
 
@@ -71,6 +72,11 @@ class BindingCredentialEncryptionTest extends UnitTest {
 
         assertNull(reload(TelegramBinding.class, telegram).botToken);
         assertNull(reload(SlackBinding.class, slack).signingSecret);
+        var delivery = commitInFreshTx(() -> DeliveryDispatcher.dispatch(
+                reload(TelegramBinding.class, telegram).agent, "telegram", "1455", "fake reminder"));
+        assertEquals(DeliveryDispatcher.DispatchResult.Status.FAILED_NO_CONFIG, delivery.status(),
+                "a delivery reports the credential missing rather than throwing: " + delivery.reason());
+        assertTrue(delivery.reason().contains("re-enter it"), delivery.reason());
 
         commitInFreshTx(() -> {
             evict(TelegramBinding.class, telegram);
