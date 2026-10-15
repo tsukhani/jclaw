@@ -312,6 +312,7 @@ public final class H2Maintenance {
         if (!check.ok()) {
             throw new IllegalArgumentException(check.reason());
         }
+        var restoredAt = stamp == null ? null : stampInstant(stamp);
         var takenAt = CredentialCopies.takenAt(zip);
         var target = dataDir.resolve(DATA_FILE);
         var staging = dataDir.resolve(DATA_FILE + ".restoring");
@@ -347,9 +348,9 @@ public final class H2Maintenance {
             Files.move(graph, displacedGraph);
         }
         Files.move(graphStaging, graph, StandardCopyOption.ATOMIC_MOVE);
-        if (stamp != null) {
+        if (restoredAt != null) {
             var copies = CredentialCopies.read(dataDir);
-            var next = copies.afterRestore(takenAt, stampInstant(stamp));
+            var next = copies.afterRestore(takenAt, restoredAt);
             if (!next.equals(copies)) next.write(dataDir);
         }
         return new RestoreResult(Files.size(target), displaced);

@@ -684,6 +684,9 @@ class H2MaintenanceTest extends UnitTest {
                 && out.toString(StandardCharsets.UTF_8).contains("(credentials unencrypted)"), out.toString(StandardCharsets.UTF_8));
 
         assertNull(CredentialCopies.read(dir).due());
+        var before = H2Maintenance.sha256(dataFile(dir));
+        assertEquals(1, H2Maintenance.run(new String[]{"restore", dir.toString(), zip.toString(), "yesterday"}, print));
+        assertEquals(before, H2Maintenance.sha256(dataFile(dir)), "a stamp that is not one refuses before the swap");
         assertEquals(0, H2Maintenance.run(new String[]{"restore", dir.toString(), zip.toString(),
                 stamp(now.plus(2, ChronoUnit.HOURS))}, print));
         assertEquals(CredentialCopies.OldCopies.PLAINTEXT, CredentialCopies.read(dir).due());
