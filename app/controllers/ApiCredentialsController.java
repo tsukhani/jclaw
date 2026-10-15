@@ -7,7 +7,6 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.UnreadableCredentials;
-import services.UnreadableCredentials.Item;
 
 import java.util.List;
 
@@ -18,8 +17,7 @@ import static utils.GsonHolder.GSON;
 @With(AuthCheck.class)
 public class ApiCredentialsController extends Controller {
 
-    // Item by its simple name: CredentialReadGateConformanceTest matches record names inside this type by substring.
-    public record UnreadableResponse(List<Item> unreadable) {}
+    public record UnreadableResponse(List<UnreadableCredentials.Item> unreadable) {}
 
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = UnreadableResponse.class)))
     @Operation(summary = "The stored credentials that do not decrypt under this installation's secret, and where each is entered again")
