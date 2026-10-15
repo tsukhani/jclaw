@@ -15,6 +15,7 @@ import services.EventLogger;
 import services.Tx;
 import utils.AppClock;
 import utils.ChannelErrorTemplates;
+import utils.CredentialCipher;
 import utils.ErrorRendering;
 import utils.GsonHolder;
 import utils.HttpFactories;
@@ -61,15 +62,32 @@ public class WhatsAppChannel implements Channel {
     public record WhatsAppConfig(String phoneNumberId, String accessToken,
                                  @Nullable String appSecret, @Nullable String verifyToken) {
         public static @Nullable WhatsAppConfig load() {
-            var cc = ChannelConfig.findByType(WHATSAPP);
+            return from(ChannelConfig.findByType(WHATSAPP));
+        }
+
+        /** The config {@code cc} holds, or null when it is off or its access token will not decrypt. */
+        public static @Nullable WhatsAppConfig from(@Nullable ChannelConfig cc) {
             if (cc == null || !cc.enabled) return null;
             var json = JsonParser.parseString(cc.configJson).getAsJsonObject();
+            var accessToken = json.get("accessToken").getAsString();
+            if (CredentialCipher.isEncrypted(accessToken)) {
+                EventLogger.warn(CHANNEL, null, WHATSAPP, "WhatsApp is not configured: the app-wide access token "
+                        + "does not decrypt under this installation's secret. Enter it again in Settings.");
+                return null;
+            }
             return new WhatsAppConfig(
                     json.get("phoneNumberId").getAsString(),
-                    json.get("accessToken").getAsString(),
-                    json.has("appSecret") ? json.get("appSecret").getAsString() : null,
-                    json.has("verifyToken") ? json.get("verifyToken").getAsString() : null
+                    accessToken,
+                    readable(json, "appSecret"),
+                    readable(json, "verifyToken")
             );
+        }
+
+        // A secret that did not decrypt keeps its ciphertext in the JSON (JsonCredential) and reads as unset.
+        private static @Nullable String readable(JsonObject json, String name) {
+            if (!json.has(name)) return null;
+            var value = json.get(name).getAsString();
+            return CredentialCipher.isEncrypted(value) ? null : value;
         }
     }
 

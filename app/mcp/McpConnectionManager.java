@@ -10,6 +10,7 @@ import mcp.transport.McpStdioTransport;
 import mcp.transport.McpStreamableHttpTransport;
 import mcp.transport.McpTransport;
 import models.EventLog;
+import models.JsonCredential;
 import models.McpServer;
 import org.jspecify.annotations.Nullable;
 import play.Play;
@@ -918,6 +919,8 @@ public final class McpConnectionManager {
     @MustBeClosed
     @SuppressWarnings("MustBeClosed")
     private static McpTransport buildTransport(McpServer server) {
+        var unreadable = JsonCredential.MCP_SERVER.unreadableReason(server.configJson);
+        if (unreadable != null) throw new IllegalStateException(unreadable);
         var cfg = JsonParser.parseString(server.configJson).getAsJsonObject();
         return switch (server.transport) {
             case STDIO -> {

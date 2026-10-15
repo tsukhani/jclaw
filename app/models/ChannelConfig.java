@@ -1,6 +1,7 @@
 package models;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.PostRemove;
@@ -29,6 +30,8 @@ public class ChannelConfig extends TimestampedModel {
     @Column(name = "channel_type", nullable = false, unique = true)
     public String channelType;
 
+    /** Its credential-named values stored encrypted (JCLAW-1455); one that will not decrypt keeps its ciphertext here. */
+    @Convert(converter = JsonCredentialConverter.ChannelConfigJson.class)
     @Column(name = "config_json", nullable = false, columnDefinition = "TEXT")
     public String configJson;
 

@@ -11,6 +11,7 @@ import mcp.McpToolDef;
 import mcp.transport.McpStdioTransport;
 import mcp.transport.McpStreamableHttpTransport;
 import mcp.transport.McpTransport;
+import models.JsonCredential;
 import models.McpServer;
 import org.jspecify.annotations.Nullable;
 import play.Play;
@@ -502,6 +503,8 @@ public final class McpServerService {
     @MustBeClosed
     @SuppressWarnings("MustBeClosed")
     private static McpTransport buildTransport(McpServer row) {
+        var unreadable = JsonCredential.MCP_SERVER.unreadableReason(row.configJson);
+        if (unreadable != null) throw new IllegalStateException(unreadable);
         var cfg = explodeConfigJson(row.transport, row.configJson);
         return switch (row.transport) {
             case STDIO -> {

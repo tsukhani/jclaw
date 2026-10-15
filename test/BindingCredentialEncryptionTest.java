@@ -1,7 +1,10 @@
 import channels.ChannelTransport;
 import channels.TelegramInboundTurn;
+import jobs.BindingCredentialColumnsJob;
+import jobs.CredentialEncryptionJob;
 import models.Agent;
 import models.AgentBoundBinding;
+import models.BindingCredential;
 import models.SlackBinding;
 import models.TelegramBinding;
 import models.WhatsAppBinding;
@@ -17,9 +20,14 @@ import services.DeliveryDispatcher;
 import services.Tx;
 import utils.CredentialCipher;
 
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.EnumMap;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -126,6 +134,126 @@ class BindingCredentialEncryptionTest extends UnitTest {
         assertEquals(whatsapp, commitInFreshTx(() -> WhatsAppBinding.findByVerifyToken(verifyToken, rotated).id));
         assertNull(commitInFreshTx(() -> TelegramBinding.findByBotToken(telegramToken, forgotten)),
                 "the fixture must need the previous secret, or the line above proves nothing");
+    }
+
+    @Test
+    void aRotationAndTheStartAfterItLeaveEveryBindingFoundByItsToken() throws Exception {
+        // This JVM's secret is the one after the rotation; the rows start as the secret before it left them.
+        var before = CredentialCipher.of(CredentialEncryptionJobTest.OLD, null);
+        var telegramToken = fake("1455");
+        var slackToken = fake("xoxb");
+        var verifyToken = fake("verify");
+        var telegram = commitInFreshTx(() -> telegram(telegramToken));
+        long slack = commitInFreshTx(() -> slack(slackToken).id);
+        long whatsapp = commitInFreshTx(() -> {
+            var b = new WhatsAppBinding();
+            b.agent = agent();
+            b.accessToken = "EAA-fake-rotation";
+            b.verifyToken = verifyToken;
+            b.save();
+            return b.id;
+        });
+        var bystander = commitInFreshTx(BindingCredentialEncryptionTest.this::agent);
+        var ids = Map.of("slack_binding", slack, "telegram_binding", telegram.id, "whatsapp_binding", whatsapp);
+        var plaintext = new EnumMap<BindingCredential, String>(BindingCredential.class);
+        plaintext.put(BindingCredential.SLACK_BOT_TOKEN, slackToken);
+        plaintext.put(BindingCredential.SLACK_SIGNING_SECRET, "fake-signing-secret");
+        plaintext.put(BindingCredential.SLACK_APP_TOKEN, "xapp-fake-app-token");
+        plaintext.put(BindingCredential.TELEGRAM_BOT_TOKEN, telegramToken);
+        plaintext.put(BindingCredential.TELEGRAM_WEBHOOK_SECRET, "fake-webhook-secret");
+        plaintext.put(BindingCredential.WHATSAPP_ACCESS_TOKEN, "EAA-fake-rotation");
+        plaintext.put(BindingCredential.WHATSAPP_VERIFY_TOKEN, verifyToken);
+        plaintext.forEach((credential, value) -> {
+            var values = new LinkedHashMap<String, String>();
+            values.put(credential.column, before.encrypt(credential.field(), value));
+            if (credential.lookupColumn != null) values.put(credential.lookupColumn, before.lookup(value));
+            update(credential.table, ids.get(credential.table), values);
+        });
+        assertNull(commitInFreshTx(() -> TelegramBinding.findByBotToken(telegramToken)),
+                "the fixture must need the start after the rotation, or what follows proves nothing");
+
+        // That start, on a copy of these rows (its pass rewrites whole tables): the lookup job, then the credential pass.
+        try (var conn = CredentialEncryptionJobTest.throwaway()) {
+            for (var row : ids.entrySet()) copy(row.getKey(), row.getValue(), conn);
+            var rotated = CredentialCipher.of(Play.secretKey, CredentialEncryptionJobTest.OLD);
+            BindingCredentialColumnsJob.refreshLookups(conn, rotated);
+            var pass = CredentialEncryptionJob.reseal(conn, rotated);
+            conn.commit();
+            assertEquals(plaintext.size(), pass.rekeyed(), "every credential is sealed again under the new secret");
+            for (var row : ids.entrySet()) copyBack(conn, row.getKey(), row.getValue());
+        }
+
+        assertEquals(telegram.agent.id,
+                TelegramInboundTurn.resolveTopicAgent(telegramToken, "1455", null, bystander).id,
+                "an inbound Telegram update still resolves its binding");
+        assertEquals(slack, commitInFreshTx(() -> SlackBinding.findByBotToken(slackToken).id));
+        assertEquals(whatsapp, commitInFreshTx(() -> WhatsAppBinding.findByVerifyToken(verifyToken).id),
+                "WhatsApp's webhook verification still matches its verify token");
+        var reread = reload(SlackBinding.class, slack);
+        assertEquals(slackToken, reread.botToken);
+        assertEquals("fake-signing-secret", reread.signingSecret);
+        assertEquals("EAA-fake-rotation", reload(WhatsAppBinding.class, whatsapp).accessToken);
+        assertThrows(RuntimeException.class, () -> commitInFreshTx(() -> telegram(telegramToken)),
+                "a duplicate Telegram bot token is still refused");
+        assertThrows(RuntimeException.class, () -> commitInFreshTx(() -> slack(slackToken)),
+                "and a duplicate Slack one");
+    }
+
+    /** The credential and lookup columns of one row, from the shared database into {@code to}. */
+    private static void copy(String table, long id, Connection to) throws SQLException {
+        var columns = credentialColumns(table);
+        var values = commitInFreshTx(() -> JPA.em().unwrap(Session.class).doReturningWork(connection -> {
+            try (var select = connection.prepareStatement("SELECT " + String.join(", ", columns) + " FROM " + table
+                    + " WHERE id = ?")) {
+                select.setLong(1, id);
+                try (var rows = select.executeQuery()) {
+                    assertTrue(rows.next(), table + " " + id);
+                    var out = new ArrayList<@Nullable String>();
+                    for (int i = 1; i <= columns.size(); i++) out.add(rows.getString(i));
+                    return out;
+                }
+            }
+        }));
+        try (var insert = to.prepareStatement("INSERT INTO " + table + " (id, " + String.join(", ", columns)
+                + ") VALUES (?" + ", ?".repeat(columns.size()) + ")")) {
+            insert.setLong(1, id);
+            for (int i = 0; i < columns.size(); i++) insert.setString(i + 2, values.get(i));
+            insert.executeUpdate();
+        }
+    }
+
+    /** What the start wrote to {@code from}'s copy of the row, back into the shared database. */
+    private static void copyBack(Connection from, String table, long id) throws SQLException {
+        var columns = credentialColumns(table);
+        var values = new LinkedHashMap<String, @Nullable String>();
+        try (var s = from.createStatement();
+             var rows = s.executeQuery("SELECT " + String.join(", ", columns) + " FROM " + table + " WHERE id = " + id)) {
+            assertTrue(rows.next());
+            for (int i = 0; i < columns.size(); i++) values.put(columns.get(i), rows.getString(i + 1));
+        }
+        update(table, id, values);
+    }
+
+    private static List<String> credentialColumns(String table) {
+        var columns = new ArrayList<String>();
+        for (var credential : BindingCredential.values()) {
+            if (!credential.table.equals(table)) continue;
+            columns.add(credential.column);
+            if (credential.lookupColumn != null) columns.add(credential.lookupColumn);
+        }
+        return columns;
+    }
+
+    private static void update(String table, long id, Map<String, @Nullable String> values) {
+        commitInFreshTx(() -> JPA.em().unwrap(Session.class).doWork(connection -> {
+            var assignments = String.join(", ", values.keySet().stream().map(column -> column + " = ?").toList());
+            try (var update = connection.prepareStatement("UPDATE " + table + " SET " + assignments + " WHERE id = ?")) {
+                int i = 1;
+                for (var value : values.values()) update.setString(i++, value);
+                update.setLong(i, id);
+                update.executeUpdate();
+            }
+        }));
     }
 
     @Test

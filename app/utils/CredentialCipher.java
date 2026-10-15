@@ -64,6 +64,58 @@ public final class CredentialCipher {
 
     private static final Opened UNREADABLE = new Opened(Source.UNREADABLE, null);
 
+    /**
+     * One boot pass over the stored credentials: what it sealed from plaintext, re-sealed from the previous secret, and
+     * could not open. Running it again over its own output changes nothing.
+     */
+    public static final class Reseal {
+
+        private final CredentialCipher cipher;
+        private int sealed;
+        private int rekeyed;
+        private int unreadable;
+
+        public Reseal(CredentialCipher cipher) {
+            this.cipher = cipher;
+        }
+
+        /**
+         * {@code stored} as the current secret seals it, or null when it needs no write: already sealed so, empty, or
+         * opened by no secret, which is left for the right one to recover.
+         */
+        public @Nullable String reseal(String field, String stored) {
+            if (stored.isEmpty()) return null;
+            var opened = cipher.open(field, stored);
+            return switch (opened.source()) {
+                case PLAINTEXT -> {
+                    sealed++;
+                    yield cipher.encrypt(field, stored);
+                }
+                case PREVIOUS -> {
+                    rekeyed++;
+                    yield cipher.encrypt(field, opened.resolvedPlaintext());
+                }
+                case UNREADABLE -> {
+                    unreadable++;
+                    yield null;
+                }
+                case CURRENT -> null;
+            };
+        }
+
+        public int sealed() {
+            return sealed;
+        }
+
+        public int rekeyed() {
+            return rekeyed;
+        }
+
+        public int unreadable() {
+            return unreadable;
+        }
+    }
+
     private record Keys(SecretKey cipher, SecretKey lookup) {}
 
     private record Installed(String secret, @Nullable String previousSecret, CredentialCipher cipher) {}

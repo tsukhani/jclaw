@@ -48,6 +48,8 @@ import utils.SsrfGuard;
 import utils.StartupErrorTemplates;
 import utils.TokenCoalescer;
 
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
@@ -882,6 +884,27 @@ public class ConfigService {
         if (stored == null || !CredentialCipher.isEncrypted(stored)) return new Read(stored, false);
         var opened = CredentialCipher.current().open(fieldName(key), stored);
         return new Read(opened.plaintext(), !opened.readable());
+    }
+
+    /**
+     * The Config part of the boot pass (JCLAW-1455): every credential sealed under {@code pass}'s current secret, on the
+     * pass's connection, which commits it. The cache needs no eviction: no value a reader sees changes.
+     */
+    public static void resealStored(Connection conn, CredentialCipher.Reseal pass) throws SQLException {
+        try (var select = conn.prepareStatement("SELECT id, config_key, config_value FROM config");
+             var update = conn.prepareStatement("UPDATE config SET config_value = ? WHERE id = ?");
+             var rows = select.executeQuery()) {
+            while (rows.next()) {
+                var key = rows.getString(2);
+                var stored = rows.getString(3);
+                if (stored == null || (!encryptsAtRest(key) && !CredentialCipher.isEncrypted(stored))) continue;
+                var resealed = pass.reseal(fieldName(key), stored);
+                if (resealed == null) continue;
+                update.setString(1, resealed);
+                update.setLong(2, rows.getLong(1));
+                update.executeUpdate();
+            }
+        }
     }
 
     /** {@code stored}, read under {@code oldKey}, in the form {@code newKey} stores it; null when it will not decrypt. */
