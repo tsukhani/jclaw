@@ -169,6 +169,26 @@ public class ApiDatabaseController extends Controller {
         ApiResponses.ok("mode", plan.mode(), "rebuildExpected", plan.rebuildExpected());
     }
 
+    /**
+     * POST /api/system/database/compact — hand off to {@code jclaw.sh compact}, which rewrites the closed data file with
+     * its live data alone, removing the old copies of the credentials (JCLAW-1455), and ack 202.
+     */
+    @AgentAccess(value = OPERATOR_ONLY, reason = "rewrites the database file and restarts the instance")
+    public static void compact() {
+        RestartService.Plan plan;
+        try {
+            plan = DatabaseService.requestCompact();
+        } catch (IllegalStateException e) {
+            ApiResponses.error(409, ApiResponses.CONFLICT, ApiResponses.messageOf(e));
+            return;
+        } catch (Exception e) {
+            ApiResponses.errorAndLog(e, 500, ApiResponses.INTERNAL_ERROR, "Failed to launch the compaction helper: " + e.getMessage());
+            return;
+        }
+        response.status = 202;
+        ApiResponses.ok("mode", plan.mode(), "rebuildExpected", plan.rebuildExpected());
+    }
+
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = H2Maintenance.CleanResult.class)))
     @Operation(summary = "Delete the files the last successful repair left behind")
     @AgentAccess(value = OPERATOR_ONLY, reason = "deletes the damaged database file kept aside by a repair")

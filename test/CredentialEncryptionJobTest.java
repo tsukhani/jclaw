@@ -53,7 +53,12 @@ class CredentialEncryptionJobTest extends UnitTest {
 
     /** Every store's table, empty, with the columns the pass reads: the binding ones as the column job leaves them. */
     static Connection throwaway() throws SQLException {
-        var conn = DriverManager.getConnection("jdbc:h2:mem:credential-pass-" + System.nanoTime() + ";MODE=MYSQL");
+        return throwaway("jdbc:h2:mem:credential-pass-" + System.nanoTime() + ";MODE=MYSQL");
+    }
+
+    /** The same tables in the database at {@code url}. */
+    static Connection throwaway(String url) throws SQLException {
+        var conn = DriverManager.getConnection(url);
         conn.setAutoCommit(false);
         try (Statement s = conn.createStatement()) {
             s.execute("CREATE TABLE config (id BIGINT PRIMARY KEY, config_key VARCHAR(255) NOT NULL, config_value TEXT)");

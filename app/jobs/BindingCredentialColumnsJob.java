@@ -22,8 +22,8 @@ import java.util.Objects;
  * Bring an existing database's channel-binding credential columns to what {@link BindingCredential} needs
  * (JCLAW-1455). Hibernate's schema update adds the lookup columns and their unique constraint, but it neither widens
  * a column nor drops a constraint, so this widens the credential columns to unbounded text (a ciphertext is about a
- * third longer than its token, and Meta sets its access tokens no maximum) and drops the unique constraint on each bot
- * token, whose ciphertext differs on every write. It then sets every lookup under the current secret, on each boot,
+ * third longer than its token, and Meta sets its access tokens no maximum), and the {@link BindingCredential#UNMAPPED}
+ * ones where they exist, and drops the unique constraint on each bot token, whose ciphertext differs on every write. It then sets every lookup under the current secret, on each boot,
  * so a rotation re-keys them.
  */
 // Before anything reads a binding by its token: the channel runners start at the default priority.
@@ -87,6 +87,16 @@ public class BindingCredentialColumnsJob extends Job<Void> {
                     s.execute("ALTER TABLE " + table + " ALTER COLUMN " + column + " SET DATA TYPE CHARACTER VARYING");
                     altered++;
                 }
+            }
+        }
+        for (var unmapped : BindingCredential.UNMAPPED) {
+            var table = unmapped.table().toUpperCase(Locale.ROOT);
+            var column = unmapped.column().toUpperCase(Locale.ROOT);
+            if (bounded(conn, table, column)) {
+                try (Statement s = conn.createStatement()) {
+                    s.execute("ALTER TABLE " + table + " ALTER COLUMN " + column + " SET DATA TYPE CHARACTER VARYING");
+                }
+                altered++;
             }
         }
         return altered;

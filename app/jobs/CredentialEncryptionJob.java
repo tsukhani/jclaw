@@ -11,10 +11,12 @@ import play.jobs.OnApplicationStart;
 import services.ConfigService;
 import services.EventLogger;
 import services.OperatorAlerts;
+import services.database.DatabaseService;
 import utils.CredentialCipher;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.Locale;
 import java.util.function.Function;
 
 /**
@@ -22,7 +24,9 @@ import java.util.function.Function;
  * {@value CredentialCipher#PREVIOUS_SECRET_VAR} opens is sealed again under the current secret, and a value neither
  * opens is counted and left as it is, for the right secret to recover. It commits once, so a start that dies partway
  * writes nothing, and a sealed value is never sealed again, so the next start finishes the job. The binding lookups
- * are {@link BindingCredentialColumnsJob}'s, which sets them under the current secret before this runs.
+ * are {@link BindingCredentialColumnsJob}'s, which sets them under the current secret before this runs. Afterwards it
+ * records whether the data file now holds old copies a compaction would remove, and masks the values H2's trace file
+ * quotes.
  */
 // After BindingCredentialColumnsJob widens the binding columns, which a long token's ciphertext needs; before
 // DefaultConfigJob, the channel runners and the MCP connections read a credential.
@@ -37,8 +41,10 @@ public class CredentialEncryptionJob extends Job<Void> {
         }
         var cipher = CredentialCipher.current();
         CredentialCipher.Reseal pass;
+        CredentialCipher.Reseal unmapped;
         try (Connection conn = DB.getDataSource().getConnection()) {
             pass = reseal(conn, cipher);
+            unmapped = resealUnmapped(conn, cipher);
             conn.commit();
         } catch (SQLException e) {
             // Every credential still reads as it did: plaintext and the previous secret's ciphertext both open.
@@ -47,6 +53,8 @@ public class CredentialEncryptionJob extends Job<Void> {
             return;
         }
         report(pass, cipher.hasPrevious());
+        DatabaseService.recordCredentialPass(pass.sealed() + unmapped.sealed(), pass.rekeyed() + unmapped.rekeyed());
+        DatabaseService.maskTraces();
     }
 
     /** Seal every store's credentials under {@code cipher}'s current secret. Does not commit. */
@@ -61,6 +69,31 @@ public class CredentialEncryptionJob extends Job<Void> {
             resealColumn(conn, json.table, JsonCredential.COLUMN, stored -> json.reseal(stored, pass));
         }
         return pass;
+    }
+
+    /**
+     * Seal the {@link BindingCredential#UNMAPPED} columns where the schema still has them. Counted apart from
+     * {@link #reseal}: nothing reads them, so one that does not open is no credential to enter again.
+     */
+    // Public because Play's tests live in the default package.
+    public static CredentialCipher.Reseal resealUnmapped(Connection conn, CredentialCipher cipher) throws SQLException {
+        var pass = new CredentialCipher.Reseal(cipher);
+        for (var column : BindingCredential.UNMAPPED) {
+            if (!columnExists(conn, column.table(), column.column())) continue;
+            resealColumn(conn, column.table(), column.column(), stored -> pass.reseal(column.field(), stored));
+        }
+        return pass;
+    }
+
+    private static boolean columnExists(Connection conn, String table, String column) throws SQLException {
+        try (var lookup = conn.prepareStatement("SELECT COUNT(*) FROM information_schema.columns "
+                + "WHERE UPPER(table_name) = ? AND UPPER(column_name) = ?")) {
+            lookup.setString(1, table.toUpperCase(Locale.ROOT));
+            lookup.setString(2, column.toUpperCase(Locale.ROOT));
+            try (var rows = lookup.executeQuery()) {
+                return rows.next() && rows.getLong(1) > 0;
+            }
+        }
     }
 
     private static void resealColumn(Connection conn, String table, String column,

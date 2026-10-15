@@ -114,7 +114,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|diagnostics|test|e2e|dist|bundle|backup|restore|repair|db-clean|db-status|completion|shim|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|diagnostics|test|e2e|dist|bundle|backup|restore|repair|compact|db-clean|db-status|completion|shim|uninstall|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -183,6 +183,9 @@ Commands:
   repair    Rebuild a damaged database from what H2's recovery tool can still
             read, verify it, and keep the damaged file aside. Stops and
             restarts a running instance.
+  compact   Rewrite the database file with its live data alone, removing the
+            old copies of the credentials it held before they were encrypted.
+            Stops and restarts a running instance.
   db-clean  Delete the files a successful repair left behind.
   db-status Database size, free space, health, last backup and repair remnants.
   completion Print a shell completion script (completion <bash|zsh>) so
@@ -294,7 +297,7 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|db-clean|db-status|completion|shim|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|compact|db-clean|db-status|completion|shim|uninstall|help>
 
 Commands:
   https     Generate a TLS PEM cert+key at certs/host.cert and host.key.
@@ -324,6 +327,9 @@ Commands:
   repair    Rebuild a damaged database from what H2's recovery tool can still
             read, verify it, and keep the damaged file aside. Stops and
             restarts a running instance.
+  compact   Rewrite the database file with its live data alone, removing the
+            old copies of the credentials it held before they were encrypted.
+            Stops and restarts a running instance.
   db-clean  Delete the files a successful repair left behind.
   db-status Database size, free space, health, last backup and repair remnants.
   completion Print a shell completion script (completion <bash|zsh>) so
@@ -374,7 +380,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|db-clean|db-status|loadtest|evals|diagnostics|test|e2e|dist|bundle|completion|uninstall)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|compact|db-clean|db-status|loadtest|evals|diagnostics|test|e2e|dist|bundle|completion|uninstall)
             return 0
             ;;
         *)
@@ -400,7 +406,7 @@ usage_for() {
         status)   usage_status   ;;
         logs)     usage_logs     ;;
         upgrade)  usage_upgrade  ;;
-        backup|restore|repair|db-clean|db-status) usage_database ;;
+        backup|restore|repair|compact|db-clean|db-status) usage_database ;;
         loadtest) usage_loadtest ;;
         scrapetest) usage_scrapetest ;;
         grapheval) usage_grapheval ;;
@@ -851,6 +857,7 @@ usage_database() {
 Usage: ${INVOKE} backup [--out <dir>] [--list]
        ${INVOKE} restore <zip | backup id> [--yes]
        ${INVOKE} repair [--yes] [--clean]
+       ${INVOKE} compact [--yes]
        ${INVOKE} db-clean [--yes]
        ${INVOKE} db-status
 
@@ -872,6 +879,13 @@ repair     The recovery procedure, run for you: H2's Recover tool reads the
            and data/repair-<stamp>.json records what was created. Rows on
            pages that cannot be read are lost — back up first if you can.
            Ends by offering to delete the intermediates; --clean accepts.
+compact    Rewrite data/jclaw.mv.db with its live data alone. Encrypting the
+           stored credentials (JCLAW-1455) leaves their old plaintext in the
+           file's free pages, and a rotation leaves their copies under the
+           previous secret; this removes both. The rewrite goes to a copy that
+           replaces the file only once every table's row count matches, so a
+           compaction cut short leaves the file as it was. Also masks the
+           values H2's trace file quotes. Stops and restarts a running instance.
 db-clean   Delete exactly what the last successful repair's manifest lists,
            after checking each file's checksum. Refused while the repair was
            incomplete or the database is not healthy: the damaged file is the
@@ -1588,7 +1602,7 @@ while [[ $# -gt 0 ]]; do
             HTTPS_INSTALL_CA=true
             shift
             ;;
-        https|no-https|secret|reset|start|stop|restart|status|logs|upgrade|shim|uninstall|backup|restore|repair|db-clean|db-status)
+        https|no-https|secret|reset|start|stop|restart|status|logs|upgrade|shim|uninstall|backup|restore|repair|compact|db-clean|db-status)
             COMMAND="$1"
             shift
             ;;
@@ -4984,6 +4998,7 @@ do_completion() {
         backup   "Back up the database"
         restore  "Replace the database with a backup"
         repair   "Rebuild a damaged database"
+        compact  "Remove old credential copies from the database file"
         db-clean "Delete the files a repair left behind"
         db-status "Database size, health and backups"
     )
@@ -6104,7 +6119,7 @@ do_db_backup() {
     cd "$SCRIPT_DIR"
     local backups_dir="${DB_BACKUP_OUT:-$SCRIPT_DIR/data/backups}"
     if [[ -n "$DB_LIST" ]]; then
-        db_engine list "$backups_dir"
+        db_engine list "$backups_dir" "$SCRIPT_DIR/data"
         return
     fi
     mkdir -p "$backups_dir"
@@ -6172,7 +6187,7 @@ successful backup.${note}" || exit 0
     fi
     db_status_json restore restoring "Restoring ${backup_name}…" "$backup_name"
     echo "==> Restoring..."
-    if ! db_engine restore "$SCRIPT_DIR/data" "$zip" 2>&1 | tee -a "$DB_LOG"; then
+    if ! db_engine restore "$SCRIPT_DIR/data" "$zip" "$(date -u +%Y%m%dT%H%M%SZ)" 2>&1 | tee -a "$DB_LOG"; then
         db_status_json restore failed "Restore failed — see logs/database.log" "$backup_name"
         DB_OP_DONE=1
         exit 1
@@ -6243,6 +6258,48 @@ repair creates are kept in data/ until you clean them up.${note}" || exit 0
         echo "The files the repair created are kept in data/. Once the rebuilt database"
         echo "has proven healthy, remove them with: ${INVOKE} db-clean"
     fi
+}
+
+# Out of process rather than at shutdown: do_stop_prod kills a JVM still stopping after 60s,
+# which would cut a shutdown-time compaction short.
+do_db_compact() {
+    cd "$SCRIPT_DIR"
+    if [[ ! -f "$SCRIPT_DIR/data/jclaw.mv.db" ]]; then
+        echo "Error: no database at data/jclaw.mv.db"
+        exit 1
+    fi
+    local was_running=""
+    db_backend_running && was_running=1
+    [[ -n "$was_running" ]] && check_prereqs
+    local note=""
+    [[ -n "$was_running" ]] && note=" JClaw will be stopped and started again."
+    db_confirm "This rewrites data/jclaw.mv.db with its live data alone, removing the old copies
+of the credentials. The file is replaced only once the rewrite matches it row for row.${note}" || exit 0
+
+    local stamp
+    stamp=$(date -u +%Y%m%dT%H%M%SZ)
+    DB_OP_STARTED=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    trap 'db_op_trap compact' EXIT
+    if [[ -n "$was_running" ]]; then
+        db_status_json compact stopping "Stopping JClaw…"
+        db_stop_instance
+    fi
+    db_status_json compact compacting "Compacting the database…"
+    echo "==> Compacting..."
+    local rc=0
+    db_engine compact "$SCRIPT_DIR/data" "$stamp" 2>&1 | tee -a "$DB_LOG" || rc=$?
+    if [[ -n "$was_running" ]]; then
+        db_status_json compact starting "Starting JClaw…"
+        db_start_instance
+    fi
+    if [[ $rc -ne 0 ]]; then
+        db_status_json compact failed "Compaction failed; the database file is unchanged — see logs/database.log"
+        DB_OP_DONE=1
+        exit 1
+    fi
+    db_status_json compact done "Compaction complete"
+    DB_OP_DONE=1
+    echo "==> Done. Backups taken before now may still hold the old copies: '${INVOKE} backup --list' marks them."
 }
 
 do_db_clean() {
@@ -6317,7 +6374,7 @@ PY
     echo "Backend: stopped (health needs a running instance)"
     db_engine status "$SCRIPT_DIR/data"
     echo "Free space: $(df -k "$SCRIPT_DIR/data" 2>/dev/null | awk 'NR==2 { printf "%.1f GB", $4/1048576 }')"
-    db_engine list "$SCRIPT_DIR/data/backups"
+    db_engine list "$SCRIPT_DIR/data/backups" "$SCRIPT_DIR/data"
 }
 
 
@@ -6392,6 +6449,9 @@ case "$COMMAND" in
         ;;
     repair)
         do_db_repair
+        ;;
+    compact)
+        do_db_compact
         ;;
     db-clean)
         do_db_clean

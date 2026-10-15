@@ -52,7 +52,9 @@ class DatabaseServiceTest extends UnitTest {
         assertNotNull(DatabaseService.resolveBackup("jclaw-20260909T120000Z.zip"));
         assertNull(DatabaseService.resolveBackup("../elsewhere/x.zip"), "no traversal");
         assertNull(DatabaseService.resolveBackup("elsewhere/x.zip"), "no path segments");
-        assertNull(DatabaseService.resolveBackup("notes.txt"), "only zips");
+        assertNull(DatabaseService.resolveBackup("notes.txt"), "only zips, and the upgrade's raw copies");
+        touch(dir, "jclaw-0.19.40-20261015T000000Z.mv.db", Instant.now());
+        assertNotNull(DatabaseService.resolveBackup("jclaw-0.19.40-20261015T000000Z.mv.db"));
         assertNull(DatabaseService.resolveBackup("missing.zip"));
         assertNull(DatabaseService.resolveBackup(""));
     }
@@ -194,6 +196,16 @@ class DatabaseServiceTest extends UnitTest {
         assertTrue(DatabaseService.cleanupUnavailableReason(ok, healthy, after).contains("since the repair"));
         assertNull(DatabaseService.cleanupUnavailableReason(ok, healthy, before), "an event before the repair does not count");
         assertNull(DatabaseService.cleanupUnavailableReason(ok, healthy, List.of()));
+    }
+
+    @Test
+    void aBootPassIsRecordedBesideTheDataFile() {
+        DatabaseService.dataDirForTest = tmp;
+        assertNull(DatabaseService.credentialCopies().encryptedAt());
+        DatabaseService.recordCredentialPass(2, 0);
+        var copies = DatabaseService.credentialCopies();
+        assertEquals("PLAINTEXT", copies.due(), "sealing plaintext leaves its old copies for a compaction");
+        assertNotNull(copies.encryptedAt());
     }
 
     @Test

@@ -66,6 +66,18 @@ class BindingCredentialColumnsJobTest extends UnitTest {
     }
 
     @Test
+    void theUnmappedCredentialColumnsAnOlderSchemaLeftAreWidenedWhereTheyExist() throws Exception {
+        try (var conn = throwaway(); Statement s = conn.createStatement()) {
+            s.execute("ALTER TABLE slack_binding ADD COLUMN user_token VARCHAR(255)");
+            s.execute("ALTER TABLE telegram_binding ADD COLUMN webhook_url VARCHAR(255)");
+            assertEquals(12, BindingCredentialColumnsJob.migrate(conn), "the ten changes, and both unmapped columns widened");
+            var sealed = CIPHER.encrypt("telegram_binding.webhook_url", "https://fake.invalid/" + "w".repeat(200));
+            s.execute("UPDATE telegram_binding SET webhook_url = '" + sealed + "' WHERE id = 1");
+            assertEquals(0, BindingCredentialColumnsJob.migrate(conn));
+        }
+    }
+
+    @Test
     void theLookupsAreSetUnderTheCurrentSecretAndARotationReKeysThem() throws Exception {
         try (var conn = throwaway(); Statement s = conn.createStatement()) {
             BindingCredentialColumnsJob.migrate(conn);

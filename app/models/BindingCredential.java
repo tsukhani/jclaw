@@ -2,6 +2,8 @@ package models;
 
 import org.jspecify.annotations.Nullable;
 
+import java.util.List;
+
 /**
  * The channel-binding columns that hold a third-party credential, each sealed by its {@link BindingCredentialConverter}
  * under its own {@link #field()} name (JCLAW-1455). A column a finder or a unique constraint matches by value has a
@@ -30,5 +32,20 @@ public enum BindingCredential {
     /** The cipher's additional authenticated data: a ciphertext moved to another column does not open there. */
     public String field() {
         return table + "." + column;
+    }
+
+    /**
+     * Columns an older schema left on the binding tables that no entity maps, each holding a credential where it holds
+     * anything: Slack's user token from the reverted JCLAW-456, and the Telegram webhook URL, whose path carried the
+     * webhook secret before JCLAW-784. Nothing reads them, so they are widened and sealed in place but never opened.
+     */
+    public static final List<Unmapped> UNMAPPED = List.of(
+            new Unmapped("slack_binding", "user_token"),
+            new Unmapped("telegram_binding", "webhook_url"));
+
+    public record Unmapped(String table, String column) {
+        public String field() {
+            return table + "." + column;
+        }
     }
 }
