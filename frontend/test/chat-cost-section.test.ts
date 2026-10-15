@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
+import { getQuery } from 'h3'
 import ChatCostSection from '~/components/ChatCostSection.vue'
 import type { Agent } from '~/types/api'
 
@@ -480,6 +481,50 @@ describe('ChatCostSection (JCLAW-28)', () => {
     // that used to be a row inside the table footer).
     expect(text).toContain('Ollama Cloud')
     expect(text).toContain('$100')
+  })
+
+  // JCLAW-1449: a subscription's per-token cost reads $0.00, so Ollama Cloud's request counts sit
+  // beside the fees.
+  function stubCloudUsage(): string[] {
+    const requested: string[] = []
+    registerEndpoint('/api/router/usage/ollama-cloud', (event) => {
+      const range = String(getQuery(event).range)
+      requested.push(range)
+      return { provider: 'ollama-cloud', range, total: range === '24h' ? 1533 : 8341, buckets: [], fetchedAt: '2026-10-15T13:17:00Z' }
+    })
+    return requested
+  }
+
+  it('shows Ollama Cloud requests over 24 hours and 7 days beside the subscription fees', async () => {
+    const requested = stubCloudUsage()
+    stubSubscriptionFixture({
+      providers: [{ name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 }],
+      rows: [],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, { props: { agents: STUB_AGENTS } })
+    await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === '30d')!.trigger('click')
+    await flushPromises()
+
+    const card = wrapper.find('[data-testid="ollama-cloud-requests"]')
+    expect(card.text()).toContain('1,533last 24 hours')
+    expect(card.text()).toContain('8,341last 7 days')
+    expect(wrapper.text()).toContain('$100')
+    expect([...new Set(requested)].sort()).toEqual(['24h', '7d'])
+    wrapper.unmount()
+  })
+
+  it('asks for no request counts when Ollama Cloud has no key', async () => {
+    const requested = stubCloudUsage()
+    stubSubscriptionFixture({
+      providers: [{ name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 }],
+      rows: [],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, { props: { agents: STUB_AGENTS } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="ollama-cloud-requests"]').exists()).toBe(false)
+    expect(requested).toEqual([])
+    wrapper.unmount()
   })
 
   it('collapses the cost section to just the provider chips when no usage exists', async () => {

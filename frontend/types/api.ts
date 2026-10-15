@@ -1033,6 +1033,28 @@ export interface Breaker {
   manual: boolean
 }
 
+/** A history span `GET /api/router/usage/ollama-cloud` accepts (JCLAW-1449). */
+export type CloudUsageRange = '24h' | '7d' | '30d'
+
+export interface CloudUsageBucket {
+  from: string
+  until: string
+  requestCount: number
+  /** True for the newest span, still running. */
+  partial: boolean
+}
+
+/** Ollama Cloud's request counts over one range, as `GET /api/router/usage/ollama-cloud` reports them. */
+export interface CloudUsage {
+  provider: string
+  range: string
+  total: number
+  /** Oldest first; empty when `fetchedAt` is null. */
+  buckets: CloudUsageBucket[]
+  /** Null when there is no reading under a minute old: no key, or ollama.com refused or did not answer. */
+  fetchedAt: string | null
+}
+
 export interface McpServer {
   id: number
   name: string
