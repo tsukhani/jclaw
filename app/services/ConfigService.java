@@ -870,9 +870,10 @@ public class ConfigService {
         return isSensitive(key) && !key.startsWith(AUTH_KEY_PREFIX);
     }
 
-    /** {@code value} in the form {@code key} stores it. An empty value holds no secret and stays as it is. */
-    private static String storedForm(String key, String value) {
-        if (value.isEmpty() || !encryptsAtRest(key)) return value;
+    /** {@code value} in the form {@code key} stores it. An empty or null value (test/, outside NullAway, writes one)
+     *  holds no secret and stays as it is. */
+    private static @Nullable String storedForm(String key, @Nullable String value) {
+        if (value == null || value.isEmpty() || !encryptsAtRest(key)) return value;
         return CredentialCipher.current().encrypt(fieldName(key), value);
     }
 
