@@ -209,6 +209,24 @@ class DatabaseServiceTest extends UnitTest {
     }
 
     @Test
+    void aBackupsDirectoryPointedAtTheDataDirectoryNeverOffersTheLiveDatabase() throws Exception {
+        DatabaseService.dataDirForTest = tmp;
+        DatabaseService.backupsDirForTest = tmp;
+        DatabaseService.recordCredentialPass(tmp, 2, 0);
+        touch(tmp, H2Maintenance.DATA_FILE, Instant.now());
+        touch(tmp, "jclaw-compacting.mv.db", Instant.now());
+        touch(tmp, "jclaw-0.19.40-20261015T000000Z.mv.db", Instant.now());
+
+        assertEquals(List.of("jclaw-0.19.40-20261015T000000Z.mv.db"),
+                DatabaseService.listUpgradeCopies().stream().map(DatabaseService.BackupInfo::id).toList(),
+                "only the upgrade's own copy is offered for deletion");
+        assertNull(DatabaseService.resolveBackup(H2Maintenance.DATA_FILE));
+        assertNull(DatabaseService.resolveBackup("jclaw-compacting.mv.db"));
+        assertFalse(DatabaseService.deleteBackup(H2Maintenance.DATA_FILE));
+        assertTrue(Files.exists(tmp.resolve(H2Maintenance.DATA_FILE)), "the live database is never deleted as a backup");
+    }
+
+    @Test
     void theManifestStampParsesAsAnInstant() {
         assertEquals(Instant.parse("2026-09-09T12:00:00Z"), DatabaseService.stampInstant("20260909T120000Z"));
         assertNull(DatabaseService.stampInstant("yesterday"));

@@ -154,7 +154,7 @@ public final class DatabaseService {
 
     /** A backup id is a bare zip file name inside the backups directory — never a path. */
     public static @Nullable Path resolveBackup(String id) {
-        if (!BACKUP_ID.matcher(id).matches()) {
+        if (!BACKUP_ID.matcher(id).matches() || (id.endsWith(UPGRADE_COPY_SUFFIX) && !isUpgradeCopy(id))) {
             return null;
         }
         var dir = backupsDir().toAbsolutePath().normalize();
@@ -182,6 +182,13 @@ public final class DatabaseService {
         }
     }
 
+    // jclaw.sh upgrade names its copies jclaw-<version>-<stamp>.mv.db. The live jclaw.mv.db never matches, so a
+    // db.backup.dir pointed at data/ cannot offer it for download or deletion.
+    private static boolean isUpgradeCopy(String name) {
+        return name.startsWith(BACKUP_PREFIX) && name.endsWith(UPGRADE_COPY_SUFFIX)
+                && !name.equals(H2Maintenance.COMPACTING_DB + UPGRADE_COPY_SUFFIX);
+    }
+
     /** The raw data-file copies {@code jclaw.sh upgrade} keeps beside the backups, newest first. */
     public static List<BackupInfo> listUpgradeCopies() {
         var dir = backupsDir();
@@ -191,7 +198,7 @@ public final class DatabaseService {
         var copies = CredentialCopies.read(dataDir());
         try (var files = Files.list(dir)) {
             var out = new ArrayList<BackupInfo>();
-            for (var p : files.filter(f -> f.getFileName().toString().endsWith(UPGRADE_COPY_SUFFIX) && Files.isRegularFile(f)).toList()) {
+            for (var p : files.filter(f -> isUpgradeCopy(f.getFileName().toString()) && Files.isRegularFile(f)).toList()) {
                 var modified = Files.getLastModifiedTime(p).toInstant();
                 out.add(new BackupInfo(p.getFileName().toString(), Files.size(p), modified.toString(),
                         copies.holdsPlaintext(modified)));
