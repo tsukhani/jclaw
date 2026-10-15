@@ -452,6 +452,7 @@ For a turnkey production install, use the [Quick Install](#quick-install-one-lin
 ./jclaw.sh backup
 ./jclaw.sh restore <zip | backup id>   # validated first; a running instance restarts
 ./jclaw.sh repair                      # rebuild a damaged database with H2's Recover tool
+./jclaw.sh compact                     # remove the credentials' old copies from the database file
 ./jclaw.sh db-clean                    # delete what the last successful repair left behind
 ./jclaw.sh db-status                   # file size, health verdict, last backup
 

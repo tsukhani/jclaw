@@ -6355,6 +6355,12 @@ print(f"Free space:   {human(s['freeBytes'])}")
 age = s.get("lastBackupAgeSeconds")
 print("Last backup:  " + (f"{s['lastBackupAt']} ({age // 3600}h {age % 3600 // 60}m ago)" if age is not None else "none"))
 print(f"Backups:      {len(s['backups'])} in {s['backupsDir']} (retention {s['retention']}, schedule {s.get('schedule') or 'none'})")
+due = (s.get("credentials") or {}).get("due")
+if due:
+    print("Credentials:  the data file still holds " + ("their old plaintext" if due == "PLAINTEXT" else "copies under the previous secret") + " (remove it with 'compact')")
+unencrypted = [b["id"] for b in s["backups"] + (s.get("upgradeCopies") or []) if b.get("unencrypted")]
+if unencrypted:
+    print(f"Unencrypted:  {len(unencrypted)} backup(s) hold the credentials in plaintext: {', '.join(unencrypted)}")
 r = s.get("repair")
 if r:
     remnants = sum(f["bytes"] for f in r["files"])
