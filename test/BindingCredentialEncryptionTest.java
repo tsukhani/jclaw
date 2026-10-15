@@ -1,3 +1,5 @@
+import agents.DangerousActionGate;
+import channels.ChannelRegistry;
 import channels.ChannelTransport;
 import channels.TelegramInboundTurn;
 import jobs.BindingCredentialColumnsJob;
@@ -16,6 +18,7 @@ import play.Play;
 import play.db.jpa.JPA;
 import play.test.UnitTest;
 import services.AgentService;
+import services.ConversationService;
 import services.DeliveryDispatcher;
 import services.Tx;
 import utils.CredentialCipher;
@@ -85,6 +88,15 @@ class BindingCredentialEncryptionTest extends UnitTest {
         assertEquals(DeliveryDispatcher.DispatchResult.Status.FAILED_NO_CONFIG, delivery.status(),
                 "a delivery reports the credential missing rather than throwing: " + delivery.reason());
         assertTrue(delivery.reason().contains("re-enter it"), delivery.reason());
+        assertNull(commitInFreshTx(() -> ChannelRegistry.forChannel("telegram",
+                reload(TelegramBinding.class, telegram).agent, "1455")), "a queued reply has no channel to go out on");
+        // A guest's Telegram turn asks on the binding's own bot, which has no token to send with.
+        var decision = commitInFreshTx(() -> {
+            var agent = reload(TelegramBinding.class, telegram).agent;
+            var conversation = ConversationService.create(agent, "telegram", "1455");
+            return DangerousActionGate.guardHarnessPermission(agent, conversation.id, "jclaw1455_fake_tool", "{}");
+        });
+        assertEquals(DangerousActionGate.Decision.ABORT, decision, "the approval fails closed rather than throwing");
 
         commitInFreshTx(() -> {
             evict(TelegramBinding.class, telegram);

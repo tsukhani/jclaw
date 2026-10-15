@@ -54,7 +54,8 @@ public final class ChannelRegistry {
         return switch (type) {
             case TELEGRAM -> {
                 var binding = TelegramBinding.findEnabledByAgentAndUser(agent, peerId);
-                yield binding == null ? null : TelegramChannel.forToken(binding.botToken);
+                // A bot token that did not decrypt reads as null (JCLAW-1455), and forToken refuses one.
+                yield binding == null || binding.botToken == null ? null : TelegramChannel.forToken(binding.botToken);
             }
             case SLACK -> {
                 // Slack is per-agent-binding like Telegram (JCLAW-441). A subagent

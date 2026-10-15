@@ -472,6 +472,13 @@ public final class DangerousActionGate {
 
     private static Decision promptAndAwait(Agent agent, @Nullable String toolName, @Nullable String argsJson,
                                            TelegramBinding binding) {
+        // A bot token that did not decrypt reads as null (JCLAW-1455): nobody can be asked, and the send would throw.
+        if (binding.botToken == null) {
+            EventLogger.warn(LOG_CATEGORY, agent.name, CHANNEL_NAME,
+                    "Dangerous tool '%s' cannot be confirmed — denying (fail-closed): %s"
+                            .formatted(toolName, TelegramBinding.unreadableBotToken(binding.agent.name)));
+            return Decision.ABORT;
+        }
         // The bound user's private chat: in a Telegram private chat
         // chat.id == user.id, so the binding's telegramUserId is both the
         // chat to prompt and the user authorized to resolve it.
