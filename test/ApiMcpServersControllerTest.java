@@ -213,22 +213,13 @@ class ApiMcpServersControllerTest extends FunctionalTest {
             row.save();
             return null;
         });
-        // Barrier: the play1 TestEngine runs the unit lane concurrently with
-        // functional tests on the shared H2 DB; under that load the fresh-VT commit
-        // above can lag becoming visible to the DELETE request's connection, so
-        // stop()'s cleanup finds no row and this assert flakes on CI (passes locally
-        // even at 600x amplification). Spin on a fresh-Tx read until the seed is
-        // globally visible before issuing the DELETE — normally one no-spin read.
+        // Confirms the seed committed before the DELETE runs; normally one no-spin read.
         awaitCommitted(() ->
                 AgentSkillAllowedTool.count("skillName = ?1", "mcp:clean") == 1L,
                 "seeded allowlist row never became visible to a fresh Tx");
         var resp = DELETE("/api/mcp-servers/" + id);
         assertIsOk(resp);
-        // JCLAW-615: the same visibility lag the seed barrier above guards
-        // against applies symmetrically to the controller's commit — a single
-        // fresh-Tx read raced it ("expected 0 but was 1" under concurrent-lane
-        // load). Spin until the delete's cascade is globally visible; normally
-        // one no-spin read.
+        // Spin until the controller's commit is visible to a fresh Tx; normally one no-spin read.
         awaitCommitted(() -> AgentSkillAllowedTool.count("skillName = ?1", "mcp:clean") == 0L,
                 () -> "delete must cascade through stop() and clear allowlist rows; " + cleanupDiagnostics());
     }
@@ -504,17 +495,18 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         org.junit.jupiter.api.Assertions.fail(msg.get());
     }
 
-    /** What stop()'s cleanup left behind. It logs and swallows a failed delete, so a timeout names
-     *  which it was: a "Failed to clear allowlist" event, or rows still unseen with none logged. */
+    /** What stop()'s cleanup left behind. It logs and swallows a failed delete, and skips the sweep while
+     *  EventLogger's shutdown latch is set (JCLAW-1454), so a timeout names which it was. */
     private static String cleanupDiagnostics() {
         services.EventLogger.flush();
+        boolean latchSet = services.EventLogger.isShuttingDown();
         return commitInFreshTx(() -> {
             // clearAllowlistAndAudit saves its audit row directly, bypassing EventLogger, so only the table holds it.
             java.util.List<models.EventLog> events = models.EventLog.find("category = ?1 and message like ?2",
                     "MCP_TOOL_UNREGISTER", "%'clean'%").fetch();
-            return "rows left %d, unregister events %s".formatted(
+            return "rows left %d, unregister events %s, shutdown latch set %s".formatted(
                     AgentSkillAllowedTool.count("skillName = ?1", "mcp:clean"),
-                    events.stream().map(e -> e.level + " " + e.message).toList());
+                    events.stream().map(e -> e.level + " " + e.message).toList(), latchSet);
         });
     }
 }

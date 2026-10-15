@@ -137,15 +137,9 @@ class JobLifecycleTest extends UnitTest {
         Assertions.assertDoesNotThrow(() -> new jobs.BrowserCleanupJob().doJob());
     }
 
-    // === ShutdownJob ===
-
-    @Test
-    void shutdownJobRunsWithoutError() {
-        // The job chains three shutdown-style calls (task poller, browser
-        // sessions, telegram poller). In a unit-test context with none of
-        // those running, the job must still complete cleanly.
-        Assertions.assertDoesNotThrow(() -> new jobs.ShutdownJob().doJob());
-    }
+    // ShutdownJob is deliberately not run (JCLAW-1454): doJob() sets EventLogger's process-global
+    // shutdown latch, and until something clears it every concurrent class's MCP allowlist revoke
+    // is skipped and its events stay out of event_log.
 
     // === TelegramStreamingRecoveryJob (JCLAW-95) ===
 
