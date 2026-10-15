@@ -7,6 +7,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.List;
 
 /**
  * JCLAW-1455: the binding tables as a database created before the credential cipher holds them, on a throwaway
@@ -88,7 +89,7 @@ class BindingCredentialColumnsJobTest extends UnitTest {
             s.execute("UPDATE whatsapp_binding SET verify_token_lookup = 'stale' WHERE id = 2");
 
             var first = BindingCredentialColumnsJob.refreshLookups(conn, CIPHER);
-            assertEquals(new BindingCredentialColumnsJob.Lookups(5, 1), first,
+            assertEquals(new BindingCredentialColumnsJob.Lookups(5, 1, List.of()), first,
                     "four tokens get a lookup and a cleared token loses its stale one; the one that does not open is left");
             assertEquals(CIPHER.lookup("xoxb-fake-1"), lookup(s, "slack_binding", "bot_token_lookup", 1));
             assertEquals(CIPHER.lookup("1:fake-a"), lookup(s, "telegram_binding", "bot_token_lookup", 1));
@@ -96,14 +97,14 @@ class BindingCredentialColumnsJobTest extends UnitTest {
             assertEquals(CIPHER.lookup("fake-verify"), lookup(s, "whatsapp_binding", "verify_token_lookup", 1));
             assertNull(lookup(s, "whatsapp_binding", "verify_token_lookup", 2));
             assertEquals("a-lookup-the-right-secret-would-confirm", lookup(s, "telegram_binding", "bot_token_lookup", 3));
-            assertEquals(new BindingCredentialColumnsJob.Lookups(0, 1),
+            assertEquals(new BindingCredentialColumnsJob.Lookups(0, 1, List.of()),
                     BindingCredentialColumnsJob.refreshLookups(conn, CIPHER), "a second start changes nothing");
 
             // A rotation: the new secret is current and the old one is PLAY_SECRET_PREVIOUS.
             var sealedBefore = CIPHER.encrypt("telegram_binding.bot_token", "2:fake-b");
             s.execute("UPDATE telegram_binding SET bot_token = '" + sealedBefore + "' WHERE id = 2");
             var rotated = CredentialCipher.of("fake-secret-after-the-rotation-0002", "fake-secret-for-the-column-job-0001");
-            assertEquals(new BindingCredentialColumnsJob.Lookups(4, 1),
+            assertEquals(new BindingCredentialColumnsJob.Lookups(4, 1, List.of()),
                     BindingCredentialColumnsJob.refreshLookups(conn, rotated));
             assertEquals(rotated.lookup("2:fake-b"), lookup(s, "telegram_binding", "bot_token_lookup", 2),
                     "a token only the previous secret opens is re-keyed under the current one");
@@ -112,6 +113,29 @@ class BindingCredentialColumnsJobTest extends UnitTest {
                 assertTrue(rows.next());
                 assertEquals(sealedElsewhere, rows.getString(1), "the job never rewrites a token");
             }
+        }
+    }
+
+    @Test
+    void aTokenSavedAgainOnASecondBindingWhileItCouldNotBeDecryptedLeavesItsLookupRatherThanFailingTheStart()
+            throws Exception {
+        try (var conn = throwaway(); Statement s = conn.createStatement()) {
+            BindingCredentialColumnsJob.migrate(conn);
+            // Restored under another secret, the operator bound the same bot again; then put the old secret back as previous.
+            var restoredUnder = CredentialCipher.of("fake-secret-the-restore-came-up-with-1", "fake-secret-for-the-column-job-0001");
+            s.execute("UPDATE telegram_binding SET bot_token = '" + CIPHER.encrypt("telegram_binding.bot_token", "1:fake-a")
+                    + "', bot_token_lookup = '" + CIPHER.lookup("1:fake-a") + "' WHERE id = 1");
+            s.execute("INSERT INTO telegram_binding (id, bot_token, bot_token_lookup) VALUES (3, '"
+                    + restoredUnder.encrypt("telegram_binding.bot_token", "1:fake-a") + "', '"
+                    + restoredUnder.lookup("1:fake-a") + "')");
+            conn.setAutoCommit(false);
+
+            assertEquals(new BindingCredentialColumnsJob.Lookups(3, 0, List.of("telegram_binding 1")),
+                    BindingCredentialColumnsJob.refreshLookups(conn, restoredUnder));
+            conn.commit();
+            assertEquals(CIPHER.lookup("1:fake-a"), lookup(s, "telegram_binding", "bot_token_lookup", 1));
+            assertEquals(restoredUnder.lookup("2:fake-b"), lookup(s, "telegram_binding", "bot_token_lookup", 2),
+                    "the refused row costs only its own update");
         }
     }
 

@@ -31,8 +31,11 @@ import java.util.Objects;
 @NoTransaction
 public class BindingCredentialColumnsJob extends Job<Void> {
 
-    /** @param updated rows whose lookup was set; {@code unreadable} rows left as they were, their token not opening */
-    public record Lookups(int updated, int unreadable) {}
+    /**
+     * @param updated rows whose lookup was set; {@code unreadable} rows left as they were, their token not opening
+     * @param shared  rows, as {@code <table> <id>}, left as they were because another row holds the same token's lookup
+     */
+    public record Lookups(int updated, int unreadable, List<String> shared) {}
 
     @Override
     public void doJob() {
@@ -55,6 +58,11 @@ public class BindingCredentialColumnsJob extends Job<Void> {
             if (lookups.unreadable() > 0) {
                 EventLogger.warn("system", ("%d binding token(s) did not decrypt under the current secret; "
                         + "their lookups are left as they were (JCLAW-1455)").formatted(lookups.unreadable()));
+            }
+            if (!lookups.shared().isEmpty()) {
+                EventLogger.warn("system", ("Binding(s) %s hold the same bot token as another binding, saved while "
+                        + "it could not be decrypted; their lookups are left as they were. Delete the duplicate (JCLAW-1455)")
+                        .formatted(String.join(", ", lookups.shared())));
             }
         } catch (SQLException e) {
             EventLogger.error("system", "Binding credential column migration failed: " + e.getMessage());
@@ -111,11 +119,12 @@ public class BindingCredentialColumnsJob extends Job<Void> {
     public static Lookups refreshLookups(Connection conn, CredentialCipher cipher) throws SQLException {
         int updated = 0;
         int unreadable = 0;
+        var shared = new ArrayList<String>();
         for (var credential : BindingCredential.values()) {
             var lookupColumn = credential.lookupColumn;
             if (lookupColumn == null) continue;
             try (PreparedStatement select = conn.prepareStatement("SELECT id, " + credential.column + ", "
-                    + lookupColumn + " FROM " + credential.table);
+                    + lookupColumn + " FROM " + credential.table + " ORDER BY id");
                  PreparedStatement update = conn.prepareStatement("UPDATE " + credential.table + " SET "
                          + lookupColumn + " = ? WHERE id = ?");
                  var rows = select.executeQuery()) {
@@ -133,12 +142,19 @@ public class BindingCredentialColumnsJob extends Job<Void> {
                     if (Objects.equals(lookup, rows.getString(3))) continue;
                     update.setString(1, lookup);
                     update.setLong(2, rows.getLong(1));
-                    update.executeUpdate();
-                    updated++;
+                    try {
+                        update.executeUpdate();
+                        updated++;
+                    } catch (SQLException e) {
+                        // A token saved again on a second binding while it could not be decrypted, once the old secret
+                        // opens it: the unique lookup refuses one, and throwing here would abort the boot.
+                        if (!UNIQUE_VIOLATION.equals(e.getSQLState())) throw e;
+                        shared.add(credential.table + " " + rows.getLong(1));
+                    }
                 }
             }
         }
-        return new Lookups(updated, unreadable);
+        return new Lookups(updated, unreadable, List.copyOf(shared));
     }
 
     private static List<String> uniqueConstraintsOnlyOn(Connection conn, String table, String column)
@@ -177,4 +193,6 @@ public class BindingCredentialColumnsJob extends Job<Void> {
 
     /** H2's length for a CHARACTER VARYING declared without one, which is what TEXT creates in MODE=MYSQL. */
     private static final long UNBOUNDED = 1_000_000_000L;
+
+    private static final String UNIQUE_VIOLATION = "23505";
 }
