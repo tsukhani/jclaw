@@ -1,3 +1,4 @@
+import com.google.gson.JsonObject;
 import models.Agent;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -5,6 +6,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import play.Play;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
@@ -15,7 +17,9 @@ import tools.ShellExecTool;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * JCLAW-1153: {@code exec}'s opt-in OS sandbox — the tri-state is its own key, the
@@ -157,6 +161,53 @@ class ShellExecSandboxTest extends UnitTest {
         assertTrue(result.contains("inside"), "workspace write must survive the sandbox; got: " + result);
         assertTrue(Files.exists(AgentService.workspacePath(AGENT).resolve("kept.txt")),
                 "the file must exist on disk, not just echo back; got: " + result);
+    }
+
+    /**
+     * JCLAW-1452 AC1: a confined {@code exec} cannot read the app root's data/ or certs/ — the
+     * real directories, not the temp tree. Sentinels of the test's own stand in for the H2 file,
+     * which a test instance does not have; certs/.env and data/jclaw.mv.db are checked too when
+     * present, for readability only, so their contents never reach the result.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void sandboxHidesJClawStateFromExec() throws IOException {
+        var appRoot = Play.applicationPath.toPath();
+        var secret = "jclaw-1452-secret-" + UUID.randomUUID();
+        var sentinels = new ArrayList<Path>();
+        try {
+            for (var dir : List.of("data", "certs")) {
+                var sentinel = Files.createDirectories(appRoot.resolve(dir))
+                        .resolve("jclaw-1452-sentinel-" + UUID.randomUUID() + ".txt");
+                Files.writeString(sentinel, secret);
+                sentinels.add(sentinel);
+            }
+            var reads = "cat '%s' '%s' 2>/dev/null || echo STATE_DENIED".formatted(sentinels.get(0), sentinels.get(1));
+            var real = new ArrayList<Path>();
+            for (var file : List.of(appRoot.resolve("certs/.env"), appRoot.resolve("data/jclaw.mv.db"))) {
+                if (Files.isReadable(file)) real.add(file);
+            }
+            var probe = new StringBuilder(reads);
+            for (int i = 0; i < real.size(); i++) {
+                probe.append("; cat '%s' >/dev/null 2>&1 && echo READABLE_%d || echo DENIED_%d".formatted(real.get(i), i, i));
+            }
+            var args = new JsonObject();
+            args.addProperty("command", probe.toString());
+            var command = args.toString();
+
+            var control = tool.execute(command, agent);
+            assertTrue(control.contains(secret), "unconfined, exec must reach the sentinels or the test proves nothing; got: " + control);
+
+            ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
+            var confined = tool.execute(command, agent);
+            assertFalse(confined.contains(secret), "data/ and certs/ must be unreadable; got: " + confined);
+            assertTrue(confined.contains("STATE_DENIED"), "got: " + confined);
+            for (int i = 0; i < real.size(); i++) {
+                assertTrue(confined.contains("DENIED_" + i), real.get(i) + " must be unreadable; got: " + confined);
+            }
+        } finally {
+            for (var s : sentinels) Files.deleteIfExists(s);
+        }
     }
 
     private static void deleteDir(Path dir) {
