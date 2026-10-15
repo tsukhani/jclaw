@@ -468,6 +468,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/providers/{name}/reachable
             GET /api/providers/{name}/video-models
             GET /api/router/status
+            GET /api/router/usage/ollama-cloud
             GET /api/scrape-jobs
             GET /api/scrape-jobs/{id}
             GET /api/scrape-jobs/{id}/download

@@ -2,6 +2,7 @@ import llm.LlmProvider.LlmException;
 import llm.LlmTypes.ProviderConfig;
 import llm.ProviderRegistry;
 import llm.routing.SubscriptionUsage;
+import llm.routing.SubscriptionUsage.Range;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -12,19 +13,26 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.EventLogger;
 import utils.AppClock;
 import utils.HttpFactories;
 import utils.LlmErrorTemplates.Failure;
 import utils.LlmErrorTemplates.Remedy;
 
+import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-/** JCLAW-1222: reading Ollama Cloud's quota windows, and benching what fails for exhausted credit. */
+/**
+ * JCLAW-1222: reading Ollama Cloud's quota windows, and benching what fails for exhausted credit.
+ * JCLAW-1449: reading the request history the same endpoint answers with since the windows went.
+ */
 class SubscriptionUsageTest extends UnitTest {
 
     /** The body ollama.com returned for a Max account on 2026-09-17, trimmed of per-model detail. */
@@ -33,6 +41,21 @@ class SubscriptionUsageTest extends UnitTest {
             "ending_at":"2026-09-17T14:27:59.206747913Z"},"models":[]},\
             "limits":{"session":{"usage":0.017,"models":[{"name":"glm-5.3-flash","request_count":120}]},\
             "weekly":{"usage":0.631,"models":[{"name":"kimi-k3","request_count":1556}]}}}""";
+
+    /** The body ollama.com returned on 2026-10-15: request counts only, no {@code limits}. */
+    private static final String HISTORY_BODY = """
+            {"range":"7d","scope":"self","granularity":"day","from":"2026-10-08T00:00:00Z",\
+            "until":"2026-10-15T13:16:46.941696596Z","totals":{"request_count":8341},"buckets":[\
+            {"from":"2026-10-08T00:00:00Z","until":"2026-10-09T00:00:00Z","request_count":952},\
+            {"from":"2026-10-09T00:00:00Z","until":"2026-10-10T00:00:00Z","request_count":1137},\
+            {"from":"2026-10-10T00:00:00Z","until":"2026-10-11T00:00:00Z","request_count":1352},\
+            {"from":"2026-10-11T00:00:00Z","until":"2026-10-12T00:00:00Z","request_count":698},\
+            {"from":"2026-10-12T00:00:00Z","until":"2026-10-13T00:00:00Z","request_count":457},\
+            {"from":"2026-10-13T00:00:00Z","until":"2026-10-14T00:00:00Z","request_count":1430},\
+            {"from":"2026-10-14T00:00:00Z","until":"2026-10-15T00:00:00Z","request_count":1533},\
+            {"from":"2026-10-15T00:00:00Z","until":"2026-10-15T13:16:46.941696596Z","partial":true,"request_count":782}]}""";
+
+    private static final String GUARD_OFF = "budget guard is off";
 
     private String provider;
 
@@ -113,6 +136,163 @@ class SubscriptionUsageTest extends UnitTest {
     }
 
     @Test
+    void theRescopedResponseParsesIntoItsRequestHistory() {
+        var seen = new CopyOnWriteArrayList<String>();
+        var snapshot = HttpFactories.callWith(canned(200, HISTORY_BODY, seen), () -> SubscriptionUsage.refreshNow(ollamaCloud()));
+        assertNotNull(snapshot);
+        assertEquals(List.of("https://ollama.com/api/usage Bearer sk-secret"), seen, "the router's own read is unchanged");
+        assertTrue(snapshot.windows().isEmpty());
+        assertEquals(0.0, snapshot.pressure(), 1e-9, "no windows, so no pressure: the guard cannot fire");
+        assertEquals("7d", snapshot.range());
+        assertEquals(8341, snapshot.total());
+        assertEquals(8, snapshot.buckets().size());
+        var first = snapshot.buckets().getFirst();
+        assertEquals(Instant.parse("2026-10-08T00:00:00Z"), first.from());
+        assertEquals(Instant.parse("2026-10-09T00:00:00Z"), first.until());
+        assertEquals(952, first.requestCount());
+        assertFalse(first.partial());
+        var last = snapshot.buckets().getLast();
+        assertEquals(782, last.requestCount());
+        assertTrue(last.partial(), "the running day is marked partial");
+        assertEquals(Instant.parse("2026-10-15T13:16:46.941696596Z"), last.until());
+    }
+
+    @Test
+    void aBodyCarryingLimitsStillFeedsTheGuardBesideItsHistory() {
+        var body = "{\"limits\":{\"weekly\":{\"usage\":0.8}},\"range\":\"24h\",\"buckets\":["
+                + "{\"from\":\"2026-10-15T12:00:00Z\",\"until\":\"2026-10-15T13:00:00Z\",\"request_count\":5}]}";
+        var snapshot = HttpFactories.callWith(canned(200, body, new CopyOnWriteArrayList<>()),
+                () -> SubscriptionUsage.refreshNow(ollamaCloud()));
+        assertNotNull(snapshot);
+        assertEquals(0.8, snapshot.pressure(), 1e-9);
+        assertEquals("weekly", snapshot.fullestWindow());
+        assertEquals(5, snapshot.total(), "with no totals the buckets are summed");
+    }
+
+    @Test
+    void malformedBucketsAreSkippedRatherThanFailingTheRead() {
+        var body = "{\"range\":\"7d\",\"totals\":{\"request_count\":3},\"buckets\":[1,{\"from\":\"x\"},"
+                + "{\"from\":\"2026-10-14T00:00:00Z\",\"until\":\"2026-10-15T00:00:00Z\",\"request_count\":\"3\"},"
+                + "{\"from\":\"2026-10-14T00:00:00Z\",\"until\":\"2026-10-15T00:00:00Z\",\"request_count\":3}]}";
+        var snapshot = HttpFactories.callWith(canned(200, body, new CopyOnWriteArrayList<>()),
+                () -> SubscriptionUsage.history(ollamaCloud(), Range.WEEK));
+        assertNotNull(snapshot);
+        assertEquals(1, snapshot.buckets().size());
+        assertEquals(3, snapshot.total());
+    }
+
+    @Test
+    void eachRangeIsItsOwnCacheEntryOnTheSameMinute() {
+        var seen = new CopyOnWriteArrayList<String>();
+        var client = canned(200, HISTORY_BODY, seen);
+        HttpFactories.callWith(client, () -> SubscriptionUsage.history(ollamaCloud(), Range.DAY));
+        HttpFactories.callWith(client, () -> SubscriptionUsage.history(ollamaCloud(), Range.DAY));
+        HttpFactories.callWith(client, () -> SubscriptionUsage.history(ollamaCloud(), Range.MONTH));
+        HttpFactories.callWith(client, () -> SubscriptionUsage.fresh(ollamaCloud()));
+        assertEquals(List.of(
+                "https://ollama.com/api/usage?range=24h Bearer sk-secret",
+                "https://ollama.com/api/usage?range=30d Bearer sk-secret",
+                "https://ollama.com/api/usage Bearer sk-secret"), seen, "a range read inside its minute is served from the cache");
+
+        var later = Clock.fixed(AppClock.now().plus(Duration.ofSeconds(61)), ZoneOffset.UTC);
+        var reread = AppClock.callWith(later,
+                () -> HttpFactories.callWith(client, () -> SubscriptionUsage.history(ollamaCloud(), Range.DAY)));
+        assertNotNull(reread);
+        assertEquals("https://ollama.com/api/usage?range=24h Bearer sk-secret", seen.getLast());
+        assertEquals(4, seen.size(), "a minute on, the range is read again");
+    }
+
+    @Test
+    void aHistoryOlderThanAMinuteIsNotServedAfterAFailedReread() {
+        HttpFactories.callWith(canned(200, HISTORY_BODY, new CopyOnWriteArrayList<>()),
+                () -> SubscriptionUsage.history(ollamaCloud(), Range.WEEK));
+        var later = Clock.fixed(AppClock.now().plus(Duration.ofSeconds(90)), ZoneOffset.UTC);
+        var reread = AppClock.callWith(later, () -> HttpFactories.callWith(canned(503, "busy", new CopyOnWriteArrayList<>()),
+                () -> SubscriptionUsage.history(ollamaCloud(), Range.WEEK)));
+        assertNull(reread, "the display never shows counts more than a minute old");
+    }
+
+    @Test
+    void readingsWithoutLimitsWarnOncePerProcessAndTheirReturnIsLogged() {
+        var events = EventLogger.captureForTest(() -> {
+            for (var i = 0; i < 3; i++) {
+                HttpFactories.callWith(canned(200, HISTORY_BODY, new CopyOnWriteArrayList<>()),
+                        () -> SubscriptionUsage.refreshNow(ollamaCloud()));
+            }
+        });
+        var warnings = events.stream().filter(e -> e.message().contains(GUARD_OFF)).toList();
+        assertEquals(1, warnings.size(), () -> "warned once across three refreshes: " + events);
+        assertEquals("WARN", warnings.getFirst().level());
+        assertTrue(warnings.getFirst().message().contains(provider), () -> warnings.toString());
+        assertTrue(warnings.getFirst().message().contains("402 and 429"), () -> warnings.toString());
+
+        var recovery = EventLogger.captureForTest(() -> HttpFactories.callWith(canned(200, LIVE_BODY, new CopyOnWriteArrayList<>()),
+                () -> SubscriptionUsage.refreshNow(ollamaCloud())));
+        assertTrue(recovery.stream().anyMatch(e -> e.message().contains("budget guard is back on") && e.message().contains(provider)),
+                () -> "the windows' return is not hidden by the earlier warning: " + recovery);
+        assertEquals(0.631, SubscriptionUsage.snapshots().get(provider).pressure(), 1e-9);
+
+        var again = EventLogger.captureForTest(() -> HttpFactories.callWith(canned(200, HISTORY_BODY, new CopyOnWriteArrayList<>()),
+                () -> SubscriptionUsage.refreshNow(ollamaCloud())));
+        assertTrue(again.stream().noneMatch(e -> e.message().contains(GUARD_OFF)), () -> "once per process: " + again);
+    }
+
+    @Test
+    void aRangeReadWithoutLimitsDoesNotSpeakForTheGuard() {
+        var events = EventLogger.captureForTest(() -> HttpFactories.callWith(canned(200, HISTORY_BODY, new CopyOnWriteArrayList<>()),
+                () -> SubscriptionUsage.history(ollamaCloud(), Range.DAY)));
+        assertTrue(events.stream().noneMatch(e -> e.message().contains(GUARD_OFF)), () -> events.toString());
+    }
+
+    @Test
+    void everyFailureAnswersNoHistoryWithAWarning() {
+        var failures = List.of(
+                canned(401, "{\"error\":\"unauthorized\"}", new CopyOnWriteArrayList<>()),
+                canned(429, "slow down", new CopyOnWriteArrayList<>()),
+                canned(500, "oops", new CopyOnWriteArrayList<>()),
+                throwing(new SocketTimeoutException("timeout")),
+                canned(200, "{\"hello\":\"world\"}", new CopyOnWriteArrayList<>()),
+                canned(200, "<html>not json</html>", new CopyOnWriteArrayList<>()));
+        for (var client : failures) {
+            SubscriptionUsage.clearForTest(provider);
+            var events = EventLogger.captureForTest(() -> assertNull(
+                    HttpFactories.callWith(client, () -> SubscriptionUsage.history(ollamaCloud(), Range.WEEK))));
+            assertEquals(1, events.stream().filter(e -> "WARN".equals(e.level())).count(), () -> events.toString());
+        }
+    }
+
+    @Test
+    void aProviderWithNoKeyAnswersNoHistoryWithAWarning() {
+        var events = EventLogger.captureForTest(() -> assertNull(SubscriptionUsage.history(provider, Range.DAY)));
+        assertTrue(events.stream().anyMatch(e -> "WARN".equals(e.level()) && e.message().contains("no API key")),
+                () -> events.toString());
+    }
+
+    @Test
+    void theAuthorizationValueNeverReachesTheLog() {
+        var key = "fake-ollama-key-" + UUID.randomUUID();
+        var config = new ProviderConfig(provider, "https://ollama.com/v1", key, List.of());
+        var clients = List.of(
+                canned(401, "{\"error\":\"bad token Bearer " + key + "\"}", new CopyOnWriteArrayList<>()),
+                canned(500, "upstream echoed " + key, new CopyOnWriteArrayList<>()),
+                canned(200, "{\"echo\":\"" + key + "\"}", new CopyOnWriteArrayList<>()),
+                throwing(new IOException("connection reset while sending " + key)),
+                throwing(new SocketTimeoutException("timeout after Authorization: Bearer " + key)));
+        for (var client : clients) {
+            SubscriptionUsage.clearForTest(provider);
+            var events = EventLogger.captureForTest(() -> {
+                HttpFactories.callWith(client, () -> SubscriptionUsage.refreshNow(config));
+                HttpFactories.callWith(client, () -> SubscriptionUsage.history(config, Range.DAY));
+            });
+            assertFalse(events.isEmpty(), "each failure is logged");
+            for (var e : events) {
+                assertFalse(e.message().contains(key), () -> "the key reached the log: " + e.message());
+                assertFalse(String.valueOf(e.details()).contains(key), () -> "the key reached the log: " + e.details());
+            }
+        }
+    }
+
+    @Test
     void exhaustedCreditBenchesAProviderWithoutAUsageSourceForAWhile() {
         SubscriptionUsage.noteFailure(quotaFailure(provider, "m1", Remedy.QUOTA_EXHAUSTED));
         assertTrue(SubscriptionUsage.isMarkedUnavailable(provider, "m1"));
@@ -154,6 +334,14 @@ class SubscriptionUsageTest extends UnitTest {
     private static LlmException quotaFailure(String provider, String model, Remedy remedy) {
         return new LlmException.ClientError("HTTP 402 from " + provider,
                 new Failure(remedy, provider, model, null, null));
+    }
+
+    /** Fails every call with {@code failure}, as a timeout or a dropped connection does. */
+    private static OkHttpClient throwing(IOException failure) {
+        Interceptor fail = _ -> {
+            throw failure;
+        };
+        return new OkHttpClient.Builder().addInterceptor(fail).build();
     }
 
     /** Answers every call with {@code code}/{@code body}, recording each request's URL and Authorization header. */

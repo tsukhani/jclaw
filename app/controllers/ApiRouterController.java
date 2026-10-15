@@ -12,6 +12,7 @@ import llm.routing.TaskClass;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
+import utils.ApiResponses;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -36,6 +37,32 @@ public class ApiRouterController extends Controller {
     /** @param unavailable providers or models a quota failure has benched, with the time each returns */
     public record RouterStatusResponse(boolean available, double downshiftAt, double exhaustedAt,
                                        List<ProviderUsage> providers, Map<String, String> unavailable) {}
+
+    /** @param partial true for the span still running, the newest */
+    public record UsageBucket(String from, String until, long requestCount, boolean partial) {}
+
+    /**
+     * @param range     the span the counts cover: {@code 24h}, {@code 7d} or {@code 30d}
+     * @param buckets   request counts over it, oldest first; empty when {@code fetchedAt} is null
+     * @param fetchedAt when ollama.com answered, at most a minute ago; null when there is no such reading
+     */
+    public record CloudUsageResponse(String provider, String range, long total, List<UsageBucket> buckets,
+                                     @Nullable String fetchedAt) {
+
+        /** {@code usage} as the wire shape; a null {@code usage} is the empty reading for {@code requested}. */
+        public static CloudUsageResponse of(String provider, SubscriptionUsage.Range requested,
+                                            SubscriptionUsage.@Nullable Snapshot usage) {
+            if (usage == null) return new CloudUsageResponse(provider, requested.param, 0, List.of(), null);
+            var buckets = usage.buckets().stream()
+                    .map(b -> new UsageBucket(b.from().toString(), b.until().toString(), b.requestCount(), b.partial()))
+                    .toList();
+            var reported = usage.range();
+            return new CloudUsageResponse(provider, reported != null ? reported : requested.param, usage.total(),
+                    buckets, usage.fetchedAt().toString());
+        }
+    }
+
+    static final String OLLAMA_CLOUD = "ollama-cloud";
 
     /**
      * GET /api/router/status — whether the router can serve, its thresholds, and the usage of every
@@ -65,5 +92,22 @@ public class ApiRouterController extends Controller {
         SubscriptionUsage.unavailableMarks().forEach((k, until) -> unavailable.put(k, until.toString()));
         renderJSON(GSON.toJson(new RouterStatusResponse(policy.available(), policy.downshiftAt(),
                 policy.exhaustedAt(), providers, unavailable)));
+    }
+
+    /**
+     * GET /api/router/usage/ollama-cloud?range=24h|7d|30d — Ollama Cloud's request counts over the
+     * range, from the cache the router reads (JCLAW-1449). A missing key, a refused or failed read and
+     * an unknown body all answer 200 with an empty reading whose {@code fetchedAt} is null.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = CloudUsageResponse.class)))
+    @Operation(summary = "Ollama Cloud request counts over the last 24 hours, 7 days or 30 days")
+    @AgentAccess(OPEN)
+    public static void ollamaCloudUsage(@Nullable String range) {
+        var span = SubscriptionUsage.Range.parse(range);
+        if (span == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "range must be 24h, 7d, or 30d");
+            return;
+        }
+        renderJSON(GSON.toJson(CloudUsageResponse.of(OLLAMA_CLOUD, span, SubscriptionUsage.history(OLLAMA_CLOUD, span))));
     }
 }
