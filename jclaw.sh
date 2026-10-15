@@ -517,6 +517,12 @@ placeholder (default: PLAY_SECRET) into a per-clone certs/.env file. The
 file is created with mode 600 on first run and preserved across rotations
 (only the secret line is rewritten).
 
+The stored credentials are encrypted under a key derived from the secret,
+so a rotation keeps the outgoing value as PLAY_SECRET_PREVIOUS. The next
+start re-encrypts the credentials under the new secret and logs when that
+line can be removed. A rotation is refused while an earlier one's
+PLAY_SECRET_PREVIOUS is still there.
+
 Restart the app to pick up the new value.
 
 Examples:
@@ -1918,6 +1924,23 @@ secret_var_name() {
     echo "${name:-PLAY_SECRET}"
 }
 
+# The value FILE gives NAME, read as the launcher reads certs/.env: KEY=VALUE, one
+# surrounding pair of quotes removed, the last line winning. Empty when absent.
+env_file_value() {
+    local line value=""
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        line="${line%$'\r'}"
+        line="${line#"${line%%[![:space:]]*}"}"
+        [[ "$line" == "$2="* ]] || continue
+        value="${line#*=}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+        case "$value" in \"*\") value="${value#\"}"; value="${value%\"}" ;; esac
+        case "$value" in \'*\') value="${value#\'}"; value="${value%\'}" ;; esac
+    done < "$1"
+    printf '%s' "$value"
+}
+
 # Source $SCRIPT_DIR/certs/.env into the current shell with auto-export so
 # the JVM started by `play` inherits the variables. Called from start
 # paths (dev + prod). Silent no-op when certs/.env is absent — that path
@@ -2108,6 +2131,23 @@ do_no_https() {
 
 do_secret() {
     local env_file="$SCRIPT_DIR/certs/.env"
+    local var_name outgoing="" previous=""
+    var_name=$(secret_var_name)
+
+    # The stored credentials are encrypted under a key derived from the secret (JCLAW-1455), so
+    # the outgoing value is kept as PLAY_SECRET_PREVIOUS for the next start to re-encrypt them.
+    if [[ -f "$env_file" ]]; then
+        outgoing=$(env_file_value "$env_file" "$var_name")
+        previous=$(env_file_value "$env_file" PLAY_SECRET_PREVIOUS)
+    fi
+    if [[ -n "$outgoing" && -n "$previous" && "$previous" != "$outgoing" ]]; then
+        echo "Error: certs/.env still holds PLAY_SECRET_PREVIOUS from an earlier rotation. Replacing it"
+        echo "       would leave every credential still encrypted under it unreadable."
+        echo "       Start JClaw once: it re-encrypts the stored credentials under the current secret"
+        echo "       and logs that PLAY_SECRET_PREVIOUS can be removed. Then delete that line from"
+        echo "       certs/.env and run '$0 secret' again."
+        exit 1
+    fi
 
     mkdir -p "$SCRIPT_DIR/certs"
 
@@ -2130,6 +2170,19 @@ do_secret() {
                 "#JCLAW_ADMIN_PASSWORD=" \
                 > "$env_file"
         )
+    fi
+
+    # Written before the rotation, so a `play secret` that fails partway cannot lose it.
+    if [[ -n "$outgoing" ]]; then
+        local tmp="$env_file.tmp.$$"
+        (
+            umask 077
+            grep -v -E '^[[:space:]]*PLAY_SECRET_PREVIOUS=|^# PLAY_SECRET_PREVIOUS: ' "$env_file" > "$tmp" || true
+            printf '%s\n' \
+                "# PLAY_SECRET_PREVIOUS: the secret before the last rotation. Remove it once JClaw logs that it can go." \
+                "PLAY_SECRET_PREVIOUS=$outgoing" >> "$tmp"
+        )
+        mv "$tmp" "$env_file"
     fi
 
     # `play secret` reads ${VARNAME} from application.conf's

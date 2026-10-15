@@ -456,7 +456,7 @@ For a turnkey production install, use the [Quick Install](#quick-install-one-lin
 ./jclaw.sh db-status                   # file size, health verdict, last backup
 
 # Admin
-./jclaw.sh secret                      # generate or rotate PLAY_SECRET in certs/.env
+./jclaw.sh secret                      # generate or rotate PLAY_SECRET in certs/.env, keeping the old one as PLAY_SECRET_PREVIOUS
 ./jclaw.sh reset                       # clear the admin password; the next launch asks for a new one
 ./jclaw.sh completion install          # bash + zsh tab completion
 ./jclaw.sh shim                        # re-link the `jclaw` command into ~/.local/bin
@@ -480,9 +480,11 @@ docker compose down
 JCLAW_PORT=8080 JCLAW_HTTPS_PORT=8443 docker compose up -d
 ```
 
-That's it — no `.env` setup needed. On first boot the container's entrypoint generates a 64-character `PLAY_SECRET` (used to sign session cookies) and persists it to `./certs/.env`. Subsequent restarts read the same file, so existing user sessions survive across `docker compose down` / `up` cycles. To rotate the secret, delete `./certs/.env` and restart the container — all existing `PLAY_SESSION` cookies become invalid, which is the point.
+That's it — no `.env` setup needed. On first boot the container's entrypoint generates a 64-character `PLAY_SECRET` (used to sign session cookies) and persists it to `./certs/.env`. Subsequent restarts read the same file, so existing user sessions survive across `docker compose down` / `up` cycles.
 
-If you'd rather pin the secret yourself (e.g. for multi-host deployments that need a shared cookie key, or rotation managed by your secret-store), drop a `.env` file alongside `docker-compose.yml` with `PLAY_SECRET=<value>` — Compose will forward it into the container and the entrypoint will defer to it instead of generating one.
+The stored third-party credentials (provider keys, channel tokens, MCP secrets) are encrypted under a key derived from `PLAY_SECRET`, so keep `./certs/.env` with `./data`: without it every credential reads as missing and has to be entered again. To rotate the secret, rename the `PLAY_SECRET` line in `./certs/.env` to `PLAY_SECRET_PREVIOUS` and restart the container. The entrypoint generates a new `PLAY_SECRET` beside it, JClaw re-encrypts the credentials under the new one, and its log says when the `PLAY_SECRET_PREVIOUS` line can be removed. All existing `PLAY_SESSION` cookies become invalid, which is the point.
+
+If you'd rather pin the secret yourself (e.g. for multi-host deployments that need a shared cookie key, or rotation managed by your secret-store), drop a `.env` file alongside `docker-compose.yml` with `PLAY_SECRET=<value>` — Compose will forward it into the container and the entrypoint will defer to it instead of generating one. Rotate it the same way, with the outgoing value as `PLAY_SECRET_PREVIOUS=<value>` beside the new one.
 
 You can also set `JCLAW_PORT` and `JCLAW_HTTPS_PORT` in `.env` alongside `docker-compose.yml` instead of passing them inline — Compose reads the same file for variable interpolation in the YAML and for the runtime environment of the `jclaw` service.
 
