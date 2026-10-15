@@ -359,6 +359,9 @@ POST    /api/system/database/repair             ApiDatabaseController.repair
 POST    /api/system/database/repair/clean       ApiDatabaseController.clean
 POST    /api/system/database/compact            ApiDatabaseController.compact
 
+# Stored credentials that do not decrypt under this installation's secret (JCLAW-1455).
+GET     /api/credentials/unreadable             ApiCredentialsController.unreadable
+
 # Upgrade. Same handoff shape as restart, but the helper downloads and unpacks
 # the release before it stops anything — so the 202 is followed by minutes of
 # normal service, tracked through the status route rather than a down-then-up poll.
