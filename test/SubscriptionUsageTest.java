@@ -28,6 +28,10 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * JCLAW-1222: reading Ollama Cloud's quota windows, and benching what fails for exhausted credit.
@@ -259,6 +263,67 @@ class SubscriptionUsageTest extends UnitTest {
                     HttpFactories.callWith(client, () -> SubscriptionUsage.history(ollamaCloud(), Range.WEEK))));
             assertEquals(1, events.stream().filter(e -> "WARN".equals(e.level())).count(), () -> events.toString());
         }
+    }
+
+    @Test
+    void aKeyOkHttpRefusesInAHeaderAnswersNoHistoryWithAWarning() {
+        var config = new ProviderConfig(provider, "https://ollama.com/v1", "fake-ollama-key-é", List.of());
+        var events = EventLogger.captureForTest(() -> assertNull(HttpFactories.callWith(
+                canned(200, HISTORY_BODY, new CopyOnWriteArrayList<>()), () -> SubscriptionUsage.history(config, Range.DAY))));
+        assertEquals(1, events.stream().filter(e -> "WARN".equals(e.level())).count(), () -> events.toString());
+    }
+
+    @Test
+    void aProviderOffOllamaComAnswersNoHistoryWithAWarningAndIsNotAsked() {
+        var config = new ProviderConfig(provider, "http://127.0.0.1:1/v1", "fake-key", List.of());
+        var seen = new CopyOnWriteArrayList<String>();
+        var events = EventLogger.captureForTest(() -> assertNull(HttpFactories.callWith(
+                canned(200, HISTORY_BODY, seen), () -> SubscriptionUsage.history(config, Range.DAY))));
+        assertTrue(seen.isEmpty(), () -> "only ollama.com is asked: " + seen);
+        assertEquals(1, events.stream().filter(e -> "WARN".equals(e.level())).count(), () -> events.toString());
+    }
+
+    @Test
+    void aReadArrivingWhileItsRangeIsFetchedWaitsForThatFetch() throws InterruptedException {
+        var calls = new AtomicInteger();
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        Interceptor slow = chain -> {
+            calls.incrementAndGet();
+            entered.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException(e);
+            }
+            return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200)
+                    .message("canned").body(ResponseBody.create(HISTORY_BODY, null)).build();
+        };
+        var client = new OkHttpClient.Builder().addInterceptor(slow).build();
+        var first = new AtomicReference<SubscriptionUsage.Snapshot>();
+        var second = new AtomicReference<SubscriptionUsage.Snapshot>();
+        var a = Thread.ofPlatform().start(() -> first.set(
+                HttpFactories.callWith(client, () -> SubscriptionUsage.history(ollamaCloud(), Range.WEEK))));
+        assertTrue(entered.await(10, TimeUnit.SECONDS), "the first read reached the transport");
+        var b = Thread.ofPlatform().start(() -> second.set(
+                HttpFactories.callWith(client, () -> SubscriptionUsage.history(ollamaCloud(), Range.WEEK))));
+        b.join(Duration.ofMillis(300));
+        release.countDown();
+        a.join(Duration.ofSeconds(10));
+        b.join(Duration.ofSeconds(10));
+        assertNotNull(first.get());
+        assertNotNull(second.get(), "a read during the fetch is answered from it, not as no reading");
+        assertEquals(1, calls.get(), "one fetch serves both");
+    }
+
+    @Test
+    void aReadWithoutWindowsLiftsAnEarlierReadingsPressure() {
+        SubscriptionUsage.putSnapshotForTest(provider, java.util.Map.of("weekly", 0.97));
+        HttpFactories.callWith(canned(200, HISTORY_BODY, new CopyOnWriteArrayList<>()),
+                () -> SubscriptionUsage.refreshNow(ollamaCloud()));
+        assertEquals(0.0, SubscriptionUsage.snapshots().get(provider).pressure(), 1e-9,
+                "a reading from before the windows went must not keep the provider benched");
     }
 
     @Test

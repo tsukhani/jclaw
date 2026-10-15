@@ -115,6 +115,18 @@ class ModelRouterTest extends UnitTest {
     }
 
     @Test
+    void withoutQuotaWindowsAPrepaidProviderIsNeitherDownshiftedNorSkipped() {
+        SubscriptionUsage.putSnapshotForTest(sub, Map.of());
+        var p = policy(Map.of(
+                TaskClass.CHAT, List.of(new Candidate(sub, "light")),
+                TaskClass.REASONING, List.of(new Candidate(sub, "heavy"), new Candidate(perToken, "heavy"))));
+        var d = route(request(REASONING), p);
+        assertEquals(new Target(sub, "heavy"), d.primary(), "a read without windows leaves the guard off");
+        assertFalse(d.downshifted());
+        assertTrue(d.skipped().stream().noneMatch(s -> s.startsWith(sub + "/")), "skipped: " + d.skipped());
+    }
+
+    @Test
     void pastTheDownshiftThresholdAHeavyClassDropsToTheLightSubscriptionModel() {
         SubscriptionUsage.putSnapshotForTest(sub, Map.of("session", 0.1, "weekly", 0.8));
         var p = policy(Map.of(

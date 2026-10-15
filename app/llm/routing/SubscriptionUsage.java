@@ -105,6 +105,7 @@ public final class SubscriptionUsage {
     private static final Map<Key, Snapshot> SNAPSHOTS = new ConcurrentHashMap<>();
     private static final Map<Key, Instant> LAST_ATTEMPT = new ConcurrentHashMap<>();
     private static final Set<Key> IN_FLIGHT = ConcurrentHashMap.newKeySet();
+    private static final Map<Key, Object> FETCH_LOCKS = new ConcurrentHashMap<>();
     private static final Set<Key> WARNED = ConcurrentHashMap.newKeySet();
     private static final Map<String, Instant> UNAVAILABLE_UNTIL = new ConcurrentHashMap<>();
     /** Providers whose last router read carried no quota windows. */
@@ -141,15 +142,19 @@ public final class SubscriptionUsage {
 
     private static @Nullable Snapshot fresh(ProviderConfig config, @Nullable Range range) {
         var key = new Key(config.name(), range);
-        if (!hasUsageSource(config) || !isStale(key)) return SNAPSHOTS.get(key);
-        var fetched = refreshNow(config, range);
-        return fetched != null ? fetched : SNAPSHOTS.get(key);
+        if (!hasUsageSource(config)) return SNAPSHOTS.get(key);
+        // A reader arriving mid-fetch would otherwise find the attempt stamped and no new snapshot yet.
+        synchronized (FETCH_LOCKS.computeIfAbsent(key, _ -> new Object())) {
+            if (!isStale(key)) return SNAPSHOTS.get(key);
+            var fetched = refreshNow(config, range);
+            return fetched != null ? fetched : SNAPSHOTS.get(key);
+        }
     }
 
     /**
      * {@code provider}'s request history over {@code range}, read at most {@link #TTL} ago through the
-     * same cache as the router's own read. Null when there is no such reading: the provider has no key,
-     * or ollama.com refused, failed or did not answer within that minute.
+     * same cache as the router's own read. Null when there is no such reading: the provider has no key
+     * or is not on ollama.com, or ollama.com refused, failed or did not answer within that minute.
      */
     public static @Nullable Snapshot history(String provider, Range range) {
         var registered = ProviderRegistry.get(provider);
@@ -162,6 +167,10 @@ public final class SubscriptionUsage {
 
     /** {@link #history(String, Range)} for a provider already resolved. */
     public static @Nullable Snapshot history(ProviderConfig config, Range range) {
+        if (!hasUsageSource(config)) {
+            warnOnce(new Key(config.name(), range), "its base URL is not on ollama.com");
+            return null;
+        }
         var snapshot = fresh(config, range);
         return snapshot != null && snapshot.fetchedAt().plus(TTL).isAfter(AppClock.now()) ? snapshot : null;
     }
@@ -176,34 +185,37 @@ public final class SubscriptionUsage {
         LAST_ATTEMPT.put(key, AppClock.now());
         var origin = origin(config.baseUrl());
         if (origin == null) return null;
-        var request = new Request.Builder()
-                .url(origin + "/api/usage" + (range != null ? "?range=" + range.param : ""))
-                .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.apiKey())
-                .get()
-                .build();
-        var call = HttpFactories.general().newCall(request);
-        call.timeout().timeout(FETCH_TIMEOUT_MS, TimeUnit.MILLISECONDS);
-        try (var response = call.execute()) {
-            var body = response.body().string();
-            if (response.code() != 200) {
-                warnOnce(key, "HTTP " + response.code());
-                return null;
+        try {
+            // OkHttp refuses a key with a character a header cannot carry; that is a failed read, not a 500.
+            var request = new Request.Builder()
+                    .url(origin + "/api/usage" + (range != null ? "?range=" + range.param : ""))
+                    .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.apiKey())
+                    .get()
+                    .build();
+            var call = HttpFactories.general().newCall(request);
+            call.timeout().timeout(FETCH_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+            try (var response = call.execute()) {
+                var body = response.body().string();
+                if (response.code() != 200) {
+                    warnOnce(key, "HTTP " + response.code());
+                    return null;
+                }
+                var root = jsonObject(body);
+                var windows = root != null ? windows(root) : Map.<String, Double>of();
+                var history = root != null ? requestHistory(root) : null;
+                if (windows.isEmpty() && history == null) {
+                    warnOnce(key, "the response carried neither usage windows nor request history");
+                    return null;
+                }
+                var now = AppClock.now();
+                var snapshot = history == null
+                        ? new Snapshot(windows, now)
+                        : new Snapshot(windows, history.range(), history.total(), history.buckets(), now);
+                SNAPSHOTS.put(key, snapshot);
+                WARNED.remove(key);
+                if (range == null) noteGuard(config.name(), !windows.isEmpty());
+                return snapshot;
             }
-            var root = jsonObject(body);
-            var windows = root != null ? windows(root) : Map.<String, Double>of();
-            var history = root != null ? requestHistory(root) : null;
-            if (windows.isEmpty() && history == null) {
-                warnOnce(key, "the response carried neither usage windows nor request history");
-                return null;
-            }
-            var now = AppClock.now();
-            var snapshot = history == null
-                    ? new Snapshot(windows, now)
-                    : new Snapshot(windows, history.range(), history.total(), history.buckets(), now);
-            SNAPSHOTS.put(key, snapshot);
-            WARNED.remove(key);
-            if (range == null) noteGuard(config.name(), !windows.isEmpty());
-            return snapshot;
         } catch (IOException | RuntimeException e) {
             // An exception message is not ours to vouch for: keep the key out of the log whatever it says.
             var message = String.valueOf(e.getMessage());
@@ -368,6 +380,7 @@ public final class SubscriptionUsage {
         GUARD_OFF.remove(provider);
         GUARD_OFF_WARNED.remove(provider);
         UNAVAILABLE_UNTIL.keySet().removeIf(k -> k.equals(provider) || k.startsWith(provider + "/"));
+        FETCH_LOCKS.keySet().removeIf(k -> k.provider().equals(provider));
     }
 
     private static boolean isStale(Key key) {
