@@ -238,6 +238,21 @@ class JobLifecycleTest extends UnitTest {
     }
 
     @Test
+    void streamingRecoveryLeavesOutABindingWhoseBotTokenDidNotDecrypt() {
+        // JCLAW-1455: such a token reads as null, which toMap refuses, and this job throwing aborts the boot.
+        var unreadable = new models.TelegramBinding();
+        unreadable.agent = new models.Agent();
+        unreadable.agent.id = 1L;
+        var readable = new models.TelegramBinding();
+        readable.agent = new models.Agent();
+        readable.agent.id = 2L;
+        readable.botToken = "fake-recovery-token";
+
+        assertEquals(java.util.Map.of(2L, "fake-recovery-token"),
+                jobs.TelegramStreamingRecoveryJob.tokensByAgentId(List.of(unreadable, readable)));
+    }
+
+    @Test
     void streamingRecoverySkipsConversationsWithoutCheckpoint() {
         // Conversations without a checkpoint (the normal case) must not be
         // touched by the recovery pass — it's selected explicitly by the
