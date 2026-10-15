@@ -495,18 +495,18 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         org.junit.jupiter.api.Assertions.fail(msg.get());
     }
 
-    /** What stop()'s cleanup left behind. It logs and swallows a failed delete, so a timeout names
-     *  which it was: a "Failed to clear allowlist" event, or none, when the sweep found no row or never
-     *  ran — it skips while EventLogger's shutdown latch is set, which was this case's flake (JCLAW-1454). */
+    /** What stop()'s cleanup left behind. It logs and swallows a failed delete, and skips the sweep while
+     *  EventLogger's shutdown latch is set (JCLAW-1454), so a timeout names which it was. */
     private static String cleanupDiagnostics() {
         services.EventLogger.flush();
+        boolean latchSet = services.EventLogger.isShuttingDown();
         return commitInFreshTx(() -> {
             // clearAllowlistAndAudit saves its audit row directly, bypassing EventLogger, so only the table holds it.
             java.util.List<models.EventLog> events = models.EventLog.find("category = ?1 and message like ?2",
                     "MCP_TOOL_UNREGISTER", "%'clean'%").fetch();
-            return "rows left %d, unregister events %s".formatted(
+            return "rows left %d, unregister events %s, shutdown latch set %s".formatted(
                     AgentSkillAllowedTool.count("skillName = ?1", "mcp:clean"),
-                    events.stream().map(e -> e.level + " " + e.message).toList());
+                    events.stream().map(e -> e.level + " " + e.message).toList(), latchSet);
         });
     }
 }
