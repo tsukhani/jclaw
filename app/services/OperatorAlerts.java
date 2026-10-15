@@ -18,8 +18,8 @@ import java.util.function.Consumer;
 
 /**
  * Messages to the operator, on a channel they chose, when unattended work fails (JCLAW-1279): a
- * circuit breaker opening or recovering, a recurring task's occurrence failing for good, and an MCP server
- * moved to the handshake protocol.
+ * circuit breaker opening or recovering, a recurring task's occurrence failing for good, an MCP server
+ * moved to the handshake protocol, and stored credentials that do not decrypt at boot.
  *
  * <p>{@link #KEY} holds the destination as a delivery spec ({@code telegram:<chat id>}), sent
  * through the main agent's bindings. Unset, nothing is decided and nothing is sent. The decision
@@ -123,6 +123,18 @@ public final class OperatorAlerts {
             LISTENERS.remove(listener);
         }
         return List.copyOf(seen);
+    }
+
+    /** Called once a boot when stored credentials do not decrypt under this installation's secret (JCLAW-1455). */
+    public static void onUnreadableCredentials(int count) {
+        if (destination() == null) return;
+        send(unreadableCredentialsAlert(count));
+    }
+
+    public static String unreadableCredentialsAlert(int count) {
+        return ("JClaw alert: %d stored credential(s) did not decrypt under this installation's secret (PLAY_SECRET in"
+                + " certs/.env), so each reads as missing. Restore the certs/.env they were saved under and restart,"
+                + " or enter them again in Settings.").formatted(count);
     }
 
     /** Called when an occurrence of a recurring task fails for good and the task moves on to {@code next}. */

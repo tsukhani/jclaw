@@ -79,6 +79,18 @@ class BootJobOrderConformanceTest extends UnitTest {
                         + "un-migrated schema: " + earlier);
     }
 
+    @Test
+    void theCredentialPassRunsAfterTheBindingColumnsAreWidenedAndBeforeTheChannelsStart() throws IOException {
+        var priorities = declaredPriorities();
+        int columns = priorities.get("BindingCredentialColumnsJob");
+        int pass = priorities.get("CredentialEncryptionJob");
+        // A long token's ciphertext does not fit the 255-character column the widening replaces (JCLAW-1455).
+        assertTrue(columns < pass, "BindingCredentialColumnsJob (" + columns + ") must run before CredentialEncryptionJob ("
+                + pass + "), or the pass fails on a token whose ciphertext the old column cannot hold");
+        assertTrue(pass < priorities.get("ChannelRunnerJob") && pass < priorities.get("McpStartupJob"),
+                "the pass runs before the channel runners and the MCP connections read a credential");
+    }
+
     /** A regex that stopped matching would make both checks above pass on an empty reading. */
     @Test
     void theScanActuallyReadsTheAnnotations() throws IOException {

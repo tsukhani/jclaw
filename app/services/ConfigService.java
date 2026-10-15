@@ -41,18 +41,21 @@ import tools.HarnessSandbox;
 import tools.SubagentSpawnTool;
 import tools.jev.JevSettings;
 import tools.scrape.WebScrapeSettings;
+import utils.CredentialCipher;
 import utils.ErrorRendering;
 import utils.HttpFactories;
 import utils.SsrfGuard;
 import utils.StartupErrorTemplates;
 import utils.TokenCoalescer;
 
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.time.Duration;
+import java.time.Instant;
 import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -75,28 +78,44 @@ public class ConfigService {
     private static final Set<String> PDF_STRATEGIES =
             Set.of("auto", "no_ocr", "ocr_only", "ocr_and_text_extraction");
 
-    // The cache stores Optional<String> rather than String so we can distinguish
-    // "key absent in DB" (empty Optional, cached) from "key not yet fetched"
-    // (cache miss, triggers a DB lookup): the typed Caches.get(key, loader) returns
-    // null for a null loader result instead of caching the absence.
-    private static final Cache<String, Optional<String>> cache = Caches.named(
+    /** A key's value as readers see it. {@code unreadable} marks a credential that will not decrypt, which reads as unset. */
+    private record Read(@Nullable String value, boolean unreadable) {}
+
+    // Absence is cached as a value: the typed Caches.get(key, loader) returns null for a null
+    // loader result instead of caching it.
+    private static final Read ABSENT = new Read(null, false);
+
+    // Holds plaintext, so a credential is decrypted once per key per TTL rather than on every read.
+    private static final Cache<String, Read> cache = Caches.named(
             "config",
             CacheConfig.newBuilder()
                     .expireAfterWrite(Duration.ofSeconds(60))
                     .build());
 
     public static @Nullable String get(String key) {
+        return read(key).value();
+    }
+
+    /**
+     * Whether {@code key} holds a credential that will not decrypt under this installation's secret. It reads as unset,
+     * and only an operator's re-entry may replace it: restoring the right secret recovers the stored value.
+     */
+    public static boolean isUnreadable(String key) {
+        return read(key).unreadable();
+    }
+
+    private static Read read(String key) {
         // get(key, loader) provides single-flight semantics — concurrent misses
         // for the same key invoke the loader at most once.
         return cache.get(key, k -> {
             var config = Tx.run(() -> Config.findByKey(k));
+            var stored = opened(k, config != null ? config.value : null);
             // JCLAW-1022: privileged keys are capped by application.conf, which the config table
             // cannot reach. Applied inside the loader so the cost lands once per key rather than
             // per read, and here rather than at each sink because provider.*.baseUrl alone has
             // nine of them.
-            return Optional.ofNullable(
-                    PrivilegedConfig.reconcile(k, config != null ? config.value : null));
-        }).orElse(null);
+            return new Read(PrivilegedConfig.reconcile(k, stored.value()), stored.unreadable());
+        });
     }
 
     /** The configured value, or {@code defaultValue} when the key is unset. Callers wanting
@@ -197,13 +216,13 @@ public class ConfigService {
     }
 
     public static void set(String key, String value) {
-        Tx.run(() -> Config.upsert(key, value));
+        Tx.run(() -> Config.upsert(key, storedForm(key, value)));
         // Read-your-writes: seed the cache immediately so a later reader on a
         // different connection sees the value before the surrounding transaction
         // commits — the FunctionalTest suite and real request flows depend on this.
         // Reconciled, not raw: the read path caps privileged keys, and seeding the cache with
         // the stored value would hand the next reader an uncapped one until the TTL (JCLAW-1022).
-        cache.put(key, Optional.ofNullable(PrivilegedConfig.reconcile(key, value)));
+        cache.put(key, new Read(PrivilegedConfig.reconcile(key, value), false));
         // JCLAW-832: when set() joined an ambient (outer) transaction the upsert is
         // not durable yet. If that transaction rolls back, drop the eagerly-cached
         // entry so it can't serve a value the DB never kept for the 60s TTL. On the
@@ -253,7 +272,7 @@ public class ConfigService {
             try {
                 var config = new Config();
                 config.key = key;
-                config.value = value;
+                config.value = storedForm(key, value);
                 config.save(); // flushes; the unique index rejects a concurrent insert
                 return true;
             } catch (PersistenceException _) {
@@ -268,7 +287,7 @@ public class ConfigService {
             // if the surrounding (not-yet-committed) transaction rolls back (JCLAW-832).
             // Reconciled, not raw: the read path caps privileged keys, and seeding the cache with
         // the stored value would hand the next reader an uncapped one until the TTL (JCLAW-1022).
-        cache.put(key, Optional.ofNullable(PrivilegedConfig.reconcile(key, value)));
+        cache.put(key, new Read(PrivilegedConfig.reconcile(key, value), false));
             if (JPA.isInsideTransaction()) {
                 scheduleRollbackEviction(JPA.em().unwrap(Session.class), key);
             }
@@ -611,7 +630,7 @@ public class ConfigService {
             return;
         }
         String existingSearchKey = get("search.ollama.apiKey");
-        if (existingSearchKey == null || existingSearchKey.isBlank()) {
+        if ((existingSearchKey == null || existingSearchKey.isBlank()) && !isUnreadable("search.ollama.apiKey")) {
             set("search.ollama.apiKey", value);
             set("search.ollama.enabled", "true");
             EventLogger.info(EVENT_CATEGORY,
@@ -662,7 +681,7 @@ public class ConfigService {
         // returns null without reaching the DB, so there is nothing stale to re-cache. Mirrors
         // the eager put set() makes for JCLAW-832; a plain deferral would not, because it would
         // leave delete() unable to honor deleteEvictsCacheSoSubsequentGetReturnsNull.
-        cache.put(key, Optional.empty());
+        cache.put(key, ABSENT);
         if (JPA.isInsideTransaction()) {
             // Same rollback contract as set(): an uncommitted delete must not leave the cache
             // asserting an absence the database never accepted.
@@ -743,11 +762,71 @@ public class ConfigService {
         return key.equals("dispatcher.llm.maxRequestsPerHost") || key.equals("dispatcher.llm.maxRequests");
     }
 
-    public static List<Config> listAll() {
-        // NB: must stay a lambda, not a method reference — Tx.run is overloaded
-        // (Function0<T> vs Runnable) and Config::findAll is ambiguous between
-        // them, whereas the explicit lambda resolves cleanly (Sonar S1612 FP).
-        return Tx.run(() -> Config.<Config>findAll());
+    /** A config row as readers see it: a credential decrypted, or a null value and {@code unreadable} when it will not decrypt. */
+    public record Entry(String key, @Nullable String value, Instant updatedAt, boolean unreadable) {}
+
+    public static List<Entry> listAll() {
+        return Tx.run(() -> Config.<Config>findAll().stream().map(ConfigService::entryOf).toList());
+    }
+
+    /** The row for {@code key} as readers see it, read from the database rather than the cache; null when absent. */
+    public static @Nullable Entry entry(String key) {
+        return Tx.run(() -> {
+            var row = Config.findByKey(key);
+            return row == null ? null : entryOf(row);
+        });
+    }
+
+    private static Entry entryOf(Config row) {
+        var read = opened(row.key, row.value);
+        return new Entry(row.key, read.value(), row.updatedAt, read.unreadable());
+    }
+
+    /**
+     * Move {@code oldKey}'s value to {@code newKey} unless {@code newKey} already holds one, then drop {@code oldKey}. A
+     * credential is re-encrypted for its new name; one that will not decrypt cannot be, so both rows stay as they are.
+     *
+     * @return whether the value moved
+     */
+    public static boolean renameIfPresent(String oldKey, String newKey) {
+        boolean moved = Tx.run(() -> {
+            var oldRow = Config.findByKey(oldKey);
+            if (oldRow == null) return false;
+            boolean copy = Config.findByKey(newKey) == null;
+            if (copy) {
+                var value = storedUnder(oldKey, newKey, oldRow.value);
+                if (value == null) return false;
+                Config.upsert(newKey, value);
+            }
+            oldRow.delete();
+            return copy;
+        });
+        clearCache();
+        return moved;
+    }
+
+    /**
+     * Rename every key under {@code oldPrefix} to the same key under {@code newPrefix}, in the caller's transaction. A
+     * credential is re-encrypted for its new name; one that will not decrypt stays under its old one.
+     */
+    public static void renamePrefix(String oldPrefix, String newPrefix) {
+        // findAll + Java filter rather than a "key LIKE ?" query: `key` is a JPQL
+        // reserved word and the config table is tiny. Each per-row save is an
+        // UPDATE on the config_key column by id — no id-table, no reserved word. A bulk HQL
+        // UPDATE would provision an HTE_config id-table whose DDL emits `key` unquoted
+        // (see the note in AgentDeletionCascade#delete).
+        boolean any = false;
+        for (Config c : Config.<Config>findAll()) {
+            if (!c.key.startsWith(oldPrefix)) continue;
+            var newKey = newPrefix + c.key.substring(oldPrefix.length());
+            var value = storedUnder(c.key, newKey, c.value);
+            if (value == null) continue;
+            c.value = value;
+            c.key = newKey;
+            c.save();
+            any = true;
+        }
+        if (any) clearCache();
     }
 
     public static void clearCache() {
@@ -780,5 +859,62 @@ public class ConfigService {
             return value.substring(0, 4) + MASK_SUFFIX;
         }
         return value;
+    }
+
+    private static final String AUTH_KEY_PREFIX = "auth.";
+
+    /**
+     * Whether {@code key}'s value is stored encrypted (JCLAW-1455): every key {@link #isSensitive} flags but those under
+     * {@code auth.}, which hold a password hash and session state rather than a third-party credential. A password hash
+     * that would not decrypt would lock the operator out.
+     */
+    public static boolean encryptsAtRest(String key) {
+        return isSensitive(key) && !key.startsWith(AUTH_KEY_PREFIX);
+    }
+
+    /** {@code value} in the form {@code key} stores it. An empty or null value (test/, outside NullAway, writes one)
+     *  holds no secret and stays as it is. */
+    private static @Nullable String storedForm(String key, @Nullable String value) {
+        if (value == null || value.isEmpty() || !encryptsAtRest(key)) return value;
+        return CredentialCipher.current().encrypt(fieldName(key), value);
+    }
+
+    // Any key's ciphertext is opened, not only an encryptsAtRest one: a key isSensitive stops flagging keeps its value.
+    private static Read opened(String key, @Nullable String stored) {
+        if (stored == null || !CredentialCipher.isEncrypted(stored)) return new Read(stored, false);
+        var opened = CredentialCipher.current().open(fieldName(key), stored);
+        return new Read(opened.plaintext(), !opened.readable());
+    }
+
+    /**
+     * The Config part of the boot pass (JCLAW-1455): every credential sealed under {@code pass}'s current secret, on the
+     * pass's connection, which commits it. The cache needs no eviction: no value a reader sees changes.
+     */
+    public static void resealStored(Connection conn, CredentialCipher.Reseal pass) throws SQLException {
+        try (var select = conn.prepareStatement("SELECT id, config_key, config_value FROM config");
+             var update = conn.prepareStatement("UPDATE config SET config_value = ? WHERE id = ?");
+             var rows = select.executeQuery()) {
+            while (rows.next()) {
+                var key = rows.getString(2);
+                var stored = rows.getString(3);
+                if (stored == null || (!encryptsAtRest(key) && !CredentialCipher.isEncrypted(stored))) continue;
+                var resealed = pass.reseal(fieldName(key), stored);
+                if (resealed == null) continue;
+                update.setString(1, resealed);
+                update.setLong(2, rows.getLong(1));
+                update.executeUpdate();
+            }
+        }
+    }
+
+    /** {@code stored}, read under {@code oldKey}, in the form {@code newKey} stores it; null when it will not decrypt. */
+    private static @Nullable String storedUnder(String oldKey, String newKey, @Nullable String stored) {
+        var value = opened(oldKey, stored).value();
+        return value == null ? null : storedForm(newKey, value);
+    }
+
+    /** The additional authenticated data for {@code key}'s ciphertext: it opens under that key and no other. */
+    private static String fieldName(String key) {
+        return "config." + key;
     }
 }

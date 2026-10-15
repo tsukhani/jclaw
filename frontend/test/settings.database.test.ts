@@ -101,7 +101,7 @@ const repairManifest = {
 }
 
 registerEndpoint('/api/system/database', { method: 'GET', handler: () => status })
-for (const url of ['/api/system/database/backups', '/api/system/database/restore?id=jclaw-20260908T120000Z.zip', '/api/system/database/repair', '/api/system/database/repair/clean', '/api/config']) {
+for (const url of ['/api/system/database/backups', '/api/system/database/restore?id=jclaw-20260908T120000Z.zip', '/api/system/database/repair', '/api/system/database/repair/clean', '/api/system/database/compact', '/api/config']) {
   registerEndpoint(url, {
     method: 'POST',
     handler: async (event) => {
@@ -379,7 +379,7 @@ describe('Settings → Database — the last operation is transient', () => {
   })
 
   it('names an operation it does not recognise as Maintenance, and falls back to its phase', async () => {
-    status = healthy({ lastOperation: { op: 'compact', phase: 'done', message: null, startedAt: recent(), backup: '' } })
+    status = healthy({ lastOperation: { op: 'vacuum', phase: 'done', message: null, startedAt: recent(), backup: '' } })
     const c = await mount()
     expect(c.find('[data-testid="db-last-op"]').text()).toBe('Maintenance: done')
   })
@@ -389,6 +389,84 @@ describe('Settings → Database — the last operation is transient', () => {
     const c = await mount()
     expect(c.find('[data-testid="db-repair-section"]').text()).not.toContain('Restore complete')
     expect(c.find('[data-testid="db-last-op"]').text()).toBe('Restore: Restore complete')
+  })
+})
+
+describe('Settings → Database — the credentials\' old copies (JCLAW-1455)', () => {
+  const unencryptedIds = ['jclaw-20260908T120000Z.zip', 'jclaw-0.19.40-20261015T000000Z.mv.db']
+  for (const id of unencryptedIds) {
+    registerEndpoint(`/api/system/database/backups/${id}`, {
+      method: 'DELETE',
+      handler: () => {
+        posts.push({ url: `DELETE ${id}`, body: null })
+        return { status: 'ok' }
+      },
+    })
+  }
+
+  function withOldCopies(due: 'PLAINTEXT' | 'PREVIOUS_SECRET' | null) {
+    const base = healthy()
+    return healthy({
+      credentials: { due, encryptedAt: '2026-10-16T01:00:00Z', compactedAt: null },
+      backups: [
+        { ...(base.backups as Array<Record<string, unknown>>)[0], unencrypted: false },
+        { ...(base.backups as Array<Record<string, unknown>>)[1], unencrypted: true },
+      ],
+      upgradeCopies: [{ id: 'jclaw-0.19.40-20261015T000000Z.mv.db', bytes: 190_000_000, createdAt: '2026-10-15T00:00:00Z', unencrypted: true }],
+    })
+  }
+
+  it('says the old plaintext is still in the file and hands the compaction off to jclaw.sh once confirmed', async () => {
+    status = withOldCopies('PLAINTEXT')
+    const c = await mount()
+    expect(c.find('[data-testid="db-compaction-reason"]').text()).toContain('still holds the plaintext')
+
+    await c.find('[data-testid="db-compact"]').trigger('click')
+    await settle()
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('row for row')
+    dialogButton('Compact')!.click()
+    await settle()
+    expect(posts).toEqual([{ url: '/api/system/database/compact', body: {} }])
+    expect(c.text()).toContain('Waiting for the backend to stop')
+  })
+
+  it('names the previous secret\'s copies after a rotation, and shows nothing once the file is clean', async () => {
+    status = withOldCopies('PREVIOUS_SECRET')
+    const c = await mount()
+    expect(c.find('[data-testid="db-compaction-reason"]').text()).toContain('previous secret')
+
+    status = healthy({ credentials: { due: null, encryptedAt: '2026-10-16T01:00:00Z', compactedAt: '2026-10-16T02:00:00Z' } })
+    clearNuxtData()
+    const clean = await mount()
+    expect(clean.find('[data-testid="db-compaction"]').exists()).toBe(false)
+    expect(clean.find('[data-testid="db-unencrypted"]').exists()).toBe(false)
+  })
+
+  it('marks each backup that holds plaintext and deletes them, the upgrade\'s copy included, once confirmed', async () => {
+    status = withOldCopies(null)
+    const c = await mount()
+    expect(c.find('[data-testid="db-unencrypted-jclaw-20260908T120000Z.zip"]').text()).toBe('Unencrypted')
+    expect(c.find('[data-testid="db-unencrypted-jclaw-20260909T120000Z.zip"]').exists()).toBe(false)
+    expect(c.find('[data-testid="db-unencrypted"]').text()).toContain('2 backups hold')
+    expect(c.find('[data-testid="db-unencrypted"]').text()).toContain('the upgrade kept')
+
+    await c.find('[data-testid="db-delete-unencrypted"]').trigger('click')
+    await settle()
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('jclaw-0.19.40-20261015T000000Z.mv.db')
+    dialogButton('Delete')!.click()
+    await settle()
+    expect(posts.map(p => p.url)).toEqual(unencryptedIds.map(id => `DELETE ${id}`))
+    expect(c.text()).toContain('Deleted 2 unencrypted backups.')
+  })
+
+  it('files a finished compaction under its own note, which stays while the outcome is recent', async () => {
+    status = healthy({
+      credentials: { due: null, encryptedAt: '2026-10-16T01:00:00Z', compactedAt: '2026-10-16T02:00:00Z' },
+      lastOperation: { op: 'compact', phase: 'done', message: 'Compaction complete', startedAt: new Date(Date.now() - 60_000).toISOString(), backup: '' },
+    })
+    const c = await mount()
+    expect(c.find('[data-testid="db-compaction"]').text()).toBe('Compact: Compaction complete')
+    expect(c.find('[data-testid="db-repair-section"]').text()).not.toContain('Compaction complete')
   })
 })
 

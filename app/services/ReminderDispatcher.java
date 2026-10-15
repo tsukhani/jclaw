@@ -112,6 +112,10 @@ public final class ReminderDispatcher {
             return DeliveryDispatcher.DispatchResult.noConfig(TELEGRAM,
                     "Telegram binding for agent '" + binding.agent.name + "' is disabled.");
         }
+        if (binding.botToken == null) {
+            return DeliveryDispatcher.DispatchResult.noConfig(TELEGRAM,
+                    TelegramBinding.unreadableBotToken(binding.agent.name));
+        }
         return TelegramChannel.forToken(binding.botToken)
                 .sendText(chatId, TELEGRAM_FRAMING + content, task.agent).ok()
                 ? DeliveryDispatcher.DispatchResult.delivered()

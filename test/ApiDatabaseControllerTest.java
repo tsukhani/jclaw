@@ -8,12 +8,14 @@ import play.mvc.Http;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.RestartService;
+import services.database.CredentialCopies;
 import services.database.DatabaseService;
 import services.database.H2Maintenance;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.zip.ZipEntry;
@@ -207,6 +209,44 @@ class ApiDatabaseControllerTest extends FunctionalTest {
         var command = spawned.getFirst().command();
         assertTrue(command.contains("repair"), () -> "command: " + command);
         assertTrue(command.contains("--yes"), () -> "command: " + command);
+    }
+
+    @Test
+    void compactHandsOffToJclawSh() {
+        login();
+        var response = POST("/api/system/database/compact", "application/json", "{}");
+        assertEquals(202, response.status.intValue());
+        assertEquals(1, spawned.size());
+        var command = spawned.getFirst().command();
+        assertTrue(command.contains("compact") && command.contains("--yes"), () -> "command: " + command);
+    }
+
+    // --- the credentials' old copies (JCLAW-1455) ---
+
+    @Test
+    void statusMarksWhatHoldsCredentialPlaintextAndOffersToDeleteIt() throws Exception {
+        login();
+        CredentialCopies.NONE.afterPass(3, 0, Instant.now().minusSeconds(3600)).write(DatabaseService.dataDirForTest);
+        seedBackup("jclaw-20261016T000000Z.zip");
+        // jclaw.sh upgrade writes its copies to data/backups, which db.backup.dir (here elsewhere) does not move.
+        var upgradeCopy = Files.createDirectories(DatabaseService.dataDirForTest.resolve("backups"))
+                .resolve("jclaw-0.19.40-20261015T000000Z.mv.db");
+        Files.writeString(upgradeCopy, "H:2,x");
+
+        var json = JsonParser.parseString(getContent(GET("/api/system/database"))).getAsJsonObject();
+        var credentials = json.getAsJsonObject("credentials");
+        assertEquals("PLAINTEXT", credentials.get("due").getAsString(), json.toString());
+        assertTrue(json.getAsJsonArray("backups").get(0).getAsJsonObject().get("unencrypted").getAsBoolean(),
+                "a backup taken while the file still held the old plaintext holds it too");
+        var copies = json.getAsJsonArray("upgradeCopies");
+        assertEquals(1, copies.size());
+        assertTrue(copies.get(0).getAsJsonObject().get("unencrypted").getAsBoolean());
+
+        assertEquals(400, POST("/api/system/database/restore?id=jclaw-0.19.40-20261015T000000Z.mv.db",
+                "application/json", "{}").status.intValue(), "a raw copy is no backup a restore takes");
+        assertEquals(0, spawned.size());
+        assertIsOk(DELETE("/api/system/database/backups/jclaw-0.19.40-20261015T000000Z.mv.db"));
+        assertFalse(Files.exists(upgradeCopy), "the upgrade's raw copy is deleted by the same route");
     }
 
     @Test

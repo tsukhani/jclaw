@@ -11,6 +11,8 @@ interface BackupInfo {
   id: string
   bytes: number
   createdAt: string
+  /** Taken while the data file held credential plaintext (JCLAW-1455), so this copy holds it too. */
+  unencrypted?: boolean
 }
 
 interface TableResult {
@@ -72,6 +74,10 @@ interface DatabaseStatus {
   lastOperation: LastOperation | null
   maintenanceAvailable: boolean
   maintenanceUnavailableReason: string | null
+  /** What a compaction would remove from the data file now, if anything (JCLAW-1455). */
+  credentials?: { due: 'PLAINTEXT' | 'PREVIOUS_SECRET' | null, encryptedAt: string | null, compactedAt: string | null }
+  /** The raw data-file copies `jclaw.sh upgrade` keeps beside the backups. */
+  upgradeCopies?: BackupInfo[]
 }
 
 const { confirm } = useConfirm()
@@ -289,6 +295,53 @@ const statusLine = computed(() => {
   }
 })
 
+const compactionDue = computed(() => status.value?.credentials?.due ?? null)
+
+async function compact() {
+  const ok = await confirm({
+    title: 'Compact the database',
+    message: 'Rewrites the data file with only its live data, which removes the old copies of the stored credentials. '
+      + 'The file is replaced only once the copy matches it row for row. JClaw restarts; this page reconnects on its own.',
+    confirmText: 'Compact',
+  })
+  if (!ok) return
+  await handOff('/api/system/database/compact', {}, 'compact')
+}
+
+/** Every backup and upgrade copy that holds the stored credentials in plaintext. */
+const unencrypted = computed<BackupInfo[]>(() => [
+  ...(status.value?.backups ?? []),
+  ...(status.value?.upgradeCopies ?? []),
+].filter(b => b.unencrypted))
+
+async function deleteUnencrypted() {
+  const files = unencrypted.value
+  const ok = await confirm({
+    title: 'Delete unencrypted backups',
+    message: `Delete ${files.length === 1 ? 'the backup' : `the ${files.length} backups`} that hold the stored credentials in plaintext `
+      + `(${files.map(b => b.id).join(', ')})? This cannot be undone. A backup from before the credentials were encrypted `
+      + 'is the only way back to an older JClaw version, which cannot read them.',
+    confirmText: 'Delete',
+    variant: 'danger',
+  })
+  if (!ok) return
+  busy.value = 'unencrypted'
+  failure.value = null
+  notice.value = null
+  let deleted = 0
+  for (const b of files) {
+    const res = await mutate(`/api/system/database/backups/${encodeURIComponent(b.id)}`, { method: 'DELETE' })
+    if (!res) {
+      failure.value = mutationError.value ?? `Could not delete ${b.id}.`
+      break
+    }
+    deleted += 1
+  }
+  busy.value = null
+  if (deleted) notice.value = `Deleted ${deleted} unencrypted ${deleted === 1 ? 'backup' : 'backups'}.`
+  await refresh()
+}
+
 async function cleanUp() {
   const s = status.value
   if (!s?.repair) return
@@ -361,7 +414,7 @@ async function turnOffSchedule() {
 /** How long a finished restore or repair stays on screen, measured from when it started. */
 const LAST_OP_WINDOW_MS = 15 * 60 * 1000
 
-const OP_VERBS = new Map([['restore', 'Restore'], ['repair', 'Repair']])
+const OP_VERBS = new Map([['restore', 'Restore'], ['repair', 'Repair'], ['compact', 'Compact']])
 
 /**
  * The outcome `jclaw.sh` left in logs/database-status.json. It exists for the reload the
@@ -387,7 +440,7 @@ const lastOp = computed(() => {
     ok,
     failed,
     inFlight,
-    panel: op.op === 'restore' ? 'backups' : 'repair',
+    panel: op.op === 'restore' ? 'backups' : op.op === 'compact' ? 'compact' : 'repair',
   }
 })
 </script>
@@ -400,7 +453,60 @@ const lastOp = computed(() => {
     <p class="text-xs text-fg-muted">
       The H2 data file behind everything on this instance. Back it up online at any time; restore or
       repair it through <code>jclaw.sh</code>, which stops the instance, does the work, and starts it again.
+      The stored credentials are encrypted with this installation's secret in <code>certs/.env</code>: keep a
+      copy of that file with your backups, because restored without it, every credential has to be entered again.
     </p>
+
+    <!-- Compaction: only while the data file still holds old copies of the credentials, or just after one ran. -->
+    <div
+      v-if="compactionDue || (lastOp && lastOp.panel === 'compact')"
+      class="bg-surface-elevated border"
+      :class="compactionDue ? 'border-amber-500/70' : 'border-border'"
+      data-testid="db-compaction"
+    >
+      <div
+        v-if="compactionDue"
+        class="px-4 py-2.5 flex items-center justify-between gap-4"
+      >
+        <div class="min-w-0">
+          <span class="text-sm font-medium text-fg-strong">Old credential copies</span>
+          <div
+            class="text-xs text-fg-muted mt-0.5"
+            data-testid="db-compaction-reason"
+          >
+            <template v-if="compactionDue === 'PLAINTEXT'">
+              The data file still holds the plaintext the stored credentials had before they were encrypted.
+              Until it is compacted, anyone with a copy of the file can read them, and so can anyone with a backup taken now.
+            </template>
+            <template v-else>
+              The data file still holds copies of the stored credentials encrypted with the previous secret.
+              Compact it so they go with that secret.
+            </template>
+            <template v-if="status && !status.maintenanceAvailable">
+              {{ status.maintenanceUnavailableReason }}
+            </template>
+          </div>
+        </div>
+        <button
+          class="shrink-0 px-3 py-1.5 text-xs font-medium text-white bg-amber-700 hover:bg-amber-800 disabled:bg-amber-700/40
+                 disabled:cursor-not-allowed rounded-full transition-colors"
+          :disabled="phase !== 'idle' || !status?.maintenanceAvailable"
+          data-testid="db-compact"
+          @click="compact"
+        >
+          Compact
+        </button>
+      </div>
+      <div
+        v-if="lastOp && lastOp.panel === 'compact'"
+        class="px-4 py-2 text-xs"
+        :class="[compactionDue ? 'border-t border-border' : '',
+                 lastOp.failed ? 'text-red-700 dark:text-red-400' : lastOp.ok ? 'text-emerald-700 dark:text-emerald-400' : 'text-fg-muted']"
+        data-testid="db-last-op"
+      >
+        {{ lastOp.text }}
+      </div>
+    </div>
 
     <!-- Health strip -->
     <div
@@ -517,6 +623,28 @@ const lastOp = computed(() => {
         </button>
       </div>
 
+      <div
+        v-if="unencrypted.length"
+        class="px-4 py-2.5 border-b border-border flex max-sm:flex-wrap items-center gap-3 text-xs"
+        data-testid="db-unencrypted"
+      >
+        <span class="text-amber-700 dark:text-amber-400">
+          {{ unencrypted.length === 1 ? '1 backup holds' : `${unencrypted.length} backups hold` }} the stored credentials in
+          plaintext: taken before they were encrypted, or before the old copies were compacted away.<template
+            v-if="(status?.upgradeCopies ?? []).some(b => b.unencrypted)"
+          > That includes the database copies the upgrade kept.</template><template v-if="compactionDue === 'PLAINTEXT'">
+            Compact first, or the next backup holds them too.</template>
+        </span>
+        <button
+          class="ml-auto shrink-0 px-2 py-0.5 border border-border hover:bg-muted transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          :disabled="busy !== null || phase !== 'idle'"
+          data-testid="db-delete-unencrypted"
+          @click="deleteUnencrypted"
+        >
+          {{ busy === 'unencrypted' ? 'Deleting…' : 'Delete them' }}
+        </button>
+      </div>
+
       <div class="divide-y divide-border">
         <div
           v-for="b in status?.backups ?? []"
@@ -524,6 +652,12 @@ const lastOp = computed(() => {
           class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3 text-xs"
         >
           <span class="font-mono text-fg-primary truncate min-w-0 max-sm:basis-full">{{ b.id }}</span>
+          <span
+            v-if="b.unencrypted"
+            class="shrink-0 px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"
+            title="Taken while the data file held the stored credentials in plaintext, so this backup holds them too"
+            :data-testid="`db-unencrypted-${b.id}`"
+          >Unencrypted</span>
           <span class="text-fg-muted tabular-nums shrink-0">{{ when(b.createdAt) }}</span>
           <span class="text-fg-muted tabular-nums shrink-0">{{ formatSize(b.bytes) }}</span>
           <span class="ml-auto flex items-center gap-1 shrink-0">

@@ -2,6 +2,7 @@ package services.database;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import org.h2.mvstore.MVStore;
 import org.h2.tools.Backup;
 import org.h2.tools.Recover;
 import org.h2.util.ScriptReader;
@@ -24,6 +25,10 @@ import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -79,6 +84,7 @@ public final class H2Maintenance {
     static final String RECOVER_ERROR_MARKER = "// error:";
 
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
+    private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
 
     // Recover writes the rows of "SCHEMA"."TABLE" into a positional VARCHAR staging table
     // O_n(C0, C1, ...) and copies them across at the end; the copy is what the ENUM cast rewrites.
@@ -294,10 +300,20 @@ public final class H2Maintenance {
      * @throws IllegalArgumentException when {@code zip} fails {@link #validateBackup}
      */
     public static RestoreResult restore(Path zip, Path dataDir) throws IOException {
+        return restore(zip, dataDir, null);
+    }
+
+    /**
+     * {@link #restore(Path, Path)}, and with {@code stamp}, the time of the restore, record in {@link CredentialCopies}
+     * that a backup taken while the data file held credential plaintext has brought it back.
+     */
+    public static RestoreResult restore(Path zip, Path dataDir, @Nullable String stamp) throws IOException {
         var check = validateBackup(zip);
         if (!check.ok()) {
             throw new IllegalArgumentException(check.reason());
         }
+        var restoredAt = stamp == null ? null : stampInstant(stamp);
+        var takenAt = CredentialCopies.takenAt(zip);
         var target = dataDir.resolve(DATA_FILE);
         var staging = dataDir.resolve(DATA_FILE + ".restoring");
         var graphStaging = extractGraph(zip, dataDir);
@@ -332,6 +348,11 @@ public final class H2Maintenance {
             Files.move(graph, displacedGraph);
         }
         Files.move(graphStaging, graph, StandardCopyOption.ATOMIC_MOVE);
+        if (restoredAt != null) {
+            var copies = CredentialCopies.read(dataDir);
+            var next = copies.afterRestore(takenAt, restoredAt);
+            if (!next.equals(copies)) next.write(dataDir);
+        }
         return new RestoreResult(Files.size(target), displaced);
     }
 
@@ -693,6 +714,95 @@ public final class H2Maintenance {
         }
     }
 
+    // ---- compaction of the old credential copies (JCLAW-1455) ----
+
+    /** The copy {@link #compact(Path, String)} writes and checks before it replaces the data file. */
+    static final String COMPACTING_DB = DB_NAME + "-compacting";
+
+    public record CompactResult(long beforeBytes, long afterBytes, int tables) {}
+
+    /**
+     * Rewrite the closed data file with its live data alone, so the plaintext an encrypted value replaced, and the
+     * previous secret's ciphertext a rotation replaced, leave the file. H2's {@code SHUTDOWN COMPACT} compresses what it
+     * writes, which hides those remnants from a scan without showing them gone; this is the same rewrite uncompressed.
+     * The copy is written beside the data file and moved over it in one step once every table's row count matches, so a
+     * run cut short leaves the data file as it was. Then the trace is masked and {@link CredentialCopies} records it.
+     *
+     * @throws SQLException when the database will not open, which includes a running instance holding it
+     */
+    public static CompactResult compact(Path dataDir, String stamp) throws IOException, SQLException {
+        var at = stampInstant(stamp);
+        var dataFile = dataDir.resolve(DATA_FILE);
+        if (!Files.isRegularFile(dataFile)) {
+            throw new IOException("no " + DATA_FILE + " in " + dataDir);
+        }
+        deleteCompactingCopy(dataDir);
+        Map<String, Long> before;
+        // A plain open, not read-only: H2 refuses it while another process holds the file, and its SHUTDOWN
+        // finishes whatever an unclean stop left, so the copy starts from a closed file.
+        try (var connection = DriverManager.getConnection(url(dataDir) + ";IFEXISTS=TRUE", "", "")) {
+            before = tableCounts(connection);
+            try (var s = connection.createStatement()) {
+                s.execute("SHUTDOWN");
+            }
+        }
+        var beforeBytes = Files.size(dataFile);
+        var copy = dataDir.resolve(COMPACTING_DB + ".mv.db");
+        try {
+            MVStore.compact(dataFile.toString(), copy.toString(), false, null);
+            Map<String, Long> after;
+            try (var connection = DriverManager.getConnection(
+                    "jdbc:h2:file:" + dataDir.toAbsolutePath().resolve(COMPACTING_DB) + ";" + MODE
+                            + ";ACCESS_MODE_DATA=r;IFEXISTS=TRUE", "", "")) {
+                after = tableCounts(connection);
+            }
+            if (!after.equals(before)) {
+                throw new IOException("the compacted copy does not match the data file (" + before + " before, "
+                        + after + " after); " + DATA_FILE + " is unchanged");
+            }
+            Files.move(copy, dataFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            deleteCompactingCopy(dataDir);
+        }
+        H2TraceMask.maskTraces(dataDir);
+        CredentialCopies.read(dataDir).afterCompaction(at).write(dataDir);
+        return new CompactResult(beforeBytes, Files.size(dataFile), before.size());
+    }
+
+    private static void deleteCompactingCopy(Path dataDir) throws IOException {
+        for (var suffix : List.of(".mv.db", ".lock.db", ".trace.db")) {
+            Files.deleteIfExists(dataDir.resolve(COMPACTING_DB + suffix));
+        }
+    }
+
+    private static Map<String, Long> tableCounts(Connection connection) throws SQLException {
+        var names = new ArrayList<String>();
+        try (var s = connection.createStatement();
+             var rs = s.executeQuery("SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+                     + "WHERE TABLE_SCHEMA = 'PUBLIC' AND TABLE_TYPE = 'BASE TABLE' ORDER BY TABLE_NAME")) {
+            while (rs.next()) {
+                names.add(rs.getString(1));
+            }
+        }
+        var counts = new TreeMap<String, Long>();
+        for (var name : names) {
+            try (var s = connection.createStatement();
+                 var rs = s.executeQuery("SELECT COUNT(*) FROM \"PUBLIC\".\"" + name + "\"")) {
+                counts.put(name, rs.next() ? rs.getLong(1) : 0L);
+            }
+        }
+        return counts;
+    }
+
+    /** A {@code yyyyMMdd'T'HHmmss'Z'} stamp, as {@code jclaw.sh} and the app name their files, read as an instant. */
+    public static Instant stampInstant(String stamp) {
+        try {
+            return STAMP.parse(stamp, Instant::from);
+        } catch (DateTimeParseException e) {
+            throw new IllegalArgumentException("not a yyyyMMddTHHmmssZ stamp: " + stamp, e);
+        }
+    }
+
     private static int countMarkers(Path script) throws IOException {
         var count = 0;
         try (BufferedReader reader = Files.newBufferedReader(script, StandardCharsets.UTF_8)) {
@@ -870,11 +980,12 @@ public final class H2Maintenance {
             usage: H2Maintenance <command> ...
               backup   <dataDir> <zip>            zip a closed database
               validate <zip>                      check a zip is an H2 backup
-              restore  <dataDir> <zip>            replace the database with the zip's
+              restore  <dataDir> <zip> [stamp]    replace the database with the zip's
               repair   <dataDir> <stamp>          recover, rebuild, verify, compact; write repair-<stamp>.json
+              compact  <dataDir> <stamp>          rewrite the file with its live data alone, removing old credential copies
               clean    <dataDir> [--dry-run]      delete what the latest repair manifest lists
-              status   <dataDir>                  size and repair remnants
-              list     <backupsDir>               backups, newest first
+              status   <dataDir>                  size, repair remnants and old credential copies
+              list     <backupsDir> [dataDir]     backups, newest first, marking those that hold credential plaintext
             """;
 
     public static void main(String[] args) {
@@ -915,7 +1026,7 @@ public final class H2Maintenance {
             }
             case "restore" -> {
                 require(args, 3);
-                var result = restore(Path.of(args[2]), Path.of(args[1]));
+                var result = restore(Path.of(args[2]), Path.of(args[1]), args.length > 3 ? args[3] : null);
                 out.println("restored " + DATA_FILE + " (" + human(result.restoredBytes()) + ")"
                         + (result.preRestoreCopy() == null ? "" : "; previous file kept as " + result.preRestoreCopy()));
                 return 0;
@@ -925,6 +1036,13 @@ public final class H2Maintenance {
                 var manifest = repair(Path.of(args[1]), args[2]);
                 printReport(manifest, out);
                 return manifest.ok() ? 0 : 1;
+            }
+            case "compact" -> {
+                require(args, 3);
+                var result = compact(Path.of(args[1]), args[2]);
+                out.println("compacted " + DATA_FILE + ": " + human(result.beforeBytes()) + " -> " + human(result.afterBytes())
+                        + ", " + result.tables() + " tables checked row for row");
+                return 0;
             }
             case "clean" -> {
                 require(args, 2);
@@ -953,13 +1071,16 @@ public final class H2Maintenance {
             }
             case "list" -> {
                 require(args, 2);
-                var backups = listBackups(Path.of(args[1]));
+                var dir = Path.of(args[1]);
+                var backups = listBackups(dir);
+                var copies = args.length > 2 ? CredentialCopies.read(Path.of(args[2])) : CredentialCopies.NONE;
                 if (backups.isEmpty()) {
                     out.println("no backups");
                 }
                 for (var b : backups) {
                     out.println("  " + b.name() + "  " + b.modified().toString().replace("T", " ").replaceAll("\\.\\d+Z$", "Z")
-                            + "  " + human(b.bytes()));
+                            + "  " + human(b.bytes())
+                            + (copies.holdsPlaintext(CredentialCopies.takenAt(dir.resolve(b.name()))) ? "  (credentials unencrypted)" : ""));
                 }
                 return 0;
             }
@@ -1006,6 +1127,12 @@ public final class H2Maintenance {
         }
         if (Files.exists(dataDir.resolve(PRE_RESTORE_FILE))) {
             out.println(PRE_RESTORE_FILE + ": " + human(Files.size(dataDir.resolve(PRE_RESTORE_FILE))) + " (kept until the next backup)");
+        }
+        var copies = CredentialCopies.read(dataDir);
+        if (copies.due() != null) {
+            out.println("credentials: the data file still holds "
+                    + (copies.due() == CredentialCopies.OldCopies.PLAINTEXT ? "their old plaintext" : "copies under the previous secret")
+                    + " (remove it with 'compact')");
         }
         var manifests = manifests(dataDir);
         if (manifests.isEmpty()) {

@@ -14,8 +14,13 @@ services:
     # If you'd rather pin the secret yourself, write `PLAY_SECRET=<value>`
     # into a `.env` file at this directory; Compose will pick it up here
     # and the entrypoint will defer to it instead of generating one.
+    #
+    # PLAY_SECRET_PREVIOUS carries the outgoing secret through a rotation, the
+    # same way: the stored credentials are encrypted under a key derived from
+    # PLAY_SECRET, and the next start re-encrypts them (docker-entrypoint.sh).
     environment:
       PLAY_SECRET: "${PLAY_SECRET:-}"
+      PLAY_SECRET_PREVIOUS: "${PLAY_SECRET_PREVIOUS:-}"
     ports:
       # HTTP/1.1.
       - "${JCLAW_PORT:-9000}:9000"

@@ -1,6 +1,7 @@
 package models;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
@@ -95,6 +96,8 @@ public class McpServer extends TimestampedModel {
     @Column(nullable = false, length = 10)
     public Transport transport;
 
+    /** Its env and header secrets stored encrypted (JCLAW-1455); one that will not decrypt keeps its ciphertext here. */
+    @Convert(converter = JsonCredentialConverter.McpServerConfig.class)
     @Column(name = "config_json", nullable = false, columnDefinition = "TEXT")
     public String configJson;
 

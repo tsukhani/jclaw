@@ -24,6 +24,7 @@ class SubprocessEnvTest extends UnitTest {
         assertTrue(SubprocessEnv.isSensitive("ANTHROPIC_API_KEY"));
         assertTrue(SubprocessEnv.isSensitive("AWS_ACCESS_KEY_ID"));
         assertTrue(SubprocessEnv.isSensitive("PLAY_SECRET"));
+        assertTrue(SubprocessEnv.isSensitive("PLAY_SECRET_PREVIOUS"));
         assertTrue(SubprocessEnv.isSensitive("GITHUB_TOKEN"));
         assertTrue(SubprocessEnv.isSensitive("DB_PASSWORD"));
         assertTrue(SubprocessEnv.isSensitive("my_credential"));

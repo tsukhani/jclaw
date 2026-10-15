@@ -218,6 +218,9 @@ public final class DeliveryDispatcher {
             return DispatchResult.noConfig(TELEGRAM,
                     "Telegram binding for agent '" + binding.agent.name + BINDING_DISABLED_SUFFIX);
         }
+        if (binding.botToken == null) {
+            return DispatchResult.noConfig(TELEGRAM, TelegramBinding.unreadableBotToken(binding.agent.name));
+        }
         // Use the agent-aware sendText path (not the raw trySend) so agent-emitted
         // markdown like **bold** and # heading is rendered through
         // TelegramMarkdownFormatter.toHtml before reaching the wire. The instance

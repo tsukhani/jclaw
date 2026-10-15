@@ -64,6 +64,9 @@ watch(() => route.query.section, (s) => {
          nothing when the config is clean, so it's a signal, not a fixture. -->
     <SettingsUnmanagedBanner />
 
+    <!-- Stored credentials this installation's secret cannot decrypt (JCLAW-1455); nothing when every one does. -->
+    <SettingsUnreadableCredentialsBanner />
+
     <!-- Mobile TOC toggle. On md+ the sticky rail is always visible; on
          narrower viewports it collapses behind this button so the active
          section gets the full width. -->

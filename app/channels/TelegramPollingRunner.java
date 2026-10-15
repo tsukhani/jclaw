@@ -192,6 +192,11 @@ public final class TelegramPollingRunner {
     private static void registerInternal(TelegramBotsLongPollingApplication app, TelegramBinding binding) {
         final Long bindingId = binding.id;
         final String token = binding.botToken;
+        if (token == null) {
+            EventLogger.warn(LOG_CATEGORY, null, LOG_SOURCE, "Not polling binding %d: %s".formatted(bindingId,
+                    TelegramBinding.unreadableBotToken(binding.agent != null ? binding.agent.name : "?")));
+            return;
+        }
 
         try {
             // JCLAW-361: seed the getUpdates start offset from the durable

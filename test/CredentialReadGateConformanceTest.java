@@ -301,7 +301,8 @@ class CredentialReadGateConformanceTest extends UnitTest {
                 offending.add(type + "." + name);
             }
             for (var nested : index.keySet()) {
-                if (declaredType.contains(nested)) {
+                // Whole names only: by substring, UnreadableCredentials named the unrelated Credentials records.
+                if (Pattern.compile("\\b" + Pattern.quote(nested) + "\\b").matcher(declaredType).find()) {
                     offending.addAll(credentialComponentsOf(nested, index, seen));
                 }
             }

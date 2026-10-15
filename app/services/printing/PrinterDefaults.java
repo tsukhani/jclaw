@@ -113,10 +113,10 @@ public final class PrinterDefaults {
     private static Map<String, String> loadOptions() {
         var options = new LinkedHashMap<String, String>();
         for (var row : ConfigService.listAll()) {
-            if (row.key != null && row.key.startsWith(KEY_OPTION_PREFIX)) {
-                var value = blankToNull(row.value);
+            if (row.key().startsWith(KEY_OPTION_PREFIX)) {
+                var value = blankToNull(row.value());
                 if (value != null) {
-                    options.put(row.key.substring(KEY_OPTION_PREFIX.length()), value);
+                    options.put(row.key().substring(KEY_OPTION_PREFIX.length()), value);
                 }
             }
         }

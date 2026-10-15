@@ -6,7 +6,6 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import models.Config;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
@@ -83,38 +82,40 @@ public class ApiConfigController extends Controller {
     public static void list() {
         var configs = ConfigService.listAll();
         var entries = configs.stream()
-                .filter(c -> !isReservedKey(c.key))
-                .map(c -> new ConfigEntry(
-                        c.key,
-                        ConfigService.maskValue(c.key, effectiveValue(c)),
-                        c.updatedAt.toString()))
+                .filter(c -> !isReservedKey(c.key()))
+                .map(ApiConfigController::toView)
                 .toList();
         renderJSON(gson.toJson(new ConfigListResponse(entries)));
     }
 
-    @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ConfigEntry.class)))
     @Operation(summary = "Read a config value by key")
     @AgentAccess(OPEN)
     public static void get(String key) {
         if (isReservedKey(key)) notFound();
-        var config = Config.findByKey(key);
+        var config = ConfigService.entry(key);
         if (config == null) {
             notFound();
+            throw ApiResponses.unreachable();
         }
-        renderJSON(gson.toJson(new ConfigEntry(
-                config.key,
-                ConfigService.maskValue(config.key, effectiveValue(config)),
-                config.updatedAt.toString())));
+        renderJSON(gson.toJson(toView(config)));
+    }
+
+    /** The masked view of a row; a credential that will not decrypt reads as empty, as an unset one would. */
+    private static ConfigEntry toView(ConfigService.Entry row) {
+        var value = row.value();
+        var shown = row.unreadable() || value == null
+                ? "" : ConfigService.maskValue(row.key(), effectiveValue(row.key(), value));
+        return new ConfigEntry(row.key(), shown, row.updatedAt().toString());
     }
 
     /**
      * The row's value once an application.conf ceiling applies, which is what takes effect. A stored
      * row can hold a looser value than the ceiling allows, and showing it would present that as live.
      */
-    private static String effectiveValue(Config row) {
-        var reconciled = PrivilegedConfig.reconcile(row.key, row.value);
-        return reconciled != null ? reconciled : row.value;
+    private static String effectiveValue(String key, String value) {
+        var reconciled = PrivilegedConfig.reconcile(key, value);
+        return reconciled != null ? reconciled : value;
     }
 
 

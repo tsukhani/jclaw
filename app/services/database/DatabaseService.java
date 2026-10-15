@@ -48,7 +48,9 @@ public final class DatabaseService {
     static final String STATUS_FILE = "logs/database-status.json";
     static final String BACKUP_PREFIX = "jclaw-";
     static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
-    private static final Pattern BACKUP_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*\\.zip");
+    // A zip, or one of the raw .mv.db copies jclaw.sh upgrade takes; only a zip restores.
+    private static final Pattern BACKUP_ID = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*\\.(zip|mv\\.db)");
+    private static final String UPGRADE_COPY_SUFFIX = ".mv.db";
     private static final Pattern SCHEDULE = Pattern.compile("([01]\\d|2[0-3]):[0-5]\\d");
 
     /** Test seams: the live directories are the running install's, which no test may touch. */
@@ -66,7 +68,18 @@ public final class DatabaseService {
     private static volatile @Nullable String lastScheduledError;
     private static volatile @Nullable Instant lastScheduledAt;
 
-    public record BackupInfo(String id, long bytes, String createdAt) {}
+    /** @param unencrypted taken while the data file held credential plaintext, so the backup holds it too */
+    public record BackupInfo(String id, long bytes, String createdAt, boolean unencrypted) {
+        public BackupInfo(String id, long bytes, String createdAt) {
+            this(id, bytes, createdAt, false);
+        }
+    }
+
+    /**
+     * What a compaction would remove from the data file now ({@code PLAINTEXT} or {@code PREVIOUS_SECRET}), or null,
+     * and when the credentials were first encrypted and the file last compacted (JCLAW-1455).
+     */
+    public record CredentialCopiesView(@Nullable String due, @Nullable String encryptedAt, @Nullable String compactedAt) {}
 
     /** The helper's progress across a restore or repair, or null when none has run. */
     public record LastOperation(@Nullable String op, @Nullable String phase, @Nullable String message,
@@ -84,7 +97,8 @@ public final class DatabaseService {
                          H2Maintenance.@Nullable Manifest repair,
                          boolean cleanupAvailable, @Nullable String cleanupUnavailableReason,
                          @Nullable LastOperation lastOperation,
-                         boolean maintenanceAvailable, @Nullable String maintenanceUnavailableReason) {}
+                         boolean maintenanceAvailable, @Nullable String maintenanceUnavailableReason,
+                         CredentialCopiesView credentials, List<BackupInfo> upgradeCopies) {}
 
     private DatabaseService() {}
 
@@ -140,10 +154,10 @@ public final class DatabaseService {
 
     /** A backup id is a bare zip file name inside the backups directory — never a path. */
     public static @Nullable Path resolveBackup(String id) {
-        if (!BACKUP_ID.matcher(id).matches()) {
+        if (!BACKUP_ID.matcher(id).matches() || (id.endsWith(UPGRADE_COPY_SUFFIX) && !isUpgradeCopy(id))) {
             return null;
         }
-        var dir = backupsDir().toAbsolutePath().normalize();
+        var dir = (isUpgradeCopy(id) ? upgradeCopiesDir() : backupsDir()).toAbsolutePath().normalize();
         var path = dir.resolve(id).toAbsolutePath().normalize();
         var parent = path.getParent();
         if (parent == null || !parent.equals(dir)) {
@@ -154,13 +168,50 @@ public final class DatabaseService {
 
     public static List<BackupInfo> listBackups() {
         try {
+            var copies = CredentialCopies.read(dataDir());
+            var dir = backupsDir();
             var out = new ArrayList<BackupInfo>();
-            for (var b : H2Maintenance.listBackups(backupsDir())) {
-                out.add(new BackupInfo(b.name(), b.bytes(), b.modified().toInstant().toString()));
+            for (var b : H2Maintenance.listBackups(dir)) {
+                out.add(new BackupInfo(b.name(), b.bytes(), b.modified().toInstant().toString(),
+                        copies.holdsPlaintext(CredentialCopies.takenAt(dir.resolve(b.name())))));
             }
             return out;
         } catch (IOException e) {
             EventLogger.warn(CATEGORY, "Could not list backups in " + backupsDir(), e.getMessage());
+            return List.of();
+        }
+    }
+
+    // jclaw.sh upgrade names its copies jclaw-<version>-<stamp>.mv.db. The live jclaw.mv.db never matches, so a
+    // db.backup.dir pointed at data/ cannot offer it for download or deletion.
+    private static boolean isUpgradeCopy(String name) {
+        return name.startsWith(BACKUP_PREFIX) && name.endsWith(UPGRADE_COPY_SUFFIX)
+                && !name.equals(H2Maintenance.COMPACTING_DB + UPGRADE_COPY_SUFFIX);
+    }
+
+    /** Where {@code jclaw.sh upgrade} writes its copies: {@code data/backups}, whatever {@value #KEY_DIR} says. */
+    static Path upgradeCopiesDir() {
+        return dataDir().resolve("backups");
+    }
+
+    /** The raw data-file copies {@code jclaw.sh upgrade} keeps, newest first. */
+    public static List<BackupInfo> listUpgradeCopies() {
+        var dir = upgradeCopiesDir();
+        if (!Files.isDirectory(dir)) {
+            return List.of();
+        }
+        var copies = CredentialCopies.read(dataDir());
+        try (var files = Files.list(dir)) {
+            var out = new ArrayList<BackupInfo>();
+            for (var p : files.filter(f -> isUpgradeCopy(f.getFileName().toString()) && Files.isRegularFile(f)).toList()) {
+                var modified = Files.getLastModifiedTime(p).toInstant();
+                out.add(new BackupInfo(p.getFileName().toString(), Files.size(p), modified.toString(),
+                        copies.holdsPlaintext(modified)));
+            }
+            out.sort((a, b) -> b.createdAt().compareTo(a.createdAt()));
+            return out;
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, "Could not list the upgrade copies in " + dir, e.getMessage());
             return List.of();
         }
     }
@@ -198,7 +249,8 @@ public final class DatabaseService {
         H2Maintenance.deleteTree(dataDir().resolve(H2Maintenance.GRAPH_PRE_RESTORE_DIR));
         prune(dir, retention());
         EventLogger.info(CATEGORY, "Database backed up to " + zip.getFileName() + " (" + H2Maintenance.human(Files.size(zip)) + ")");
-        return new BackupInfo(zip.getFileName().toString(), Files.size(zip), Files.getLastModifiedTime(zip).toInstant().toString());
+        return new BackupInfo(zip.getFileName().toString(), Files.size(zip), Files.getLastModifiedTime(zip).toInstant().toString(),
+                CredentialCopies.read(dataDir()).holdsPlaintext(CredentialCopies.takenAt(zip)));
     }
 
     /** Keep the newest {@code keep} of this service's own backups; uploads and upgrade copies are not counted. */
@@ -297,6 +349,53 @@ public final class DatabaseService {
     public static RestartService.Plan requestRepair() throws IOException {
         EventLogger.warn(CATEGORY, "Repairing the database on operator request — handing off to jclaw.sh");
         return RestartService.requestMaintenance("repair", List.of("--yes"));
+    }
+
+    /**
+     * Compaction runs out of process, never at shutdown: {@code jclaw.sh stop} kills a JVM still stopping after 60 s and
+     * Docker after its grace period, either of which would cut a shutdown-time compaction short.
+     */
+    public static RestartService.Plan requestCompact() throws IOException {
+        EventLogger.warn(CATEGORY, "Compacting the database on operator request — handing off to jclaw.sh");
+        return RestartService.requestMaintenance("compact", List.of("--yes"));
+    }
+
+    // ---- the credentials' old copies (JCLAW-1455) ----
+
+    /**
+     * Record a boot pass over the credentials in {@code dataDir}, and say when it left old copies a compaction would
+     * remove. The pass calls this before it commits, so a failure here leaves nothing sealed that the record misses.
+     */
+    public static void recordCredentialPass(Path dataDir, int sealed, int rekeyed) throws IOException {
+        var copies = CredentialCopies.read(dataDir);
+        var next = copies.afterPass(sealed, rekeyed, AppClock.now());
+        if (!next.equals(copies)) {
+            next.write(dataDir);
+        }
+        if (next.due() != null && (sealed > 0 || rekeyed > 0)) {
+            EventLogger.warn(CATEGORY, (next.due() == CredentialCopies.OldCopies.PLAINTEXT
+                    ? "The data file still holds the credentials' old plaintext"
+                    : "The data file still holds the credentials' copies under the previous secret")
+                    + "; compact it from Settings → Database or with 'jclaw.sh compact'");
+        }
+    }
+
+    /** Mask the values H2's trace file quotes, which can include a credential a write was refused with. */
+    public static void maskTraces() {
+        try {
+            var masked = H2TraceMask.maskTraces(dataDir());
+            if (masked > 0) {
+                EventLogger.info(CATEGORY, "Masked %d quoted value(s) in H2's trace file".formatted(masked));
+            }
+        } catch (IOException e) {
+            EventLogger.warn(CATEGORY, "Could not mask the values in H2's trace file", e.getMessage());
+        }
+    }
+
+    public static CredentialCopiesView credentialCopies() {
+        var copies = CredentialCopies.read(dataDir());
+        var due = copies.due();
+        return new CredentialCopiesView(due == null ? null : due.name(), copies.encryptedAt(), copies.compactedAt());
     }
 
     /** Copy an uploaded backup into the backups directory under a name {@link #resolveBackup} accepts. */
@@ -420,7 +519,8 @@ public final class DatabaseService {
                 scheduledAt == null ? null : scheduledAt.toString(), lastScheduledError,
                 manifest, cleanupReason == null, cleanupReason,
                 lastOperation(),
-                maintenance == null, maintenance);
+                maintenance == null, maintenance,
+                credentialCopies(), listUpgradeCopies());
     }
 
     static long sizeOf(Path path) {

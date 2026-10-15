@@ -120,9 +120,10 @@ public final class LoggerLevelService {
     /** Every persisted override, sorted by logger name. */
     public static List<LoggerLevel> list() {
         var out = new ArrayList<LoggerLevel>();
-        for (Config c : ConfigService.listAll()) {
-            if (c.key != null && c.key.startsWith(PREFIX)) {
-                out.add(new LoggerLevel(c.key.substring(PREFIX.length()), c.value));
+        for (var c : ConfigService.listAll()) {
+            var level = c.value();
+            if (c.key().startsWith(PREFIX) && level != null) {
+                out.add(new LoggerLevel(c.key().substring(PREFIX.length()), level));
             }
         }
         out.sort(Comparator.comparing(LoggerLevel::logger));

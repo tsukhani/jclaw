@@ -6,6 +6,8 @@ This page summarizes each section. The settings page itself is the source of tru
 
 A saved secret (an API key, token, password or secret header) is never shown back, in Settings or on the channel pages. It appears as `••••••••` with a pencil. The pencil opens an empty field for a whole new value; saving it blank keeps the one already saved, and where a secret can be removed, the editor's **Remove** button does it. JClaw refuses a value that is only the saved one's mask, as the API reads it back, rather than saving it over the saved value.
 
+JClaw stores these secrets encrypted, with a key it makes from the secret in `certs/.env`. If a stored secret does not decrypt, a red banner at the top of Settings says how many ("2 stored credentials do not decrypt") and lists each one with an **Enter it again** link to the page that takes it. JClaw treats each one as missing until you enter it again. This happens when the database came from an installation with a different `certs/.env`. Put that `certs/.env` back and restart, and every one of them decrypts again. See [Encrypted credentials](#settings-encrypted-credentials).
+
 ## Timezone
 
 Operator-wide settings.
@@ -149,6 +151,8 @@ Attention is the state worth knowing about. On 2026-09-09 the live database turn
 
 **retention**: how many of the panel's own backups to keep; JClaw prunes the oldest after each new one (default 7). Uploaded backups and the copies the upgrade takes are not counted.
 
+A backup that holds the stored credentials in plaintext is marked **Unencrypted** in the list. Above the list, a line says how many there are, and **Delete them** deletes them all after you confirm. The database copies that `jclaw upgrade` keeps in `data/backups/` are counted there too. See [Encrypted credentials](#settings-encrypted-credentials) for which backups these are.
+
 Backups are plain zips: `unzip -l` lists the `jclaw.mv.db` inside, with the memory graph under `memory-graph/`, and H2's own tools open it.
 
 ### Restore
@@ -172,13 +176,31 @@ JClaw shows Repair prominently when the verdict is Attention or Critical. Repair
 
 Everything a repair creates stays in `data/` (the damaged file, its trace, the recovery script and dump) because the damaged file is the only route to a second attempt. The panel shows their total size and offers **Clean up repair files** once the repair succeeded and the verdict is Healthy, with no read failure logged since and every restored table readable. Until then the button is disabled with the reason. Cleanup deletes exactly what the manifest lists, after checking each file's checksum, and the manifest last; the live file, the lock, the trace and `backups/` are never touched.
 
+### Encrypted credentials
+
+JClaw encrypts the third-party credentials it stores: the provider, search and scanner keys and the other secret settings, the Slack, Telegram and WhatsApp channel tokens, and the secret values of each MCP server. The key comes from the secret in `certs/.env`. A copy of the database alone does not reveal them.
+
+This has four consequences:
+
+- **Keep `certs/.env` with your backups.** A backup restored onto an installation with a different `certs/.env` opens, but none of its credentials decrypt. Settings then lists each one for you to enter again (see the top of this page).
+- **Rotate with `jclaw secret`.** It keeps the old value as `PLAY_SECRET_PREVIOUS` in `certs/.env`. On the next start, JClaw encrypts every credential again under the new secret and logs when you can remove the `PLAY_SECRET_PREVIOUS` line. Do not delete `certs/.env` to rotate: that makes every stored credential unreadable. A backup taken before the rotation is still encrypted under the old secret, so keep that value with those backups. To restore one of them, first put the old value back in `certs/.env` as `PLAY_SECRET_PREVIOUS`. The next start then encrypts its credentials again under the current secret.
+- **Old copies stay in the file until it is compacted.** When JClaw first encrypts the credentials, H2 keeps the plaintext they replaced in the file's free space. A rotation leaves the copies under the old secret in the same way. While this is so, the top of the panel shows **Old credential copies**, with a **Compact** button.
+- **An older version cannot read them.** To go back to a JClaw version from before the encryption, restore a backup taken before it. Keep one until you are sure you will stay on this version, because **Delete them** deletes those backups too.
+
+**Compact** hands off to `jclaw.sh compact`, the way Repair does. The instance stops. JClaw writes a copy of the data file that holds only its live data, checks that every table has the same number of rows, and then puts the copy in place of the file in one step. If the compaction stops partway, the data file is left as it was. The instance then starts again. Compaction never runs while JClaw shuts down, because `jclaw stop` kills an instance that is still stopping after 60 seconds, and that could cut it short.
+
+A backup copies the whole file, free space included. So every backup taken before the credentials were encrypted, and every backup taken after that but before the compaction, holds them in plaintext. These are the ones marked **Unencrypted**. JClaw records when the credentials were first encrypted and when the file was compacted, and dates each backup by the time inside it, so an uploaded backup keeps the date it was taken. Restoring an **Unencrypted** backup brings its plaintext back, so the panel asks for a compaction again.
+
+H2 also writes a value it refuses into its trace file, `data/jclaw.trace.db`. JClaw replaces every quoted value in that file with `*` at each start and at each compaction. It keeps the file, because the health strip reads it.
+
 ### From the command line
 
 ```bash
 jclaw backup                     # online through the running instance, or from the closed file
-jclaw backup --list              # what is in data/backups/
+jclaw backup --list              # what is in data/backups/, marking the backups that hold credentials in plaintext
 jclaw restore <zip | backup id>  # validate, stop, swap, start
 jclaw repair                     # stop, recover, rebuild, verify, compact, start; then offer cleanup
+jclaw compact                    # stop, remove the old credential copies from the data file, start
 jclaw db-clean                   # delete what the last successful repair left behind
 jclaw db-status                  # the health strip as text
 ```
@@ -285,7 +307,7 @@ Those are the rows a new install starts with. Any other OpenAI-compatible provid
 
 For each provider you can:
 
-- Set the **API key**: stored as plain text in the Config DB, because it is a credential for the provider's API and has to be sent as written, and never shown back once saved.
+- Set the **API key**: stored encrypted in the Config DB (see [Encrypted credentials](#settings-encrypted-credentials)), and never shown back once saved.
 - Set the **base URL** (most providers ship with a sensible default).
 - Mark **Enabled / disabled** to hide the provider from the agent picker.
 - Edit **local**: the provider's Remote/Local classification (`provider.<name>.local`). It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp, so only their cards have a **local** row; absent means remote, and a remote card has no row, so declaring one local takes `POST /api/config`. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.

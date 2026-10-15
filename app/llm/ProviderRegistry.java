@@ -124,7 +124,10 @@ public final class ProviderRegistry {
         // so concurrent get() calls are not blocked by the DB read.
         var allConfigs = ConfigService.listAll();
         var configMap = new HashMap<String, String>();
-        for (var c : allConfigs) configMap.put(c.key, c.value);
+        for (var c : allConfigs) {
+            var value = c.value();
+            if (value != null) configMap.put(c.key(), value);
+        }
 
         // Sort provider names so ordering is stable regardless of the source
         // HashMap's bucket layout: getPrimary() must not shift when

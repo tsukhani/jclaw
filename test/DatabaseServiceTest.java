@@ -43,6 +43,7 @@ class DatabaseServiceTest extends UnitTest {
     @Test
     void aBackupIdIsABareZipNameInsideTheBackupsDirectory() throws Exception {
         var dir = Files.createDirectories(tmp.resolve("backups"));
+        DatabaseService.dataDirForTest = tmp;
         DatabaseService.backupsDirForTest = dir;
         touch(dir, "jclaw-20260909T120000Z.zip", Instant.now());
         Files.createDirectories(tmp.resolve("elsewhere"));
@@ -52,7 +53,9 @@ class DatabaseServiceTest extends UnitTest {
         assertNotNull(DatabaseService.resolveBackup("jclaw-20260909T120000Z.zip"));
         assertNull(DatabaseService.resolveBackup("../elsewhere/x.zip"), "no traversal");
         assertNull(DatabaseService.resolveBackup("elsewhere/x.zip"), "no path segments");
-        assertNull(DatabaseService.resolveBackup("notes.txt"), "only zips");
+        assertNull(DatabaseService.resolveBackup("notes.txt"), "only zips, and the upgrade's raw copies");
+        touch(dir, "jclaw-0.19.40-20261015T000000Z.mv.db", Instant.now());
+        assertNotNull(DatabaseService.resolveBackup("jclaw-0.19.40-20261015T000000Z.mv.db"));
         assertNull(DatabaseService.resolveBackup("missing.zip"));
         assertNull(DatabaseService.resolveBackup(""));
     }
@@ -194,6 +197,36 @@ class DatabaseServiceTest extends UnitTest {
         assertTrue(DatabaseService.cleanupUnavailableReason(ok, healthy, after).contains("since the repair"));
         assertNull(DatabaseService.cleanupUnavailableReason(ok, healthy, before), "an event before the repair does not count");
         assertNull(DatabaseService.cleanupUnavailableReason(ok, healthy, List.of()));
+    }
+
+    @Test
+    void aBootPassIsRecordedBesideTheDataFile() throws Exception {
+        DatabaseService.dataDirForTest = tmp;
+        assertNull(DatabaseService.credentialCopies().encryptedAt());
+        DatabaseService.recordCredentialPass(tmp, 2, 0);
+        var copies = DatabaseService.credentialCopies();
+        assertEquals("PLAINTEXT", copies.due(), "sealing plaintext leaves its old copies for a compaction");
+        assertNotNull(copies.encryptedAt());
+    }
+
+    @Test
+    void aBackupsDirectoryPointedAtTheDataDirectoryNeverOffersTheLiveDatabase() throws Exception {
+        DatabaseService.dataDirForTest = tmp;
+        DatabaseService.backupsDirForTest = tmp;
+        DatabaseService.recordCredentialPass(tmp, 2, 0);
+        touch(tmp, H2Maintenance.DATA_FILE, Instant.now());
+        touch(tmp, "jclaw-compacting.mv.db", Instant.now());
+        touch(tmp, "jclaw-0.19.40-20261015T000000Z.mv.db", Instant.now());
+        touch(Files.createDirectories(tmp.resolve("backups")), "jclaw-0.19.41-20261016T000000Z.mv.db", Instant.now());
+
+        assertEquals(List.of("jclaw-0.19.41-20261016T000000Z.mv.db"),
+                DatabaseService.listUpgradeCopies().stream().map(DatabaseService.BackupInfo::id).toList(),
+                "only the upgrade's own copy, from data/backups where jclaw.sh writes it, is offered for deletion");
+        assertNull(DatabaseService.resolveBackup("jclaw-0.19.40-20261015T000000Z.mv.db"), "nothing outside data/backups");
+        assertNull(DatabaseService.resolveBackup(H2Maintenance.DATA_FILE));
+        assertNull(DatabaseService.resolveBackup("jclaw-compacting.mv.db"));
+        assertFalse(DatabaseService.deleteBackup(H2Maintenance.DATA_FILE));
+        assertTrue(Files.exists(tmp.resolve(H2Maintenance.DATA_FILE)), "the live database is never deleted as a backup");
     }
 
     @Test

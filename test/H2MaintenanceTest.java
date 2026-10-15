@@ -3,6 +3,7 @@ import memory.graph.RunLedger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import play.test.UnitTest;
+import services.database.CredentialCopies;
 import services.database.H2Maintenance;
 
 import java.io.ByteArrayOutputStream;
@@ -16,6 +17,8 @@ import java.nio.file.StandardOpenOption;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.zip.ZipEntry;
@@ -625,6 +628,70 @@ class H2MaintenanceTest extends UnitTest {
         assertEquals(1, H2Maintenance.run(new String[]{"restore"}, print), "a missing argument is a usage error");
     }
 
+    // ---- compaction of the old credential copies (JCLAW-1455) ----
+
+    private static String stamp(Instant at) {
+        return at.truncatedTo(ChronoUnit.SECONDS).toString().replace("-", "").replace(":", "");
+    }
+
+    @Test
+    void compactRewritesTheFileRowForRowAndRecordsIt() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 50);
+        CredentialCopies.NONE.afterPass(2, 0, Instant.parse("2026-10-16T01:00:00Z")).write(dir);
+        // What an interrupted run leaves: the copy, never the data file, which is only ever replaced whole.
+        Files.writeString(dir.resolve("jclaw-compacting.mv.db"), "half a copy");
+
+        var out = new ByteArrayOutputStream();
+        var print = new PrintStream(out, true, StandardCharsets.UTF_8);
+        assertEquals(0, H2Maintenance.run(new String[]{"status", dir.toString()}, print));
+        assertTrue(out.toString(StandardCharsets.UTF_8).contains("still holds their old plaintext"), out.toString(StandardCharsets.UTF_8));
+
+        out.reset();
+        assertEquals(0, H2Maintenance.run(new String[]{"compact", dir.toString(), "20261016T030000Z"}, print),
+                out.toString(StandardCharsets.UTF_8));
+        assertTrue(out.toString(StandardCharsets.UTF_8).contains("tables checked row for row"), out.toString(StandardCharsets.UTF_8));
+        assertEquals(50, count(dir, "note"));
+        assertEquals(List.of("WRITING", "OTHER", "CODING"), categories(dir));
+        assertFalse(names(dir).stream().anyMatch(n -> n.startsWith("jclaw-compacting")), names(dir).toString());
+
+        var copies = CredentialCopies.read(dir);
+        assertNull(copies.due());
+        assertEquals("2026-10-16T03:00:00Z", copies.compactedAt());
+
+        out.reset();
+        assertEquals(1, H2Maintenance.run(new String[]{"compact", dir.toString(), "yesterday"}, print),
+                "a stamp that is not one is a usage error, before anything is touched");
+        assertEquals(2, H2Maintenance.run(new String[]{"compact", tmp.resolve("empty").toString(), "20261016T030000Z"}, print),
+                "no database to compact");
+    }
+
+    @Test
+    void restoringABackupTakenWhileTheFileHeldPlaintextMarksTheCompactionDueAgain() throws Exception {
+        var dir = Files.createDirectories(tmp.resolve("d"));
+        buildDatabase(dir, 3);
+        var zip = tmp.resolve("held-plaintext.zip");
+        try (var c = open(dir)) {
+            H2Maintenance.backupOnline(c, zip);
+        }
+        var now = Instant.now();
+        CredentialCopies.NONE.afterPass(1, 0, now.minus(1, ChronoUnit.HOURS)).afterCompaction(now.plus(1, ChronoUnit.HOURS)).write(dir);
+
+        var out = new ByteArrayOutputStream();
+        var print = new PrintStream(out, true, StandardCharsets.UTF_8);
+        assertEquals(0, H2Maintenance.run(new String[]{"list", tmp.toString(), dir.toString()}, print));
+        assertTrue(out.toString(StandardCharsets.UTF_8).contains("held-plaintext.zip") 
+                && out.toString(StandardCharsets.UTF_8).contains("(credentials unencrypted)"), out.toString(StandardCharsets.UTF_8));
+
+        assertNull(CredentialCopies.read(dir).due());
+        var before = H2Maintenance.sha256(dataFile(dir));
+        assertEquals(1, H2Maintenance.run(new String[]{"restore", dir.toString(), zip.toString(), "yesterday"}, print));
+        assertEquals(before, H2Maintenance.sha256(dataFile(dir)), "a stamp that is not one refuses before the swap");
+        assertEquals(0, H2Maintenance.run(new String[]{"restore", dir.toString(), zip.toString(),
+                stamp(now.plus(2, ChronoUnit.HOURS))}, print));
+        assertEquals(CredentialCopies.OldCopies.PLAINTEXT, CredentialCopies.read(dir).due());
+    }
+
     // ---- the standalone guarantee jclaw.sh relies on ----
 
     @Test
@@ -633,7 +700,7 @@ class H2MaintenanceTest extends UnitTest {
         // from the framework lib plus the compiled classes — nothing from the app's dependency
         // tree, and nothing from Play. A reference outside that set fails at runtime with the
         // database down, which is the worst moment to learn about it.
-        ArchRule rule = classes().that().haveNameMatching("services\\.database\\.H2Maintenance(\\$.*)?")
+        ArchRule rule = classes().that().haveNameMatching("services\\.database\\.(H2Maintenance|CredentialCopies|H2TraceMask)(\\$.*)?")
                 .should().onlyDependOnClassesThat()
                 .resideInAnyPackage("java..", "org.h2..", "com.google.gson..", "org.jspecify..", "services.database")
                 .because("jclaw.sh runs H2Maintenance out of process on the H2 and Gson jars alone (JCLAW-1165)");

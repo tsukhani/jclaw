@@ -67,8 +67,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         // binding per agent) instead of a per-orphan findByAgent lookup. A
         // disabled binding is simply absent here, which the per-orphan check
         // below treats the same as before (no enabled binding → skip).
-        Map<Long, String> tokensByAgentId = Tx.run(() -> TelegramBinding.findAllEnabled().stream()
-                .collect(Collectors.toMap(b -> b.agent.id, b -> b.botToken, (first, _) -> first)));
+        Map<Long, String> tokensByAgentId = Tx.run(() -> tokensByAgentId(TelegramBinding.findAllEnabled()));
 
         for (var orphan : orphans) {
             try {
@@ -82,6 +81,16 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
                                 .formatted(orphan.id, orphan.activeStreamMessageId, e.getMessage()));
             }
         }
+    }
+
+    /**
+     * Each binding's bot token by its agent's id. A token that did not decrypt reads as null (JCLAW-1455) and is left
+     * out: {@code toMap} throws on a null value, and this job failing aborts the boot.
+     */
+    public static Map<Long, String> tokensByAgentId(List<TelegramBinding> bindings) {
+        return bindings.stream()
+                .filter(b -> b.botToken != null)
+                .collect(Collectors.toMap(b -> b.agent.id, b -> b.botToken, (first, _) -> first));
     }
 
     private static void recoverOne(Conversation orphan, Map<Long, String> tokensByAgentId)
@@ -114,7 +123,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         var botToken = tokensByAgentId.get(agent.id);
         if (botToken == null) {
             EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
-                    "Recovery: skipping orphan for conversation %d — no enabled binding"
+                    "Recovery: skipping orphan for conversation %d — no enabled binding with a readable bot token"
                             .formatted(convId));
             return;
         }

@@ -2,13 +2,18 @@ package models;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.DynamicUpdate;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
+import utils.CredentialCipher;
 
 import java.time.Instant;
 import java.util.List;
@@ -35,6 +40,8 @@ import java.util.List;
 // resolves a binding per event, so L2-cache this entity for the same transparent
 // caching the sibling bindings enjoy.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
+// JCLAW-1455: an update writes only the changed columns, so a credential that will not decrypt (read as null) survives it.
+@DynamicUpdate
 public class WhatsAppBinding extends AgentBoundBinding {
 
     /**
@@ -56,7 +63,8 @@ public class WhatsAppBinding extends AgentBoundBinding {
     public String phoneNumberId;
 
     /** Cloud-API access token (Bearer) for Graph API calls. Null for WHATSAPP_WEB. */
-    @Column(name = "access_token")
+    @Column(name = "access_token", columnDefinition = "TEXT")
+    @Convert(converter = BindingCredentialConverter.WhatsAppAccessToken.class)
     @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedAccessToken()).
     public String accessToken;
 
@@ -65,7 +73,8 @@ public class WhatsAppBinding extends AgentBoundBinding {
      * (JCLAW-446). Null for WHATSAPP_WEB (and may be null on a Cloud-API binding
      * until the operator completes setup).
      */
-    @Column(name = "app_secret")
+    @Column(name = "app_secret", columnDefinition = "TEXT")
+    @Convert(converter = BindingCredentialConverter.WhatsAppAppSecret.class)
     @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedAppSecret()).
     public String appSecret;
 
@@ -73,9 +82,15 @@ public class WhatsAppBinding extends AgentBoundBinding {
      * Operator-chosen token echoed back on Meta's GET hub-verification challenge
      * (JCLAW-446). Null for WHATSAPP_WEB.
      */
-    @Column(name = "verify_token")
+    @Column(name = "verify_token", columnDefinition = "TEXT")
+    @Convert(converter = BindingCredentialConverter.WhatsAppVerifyToken.class)
     @JsonIgnore // JCLAW-730: shared secret — never serialize in the clear (see maskedVerifyToken()).
     public String verifyToken;
+
+    /** HMAC of {@link #verifyToken} (JCLAW-1455): the stored token is encrypted under a random IV, so it is matched here. */
+    @Column(name = "verify_token_lookup", length = 64)
+    @JsonIgnore
+    public String verifyTokenLookup;
 
     /**
      * The JID of the account a WhatsApp-Web binding paired as — the bot's own
@@ -210,9 +225,21 @@ public class WhatsAppBinding extends AgentBoundBinding {
      * one token would be a misconfiguration). Null/blank token → null.
      */
     public static WhatsAppBinding findByVerifyToken(String verifyToken) {
+        return findByVerifyToken(verifyToken, CredentialCipher.current());
+    }
+
+    /** {@link #findByVerifyToken(String)} under {@code cipher}'s lookups. */
+    public static WhatsAppBinding findByVerifyToken(String verifyToken, CredentialCipher cipher) {
         if (verifyToken == null || verifyToken.isBlank()) return null;
         return WhatsAppBinding.find(
-                "verifyToken = ?1 and enabled = true", verifyToken).first();
+                "verifyTokenLookup IN (?1) and enabled = true", cipher.lookups(verifyToken)).first();
+    }
+
+    @PrePersist
+    @PreUpdate
+    void sealVerifyTokenLookup() {
+        // A token that will not decrypt reads as null: the boot pass computes its lookup once the right secret is back.
+        verifyTokenLookup = verifyToken == null ? null : CredentialCipher.current().lookup(verifyToken);
     }
 
     public static List<WhatsAppBinding> findAllEnabled() {

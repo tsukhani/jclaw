@@ -6,7 +6,6 @@ import llm.routing.ModelRouter;
 import mcp.McpAllowlist;
 import models.Agent;
 import models.AgentToolConfig;
-import models.Config;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 
@@ -257,26 +256,10 @@ public class AgentService {
     /**
      * JCLAW-533: re-key the name-partitioned {@code agent.<name>.*} config rows
      * when an agent is renamed, so per-agent settings (shell allowlist, queue
-     * mode, …) follow the agent instead of stranding under the old name. Uses a
-     * SELECT + per-row save rather than a bulk HQL UPDATE — the bulk form would
-     * provision an HTE_config id-table whose DDL emits the reserved word
-     * {@code key} unquoted (see the note in {@link AgentDeletionCascade#delete}).
+     * mode, …) follow the agent instead of stranding under the old name.
      */
     private static void renameAgentConfigKeys(String oldName, String newName) {
-        var oldPrefix = AGENT_CONFIG_PREFIX + oldName + ".";
-        var newPrefix = AGENT_CONFIG_PREFIX + newName + ".";
-        // findAll + Java filter rather than a "key LIKE ?" query: `key` is a JPQL
-        // reserved word and the config table is tiny. Each per-row save is an
-        // UPDATE on the config_key column by id — no id-table, no reserved word.
-        boolean any = false;
-        for (Config c : Config.<Config>findAll()) {
-            if (c.key.startsWith(oldPrefix)) {
-                c.key = newPrefix + c.key.substring(oldPrefix.length());
-                c.save();
-                any = true;
-            }
-        }
-        if (any) ConfigService.clearCache();
+        ConfigService.renamePrefix(AGENT_CONFIG_PREFIX + oldName + ".", AGENT_CONFIG_PREFIX + newName + ".");
     }
 
     /**
