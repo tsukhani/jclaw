@@ -15,6 +15,7 @@ import java.security.GeneralSecurityException;
 import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.Objects;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
@@ -160,6 +161,12 @@ public final class CredentialCipher {
     public @Nullable String previousLookup(String value) {
         var previousKeys = previous;
         return previousKeys == null ? null : hmac(previousKeys.lookup(), value);
+    }
+
+    /** Every lookup a row may hold for {@code value}: the previous secret's too, for a row the boot pass has not re-keyed. */
+    public List<String> lookups(String value) {
+        var previousLookup = previousLookup(value);
+        return previousLookup == null ? List.of(lookup(value)) : List.of(lookup(value), previousLookup);
     }
 
     private static Keys derive(String secret) {

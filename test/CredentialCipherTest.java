@@ -6,6 +6,7 @@ import utils.CredentialCipher.Source;
 
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.List;
 
 /** JCLAW-1455: the cipher every credential store reaches. Secrets here are fixtures, not any instance's. */
 class CredentialCipherTest extends UnitTest {
@@ -108,6 +109,8 @@ class CredentialCipherTest extends UnitTest {
         assertEquals(TWO.lookup("fake-bot-token"), rotated.lookup("fake-bot-token"));
         assertEquals(lookup, rotated.previousLookup("fake-bot-token"));
         assertNull(ONE.previousLookup("fake-bot-token"));
+        assertEquals(List.of(TWO.lookup("fake-bot-token"), lookup), rotated.lookups("fake-bot-token"));
+        assertEquals(List.of(lookup), ONE.lookups("fake-bot-token"));
     }
 
     @Test

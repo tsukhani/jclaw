@@ -3,12 +3,17 @@ package models;
 import channels.ChannelTransport;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.DynamicUpdate;
 import services.Tx;
+import utils.CredentialCipher;
 
 import java.util.List;
 
@@ -35,16 +40,25 @@ import java.util.List;
 // secondary-key Caches.named layer — re-scoped per the JCLAW-204 comment
 // thread, the only meaningful win is L2 here.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
+// JCLAW-1455: an update writes only the changed columns, so a credential that will not decrypt (read as null) survives it.
+@DynamicUpdate
 public class TelegramBinding extends AgentBoundBinding {
 
     /**
      * Bot token as issued by BotFather, e.g. {@code 123456:ABC-DEF...}. Telegram
-     * enforces global uniqueness on its side; we mirror that with a DB constraint so
-     * accidental double-binds (same operator adding the same token twice) fail fast.
+     * enforces global uniqueness on its side; we mirror that with a DB constraint on
+     * {@link #botTokenLookup} so accidental double-binds (same operator adding the
+     * same token twice) fail fast.
      */
-    @Column(name = "bot_token", nullable = false, unique = true)
+    @Column(name = "bot_token", nullable = false, columnDefinition = "TEXT")
+    @Convert(converter = BindingCredentialConverter.TelegramBotToken.class)
     @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedBotToken()).
     public String botToken;
+
+    /** HMAC of {@link #botToken} (JCLAW-1455): the stored token is encrypted under a random IV, so it is matched here. */
+    @Column(name = "bot_token_lookup", length = 64, unique = true)
+    @JsonIgnore
+    public String botTokenLookup;
 
     /**
      * Numeric Telegram user id (string-typed because the Telegram SDK exposes it
@@ -63,7 +77,8 @@ public class TelegramBinding extends AgentBoundBinding {
      * Telegram only as the {@code secret_token} (verified via the
      * {@code X-Telegram-Bot-Api-Secret-Token} header), no longer a URL segment.
      */
-    @Column(name = "webhook_secret")
+    @Column(name = "webhook_secret", columnDefinition = "TEXT")
+    @Convert(converter = BindingCredentialConverter.TelegramWebhookSecret.class)
     @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedWebhookSecret()).
     public String webhookSecret;
 
@@ -109,7 +124,20 @@ public class TelegramBinding extends AgentBoundBinding {
     public Long notifierCooldownMs;
 
     public static TelegramBinding findByBotToken(String botToken) {
-        return TelegramBinding.find("botToken", botToken).first();
+        return findByBotToken(botToken, CredentialCipher.current());
+    }
+
+    /** {@link #findByBotToken(String)} under {@code cipher}'s lookups. */
+    public static TelegramBinding findByBotToken(String botToken, CredentialCipher cipher) {
+        if (botToken == null) return null;
+        return TelegramBinding.find("botTokenLookup IN (?1)", cipher.lookups(botToken)).first();
+    }
+
+    @PrePersist
+    @PreUpdate
+    void sealBotTokenLookup() {
+        // A token that will not decrypt reads as null: the boot pass computes its lookup once the right secret is back.
+        botTokenLookup = botToken == null ? null : CredentialCipher.current().lookup(botToken);
     }
 
     /**

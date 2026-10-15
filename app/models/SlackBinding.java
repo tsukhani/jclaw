@@ -3,11 +3,16 @@ package models;
 import channels.ChannelTransport;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.Column;
+import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Index;
+import jakarta.persistence.PrePersist;
+import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
+import org.hibernate.annotations.DynamicUpdate;
+import utils.CredentialCipher;
 
 import java.util.List;
 
@@ -38,16 +43,24 @@ import java.util.List;
 // findById per inbound event, so L2-cache this entity for the same transparent
 // caching Agent and TelegramBinding enjoy.
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
+// JCLAW-1455: an update writes only the changed columns, so a credential that will not decrypt (read as null) survives it.
+@DynamicUpdate
 public class SlackBinding extends AgentBoundBinding {
 
     /**
      * Slack bot token ({@code xoxb-...}). Globally unique on Slack's side; we
-     * mirror that with a DB constraint so an operator pasting the same token
-     * into two bindings fails fast.
+     * mirror that with a DB constraint on {@link #botTokenLookup} so an operator
+     * pasting the same token into two bindings fails fast.
      */
-    @Column(name = "bot_token", nullable = false, unique = true)
+    @Column(name = "bot_token", nullable = false, columnDefinition = "TEXT")
+    @Convert(converter = BindingCredentialConverter.SlackBotToken.class)
     @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedBotToken()).
     public String botToken;
+
+    /** HMAC of {@link #botToken} (JCLAW-1455): the stored token is encrypted under a random IV, so it is matched here. */
+    @Column(name = "bot_token_lookup", length = 64, unique = true)
+    @JsonIgnore
+    public String botTokenLookup;
 
     /**
      * Slack signing secret for HMAC verification of inbound Events/interactivity
@@ -55,7 +68,8 @@ public class SlackBinding extends AgentBoundBinding {
      * for SOCKET bindings (harmless, and lets the operator switch transports
      * without re-entering it).
      */
-    @Column(name = "signing_secret", nullable = false)
+    @Column(name = "signing_secret", nullable = false, columnDefinition = "TEXT")
+    @Convert(converter = BindingCredentialConverter.SlackSigningSecret.class)
     @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedSigningSecret()).
     public String signingSecret;
 
@@ -63,7 +77,8 @@ public class SlackBinding extends AgentBoundBinding {
      * App-level token ({@code xapp-...}) used to open a Socket Mode WebSocket
      * (JCLAW-351). Null for HTTP (Events API) transport bindings.
      */
-    @Column(name = "app_token")
+    @Column(name = "app_token", columnDefinition = "TEXT")
+    @Convert(converter = BindingCredentialConverter.SlackAppToken.class)
     @JsonIgnore // JCLAW-730: credential — never serialize in the clear (see maskedAppToken()).
     public String appToken;
 
@@ -115,7 +130,20 @@ public class SlackBinding extends AgentBoundBinding {
     public String replyToMode;
 
     public static SlackBinding findByBotToken(String botToken) {
-        return SlackBinding.find("botToken", botToken).first();
+        return findByBotToken(botToken, CredentialCipher.current());
+    }
+
+    /** {@link #findByBotToken(String)} under {@code cipher}'s lookups. */
+    public static SlackBinding findByBotToken(String botToken, CredentialCipher cipher) {
+        if (botToken == null) return null;
+        return SlackBinding.find("botTokenLookup IN (?1)", cipher.lookups(botToken)).first();
+    }
+
+    @PrePersist
+    @PreUpdate
+    void sealBotTokenLookup() {
+        // A token that will not decrypt reads as null: the boot pass computes its lookup once the right secret is back.
+        botTokenLookup = botToken == null ? null : CredentialCipher.current().lookup(botToken);
     }
 
     public static SlackBinding findByAgent(Agent agent) {
