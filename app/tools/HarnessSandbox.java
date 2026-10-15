@@ -4,10 +4,16 @@ import agents.DangerousActionGate;
 import agents.ToolContext;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
+import services.EventLogger;
 import services.ExecutableProbeSupport;
+import services.database.DatabaseService;
 import utils.ChannelOriginTrust;
+import utils.SandboxHiddenRoots;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -27,11 +33,12 @@ import java.util.Locale;
  *   <li><b>macOS</b> — {@code sandbox-exec -p '<profile>' <argv>} with an inline
  *       Seatbelt profile (no temp file): allow-default, deny all writes except
  *       the session dir + {@code /private/tmp} + {@code /private/var/folders} +
- *       {@code /dev}, deny reads of the enumerated secret paths.</li>
+ *       {@code /dev}, deny reads of the enumerated secret paths, and deny reads and
+ *       writes of JClaw's own state ({@link SandboxHiddenRoots}).</li>
  *   <li><b>Linux</b> — {@code bwrap --ro-bind / / --dev /dev --tmpfs /tmp --proc /proc
  *       --tmpfs $HOME --bind <writeRoot> <writeRoot> [--ro-bind-try <allowance> <allowance>]*
- *       <argv>}: the visible filesystem is built from nothing, so secrets are ABSENT
- *       rather than merely denied (allowlist-by-construction). Mount order is
+ *       [--tmpfs <hidden root>]* <argv>}: the visible filesystem is built from nothing, so
+ *       secrets are ABSENT rather than merely denied (allowlist-by-construction). Mount order is
  *       load-bearing — see {@link #linuxArgv}.</li>
  * </ul>
  *
@@ -255,27 +262,47 @@ public final class HarnessSandbox {
     }
 
     private static List<String> macos(List<String> argv, File session, List<String> allowances) {
-        var home = System.getProperty("user.home", "");
-        var sb = new StringBuilder("(version 1)\n(allow default)\n");
-        sb.append("(deny file-write* (subpath \"/\"))\n");
-        sb.append(writeAllow(session.getAbsolutePath()));
-        sb.append(writeAllow("/private/tmp"));
-        sb.append(writeAllow("/private/var/folders"));
-        sb.append(writeAllow("/dev"));
-        for (var a : allowances) {
-            sb.append(writeAllow(absHome(home, a)));
-        }
-        for (var s : DENY_READ_HOME) {
-            sb.append("(deny file-read* (subpath \"")
-                    .append(escapeSeatbelt(absHome(home, s)))
-                    .append("\"))\n");
-        }
+        var profile = macosProfile(session, allowances, System.getProperty("user.home", ""),
+                SandboxHiddenRoots.current());
         var out = new ArrayList<String>();
         out.add("sandbox-exec");
         out.add("-p");
-        out.add(sb.toString());
+        out.add(profile);
         out.addAll(argv);
         return List.copyOf(out);
+    }
+
+    /**
+     * The Seatbelt profile, public so a test can pin its rule order on any host. The last
+     * matching rule wins, so each {@code hidden} root is denied after every write grant (hiding
+     * it even inside a grant above it), a grant beneath one is reopened after that, and the
+     * {@code $HOME} secrets come last so no reopen can reach them.
+     */
+    public static String macosProfile(File writeRoot, List<String> allowances, String home, List<Path> hidden) {
+        var sb = new StringBuilder("(version 1)\n(allow default)\n");
+        sb.append("(deny file-write* (subpath \"/\"))\n");
+        sb.append(writeAllow(writeRoot.getAbsolutePath()));
+        sb.append(writeAllow("/private/tmp"));
+        sb.append(writeAllow("/private/var/folders"));
+        sb.append(writeAllow("/dev"));
+        var grants = new ArrayList<String>();
+        grants.add(writeRoot.getAbsolutePath());
+        for (var a : allowances) {
+            var abs = absHome(home, a);
+            sb.append(writeAllow(abs));
+            grants.add(abs);
+        }
+        for (var root : hidden) {
+            sb.append(rule("deny", "file-read* file-write*", root.toString()));
+        }
+        for (var g : grants) {
+            var reopened = SandboxHiddenRoots.beneath(g, hidden);
+            if (reopened != null) sb.append(rule("allow", "file-read* file-write*", reopened.toString()));
+        }
+        for (var s : DENY_READ_HOME) {
+            sb.append(rule("deny", "file-read*", absHome(home, s)));
+        }
+        return sb.toString();
     }
 
     /**
@@ -285,7 +312,34 @@ public final class HarnessSandbox {
      * under {@code $HOME} on every non-container install.
      */
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances) {
-        var home = System.getProperty("user.home", "");
+        return linuxArgv(argv, writeRoot, allowances, System.getProperty("user.home", ""),
+                linuxHiddenRoots(DatabaseService.backupsDir(), SandboxHiddenRoots.current()));
+    }
+
+    /**
+     * The {@code hidden} roots a tmpfs can cover. bwrap cannot create a mount point under the
+     * read-only root, so a missing root hides nothing; {@code backups} is JClaw's own and is
+     * created first, or a backup made after a long-running harness started would be readable to it.
+     */
+    public static List<Path> linuxHiddenRoots(Path backups, List<Path> hidden) {
+        try {
+            Files.createDirectories(backups);
+        } catch (IOException e) {
+            EventLogger.warn("tool", "Sandbox: could not create the backup directory " + backups
+                    + " to hide it from confined processes", e.toString());
+        }
+        return hidden.stream().filter(Files::isDirectory).toList();
+    }
+
+    /**
+     * {@link #linuxArgv(List, File, List)} with the home and hidden roots given. Each
+     * {@code hidden} root gets a tmpfs after the grants outside it, so an ancestor write root
+     * cannot re-expose it, and before the grants beneath it. Every grant is bound at its
+     * canonical path, where the tmpfs mounts go, so one reached through a symlink cannot show a
+     * hidden root at a path its tmpfs does not cover.
+     */
+    public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances,
+                                         String home, List<Path> hidden) {
         var out = new ArrayList<String>(List.of(
                 BWRAP,
                 "--ro-bind", "/", "/",
@@ -294,21 +348,35 @@ public final class HarnessSandbox {
                 "--proc", "/proc",
                 // an empty HOME by default; the write root and the harness's own state
                 // paths are bound back below (secrets not listed stay absent).
-                "--tmpfs", home,
-                // rebind the write root read-write over the read-only root
-                "--bind", writeRoot.getAbsolutePath(), writeRoot.getAbsolutePath()));
+                "--tmpfs", home));
+        var reopened = new ArrayList<String>();
+        // rebind the write root read-write over the read-only root
+        addBind(out, reopened, "--bind", writeRoot.getAbsolutePath(), hidden);
         for (var a : allowances) {
-            var abs = absHome(home, a);
-            out.add("--ro-bind-try");
-            out.add(abs);
-            out.add(abs);
+            addBind(out, reopened, "--ro-bind-try", absHome(home, a), hidden);
         }
+        for (var root : hidden) {
+            out.add("--tmpfs");
+            out.add(root.toString());
+        }
+        out.addAll(reopened);
         out.addAll(argv);
         return List.copyOf(out);
     }
 
+    private static void addBind(List<String> out, List<String> reopened, String flag, String path,
+                                List<Path> hidden) {
+        var canonical = SandboxHiddenRoots.canonical(path).toString();
+        var after = SandboxHiddenRoots.beneath(path, hidden) != null;
+        (after ? reopened : out).addAll(List.of(flag, canonical, canonical));
+    }
+
     private static String writeAllow(String path) {
-        return "(allow file-write* (subpath \"" + escapeSeatbelt(path) + "\"))\n";
+        return rule("allow", "file-write*", path);
+    }
+
+    private static String rule(String action, String operations, String path) {
+        return "(" + action + " " + operations + " (subpath \"" + escapeSeatbelt(path) + "\"))\n";
     }
 
     /**
