@@ -319,7 +319,8 @@ async function deleteUnencrypted() {
   const ok = await confirm({
     title: 'Delete unencrypted backups',
     message: `Delete ${files.length === 1 ? 'the backup' : `the ${files.length} backups`} that hold the stored credentials in plaintext `
-      + `(${files.map(b => b.id).join(', ')})? This cannot be undone.`,
+      + `(${files.map(b => b.id).join(', ')})? This cannot be undone. A backup from before the credentials were encrypted `
+      + 'is the only way back to an older JClaw version, which cannot read them.',
     confirmText: 'Delete',
     variant: 'danger',
   })

@@ -180,11 +180,12 @@ Everything a repair creates stays in `data/` (the damaged file, its trace, the r
 
 JClaw encrypts the third-party credentials it stores: the provider, search and scanner keys and the other secret settings, the Slack, Telegram and WhatsApp channel tokens, and the secret values of each MCP server. The key comes from the secret in `certs/.env`. A copy of the database alone does not reveal them.
 
-This has three consequences:
+This has four consequences:
 
 - **Keep `certs/.env` with your backups.** A backup restored onto an installation with a different `certs/.env` opens, but none of its credentials decrypt. Settings then lists each one for you to enter again (see the top of this page).
 - **Rotate with `jclaw secret`.** It keeps the old value as `PLAY_SECRET_PREVIOUS` in `certs/.env`. On the next start, JClaw encrypts every credential again under the new secret and logs when you can remove the `PLAY_SECRET_PREVIOUS` line. Do not delete `certs/.env` to rotate: that makes every stored credential unreadable. A backup taken before the rotation is still encrypted under the old secret, so keep that value with those backups. To restore one of them, first put the old value back in `certs/.env` as `PLAY_SECRET_PREVIOUS`. The next start then encrypts its credentials again under the current secret.
 - **Old copies stay in the file until it is compacted.** When JClaw first encrypts the credentials, H2 keeps the plaintext they replaced in the file's free space. A rotation leaves the copies under the old secret in the same way. While this is so, the top of the panel shows **Old credential copies**, with a **Compact** button.
+- **An older version cannot read them.** To go back to a JClaw version from before the encryption, restore a backup taken before it. Keep one until you are sure you will stay on this version, because **Delete them** deletes those backups too.
 
 **Compact** hands off to `jclaw.sh compact`, the way Repair does. The instance stops. JClaw writes a copy of the data file that holds only its live data, checks that every table has the same number of rows, and then puts the copy in place of the file in one step. If the compaction stops partway, the data file is left as it was. The instance then starts again. Compaction never runs while JClaw shuts down, because `jclaw stop` kills an instance that is still stopping after 60 seconds, and that could cut it short.
 
