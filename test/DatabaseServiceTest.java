@@ -199,10 +199,10 @@ class DatabaseServiceTest extends UnitTest {
     }
 
     @Test
-    void aBootPassIsRecordedBesideTheDataFile() {
+    void aBootPassIsRecordedBesideTheDataFile() throws Exception {
         DatabaseService.dataDirForTest = tmp;
         assertNull(DatabaseService.credentialCopies().encryptedAt());
-        DatabaseService.recordCredentialPass(2, 0);
+        DatabaseService.recordCredentialPass(tmp, 2, 0);
         var copies = DatabaseService.credentialCopies();
         assertEquals("PLAINTEXT", copies.due(), "sealing plaintext leaves its old copies for a compaction");
         assertNotNull(copies.encryptedAt());

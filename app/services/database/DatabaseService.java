@@ -350,23 +350,21 @@ public final class DatabaseService {
 
     // ---- the credentials' old copies (JCLAW-1455) ----
 
-    /** Record a boot pass over the credentials, and say when it left old copies a compaction would remove. */
-    public static void recordCredentialPass(int sealed, int rekeyed) {
-        var dir = dataDir();
-        try {
-            var copies = CredentialCopies.read(dir);
-            var next = copies.afterPass(sealed, rekeyed, AppClock.now());
-            if (!next.equals(copies)) {
-                next.write(dir);
-            }
-            if (next.due() != null && (sealed > 0 || rekeyed > 0)) {
-                EventLogger.warn(CATEGORY, (next.due() == CredentialCopies.OldCopies.PLAINTEXT
-                        ? "The data file still holds the credentials' old plaintext"
-                        : "The data file still holds the credentials' copies under the previous secret")
-                        + "; compact it from Settings → Database or with 'jclaw.sh compact'");
-            }
-        } catch (IOException e) {
-            EventLogger.warn(CATEGORY, "Could not record the credential pass in " + CredentialCopies.FILE, e.getMessage());
+    /**
+     * Record a boot pass over the credentials in {@code dataDir}, and say when it left old copies a compaction would
+     * remove. The pass calls this before it commits, so a failure here leaves nothing sealed that the record misses.
+     */
+    public static void recordCredentialPass(Path dataDir, int sealed, int rekeyed) throws IOException {
+        var copies = CredentialCopies.read(dataDir);
+        var next = copies.afterPass(sealed, rekeyed, AppClock.now());
+        if (!next.equals(copies)) {
+            next.write(dataDir);
+        }
+        if (next.due() != null && (sealed > 0 || rekeyed > 0)) {
+            EventLogger.warn(CATEGORY, (next.due() == CredentialCopies.OldCopies.PLAINTEXT
+                    ? "The data file still holds the credentials' old plaintext"
+                    : "The data file still holds the credentials' copies under the previous secret")
+                    + "; compact it from Settings → Database or with 'jclaw.sh compact'");
         }
     }
 

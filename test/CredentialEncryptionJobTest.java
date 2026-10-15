@@ -4,16 +4,23 @@ import jobs.CredentialEncryptionJob;
 import models.BindingCredential;
 import models.JsonCredential;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import play.test.UnitTest;
 import services.OperatorAlerts;
+import services.database.CredentialCopies;
 import utils.CredentialCipher;
 
+import java.io.IOException;
+import java.lang.reflect.Proxy;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * JCLAW-1455: the boot pass over every credential store, on a throwaway database holding each store's table as the
@@ -143,6 +150,34 @@ class CredentialEncryptionJobTest extends UnitTest {
             conn.commit();
             assertEquals(SEEDED.size() - 3, rerun.sealed(), "only what the first start left plaintext is sealed");
             assertEveryCredentialOpens(conn, CredentialCipher.of(OLD, null));
+        }
+    }
+
+    @Test
+    void thePassIsRecordedBeforeItCommitsSoAStartThatDiesBetweenStillFindsACompactionDue(@TempDir Path dataDir)
+            throws Exception {
+        try (var seeded = seed()) {
+            var dueAtCommit = new AtomicReference<CredentialCopies.OldCopies>();
+            var conn = (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
+                    new Class<?>[] {Connection.class}, (proxy, method, args) -> {
+                        if (method.getName().equals("commit")) dueAtCommit.set(CredentialCopies.read(dataDir).due());
+                        return method.invoke(seeded, args);
+                    });
+            var pass = CredentialEncryptionJob.sealAndCommit(conn, CIPHER, dataDir);
+            assertEquals(SEEDED.size(), pass.sealed());
+            assertEquals(CredentialCopies.OldCopies.PLAINTEXT, dueAtCommit.get(),
+                    "the old plaintext is on record before the sealed values are");
+            assertEveryCredentialOpens(seeded, CIPHER);
+        }
+    }
+
+    @Test
+    void aPassWhoseRecordCannotBeWrittenSealsNothing(@TempDir Path tmp) throws Exception {
+        var notADirectory = Files.writeString(tmp.resolve("data"), "");
+        try (var conn = seed()) {
+            var before = snapshot(conn);
+            assertThrows(IOException.class, () -> CredentialEncryptionJob.sealAndCommit(conn, CIPHER, notADirectory));
+            assertEquals(before, snapshot(conn), "rolled back for the next start, with no plaintext sealed unrecorded");
         }
     }
 

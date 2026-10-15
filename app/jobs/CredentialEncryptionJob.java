@@ -14,6 +14,8 @@ import services.OperatorAlerts;
 import services.database.DatabaseService;
 import utils.CredentialCipher;
 
+import java.io.IOException;
+import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Locale;
@@ -24,9 +26,9 @@ import java.util.function.Function;
  * {@value CredentialCipher#PREVIOUS_SECRET_VAR} opens is sealed again under the current secret, and a value neither
  * opens is counted and left as it is, for the right secret to recover. It commits once, so a start that dies partway
  * writes nothing, and a sealed value is never sealed again, so the next start finishes the job. The binding lookups
- * are {@link BindingCredentialColumnsJob}'s, which sets them under the current secret before this runs. Afterwards it
- * records whether the data file now holds old copies a compaction would remove, and masks the values H2's trace file
- * quotes.
+ * are {@link BindingCredentialColumnsJob}'s, which sets them under the current secret before this runs. Before it
+ * commits it records whether the data file now holds old copies a compaction would remove; afterwards it masks the
+ * values H2's trace file quotes.
  */
 // After BindingCredentialColumnsJob widens the binding columns, which a long token's ciphertext needs; before
 // DefaultConfigJob, the channel runners and the MCP connections read a credential.
@@ -41,20 +43,39 @@ public class CredentialEncryptionJob extends Job<Void> {
         }
         var cipher = CredentialCipher.current();
         CredentialCipher.Reseal pass;
-        CredentialCipher.Reseal unmapped;
         try (Connection conn = DB.getDataSource().getConnection()) {
-            pass = reseal(conn, cipher);
-            unmapped = resealUnmapped(conn, cipher);
-            conn.commit();
-        } catch (SQLException e) {
+            pass = sealAndCommit(conn, cipher, DatabaseService.dataDir());
+        } catch (SQLException | IOException e) {
             // Every credential still reads as it did: plaintext and the previous secret's ciphertext both open.
             EventLogger.error("system", "Encrypting the stored credentials failed; the next start tries again: "
                     + e.getMessage());
             return;
         }
         report(pass, cipher.hasPrevious());
-        DatabaseService.recordCredentialPass(pass.sealed() + unmapped.sealed(), pass.rekeyed() + unmapped.rekeyed());
         DatabaseService.maskTraces();
+    }
+
+    /**
+     * Seal every store, record in {@code dataDir} the old copies that leaves in the data file, and only then commit: a
+     * start that dies between the two finds a compaction due, never sealed values whose plaintext no record names. A
+     * record that cannot be written rolls the pass back for the next start.
+     *
+     * @return the pass over the stores, without the {@link #resealUnmapped} columns
+     */
+    // Public because Play's tests live in the default package.
+    public static CredentialCipher.Reseal sealAndCommit(Connection conn, CredentialCipher cipher, Path dataDir)
+            throws SQLException, IOException {
+        var pass = reseal(conn, cipher);
+        var unmapped = resealUnmapped(conn, cipher);
+        try {
+            DatabaseService.recordCredentialPass(dataDir, pass.sealed() + unmapped.sealed(),
+                    pass.rekeyed() + unmapped.rekeyed());
+        } catch (IOException e) {
+            conn.rollback();
+            throw e;
+        }
+        conn.commit();
+        return pass;
     }
 
     /** Seal every store's credentials under {@code cipher}'s current secret. Does not commit. */
