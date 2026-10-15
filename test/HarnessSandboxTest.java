@@ -259,6 +259,36 @@ class HarnessSandboxTest extends UnitTest {
                 "a write root above data/ must not reopen it: " + ancestor);
     }
 
+    /**
+     * A grant equal to a hidden root, or holding a nested one (the default data/backups), stays
+     * hidden: a coding run whose parent is the checkout and whose model-chosen folder is "data"
+     * would otherwise reopen the whole database directory.
+     */
+    @Test
+    void aGrantEqualToOrHoldingAHiddenRootIsNotReopened() {
+        var root = SandboxHiddenRoots.canonical(session).resolve("jclaw");
+        var data = root.resolve("data");
+        var hidden = List.of(data, root.resolve("certs"), root.resolve("conf"), data.resolve("runs/backups"));
+
+        assertNull(SandboxHiddenRoots.beneath(data.toString(), hidden), "a grant equal to data/");
+        assertNull(SandboxHiddenRoots.beneath(data.resolve("runs").toString(), hidden), "a grant holding data/runs/backups");
+        assertNull(SandboxHiddenRoots.beneath(data.resolve("runs/backups").toString(), hidden), "a grant equal to the nested root");
+        assertEquals(data.resolve("runs/other"), SandboxHiddenRoots.beneath(data.resolve("runs/other").toString(), hidden));
+
+        var profile = HarnessSandbox.macosProfile(data.toFile(), List.of(data.resolve("runs").toString()),
+                "/Users/operator", hidden);
+        assertFalse(profile.contains("(allow file-read* file-write* (subpath \"" + data + "\"))"), profile);
+        assertFalse(profile.contains("(allow file-read* file-write* (subpath \"" + data.resolve("runs") + "\"))"), profile);
+
+        var argv = HarnessSandbox.linuxArgv(List.of("true"), data.toFile(), List.of(), "/home/operator", hidden);
+        int bind = indexOfPair(argv, "--bind", data.toString());
+        int tmpfs = indexOfPair(argv, "--tmpfs", data.toString());
+        assertTrue(bind >= 0 && bind < tmpfs,
+                "a write root equal to data/ must be bound before data/'s tmpfs covers it, argv=" + argv);
+        assertEquals(-1, indexOfPair(argv.subList(tmpfs, argv.size()), "--bind", data.toString()),
+                "and never bound back after it, argv=" + argv);
+    }
+
     /** Sentinel files of this test's own under the app root's data/ and certs/; the caller deletes them. */
     private static List<Path> writeStateSentinels(String content) throws Exception {
         var appRoot = Play.applicationPath.toPath();
@@ -286,7 +316,6 @@ class HarnessSandboxTest extends UnitTest {
     @Test
     @EnabledOnOs(OS.MAC)
     void macAcpRunCannotReadJClawState() throws Exception {
-        ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "true");
         var agent = "harness-sbx-1452";
         var coding = AgentService.workspacePath(agent).resolve("coding").toAbsolutePath();
         var secret = "jclaw-1452-secret-" + java.util.UUID.randomUUID();
@@ -303,6 +332,8 @@ class HarnessSandboxTest extends UnitTest {
             assertTrue(control.contains(secret), "unconfined, the sentinels must be readable or the test proves nothing: " + control);
             Files.delete(folder.resolve("note.txt"));
 
+            // Set right before the wrap: another class's table wipe can clear the key.
+            ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "true");
             var wrapped = HarnessSandbox.wrap(command, folder.toFile(), new ClaudeAdapter(), false);
             assertEquals("sandbox-exec", wrapped.get(0));
             var confined = run(wrapped, folder);
@@ -319,12 +350,12 @@ class HarnessSandboxTest extends UnitTest {
 
     /**
      * A write root and an allowance beneath data/ are reopened after the deny: a confined run
-     * reads and writes both, and still cannot read their sibling in data/.
+     * reads and writes both, and still cannot read their sibling in data/. A write root that is
+     * data/ itself reopens nothing.
      */
     @Test
     @EnabledOnOs(OS.MAC)
     void macReopensAWriteRootAndAllowanceBeneathData() throws Exception {
-        ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "true");
         var data = Files.createDirectories(Play.applicationPath.toPath().resolve("data"));
         var mine = Files.createDirectory(data.resolve("jclaw-1452-sbx-" + java.util.UUID.randomUUID()));
         try {
@@ -335,14 +366,25 @@ class HarnessSandboxTest extends UnitTest {
             var script = "echo written > out.txt && cat out.txt; cat '%s'; ".formatted(allowance.resolve("allowed.txt"))
                     + "cat '%s' 2>/dev/null || echo SIBLING_DENIED".formatted(mine.resolve("sibling.txt"));
 
+            ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "true");
             var wrapped = HarnessSandbox.wrap(List.of("/bin/sh", "-c", script), writeRoot.toFile(),
                     List.of(allowance.toString()), HarnessSandbox.ACP_SANDBOX_KEY, false);
+            assertEquals("sandbox-exec", wrapped.get(0));
             var out = run(wrapped, writeRoot);
             assertTrue(out.contains("written"), "the write root beneath data/ must be writable and readable: " + out);
             assertTrue(Files.exists(writeRoot.resolve("out.txt")), out);
             assertTrue(out.contains("allowance-readable"), "the allowance beneath data/ must be readable: " + out);
             assertFalse(out.contains("sibling-secret"), "the rest of data/ must stay hidden: " + out);
             assertTrue(out.contains("SIBLING_DENIED"), out);
+
+            ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "true");
+            var whole = HarnessSandbox.wrap(List.of("/bin/sh", "-c",
+                            "cat '%s' 2>/dev/null || echo SIBLING_DENIED".formatted(mine.resolve("sibling.txt"))),
+                    data.toFile(), List.of(), HarnessSandbox.ACP_SANDBOX_KEY, false);
+            assertEquals("sandbox-exec", whole.get(0));
+            var wholeOut = run(whole, session);
+            assertFalse(wholeOut.contains("sibling-secret"), "a write root equal to data/ must not reopen it: " + wholeOut);
+            assertTrue(wholeOut.contains("SIBLING_DENIED"), wholeOut);
         } finally {
             deleteTree(mine);
         }

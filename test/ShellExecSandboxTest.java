@@ -189,7 +189,8 @@ class ShellExecSandboxTest extends UnitTest {
             }
             var probe = new StringBuilder(reads);
             for (int i = 0; i < real.size(); i++) {
-                probe.append("; cat '%s' >/dev/null 2>&1 && echo READABLE_%d || echo DENIED_%d".formatted(real.get(i), i, i));
+                // One byte proves the read; on the live checkout the H2 file is over a gigabyte.
+                probe.append("; head -c 1 '%s' >/dev/null 2>&1 && echo READABLE_%d || echo DENIED_%d".formatted(real.get(i), i, i));
             }
             var args = new JsonObject();
             args.addProperty("command", probe.toString());
@@ -197,6 +198,9 @@ class ShellExecSandboxTest extends UnitTest {
 
             var control = tool.execute(command, agent);
             assertTrue(control.contains(secret), "unconfined, exec must reach the sentinels or the test proves nothing; got: " + control);
+            for (int i = 0; i < real.size(); i++) {
+                assertTrue(control.contains("READABLE_" + i), "unconfined, exec must read " + real.get(i) + "; got: " + control);
+            }
 
             ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
             var confined = tool.execute(command, agent);

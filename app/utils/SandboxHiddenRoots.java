@@ -7,7 +7,6 @@ import services.database.DatabaseService;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.LinkedHashSet;
 import java.util.List;
 
@@ -28,7 +27,8 @@ public final class SandboxHiddenRoots {
      * {@code data/}, {@code certs/} and {@code conf/} under the application root and under the
      * working directory, which H2's {@code ./data/jclaw} resolves against, plus the backup
      * directory, which an operator may move out of {@code data/}. Canonical, because Seatbelt
-     * matches after symlink resolution; a root nested inside another is dropped.
+     * matches after symlink resolution. A root nested in another is kept, so {@link #beneath}
+     * sees the default {@code data/backups}.
      */
     public static List<Path> current() {
         var bases = new ArrayList<Path>();
@@ -40,12 +40,18 @@ public final class SandboxHiddenRoots {
             for (var dir : STATE_DIRS) roots.add(canonical(base.resolve(dir)));
         }
         roots.add(canonical(DatabaseService.backupsDir()));
-        return outermost(roots);
+        return List.copyOf(roots);
     }
 
-    /** {@code path} in canonical form when it lies at or beneath one of the canonical {@code hidden} roots, else null. */
+    /**
+     * {@code path} in canonical form when it lies strictly beneath one of the canonical
+     * {@code hidden} roots and holds none of them, else null. A grant equal to a root, or holding
+     * one, stays hidden: reopening it would expose the root's whole contents (a coding run whose
+     * parent is the checkout and whose model-chosen folder is {@code data}).
+     */
     public static @Nullable Path beneath(String path, List<Path> hidden) {
         var c = canonical(Path.of(path));
+        if (hidden.stream().anyMatch(r -> r.startsWith(c))) return null;
         return hidden.stream().anyMatch(c::startsWith) ? c : null;
     }
 
@@ -58,11 +64,5 @@ public final class SandboxHiddenRoots {
         } catch (IOException _) {
             return abs;
         }
-    }
-
-    private static List<Path> outermost(Collection<Path> roots) {
-        return roots.stream()
-                .filter(r -> roots.stream().noneMatch(o -> !o.equals(r) && r.startsWith(o)))
-                .toList();
     }
 }
