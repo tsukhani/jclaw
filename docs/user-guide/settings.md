@@ -183,7 +183,7 @@ JClaw encrypts the third-party credentials it stores: the provider, search and s
 This has three consequences:
 
 - **Keep `certs/.env` with your backups.** A backup restored onto an installation with a different `certs/.env` opens, but none of its credentials decrypt. Settings then lists each one for you to enter again (see the top of this page).
-- **Rotate with `jclaw secret`.** It keeps the old value as `PLAY_SECRET_PREVIOUS` in `certs/.env`. On the next start, JClaw encrypts every credential again under the new secret and logs when you can remove the `PLAY_SECRET_PREVIOUS` line. Do not delete `certs/.env` to rotate: that makes every stored credential unreadable.
+- **Rotate with `jclaw secret`.** It keeps the old value as `PLAY_SECRET_PREVIOUS` in `certs/.env`. On the next start, JClaw encrypts every credential again under the new secret and logs when you can remove the `PLAY_SECRET_PREVIOUS` line. Do not delete `certs/.env` to rotate: that makes every stored credential unreadable. A backup taken before the rotation is still encrypted under the old secret, so keep that value with those backups. To restore one of them, first put the old value back in `certs/.env` as `PLAY_SECRET_PREVIOUS`. The next start then encrypts its credentials again under the current secret.
 - **Old copies stay in the file until it is compacted.** When JClaw first encrypts the credentials, H2 keeps the plaintext they replaced in the file's free space. A rotation leaves the copies under the old secret in the same way. While this is so, the top of the panel shows **Old credential copies**, with a **Compact** button.
 
 **Compact** hands off to `jclaw.sh compact`, the way Repair does. The instance stops. JClaw writes a copy of the data file that holds only its live data, checks that every table has the same number of rows, and then puts the copy in place of the file in one step. If the compaction stops partway, the data file is left as it was. The instance then starts again. Compaction never runs while JClaw shuts down, because `jclaw stop` kills an instance that is still stopping after 60 seconds, and that could cut it short.
@@ -306,7 +306,7 @@ Those are the rows a new install starts with. Any other OpenAI-compatible provid
 
 For each provider you can:
 
-- Set the **API key**: stored as plain text in the Config DB, because it is a credential for the provider's API and has to be sent as written, and never shown back once saved.
+- Set the **API key**: stored encrypted in the Config DB (see [Encrypted credentials](#settings-encrypted-credentials)), and never shown back once saved.
 - Set the **base URL** (most providers ship with a sensible default).
 - Mark **Enabled / disabled** to hide the provider from the agent picker.
 - Edit **local**: the provider's Remote/Local classification (`provider.<name>.local`). It decides which section the card appears under, and it is what lets a provider serve memory embeddings and reranking. Seeded `true` for Ollama Local, LM Studio, vLLM and llama.cpp, so only their cards have a **local** row; absent means remote, and a remote card has no row, so declaring one local takes `POST /api/config`. Declare a provider local only when you host it yourself: memory text is sent there whenever it serves those features.
