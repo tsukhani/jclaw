@@ -737,8 +737,11 @@ coding-harness boundary and the native-tool boundary cannot drift apart:
 - **macOS** — `sandbox-exec -p '<inline Seatbelt profile>'`: allow-default, deny all writes,
   then grant back the write root, any caller-passed allowances, `/private/tmp`,
   `/private/var/folders` and `/dev`;
-  deny reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube`, `~/.netrc`.
-- **Linux** — `bwrap --ro-bind / / --tmpfs $HOME --bind <writeRoot> <writeRoot>`: the visible
+  deny reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube`, `~/.netrc`, and
+  reads and writes of JClaw's `data/`, `certs/`, `conf/` and backup directory
+  (`utils.SandboxHiddenRoots`), reopening a write root or allowance beneath one.
+- **Linux** — `bwrap --ro-bind / / --tmpfs $HOME --bind <writeRoot> <writeRoot>`, then a tmpfs
+  over each of those JClaw directories: the visible
   filesystem is built from nothing, so secrets are *absent* rather than merely denied. Mount
   order is load-bearing: bwrap applies mounts in argument order and a tmpfs over an ancestor
   hides every earlier bind beneath it, so the `$HOME` tmpfs must precede the write-root bind
