@@ -25,6 +25,8 @@ The Tasks card splits three ways on purpose. You want to see `RUNNING` tick up a
 
 The Tasks and Reminders sub-stats, plus three panels, refresh in lockstep on a **5-second tick**. The three panels are Chat Cost, Chat Performance, and Recent Activity. Circuit Breakers polls on its own 10-second tick. Chat Compression is not on a tick at all. The Agents, Conversations, and Channels cards load once per visit. The page polls in the background as long as it is open, so you can watch a task fire and see the numbers move without a manual reload.
 
+One card is different. The **Ollama Cloud requests** card in Chat Cost reads when the page loads, then every **5 minutes**, and only while the tab is visible. It stops while the tab is hidden and reads again when you come back.
+
 ### Chat Cost
 
 This panel shows persisted token usage and dollar cost, aggregated across your conversations. Header controls:
@@ -34,6 +36,8 @@ This panel shows persisted token usage and dollar cost, aggregated across your c
 - **CSV**: download the per-model breakdown.
 
 When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, and similar), a **Subscription** subsection renders first. It shows the pro-rated monthly fee for the selected window, and per-provider chips narrow the view to one provider. The **Per-token** subsection below covers everything billed on usage. It has its own provider chips and a rollup card per provider (total spend and average $/1M tokens). A **Combined Total** row sums the two.
+
+A subscription costs $0.00 per token, so its dollar figures do not show how much you use it. When Ollama Cloud has an API key, an **Ollama Cloud requests** card sits beside the subscription chips. It shows how many requests your Ollama Cloud account made over the **last 24 hours** and the **last 7 days**, as ollama.com counts them. It is the count for the whole account, so it can include requests made outside JClaw. A dash means ollama.com gave no count for that range. The card is absent when it gave neither. For a 30-day view with one bar per period, see **Cloud usage** on the Ollama Cloud card in [Settings → LLM Providers](/settings?section=providers).
 
 ### Circuit Breakers
 
