@@ -4,7 +4,6 @@ import agents.AgentRunner;
 import agents.SkillLoader;
 import agents.ToolResultVerifier;
 import models.Agent;
-import models.Config;
 import play.Logger;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
@@ -15,7 +14,6 @@ import services.FetchSidecarManager;
 import services.InternalApiTokenService;
 import services.SkillPromotionService;
 import services.StealthSidecarManager;
-import services.Tx;
 import services.UvProbe;
 import services.decision.DecisionSettings;
 import services.scanners.ScannerRegistry;
@@ -505,7 +503,9 @@ public class DefaultConfigJob extends Job<Void> {
     private void moveDataImpulseCredentialsToAPlan() {
         var url = ConfigService.get(WebScrapeSettings.PROXY_URL, "");
         var username = ConfigService.get(WebScrapeSettings.PROXY_USERNAME, "");
+        // The move deletes the old password row, which a password that will not decrypt must outlive.
         if (!DataImpulsePlans.isGateway(url) || username.isBlank()
+                || ConfigService.isUnreadable(WebScrapeSettings.PROXY_PASSWORD)
                 || !ConfigService.get(WebScrapeSettings.PROXY_DATAIMPULSE_PLAN, "").isBlank()) {
             return;
         }
@@ -523,7 +523,8 @@ public class DefaultConfigJob extends Job<Void> {
     }
 
     private void seedIfAbsent(String key, String value) {
-        if (ConfigService.get(key) == null) {
+        // A credential that will not decrypt reads as unset, but restoring the right secret recovers it.
+        if (ConfigService.get(key) == null && !ConfigService.isUnreadable(key)) {
             ConfigService.set(key, value);
         }
     }
@@ -537,16 +538,8 @@ public class DefaultConfigJob extends Job<Void> {
      * reflectively so the contract stays covered.
      */
     private void renameKeyIfPresent(String oldKey, String newKey) {
-        Tx.run(() -> {
-            var oldRow = Config.findByKey(oldKey);
-            if (oldRow == null) return;
-            var newRow = Config.findByKey(newKey);
-            if (newRow == null) {
-                Config.upsert(newKey, oldRow.value);
-                EventLogger.info(EVENT_CATEGORY_SYSTEM, "Config key migrated: %s → %s".formatted(oldKey, newKey));
-            }
-            oldRow.delete();
-        });
-        ConfigService.clearCache();
+        if (ConfigService.renameIfPresent(oldKey, newKey)) {
+            EventLogger.info(EVENT_CATEGORY_SYSTEM, "Config key migrated: %s → %s".formatted(oldKey, newKey));
+        }
     }
 }

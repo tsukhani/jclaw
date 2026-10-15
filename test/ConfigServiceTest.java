@@ -16,6 +16,7 @@ import services.decision.OllamaDecision;
 import services.telemetry.OtelConfig;
 import tools.jev.JevSettings;
 import tools.scrape.WebScrapeSettings;
+import utils.CredentialCipher;
 import utils.HttpFactories;
 
 class ConfigServiceTest extends UnitTest {
@@ -908,5 +909,105 @@ class ConfigServiceTest extends UnitTest {
         assertNull(seen.get(),
                 "a reader on another connection must be served the absence, not the value the "
                         + "delete is removing; serving the value is what let it survive the commit");
+    }
+
+    // --- JCLAW-1455: credentials encrypted at rest ---
+
+    private static final String CREDENTIAL_KEY = "jclaw1455.example.apiKey";
+
+    private static String storedValue(String key) {
+        return Tx.run(() -> Config.findByKey(key).value);
+    }
+
+    @Test
+    void aCredentialIsStoredEncryptedAndReadsBackWhole() {
+        ConfigService.set(CREDENTIAL_KEY, "fake-credential-1455");
+        var stored = storedValue(CREDENTIAL_KEY);
+        assertTrue(stored.startsWith(CredentialCipher.PREFIX), stored);
+        assertFalse(stored.contains("fake-credential-1455"));
+
+        ConfigService.clearCache();
+        assertEquals("fake-credential-1455", ConfigService.get(CREDENTIAL_KEY), "decrypted on a cache miss");
+        assertFalse(ConfigService.isUnreadable(CREDENTIAL_KEY));
+        assertEquals("fake-credential-1455", ConfigService.entry(CREDENTIAL_KEY).value());
+        var listed = ConfigService.listAll().stream().filter(e -> e.key().equals(CREDENTIAL_KEY)).findFirst().orElseThrow();
+        assertEquals("fake-credential-1455", listed.value());
+        assertFalse(listed.unreadable());
+    }
+
+    @Test
+    void onlyACredentialIsEncrypted() {
+        ConfigService.set("jclaw1455.example.timeoutSeconds", "30");
+        assertEquals("30", storedValue("jclaw1455.example.timeoutSeconds"));
+        ConfigService.set(CREDENTIAL_KEY, "");
+        assertEquals("", storedValue(CREDENTIAL_KEY), "an empty value holds no secret");
+        // auth.* holds a password hash and session state; one that would not decrypt would lock the operator out.
+        assertTrue(ConfigService.isSensitive("auth.admin.passwordHash"));
+        assertFalse(ConfigService.encryptsAtRest("auth.admin.passwordHash"));
+        assertTrue(ConfigService.encryptsAtRest("provider.openrouter.apiKey"));
+        assertFalse(ConfigService.encryptsAtRest("provider.openrouter.baseUrl"));
+    }
+
+    @Test
+    void aCredentialWrittenBeforeEncryptionStillReads() {
+        Tx.run(() -> Config.upsert(CREDENTIAL_KEY, "sk-written-before-1455"));
+        assertEquals("sk-written-before-1455", ConfigService.get(CREDENTIAL_KEY));
+        assertFalse(ConfigService.isUnreadable(CREDENTIAL_KEY));
+    }
+
+    @Test
+    void aCiphertextCopiedToAnotherKeyDoesNotOpen() {
+        var other = "jclaw1455.other.apiKey";
+        ConfigService.set(CREDENTIAL_KEY, "fake-credential-1455");
+        var stored = storedValue(CREDENTIAL_KEY);
+        Tx.run(() -> Config.upsert(other, stored));
+        ConfigService.clearCache();
+        assertNull(ConfigService.get(other));
+        assertTrue(ConfigService.isUnreadable(other));
+        assertEquals("fake-credential-1455", ConfigService.get(CREDENTIAL_KEY));
+    }
+
+    @Test
+    void aCredentialThatWillNotDecryptReadsAsUnsetAndIsLeftAlone() throws Exception {
+        var foreign = CredentialCipher.of("jclaw1455-some-other-secret", null)
+                .encrypt("config." + CREDENTIAL_KEY, "fake-credential-1455");
+        Tx.run(() -> Config.upsert(CREDENTIAL_KEY, foreign));
+
+        assertNull(ConfigService.get(CREDENTIAL_KEY));
+        assertEquals("fallback", ConfigService.get(CREDENTIAL_KEY, "fallback"));
+        assertTrue(ConfigService.isUnreadable(CREDENTIAL_KEY));
+        var entry = ConfigService.entry(CREDENTIAL_KEY);
+        assertNull(entry.value());
+        assertTrue(entry.unreadable());
+
+        // Boot seeding and a key rename both leave it for the right secret to recover.
+        var seed = DefaultConfigJob.class.getDeclaredMethod("seedIfAbsent", String.class, String.class);
+        seed.setAccessible(true);
+        seed.invoke(new DefaultConfigJob(), CREDENTIAL_KEY, "");
+        assertEquals(foreign, storedValue(CREDENTIAL_KEY));
+        assertFalse(ConfigService.renameIfPresent(CREDENTIAL_KEY, "jclaw1455.renamed.apiKey"));
+        assertEquals(foreign, storedValue(CREDENTIAL_KEY));
+        Tx.run(() -> assertNull(Config.findByKey("jclaw1455.renamed.apiKey")));
+
+        // The operator's re-entry replaces it.
+        ConfigService.set(CREDENTIAL_KEY, "fake-credential-reentered");
+        ConfigService.clearCache();
+        assertEquals("fake-credential-reentered", ConfigService.get(CREDENTIAL_KEY));
+        assertFalse(ConfigService.isUnreadable(CREDENTIAL_KEY));
+    }
+
+    @Test
+    void aRenamedCredentialIsReEncryptedForItsNewName() {
+        ConfigService.set("jclaw1455.legacy.apiKey", "fake-credential-1455");
+        assertTrue(ConfigService.renameIfPresent("jclaw1455.legacy.apiKey", CREDENTIAL_KEY));
+        assertEquals("fake-credential-1455", ConfigService.get(CREDENTIAL_KEY));
+        assertTrue(storedValue(CREDENTIAL_KEY).startsWith(CredentialCipher.PREFIX));
+
+        ConfigService.set("agent.jclaw1455a.probe.apiKey", "fake-credential-agent");
+        ConfigService.set("agent.jclaw1455a.queue.mode", "queue");
+        Tx.run(() -> ConfigService.renamePrefix("agent.jclaw1455a.", "agent.jclaw1455b."));
+        assertEquals("fake-credential-agent", ConfigService.get("agent.jclaw1455b.probe.apiKey"));
+        assertEquals("queue", ConfigService.get("agent.jclaw1455b.queue.mode"));
+        assertNull(ConfigService.get("agent.jclaw1455a.probe.apiKey"));
     }
 }
