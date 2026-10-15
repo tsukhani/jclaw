@@ -327,6 +327,138 @@ class SubscriptionUsageTest extends UnitTest {
     }
 
     @Test
+    void withTheGuardOffTheRouterAsksOnceAnHour() {
+        var seen = new CopyOnWriteArrayList<String>();
+        var client = canned(200, HISTORY_BODY, seen);
+        var start = AppClock.now();
+        for (var offset : List.of(Duration.ZERO, Duration.ofMinutes(2), Duration.ofMinutes(30), Duration.ofSeconds(3599))) {
+            readRouterAt(start.plus(offset), client);
+        }
+        assertEquals(1, seen.size(), () -> "a read with no windows stands for the hour: " + seen);
+        readRouterAt(start.plus(Duration.ofHours(1)).plusSeconds(1), client);
+        assertEquals(2, seen.size(), () -> "just past the hour the router asks again: " + seen);
+    }
+
+    @Test
+    void withTheGuardOffACreditFailureDoesNotHastenTheRouterRead() {
+        try {
+            registerOnOllamaCom();
+            var seen = new CopyOnWriteArrayList<String>();
+            var client = canned(200, HISTORY_BODY, seen);
+            var start = AppClock.now();
+            readRouterAt(start, client);
+            SubscriptionUsage.noteFailure(quotaFailure(provider, "kimi-k3", Remedy.RATE_LIMITED));
+            readRouterAt(start.plus(Duration.ofMinutes(2)), client);
+            SubscriptionUsage.noteFailure(quotaFailure(provider, "kimi-k3", Remedy.QUOTA_EXHAUSTED));
+            readRouterAt(start.plus(Duration.ofMinutes(3)), client);
+            assertEquals(1, seen.size(), () -> "a 429 or 402 cannot bring back windows the read lacks: " + seen);
+            assertTrue(SubscriptionUsage.isMarkedUnavailable(provider, "kimi-k3"), "the 402 still benches the model");
+            assertFalse(SubscriptionUsage.isMarkedUnavailable(provider, "glm-5.3"), "and only the model");
+        } finally {
+            unregister();
+        }
+    }
+
+    @Test
+    void whenWindowsReturnOnTheHourlyCheckTheMinuteTtlIsBack() {
+        var seen = new CopyOnWriteArrayList<String>();
+        var withWindows = canned(200, LIVE_BODY, seen);
+        var start = AppClock.now();
+        readRouterAt(start, canned(200, HISTORY_BODY, seen));
+        readRouterAt(start.plus(Duration.ofMinutes(30)), withWindows);
+        assertEquals(1, seen.size(), () -> "with the guard off nothing is asked within the hour: " + seen);
+
+        var recheck = start.plus(Duration.ofHours(1)).plusSeconds(1);
+        var events = EventLogger.captureForTest(() -> readRouterAt(recheck, withWindows));
+        assertEquals(2, seen.size(), () -> seen.toString());
+        assertTrue(events.stream().anyMatch(e -> e.message().contains("budget guard is back on")), () -> events.toString());
+        readRouterAt(recheck.plusSeconds(30), withWindows);
+        assertEquals(2, seen.size(), () -> seen.toString());
+        readRouterAt(recheck.plusSeconds(61), withWindows);
+        assertEquals(3, seen.size(), () -> "with windows back, a minute-old read is stale again: " + seen);
+    }
+
+    @Test
+    void theRouterReadAndTheWeekReadShareOneFetchEitherWayRound() {
+        var seen = new CopyOnWriteArrayList<String>();
+        var client = canned(200, HISTORY_BODY, seen);
+        var start = AppClock.now();
+        readRouterAt(start, client);
+        var week = weekAt(start.plusSeconds(30), client);
+        assertNotNull(week, "the router's read answers the 7d view");
+        assertEquals(8341, week.total());
+        assertEquals(List.of("https://ollama.com/api/usage Bearer sk-secret"), seen);
+
+        SubscriptionUsage.clearForTest(provider);
+        seen.clear();
+        weekAt(start, client);
+        var router = readRouterAt(start.plusSeconds(30), client);
+        assertNotNull(router, "the 7d read answers the router");
+        assertEquals("7d", router.range());
+        assertEquals(List.of("https://ollama.com/api/usage?range=7d Bearer sk-secret"), seen);
+    }
+
+    @Test
+    void aWeekReadAMinuteAfterTheRouterReadFetchesThoughTheRouterEntryStandsForTheHour() {
+        var seen = new CopyOnWriteArrayList<String>();
+        var client = canned(200, HISTORY_BODY, seen);
+        var start = AppClock.now();
+        readRouterAt(start, client);
+        var later = start.plusSeconds(61);
+        var week = weekAt(later, client);
+        assertNotNull(week, "the 7d view never shows history more than a minute old");
+        assertEquals(later, week.fetchedAt());
+        assertEquals(List.of("https://ollama.com/api/usage Bearer sk-secret",
+                "https://ollama.com/api/usage?range=7d Bearer sk-secret"), seen);
+    }
+
+    @Test
+    void aWeekReadThatFillsTheRouterEntryMovesTheGuardWithIt() {
+        var seen = new CopyOnWriteArrayList<String>();
+        var start = AppClock.now();
+        var off = EventLogger.captureForTest(() -> weekAt(start, canned(200, HISTORY_BODY, seen)));
+        assertTrue(off.stream().anyMatch(e -> e.message().contains(GUARD_OFF)),
+                () -> "a 7d read without windows turns the guard off: " + off);
+
+        var withWindows = "{\"limits\":{\"weekly\":{\"usage\":0.4}},\"range\":\"7d\",\"buckets\":["
+                + "{\"from\":\"2026-10-14T00:00:00Z\",\"until\":\"2026-10-15T00:00:00Z\",\"request_count\":5}]}";
+        var later = start.plusSeconds(61);
+        var on = EventLogger.captureForTest(() -> weekAt(later, canned(200, withWindows, seen)));
+        assertTrue(on.stream().anyMatch(e -> e.message().contains("budget guard is back on")),
+                () -> "and one with windows turns it back on: " + on);
+        assertEquals(0.4, SubscriptionUsage.snapshots().get(provider).pressure(), 1e-9);
+        readRouterAt(later.plusSeconds(61), canned(200, LIVE_BODY, seen));
+        assertEquals(3, seen.size(), () -> "the router's minute TTL is back: " + seen);
+    }
+
+    /** The router's read, synchronously: {@code current()} refreshes on a virtual thread the canned transport cannot reach. */
+    private SubscriptionUsage.Snapshot readRouterAt(Instant at, OkHttpClient client) {
+        return AppClock.callWith(Clock.fixed(at, ZoneOffset.UTC),
+                () -> HttpFactories.callWith(client, () -> SubscriptionUsage.fresh(ollamaCloud())));
+    }
+
+    private SubscriptionUsage.Snapshot weekAt(Instant at, OkHttpClient client) {
+        return AppClock.callWith(Clock.fixed(at, ZoneOffset.UTC),
+                () -> HttpFactories.callWith(client, () -> SubscriptionUsage.history(ollamaCloud(), Range.WEEK)));
+    }
+
+    /** {@code noteFailure} acts on a usage source only for a provider the registry knows is on ollama.com. */
+    private void registerOnOllamaCom() {
+        ConfigService.set("provider." + provider + ".baseUrl", "https://ollama.com/v1");
+        ConfigService.set("provider." + provider + ".apiKey", "sk-test");
+        ConfigService.set("provider." + provider + ".models", "[{\"id\":\"kimi-k3\"},{\"id\":\"glm-5.3\"}]");
+        for (var i = 0; i < 50 && ProviderRegistry.get(provider) == null; i++) ProviderRegistry.refresh();
+        assertNotNull(ProviderRegistry.get(provider), "registered, or the test would pass without a usage source");
+    }
+
+    private void unregister() {
+        for (var suffix : new String[] {".baseUrl", ".apiKey", ".models"}) {
+            ConfigService.delete("provider." + provider + suffix);
+        }
+        ProviderRegistry.refresh();
+    }
+
+    @Test
     void aProviderWithNoKeyAnswersNoHistoryWithAWarning() {
         var events = EventLogger.captureForTest(() -> assertNull(SubscriptionUsage.history(provider, Range.DAY)));
         assertTrue(events.stream().anyMatch(e -> "WARN".equals(e.level()) && e.message().contains("no API key")),

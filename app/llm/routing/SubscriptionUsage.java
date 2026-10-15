@@ -36,12 +36,14 @@ import java.util.concurrent.TimeUnit;
  * {@code range} takes {@code 24h}, {@code 7d} or {@code 30d} (JCLAW-1449). Every {@code limits.*.usage}
  * is read whenever a body carries it, so the budget guard returns by itself if the fractions do.
  * Routing reads the cached value and never waits on the fetch; a refresh starts in the background
- * once the value is a minute old.
+ * once the value is a minute old, or an hour old while it carries no windows, since a read can then
+ * only learn whether they returned. ollama.com answers that unparameterised read for range {@code 7d},
+ * so one fetch fills both it and the 7d entry.
  *
  * <p><b>Reactive.</b> A call that fails for exhausted credit marks what failed as unavailable for a
  * while. On a host with a usage source only the model is marked — Ollama answers 402 for a model
- * whose tier the plan does not include while the plan itself has headroom — and the next route
- * re-reads the usage; elsewhere the whole provider is, since a balance is account-wide.
+ * whose tier the plan does not include while the plan itself has headroom — and, while the guard is
+ * on, the next route re-reads the usage; elsewhere the whole provider is, since a balance is account-wide.
  */
 public final class SubscriptionUsage {
 
@@ -98,6 +100,8 @@ public final class SubscriptionUsage {
     private record Key(String provider, @Nullable Range range) {}
 
     static final Duration TTL = Duration.ofSeconds(60);
+    /** How long the router's own read stands while its provider reports no quota windows. */
+    static final Duration GUARD_OFF_RECHECK = Duration.ofHours(1);
     static final Duration MODEL_QUOTA_COOLDOWN = Duration.ofMinutes(60);
     static final Duration PROVIDER_QUOTA_COOLDOWN = Duration.ofMinutes(15);
     private static final long FETCH_TIMEOUT_MS = 5_000;
@@ -182,7 +186,8 @@ public final class SubscriptionUsage {
 
     private static @Nullable Snapshot refreshNow(ProviderConfig config, @Nullable Range range) {
         var key = new Key(config.name(), range);
-        LAST_ATTEMPT.put(key, AppClock.now());
+        var attempted = AppClock.now();
+        LAST_ATTEMPT.put(key, attempted);
         var origin = origin(config.baseUrl());
         if (origin == null) return null;
         try {
@@ -213,7 +218,15 @@ public final class SubscriptionUsage {
                         : new Snapshot(windows, history.range(), history.total(), history.buckets(), now);
                 SNAPSHOTS.put(key, snapshot);
                 WARNED.remove(key);
-                if (range == null) noteGuard(config.name(), !windows.isEmpty());
+                var twin = twin(key, snapshot);
+                if (twin != null) {
+                    // Snapshot before stamp: a reader finding the stamp fresh must find the snapshot too.
+                    SNAPSHOTS.put(twin, snapshot);
+                    LAST_ATTEMPT.put(twin, attempted);
+                    WARNED.remove(twin);
+                }
+                // The guard follows whatever the router's entry now holds, a 7d read's windows included.
+                if (range == null || twin != null) noteGuard(config.name(), !windows.isEmpty());
                 return snapshot;
             }
         } catch (IOException | RuntimeException e) {
@@ -224,6 +237,13 @@ public final class SubscriptionUsage {
                     + (apiKey.isEmpty() ? message : message.replace(apiKey, "****")));
             return null;
         }
+    }
+
+    /** The router's entry for a 7d read, or the 7d entry for the router's, when the body reports 7d; else null. */
+    private static @Nullable Key twin(Key key, Snapshot snapshot) {
+        if (!Range.WEEK.param.equals(snapshot.range())) return null;
+        if (key.range() == null) return new Key(key.provider(), Range.WEEK);
+        return key.range() == Range.WEEK ? new Key(key.provider(), null) : null;
     }
 
     private record History(@Nullable String range, long total, List<Bucket> buckets) {}
@@ -316,7 +336,8 @@ public final class SubscriptionUsage {
     /**
      * Learn from a failed call. Only exhausted credit marks anything; a rate limit on a host with a
      * usage source just makes the next route re-read the usage, since a spent session window
-     * surfaces as a 429 before the fraction next refreshes.
+     * surfaces as a 429 before the fraction next refreshes. With the guard off there is no fraction
+     * to re-read, so neither failure hastens the hourly read.
      */
     public static void noteFailure(Throwable failure) {
         if (!(failure instanceof LlmException e)) return;
@@ -332,10 +353,10 @@ public final class SubscriptionUsage {
                 } else {
                     markUnavailable(f.provider(), PROVIDER_QUOTA_COOLDOWN);
                 }
-                if (usageSource) LAST_ATTEMPT.remove(new Key(f.provider(), null));
+                if (usageSource) hastenRead(f.provider());
             }
             case RATE_LIMITED -> {
-                if (usageSource) LAST_ATTEMPT.remove(new Key(f.provider(), null));
+                if (usageSource) hastenRead(f.provider());
             }
             default -> {
                 // Other failures say nothing about credit.
@@ -385,7 +406,12 @@ public final class SubscriptionUsage {
 
     private static boolean isStale(Key key) {
         var last = LAST_ATTEMPT.get(key);
-        return last == null || !last.plus(TTL).isAfter(AppClock.now());
+        var maxAge = key.range() == null && GUARD_OFF.contains(key.provider()) ? GUARD_OFF_RECHECK : TTL;
+        return last == null || !last.plus(maxAge).isAfter(AppClock.now());
+    }
+
+    private static void hastenRead(String provider) {
+        if (!GUARD_OFF.contains(provider)) LAST_ATTEMPT.remove(new Key(provider, null));
     }
 
     private static void markUnavailable(String key, Duration cooldown) {
