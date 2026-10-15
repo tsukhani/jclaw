@@ -8,6 +8,7 @@ import play.test.UnitTest;
 import services.AgentService;
 import services.CodingRunFolders;
 import services.ConfigService;
+import services.EventLogger;
 import tools.ClaudeAdapter;
 import tools.GenericAdapter;
 import tools.HarnessSandbox;
@@ -129,9 +130,9 @@ class HarnessSandboxTest extends UnitTest {
 
         int homeTmpfs = indexOfPair(argv, "--tmpfs", home);
         assertTrue(homeTmpfs >= 0, "the $HOME tmpfs is missing, argv=" + argv);
-        assertTrue(indexOfPair(argv, "--bind", writeRoot.getAbsolutePath()) > homeTmpfs,
+        assertTrue(indexOfPair(argv, "--bind", SandboxHiddenRoots.canonical(writeRoot.toPath()).toString()) > homeTmpfs,
                 "the write-root bind must follow the $HOME tmpfs, argv=" + argv);
-        assertTrue(indexOfPair(argv, "--ro-bind-try", "/opt/state") > homeTmpfs,
+        assertTrue(indexOfPair(argv, "--ro-bind-try", SandboxHiddenRoots.canonical("/opt/state").toString()) > homeTmpfs,
                 "allowances must follow the $HOME tmpfs, argv=" + argv);
         assertEquals(List.of("/bin/sh", "-c", "true"), argv.subList(argv.size() - 3, argv.size()));
     }
@@ -143,15 +144,15 @@ class HarnessSandboxTest extends UnitTest {
         return -1;
     }
 
-    /** A fake install at {@code root}: its three state directories, canonical as production passes them. */
+    /** A fake install at {@code root}: its state directories, canonical as production passes them. */
     private static List<Path> stateOf(Path root) {
-        return List.of(root.resolve("data"), root.resolve("certs"), root.resolve("conf"));
+        return List.of(root.resolve("data"), root.resolve("certs"), root.resolve("conf"), root.resolve("logs"));
     }
 
     /**
      * JCLAW-1452 AC3: the $HOME tmpfs hides a checkout under the home directory but nothing
-     * outside it, so data/, certs/ and conf/ each get their own tmpfs, after the $HOME one, in
-     * both layouts. The write root outside them is still bound.
+     * outside it, so data/, certs/, conf/ and logs/ each get their own tmpfs, after the $HOME one,
+     * in both layouts. The write root outside them is still bound.
      */
     @Test
     void linuxHidesJClawStateWhetherOrNotTheCheckoutIsUnderHome() {
@@ -204,13 +205,61 @@ class HarnessSandboxTest extends UnitTest {
                 "argv=" + argv);
     }
 
+    /**
+     * A tmpfs needs an existing mount point, so the backup directory, which JClaw owns, is
+     * created and then hidden; a backup made after a long-running harness started would
+     * otherwise be readable to it. Any other missing root is skipped, and a directory that
+     * cannot be created is logged rather than thrown.
+     */
+    @Test
+    void linuxCreatesAMissingBackupDirectoryAndHidesIt() throws Exception {
+        var root = SandboxHiddenRoots.canonical(session).resolve("jclaw");
+        var backups = root.resolve("backups");
+        assertFalse(Files.exists(backups));
+
+        var hidden = HarnessSandbox.linuxHiddenRoots(backups, List.of(root.resolve("certs"), backups));
+        assertTrue(Files.isDirectory(backups), "the backup directory must be created");
+        assertEquals(List.of(backups), hidden, "a missing root that is not the backup directory gets no tmpfs");
+        var argv = HarnessSandbox.linuxArgv(List.of("true"), session.toFile(), List.of(), "/home/operator", hidden);
+        assertTrue(indexOfPair(argv, "--tmpfs", backups.toString()) >= 0, "argv=" + argv);
+
+        var blocked = Files.writeString(session.resolve("a-file"), "x").resolve("backups");
+        var events = EventLogger.captureForTest(() ->
+                assertEquals(List.of(), HarnessSandbox.linuxHiddenRoots(blocked, List.of(blocked))));
+        assertTrue(events.stream().anyMatch(e -> "WARN".equals(e.level()) && e.message().contains(blocked.toString())),
+                "the failure must be logged, events=" + events);
+    }
+
+    /**
+     * Every grant is bound at its canonical path, where the tmpfs mounts go. A write root above
+     * data/ reached through a symlink, bound at the link, would show data/ at a path no tmpfs covers.
+     */
+    @Test
+    void linuxBindsAGrantReachedThroughASymlinkAtItsCanonicalPath() throws Exception {
+        var real = Files.createDirectories(SandboxHiddenRoots.canonical(session).resolve("real/jclaw"));
+        var link = Files.createSymbolicLink(session.resolve("link"), real.getParent());
+        var throughLink = link.resolve("jclaw");
+        var argv = HarnessSandbox.linuxArgv(List.of("true"), throughLink.toFile(),
+                List.of(throughLink.resolve("workspace").toString()), "/home/operator", stateOf(real));
+
+        int bind = indexOfPair(argv, "--bind", real.toString());
+        assertTrue(bind >= 0, "the write root must be bound at its canonical path, argv=" + argv);
+        assertTrue(indexOfPair(argv, "--ro-bind-try", real.resolve("workspace").toString()) >= 0,
+                "an allowance too, argv=" + argv);
+        for (var hidden : stateOf(real)) {
+            assertTrue(indexOfPair(argv, "--tmpfs", hidden.toString()) > bind, hidden + " must cover the bind, argv=" + argv);
+        }
+        assertTrue(argv.stream().noneMatch(a -> a.startsWith(link.toString())),
+                "nothing may be bound at the symlinked path, argv=" + argv);
+    }
+
     /** The production argv hides this install's own state directories at their canonical paths. */
     @Test
     void linuxProductionArgvHidesThisInstallsState() {
         var argv = HarnessSandbox.linuxArgv(List.of("true"), session.toFile(), List.of());
         var appRoot = Play.applicationPath.toPath();
         assertTrue(Files.isDirectory(appRoot.resolve("conf")), "a checkout always has conf/");
-        for (var dir : List.of("data", "certs", "conf")) {
+        for (var dir : List.of("data", "certs", "conf", "logs")) {
             var path = appRoot.resolve(dir);
             if (!Files.isDirectory(path)) continue;
             assertTrue(indexOfPair(argv, "--tmpfs", SandboxHiddenRoots.canonical(path).toString()) >= 0,
@@ -222,7 +271,7 @@ class HarnessSandboxTest extends UnitTest {
     void hiddenRootsAreThisInstallsStateAtCanonicalPaths() throws Exception {
         var hidden = SandboxHiddenRoots.current();
         var appRoot = Play.applicationPath.toPath();
-        for (var dir : List.of("data", "certs", "conf")) {
+        for (var dir : List.of("data", "certs", "conf", "logs")) {
             assertTrue(hidden.contains(SandboxHiddenRoots.canonical(appRoot.resolve(dir))), dir + " in " + hidden);
         }
         var link = Files.createSymbolicLink(session.resolve("link"), Files.createDirectory(session.resolve("target")));
@@ -249,6 +298,7 @@ class HarnessSandboxTest extends UnitTest {
         assertTrue(lastWriteGrant >= 0 && denyData > lastWriteGrant, profile);
         assertTrue(profile.contains("(deny file-read* file-write* (subpath \"" + root.resolve("certs") + "\"))"), profile);
         assertTrue(profile.contains("(deny file-read* file-write* (subpath \"" + root.resolve("conf") + "\"))"), profile);
+        assertTrue(profile.contains("(deny file-read* file-write* (subpath \"" + root.resolve("logs") + "\"))"), profile);
         assertTrue(reopen > denyData, "the write root beneath data/ must be reopened after the deny: " + profile);
         assertTrue(denySsh > reopen, "the $HOME secrets must come last: " + profile);
         assertFalse(profile.contains("(allow file-read* file-write* (subpath \"" + root.resolve("workspace") + "\"))"),
@@ -289,11 +339,11 @@ class HarnessSandboxTest extends UnitTest {
                 "and never bound back after it, argv=" + argv);
     }
 
-    /** Sentinel files of this test's own under the app root's data/ and certs/; the caller deletes them. */
+    /** Sentinel files of this test's own under the app root's data/, certs/ and logs/; the caller deletes them. */
     private static List<Path> writeStateSentinels(String content) throws Exception {
         var appRoot = Play.applicationPath.toPath();
         var out = new java.util.ArrayList<Path>();
-        for (var dir : List.of("data", "certs")) {
+        for (var dir : List.of("data", "certs", "logs")) {
             var sentinel = Files.createDirectories(appRoot.resolve(dir))
                     .resolve("jclaw-1452-sentinel-" + java.util.UUID.randomUUID() + ".txt");
             Files.writeString(sentinel, content);
@@ -311,7 +361,7 @@ class HarnessSandboxTest extends UnitTest {
     /**
      * JCLAW-1452 AC2: a confined harness run, launched the way the ACP runner launches one
      * (the session folder as write root, the adapter's allowances, an untrusted origin), cannot
-     * read the app root's data/ or certs/, while its session folder stays readable and writable.
+     * read the app root's data/, certs/ or logs/, while its session folder stays readable and writable.
      */
     @Test
     @EnabledOnOs(OS.MAC)
@@ -323,7 +373,8 @@ class HarnessSandboxTest extends UnitTest {
         try {
             var folder = CodingRunFolders.open(coding, "read jclaw state", null).dir();
             var env = Play.applicationPath.toPath().resolve("certs/.env");
-            var script = "cat '%s' '%s' 2>/dev/null || echo STATE_DENIED; ".formatted(sentinels.get(0), sentinels.get(1))
+            var files = String.join(" ", sentinels.stream().map(s -> "'" + s + "'").toList());
+            var script = "cat %s 2>/dev/null || echo STATE_DENIED; ".formatted(files)
                     + "cat '%s' >/dev/null 2>&1 && echo ENV_READABLE || echo ENV_DENIED; ".formatted(env)
                     + "echo session-ok > note.txt && cat note.txt";
             var command = List.of("/bin/sh", "-c", script);
@@ -337,7 +388,7 @@ class HarnessSandboxTest extends UnitTest {
             var wrapped = HarnessSandbox.wrap(command, folder.toFile(), new ClaudeAdapter(), false);
             assertEquals("sandbox-exec", wrapped.get(0));
             var confined = run(wrapped, folder);
-            assertFalse(confined.contains(secret), "data/ and certs/ must be unreadable: " + confined);
+            assertFalse(confined.contains(secret), "data/, certs/ and logs/ must be unreadable: " + confined);
             assertTrue(confined.contains("STATE_DENIED"), confined);
             if (Files.isReadable(env)) assertTrue(confined.contains("ENV_DENIED"), "certs/.env must be unreadable: " + confined);
             assertTrue(confined.contains("session-ok"), "the session folder must stay writable and readable: " + confined);

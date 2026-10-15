@@ -4,11 +4,14 @@ import agents.DangerousActionGate;
 import agents.ToolContext;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
+import services.EventLogger;
 import services.ExecutableProbeSupport;
+import services.database.DatabaseService;
 import utils.ChannelOriginTrust;
 import utils.SandboxHiddenRoots;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -309,16 +312,31 @@ public final class HarnessSandbox {
      * under {@code $HOME} on every non-container install.
      */
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances) {
-        // A tmpfs needs an existing mount point under the read-only root; a missing root hides nothing.
-        var hidden = SandboxHiddenRoots.current().stream().filter(Files::isDirectory).toList();
-        return linuxArgv(argv, writeRoot, allowances, System.getProperty("user.home", ""), hidden);
+        return linuxArgv(argv, writeRoot, allowances, System.getProperty("user.home", ""),
+                linuxHiddenRoots(DatabaseService.backupsDir(), SandboxHiddenRoots.current()));
+    }
+
+    /**
+     * The {@code hidden} roots a tmpfs can cover. bwrap cannot create a mount point under the
+     * read-only root, so a missing root hides nothing; {@code backups} is JClaw's own and is
+     * created first, or a backup made after a long-running harness started would be readable to it.
+     */
+    public static List<Path> linuxHiddenRoots(Path backups, List<Path> hidden) {
+        try {
+            Files.createDirectories(backups);
+        } catch (IOException e) {
+            EventLogger.warn("tool", "Sandbox: could not create the backup directory " + backups
+                    + " to hide it from confined processes", e.toString());
+        }
+        return hidden.stream().filter(Files::isDirectory).toList();
     }
 
     /**
      * {@link #linuxArgv(List, File, List)} with the home and hidden roots given. Each
      * {@code hidden} root gets a tmpfs after the grants outside it, so an ancestor write root
-     * cannot re-expose it, and before the grants beneath it, which are bound back at their
-     * canonical paths.
+     * cannot re-expose it, and before the grants beneath it. Every grant is bound at its
+     * canonical path, where the tmpfs mounts go, so one reached through a symlink cannot show a
+     * hidden root at a path its tmpfs does not cover.
      */
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances,
                                          String home, List<Path> hidden) {
@@ -348,12 +366,9 @@ public final class HarnessSandbox {
 
     private static void addBind(List<String> out, List<String> reopened, String flag, String path,
                                 List<Path> hidden) {
-        var beneath = SandboxHiddenRoots.beneath(path, hidden);
-        if (beneath == null) {
-            out.addAll(List.of(flag, path, path));
-        } else {
-            reopened.addAll(List.of(flag, beneath.toString(), beneath.toString()));
-        }
+        var canonical = SandboxHiddenRoots.canonical(path).toString();
+        var after = SandboxHiddenRoots.beneath(path, hidden) != null;
+        (after ? reopened : out).addAll(List.of(flag, canonical, canonical));
     }
 
     private static String writeAllow(String path) {

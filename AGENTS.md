@@ -738,7 +738,7 @@ coding-harness boundary and the native-tool boundary cannot drift apart:
   then grant back the write root, any caller-passed allowances, `/private/tmp`,
   `/private/var/folders` and `/dev`;
   deny reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube`, `~/.netrc`, and
-  reads and writes of JClaw's `data/`, `certs/`, `conf/` and backup directory
+  reads and writes of JClaw's `data/`, `certs/`, `conf/`, `logs/` and backup directory
   (`utils.SandboxHiddenRoots`), reopening a write root or allowance beneath one.
 - **Linux** — `bwrap --ro-bind / / --tmpfs $HOME --bind <writeRoot> <writeRoot>`, then a tmpfs
   over each of those JClaw directories: the visible

@@ -164,10 +164,10 @@ class ShellExecSandboxTest extends UnitTest {
     }
 
     /**
-     * JCLAW-1452 AC1: a confined {@code exec} cannot read the app root's data/ or certs/ — the
-     * real directories, not the temp tree. Sentinels of the test's own stand in for the H2 file,
-     * which a test instance does not have; certs/.env and data/jclaw.mv.db are checked too when
-     * present, for readability only, so their contents never reach the result.
+     * JCLAW-1452 AC1: a confined {@code exec} cannot read the app root's data/, certs/ or logs/ —
+     * the real directories, not the temp tree. Sentinels of the test's own stand in for the H2
+     * file and the log, which a test instance does not have; certs/.env and data/jclaw.mv.db are
+     * checked too when present, for readability only, so their contents never reach the result.
      */
     @Test
     @EnabledOnOs(OS.MAC)
@@ -176,13 +176,14 @@ class ShellExecSandboxTest extends UnitTest {
         var secret = "jclaw-1452-secret-" + UUID.randomUUID();
         var sentinels = new ArrayList<Path>();
         try {
-            for (var dir : List.of("data", "certs")) {
+            for (var dir : List.of("data", "certs", "logs")) {
                 var sentinel = Files.createDirectories(appRoot.resolve(dir))
                         .resolve("jclaw-1452-sentinel-" + UUID.randomUUID() + ".txt");
                 Files.writeString(sentinel, secret);
                 sentinels.add(sentinel);
             }
-            var reads = "cat '%s' '%s' 2>/dev/null || echo STATE_DENIED".formatted(sentinels.get(0), sentinels.get(1));
+            var files = String.join(" ", sentinels.stream().map(s -> "'" + s + "'").toList());
+            var reads = "cat %s 2>/dev/null || echo STATE_DENIED".formatted(files);
             var real = new ArrayList<Path>();
             for (var file : List.of(appRoot.resolve("certs/.env"), appRoot.resolve("data/jclaw.mv.db"))) {
                 if (Files.isReadable(file)) real.add(file);
@@ -204,7 +205,7 @@ class ShellExecSandboxTest extends UnitTest {
 
             ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
             var confined = tool.execute(command, agent);
-            assertFalse(confined.contains(secret), "data/ and certs/ must be unreadable; got: " + confined);
+            assertFalse(confined.contains(secret), "data/, certs/ and logs/ must be unreadable; got: " + confined);
             assertTrue(confined.contains("STATE_DENIED"), "got: " + confined);
             for (int i = 0; i < real.size(); i++) {
                 assertTrue(confined.contains("DENIED_" + i), real.get(i) + " must be unreadable; got: " + confined);
