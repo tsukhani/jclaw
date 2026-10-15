@@ -157,7 +157,7 @@ public final class DatabaseService {
         if (!BACKUP_ID.matcher(id).matches() || (id.endsWith(UPGRADE_COPY_SUFFIX) && !isUpgradeCopy(id))) {
             return null;
         }
-        var dir = backupsDir().toAbsolutePath().normalize();
+        var dir = (isUpgradeCopy(id) ? upgradeCopiesDir() : backupsDir()).toAbsolutePath().normalize();
         var path = dir.resolve(id).toAbsolutePath().normalize();
         var parent = path.getParent();
         if (parent == null || !parent.equals(dir)) {
@@ -189,9 +189,14 @@ public final class DatabaseService {
                 && !name.equals(H2Maintenance.COMPACTING_DB + UPGRADE_COPY_SUFFIX);
     }
 
-    /** The raw data-file copies {@code jclaw.sh upgrade} keeps beside the backups, newest first. */
+    /** Where {@code jclaw.sh upgrade} writes its copies: {@code data/backups}, whatever {@value #KEY_DIR} says. */
+    static Path upgradeCopiesDir() {
+        return dataDir().resolve("backups");
+    }
+
+    /** The raw data-file copies {@code jclaw.sh upgrade} keeps, newest first. */
     public static List<BackupInfo> listUpgradeCopies() {
-        var dir = backupsDir();
+        var dir = upgradeCopiesDir();
         if (!Files.isDirectory(dir)) {
             return List.of();
         }

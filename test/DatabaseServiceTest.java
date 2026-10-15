@@ -43,6 +43,7 @@ class DatabaseServiceTest extends UnitTest {
     @Test
     void aBackupIdIsABareZipNameInsideTheBackupsDirectory() throws Exception {
         var dir = Files.createDirectories(tmp.resolve("backups"));
+        DatabaseService.dataDirForTest = tmp;
         DatabaseService.backupsDirForTest = dir;
         touch(dir, "jclaw-20260909T120000Z.zip", Instant.now());
         Files.createDirectories(tmp.resolve("elsewhere"));
@@ -216,10 +217,12 @@ class DatabaseServiceTest extends UnitTest {
         touch(tmp, H2Maintenance.DATA_FILE, Instant.now());
         touch(tmp, "jclaw-compacting.mv.db", Instant.now());
         touch(tmp, "jclaw-0.19.40-20261015T000000Z.mv.db", Instant.now());
+        touch(Files.createDirectories(tmp.resolve("backups")), "jclaw-0.19.41-20261016T000000Z.mv.db", Instant.now());
 
-        assertEquals(List.of("jclaw-0.19.40-20261015T000000Z.mv.db"),
+        assertEquals(List.of("jclaw-0.19.41-20261016T000000Z.mv.db"),
                 DatabaseService.listUpgradeCopies().stream().map(DatabaseService.BackupInfo::id).toList(),
-                "only the upgrade's own copy is offered for deletion");
+                "only the upgrade's own copy, from data/backups where jclaw.sh writes it, is offered for deletion");
+        assertNull(DatabaseService.resolveBackup("jclaw-0.19.40-20261015T000000Z.mv.db"), "nothing outside data/backups");
         assertNull(DatabaseService.resolveBackup(H2Maintenance.DATA_FILE));
         assertNull(DatabaseService.resolveBackup("jclaw-compacting.mv.db"));
         assertFalse(DatabaseService.deleteBackup(H2Maintenance.DATA_FILE));

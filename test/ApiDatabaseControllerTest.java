@@ -228,7 +228,9 @@ class ApiDatabaseControllerTest extends FunctionalTest {
         login();
         CredentialCopies.NONE.afterPass(3, 0, Instant.now().minusSeconds(3600)).write(DatabaseService.dataDirForTest);
         seedBackup("jclaw-20261016T000000Z.zip");
-        var upgradeCopy = DatabaseService.backupsDirForTest.resolve("jclaw-0.19.40-20261015T000000Z.mv.db");
+        // jclaw.sh upgrade writes its copies to data/backups, which db.backup.dir (here elsewhere) does not move.
+        var upgradeCopy = Files.createDirectories(DatabaseService.dataDirForTest.resolve("backups"))
+                .resolve("jclaw-0.19.40-20261015T000000Z.mv.db");
         Files.writeString(upgradeCopy, "H:2,x");
 
         var json = JsonParser.parseString(getContent(GET("/api/system/database"))).getAsJsonObject();
