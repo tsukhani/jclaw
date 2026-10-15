@@ -625,7 +625,11 @@ function usageTone(fraction: number): string {
           <span
             v-else
             class="text-fg-muted"
-          >{{ p.usageSource ? 'Usage not read yet' : 'No usage API: benched only after an out-of-credit reply' }}</span>
+          >{{ !p.usageSource
+            ? 'No usage API: benched only after an out-of-credit reply'
+            : p.fetchedAt
+              ? 'No quota windows reported: benched only after an out-of-credit reply'
+              : 'Usage not read yet' }}</span>
         </span>
       </div>
       <div

@@ -20,6 +20,7 @@ import {
 import { isDeclaredToolIncapable, isLocalProvider } from '~/composables/useProviders'
 import { isSensitiveKey } from '~/utils/secrets'
 import type { Agent, ApiErrorDetails, ConfigEntry, DiscoveredModel, DiscoverModelsResponse, ProviderInfo, ProviderModelDef } from '~/types/api'
+import OllamaCloudUsage from './OllamaCloudUsage.vue'
 import SettingsConfigField from './SettingsConfigField.vue'
 
 const { configData, saving, refresh, getProviderModels, editingKey, editValue, editError, startEdit, updateEntry, providersData } = useSettingsConfig()
@@ -140,6 +141,11 @@ function usesNativeApi(name: string): boolean {
 
 async function toggleNativeApi(name: string) {
   await writeProviderConfig(name, nativeApiKey(name), usesNativeApi(name) ? 'false' : 'true')
+}
+
+// JCLAW-1449: Ollama Cloud's request history, once it has a key (the backend registers it only then).
+function showsCloudUsage(name: string): boolean {
+  return name === 'ollama-cloud' && (providersData.value ?? []).some(p => p.name === name)
 }
 
 // JCLAW-110: per-provider enabled flag. A provider is considered enabled
@@ -1151,6 +1157,7 @@ const groupedProviders = computed(() => {
               />
             </button>
           </div>
+          <OllamaCloudUsage v-if="showsCloudUsage(name)" />
         </div>
 
         <!-- Expanded model management panel -->

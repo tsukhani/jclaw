@@ -71,6 +71,8 @@ registerEndpoint('/api/router/status', () => ({
   providers: [
     { provider: 'ollama-cloud', prepaid: true, usageSource: true, windows: { session: 0.02, weekly: 0.81 }, fetchedAt: '2026-09-18T00:00:00Z' },
     { provider: 'openrouter', prepaid: false, usageSource: false, windows: {}, fetchedAt: null },
+    // JCLAW-1449: ollama.com answered, but with request counts and no quota windows.
+    { provider: 'ollama-cloud-b', prepaid: true, usageSource: true, windows: {}, fetchedAt: '2026-10-15T13:17:00Z' },
   ],
   unavailable: {},
 }))
@@ -402,5 +404,7 @@ describe('SettingsModelRouterPanel', () => {
     const usage = c.find('[data-testid="router-usage"]')
     expect(usage.text()).toContain('weekly 81%')
     expect(usage.text()).toContain('No usage API')
+    expect(usage.text()).toContain('No quota windows reported: benched only after an out-of-credit reply')
+    expect(usage.text()).not.toContain('Usage not read yet')
   })
 })
