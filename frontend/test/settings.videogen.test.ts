@@ -18,6 +18,7 @@ function setupApi(opts?: {
   capturePost?: (b: { key?: string, value?: string }) => void
   extraEntries?: Array<{ key: string, value: string }>
   videoModels?: Array<{ slug: string, name: string, description: string | null }>
+  bflVideoModels?: Array<{ slug: string, description: string | null }>
 }) {
   registerEndpoint('/api/agents', () => [
     { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5', enabled: true, isMain: true, providerConfigured: true },
@@ -31,6 +32,7 @@ function setupApi(opts?: {
   registerEndpoint('/api/providers/vllm/reachable', () => ({ provider: 'vllm', reachable: false, modelCount: 0, reason: 'vllm not running' }))
   registerEndpoint('/api/providers/openrouter/video-models', () => ({ provider: 'openrouter', models: [], count: 0 }))
   registerEndpoint('/api/videogen/models', () => opts?.videoModels ?? [])
+  registerEndpoint('/api/videogen/bfl/models', () => opts?.bflVideoModels ?? [])
   const base = [
     { key: 'provider.ollama-cloud.baseUrl', value: 'https://ollama.com/v1' },
     { key: 'provider.ollama-cloud.apiKey', value: 'sk-cloud-****' },
@@ -155,6 +157,78 @@ describe('Settings — Video Generation (JCLAW-236)', () => {
     const hit = captured.find(b => b.key === 'videogen.cloud.model')
     expect(hit).toBeTruthy()
     expect(hit!.value).toBe('wan-video/wan-2.2-t2v-fast')
+  })
+})
+
+describe('Settings — Video Generation through Black Forest Labs', () => {
+  beforeEach(() => clearNuxtData())
+
+  it('with BFL selected, checks only the BFL radio and lists its video models', async () => {
+    setupApi({
+      bflVideoModels: [{ slug: 'flux-3-video', description: 'Generate a video with FLUX 3.' }],
+      extraEntries: [
+        { key: 'provider.bfl.apiKey', value: 'bfl-****' },
+        { key: 'videogen.provider', value: 'bfl' },
+      ],
+    })
+    const c = await mountSettingsSection('video-generation')
+
+    const bfl = c.find<HTMLInputElement>('#videogen-provider-bfl')
+    expect(bfl.element.disabled).toBe(false)
+    expect(bfl.element.checked).toBe(true)
+    // BFL is a cloud backend: the Self-Hosted radio must not read it as a local engine.
+    expect(c.find<HTMLInputElement>('#videogen-provider-local').element.checked).toBe(false)
+    expect(c.find<HTMLInputElement>('#videogen-provider-replicate').element.checked).toBe(false)
+
+    const select = c.find('select[aria-label="Black Forest Labs video model"]')
+    await vi.waitFor(() => {
+      const values = select.findAll('option').map(o => (o.element as HTMLOptionElement).value)
+      expect(values).toEqual(['', 'flux-3-video'])
+    })
+  })
+
+  it('POSTs videogen.bfl.model when a BFL model is chosen', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({
+      capturePost: b => captured.push(b),
+      bflVideoModels: [{ slug: 'flux-3-video', description: null }],
+      extraEntries: [
+        { key: 'provider.bfl.apiKey', value: 'bfl-****' },
+        { key: 'videogen.provider', value: 'bfl' },
+      ],
+    })
+    const c = await mountSettingsSection('video-generation')
+
+    const select = c.find('select[aria-label="Black Forest Labs video model"]')
+    await vi.waitFor(() => expect(select.findAll('option').length).toBe(2))
+    await select.setValue('flux-3-video')
+    await flushPromises()
+
+    expect(captured).toContainEqual({ key: 'videogen.bfl.model', value: 'flux-3-video' })
+  })
+
+  it('without a BFL key, the BFL radio is disabled', async () => {
+    setupApi({ extraEntries: [
+      { key: 'provider.replicate.apiKey', value: 'r8_****' },
+      { key: 'videogen.provider', value: 'replicate' },
+    ] })
+    const c = await mountSettingsSection('video-generation')
+
+    expect(c.find<HTMLInputElement>('#videogen-provider-bfl').element.disabled).toBe(true)
+    expect(c.text()).toContain('no API key — set in Image Generation')
+  })
+
+  it('enabling with only a BFL key selects BFL', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ capturePost: b => captured.push(b), extraEntries: [{ key: 'provider.bfl.apiKey', value: 'bfl-****' }] })
+    const c = await mountSettingsSection('video-generation')
+
+    const toggle = c.find<HTMLButtonElement>('button[aria-label="Enable video generation"]')
+    expect(toggle.element.disabled).toBe(false)
+    await toggle.trigger('click')
+    await flushPromises()
+
+    expect(captured).toContainEqual({ key: 'videogen.provider', value: 'bfl' })
   })
 })
 

@@ -48,6 +48,8 @@ GET     /api/imagegen/local/state               ApiImagegenController.state
 POST    /api/imagegen/local/pull                ApiImagegenController.pull
 # Replicate text-to-image model discovery — Settings model dropdown
 GET     /api/imagegen/models                     ApiImagegenController.models
+# Black Forest Labs image model discovery — Settings model dropdown
+GET     /api/imagegen/bfl/models                 ApiImagegenController.bflModels
 # Live step-progress of an in-flight local image generation — chat progress bar
 GET     /api/imagegen/progress                   ApiImagegenController.progress
 # Local image-gen host capability (GPU/VRAM) — Settings Self-Hosted hardware gate
@@ -66,6 +68,8 @@ GET     /api/videogen/jobs/recent                ApiVideogenController.recent
 GET     /api/videogen/state                      ApiVideogenController.state
 # Replicate text-to-video model discovery — Settings model dropdown (JCLAW-236)
 GET     /api/videogen/models                     ApiVideogenController.models
+# Black Forest Labs video model discovery — Settings model dropdown
+GET     /api/videogen/bfl/models                 ApiVideogenController.bflModels
 # Local engine capability probe — adaptive Settings dropdown (JCLAW-232/233)
 GET     /api/videogen/capability                 ApiVideogenController.capability
 POST    /api/videogen/capability/probe           ApiVideogenController.probeCapability

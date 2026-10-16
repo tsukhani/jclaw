@@ -8,17 +8,18 @@ import java.util.Optional;
 
 /**
  * Picks the {@link VideoGenerationService} matching the operator's {@code videogen.provider} selection
- * (JCLAW-231), single-select like {@code services.imagegen.ImageGenerationRouter}. Cloud video ships
- * with a single provider:
+ * (JCLAW-231), single-select like {@code services.imagegen.ImageGenerationRouter}:
  *
  * <ul>
  *   <li>{@code replicate} → {@link ReplicateVideoGenerationClient} — fronts WAN 2 and LTX in cloud form
  *       for users without a local GPU, so one aggregator covers the whole cloud path.</li>
+ *   <li>{@code bfl} → {@link BflVideoGenerationClient} — Black Forest Labs' first-party FLUX 3 Video,
+ *       on the key image generation already uses.</li>
  *   <li>{@code ltx-local} / {@code wan-local} → {@link LocalVideoGenerationClient} — the on-host Python
  *       sidecar (JCLAW-232/233), gated on free VRAM, returning real per-step progress.</li>
  * </ul>
  *
- * <p>A second cloud client was deliberately dropped (SV-1 / JCLAW-510): Replicate already fronts both
+ * <p>A second cloud aggregator was deliberately dropped (SV-1 / JCLAW-510): Replicate already fronts both
  * WAN 2 and LTX, so another aggregator would add no capability, only a price/speed hedge — fal.ai is the
  * documented future option if that hedge is ever wanted (the true Replicate peer: same poll-without-webhook
  * queue API), rather than a first-party API like Runway/Luma/Kling. Returns {@link Optional#empty()}
@@ -48,6 +49,7 @@ public final class VideoGenerationRouter {
         if (provider == null || provider.isBlank()) return null;
         return switch (provider) {
             case "replicate" -> Strings.firstNonBlank(ConfigService.get("videogen.cloud.model"));
+            case "bfl" -> Strings.firstNonBlankOr(BflVideoGenerationClient.DEFAULT_MODEL, ConfigService.get("videogen.bfl.model"));
             case "ltx-local" -> Strings.firstNonBlankOr("ltx", ConfigService.get(LOCAL_MODEL_KEY));
             case "wan-local" -> Strings.firstNonBlankOr("wan-5b", ConfigService.get(LOCAL_MODEL_KEY));
             default -> null;
@@ -63,6 +65,7 @@ public final class VideoGenerationRouter {
         if (provider == null || provider.isBlank()) return Optional.empty();
         return switch (provider) {
             case "replicate" -> Optional.of(new ReplicateVideoGenerationClient());
+            case "bfl" -> Optional.of(new BflVideoGenerationClient());
             // Local engines (JCLAW-232/233): one Python sidecar per JVM, the selected variant passed
             // through as videogen.local.model. The adaptive picker offers a free-VRAM-tiered spectrum per
             // platform (SV-2) — LTX quantization tiers (ltx / ltx-q8 / ltx-bf16) on Apple Silicon, WAN

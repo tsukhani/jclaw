@@ -1,14 +1,15 @@
 <script setup lang="ts">
 // Video Generation settings panel (JCLAW-680 second pass).
 // Moved verbatim from pages/settings.vue. Agents produce videos via the
-// generate_video tool; the operator picks Replicate cloud (reusing the
-// Replicate API key from Image Generation) or a self-hosted WAN/LTX engine
+// generate_video tool; the operator picks a cloud backend, Black Forest Labs or
+// Replicate (each reusing its API key from Image Generation), or a self-hosted WAN/LTX engine
 // chosen by an adaptive GPU-capability probe. Config reads/writes go through
 // the shared store; the inline config-row editor + API-key checks injected.
 
 const { configData, saving, refresh, saveField, apiKeyConfigured } = useSettingsConfig()
 
 const replicateApiKeyConfigured = computed(() => apiKeyConfigured('replicate'))
+const bflApiKeyConfigured = computed(() => apiKeyConfigured('bfl'))
 
 // Cloud video generation via Replicate (JCLAW-231/235). Mirrors Image Generation: a non-empty
 // videogen.provider IS the "enabled" state. Replicate is the only cloud backend today (the second
@@ -34,7 +35,8 @@ async function setVideogenProvider(value: string) {
 async function toggleVideogenEnabled() {
   if (videogenEnabled.value) return setVideogenProvider('')
   if (replicateApiKeyConfigured.value) return setVideogenProvider('replicate')
-  // No Replicate key: Self-Hosted is the only backend, so enabling picks the best engine this machine runs.
+  if (bflApiKeyConfigured.value) return setVideogenProvider('bfl')
+  // No cloud key: Self-Hosted is the only backend, so enabling picks the best engine this machine runs.
   await selectSelfHosted()
 }
 // Model dropdown: Replicate curates a `text-to-video` collection; GET /api/videogen/models returns its
@@ -57,6 +59,26 @@ const videogenModelOptions = computed<VideoModel[]>(() => {
   // error) so the select shows it as the active choice instead of silently snapping to the default.
   if (saved && !discovered.some(m => m.slug === saved)) {
     return [{ slug: saved, name: saved, description: null }, ...discovered]
+  }
+  return discovered
+})
+
+// BFL video models, read server-side from BFL's published API spec; stored as videogen.bfl.model, a
+// separate key from Replicate's so switching backends never sends one provider's slug to the other.
+interface BflModel {
+  slug: string
+  description: string | null
+}
+const bflModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'videogen.bfl.model')?.value ?? '',
+)
+const { data: bflModels, refresh: refreshBflModels, status: bflModelsStatus }
+  = useLazyFetch<BflModel[]>('/api/videogen/bfl/models')
+const bflModelOptions = computed<BflModel[]>(() => {
+  const discovered = bflModels.value ?? []
+  const saved = bflModel.value
+  if (saved && !discovered.some(m => m.slug === saved)) {
+    return [{ slug: saved, description: null }, ...discovered]
   }
   return discovered
 })
@@ -148,12 +170,13 @@ function stopVideoCapPolling() {
     videoCapPollTimer = null
   }
 }
-// Top-level Self-Hosted vs Replicate choice. "Local" is any provider that isn't the lone cloud backend
-// (replicate) — i.e. an ltx-local / wan-local engine. The header radio shows checked whenever local is
-// active, even before a GPU probe, so the current backend is always clear.
+// Top-level Self-Hosted vs cloud choice. "Local" is any provider that isn't a cloud backend — i.e. an
+// ltx-local / wan-local engine. The header radio shows checked whenever local is active, even before a
+// GPU probe, so the current backend is always clear.
+const CLOUD_BACKENDS = ['bfl', 'replicate']
 const videogenIsLocal = computed(() => {
   const p = videogenProvider.value
-  return p !== '' && p !== 'replicate'
+  return p !== '' && !CLOUD_BACKENDS.includes(p)
 })
 // The radios' own selections, so a failed save can put them back; a one-way :checked never re-renders.
 const videogenBackend = computed(() => {
@@ -172,7 +195,7 @@ watch(activeLocalEngineId, (v) => {
 // The backend radios, the engine picker and the GPU probe all report here.
 const backendSave = useSaveAttempt()
 const videogenBackendError = backendSave.saveError
-// The Replicate model select and the job timeout, which save on change.
+// The BFL and Replicate model selects and the job timeout, which save on change.
 const { saveError: fieldError, attempt: attemptField } = useSaveAttempt()
 function putBackVideogenChoice() {
   chosenVideogenBackend.value = videogenBackend.value
@@ -183,10 +206,10 @@ function putBackVideogenChoice() {
 const videoLocalUnsupported = computed(() =>
   videoCapState.value === 'READY' && !videoEngines.value.some(e => e.runnable),
 )
-// Why the toggle cannot turn on: no Replicate key, and no self-hosted engine this machine can run.
+// Why the toggle cannot turn on: no cloud key, and no self-hosted engine this machine can run.
 const noBackendReason = computed(() => {
-  if (videogenEnabled.value || replicateApiKeyConfigured.value) return ''
-  const fix = 'Set a Replicate API key in Image Generation above'
+  if (videogenEnabled.value || replicateApiKeyConfigured.value || bflApiKeyConfigured.value) return ''
+  const fix = 'Set a Black Forest Labs or Replicate API key in Image Generation above'
   if (videoCapability.value && !videoCapability.value.uvAvailable) return `${fix}, or install uv to run a self-hosted engine.`
   if (videoLocalUnsupported.value) return `${fix}: this machine cannot run a self-hosted engine.`
   if (videoCapState.value === 'ERROR' || videoCapState.value === 'UNAVAILABLE') return `${fix}: the self-hosted GPU probe failed.`
@@ -233,7 +256,7 @@ onUnmounted(() => stopVideoCapPolling())
       Let agents produce short videos with the <span class="font-mono">generate_video</span> tool, then
       enable the tool per agent in the agent editor (it is off by default). Generation is asynchronous —
       a “generating” card appears in chat and swaps to the finished clip when the job completes (minutes).
-      Replicate reuses the API key set in <span class="text-fg-muted">Image Generation</span> above.
+      Black Forest Labs and Replicate reuse the API keys set in <span class="text-fg-muted">Image Generation</span> above.
     </p>
 
     <!-- Active-backend status line. -->
@@ -293,6 +316,72 @@ onUnmounted(() => stopVideoCapPolling())
         <legend class="sr-only">
           Video generation backend
         </legend>
+
+        <!-- Black Forest Labs — FLUX 3 Video; reuses the BFL API key from Image Generation. -->
+        <div class="bg-surface-elevated border border-border">
+          <label
+            for="videogen-provider-bfl"
+            class="px-4 py-2.5 flex items-center gap-3"
+            :class="bflApiKeyConfigured ? 'cursor-pointer' : 'cursor-not-allowed bg-amber-50/40 dark:bg-amber-900/10'"
+            :title="bflApiKeyConfigured ? '' : 'Set a Black Forest Labs API key in Image Generation above to enable.'"
+          >
+            <input
+              id="videogen-provider-bfl"
+              v-model="chosenVideogenBackend"
+              type="radio"
+              name="videogen-provider"
+              value="bfl"
+              :disabled="!bflApiKeyConfigured"
+              class="accent-emerald-600"
+              @change="setVideogenProvider('bfl')"
+            >
+            <span
+              class="flex-1 text-sm"
+              :class="bflApiKeyConfigured ? 'text-fg-primary' : 'text-amber-800 dark:text-amber-300 opacity-80'"
+            >Black Forest Labs (Flux)</span>
+            <span
+              v-if="!bflApiKeyConfigured"
+              class="text-xs text-amber-700 dark:text-amber-300 border border-amber-300 dark:border-amber-600/60 bg-amber-100/60 dark:bg-amber-900/30 px-1"
+            >no API key — set in Image Generation</span>
+          </label>
+          <!-- Model — video models from BFL's API spec (GET /api/videogen/bfl/models). -->
+          <div class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3">
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Model</span>
+            <select
+              :value="bflModel"
+              :disabled="saving"
+              aria-label="Black Forest Labs video model"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              @change="attemptField(() => saveField('videogen.bfl.model', ($event.target as HTMLSelectElement).value))"
+            >
+              <option value="">
+                Provider default (flux-3-video)
+              </option>
+              <option
+                v-for="m in bflModelOptions"
+                :key="m.slug"
+                :value="m.slug"
+                :title="m.description ?? ''"
+              >
+                {{ m.slug }}
+              </option>
+            </select>
+            <button
+              type="button"
+              class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
+              :disabled="bflModelsStatus === 'pending'"
+              @click="refreshBflModels()"
+            >
+              {{ bflModelsStatus === 'pending' ? 'discovering…' : 'refresh' }}
+            </button>
+          </div>
+          <div
+            v-if="bflModelsStatus !== 'pending' && !bflModels?.length"
+            class="border-t border-border px-4 py-2 text-xs text-fg-muted"
+          >
+            No models discovered — Black Forest Labs could not be reached. Refresh to try again.
+          </div>
+        </div>
 
         <!-- Replicate — the cloud backend; reuses the Replicate API key from Image Generation. -->
         <div class="bg-surface-elevated border border-border">

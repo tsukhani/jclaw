@@ -41,6 +41,7 @@ function defaultImagegenProvider(): string {
 const { saveError, attempt } = useSaveAttempt()
 // The Replicate model select sits far below the panel's alert, so its failure shows beside it.
 const { saveError: replicateModelError, attempt: attemptReplicateModel } = useSaveAttempt()
+const { saveError: bflModelError, attempt: attemptBflModel } = useSaveAttempt()
 
 async function toggleImagegenEnabled() {
   saving.value = true
@@ -91,6 +92,26 @@ const imagegenModelOptions = computed<ImageModel[]>(() => {
 // image-to-image (Kontext / style transfer, accept an uploaded reference) vs text-to-image.
 const textToImageOptions = computed(() => imagegenModelOptions.value.filter(m => !m.imageToImage))
 const imageToImageOptions = computed(() => imagegenModelOptions.value.filter(m => m.imageToImage))
+
+// BFL image models, read server-side from BFL's published API spec (it has no list-models endpoint).
+// Stored as imagegen.bfl.model; a saved model the spec no longer lists is still surfaced.
+interface BflModel {
+  slug: string
+  description: string | null
+}
+const bflModel = computed(() =>
+  configData.value?.entries?.find(e => e.key === 'imagegen.bfl.model')?.value ?? '',
+)
+const { data: bflModels, refresh: refreshBflModels, status: bflModelsStatus }
+  = useLazyFetch<BflModel[]>('/api/imagegen/bfl/models')
+const bflModelOptions = computed<BflModel[]>(() => {
+  const discovered = bflModels.value ?? []
+  const saved = bflModel.value
+  if (saved && !discovered.some(m => m.slug === saved)) {
+    return [{ slug: saved, description: null }, ...discovered]
+  }
+  return discovered
+})
 
 // ──────────────────── Local Flux 2 Klein sidecar (JCLAW-226) ──────────────
 // Runtime state — uv availability + Flux weight download status — comes from
@@ -336,6 +357,50 @@ onUnmounted(() => stopImagegenLocalPolling())
             :error="editError"
             class="px-4 pb-2.5"
           />
+          <!-- Model — image models from BFL's API spec (GET /api/imagegen/bfl/models); shown when BFL is active. -->
+          <div
+            v-if="imagegenProvider === 'bfl'"
+            class="border-t border-border px-4 py-2.5 flex max-sm:flex-wrap items-center gap-3"
+          >
+            <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">Model</span>
+            <select
+              :value="bflModel"
+              :disabled="saving"
+              aria-label="Black Forest Labs image model"
+              class="flex-1 min-w-0 px-2 py-1 bg-muted border border-input text-sm text-fg-strong focus:outline-hidden"
+              @change="attemptBflModel(() => saveField('imagegen.bfl.model', ($event.target as HTMLSelectElement).value))"
+            >
+              <option value="">
+                Provider default (flux-2-pro)
+              </option>
+              <option
+                v-for="m in bflModelOptions"
+                :key="m.slug"
+                :value="m.slug"
+                :title="m.description ?? ''"
+              >
+                {{ m.slug }}
+              </option>
+            </select>
+            <button
+              type="button"
+              class="shrink-0 text-xs text-fg-muted hover:text-fg-strong disabled:opacity-50"
+              :disabled="bflModelsStatus === 'pending'"
+              @click="refreshBflModels()"
+            >
+              {{ bflModelsStatus === 'pending' ? 'discovering…' : 'refresh' }}
+            </button>
+          </div>
+          <ApiErrorAlert
+            :error="bflModelError"
+            class="border-t border-border px-4 py-2.5"
+          />
+          <div
+            v-if="imagegenProvider === 'bfl' && bflModelsStatus !== 'pending' && !bflModels?.length"
+            class="border-t border-border px-4 py-2 text-xs text-fg-muted"
+          >
+            No models discovered — Black Forest Labs could not be reached. Refresh to try again.
+          </div>
         </div>
 
         <!-- OpenAI (gpt-image-1) — reuses the OpenAI key from LLM Providers above; no inline key. -->

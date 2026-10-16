@@ -19,6 +19,7 @@ interface Opts {
   openaiKey?: string
   bflKey?: string
   replicateKey?: string
+  bflModel?: string
   uvAvailable?: boolean
   fluxModelStatus?: 'ABSENT' | 'DOWNLOADING' | 'AVAILABLE' | 'ERROR'
   hfToken?: string
@@ -38,6 +39,9 @@ function configEntries(opts: Opts) {
   ]
   if (opts.imagegenProvider !== undefined) {
     e.push({ key: 'imagegen.provider', value: opts.imagegenProvider, updatedAt: '2026-06-23T10:00:00Z' })
+  }
+  if (opts.bflModel !== undefined) {
+    e.push({ key: 'imagegen.bfl.model', value: opts.bflModel, updatedAt: '2026-06-23T10:00:00Z' })
   }
   return e
 }
@@ -235,6 +239,48 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     const hit = captured.find(b => b.key === 'imagegen.provider')
     expect(hit).toBeTruthy()
     expect(hit!.value).toBe('bfl')
+  })
+
+  it('lists BFL image models when BFL is active, keeping a saved model the spec no longer lists', async () => {
+    registerEndpoint('/api/imagegen/bfl/models', () => [
+      { slug: 'flux-2-pro', description: 'Generate or edit an image with FLUX.2 [pro]' },
+      { slug: 'flux-3-image', description: 'Generate an image with FLUX 3.' },
+    ])
+    setupApi({ imagegenProvider: 'bfl', bflKey: 'bfl-****', bflModel: 'flux-retired' })
+    const c = await mountSettingsSection('image-generation')
+
+    const select = c.find<HTMLSelectElement>('select[aria-label="Black Forest Labs image model"]')
+    expect(select.exists()).toBe(true)
+    await vi.waitFor(() => {
+      const values = select.findAll('option').map(o => (o.element as HTMLOptionElement).value)
+      expect(values).toEqual(['', 'flux-retired', 'flux-2-pro', 'flux-3-image'])
+    })
+    expect(select.element.value).toBe('flux-retired')
+    // Each backend keeps its own picker: Replicate's is not shown while BFL is active.
+    expect(c.find('select[aria-label="Replicate image model"]').exists()).toBe(false)
+  })
+
+  it('POSTs imagegen.bfl.model when a BFL model is chosen', async () => {
+    registerEndpoint('/api/imagegen/bfl/models', () => [
+      { slug: 'flux-3-image', description: 'Generate an image with FLUX 3.' },
+    ])
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupApi({ imagegenProvider: 'bfl', bflKey: 'bfl-****', capturePost: b => captured.push(b) })
+    const c = await mountSettingsSection('image-generation')
+
+    const select = c.find('select[aria-label="Black Forest Labs image model"]')
+    await vi.waitFor(() => expect(select.findAll('option').length).toBe(2))
+    await select.setValue('flux-3-image')
+    await flushPromises()
+
+    expect(captured).toContainEqual({ key: 'imagegen.bfl.model', value: 'flux-3-image' })
+  })
+
+  it('hides the BFL model dropdown while another backend is active', async () => {
+    setupApi({ imagegenProvider: 'openai', openaiKey: 'sk-****', bflKey: 'bfl-****' })
+    const c = await mountSettingsSection('image-generation')
+
+    expect(c.find('select[aria-label="Black Forest Labs image model"]').exists()).toBe(false)
   })
 
   it('sets the BFL API key inline (not via LLM Providers)', async () => {

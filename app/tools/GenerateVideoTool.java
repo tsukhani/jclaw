@@ -6,7 +6,6 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.VideoGenerationJob;
-import services.ConfigService;
 import services.Tx;
 import services.WorkspaceFiles;
 import services.videogen.VideoGenerationJobService;
@@ -171,7 +170,7 @@ public class GenerateVideoTool implements ToolRegistry.Tool {
         var meta = new JsonObject();
         meta.addProperty(ARG_PROMPT, req.prompt());
         if (job.provider != null) meta.addProperty("provider", job.provider);
-        var model = ConfigService.get("videogen.cloud.model");
+        var model = VideoGenerationRouter.effectiveModel(job.provider);
         if (model != null && !model.isBlank()) meta.addProperty("model", model);
         meta.addProperty("fps", req.fps() != null && req.fps() > 0 ? req.fps() : DEFAULT_FPS);
         meta.addProperty("aspectRatio",

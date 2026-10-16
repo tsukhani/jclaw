@@ -8,6 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.BflModelCatalog;
 import services.ConfigService;
 import services.imagegen.BflImageGenerationClient;
 import services.imagegen.ImageGenerationException;
@@ -18,6 +19,9 @@ import services.imagegen.OpenAiImageGenerationClient;
 import services.imagegen.ReplicateImageGenerationClient;
 
 import java.util.Base64;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
 
 /**
  * JCLAW-225 coverage for the cloud image-generation clients against a mocked transport.
@@ -158,6 +162,24 @@ class ImageGenerationClientTest extends UnitTest {
     }
 
     @Test
+    void bflLabelsTheImageByItsBytes() {
+        // flux-2-pro returns JPEG and FLUX 3 PNG; a fixed image/png stored JPEGs as .png files.
+        var jpeg = new byte[]{(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 0x10, 'J', 'F', 'I', 'F', 0, 1};
+        var png = new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0x0D, 'I', 'H', 'D', 'R'};
+        for (var bytes : List.of(jpeg, png)) {
+            server.enqueue(new MockResponse.Builder().code(200)
+                    .body(jsonBuf("{\"id\":\"abc\",\"polling_url\":\"" + server.url("/poll") + "\"}")).build());
+            server.enqueue(new MockResponse.Builder().code(200)
+                    .body(jsonBuf("{\"status\":\"Ready\",\"result\":{\"sample\":\"" + server.url("/img") + "\"}}")).build());
+            server.enqueue(new MockResponse.Builder().code(200).body(bytesBuf(bytes)).build());
+        }
+        var client = new BflImageGenerationClient(testClient);
+
+        assertEquals("image/jpeg", client.generate("a cat", null, null, null).mimeType());
+        assertEquals("image/png", client.generate("a cat", null, null, null).mimeType());
+    }
+
+    @Test
     void bflSendsInputImageForImageToImage() throws Exception {
         // JCLAW-695: with a reference image, the FLUX.2 submit body carries input_image (base64)
         // on the same endpoint + poll path — turning the request into image-to-image / style transfer.
@@ -175,6 +197,75 @@ class ImageGenerationClientTest extends UnitTest {
         var submitBody = server.takeRequest().getBody().utf8();
         assertTrue(submitBody.contains("input_image"),
                 "BFL submit must carry the reference as input_image: " + submitBody);
+    }
+
+    @Test
+    void bflFlux3SizesByAspectRatioAndSendsReferencesAsImages() throws Exception {
+        // FLUX 3 refuses unknown fields, so the FLUX.2 width/height/input_image would be a 422 there.
+        ConfigService.set("imagegen.bfl.model", "flux-3-image");
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"id\":\"abc\",\"polling_url\":\"" + server.url("/poll") + "\"}")).build());
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"status\":\"Ready\",\"result\":{\"sample\":\"" + server.url("/img") + "\"}}")).build());
+        server.enqueue(new MockResponse.Builder().code(200).body(bytesBuf(new byte[]{9})).build());
+
+        var ref = new ImageGenerationService.ReferenceImage(new byte[]{1, 2, 3, 4}, "image/png");
+        var result = new BflImageGenerationClient(testClient).generate("in this style", null, 1536, 864, ref);
+        assertEquals("bfl:flux-3-image", result.generatedBy());
+
+        var body = JsonParser.parseString(server.takeRequest().getBody().utf8()).getAsJsonObject();
+        assertEquals("16:9", body.get("aspect_ratio").getAsString());
+        assertEquals(1, body.getAsJsonArray("images").size());
+        assertFalse(body.has("width") || body.has("height") || body.has("input_image"), body.toString());
+    }
+
+    @Test
+    void bflSendsSizeAndReferenceInTheFieldsTheModelPublishes() throws Exception {
+        // Ultra takes a ratio and a Redux image_prompt: FLUX.2's pixels and input_image would be ignored.
+        var ultra = new BflModelCatalog.RequestShape(Set.of("prompt", "aspect_ratio", "image_prompt"), List.of());
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"id\":\"abc\",\"polling_url\":\"" + server.url("/poll") + "\"}")).build());
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"status\":\"Ready\",\"result\":{\"sample\":\"" + server.url("/img") + "\"}}")).build());
+        server.enqueue(new MockResponse.Builder().code(200).body(bytesBuf(new byte[]{9})).build());
+
+        var ref = new ImageGenerationService.ReferenceImage(new byte[]{1, 2, 3, 4}, "image/png");
+        new BflImageGenerationClient(testClient, m -> "flux-pro-1.1-ultra".equals(m) ? Optional.of(ultra) : Optional.empty())
+                .generate("in this style", "flux-pro-1.1-ultra", 864, 1536, ref);
+
+        var body = JsonParser.parseString(server.takeRequest().getBody().utf8()).getAsJsonObject();
+        assertEquals("9:16", body.get("aspect_ratio").getAsString());
+        assertTrue(body.has("image_prompt"), body.toString());
+        assertFalse(body.has("width") || body.has("height") || body.has("input_image") || body.has("images"),
+                body.toString());
+    }
+
+    @Test
+    void bflLeavesTheRatioToAModelThatCanChooseItWhenNoSizeIsAsked() throws Exception {
+        var klein = new BflModelCatalog.RequestShape(Set.of("prompt", "width", "height", "aspect_ratio"), List.of("1:1"));
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"id\":\"abc\",\"polling_url\":\"" + server.url("/poll") + "\"}")).build());
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"status\":\"Ready\",\"result\":{\"sample\":\"" + server.url("/img") + "\"}}")).build());
+        server.enqueue(new MockResponse.Builder().code(200).body(bytesBuf(new byte[]{9})).build());
+
+        new BflImageGenerationClient(testClient, _ -> Optional.of(klein))
+                .generate("a cat", "flux-3-image-klein", null, null);
+
+        var body = JsonParser.parseString(server.takeRequest().getBody().utf8()).getAsJsonObject();
+        assertFalse(body.has("width") || body.has("height") || body.has("aspect_ratio"), body.toString());
+    }
+
+    @Test
+    void bflModeratedPromptFailsWithoutWaitingForTheDeadline() {
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"id\":\"abc\",\"polling_url\":\"" + server.url("/poll") + "\"}")).build());
+        server.enqueue(new MockResponse.Builder().code(200)
+                .body(jsonBuf("{\"status\":\"Content Moderated\"}")).build());
+
+        var client = new BflImageGenerationClient(testClient);
+        var ex = assertThrows(ImageGenerationException.class, () -> client.generate("a cat", null, null, null));
+        assertTrue(ex.getMessage().contains("generation failed"), ex.getMessage());
     }
 
     @Test

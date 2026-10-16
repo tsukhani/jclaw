@@ -2,12 +2,14 @@ package controllers;
 
 import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.BflModelCatalog;
 import services.ConfigService;
 import services.EventLogger;
 import services.UvProbe;
@@ -135,5 +137,14 @@ public class ApiImagegenController extends Controller {
         var m = new LinkedHashMap<String, Object>();
         m.put("status", "probing");
         renderJSON(gson.toJson(m));
+    }
+
+    /** GET /api/imagegen/bfl/models — Black Forest Labs image models for the Settings dropdown, read from
+     *  BFL's published API spec. Empty when the spec cannot be read; the UI degrades to "no models". */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BflModelCatalog.BflModel.class))))
+    @Operation(summary = "List selectable Black Forest Labs image models")
+    @AgentAccess(OPEN)
+    public static void bflModels() {
+        renderJSON(gson.toJson(BflModelCatalog.imageModels()));
     }
 }

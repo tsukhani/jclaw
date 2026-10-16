@@ -2,12 +2,17 @@ package controllers;
 
 import com.google.gson.Gson;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.MessageAttachment;
 import models.VideoGenerationJob;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AttachmentService;
+import services.BflModelCatalog;
 import services.ConfigService;
 import services.videogen.ReplicateVideoModelCatalog;
 import services.videogen.VideoCapabilityProbe;
@@ -166,4 +171,11 @@ public class ApiVideogenController extends Controller {
         }
     }
 
+    /** GET /api/videogen/bfl/models — Black Forest Labs video models for the Settings model dropdown. */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = BflModelCatalog.BflModel.class))))
+    @Operation(summary = "List selectable Black Forest Labs video models")
+    @AgentAccess(OPEN)
+    public static void bflModels() {
+        renderJSON(gson.toJson(BflModelCatalog.videoModels()));
+    }
 }

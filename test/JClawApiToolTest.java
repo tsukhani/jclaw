@@ -438,6 +438,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/conversations/{id}
             GET /api/conversations/{id}/messages
             GET /api/conversations/{id}/queue
+            GET /api/imagegen/bfl/models
             GET /api/imagegen/capability
             GET /api/imagegen/local/state
             GET /api/imagegen/models
@@ -503,6 +504,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/transcription/diarization/models
             GET /api/transcription/state
             GET /api/tts/state
+            GET /api/videogen/bfl/models
             GET /api/videogen/capability
             GET /api/videogen/jobs
             GET /api/videogen/jobs/recent

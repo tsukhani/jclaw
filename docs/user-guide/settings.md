@@ -601,7 +601,7 @@ Backend for the agent's `generate_image` tool (off per-agent by default; turn it
 
 JClaw offers a master toggle, then a backend radio group:
 
-- **BFL (Black Forest Labs)**: the Flux image API. Paste the BFL key **in this panel**; it is image-generation-only, separate from [LLM Providers](#settings-llm-providers).
+- **BFL (Black Forest Labs)**: the Flux image API. Paste the BFL key **in this panel**. It is separate from [LLM Providers](#settings-llm-providers) and shared with [Video Generation](#settings-video-generation). With BFL selected, a **Model** dropdown lists the image models BFL offers, read from BFL's published API description. Leave it on *Provider default* (`flux-2-pro`), or pick another model such as `flux-3-image`.
 - **OpenAI**: reuses your OpenAI key from LLM Providers; renders with `gpt-image-1`.
 - **Replicate**: hosted models. Set the Replicate key **in this panel** (it is shared with [Video Generation](#settings-video-generation)). The model dropdown is live-discovered from Replicate's curated text-to-image collection, split into **text-to-image** and **image-to-image (Kontext style transfer)** groups; leave it on *Provider default* (`black-forest-labs/flux-schnell`) to let Replicate pick.
 - **Self-Hosted (Flux 2 Klein)**: runs the local image sidecar on your own GPU, no API key. Three runtime gates must clear, each shown inline:
@@ -639,6 +639,7 @@ Backend for the agent's `generate_video` tool (off per-agent by default). Like i
 
 JClaw offers a master toggle, then a backend radio group:
 
+- **Black Forest Labs (Flux)**: FLUX 3 Video, which makes HD clips of 5 to 20 seconds with sound. BFL charges for each second of video, so a clip is 5 seconds unless the agent asks for a longer one. The key is **not** set here; it reuses the BFL key from [Image Generation](#settings-image-generation), so this radio is disabled until that key is configured. A **Model** dropdown lists the video models BFL offers; leave it on *Provider default* (`flux-3-video`).
 - **Replicate**: hosted text-to-video models, live-discovered from Replicate's curated collection (leave on *Provider default*, `wan-video/wan-2.2-t2v-fast`, to let Replicate pick). The Replicate key is **not** set here; it reuses the one from [Image Generation](#settings-image-generation), so this radio is disabled until that key is configured.
 - **Self-Hosted (on this machine)**: runs the local video sidecar. Gated on **uv on PATH**; click **detect GPU** to probe. The probe returns the WAN / LTX engine variants your hardware can run, each tagged **ready** (green), **runs slow** (amber, still selectable), or unavailable (disabled, with the reason). Picking Self-Hosted auto-selects the best runnable engine; the per-engine radios refine the variant.
 

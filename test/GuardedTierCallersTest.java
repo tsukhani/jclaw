@@ -24,7 +24,9 @@ class GuardedTierCallersTest extends UnitTest {
             "llm.OkHttpLlmHttpDriver.streamNdjson",
             "mcp.transport.McpStreamableHttpTransport.send",
             "mcp.transport.McpStreamableHttpTransport.listenClient",
+            "services.BflModelCatalog.<init>",
             "services.ModelDiscoveryService.listAllModelIds",
+            "services.imagegen.BflImageGenerationClient.<init>",
             "services.discovery.LmStudioDiscoveryStrategy.fetchNative",
             "services.discovery.OllamaDiscoveryStrategy.fetchTags",
             "services.discovery.OllamaDiscoveryStrategy.fetchShow",
@@ -35,7 +37,8 @@ class GuardedTierCallersTest extends UnitTest {
             "services.decision.OllamaDecision.get",
             "services.decision.OllamaDecision.pin",
             "services.decision.OllamaDecision.unload",
-            "services.decision.LayaDecision.status");
+            "services.decision.LayaDecision.status",
+            "services.videogen.BflVideoGenerationClient.<init>");
 
     /**
      * TypeSafe's JEV is a fixed vendor endpoint, so {@code Target.guarded} picks the tier per target; that pick is
