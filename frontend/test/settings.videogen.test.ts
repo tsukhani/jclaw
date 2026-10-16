@@ -200,7 +200,7 @@ describe('Settings — Video Generation through Black Forest Labs', () => {
     const c = await mountSettingsSection('video-generation')
 
     const select = c.find('select[aria-label="Black Forest Labs video model"]')
-    await vi.waitFor(() => expect(select.findAll('option').length).toBe(2))
+    await vi.waitFor(() => expect(select.findAll('option')).toHaveLength(2))
     await select.setValue('flux-3-video')
     await flushPromises()
 

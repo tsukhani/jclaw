@@ -269,7 +269,7 @@ describe('Settings page — Image Generation (JCLAW-229)', () => {
     const c = await mountSettingsSection('image-generation')
 
     const select = c.find('select[aria-label="Black Forest Labs image model"]')
-    await vi.waitFor(() => expect(select.findAll('option').length).toBe(2))
+    await vi.waitFor(() => expect(select.findAll('option')).toHaveLength(2))
     await select.setValue('flux-3-image')
     await flushPromises()
 

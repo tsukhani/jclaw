@@ -173,10 +173,10 @@ function stopVideoCapPolling() {
 // Top-level Self-Hosted vs cloud choice. "Local" is any provider that isn't a cloud backend — i.e. an
 // ltx-local / wan-local engine. The header radio shows checked whenever local is active, even before a
 // GPU probe, so the current backend is always clear.
-const CLOUD_BACKENDS = ['bfl', 'replicate']
+const CLOUD_BACKENDS = new Set(['bfl', 'replicate'])
 const videogenIsLocal = computed(() => {
   const p = videogenProvider.value
-  return p !== '' && !CLOUD_BACKENDS.includes(p)
+  return p !== '' && !CLOUD_BACKENDS.has(p)
 })
 // The radios' own selections, so a failed save can put them back; a one-way :checked never re-renders.
 const videogenBackend = computed(() => {
