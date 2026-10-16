@@ -227,8 +227,8 @@ class SubscriptionUsageTest extends UnitTest {
         var warnings = events.stream().filter(e -> e.message().contains(GUARD_OFF)).toList();
         assertEquals(1, warnings.size(), () -> "warned once across three refreshes: " + events);
         assertEquals("WARN", warnings.getFirst().level());
-        assertTrue(warnings.getFirst().message().contains(provider), () -> warnings.toString());
-        assertTrue(warnings.getFirst().message().contains("402 and 429"), () -> warnings.toString());
+        assertTrue(warnings.getFirst().message().contains(provider), warnings::toString);
+        assertTrue(warnings.getFirst().message().contains("402 and 429"), warnings::toString);
 
         var recovery = EventLogger.captureForTest(() -> HttpFactories.callWith(canned(200, LIVE_BODY, new CopyOnWriteArrayList<>()),
                 () -> SubscriptionUsage.refreshNow(ollamaCloud())));
@@ -245,7 +245,7 @@ class SubscriptionUsageTest extends UnitTest {
     void aRangeReadWithoutLimitsDoesNotSpeakForTheGuard() {
         var events = EventLogger.captureForTest(() -> HttpFactories.callWith(canned(200, HISTORY_BODY, new CopyOnWriteArrayList<>()),
                 () -> SubscriptionUsage.history(ollamaCloud(), Range.DAY)));
-        assertTrue(events.stream().noneMatch(e -> e.message().contains(GUARD_OFF)), () -> events.toString());
+        assertTrue(events.stream().noneMatch(e -> e.message().contains(GUARD_OFF)), events::toString);
     }
 
     @Test
@@ -261,7 +261,7 @@ class SubscriptionUsageTest extends UnitTest {
             SubscriptionUsage.clearForTest(provider);
             var events = EventLogger.captureForTest(() -> assertNull(
                     HttpFactories.callWith(client, () -> SubscriptionUsage.history(ollamaCloud(), Range.WEEK))));
-            assertEquals(1, events.stream().filter(e -> "WARN".equals(e.level())).count(), () -> events.toString());
+            assertEquals(1, events.stream().filter(e -> "WARN".equals(e.level())).count(), events::toString);
         }
     }
 
@@ -270,7 +270,7 @@ class SubscriptionUsageTest extends UnitTest {
         var config = new ProviderConfig(provider, "https://ollama.com/v1", "fake-ollama-key-é", List.of());
         var events = EventLogger.captureForTest(() -> assertNull(HttpFactories.callWith(
                 canned(200, HISTORY_BODY, new CopyOnWriteArrayList<>()), () -> SubscriptionUsage.history(config, Range.DAY))));
-        assertEquals(1, events.stream().filter(e -> "WARN".equals(e.level())).count(), () -> events.toString());
+        assertEquals(1, events.stream().filter(e -> "WARN".equals(e.level())).count(), events::toString);
     }
 
     @Test
@@ -280,7 +280,7 @@ class SubscriptionUsageTest extends UnitTest {
         var events = EventLogger.captureForTest(() -> assertNull(HttpFactories.callWith(
                 canned(200, HISTORY_BODY, seen), () -> SubscriptionUsage.history(config, Range.DAY))));
         assertTrue(seen.isEmpty(), () -> "only ollama.com is asked: " + seen);
-        assertEquals(1, events.stream().filter(e -> "WARN".equals(e.level())).count(), () -> events.toString());
+        assertEquals(1, events.stream().filter(e -> "WARN".equals(e.level())).count(), events::toString);
     }
 
     @Test
@@ -370,10 +370,10 @@ class SubscriptionUsageTest extends UnitTest {
 
         var recheck = start.plus(Duration.ofHours(1)).plusSeconds(1);
         var events = EventLogger.captureForTest(() -> readRouterAt(recheck, withWindows));
-        assertEquals(2, seen.size(), () -> seen.toString());
-        assertTrue(events.stream().anyMatch(e -> e.message().contains("budget guard is back on")), () -> events.toString());
+        assertEquals(2, seen.size(), seen::toString);
+        assertTrue(events.stream().anyMatch(e -> e.message().contains("budget guard is back on")), events::toString);
         readRouterAt(recheck.plusSeconds(30), withWindows);
-        assertEquals(2, seen.size(), () -> seen.toString());
+        assertEquals(2, seen.size(), seen::toString);
         readRouterAt(recheck.plusSeconds(61), withWindows);
         assertEquals(3, seen.size(), () -> "with windows back, a minute-old read is stale again: " + seen);
     }
@@ -462,7 +462,7 @@ class SubscriptionUsageTest extends UnitTest {
     void aProviderWithNoKeyAnswersNoHistoryWithAWarning() {
         var events = EventLogger.captureForTest(() -> assertNull(SubscriptionUsage.history(provider, Range.DAY)));
         assertTrue(events.stream().anyMatch(e -> "WARN".equals(e.level()) && e.message().contains("no API key")),
-                () -> events.toString());
+                events::toString);
     }
 
     @Test

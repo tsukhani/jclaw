@@ -77,6 +77,7 @@ public class BindingCredentialColumnsJob extends Job<Void> {
      * @return how many constraints were dropped and columns widened
      */
     // Public because Play's tests live in the default package: a test drives it on a throwaway schema.
+    @SuppressWarnings("java:S2077") // table, column and constraint names come from BindingCredential or the schema, never from input
     public static int migrate(Connection conn) throws SQLException {
         if (!conn.getMetaData().getDatabaseProductName().toLowerCase(Locale.ROOT).contains("h2")) {
             return 0;
@@ -116,6 +117,7 @@ public class BindingCredentialColumnsJob extends Job<Void> {
      * Does not commit.
      */
     // Public because Play's tests live in the default package.
+    @SuppressWarnings("java:S2077") // table and column names come from BindingCredential; values are bound
     public static Lookups refreshLookups(Connection conn, CredentialCipher cipher) throws SQLException {
         int updated = 0;
         int unreadable = 0;

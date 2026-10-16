@@ -775,6 +775,7 @@ public final class H2Maintenance {
         }
     }
 
+    @SuppressWarnings("java:S2077") // the names are the schema's own, read from INFORMATION_SCHEMA
     private static Map<String, Long> tableCounts(Connection connection) throws SQLException {
         var names = new ArrayList<String>();
         try (var s = connection.createStatement();

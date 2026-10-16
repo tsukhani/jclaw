@@ -117,6 +117,8 @@ public class CredentialEncryptionJob extends Job<Void> {
         }
     }
 
+    // S2077: table and column are fixed names, values are bound. S4276: a UnaryOperator cannot return @Nullable.
+    @SuppressWarnings({"java:S2077", "java:S4276"})
     private static void resealColumn(Connection conn, String table, String column,
                                      Function<String, @Nullable String> reseal) throws SQLException {
         try (var select = conn.prepareStatement("SELECT id, " + column + " FROM " + table);

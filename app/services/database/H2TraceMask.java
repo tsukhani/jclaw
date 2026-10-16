@@ -62,7 +62,8 @@ public final class H2TraceMask {
             while (i < length && bytes[i] != '\n' && bytes[i] != '\r' && !truncatedAt(bytes, i, length)) {
                 if (bytes[i] == QUOTE) {
                     if (i + 1 < length && bytes[i + 1] == QUOTE) {
-                        changed |= maskAt(bytes, i) | maskAt(bytes, i + 1);
+                        changed |= maskAt(bytes, i);
+                        changed |= maskAt(bytes, i + 1);
                         i += 2;
                         continue;
                     }

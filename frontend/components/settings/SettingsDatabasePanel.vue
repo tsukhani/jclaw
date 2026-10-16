@@ -316,9 +316,10 @@ const unencrypted = computed<BackupInfo[]>(() => [
 
 async function deleteUnencrypted() {
   const files = unencrypted.value
+  const which = files.length === 1 ? 'the backup' : `the ${files.length} backups`
   const ok = await confirm({
     title: 'Delete unencrypted backups',
-    message: `Delete ${files.length === 1 ? 'the backup' : `the ${files.length} backups`} that hold the stored credentials in plaintext `
+    message: `Delete ${which} that hold the stored credentials in plaintext `
       + `(${files.map(b => b.id).join(', ')})? This cannot be undone. A backup from before the credentials were encrypted `
       + 'is the only way back to an older JClaw version, which cannot read them.',
     confirmText: 'Delete',
@@ -416,6 +417,9 @@ const LAST_OP_WINDOW_MS = 15 * 60 * 1000
 
 const OP_VERBS = new Map([['restore', 'Restore'], ['repair', 'Repair'], ['compact', 'Compact']])
 
+/** The action an outcome renders under; anything else is the repair's. */
+const OP_PANELS = new Map([['restore', 'backups'], ['compact', 'compact']])
+
 /**
  * The outcome `jclaw.sh` left in logs/database-status.json. It exists for the reload the
  * restart forces, but the file stays until the next operation overwrites it — so show it
@@ -440,7 +444,7 @@ const lastOp = computed(() => {
     ok,
     failed,
     inFlight,
-    panel: op.op === 'restore' ? 'backups' : op.op === 'compact' ? 'compact' : 'repair',
+    panel: OP_PANELS.get(op.op ?? '') ?? 'repair',
   }
 })
 </script>

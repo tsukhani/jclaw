@@ -110,7 +110,7 @@ public record CredentialCopies(@Nullable String encryptedAt, List<Window> plaint
         try {
             var parsed = GSON.fromJson(Files.readString(file, StandardCharsets.UTF_8), CredentialCopies.class);
             return parsed == null ? NONE : parsed;
-        } catch (IOException | JsonParseException e) {
+        } catch (IOException | JsonParseException _) {
             return NONE;
         }
     }

@@ -28,6 +28,7 @@ public final class UnreadableCredentials {
 
     private UnreadableCredentials() {}
 
+    @SuppressWarnings("java:S2077") // table and column names come from BindingCredential, never from input
     public static List<Item> list() {
         var out = new ArrayList<Item>();
         for (var entry : ConfigService.listAll()) {
