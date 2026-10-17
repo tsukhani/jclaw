@@ -3247,6 +3247,10 @@ do_start_prod() {
     #     46% and peak RSS to 1.76 GB (from 2.5 GB) with zero allocation
     #     stalls, costing +75% GC cycles. Raising the heap does not raise this —
     #     set JCLAW_JVM_SOFTMAX too, or ZGC keeps targeting 1g.
+    #   - UseCompactObjectHeaders: 8-byte object headers instead of 12 (JEP 519,
+    #     a product flag since JDK 25). Cut the live heap 3% under a c=100 x
+    #     50-turn loadtest — modest, since the heap is mostly byte[] — with boot
+    #     time unchanged. JCLAW_JVM_OPTS='-XX:-UseCompactObjectHeaders' turns it off.
     #   - HeapDumpOnOutOfMemoryError + ExitOnOutOfMemoryError: dump for
     #     postmortem, then exit cleanly so a process manager can restart.
     #   - MaxDirectMemorySize: caps Netty off-heap buffer allocation so a
@@ -3291,6 +3295,7 @@ do_start_prod() {
         "-XX:+UseZGC"
         "-XX:SoftMaxHeapSize=${softmax}"
         "-XX:ZUncommitDelay=60"
+        "-XX:+UseCompactObjectHeaders"
         "-XX:+HeapDumpOnOutOfMemoryError"
         # Both file paths below are relative: do_start_prod cd's to $SCRIPT_DIR, so the JVM
         # inherits it. Absolute breaks Windows, where the bundle runs under Git Bash against a
