@@ -1,3 +1,4 @@
+import agents.AgentRunner;
 import agents.CurrentTimeInjector;
 import agents.SystemPromptAssembler;
 import memory.MemoryStore;
@@ -396,6 +397,53 @@ class SystemPromptAssemblerTest extends UnitTest {
         var prompt = SystemPromptAssembler.assemble(agent, null, null, "rocketchat").systemPrompt();
         assertFalse(prompt.contains("Channel Guidance"),
                 "unrecognized channels must not trigger guidance");
+    }
+
+    @Test
+    void chatAudienceReadsPrivateOrGroupOffTheConversationsPeerKey() {
+        var agent = newAgent("spa-chat-audience");
+        assertAudience(agent, "whatsapp", "447911111111", "This WhatsApp chat is private and one-to-one");
+        assertAudience(agent, "whatsapp", "120363012345678901@g.us", "This WhatsApp chat is a group");
+        assertAudience(agent, "telegram", AgentRunner.telegramConversationPeerId("42", "private", "42", null),
+                "This Telegram chat is private and one-to-one");
+        assertAudience(agent, "telegram",
+                AgentRunner.telegramConversationPeerId("42", "supergroup", "-1001234567890", null),
+                "This Telegram chat is a group");
+        assertAudience(agent, "telegram",
+                AgentRunner.telegramConversationPeerId("42", "supergroup", "-1001234567890", 7),
+                "This Telegram chat is a group");
+        assertAudience(agent, "slack", "D0123ABCD", "This Slack chat is private and one-to-one");
+        assertAudience(agent, "slack", "C0123ABCD", "This Slack chat is a group");
+        assertAudience(agent, "slack", "G0123ABCD", "This Slack chat is a group");
+    }
+
+    @Test
+    void chatAudienceIsLeftOutWhenThePeerKeyDoesNotDescribeTheChat() {
+        var agent = newAgent("spa-chat-audience-none");
+        // A subagent's conversation copies its parent's peer key, but its transcript goes only to the parent agent.
+        var subagentChild = conversation("telegram", "-1001234567890");
+        subagentChild.parentConversation = conversation("telegram", "-1001234567890");
+        for (var conv : List.of(conversation("web", "admin"), conversation("telegram", null), subagentChild)) {
+            var prompt = SystemPromptAssembler.assemble(agent, null, null, conv.channelType, null, conv).systemPrompt();
+            assertFalse(prompt.contains("## Chat Audience"), conv.channelType + " " + conv.peerId);
+        }
+        assertFalse(SystemPromptAssembler.assemble(agent, null, null, "whatsapp").systemPrompt()
+                .contains("## Chat Audience"), "with no conversation there is no peer key to read");
+    }
+
+    private static void assertAudience(Agent agent, String channel, String peerId, String expected) {
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, channel, null, conversation(channel, peerId))
+                .systemPrompt();
+        assertTrue(prompt.contains("## Chat Audience\n" + expected), channel + " " + peerId);
+        assertTrue(prompt.indexOf("## Chat Audience") < prompt.indexOf(SystemPromptAssembler.CACHE_BOUNDARY_MARKER),
+                "the audience is fixed for the conversation, so it belongs in the cacheable prefix");
+    }
+
+    private static Conversation conversation(String channel, String peerId) {
+        var conv = new Conversation();
+        conv.channelType = channel;
+        conv.peerId = peerId;
+        return conv;
     }
 
     @Test

@@ -43,6 +43,11 @@ final class TelegramMessageAddressing {
                 : chatId;
     }
 
+    /** Whether a {@link #telegramConversationPeerId} names a group: Telegram group chat ids are negative, user ids positive. */
+    static boolean isGroupPeer(String peerId) {
+        return peerId.startsWith("-");
+    }
+
     /**
      * JCLAW-370: prefix sender attribution onto a group message so the agent
      * knows WHO spoke in a shared group conversation. No-op for a DM

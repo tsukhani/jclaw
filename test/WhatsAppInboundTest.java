@@ -35,6 +35,8 @@ class WhatsAppInboundTest extends UnitTest {
         var m = msg("447911111111", "447911111111", WhatsAppInboundMessage.CHAT_DIRECT, "hi", null);
         assertEquals("447911111111", WhatsAppInbound.conversationPeerId(m),
                 "a 1:1 conversation keys off the sender");
+        assertFalse(WhatsAppInbound.isGroupPeer(WhatsAppInbound.conversationPeerId(m)),
+                "a 1:1 peer key must read back as private");
     }
 
     @Test
@@ -42,6 +44,8 @@ class WhatsAppInboundTest extends UnitTest {
         var m = msg("447911111111", "group-123@g.us", WhatsAppInboundMessage.CHAT_GROUP, "hi", "Ada");
         assertEquals("group-123@g.us", WhatsAppInbound.conversationPeerId(m),
                 "every group member shares one conversation keyed off the chat id");
+        assertTrue(WhatsAppInbound.isGroupPeer(WhatsAppInbound.conversationPeerId(m)),
+                "a group peer key must read back as a group");
     }
 
     @Test

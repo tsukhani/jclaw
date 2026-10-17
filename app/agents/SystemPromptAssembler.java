@@ -1,5 +1,7 @@
 package agents;
 
+import channels.SlackInbound;
+import channels.WhatsAppInbound;
 import com.google.gson.Gson;
 import llm.TokenUsageEstimator;
 import memory.MemoryAutoCapture;
@@ -428,6 +430,10 @@ public class SystemPromptAssembler {
         // trade-off for per-channel tuning.
         appendChannelGuidance(b, channelType);
 
+        // 8b. Chat audience — whether this chat is private or a group, so an AGENT.md rule
+        // scoped to groups applies only in one. Fixed for the conversation, so cacheable.
+        appendChatAudience(b, conversation);
+
         // 9. Environment info — JVM-stable values plus the turn's effective model, so
         // the section is byte-identical for every turn on the same model and never
         // busts the prompt-prefix cache (the clock lives in CurrentTimeInjector; see 10).
@@ -528,6 +534,34 @@ public class SystemPromptAssembler {
             case "voice" -> Optional.of(VOICE_CHANNEL_GUIDANCE);
             default -> Optional.empty();
         };
+    }
+
+    /**
+     * Read off the peer key rather than {@link Conversation#chatType}, which only Telegram and
+     * WhatsApp stamp and only at creation: a conversation started by {@code /new} keeps the peer
+     * key but loses the chat type. Web and voice say they are private in their channel guidance.
+     */
+    private static void appendChatAudience(SectionedBuilder b, @Nullable Conversation conversation) {
+        // A subagent's conversation copies its parent chat's peer key, but its transcript goes only to the parent agent.
+        if (conversation == null || conversation.peerId == null || conversation.channelType == null
+                || conversation.parentConversation != null) return;
+        var peerId = conversation.peerId;
+        var audience = switch (conversation.channelType) {
+            case "whatsapp" -> chatAudience("WhatsApp", WhatsAppInbound.isGroupPeer(peerId));
+            case "telegram" -> chatAudience("Telegram", TelegramMessageAddressing.isGroupPeer(peerId));
+            case "slack" -> chatAudience("Slack", SlackInbound.isGroupPeer(peerId));
+            default -> null;
+        };
+        if (audience == null) return;
+        b.startSection("Chat Audience");
+        b.sb.append("\n## Chat Audience\n").append(audience);
+    }
+
+    private static String chatAudience(String channel, boolean group) {
+        return group
+                ? "This %s chat is a group: every member can read the whole thread.\n".formatted(channel)
+                : "This %s chat is private and one-to-one, never a group chat: only the person messaging you can see it.\n"
+                        .formatted(channel);
     }
 
     private static void appendChannelGuidanceSection(StringBuilder sb, String channelType, String body) {

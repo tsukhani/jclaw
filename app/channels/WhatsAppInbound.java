@@ -145,6 +145,11 @@ public final class WhatsAppInbound {
         return msg.isGroup() ? msg.chatId() : msg.from();
     }
 
+    /** Whether a {@link #conversationPeerId} names a group: only a group keys off its {@code @g.us} chat JID. */
+    public static boolean isGroupPeer(String peerId) {
+        return peerId.endsWith(WhatsAppCobaltParser.GROUP_SERVER_SUFFIX);
+    }
+
     /**
      * The user turn {@code msg} becomes: sender-attributed in a group, with the delivered message it
      * quotes ahead of it when JClaw recorded one (JCLAW-1297). The Cloud API sends only the quoted id.

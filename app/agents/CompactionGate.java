@@ -143,7 +143,7 @@ public final class CompactionGate {
             if (conv == null) return current;
             var promptDisabled = disabledTools != null ? disabledTools
                     : ToolRegistry.fencedDisabled(agent, TaskToolPolicy.allowListOf(conv.enabledToolNames));
-            var assembled = SystemPromptAssembler.assemble(agent, userMessage, promptDisabled, conv.channelType);
+            var assembled = SystemPromptAssembler.assemble(agent, userMessage, promptDisabled, conv.channelType, null, conv);
             var sysPrompt = SessionCompactor.appendSummaryToPrompt(assembled.systemPrompt(), conv);
             // JCLAW-268: re-inject spawn-time parent context for inherit-mode subagents.
             sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, conv);

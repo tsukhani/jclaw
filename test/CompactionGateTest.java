@@ -317,7 +317,7 @@ class CompactionGateTest extends UnitTest {
         configureProviderWithModel("test-model", 2000, 1024);
         var primary = llm.ProviderRegistry.get("test-provider");
 
-        var conv = ConversationService.create(agent, "web", "user1");
+        var conv = ConversationService.create(agent, "whatsapp", "447911111111");
         for (int i = 0; i < 25; i++) {
             var role = (i % 2 == 0) ? MessageRole.USER : MessageRole.ASSISTANT;
             ConversationService.appendMessage(conv, role, "turn " + i, null, null, null);
@@ -350,6 +350,9 @@ class CompactionGateTest extends UnitTest {
                         && s.contains(services.SessionCompactor.PRIOR_SUMMARY_HEADER),
                 "rebuilt system prompt must contain the prior-summary header; got: "
                         + result.getFirst().content());
+        assertTrue(result.getFirst().content() instanceof String s
+                        && s.contains("This WhatsApp chat is private and one-to-one"),
+                "the rebuild must assemble with the conversation, or the chat's audience drops out after compaction");
 
         // And the conversation row's compactionSince watermark was bumped.
         commitAndReopen();

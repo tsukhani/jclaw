@@ -164,6 +164,11 @@ public final class SlackInbound {
         return QuotedReply.fold(text, QuotedReply.block(parent.source, parent.text, false));
     }
 
+    /** Whether a conversation's peer (the Slack channel id) names a group: only a DM's id starts with {@code D}. */
+    public static boolean isGroupPeer(String peerId) {
+        return !peerId.startsWith("D");
+    }
+
     private static void processMessage(Long bindingId, String botToken, @Nullable String teamId,
                                        SlackChannel.InboundMessage message, @Nullable DeliveredMessage parent) {
         try {
