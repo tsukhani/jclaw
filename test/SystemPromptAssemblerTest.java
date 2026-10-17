@@ -326,6 +326,8 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "guidance body should reference Telegram");
         assertTrue(prompt.contains("4000 characters") || prompt.contains("inline photos"),
                 "guidance body should include Telegram-specific hints");
+        assertFalse(prompt.contains("never a group chat"),
+                "a Telegram chat can be a group, so its static guidance must not claim privacy");
         assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
         assertFalse(prompt.contains("language hint structure"), "only web chat draws the structure fence");
     }
@@ -338,6 +340,8 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "web must produce a Channel Guidance header");
         assertTrue(prompt.contains("admin chat UI") || prompt.contains("download chips"),
                 "guidance body should include web-specific hints");
+        assertTrue(prompt.contains("never a group chat: no one else can see it"),
+                "web chat is one-to-one, so an AGENT.md group-chat rule must not read as applying to it");
         assertTrue(prompt.contains("language hint lewis"),
                 "web guidance must teach the lewis fence the chat draws");
         assertTrue(prompt.contains("language hint structure"),
@@ -359,6 +363,8 @@ class SystemPromptAssemblerTest extends UnitTest {
                 "guidance body should describe the spoken STT/TTS surface");
         assertTrue(prompt.contains("never tell them you lack audio"),
                 "guidance must forbid the 'I can't hear you' failure mode");
+        assertTrue(prompt.contains("private and one-to-one, never a group chat"),
+                "a voice session is one-to-one, so a group-chat rule must not read as applying to it");
         assertFalse(prompt.contains("admin chat UI"),
                 "voice must NOT get the web-UI markdown guidance");
         assertFalse(prompt.toLowerCase().contains("lewis"), "only web chat draws the lewis fence");
