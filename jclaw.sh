@@ -3253,6 +3253,9 @@ do_start_prod() {
     #     time unchanged. JCLAW_JVM_OPTS='-XX:-UseCompactObjectHeaders' turns it off.
     #   - HeapDumpOnOutOfMemoryError + ExitOnOutOfMemoryError: dump for
     #     postmortem, then exit cleanly so a process manager can restart.
+    #     The dump name carries the pid: the JVM never overwrites an existing
+    #     dump, so a fixed name left every OOM after the first with none.
+    #   - ErrorFile: a JVM crash log goes to logs/ with the rest, not the cwd.
     #   - MaxDirectMemorySize: caps Netty off-heap buffer allocation so a
     #     leak here can't exhaust native memory unnoticed.
     #   - io.netty.leakDetection.level=DISABLED: Netty defaults to SIMPLE,
@@ -3297,12 +3300,13 @@ do_start_prod() {
         "-XX:ZUncommitDelay=60"
         "-XX:+UseCompactObjectHeaders"
         "-XX:+HeapDumpOnOutOfMemoryError"
-        # Both file paths below are relative: do_start_prod cd's to $SCRIPT_DIR, so the JVM
+        # The file paths below are relative: do_start_prod cd's to $SCRIPT_DIR, so the JVM
         # inherits it. Absolute breaks Windows, where the bundle runs under Git Bash against a
         # native java.exe: /c/Users/... is unresolvable, and -Xlog splits its spec on ':', so a
         # translated C:/... path fails the parser instead of fixing it.
-        "-XX:HeapDumpPath=logs/heap-oom.hprof"
+        "-XX:HeapDumpPath=logs/heap-oom-%p.hprof"
         "-XX:+ExitOnOutOfMemoryError"
+        "-XX:ErrorFile=logs/hs_err_pid%p.log"
         "-XX:MaxDirectMemorySize=256m"
         "-Dio.netty.leakDetection.level=DISABLED"
         "-Dnetworkaddress.cache.ttl=30"

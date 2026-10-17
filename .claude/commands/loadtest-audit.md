@@ -45,7 +45,7 @@ Run it with `run_in_background: true` and wait for the completion notification; 
 4. Takes a **settled snapshot** (`GC.run` twice, 5 s apart; one call does not reliably finish a ZGC cycle), then runs **mock1**, **mock2** and **real**. Each pass gets its own JFR recording (`settings=profile`), a slice of `logs/application.log`, and a settled snapshot afterwards: heap, class histogram, metaspace, platform and virtual threads, `lsof`.
 5. Renders JFR views and writes `digest.md`.
 
-**Exit codes:** 2 means usage error or no backend: report it and stop. 3 means the smoke call failed: quote the error from `smoke.out` and stop, because the provider or model is unusable, which is not a JClaw finding unless the error came from JClaw itself (a 500 from `/api/metrics/loadtest`). 4 means the backend died mid-run, which is the most serious possible finding: look for `logs/heap-oom.hprof` (the JVM runs `-XX:+HeapDumpOnOutOfMemoryError`), an `hs_err_pid*.log`, and the tail of `logs/application.log`.
+**Exit codes:** 2 means usage error or no backend: report it and stop. 3 means the smoke call failed: quote the error from `smoke.out` and stop, because the provider or model is unusable, which is not a JClaw finding unless the error came from JClaw itself (a 500 from `/api/metrics/loadtest`). 4 means the backend died mid-run, which is the most serious possible finding: look for `logs/heap-oom-<pid>.hprof` (the JVM runs `-XX:+HeapDumpOnOutOfMemoryError`), a `logs/hs_err_pid<pid>.log`, and the tail of `logs/application.log`.
 
 Keep a real pass under 30 minutes (`jclaw.sh` gives a real run 1800 s before its client gives up, while the server keeps going) and within 100 × 50, the endpoint's limits.
 
