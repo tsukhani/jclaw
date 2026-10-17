@@ -291,6 +291,11 @@ const statusBadgeClass: Record<McpServer['status'], string> = {
   DISCONNECTED: 'text-fg-muted border-current',
   ERROR: 'text-red-700 dark:text-red-400 border-current',
 }
+// Hues the status badges do not use, so a version never reads as a connection state.
+const generationPillClass: Record<number, string> = {
+  1: 'text-cyan-700 dark:text-cyan-400 bg-cyan-400/10 border-current',
+  2: 'text-violet-700 dark:text-violet-400 bg-violet-500/10 border-current',
+}
 
 function addEnvRow() {
   editing.value?.envRows.push({ key: '', value: '' })
@@ -620,6 +625,9 @@ function removeHeaderRow(i: number) {
               Status
             </th>
             <th class="px-4 py-2.5 font-medium">
+              Version
+            </th>
+            <th class="px-4 py-2.5 font-medium">
               Tools
             </th>
             <th class="px-4 py-2.5 font-medium text-right">
@@ -649,19 +657,25 @@ function removeHeaderRow(i: number) {
                 {{ server.transport === 'HTTP' ? server.url : `${server.command || ''} ${(server.args || []).join(' ')}`.trim() }}
               </td>
               <td class="px-4 py-2.5">
-                <div class="flex items-center gap-1.5">
-                  <span
-                    class="text-[10px] font-mono px-1.5 py-px rounded-sm border"
-                    :class="statusBadgeClass[server.status]"
-                    :title="server.lastError || ''"
-                  >{{ server.status }}</span>
-                  <span
-                    v-if="server.protocolGeneration"
-                    class="text-[10px] font-mono text-fg-muted"
-                    :title="`JClaw last connected with MCP v${server.protocolGeneration} (revision ${server.protocolVersion})`"
-                    data-testid="mcp-protocol-version"
-                  >v{{ server.protocolGeneration }}</span>
-                </div>
+                <span
+                  class="text-[10px] font-mono px-1.5 py-px rounded-sm border"
+                  :class="statusBadgeClass[server.status]"
+                  :title="server.lastError || ''"
+                >{{ server.status }}</span>
+              </td>
+              <td class="px-4 py-2.5">
+                <span
+                  v-if="server.protocolGeneration"
+                  class="text-[10px] font-mono px-1.5 py-px rounded-sm border"
+                  :class="generationPillClass[server.protocolGeneration]"
+                  :title="`JClaw last connected with MCP v${server.protocolGeneration} (revision ${server.protocolVersion})`"
+                  data-testid="mcp-protocol-version"
+                >v{{ server.protocolGeneration }}</span>
+                <span
+                  v-else
+                  class="text-xs text-fg-muted"
+                  title="Not connected yet"
+                >—</span>
               </td>
               <td class="px-4 py-2.5 text-fg-muted text-xs">
                 <button
@@ -766,7 +780,7 @@ function removeHeaderRow(i: number) {
               :data-testid="`mcp-breaker-row-${server.name}`"
             >
               <td
-                colspan="6"
+                colspan="7"
                 class="bg-muted/30 px-4 py-2.5 border-l-2"
                 :class="breakerAccentClass[breakerOf(server)!.state]"
               >
@@ -788,7 +802,7 @@ function removeHeaderRow(i: number) {
                  description) without diving into the agent edit panel. -->
             <tr v-if="expandedToolsRowId === server.id && server.tools.length">
               <td
-                colspan="6"
+                colspan="7"
                 class="bg-muted/30 px-0 py-0"
               >
                 <!-- Tool catalogue: hairline-divided list inside a
@@ -832,7 +846,7 @@ function removeHeaderRow(i: number) {
             <!-- Inline edit panel — same input structure as the add form -->
             <tr v-if="expandedRowId === server.id && editing && editing.id === server.id">
               <td
-                colspan="6"
+                colspan="7"
                 class="bg-muted/30 p-4"
               >
                 <form
@@ -1131,7 +1145,7 @@ function removeHeaderRow(i: number) {
             <!-- Test result banner for collapsed rows -->
             <tr v-else-if="testResult && testResultForId === server.id">
               <td
-                colspan="6"
+                colspan="7"
                 class="bg-muted/30 px-4 py-2 text-xs"
                 :class="testResult.success ? 'text-green-700 dark:text-green-400' : 'text-red-700 dark:text-red-400'"
               >

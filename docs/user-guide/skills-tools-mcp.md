@@ -211,7 +211,7 @@ A successful test does not guarantee a server's tools will work end to end. You 
 
 ### Protocol versions
 
-MCP has two generations of protocol. JClaw calls them **MCP v1** and **MCP v2**. MCP v1 opens every connection with a handshake. MCP v2 drops the handshake. JClaw speaks both. The MCP specification itself names each version by its release date, not by a number: MCP v2 is the 2026-07-28 version, and MCP v1 covers every version before it. The generation a server last connected with shows beside its status as `v1` or `v2`. Hover over it to see the exact version. The server's edit form has a **Protocol** setting:
+MCP has two generations of protocol. JClaw calls them **MCP v1** and **MCP v2**. MCP v1 opens every connection with a handshake. MCP v2 drops the handshake. JClaw speaks both. The MCP specification itself names each version by its release date, not by a number: MCP v2 is the 2026-07-28 version, and MCP v1 covers every version before it. The generation a server last connected with shows in the **Version** column as `v1` or `v2`, in different colors. Hover over it to see the exact version. A server that has never connected shows a dash. The server's edit form has a **Protocol** setting:
 
 - **Automatic** (the default) asks the server on every connect whether it speaks MCP v2, and uses it if so. A server that does not is connected with MCP v1, at the cost of one extra round trip.
 - **Handshake** always connects with MCP v1 and never asks.

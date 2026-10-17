@@ -278,14 +278,25 @@ describe('MCP Servers page', () => {
     expect(c.text()).toContain('Connected')
   })
 
-  it('shows the protocol generation each server last connected with, and its revision on hover (JCLAW-1443)', async () => {
-    setupApi([server({ protocolVersion: '2026-07-28', protocolGeneration: 2 }), server({ id: 2, name: 'fresh' })])
+  it('shows the protocol generation each server last connected with in its own column, and its revision on hover (JCLAW-1443)', async () => {
+    setupApi([
+      server({ protocolVersion: '2026-07-28', protocolGeneration: 2 }),
+      server({ id: 2, name: 'older', protocolVersion: '2025-06-18', protocolGeneration: 1 }),
+      server({ id: 3, name: 'fresh' }),
+    ])
     const c = await mountSuspended(McpServers)
     await flushPromises()
 
-    const versions = c.findAll('[data-testid="mcp-protocol-version"]')
-    expect(versions.map(v => v.text())).toEqual(['v2'])
-    expect(versions[0]!.attributes('title')).toContain('2026-07-28')
+    const headers = c.findAll('thead th').map(th => th.text())
+    const column = headers.indexOf('Version')
+    expect(column).toBe(headers.indexOf('Status') + 1)
+    const cells = c.findAll('tbody > tr').map(tr => tr.findAll('td')[column]!)
+    expect(cells.map(td => td.text())).toEqual(['v2', 'v1', '—'])
+
+    const [v2, v1] = c.findAll('[data-testid="mcp-protocol-version"]')
+    expect(v2!.attributes('title')).toContain('2026-07-28')
+    expect(v1!.attributes('title')).toContain('2025-06-18')
+    expect(v2!.classes()).not.toEqual(v1!.classes())
   })
 
   it('edits the protocol setting beside the version JClaw last connected with', async () => {
@@ -369,7 +380,7 @@ describe('MCP servers page — each server shows its own breaker (JCLAW-1301)', 
 
   it('adds no column: the breaker sits among the row actions', async () => {
     const c = await mountWith([breaker('mcp:github', 'CLOSED')])
-    expect(c.findAll('thead th').map(th => th.text())).toEqual(['Name', 'Transport', 'Endpoint', 'Status', 'Tools', 'Actions'])
+    expect(c.findAll('thead th').map(th => th.text())).toEqual(['Name', 'Transport', 'Endpoint', 'Status', 'Version', 'Tools', 'Actions'])
     const actions = c.findAll('tbody tr')[0]!.findAll('td').at(-1)!
     expect(actions.find('[data-testid="mcp-breaker-toggle-github"]').exists()).toBe(true)
   })
