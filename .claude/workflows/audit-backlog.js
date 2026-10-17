@@ -36,6 +36,7 @@ const compact = (f) => ({
   id: f.id, severity: f.severity, file: f.file, lines: f.lines, kind: kindOf(f), category: f.category || f.concept || '',
   title: f.title, impact: String(f.impact || f.scenario || '').slice(0, 240),
   ...(MAPPED ? { knownKeys: f.knownKeys || [] } : {}),
+  ...(f.coveredBy ? { coveredBy: f.coveredBy } : {}),
 })
 
 phase('Survey')
@@ -76,7 +77,8 @@ Rules:
 - Propose a NEW epic (existingKey "") only for a theme no open epic covers. Name it for its subject, never for this
   audit or its date: summary (one line), epicName (at most three words), description (two to four sentences on the
   problem its stories share).
-- A finding an open issue below already plans to fix goes to that issue's epic when it has one${MAPPED ? ' (a finding\'s knownKeys are the issues filed against its files)' : ''}.
+- A finding with coveredBy names the open issue its reviewer believes already plans the fix; it goes to that issue's
+  epic when it has one, as does any finding an open issue below already plans to fix${MAPPED ? ' (a finding\'s knownKeys are the issues filed against its files)' : ''}.
 - As few epics as cover the themes coherently. Refs are E1, E2, ...
 
 OPEN EPICS: ${JSON.stringify(survey.epics)}
@@ -160,10 +162,11 @@ const DEDUP_SCHEMA = {
     verdicts: {
       type: 'array',
       items: {
-        type: 'object', additionalProperties: false, required: ['ref', 'verdict', 'key', 'reason'],
+        type: 'object', additionalProperties: false, required: ['ref', 'verdict', 'key', 'sitesListed', 'reason'],
         properties: {
           ref: { type: 'string' }, verdict: { type: 'string', enum: ['new', 'extends', 'covered'] },
           key: { type: 'string' }, reason: { type: 'string' },
+          sitesListed: { type: 'boolean', description: 'covered only: the issue names these files or sites; false when it covers the defect but not these sites' },
         },
       },
     },
@@ -189,9 +192,11 @@ Rules:
 - afkCandidate: true only when an unattended agent could do it from the description alone — exact files, a clear
   fix, a test that proves it, no product decision, no change to a wire or storage contract. afkReason: one line.
 - dependsOn: refs of stories in this epic that must land first.
-- Open issues below are already filed. Where one already plans a finding's fix, put exactly those findings in
-  one story and set coveredBy to its key: it is filed as a comment on that issue, not as a new story. Never
-  write a story that re-scopes, splits or repeats work an open issue already plans. coveredBy is "" otherwise.
+- Open issues below are already filed. A finding whose coveredBy names one is its reviewer's claim that the issue
+  plans the fix: put the findings that share a coveredBy key in one story, set the story's coveredBy to that key, and
+  never mix them with findings that carry none. Where an open issue plans a finding's fix that nobody claimed, do the
+  same. A covered story is filed as evidence on that issue, not as a new story. Never write a story that re-scopes,
+  splits or repeats work an open issue already plans. coveredBy is "" otherwise.
 - Refs are S1, S2, ... Every id in FINDINGS appears in exactly one story.
 - LOW FINDINGS are not yours to group. Add one to a story above only when its fix is part of that same change;
   leave every other out — the workflow folds them into one cleanup story for this epic. Never write a story of
@@ -212,7 +217,10 @@ candidate's description, and its comments where they matter, before ruling.
 - "covered": an open issue already plans this same change. Its evidence will be added there as a comment instead.
 - "extends": an open issue changes the same code for a related reason, or a recently resolved one fixed only part
   of it. The story is created and linked to that key.
-A story with a coveredBy key was matched to that issue by its writer: confirm it as "covered" or correct it.
+A story with a coveredBy key claims that issue plans its fix — a claim made from the issue's title alone. Read the
+issue's description: rule "covered" only when it plans this same fix, and set sitesListed true when it names these
+files or sites, false when it covers the defect but not these sites, so its comment asks to add them. When it does
+not plan this fix, rule "extends" or "new", whatever the title suggests. sitesListed is false for any other verdict.
 A cleanup story (ref ending -LOW) gathers independent low-severity findings: rule it "covered" or "extends" only
 when one issue already plans most of them, otherwise "new".
 ${READ_ONLY}
@@ -227,8 +235,9 @@ STORIES: ${JSON.stringify(stories.map((s) => ({
 
 // Low findings never get stories of their own: whatever the writer does not attach to a Medium-or-up change is
 // folded into one cleanup story per epic, so a full-tree run proposes tens of stories, not hundreds.
-// A defect never folds, whatever its severity: the cleanup list is for cost and maintainability, not bugs.
-const isLow = (id) => byId.get(id).severity === 'low' && byId.get(id).defect !== 'yes'
+// A defect never folds, whatever its severity: the cleanup list is for cost and maintainability, not bugs. Nor
+// does a covered finding: it is filed as evidence on its issue once the Jira check confirms the cover.
+const isLow = (id) => byId.get(id).severity === 'low' && byId.get(id).defect !== 'yes' && !byId.get(id).coveredBy
 const cleanupStory = (e, ids) => {
   const files = new Set(ids.map((id) => String(byId.get(id).file).split(' ')[0])).size
   return {
@@ -284,7 +293,7 @@ const lane = async () => {
         epic: e,
         stories: stories.map((s) => ({
           ...s,
-          jira: verdicts.get(s.ref) || { verdict: 'new', key: '', reason: dedup ? 'not ruled on; treated as new' : 'dedup failed; treated as new' },
+          jira: verdicts.get(s.ref) || { verdict: 'new', key: '', sitesListed: false, reason: dedup ? 'not ruled on; treated as new' : 'dedup failed; treated as new' },
         })),
       })
     } catch (err) {

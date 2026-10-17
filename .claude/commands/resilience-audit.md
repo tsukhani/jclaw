@@ -42,7 +42,7 @@ Every agent prompt carries this split as the workflow's `OUT_OF_SCOPE` text, and
 
 ## Jira first, so known work is not paid for twice
 
-The groups are concerns, not files, so every reviewer sees every open JCLAW issue (`summary`, status, epic) before it starts. It writes no finding a filed issue already plans to fix; where one is still visibly present it adds a `STILL OPEN: <key> — <file>:<lines>` line instead, which needs no skeptic. Skeptics reject a finding a listed issue covers. The backlog step then reads the open epics before proposing any, gives each story writer the open issues, and runs a last per-story Jira search.
+The groups are concerns, not files, so every reviewer sees every open JCLAW issue (`summary`, status, epic) before it starts. A defect a filed issue already plans to fix still gets a finding card, marked `covered_by: <key>`, and the skeptic judges it like any other — a title that merely sounds related is no reason to drop a bug. Covered findings never fold into a cleanup story; the writer groups them by issue, and the backlog's Jira check reads that issue's description: `covered` stands only when the issue plans this fix, and records whether the description lists these sites. A confirmed cover is filed as evidence on the issue ("still present", or "sites to add to this issue's scope"); a cover that does not hold becomes `extends` or `new`. The backlog step also reads the open epics before proposing any, gives each story writer the open issues, and runs a last per-story Jira search.
 
 ## 1. Run it
 
@@ -67,10 +67,10 @@ A full run is 28 agents — three per group plus one synthesizer — plus the ba
 Save `backlog` as JSON to `docs/spikes/audits/resilience-audit-<date>-backlog.json` (gitignored, so it outlives the session) and give its path. Then show, in this order:
 
 1. The headline, then the scorecard: one row per concept, all 30, with its status (`sound`, `gaps`, `needs-measurement`, `not-applicable`) and its one-line summary.
-2. One coverage line: groups run and dropped, findings surviving and rejected, open issues checked, still-open confirmations.
+2. One coverage line: groups run and dropped, findings surviving and rejected, open issues checked, findings claimed as covered.
 3. **Epics, ranked:** `rank | epic (key, or NEW) | stories | top priority | why this epic`.
 4. **Stories, ranked:** `rank | priority | summary | epic | Jira check (new / extends KEY) | findings | quick win | AFK candidate`. Each epic's Low findings are folded into one `cleanup` story, and the AFK mark is narrowed the same way as in `/code-audit`.
-5. **Already filed:** the `covered` stories, each as the open issue it will comment on, and the `STILL OPEN` confirmations grouped by issue.
+5. **Already filed:** the `covered` stories, each as the open issue it will comment on and whether its sites are listed there.
 6. The `needsMeasurement` list, each with how to settle it. Offer to run the `EXPLAIN`s read-only against the live H2 and to hand the load questions to `/loadtest-audit`. Measurements are not filed as stories unless the operator asks.
 
 Then ask what to file: everything, a rank cut, or named refs, and which AFK candidates get the `afk` label. On approval, follow `.claude/commands/audit-file.md` with the saved path. This command never edits `app/` and never writes to Jira itself.

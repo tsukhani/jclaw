@@ -179,7 +179,6 @@ const GROUPS = [
 
 // Every open JCLAW issue (`plan.mjs --known-only`), so a reviewer does not pay to re-find what is already filed.
 const KNOWN = (args && args.known) || []
-const STILL_OPEN = /^\s*STILL OPEN:\s*(JCLAW-\d+)\s*[-–—:]*\s*(.*)$/gim
 const KNOWN_LIST = KNOWN.length
   ? `ALREADY FILED — every open JCLAW issue:\n${KNOWN.map((k) => `- ${k.key} (${k.status}${k.epic ? `, epic ${k.epic}` : ''}): ${k.summary}`).join('\n')}`
   : ''
@@ -236,6 +235,7 @@ Then ONE block per finding:
 - scenario: <the trigger (what is slow, failing, duplicated, concurrent or overloaded) and the step-by-step consequence>
 - evidence: <the code that allows it, quoted concisely>
 - existing_protection: <the nearest mechanism and why it does not cover this path, or "none">
+- covered_by: <the ALREADY FILED key whose issue plans this fix, or none>
 - fix: <specific change, naming the existing mechanism to reuse where one fits>
 - measurement: <only if status needs-measurement: the query, EXPLAIN, loadtest or JFR view that would settle it; else "none">
 `
@@ -265,7 +265,7 @@ const EXTRACT_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['concept', 'file', 'lines', 'severity', 'title', 'scenario', 'evidence', 'existingProtection', 'fix', 'measurement', 'verdict', 'adjudication'],
+        required: ['concept', 'file', 'lines', 'severity', 'title', 'scenario', 'evidence', 'existingProtection', 'coveredBy', 'fix', 'measurement', 'verdict', 'adjudication'],
         properties: {
           concept: { type: 'string' },
           file: { type: 'string' },
@@ -275,6 +275,7 @@ const EXTRACT_SCHEMA = {
           scenario: { type: 'string' },
           evidence: { type: 'string' },
           existingProtection: { type: 'string' },
+          coveredBy: { type: 'string', description: 'the JCLAW key from covered_by, or "" for none' },
           fix: { type: 'string' },
           measurement: { type: 'string' },
           verdict: { type: 'string', enum: ['confirmed', 'downgraded', 'rejected'] },
@@ -381,9 +382,8 @@ ${g.seeds}
 Questions to answer:
 ${g.questions}
 ${KNOWN_LIST && `${KNOWN_LIST}
-Write no FINDING for a defect one of these already plans to fix. Where one is still visibly present, add a line
-"STILL OPEN: <key> — <file>:<lines>" after your findings instead; it needs no adjudication. Spend the review on
-what they do not cover.`}
+When a defect you find is one an issue above already plans to fix, still write its FINDING block and set covered_by
+to that key; it is filed as evidence on that issue, not as a new story. Spend the review on what they do not cover.`}
 
 Method: start from the seeds, then search all of app/ for every site of each pattern (every client builder, every
 executor, every queue, every cache, every query — whatever your concepts touch) so a path the seeds miss is still
@@ -408,13 +408,13 @@ Your plain-text response IS the deliverable — do NOT call any structured-outpu
   ({ g, reviewText }) => {
     // A dead agent returns null; throwing drops the group into groupsDropped instead of counting it reviewed.
     if (!reviewText) throw new Error(`review:${g.id} returned nothing`)
-    const stillOpen = [...reviewText.matchAll(STILL_OPEN)].map((m) => ({ key: m[1], where: m[2].trim(), group: g.id }))
     return agent(
       `You are a skeptical staff engineer adjudicating a peer's reliability findings for JClaw, concern: ${g.title}.
 Your job is to REFUTE weak findings, not to agree. Re-read the cited code YOURSELF before ruling, and follow the
 call path far enough to see whether a protection upstream or downstream already covers it.
 ${KNOWN_LIST && `${KNOWN_LIST}
-Reject a finding one of these already plans to fix, and name the key in the adjudication.`}
+Judge a finding with a covered_by key like any other: its defect must be real. Keep covered_by as written; the
+backlog step checks it against that issue's description, which you have not seen.`}
 ${PROJECT_GIVENS}
 ${SEVERITY}
 ${OUT_OF_SCOPE}
@@ -443,23 +443,24 @@ Your plain-text response IS the deliverable — do NOT call any structured-outpu
 REVIEW TO ADJUDICATE:
 ${reviewText}`,
       { label: `verify:${g.id}`, phase: 'Verify', model: 'opus' },
-    ).then((text) => ({ g, verdictText: text, stillOpen }))
+    ).then((text) => ({ g, verdictText: text }))
   },
 
   // stage 3 — EXTRACT (schema; NO file reading)
-  ({ g, verdictText, stillOpen }) => {
+  ({ g, verdictText }) => {
     if (!verdictText) throw new Error(`verify:${g.id} returned nothing`)
     return agent(
     `Transform the adjudicated reliability-review prose below into structured JSON. Do NOT read any files or use any
 tool except the final structured-output call. Parse each "### CONCEPT" block into concepts[] and each
 "### FINDING" block into findings[]. Map "final_severity" -> "severity", "existing_protection" ->
-"existingProtection". Carry every other field over verbatim. A FINDING block with no verdict is "confirmed" at its
+"existingProtection", and "covered_by" -> "coveredBy" as the bare JCLAW key ("" when none or absent). Carry every
+other field over verbatim. A FINDING block with no verdict is "confirmed" at its
 stated severity. Produce {groupId:"${g.id}", concepts:[...], findings:[...]}.
 
 ADJUDICATED PROSE:
 ${verdictText}`,
     { label: `extract:${g.id}`, phase: 'Extract', schema: EXTRACT_SCHEMA, model: 'opus', effort: 'low' },
-    ).then((r) => r && { ...r, groupId: g.id, stillOpen })
+    ).then((r) => r && { ...r, groupId: g.id })
   },
 )
 
@@ -469,7 +470,6 @@ if (dropped.length) log(`WARNING: ${dropped.length} groups dropped: ${dropped.jo
 const surviving = done.flatMap((d) => d.findings.map((f) => ({ ...f, group: d.groupId })))
   .filter((f) => f.verdict !== 'rejected' && f.severity !== 'none')
 const rejected = done.flatMap((d) => d.findings).filter((f) => f.verdict === 'rejected').length
-const stillOpen = done.flatMap((d) => d.stillOpen || [])
 const unreviewed = Object.keys(CONCEPTS).filter((c) =>
   !NOT_APPLICABLE.some((n) => n.concept === c) && !groups.some((g) => g.concepts.includes(c) && !dropped.includes(g.id)))
 
@@ -514,13 +514,12 @@ return {
     groupsDropped: dropped,
     conceptsUnreviewed: unreviewed,
     openIssuesChecked: opts.openIssuesChecked ?? null,
-    stillOpen: { confirmations: stillOpen.length, issues: [...new Set(stillOpen.map((s) => s.key))].length },
+    coveredClaims: surviving.filter((f) => f.coveredBy).length,
     survivingFindings: surviving.length,
     rejected,
     bySeverity: { critical: sev('critical'), high: sev('high'), medium: sev('medium'), low: sev('low') },
   },
   synthesis,
   backlog,
-  stillOpen,
   findings: surviving,
 }

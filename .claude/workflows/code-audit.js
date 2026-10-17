@@ -34,7 +34,6 @@ Run those commands first. If they print a different number of files than ${unit.
 
 // Open Jira issues the plan builder matched to each unit's files, so a reviewer does not pay to re-find them.
 const KNOWN = new Map((args.known || []).map((k) => [k.key, k]))
-const STILL_OPEN = /^\s*STILL OPEN:\s*(JCLAW-\d+)\s*[-–—:]*\s*(.*)$/gim
 const knownList = (unit) => {
   const ks = (unit.known || []).map((key) => KNOWN.get(key)).filter(Boolean)
   if (!ks.length) return ''
@@ -42,12 +41,14 @@ const knownList = (unit) => {
   return `ALREADY FILED — open JCLAW issues that name this unit's files${shown}:
 ${ks.map((k) => `- ${k.key} (${k.status}${k.epic ? `, epic ${k.epic}` : ''}): ${k.summary}`).join('\n')}`
 }
+// A defect a filed issue already covers still gets a card, marked covered_by: the backlog step reads that issue's
+// description before anything is filed, so a title that merely sounds related cannot hide a bug.
 const knownForReview = (unit) => knownList(unit) && `${knownList(unit)}
-Write no FINDING for a defect one of these already plans to fix. Where one is still visibly present, add a line
-"STILL OPEN: <key> — <file>:<lines>" after your findings instead; it needs no adjudication. Spend the review on
-what they do not cover.`
+When a defect you find is one an issue above already plans to fix, still write its FINDING card and set covered_by
+to that key; it is filed as evidence on that issue, not as a new story. Spend the review on what they do not cover.`
 const knownForVerify = (unit) => knownList(unit) && `${knownList(unit)}
-Reject a finding one of these already plans to fix, and name the key in the adjudication.`
+Judge a card with a covered_by key like any other: its defect must be real. Keep covered_by as written; the
+backlog step checks it against that issue's description, which you have not seen.`
 
 // ---- shared context baked into every agent so it judges THIS codebase, not generic Java ----
 const PROJECT_CONSTRAINTS = `
@@ -109,6 +110,7 @@ Emit ONE block per finding, in EXACTLY this markdown shape (repeat the block per
 - category: <e.g. SRP-God-class, DIP, ISP, DRY, OCP, GRASP-coupling, GRASP-cohesion, encapsulation, mutability, Java25-idiom, N+1, unbounded-state, memory-leak, resource-leak, blocking-hot-path, redundant-alloc, algorithmic, missed-memoization, lock-contention, VT-hazard>
 - principle: <e.g. SOLID:SRP, GRASP:LowCoupling, Java25:RecordPatterns, Perf:UnboundedMap>
 - severity: critical | high | medium | low
+- covered_by: <the ALREADY FILED key whose issue plans this fix, or none>
 - defect: yes | no   (yes when the code misbehaves today on input it can actually receive: lost or corrupted data, a wrong result, a broken feature, a crash. no when the cost is only performance or maintainability)
 - title: <one line>
 - evidence: <quote the actual smell from the code, concise>
@@ -127,7 +129,7 @@ const VERIFY_SCHEMA = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['file', 'lines', 'axis', 'category', 'principle', 'severity', 'defect', 'title', 'evidence', 'impact', 'fix', 'verdict', 'adjudication'],
+        required: ['file', 'lines', 'axis', 'category', 'principle', 'severity', 'defect', 'coveredBy', 'title', 'evidence', 'impact', 'fix', 'verdict', 'adjudication'],
         properties: {
           file: { type: 'string' },
           lines: { type: 'string' },
@@ -136,6 +138,7 @@ const VERIFY_SCHEMA = {
           principle: { type: 'string' },
           severity: { type: 'string', enum: ['critical', 'high', 'medium', 'low', 'none'], description: 'severity AFTER adjudication' },
           defect: { type: 'string', enum: ['yes', 'no'] },
+          coveredBy: { type: 'string', description: 'the JCLAW key from covered_by, or "" for none' },
           title: { type: 'string' },
           evidence: { type: 'string' },
           impact: { type: 'string' },
@@ -194,7 +197,7 @@ const SYNTH_SCHEMA = {
 
 // The adjudicated cards are a fixed "- key: value" shape, so they parse in code. An extractor agent runs only for a
 // unit whose prose does not parse: every agent carries ~27k tokens of injected instructions before it does any work.
-const CARD_KEYS = ['file', 'lines', 'axis', 'category', 'principle', 'severity', 'defect', 'title', 'evidence', 'impact', 'fix', 'verdict', 'final_severity', 'adjudication']
+const CARD_KEYS = ['file', 'lines', 'axis', 'category', 'principle', 'severity', 'covered_by', 'defect', 'title', 'evidence', 'impact', 'fix', 'verdict', 'final_severity', 'adjudication']
 const KEY_LINE = /^\s*[-*]\s+\**([a-z_]+)\**\s*:\**\s?(.*)$/i
 const CARD_LIKE = /^\s*[-*]\s+\**(file|verdict)\**\s*:/im
 const enumOf = (s) => (s || '').replace(/[*`]/g, '').trim().toLowerCase().split(/[\s(,;]/)[0]
@@ -219,6 +222,7 @@ function parseCards(text) {
       file: card.file, lines: card.lines, axis: enumOf(card.axis),
       category: card.category || '', principle: card.principle || '',
       severity: enumOf(card.final_severity || card.severity), defect: enumOf(card.defect) === 'yes' ? 'yes' : 'no', title: card.title,
+      coveredBy: ((card.covered_by || '').match(/JCLAW-\d+/) || [''])[0],
       evidence: card.evidence || '', impact: card.impact || '', fix: card.fix || '',
       verdict: enumOf(card.verdict) || 'confirmed', adjudication: card.adjudication || '',
     }
@@ -300,7 +304,8 @@ ${reviewText}`
 const extractPrompt = (unit, verdictText) => `Transform the adjudicated code-review prose below into structured JSON. Do NOT read any files or use any
 tool except the final structured-output call. Parse each "### FINDING" block into one array entry.
 Map "final_severity" -> "severity". Map "verdict" -> "verdict". Carry over file/lines/axis/category/principle/
-defect/title/evidence/impact/fix/adjudication verbatim; a block with no defect field is "no". If a block lacks a verdict, treat it as "confirmed" at its
+defect/title/evidence/impact/fix/adjudication verbatim; a block with no defect field is "no". Map "covered_by" ->
+"coveredBy" as the bare JCLAW key, or "" when it is none or absent. If a block lacks a verdict, treat it as "confirmed" at its
 stated severity. Produce {unitId:"${unit.id}", verified:[...]} with one entry per FINDING block. If the text is
 "NO FINDINGS" or contains no blocks, return an empty verified array.
 
@@ -311,22 +316,19 @@ ${verdictText}`
 async function auditUnit(unit) {
   const reviewText = await agent(reviewPrompt(unit), { label: `review:${unit.id} ${unitPkgs(unit)}`, phase: 'Review' })
   if (!reviewText) throw new Error(`review:${unit.id} returned nothing`)
-  const stillOpen = [...reviewText.matchAll(STILL_OPEN)].map((m) => ({ key: m[1], where: m[2].trim(), unitId: unit.id }))
-  const findingsText = reviewText.replace(STILL_OPEN, '')
-  if (/NO FINDINGS/i.test(findingsText) && findingsText.replace(/SUMMARY:.*/i, '').trim().length < 60) {
-    return { unitId: unit.id, verified: [], parsedBy: 'clean', stillOpen }
+  if (/NO FINDINGS/i.test(reviewText) && reviewText.replace(/SUMMARY:.*/i, '').trim().length < 60) {
+    return { unitId: unit.id, verified: [], parsedBy: 'clean' }
   }
   const verdictText = await agent(verifyPrompt(unit, reviewText),
     { label: `verify:${unit.id} ${unitPkgs(unit)}`, phase: 'Verify', model: 'opus' })
   if (!verdictText) throw new Error(`verify:${unit.id} returned nothing`)
-  const cardsText = verdictText.replace(STILL_OPEN, '')
-  if (/^\s*NO FINDINGS\s*$/i.test(cardsText)) return { unitId: unit.id, verified: [], parsedBy: 'clean', stillOpen }
-  const parsed = parseCards(cardsText)
-  if (parsed) return { unitId: unit.id, verified: parsed, parsedBy: 'code', stillOpen }
+  if (/^\s*NO FINDINGS\s*$/i.test(verdictText)) return { unitId: unit.id, verified: [], parsedBy: 'clean' }
+  const parsed = parseCards(verdictText)
+  if (parsed) return { unitId: unit.id, verified: parsed, parsedBy: 'code' }
   const extracted = await agent(extractPrompt(unit, verdictText),
     { label: `extract:${unit.id}`, phase: 'Extract', schema: VERIFY_SCHEMA, model: 'opus', effort: 'low' })
   if (!extracted) throw new Error(`extract:${unit.id} returned nothing`)
-  return { unitId: unit.id, verified: extracted.verified, parsedBy: 'agent', stillOpen }
+  return { unitId: unit.id, verified: extracted.verified, parsedBy: 'agent' }
 }
 
 // ---- Review + Verify in lanes: each lane takes the next unit and runs its reviewer, then its skeptic, so at most
@@ -371,7 +373,6 @@ const unitById = new Map(units.map((u) => [u.id, u]))
 const surviving = audited
   .flatMap((u) => u.verified.map((f) => ({ ...f, unitId: u.unitId, knownKeys: unitById.get(u.unitId).known || [] })))
   .filter((f) => f.verdict !== 'rejected' && f.severity !== 'none')
-const stillOpen = audited.flatMap((u) => u.stillOpen || [])
 const cleanFindings = surviving.filter((f) => f.axis === 'clean-code')
 const perfFindings = surviving.filter((f) => f.axis === 'performance')
 
@@ -455,7 +456,7 @@ const stats = {
   },
   outputTokensThisTurn: budget.spent(),
   openIssuesChecked: args.openIssuesChecked ?? null,
-  stillOpen: { confirmations: stillOpen.length, issues: [...new Set(stillOpen.map((s) => s.key))].length },
+  coveredClaims: surviving.filter((f) => f.coveredBy).length,
   survivingFindings: surviving.length,
   defects: surviving.filter((f) => f.defect === 'yes').length,
   rejected: audited.flatMap((u) => u.verified).filter((f) => f.verdict === 'rejected').length,
@@ -464,4 +465,4 @@ const stats = {
 }
 if (failed.length) log(`WARNING: ${failed.length} units failed: ${failed.map((u) => u.id).join(', ')}`)
 
-return { stats, synthesis, backlog, stillOpen, findings: surviving, remainingPlan }
+return { stats, synthesis, backlog, findings: surviving, remainingPlan }

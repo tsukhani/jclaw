@@ -27,8 +27,8 @@ Every agent prompt carries the audit split as the workflow's `OUT_OF_SCOPE` text
 
 Before any agent runs, the plan builder reads every open JCLAW issue and attaches each one to the units whose files it names — by path, or by a class name with two or more capitals, since a bare `Agent` or `Task` would tie every issue to every unit. A unit lists at most twelve, those naming most of its files. Then:
 
-- **Reviewers** see their unit's filed issues and write no finding a filed issue already plans to fix. Where one is still visibly present they add a `STILL OPEN: <key> — <file>:<lines>` line instead, which needs no skeptic; the report lists those confirmations, so the operator sees which filed stories still bite.
-- **Skeptics** reject a finding a listed issue already covers.
+- **Reviewers** see their unit's filed issues. A defect a filed issue already plans to fix still gets a finding card, marked `covered_by: <key>`, and the skeptic judges it like any other — a title that merely sounds related is no reason to drop a bug. Covered findings never fold into a cleanup story; the writer groups them by issue, and the backlog's Jira check reads that issue's description: `covered` stands only when the issue plans this fix, and records whether the description lists these sites. A confirmed cover is filed as evidence on the issue ("still present", or "sites to add to this issue's scope"); a cover that does not hold becomes `extends` or `new`.
+- **Skeptics** judge a covered finding's defect like any other; the cover itself is checked by the backlog step, against the issue's description, which a skeptic never sees.
 - **The backlog step** reads the open epics before proposing any, gives each story writer the issues filed against its findings' files, and runs a last per-story Jira search for whatever the class-name match missed.
 
 ## Division of labor
@@ -87,10 +87,10 @@ Call the Workflow tool with `scriptPath: ".claude/workflows/code-audit.js"` and 
 
 Save `backlog` as JSON to `docs/spikes/audits/code-audit-<date>-backlog.json` (gitignored, so it outlives the session) and give its path. Then show, in this order:
 
-1. One coverage line: scope, units audited of planned, lines reviewed, findings surviving and rejected, open issues checked, still-open confirmations, and output tokens per unit.
+1. One coverage line: scope, units audited of planned, lines reviewed, findings surviving and rejected, open issues checked, findings claimed as covered (`stats.coveredClaims`), and output tokens per unit.
 2. **Epics, ranked:** `rank | epic (key, or NEW) | stories | top priority | why this epic`.
 3. **Stories, ranked:** `rank | priority | summary | epic | Jira check (new / extends KEY) | findings | quick win | AFK candidate`. Low findings never get stories of their own: each epic's are folded into one `cleanup` story listing every finding with its own fix, unless a writer attached one to the Medium-or-up change it belongs to. A **defect** — a finding whose card says the code misbehaves today — never folds, whatever its severity, and the coverage line counts them (`stats.defects`). Severity is the consequence of a real finding, never the skeptic's confidence in it: doubt rejects a finding, it does not shrink one. An AFK mark survives only on a quick win touching at most two files that is not a structural refactor; it is a shortlist to pick from, never a default.
-4. **Already filed:** the `covered` stories, each as the open issue it will comment on, and the `STILL OPEN` confirmations grouped by issue — filed work the code still shows.
+4. **Already filed:** the `covered` stories, each as the open issue it will comment on and whether its sites are listed there — filed work the code still shows.
 5. Unfiled findings with their reasons, then the two axis headlines from the synthesis in one line each.
 
 Then ask what to file: everything, a rank cut, or named refs, and which AFK candidates get the `afk` label. On approval, follow `.claude/commands/audit-file.md` with the saved path. This command never edits `app/` and never writes to Jira itself.
