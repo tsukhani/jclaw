@@ -77,6 +77,14 @@ evals/local/
 # because they hold per-developer state that shouldn't be checked in.
 !.claude/commands/
 !.claude/commands/**
+# …and the workflows those commands drive. Other saved workflows stay local.
+!.claude/workflows/
+.claude/workflows/*
+!.claude/workflows/code-audit.js
+!.claude/workflows/resilience-audit.js
+!.claude/workflows/audit-backlog.js
+!.claude/audit/
+!.claude/audit/**
 
 # Autoresearch state
 .autoresearch/
