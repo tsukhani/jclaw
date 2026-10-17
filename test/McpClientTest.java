@@ -470,7 +470,7 @@ class McpClientTest extends UnitTest {
         var ex = assertThrows(McpException.class, () -> McpEraDetection.open("fake", McpServer.Protocol.HANDSHAKE,
                 false, clients(transports, () -> modernOnly((_, r) -> ok(r, "{}")), Duration.ofSeconds(5))));
         assertEquals(-32022, ex.code());
-        assertTrue(ex.getMessage().contains("now needs protocol 2026-07-28"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("now needs MCP v2"), ex.getMessage());
         assertTrue(ex.getMessage().contains("Set its Protocol to Automatic"), ex.getMessage());
         assertFalse(transports.getFirst().methods.contains("server/discover"));
     }
@@ -482,7 +482,16 @@ class McpClientTest extends UnitTest {
         var ex = assertThrows(McpException.class, () -> McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC,
                 false, clients(transports, () -> none, Duration.ofSeconds(5))));
         assertEquals(2, transports.size(), "the handshake must be tried on a fresh connection");
-        assertTrue(ex.getMessage().contains("offers 2025-11-25"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("offers MCP v1 (2025-11-25)"), ex.getMessage());
+    }
+
+    @Test
+    void everyHandshakeRevisionReadsAsMcpV1AndTheStatelessOnesAsV2() {
+        for (var v : List.of("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")) {
+            assertEquals("MCP v1", McpClient.label(v), v);
+        }
+        assertEquals("MCP v2", McpClient.label("2026-07-28"));
+        assertEquals(2, McpClient.generation("2027-03-01"), "a later revision stays in the stateless generation");
     }
 
     @Test

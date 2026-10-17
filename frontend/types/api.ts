@@ -1102,6 +1102,8 @@ export interface McpServer {
   protocol: 'AUTOMATIC' | 'HANDSHAKE'
   /** The protocol version JClaw last connected with, or null before the first connect. */
   protocolVersion: string | null
+  /** 1 or 2, shown as MCP v1 or v2: every handshake-era revision is 1, 2026-07-28 on is 2. */
+  protocolGeneration: number | null
   /** When JClaw itself moved the server to HANDSHAKE, and why; null once the operator sets it. */
   protocolSwitchedAt: string | null
   protocolSwitchReason: string | null

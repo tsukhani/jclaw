@@ -44,7 +44,7 @@ public final class McpEraDetection {
             } catch (McpException e) {
                 if (!Objects.equals(e.code(), McpClient.UNSUPPORTED_PROTOCOL_VERSION)) throw e;
                 throw new McpException(McpClient.UNSUPPORTED_PROTOCOL_VERSION, ("MCP server '%s' refused the"
-                        + " handshake: it now needs protocol 2026-07-28. Set its Protocol to Automatic on the"
+                        + " handshake: it now needs MCP v2. Set its Protocol to Automatic on the"
                         + " MCP Servers page.").formatted(serverName), e.supportedVersions());
             }
         }
@@ -62,7 +62,8 @@ public final class McpEraDetection {
                 throw new McpException(("MCP server '%s' shares no protocol version with JClaw: it offers %s,"
                         + " and JClaw speaks %s, or %s through the handshake, which it refused too.").formatted(
                         serverName, McpClient.describeVersions(List.copyOf(versions)),
-                        McpClient.MODERN_PROTOCOL_VERSION, McpClient.PROTOCOL_VERSION), e);
+                        McpClient.describeVersions(List.of(McpClient.MODERN_PROTOCOL_VERSION)),
+                        McpClient.describeVersions(List.of(McpClient.PROTOCOL_VERSION))), e);
             }
             return new Opened(handshake, retry.switchOnSuccess() ? retry.reason() : null, first.offersModern());
         }

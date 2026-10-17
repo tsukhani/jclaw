@@ -18,6 +18,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -33,6 +34,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.stream.Collectors;
 
 /**
  * MCP client state machine over an {@link McpTransport} (JCLAW-31).
@@ -339,7 +341,7 @@ public class McpClient implements AutoCloseable {
                 return;
             }
             throw new McpException.NeedsHandshake(
-                    "the server refused 2026-07-28 and offers " + describeVersions(refusal.supportedVersions()),
+                    "the server refused MCP v2 and offers " + describeVersions(refusal.supportedVersions()),
                     false, UNSUPPORTED_PROTOCOL_VERSION, refusal.supportedVersions());
         }
         openWithInitialize(false);
@@ -446,7 +448,7 @@ public class McpClient implements AutoCloseable {
             storeConnectList(fetchToolsStrict(handshakeTimeout));
         } catch (McpException e) {
             throw new McpException.NeedsHandshake(
-                    "the first tools/list over 2026-07-28 failed: " + e.getMessage(), true, e.code(), List.of());
+                    "the first tools/list over MCP v2 failed: " + e.getMessage(), true, e.code(), List.of());
         }
     }
 
@@ -482,8 +484,24 @@ public class McpClient implements AutoCloseable {
         return out;
     }
 
+    /** 1 for every handshake-era revision, 2 from 2026-07-28 on (ISO dates sort as strings): what an operator reads. */
+    public static int generation(String version) {
+        return version.compareTo(MODERN_PROTOCOL_VERSION) >= 0 ? 2 : 1;
+    }
+
+    /** {@code MCP v1} or {@code MCP v2}, the name a revision goes by wherever an operator reads it. */
+    public static String label(String version) {
+        return "MCP v" + generation(version);
+    }
+
+    /** {@code MCP v1 (2025-06-18, 2025-11-25) and MCP v2 (2026-07-28)}: the generation, then the exact revisions. */
     static String describeVersions(List<String> versions) {
-        return versions.isEmpty() ? "no version JClaw knows" : String.join(", ", versions);
+        if (versions.isEmpty()) return "no version JClaw knows";
+        var byLabel = new LinkedHashMap<String, List<String>>();
+        for (var v : versions) byLabel.computeIfAbsent(label(v), _ -> new ArrayList<>()).add(v);
+        return byLabel.entrySet().stream()
+                .map(e -> e.getKey() + " (" + String.join(", ", e.getValue()) + ")")
+                .collect(Collectors.joining(" and "));
     }
 
     // ==================== tool-list freshness ====================
@@ -853,7 +871,7 @@ public class McpClient implements AutoCloseable {
         }
         var status = e.httpStatus();
         if (status != null && status >= 400 && status < 500 && !isStandardOrModernCode(code)) {
-            var lost = "MCP HTTP " + status + ": the server stopped answering 2026-07-28;"
+            var lost = "MCP HTTP " + status + ": the server stopped answering MCP v2;"
                     + " reconnecting to detect its protocol again";
             onTransportError(new IOException(lost));
             return new McpException(lost, e);

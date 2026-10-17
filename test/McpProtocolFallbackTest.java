@@ -140,6 +140,7 @@ class McpProtocolFallbackTest extends UnitTest {
         awaitState("legacy", McpServer.Status.CONNECTED);
         assertEquals("server/discover", processes().getFirst().methods().getFirst());
         await(() -> "2026-07-28".equals(column(server.id, "protocolVersion")), "the detected version is stored");
+        assertEquals(2, McpServerService.View.of(reload(server.id)).protocolGeneration());
     }
 
     @Test
@@ -171,7 +172,8 @@ class McpProtocolFallbackTest extends UnitTest {
         assertTrue(result.success(), result.message());
         assertTrue(result.offersModern(), result.message());
         assertEquals("2026-07-28", result.protocolVersion());
-        assertTrue(result.message().contains("offers 2026-07-28"), result.message());
+        assertTrue(result.message().contains("Connected over MCP v2. "), result.message());
+        assertTrue(result.message().contains("offers MCP v2"), result.message());
         assertEquals(McpServer.Status.CONNECTED, McpConnectionManager.status("tested"));
         assertEquals("handshake:echo", McpConnectionManager.callTool("tested", "echo", new JsonObject()).content());
         assertEquals("HANDSHAKE", column(server.id, "protocol"));

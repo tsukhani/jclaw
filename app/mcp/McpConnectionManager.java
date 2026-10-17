@@ -389,7 +389,7 @@ public final class McpConnectionManager {
                 handshake.connect();
             } catch (Exception he) {
                 handleFailure(entry, server, entry.attempts, he.getMessage());
-                return new McpException(("MCP server '%s' refused this call over protocol 2026-07-28 (%s), and"
+                return new McpException(("MCP server '%s' refused this call over MCP v2 (%s), and"
                         + " the handshake failed too: %s").formatted(server.name, e.reason(), he.getMessage()), e);
             }
             entry.client = handshake;
@@ -414,14 +414,14 @@ public final class McpConnectionManager {
     }
 
     private static McpException switchedFailure(String serverName, McpException.NeedsHandshake e) {
-        return new McpException(("MCP server '%s' refused this call over protocol 2026-07-28 (%s), so JClaw"
+        return new McpException(("MCP server '%s' refused this call over MCP v2 (%s), so JClaw"
                 + " switched it to the Handshake protocol. The call was not retried: try it again.")
                 .formatted(serverName, e.reason()), e);
     }
 
     /** The refused connection was already replaced by a reconnect, which detects the server's protocol afresh. */
     private static McpException replacedFailure(String serverName, McpException.NeedsHandshake e) {
-        return new McpException(("MCP server '%s' refused this call over protocol 2026-07-28 (%s) on a connection"
+        return new McpException(("MCP server '%s' refused this call over MCP v2 (%s) on a connection"
                 + " JClaw has since replaced. The call was not retried: try it again.")
                 .formatted(serverName, e.reason()), e);
     }

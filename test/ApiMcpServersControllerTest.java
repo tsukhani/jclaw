@@ -360,6 +360,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                 """);
         assertEquals("AUTOMATIC", created.get("protocol").getAsString());
         assertTrue(created.get("protocolVersion") == null || created.get("protocolVersion").isJsonNull());
+        assertTrue(created.get("protocolGeneration") == null || created.get("protocolGeneration").isJsonNull());
     }
 
     @Test

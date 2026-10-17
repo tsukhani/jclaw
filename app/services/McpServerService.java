@@ -90,6 +90,8 @@ public final class McpServerService {
                        String protocol,
                        /** The protocol version JClaw last connected with, else null. */
                        @Nullable String protocolVersion,
+                       /** {@link McpClient#generation} of {@code protocolVersion}: shown as MCP v1 or v2. */
+                       @Nullable Integer protocolGeneration,
                        /** When JClaw itself moved the server to HANDSHAKE, and why; null once the operator sets it. */
                        @Nullable String protocolSwitchedAt,
                        @Nullable String protocolSwitchReason) {
@@ -139,6 +141,7 @@ public final class McpServerService {
                     null,
                     row.protocolSetting().name(),
                     row.protocolVersion,
+                    row.protocolVersion != null ? McpClient.generation(row.protocolVersion) : null,
                     row.protocolSwitchedAt != null ? row.protocolSwitchedAt.toString() : null,
                     row.protocolSwitchReason);
         }
@@ -148,7 +151,7 @@ public final class McpServerService {
             return new View(id, name, enabled, requiresApproval, transport, command, args, env,
                     url, headers, status, lastError, lastConnectedAt, lastDisconnectedAt,
                     toolCount, tools, createdAt, updatedAt, original, protocol, protocolVersion,
-                    protocolSwitchedAt, protocolSwitchReason);
+                    protocolGeneration, protocolSwitchedAt, protocolSwitchReason);
         }
     }
 
@@ -390,11 +393,11 @@ public final class McpServerService {
         }
         try (var client = opened.client()) {
             var names = client.tools().stream().map(McpToolDef::name).sorted().toList();
-            var offer = opened.offersModern() ? "The server offers 2026-07-28."
-                    : "The server does not offer 2026-07-28.";
+            var version = Objects.requireNonNull(client.protocolVersion(), "a connected client has a version");
+            var offer = opened.offersModern() ? "The server offers MCP v2." : "The server does not offer MCP v2.";
             return new TestResult(true, names.size(), "Connected over %s. %d tool(s) advertised. %s"
-                    .formatted(client.protocolVersion(), names.size(), offer), names,
-                    client.protocolVersion(), opened.offersModern());
+                    .formatted(McpClient.label(version), names.size(), offer), names,
+                    version, opened.offersModern());
         }
     }
 

@@ -656,27 +656,11 @@ function removeHeaderRow(i: number) {
                     :title="server.lastError || ''"
                   >{{ server.status }}</span>
                   <span
-                    v-if="server.protocolVersion"
+                    v-if="server.protocolGeneration"
                     class="text-[10px] font-mono text-fg-muted"
-                    :title="`JClaw last connected with MCP protocol ${server.protocolVersion}`"
+                    :title="`JClaw last connected with MCP v${server.protocolGeneration} (revision ${server.protocolVersion})`"
                     data-testid="mcp-protocol-version"
-                  >{{ server.protocolVersion }}</span>
-                  <button
-                    v-if="breakerOf(server)"
-                    type="button"
-                    class="p-0.5 transition-colors"
-                    :class="breakerIconClass[breakerOf(server)!.state]"
-                    :title="`Circuit breaker ${breakerOf(server)!.state.replace('_', ' ').toLowerCase()}`"
-                    :aria-label="`Circuit breaker for ${server.name}`"
-                    :aria-expanded="breakerRowShown(server)"
-                    :data-testid="`mcp-breaker-toggle-${server.name}`"
-                    @click="toggleBreakerRow(server.id)"
-                  >
-                    <BoltIcon
-                      class="w-3.5 h-3.5"
-                      aria-hidden="true"
-                    />
-                  </button>
+                  >v{{ server.protocolGeneration }}</span>
                 </div>
               </td>
               <td class="px-4 py-2.5 text-fg-muted text-xs">
@@ -725,6 +709,28 @@ function removeHeaderRow(i: number) {
                       :class="expandedRowId === server.id ? 'rotate-180' : ''"
                     />
                   </button>
+                  <button
+                    v-if="breakerOf(server)"
+                    type="button"
+                    class="transition-colors"
+                    :class="breakerIconClass[breakerOf(server)!.state]"
+                    :title="`Circuit breaker ${breakerOf(server)!.state.replace('_', ' ').toLowerCase()}`"
+                    :aria-label="`Circuit breaker for ${server.name}`"
+                    :aria-expanded="breakerRowShown(server)"
+                    :data-testid="`mcp-breaker-toggle-${server.name}`"
+                    @click="toggleBreakerRow(server.id)"
+                  >
+                    <BoltIcon
+                      class="w-4 h-4"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <!-- Holds the icon column steady on a server that has no breaker yet. -->
+                  <span
+                    v-else
+                    class="w-4 h-4"
+                    aria-hidden="true"
+                  />
                   <button
                     type="button"
                     class="text-fg-muted hover:text-fg-strong transition-colors disabled:opacity-50 disabled:cursor-wait"
@@ -912,11 +918,11 @@ function removeHeaderRow(i: number) {
                       <span
                         class="text-xs text-fg-muted pb-1.5"
                         data-testid="mcp-protocol-last-version"
-                      >{{ server.protocolVersion ? `Last connected with ${server.protocolVersion}` : 'Not connected yet' }}</span>
+                      >{{ server.protocolGeneration ? `Last connected with MCP v${server.protocolGeneration}` : 'Not connected yet' }}</span>
                     </div>
                     <p class="text-xs text-fg-muted mt-1">
-                      Automatic asks the server on every connect whether it speaks MCP 2026-07-28 and uses it if so.
-                      Handshake always connects the older way, for a server that misbehaves on 2026-07-28.
+                      Automatic asks the server on every connect whether it speaks MCP v2 and uses it if so.
+                      Handshake always connects with MCP v1, for a server that misbehaves on v2.
                     </p>
                     <p
                       v-if="server.protocolSwitchedAt && server.protocol === 'HANDSHAKE'"
@@ -924,7 +930,7 @@ function removeHeaderRow(i: number) {
                       data-testid="mcp-protocol-switched"
                     >
                       JClaw switched this server to Handshake on {{ formatSwitchedAt(server.protocolSwitchedAt) }}:
-                      {{ server.protocolSwitchReason }}. Set it back to Automatic to try 2026-07-28 again.
+                      {{ server.protocolSwitchReason }}. Set it back to Automatic to try MCP v2 again.
                     </p>
                   </div>
 
