@@ -171,7 +171,7 @@ const sinceParam = computed(() => {
   return new Date(ms).toISOString()
 })
 
-const { data: costData, refresh, pending } = useFetch<CostResponse>('/api/metrics/cost', {
+const { data: costData, refresh, pending, status: costStatus } = useFetch<CostResponse>('/api/metrics/cost', {
   query: { since: sinceParam },
   default: () => ({ since: '', rows: [] }),
   watch: [sinceParam],
@@ -206,9 +206,15 @@ interface ProviderInfo {
   subscriptionMonthlyUsd: number
   supportedModalities: ('PER_TOKEN' | 'SUBSCRIPTION')[]
 }
-const { data: providersInfo } = useFetch<ProviderInfo[]>('/api/providers', {
+const { data: providersInfo, status: providersStatus } = useFetch<ProviderInfo[]>('/api/providers', {
   default: () => [],
 })
+
+// Saved filters are restored before either fetch lands, while every list they are checked
+// against is still empty, so the resets below wait for both or each reload would clear them.
+// A failed fetch counts as finished: the view then renders from the defaults.
+const dataSettled = computed(() => [costStatus.value, providersStatus.value]
+  .every(s => s === 'success' || s === 'error'))
 
 const modalityByProvider = computed(() => {
   const m = new Map<string, 'PER_TOKEN' | 'SUBSCRIPTION'>()
@@ -291,7 +297,7 @@ const availableChannels = computed(() => listChannelsInRows(rows.value))
 
 // Reset filters that no longer make sense as the data set changes.
 watchEffect(() => {
-  if (selectedChannel.value !== null
+  if (dataSettled.value && selectedChannel.value !== null
     && !availableChannels.value.includes(selectedChannel.value)) {
     selectedChannel.value = null
   }
@@ -301,7 +307,7 @@ watchEffect(() => {
 // Mirror the channel reset above so the chip can't get stuck pointing
 // at a provider that no longer renders.
 watchEffect(() => {
-  if (selectedSubscriptionProvider.value !== null
+  if (dataSettled.value && selectedSubscriptionProvider.value !== null
     && !configuredSubscriptionProviders.value.some(p => p.name === selectedSubscriptionProvider.value)) {
     selectedSubscriptionProvider.value = null
   }
@@ -378,13 +384,18 @@ const perTokenProviderBreakdown = computed(() => {
     .sort((a, b) => b.totalCost - a.totalCost)
 })
 
+// As with the subscription chips, filtering to the only provider would change nothing.
+const perTokenFilterable = computed(() => perTokenProviderBreakdown.value.length > 1)
+
 // Clear the per-token chip if its provider drops out of the window (e.g.,
 // the operator changes the agent/channel filter so that provider no longer
-// has paid activity). Mirrors the subscription-chip reset. Placed after
-// perTokenProviderBreakdown so its immediate run doesn't hit the TDZ.
+// has paid activity), or it is the only one left. Mirrors the
+// subscription-chip reset. Placed after perTokenProviderBreakdown so its
+// immediate run doesn't hit the TDZ.
 watchEffect(() => {
-  if (selectedPerTokenProvider.value !== null
-    && !perTokenProviderBreakdown.value.some(p => p.name === selectedPerTokenProvider.value)) {
+  if (dataSettled.value && selectedPerTokenProvider.value !== null
+    && (!perTokenFilterable.value
+      || !perTokenProviderBreakdown.value.some(p => p.name === selectedPerTokenProvider.value))) {
     selectedPerTokenProvider.value = null
   }
 })
@@ -472,9 +483,10 @@ function onSubscriptionChipClick(name: string) {
 }
 
 /**
- * Toggle the per-token chip filter. No disabled-state guard like the
+ * Toggle the per-token chip filter. No no-usage guard like the
  * subscription chip needs — every per-token card represents a provider
- * with paid activity this window, so all of them are always selectable.
+ * with paid activity this window; the chips are disabled only when there
+ * is one (see perTokenFilterable).
  */
 function onPerTokenChipClick(name: string) {
   selectedPerTokenProvider.value = selectedPerTokenProvider.value === name ? null : name
@@ -693,6 +705,10 @@ const unallocatedSubscriptions = computed(() => {
     .filter(p => p.proRatedFee > 0)
 })
 
+// The subscription table and Combined Total show whenever there is a bill, used or not.
+const hasSubscriptionRows = computed(() =>
+  subscriptionPerModelAllocated.value.length > 0 || unallocatedSubscriptions.value.length > 0)
+
 // ── Subscription effective rate & break-even (scope C) ─────────────────────
 // Re-express each subscription as a per-token rate so it can be compared
 // against per-token providers, and surface the monthly volume at which the
@@ -825,8 +841,9 @@ const chartMaxCost = computed(() => {
 // subscriptionPerModelAllocated, so clicking Ollama Cloud collapses the
 // chart to that provider's models with their share of $100. Keeps
 // modelProvider on each row so the swatch helper can color-key the bar.
-const subscriptionChartRows = computed(() =>
-  subscriptionPerModelAllocated.value
+// A subscription with no usage gets a bar for its fee, as it gets a table row.
+const subscriptionChartRows = computed(() => [
+  ...subscriptionPerModelAllocated.value
     .filter(m => m.turnCount > 0)
     .map(m => ({
       label: m.modelProvider ? `${m.modelProvider}/${m.modelId}` : m.modelId,
@@ -834,7 +851,13 @@ const subscriptionChartRows = computed(() =>
       turnCount: m.turnCount,
       modelProvider: m.modelProvider,
     })),
-)
+  ...unallocatedSubscriptions.value.map(p => ({
+    label: `${p.name} · no usage`,
+    cost: p.proRatedFee,
+    turnCount: 0,
+    modelProvider: p.name,
+  })),
+])
 
 const subscriptionChartMaxCost = computed(() => {
   const max = subscriptionChartRows.value.reduce((m, r) => Math.max(m, r.cost), 0)
@@ -1146,14 +1169,14 @@ defineExpose({ refresh })
              per-row cost attribution so this subsection never feeds the
              per-model table or chart below. -->
         <!-- border-b is only meaningful as a separator from the per-model
-             table / Combined Total below. With both gated on actual usage,
+             table / Combined Total below. With both gated on having rows,
              leaving the border in unconditionally drew a stray line under
-             the chip strip on zero-usage weeks. Same predicate as the
+             the chip strip when there were none. Same predicate as the
              Combined Total wrapper below. -->
         <div
           v-if="hasSubscriptionSection"
           class="mt-6 mb-6"
-          :class="hasPaidData || subscriptionPerModelAllocated.length > 0
+          :class="hasPaidData || hasSubscriptionRows
             ? 'border-b border-border'
             : ''"
         >
@@ -1243,12 +1266,10 @@ defineExpose({ refresh })
                flat fee allocated proportionally to work done. Fixed sort
                by turn count descending; interactive sort would be overkill
                on what's usually a 1-2 model set per subscription provider.
-               Hidden when there is no subscription usage in the window so
-               the section stays consistent with the per-token block (which
-               gates on hasPaidData). The provider chip strip above and the
-               COMBINED TOTAL row below carry the bill on zero-usage weeks. -->
+               Shown whenever a subscription is billed, used or not, so the
+               Total carries the bill in a quiet window too. -->
           <div
-            v-if="view === 'table' && subscriptionPerModelAllocated.length > 0"
+            v-if="view === 'table' && hasSubscriptionRows"
             class="overflow-x-auto border-t border-border"
           >
             <table class="w-full min-w-[42rem] text-xs table-fixed">
@@ -1443,12 +1464,10 @@ defineExpose({ refresh })
           </div>
 
           <!-- Subscription chart view: horizontal bars of allocated cost,
-               one bar per model that contributed usage this window. Bar
-               widths are relative to the largest allocated cost in the
-               current view (so a chip filter to one provider re-scales
-               the bars to that provider's range). Suppressed when there
-               are no usage rows — the empty-state info lives in the
-               unallocated footnote below. -->
+               one bar per model that contributed usage this window and one
+               per subscription that had none. Bar widths are relative to
+               the largest cost in the current view (so a chip filter to
+               one provider re-scales the bars to that provider's range). -->
           <!-- One grid container for all chart rows (not one grid per row)
                so the auto cost column resolves to a single width across
                rows and every bar's left edge sits at the same x. The
@@ -1511,8 +1530,9 @@ defineExpose({ refresh })
 
           <!-- Per-provider rollup chips — total per-token spend and average
                $/1M for each provider (the per-token analogue of the
-               subscription cards' effective rate). Click to scope the table /
-               chart / totals below to that provider; click again to clear.
+               subscription cards' effective rate). With two or more, click
+               to scope the table / chart / totals below to that provider;
+               click again to clear.
                Built from the unfiltered breakdown so every provider stays
                visible regardless of the active chip. Renders in both table
                and chart views, like the subscription strip. -->
@@ -1525,10 +1545,13 @@ defineExpose({ refresh })
               :key="p.name"
               type="button"
               :aria-pressed="selectedPerTokenProvider === p.name"
+              :disabled="!perTokenFilterable"
               class="border min-w-[9rem] text-left transition-colors flex items-stretch"
               :class="selectedPerTokenProvider === p.name
                 ? `${providerBorderColor(p.name)} bg-muted/40`
-                : 'border-border bg-muted/20 hover:bg-muted/30 cursor-pointer'"
+                : perTokenFilterable
+                  ? 'border-border bg-muted/20 hover:bg-muted/30 cursor-pointer'
+                  : 'border-border bg-muted/20'"
               @click="onPerTokenChipClick(p.name)"
             >
               <div
@@ -1751,13 +1774,10 @@ defineExpose({ refresh })
              operator reads "everything below the per-token table is the
              combined-total summary" without a hard line stitched between
              the gap and the row.
-             Suppressed entirely when no usage exists in the window — even
-             when a subscription is configured. The (dimmed) provider chips
-             up top already convey the bill on zero-usage weeks; rendering
-             a Combined Total of $bill / 0 turns / 0 tokens / 0 cost-per-row
-             was visual noise the operator had to mentally subtract from. -->
+             Shown whenever there is per-token spend or a subscription bill,
+             so a window with no usage still totals what is paid. -->
         <div
-          v-if="hasPaidData || subscriptionPerModelAllocated.length > 0"
+          v-if="hasPaidData || hasSubscriptionRows"
           class="overflow-x-auto pt-6 bg-muted/50"
         >
           <table class="w-full min-w-[42rem] text-xs table-fixed">

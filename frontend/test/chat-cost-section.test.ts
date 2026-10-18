@@ -484,15 +484,9 @@ describe('ChatCostSection (JCLAW-28)', () => {
     expect(text).toContain('$100')
   })
 
-  it('collapses the cost section to just the provider chips when no usage exists', async () => {
-    // Pre-fix the section rendered a per-model table with a $0 TOTAL row
-    // PLUS a Combined Total row showing the unused subscription bill,
-    // even on weeks with no chat activity. The per-token block already
-    // hid itself in that case, so the section was lopsided. New
-    // behaviour: when no provider has any usage, the section collapses
-    // to just the (dimmed) provider chip strip up top — both the
-    // per-model table AND the combined-total footer go away. The chips
-    // alone carry the "you're paying these subscriptions" message.
+  it('shows the subscription bill when no provider has usage', async () => {
+    // The fees are paid whether or not anything ran, so a quiet window
+    // still lists each subscription and totals the bill.
     stubSubscriptionFixture({
       providers: [
         { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
@@ -504,23 +498,44 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
-    await wrapper.findAll('button').find(b => b.text() === '30d')!.trigger('click')
+
+    const unused = wrapper.findAll('[data-testid="subscription-no-usage-row"]')
+    expect(unused.map(r => r.text())).toEqual([
+      expect.stringContaining('ollama-cloud'),
+      expect.stringContaining('openai'),
+    ])
+    expect(wrapper.find('tfoot').text()).toContain('$120')
+    expect(wrapper.text()).toMatch(/Combined total.*\$120/)
+    for (const chip of wrapper.findAll('button[aria-pressed]')) {
+      expect(chip.attributes('disabled')).toBeDefined()
+    }
+  })
+
+  it('draws a bar for each subscription with no usage in the chart', async () => {
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.findAll('button').find(b => b.attributes('title') === 'Bar chart view')!.trigger('click')
     await flushPromises()
 
     const text = wrapper.text()
-    // Provider chips still render — they carry the bill on zero-usage
-    // weeks via their own labels, dimmed to signal "no activity yet."
-    expect(text).toContain('Ollama Cloud')
-    expect(text).toContain('$100')
-    expect(text).toContain('OpenAI')
-    expect(text).toContain('$20')
-    // Per-model table is gone — no <thead> anywhere in the section.
-    expect(wrapper.findAll('thead')).toHaveLength(0)
-    // Combined-total footer is gone — no "Combined total" row label.
-    expect(text).not.toContain('Combined total')
-    // No isolated $0 anywhere; the chips' $20 / $100 are non-zero so
-    // a literal "$0" appearing would mean a zeroed sub-total leaked in.
-    expect(text).not.toContain('$0')
+    expect(text).toContain('ollama-cloud/kimi-k2.5')
+    expect(text).toContain('$100.0000')
+    expect(text).toContain('openai · no usage')
+    expect(text).toContain('$20.0000')
   })
 
   it('dims the provider chip when a subscription provider has zero usage', async () => {
@@ -712,6 +727,52 @@ describe('ChatCostSection (JCLAW-28)', () => {
     const ollamaChip = chips.find(c => c.text().includes('Ollama Cloud'))!
     expect(openaiChip.attributes('disabled')).toBeDefined()
     expect(ollamaChip.attributes('disabled')).toBeUndefined()
+  })
+
+  it('keeps the saved chip selections and channel filter across a reload', async () => {
+    // Restored before the data loads; judged against it only once it has.
+    localStorage.setItem('jclaw:chat-cost:settings', JSON.stringify({
+      channel: 'web', subscriptionProvider: 'ollama-cloud', perTokenProvider: 'openrouter',
+    }))
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+        { name: 'openrouter', paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0 },
+        { name: 'together', paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'gpt-5', modelProvider: 'openai',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.6', modelProvider: 'openrouter',
+          prompt: 1_000_000, completion: 0, promptPrice: 1.0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'telegram', usage: {
+          modelId: 'llama-4', modelProvider: 'together',
+          prompt: 1_000_000, completion: 0, promptPrice: 1.0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'llama-4', modelProvider: 'together',
+          prompt: 1_000_000, completion: 0, promptPrice: 1.0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+
+    const chips = wrapper.findAll('button[aria-pressed]')
+    expect(chips.find(c => c.text().includes('Ollama Cloud'))!.attributes('aria-pressed')).toBe('true')
+    expect(chips.find(c => c.text().includes('OpenRouter'))!.attributes('aria-pressed')).toBe('true')
+    expect((wrapper.find('select[aria-label="Filter by channel"]').element as HTMLSelectElement).value).toBe('web')
   })
 
   it('clears the chip filter once only one subscription provider has usage', async () => {
@@ -1251,6 +1312,28 @@ describe('ChatCostSection (JCLAW-28)', () => {
     const card = wrapper.findAll('button[aria-pressed]').find(c => c.text().includes('OpenRouter'))
     expect(card).toBeDefined()
     expect(card!.text()).toContain('$1.00/1M')
+  })
+
+  it('does not filter on a per-token card when only one provider has paid activity', async () => {
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'openrouter', paymentModality: 'PER_TOKEN', subscriptionMonthlyUsd: 0 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.6', modelProvider: 'openrouter',
+          prompt: 1_000_000, completion: 0, promptPrice: 1.0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+
+    const card = wrapper.findAll('button[aria-pressed]').find(c => c.text().includes('OpenRouter'))!
+    expect(card.attributes('disabled')).toBeDefined()
+    expect(card.classes()).not.toContain('cursor-pointer')
   })
 
   it('scopes the per-token table to one provider on card click, and clears on re-click', async () => {
