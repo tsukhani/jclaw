@@ -3266,9 +3266,6 @@ do_start_prod() {
     #     releases, prod turns it off. Must be a -D (JVM property): Netty
     #     reads it once in ResourceLeakDetector's static initializer, so
     #     setting it via application.conf is too late.
-    #   - DNS TTLs: LLM providers rotate endpoints via DNS; 30 s positive
-    #     TTL keeps us close to current, 0 s negative TTL prevents caching
-    #     transient lookup failures indefinitely.
     #   - GC log: rotated, time-stamped, very low overhead; invaluable for
     #     diagnosing GC-related latency spikes.
     # Play 1.x passes unrecognized args straight to the JVM (see
@@ -3309,8 +3306,6 @@ do_start_prod() {
         "-XX:ErrorFile=logs/hs_err_pid%p.log"
         "-XX:MaxDirectMemorySize=256m"
         "-Dio.netty.leakDetection.level=DISABLED"
-        "-Dnetworkaddress.cache.ttl=30"
-        "-Dnetworkaddress.cache.negative.ttl=0"
         "-Xlog:gc*:file=logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
     )
 
