@@ -284,9 +284,6 @@ const subscriptionProviderBreakdown = computed(() =>
   })),
 )
 
-// JCLAW-1449: /api/providers lists a provider only once its key is set.
-const ollamaCloudConfigured = computed(() => (providersInfo.value ?? []).some(p => p.name === 'ollama-cloud'))
-
 // Channel options: only channel kinds that have data in the loaded window.
 // Operator filtering by a channel that has no data would be confusing;
 // surfacing only-with-data matches Chat Performance's behavior.
@@ -1237,7 +1234,6 @@ defineExpose({ refresh })
                   </div>
                 </div>
               </button>
-              <OllamaCloudRequests v-if="ollamaCloudConfigured" />
             </div>
           </div>
 

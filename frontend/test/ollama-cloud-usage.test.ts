@@ -4,13 +4,12 @@ import { enableAutoUnmount, flushPromises } from '@vue/test-utils'
 import { clearNuxtData } from '#app'
 import { createError, getQuery } from 'h3'
 import OllamaCloudUsage from '~/components/settings/OllamaCloudUsage.vue'
-import OllamaCloudRequests from '~/components/OllamaCloudRequests.vue'
 import type { CloudUsage } from '~/types/api'
 
 /**
- * JCLAW-1449: Ollama Cloud's request history — the "Cloud usage" block on its Settings card, and
- * the request counts beside the Chat Cost fees. The 7d reading is the one ollama.com returned on
- * 2026-10-15, through the backend's /api/router/usage/ollama-cloud shape.
+ * JCLAW-1449: Ollama Cloud's request history — the "Cloud usage" block on its Settings card. The
+ * 7d reading is the one ollama.com returned on 2026-10-15, through the backend's
+ * /api/router/usage/ollama-cloud shape.
  */
 const WEEK: CloudUsage = {
   provider: 'ollama-cloud',
@@ -137,57 +136,5 @@ describe('Cloud usage block (Settings → LLM Providers → Ollama Cloud)', () =
     await flushPromises()
     await vi.waitFor(() => expect(c.find('[role="alert"]').exists()).toBe(true))
     expect(c.find('[role="alert"]').text()).toContain('Retry')
-  })
-})
-
-describe('Ollama Cloud requests (Dashboard → Chat Cost)', () => {
-  function stubVisibility(state: 'visible' | 'hidden') {
-    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => state })
-    document.dispatchEvent(new Event('visibilitychange'))
-  }
-
-  it('shows the last 24 hours and 7 days', async () => {
-    const c = await mountSuspended(OllamaCloudRequests)
-    await flushPromises()
-    const card = c.find('[data-testid="ollama-cloud-requests"]')
-    expect(card.text()).toContain('Ollama Cloud requests')
-    expect(card.text()).toContain('120last 24 hours')
-    expect(card.text()).toContain('8,341last 7 days')
-  })
-
-  it('renders nothing without a reading', async () => {
-    readings = {}
-    const c = await mountSuspended(OllamaCloudRequests)
-    await flushPromises()
-    expect(c.find('[data-testid="ollama-cloud-requests"]').exists()).toBe(false)
-  })
-
-  it('reads on load and every 5 minutes while visible, and not while the tab is hidden', async () => {
-    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
-    try {
-      stubVisibility('visible')
-      await mountSuspended(OllamaCloudRequests)
-      await flushPromises()
-      expect(requested.sort()).toEqual(['24h', '7d'])
-
-      requested = []
-      vi.advanceTimersByTime(5 * 60 * 1000)
-      await flushPromises()
-      expect(requested.sort()).toEqual(['24h', '7d'])
-
-      requested = []
-      stubVisibility('hidden')
-      vi.advanceTimersByTime(15 * 60 * 1000)
-      await flushPromises()
-      expect(requested).toEqual([])
-
-      stubVisibility('visible')
-      await flushPromises()
-      expect(requested.sort()).toEqual(['24h', '7d'])
-    }
-    finally {
-      vi.useRealTimers()
-      Reflect.deleteProperty(document, 'visibilityState')
-    }
   })
 })
