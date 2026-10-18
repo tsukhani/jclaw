@@ -406,6 +406,13 @@ const subscriptionProvidersWithUsage = computed<Set<string>>(() => {
   return set
 })
 
+// With one provider in use, its chip would show the same rows and only drop the unused
+// subscriptions' fees from the totals, so the chips filter only when two have usage.
+const subscriptionFilterable = computed(() => subscriptionProvidersWithUsage.value.size > 1)
+watchEffect(() => {
+  if (!subscriptionFilterable.value) selectedSubscriptionProvider.value = null
+})
+
 // Window length in days — used to pro-rate the subscription monthly fee.
 // For the "all time" window we fall back to the full row set's earliest
 // timestamp (not just subscription rows): the operator is asking "how
@@ -670,16 +677,13 @@ const subscriptionPerModelAllocated = computed<(FleetCostPerModel & { allocatedC
 })
 
 // Providers with a configured subscription bill but zero usage this
-// window. Their fee is real money the operator is paying, so we surface
-// it in a footnote rather than silently dropping it — accounting honesty
-// beats spreadsheet neatness. The Total row in the table sums only the
-// allocated cost, so `unallocatedSubscriptions` is what makes up the gap
-// between the table Total and the bill subtotal.
+// window. Their fee is real money the operator is paying, so each gets a
+// row in the table and the Total is the whole bill, not just the share
+// allocated to models that ran.
 const unallocatedSubscriptions = computed(() => {
   // When a chip filter is active, every other provider's bill is hidden
-  // by design, not unallocated — surfacing them in the footnote would
-  // misrepresent the view. The footnote re-appears once the filter is
-  // cleared.
+  // by design, not unallocated — listing them would misrepresent the
+  // view. They re-appear once the filter is cleared.
   if (selectedSubscriptionProvider.value !== null) return []
   const usedProviders = new Set(
     subscriptionPerModel.value.map(m => m.modelProvider).filter(Boolean),
@@ -688,14 +692,6 @@ const unallocatedSubscriptions = computed(() => {
     .filter(p => !usedProviders.has(p.name))
     .filter(p => p.proRatedFee > 0)
 })
-
-// Sum of allocations across all subscription model rows. Equals the
-// total bill when every configured subscription provider had usage this
-// window; less than the bill when one or more are unallocated (see
-// `unallocatedSubscriptions`).
-const subscriptionAllocatedTotal = computed(() =>
-  subscriptionPerModelAllocated.value.reduce((sum, m) => sum + m.allocatedCost, 0),
-)
 
 // ── Subscription effective rate & break-even (scope C) ─────────────────────
 // Re-express each subscription as a per-token rate so it can be compared
@@ -1175,7 +1171,8 @@ defineExpose({ refresh })
                  information that the table footer already carries. Chips
                  for providers with zero usage this window are visually
                  muted and not clickable (selecting one would render an
-                 empty table). -->
+                 empty table), and no chip is clickable unless two
+                 providers have usage (see subscriptionFilterable). -->
             <div
               v-if="subscriptionCards.length > 0"
               class="mt-3 flex flex-wrap gap-2"
@@ -1185,14 +1182,17 @@ defineExpose({ refresh })
                 :key="p.name"
                 type="button"
                 :aria-pressed="selectedSubscriptionProvider === p.name"
-                :disabled="selectedSubscriptionProvider !== p.name
-                  && !subscriptionProvidersWithUsage.has(p.name)"
+                :disabled="!subscriptionFilterable
+                  || (selectedSubscriptionProvider !== p.name
+                    && !subscriptionProvidersWithUsage.has(p.name))"
                 class="border min-w-[9rem] text-left transition-colors flex items-stretch"
                 :class="selectedSubscriptionProvider === p.name
                   ? `${providerBorderColor(p.name)} bg-muted/40`
-                  : subscriptionProvidersWithUsage.has(p.name)
-                    ? 'border-border bg-muted/20 hover:bg-muted/30 cursor-pointer'
-                    : 'border-border bg-muted/10 opacity-50 cursor-not-allowed'"
+                  : !subscriptionProvidersWithUsage.has(p.name)
+                    ? 'border-border bg-muted/10 opacity-50 cursor-not-allowed'
+                    : subscriptionFilterable
+                      ? 'border-border bg-muted/20 hover:bg-muted/30 cursor-pointer'
+                      : 'border-border bg-muted/20'"
                 @click="onSubscriptionChipClick(p.name)"
               >
                 <!-- Same per-provider swatch as the chart bar below — the
@@ -1383,15 +1383,37 @@ defineExpose({ refresh })
                     {{ formatStatCurrency(m.allocatedCost) }}
                   </td>
                 </tr>
+                <tr
+                  v-for="p in unallocatedSubscriptions"
+                  :key="`unused-${p.name}`"
+                  class="border-t border-border"
+                  data-testid="subscription-no-usage-row"
+                >
+                  <td class="px-4 py-2 font-mono text-fg-primary">
+                    <span class="inline-flex items-center gap-2 align-middle">
+                      <span
+                        class="inline-block w-2 h-2 shrink-0 rounded-sm"
+                        :class="providerSwatchColor(p.name)"
+                        :title="p.name"
+                      />
+                      <span>{{ p.name }} <span class="text-fg-muted">· no usage</span></span>
+                    </span>
+                  </td>
+                  <td
+                    v-for="i in 5"
+                    :key="i"
+                    class="px-3 py-2 text-right font-mono text-fg-muted"
+                  >
+                    0
+                  </td>
+                  <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                    {{ formatStatCurrency(p.proRatedFee) }}
+                  </td>
+                </tr>
               </tbody>
               <!-- Section total. Stat cells are the column sums of the
-                   bodies above; the Cost cell is the sum of allocated
-                   per-model costs and equals the bill total iff every
-                   configured subscription provider had at least some
-                   usage this window. When one or more providers had
-                   zero usage, this Total falls short of the bill by
-                   exactly the unallocated amount — surfaced in the
-                   footnote below. -->
+                   bodies above; the Cost cell is the window's bill, which
+                   the model allocations and the no-usage rows sum to. -->
               <tfoot>
                 <tr class="bg-muted/30 border-t border-border">
                   <td class="px-4 py-2 text-xs font-medium text-fg-muted uppercase tracking-wide">
@@ -1412,11 +1434,8 @@ defineExpose({ refresh })
                   <td class="px-3 py-2 text-right font-mono text-yellow-700 dark:text-yellow-400">
                     {{ subscriptionBreakdown.cached.toLocaleString() }}
                   </td>
-                  <td
-                    class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400"
-                    :title="`Sum of per-model allocations. Bill total this window: ${formatStatCurrency(subscriptionFee)}`"
-                  >
-                    {{ formatStatCurrency(subscriptionAllocatedTotal) }}
+                  <td class="px-3 py-2 text-right font-mono text-emerald-700 dark:text-emerald-400">
+                    {{ formatStatCurrency(subscriptionFee) }}
                   </td>
                 </tr>
               </tfoot>

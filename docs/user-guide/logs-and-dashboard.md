@@ -33,7 +33,7 @@ This panel shows persisted token usage and dollar cost, aggregated across your c
 - **View**: table or bar chart.
 - **CSV**: download the per-model breakdown.
 
-When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, and similar), a **Subscription** subsection renders first. It shows the pro-rated monthly fee for the selected window, and per-provider chips narrow the view to one provider. The **Per-token** subsection below covers everything billed on usage. It has its own provider chips and a rollup card per provider (total spend and average $/1M tokens). A **Combined Total** row sums the two.
+When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, and similar), a **Subscription** subsection renders first. It shows the pro-rated monthly fee for the selected window. When two or more subscriptions were used in the window, click a provider's chip to narrow the view to it, and click it again to clear. A subscription you did not use in the window still gets a row, marked **no usage**, with its fee. So the subscription **Total** is everything you pay. The **Per-token** subsection below covers everything billed on usage. It has its own provider chips and a rollup card per provider (total spend and average $/1M tokens). A **Combined Total** row sums the two.
 
 A subscription costs $0.00 per token, so its dollar figures do not show how much you use it. To see how many requests your Ollama Cloud account made, open **Cloud usage** on the Ollama Cloud card in [Settings → LLM Providers](/settings?section=providers).
 

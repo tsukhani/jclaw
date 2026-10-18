@@ -51,9 +51,11 @@ describe('ChatCostSection (JCLAW-28)', () => {
   // clearNuxtData() between tests so useFetch's per-URL cache doesn't
   // leak a prior test's /api/providers or /api/metrics/cost payload
   // into the next mount. Same gotcha as the OCR section in
-  // settings.page.test.ts.
+  // settings.page.test.ts. localStorage too: the component persists its
+  // window, view, agent and chip choices there.
   beforeEach(() => {
     clearNuxtData()
+    localStorage.clear()
   })
 
   it('renders empty state when no rows are returned', async () => {
@@ -415,7 +417,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
   // added on top). Per-provider rows that
   // used to sit in the table footer are gone; the bill breakdown lives
   // in the section subtitle, and any subscription with zero usage this
-  // window shows up as an "unallocated" footnote.
+  // window gets a "no usage" row so the Total is the whole bill.
 
   /** Fixture: makes both /api/metrics/cost and /api/providers stubs at
    *  once so each test reads as "given this providers config and these
@@ -562,9 +564,10 @@ describe('ChatCostSection (JCLAW-28)', () => {
     // Unused provider's chip is visually dimmed AND non-clickable.
     expect(openaiChip!.classes()).toContain('opacity-50')
     expect((openaiChip!.element as HTMLButtonElement).disabled).toBe(true)
-    // Provider with usage stays at full opacity, clickable.
+    // Provider with usage stays at full opacity, but as the only one in use
+    // it is not clickable either: filtering to it would show the same rows.
     expect(ollamaChip!.classes()).not.toContain('opacity-50')
-    expect((ollamaChip!.element as HTMLButtonElement).disabled).toBe(false)
+    expect((ollamaChip!.element as HTMLButtonElement).disabled).toBe(true)
 
     // The previous "$X unallocated — Provider has no usage this window"
     // phrasing has been removed entirely (the dimmed chip carries that
@@ -681,7 +684,79 @@ describe('ChatCostSection (JCLAW-28)', () => {
   it('disables click on chips for providers with no usage this window', async () => {
     // OpenAI configured at $20/mo but with no rows — its chip is muted
     // and the disabled attribute is set so the operator can't select an
-    // empty view.
+    // empty view. Two other providers have usage, so filtering is on.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'together', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 10 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'llama-4', modelProvider: 'together',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+
+    const chips = wrapper.findAll('button[aria-pressed]')
+    const openaiChip = chips.find(c => c.text().includes('OpenAI'))!
+    const ollamaChip = chips.find(c => c.text().includes('Ollama Cloud'))!
+    expect(openaiChip.attributes('disabled')).toBeDefined()
+    expect(ollamaChip.attributes('disabled')).toBeUndefined()
+  })
+
+  it('clears the chip filter once only one subscription provider has usage', async () => {
+    // Selected while both providers had usage; narrowing to agent 1 leaves
+    // only Ollama Cloud, and a kept selection would drop OpenAI's $20 from
+    // the Total.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 2, channelType: 'web', usage: {
+          modelId: 'gpt-5', modelProvider: 'openai',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === '30d')!.trigger('click')
+    await flushPromises()
+
+    const ollamaChip = wrapper.findAll('button[aria-pressed]').find(c => c.text().includes('Ollama Cloud'))!
+    await ollamaChip.trigger('click')
+    await flushPromises()
+    expect(ollamaChip.attributes('aria-pressed')).toBe('true')
+
+    await wrapper.find('select[aria-label="Filter by agent"]').setValue('1')
+    await flushPromises()
+
+    expect(ollamaChip.attributes('aria-pressed')).toBe('false')
+    expect(ollamaChip.attributes('disabled')).toBeDefined()
+    expect(wrapper.find('tfoot').text()).toContain('$120')
+    wrapper.unmount()
+  })
+
+  it('counts a subscription with no usage in the Total', async () => {
+    // Ollama Cloud ($100) ran; OpenAI ($20) did not, but is still billed.
     stubSubscriptionFixture({
       providers: [
         { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
@@ -698,12 +773,16 @@ describe('ChatCostSection (JCLAW-28)', () => {
       props: { agents: STUB_AGENTS },
     })
     await flushPromises()
+    await wrapper.findAll('button').find(b => b.text() === '30d')!.trigger('click')
+    await flushPromises()
 
-    const openaiChip = wrapper.findAll('button')
-      .find(b => b.attributes('aria-pressed') !== undefined
-        && b.text().includes('OpenAI'))!
-    expect(openaiChip).toBeDefined()
-    expect(openaiChip.attributes('disabled')).toBeDefined()
+    const unused = wrapper.findAll('[data-testid="subscription-no-usage-row"]')
+    expect(unused).toHaveLength(1)
+    expect(unused[0]!.text()).toContain('openai')
+    expect(unused[0]!.text()).toContain('no usage')
+    expect(unused[0]!.text()).toContain('$20')
+    expect(wrapper.find('tfoot').text()).toContain('$120')
+    wrapper.unmount()
   })
 
   it('clears the filter when the active chip is clicked a second time', async () => {
@@ -958,6 +1037,10 @@ describe('ChatCostSection (JCLAW-28)', () => {
       rows: [
         { agentId: 1, channelType: 'web', usage: {
           modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'gpt-5', modelProvider: 'openai',
           prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
         } },
       ],
