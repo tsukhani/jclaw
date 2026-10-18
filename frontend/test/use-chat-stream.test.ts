@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, ref, shallowRef } from 'vue'
-import type { Message } from '~/types/api'
+import type { ChecklistItem, Message } from '~/types/api'
 import { useChatStream, type UseChatStream, type UseChatStreamDeps } from '~/composables/useChatStream'
 
 // The stream endpoint uses native globalThis.fetch (ReadableStream body), so
@@ -243,6 +243,45 @@ describe('useChatStream', () => {
     const assistant = deps.messages.value[1]
     expect(assistant!.toolCalls).toHaveLength(1)
     expect(assistant!.toolCalls![0]!.name).toBe('generate_image')
+  })
+
+  it('takes the live checklist from a successful checklist call and drops it when the next send starts', async () => {
+    const liveChecklist = ref<ChecklistItem[] | null>(null)
+    const deps = makeDeps({ input: ref('plan it'), liveChecklist })
+    const items = [{ content: 'Run tests', status: 'in_progress', activeForm: 'Running tests' }]
+    const frame = (o: object) => `data: ${JSON.stringify(o)}\n`
+    streamWith([
+      frame({ type: 'init', conversationId: 42 }),
+      frame({ type: 'tool_call', id: 'tc1', name: 'checklist', arguments: JSON.stringify({ items }),
+        resultText: 'Checklist updated successfully (1 items).' }),
+      frame({ type: 'complete', content: 'done' }),
+    ])
+    const { api } = await mountStream(deps)
+    await api.sendMessage()
+    await flushPromises()
+    expect(liveChecklist.value).toEqual(items)
+
+    streamWith([frame({ type: 'init', conversationId: 42 }), frame({ type: 'complete', content: 'ok' })])
+    deps.input.value = 'next'
+    await api.sendMessage()
+    await flushPromises()
+    expect(liveChecklist.value).toBeNull()
+  })
+
+  it('leaves the live checklist alone when the tool refused the call', async () => {
+    const liveChecklist = ref<ChecklistItem[] | null>(null)
+    const deps = makeDeps({ input: ref('plan it'), liveChecklist })
+    const frame = (o: object) => `data: ${JSON.stringify(o)}\n`
+    streamWith([
+      frame({ type: 'init', conversationId: 42 }),
+      frame({ type: 'tool_call', id: 'tc1', name: 'checklist', arguments: '{"items":[]}',
+        resultText: 'Error: At most one item may be in_progress. Found 2.' }),
+      frame({ type: 'complete', content: 'done' }),
+    ])
+    const { api } = await mountStream(deps)
+    await api.sendMessage()
+    await flushPromises()
+    expect(liveChecklist.value).toBeNull()
   })
 
   it('appends a (stopped) marker when the stream aborts', async () => {

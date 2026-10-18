@@ -196,6 +196,18 @@ public class Conversation extends TimestampedModel {
     @Column(name = "enabled_tool_names", columnDefinition = "TEXT")
     public String enabledToolNames;
 
+    /**
+     * The agent's current list from its {@code checklist} tool, as a JSON array of
+     * {@code {content, status, activeForm}}. Each successful call replaces it; {@code /reset} clears it,
+     * and so does a turn that finds it abandoned; null when the agent has set none.
+     */
+    @Column(columnDefinition = "TEXT")
+    public String checklist;
+
+    /** When the call that stored {@link #checklist} ran; null with it. */
+    @Column(name = "checklist_updated_at")
+    public Instant checklistUpdatedAt;
+
     // Hibernate PersistentBag isn't Serializable, but JClaw never serializes
     // JPA entities off-heap (no session replication, no caching). The
     // Serializable on GenericModel is incidental — fields are JPA-tracked.

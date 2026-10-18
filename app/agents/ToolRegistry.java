@@ -238,8 +238,8 @@ public class ToolRegistry {
          *  handles (browser Page, shell process), no non-idempotent DB writes.
          *  Parallel-safe tools get one virtual thread per call, so calls race
          *  freely. Stateless HTTP clients ({@code web_fetch}, {@code
-         *  web_search}), pure-compute helpers ({@code date_time}), and
-         *  validating-only tools ({@code checklist}) are the typical shape.
+         *  web_search}) and pure-compute helpers ({@code date_time}) are the
+         *  typical shape.
          *
          *  <p>Getting this wrong is a correctness bug, not a performance
          *  tradeoff: the screenshot-before-navigate class of race

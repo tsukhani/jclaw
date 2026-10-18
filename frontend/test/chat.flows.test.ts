@@ -470,3 +470,31 @@ describe('Chat page — replying to a message (JCLAW-1299)', () => {
     component.unmount()
   })
 })
+
+describe('Chat page — checklist panel (JCLAW-1569)', () => {
+  it('shows the open conversation\'s unfinished checklist above the composer', async () => {
+    setupChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 99, agentId: 1, agentName: 'vision-agent', channelType: 'web', peerId: null, preview: 'plan',
+        messageCount: 2, createdAt: '2026-10-18T10:00:00Z', updatedAt: '2026-10-18T10:00:01Z',
+        checklist: [
+          { content: 'Run tests', status: 'completed', activeForm: 'Running tests' },
+          { content: 'Fix the parser', status: 'in_progress', activeForm: 'Fixing the parser' },
+        ] },
+    ])
+    registerEndpoint('/api/conversations/99/messages', () => [
+      { id: 7000, role: 'user', content: 'plan it', createdAt: '2026-10-18T10:00:00Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    expect(component.find('[data-testid="chat-checklist"]').exists()).toBe(false)
+
+    await (component.vm as unknown as { loadConversation: (id: number) => Promise<void> }).loadConversation(99)
+    await flushPromises()
+
+    const panel = component.get('[data-testid="chat-checklist"]')
+    expect(panel.get('[data-testid="chat-checklist-count"]').text()).toBe('1 of 2 done')
+    expect(panel.text()).toContain('Fixing the parser')
+  })
+})

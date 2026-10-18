@@ -282,6 +282,19 @@ class SlashCommandsTest extends UnitTest {
     }
 
     @Test
+    void resetClearsTheChecklist() {
+        var convo = ConversationService.findOrCreate(agent, "web", "admin");
+        convo.checklist = "[{\"content\":\"A\",\"status\":\"pending\",\"activeForm\":\"Doing A\"}]";
+        convo.checklistUpdatedAt = Instant.now();
+        convo.save();
+
+        var result = Commands.execute(Commands.Command.RESET, agent, "web", "admin", convo);
+
+        assertNull(result.conversation().checklist, "/reset must clear the checklist with the rest of the context");
+        assertNull(result.conversation().checklistUpdatedAt);
+    }
+
+    @Test
     void resetExcludesPriorMessagesFromLlmContext() {
         var convo = ConversationService.findOrCreate(agent, "web", "admin");
         ConversationService.appendUserMessage(convo, "pre-reset question");

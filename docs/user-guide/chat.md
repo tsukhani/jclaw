@@ -161,6 +161,12 @@ When the agent hands work to an [external coding harness](/guide#subagents-acp-h
 
 Only the conversation that started the run shows the panel. A coding run that a [task](/guide#tasks) started has no conversation, so no chat shows it. See [Watching a coding run](/guide#subagents-coding-run-log) for what each line means, and for the other places the log opens.
 
+## The checklist
+
+When the agent works through a task in steps, it can keep a checklist with its `checklist` tool. While a step is still open, a **Checklist** panel docks above the composer. Its header counts the steps done, for example **1 of 3 done**. Done steps are crossed out. The step in progress has a spinner and reads as what the agent is doing, for example "Fixing the parser". Click the header to fold the panel; folded, it still names the step in progress. The panel updates while the agent works.
+
+The agent keeps seeing its checklist after older turns are summarized or drop out of its context, on every channel, not only in the web chat. A checklist goes away when every step is done, after `/reset`, or once you send more than three messages without the agent updating it.
+
 ## Subagent transcripts are read-only
 
 If you arrive at a conversation that was created by a subagent run (for example, via **Open full transcript** in an expanded subagent row, the "View full →" link on an announce card, or by clicking a row on the [Subagents](/subagents) page), the composer is disabled with the note **Subagent transcripts are read-only**. You can read the transcript but not extend it. The full page loads the transcript once. So a running subagent's transcript shows the messages as of when you opened it. To follow a run live, expand its row in the conversation that spawned it. **← Back to conversation** in the banner returns you to the conversation that spawned it.

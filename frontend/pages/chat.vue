@@ -29,7 +29,7 @@ import { formatSize } from '~/utils/format'
 // suppression rule closes.
 import { isBackgroundSubagentAnnounce, shouldDisplayMessage } from '~/utils/display-message-filter'
 
-import type { Agent, AgentSkill, AgentTool, ChatQuote, Conversation, Message, ConfigResponse, Prompt, SlashCommand } from '~/types/api'
+import type { Agent, AgentSkill, AgentTool, ChatQuote, ChecklistItem, Conversation, Message, ConfigResponse, Prompt, SlashCommand } from '~/types/api'
 import { useChatComposer } from '~/composables/useChatComposer'
 import { useChatMessageActions } from '~/composables/useChatMessageActions'
 import { useChatUsageMeter } from '~/composables/useChatUsageMeter'
@@ -52,6 +52,8 @@ import ChatBrowserSetupBar from '~/components/chat/ChatBrowserSetupBar.vue'
 import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
 import ChatSubagentTranscriptPanel from '~/components/chat/ChatSubagentTranscriptPanel.vue'
+import ChatChecklist from '~/components/chat/ChatChecklist.vue'
+import { hasOpenItem } from '~/utils/checklist'
 
 // Issued before either await so the two round trips overlap — in an SPA Nuxt
 // starts a useFetch at its call site, not at the await.
@@ -188,6 +190,16 @@ const {
 const input = ref('')
 // JCLAW-1299: the message the next send replies to, shown above the composer until sent or dismissed.
 const pendingQuote = ref<ChatQuote | null>(null)
+// JCLAW-1569: during a turn the stream's latest checklist call; otherwise the stored row, which /reset
+// and abandonment clear.
+const liveChecklist = ref<ChecklistItem[] | null>(null)
+watch(selectedConvoId, () => {
+  liveChecklist.value = null
+})
+const openChecklist = computed(() => {
+  const items = liveChecklist.value ?? currentConversation.value?.checklist
+  return hasOpenItem(items) ? items : null
+})
 // `streaming` and `streamReasoning` (below) are page-level shared refs, not
 // owned by useChatStream: useChatScroll pins the reasoning body off them,
 // useMediaGenPolling tears down on streaming-end, and displayMessages /
@@ -538,6 +550,7 @@ const {
   refreshAgents,
   pendingOverrides,
   quote: pendingQuote,
+  liveChecklist,
 })
 
 // Live "Prefilling… / Generating…" indicator with a running elapsed timer for
@@ -1026,6 +1039,11 @@ function exportConversation() {
           v-if="activeCodingRunId"
           :key="activeCodingRunId"
           :run-id="activeCodingRunId"
+        />
+
+        <ChatChecklist
+          v-if="openChecklist"
+          :items="openChecklist"
         />
 
         <!-- Input -->

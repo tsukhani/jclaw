@@ -31,6 +31,7 @@ import services.ModelOverrideResolver;
 import services.Tx;
 import services.search.LuceneIndexer;
 import services.search.MessageSearch;
+import tools.CheckListTool;
 import utils.ApiResponses;
 import utils.JpqlFilter;
 
@@ -74,7 +75,8 @@ public class ApiConversationsController extends Controller {
                                    String modelProviderOverride, String modelIdOverride,
                                    String thinkingModeOverride,
                                    Long parentConversationId,
-                                   long compactionCount) {}
+                                   long compactionCount,
+                                   JsonArray checklist) {}
 
     /**
      * Documents the {@code GET /messages} response shape. The actual emission
@@ -1004,6 +1006,8 @@ public class ApiConversationsController extends Controller {
         // is a fresh prompt or has been reset by compaction (and how many
         // times). Cheap COUNT on an indexed column; no need to denormalize.
         map.put("compactionCount", compactionCount);
+        var checklist = CheckListTool.storedItems(c.checklist);
+        if (checklist != null) map.put("checklist", checklist);
         return map;
     }
 

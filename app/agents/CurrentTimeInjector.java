@@ -1,6 +1,7 @@
 package agents;
 
 import llm.LlmTypes.ChatMessage;
+import org.jspecify.annotations.Nullable;
 import services.TimezoneResolver;
 import utils.AppClock;
 
@@ -121,9 +122,17 @@ public final class CurrentTimeInjector {
      * the clock present for the whole turn without re-injecting it per round.
      */
     public static List<ChatMessage> inject(List<ChatMessage> messages) {
+        return inject(messages, null);
+    }
+
+    /**
+     * {@link #inject(List)} with {@code extra} appended after the clock in the same message, so other
+     * per-turn context stays out of the cached prefix with it and shifts no message index.
+     */
+    public static List<ChatMessage> inject(List<ChatMessage> messages, @Nullable String extra) {
         if (messages == null || messages.isEmpty()) return messages;
         var out = new ArrayList<>(messages);
-        out.add(ChatMessage.user(block()));
+        out.add(ChatMessage.user(extra == null ? block() : block() + extra));
         return out;
     }
 

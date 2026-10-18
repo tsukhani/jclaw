@@ -161,6 +161,24 @@ class ApiConversationsControllerBranchTest extends FunctionalTest {
                 "the GROUP BY bulk-fetch must surface the two-compaction count: " + body);
     }
 
+    @Test
+    void listAndSingleGetCarryAStoredChecklistAsAnArray() {
+        login();
+        var id = commitInFreshTx(() -> {
+            var agent = newAgent("checklist-row-agent");
+            var withList = ConversationService.create(agent, "web", "u-list");
+            withList.checklist = "[{\"content\":\"A\",\"status\":\"pending\",\"activeForm\":\"Doing A\"}]";
+            withList.save();
+            ConversationService.create(agent, "web", "u-none");
+            return withList.id;
+        });
+
+        var list = getContent(GET("/api/conversations"));
+        assertEquals(1, count(list, "\"checklist\":[{"), "only the row with a list carries the key: " + list);
+        var single = getContent(GET("/api/conversations/" + id));
+        assertTrue(single.contains("\"checklist\":[{\"content\":\"A\""), single);
+    }
+
     // ── server-side sort arms ─────────────────────────────────────────
 
     @Test

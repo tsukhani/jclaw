@@ -11,6 +11,7 @@ import play.test.UnitTest;
 import services.ConfigService;
 import services.ConversationService;
 import services.Tx;
+import tools.CheckListTool;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -136,6 +137,35 @@ class AgentRunnerCoreTest extends UnitTest {
                 ConversationService.findById(convo.id));
         assertTrue(messages.size() >= 2,
                 "Should have user + assistant messages, got " + messages.size());
+    }
+
+    @Test
+    void aStoredChecklistReachesTheModelWhenTheCallThatSetItIsGone() throws Exception {
+        var lastMessage = new AtomicReference<String>();
+        startLlmServer(exchange -> {
+            var messages = com.google.gson.JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes()))
+                    .getAsJsonObject().getAsJsonArray("messages");
+            lastMessage.set(messages.get(messages.size() - 1).toString());
+            var resp = simpleResponse("Carrying on.");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, resp.getBytes().length);
+            exchange.getResponseBody().write(resp.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+        var agent = createAgent("checklist-reminder-agent", "core-provider", "test-model");
+        var convo = ConversationService.create(agent, "web", "user1");
+        convo.checklist = "[{\"content\":\"Fix the parser\",\"status\":\"in_progress\",\"activeForm\":\"Fixing the parser\"}]";
+        convo.checklistUpdatedAt = java.time.Instant.now();
+        convo.save();
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        runOnVirtualThread(agent, convo, "Carry on");
+
+        assertNotNull(lastMessage.get(), "the provider must have been called");
+        assertTrue(lastMessage.get().contains(CheckListTool.REMINDER_HEADING), lastMessage.get());
+        assertTrue(lastMessage.get().contains("[in progress] Fixing the parser"), lastMessage.get());
     }
 
     // --- JCLAW-178: ollama-local end-to-end ---

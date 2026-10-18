@@ -206,6 +206,16 @@ export interface Conversation {
    *  post-compaction prefix (and how many times the conversation has been
    *  compacted). Optional for backwards-compat; absent → treat as 0. */
   compactionCount?: number
+  /** JCLAW-1569: the agent's current list from its `checklist` tool; absent when it has set none. */
+  checklist?: ChecklistItem[]
+}
+
+/** One step of the agent's `checklist` tool. */
+export interface ChecklistItem {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+  /** Present-progressive form shown while the step is in progress ("Running tests"). */
+  activeForm: string
 }
 
 /**

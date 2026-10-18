@@ -2,7 +2,8 @@ import { onUnmounted, ref, triggerRef, nextTick, type Ref, type ShallowRef } fro
 import type { PendingOverrides } from '~/composables/useAgentModel'
 import { useStreamMarkdownRender } from '~/composables/useStreamMarkdownRender'
 import type { UploadedAttachment } from '~/composables/useChatAttachments'
-import type { ChatQuote, Message, MessageAttachment, ToolCallResultStructured } from '~/types/api'
+import type { ChatQuote, ChecklistItem, Message, MessageAttachment, ToolCallResultStructured } from '~/types/api'
+import { checklistFromCall } from '~/utils/checklist'
 import type { MessageRoute } from '~/utils/usage-cost'
 
 /**
@@ -84,6 +85,8 @@ export interface UseChatStreamDeps {
   quote?: Ref<ChatQuote | null>
   refreshConversations: () => Promise<void> | void
   refreshAgents: () => Promise<void> | void
+  /** JCLAW-1569: the list the turn in flight last set; cleared when a send starts, when the stored row takes over. */
+  liveChecklist?: Ref<ChecklistItem[] | null>
 }
 
 export interface UseChatStream {
@@ -377,6 +380,8 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       imageGenTurnKey.value = m._key ?? null
       startImageProgressPolling()
     }
+    const checklist = checklistFromCall(event.name, event.arguments, event.resultText)
+    if (checklist && deps.liveChecklist) deps.liveChecklist.value = checklist
     // JCLAW-228/562: the call produced inline attachments (image / voice clips) — attach them to the
     // streaming bubble so they render immediately (the server already persisted them on the
     // assistant turn).
@@ -535,6 +540,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     messages.value.push({ _key: crypto.randomUUID(), role: 'user', content: text, createdAt: new Date().toISOString(), attachments: buildOptimisticAttachments(uploaded), ...(quote ? { _quote: quote } : {}) })
     triggerRef(messages)
     scrollToBottom()
+    if (deps.liveChecklist) deps.liveChecklist.value = null
 
     beginStreamingState()
 

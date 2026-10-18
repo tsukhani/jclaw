@@ -390,6 +390,8 @@ public final class Commands {
             // Keeping it transient sidesteps the problem entirely — the
             // event_log entry below is the durable record of the reset.
             conv.contextSince = AppClock.now();
+            conv.checklist = null;
+            conv.checklistUpdatedAt = null;
             conv.save();
             return conv;
         });

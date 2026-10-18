@@ -14,6 +14,7 @@ import services.EventLogger;
 import services.SessionCompactor;
 import services.TaskToolPolicy;
 import services.Tx;
+import tools.CheckListTool;
 import utils.LatencyTrace;
 
 import java.util.List;
@@ -200,7 +201,7 @@ final class AgentPromptPreparer {
         // Clock rides the last user message rather than the system prompt (see
         // CurrentTimeInjector). Must mirror applyMediaRewrite's placement: last,
         // after compaction/trim/media, since each of those rebuilds the list.
-        finalMessages = CurrentTimeInjector.inject(finalMessages);
+        finalMessages = CurrentTimeInjector.inject(finalMessages, CheckListTool.reminder(conversation, finalMessages));
         return new PreparedData(finalMessages, prepared.primary(), prepared.fallback(), prepared.tools(),
                 hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
     }
@@ -292,7 +293,8 @@ final class AgentPromptPreparer {
         // the cacheable prefix — and the whole history sitting behind it — stays
         // byte-stable across turns. Injected last, after compaction/trim/media
         // rewrites, so nothing downstream rebuilds the list and drops it.
-        return new PreparedPrologue(prepared.assembled(), CurrentTimeInjector.inject(finalMessages),
+        return new PreparedPrologue(prepared.assembled(),
+                CurrentTimeInjector.inject(finalMessages, CheckListTool.reminder(conversation, finalMessages)),
                 prepared.tools(), prepared.disabledTools(),
                 hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
     }
