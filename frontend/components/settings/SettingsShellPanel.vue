@@ -30,8 +30,8 @@ const shellConfig = computed(() => {
   }
   return {
     allowlist: map.get('shell.allowlist') ?? '',
-    defaultTimeout: map.get('shell.defaultTimeoutSeconds') ?? '30',
-    maxTimeout: map.get('shell.maxTimeoutSeconds') ?? '300',
+    defaultTimeout: map.get('shell.defaultTimeoutSeconds') ?? '120',
+    maxTimeout: map.get('shell.maxTimeoutSeconds') ?? '600',
     maxOutput: map.get('shell.maxOutputBytes') ?? '102400',
     sandbox: sandboxChoice(map.get('shell.sandbox')),
     lifetime: map.get('shell.backgroundLifetimeHours') ?? '24',
@@ -164,7 +164,7 @@ async function stopProcess(pid: number) {
               v-model="shellTimeoutEdit"
               type="number"
               min="1"
-              max="300"
+              :max="shellConfig.maxTimeout"
               aria-label="Shell default timeout seconds"
               class="w-24 px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
             >

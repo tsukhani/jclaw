@@ -113,6 +113,8 @@ class ToolErrorTemplatesTest extends UnitTest {
         assertNotEquals(timedOut.code(), exited.code());
         assertTrue(ToolErrorTemplates.render(timedOut).contains("larger 'timeout'"),
                 "the remedy for a timeout is the timeout, not the command");
+        assertTrue(ToolErrorTemplates.render(timedOut).contains("'background': true"),
+                "a server or a long build is told to run in the background (JCLAW-1575)");
     }
 
     // ── web (AC: unreachable vs timed out) ────────────────────────────────────

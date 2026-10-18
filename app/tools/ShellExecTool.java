@@ -13,6 +13,8 @@ import services.AgentService;
 import services.BackgroundProcesses;
 import services.ConfigService;
 import services.EventLogger;
+import services.SubagentRegistry;
+import services.TaskRunRegistry;
 import services.Tx;
 import utils.ErrorTemplate;
 import utils.SubprocessEnv;
@@ -45,6 +47,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -141,6 +144,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     private static final String PARAM_WHY = "why";
     private static final String PARAM_WORKDIR = "workdir";
     private static final String PARAM_TIMEOUT = "timeout";
+    private static final String PARAM_BACKGROUND = "background";
 
     /**
      * Field names of the JSON envelope {@link #execute} returns as its result text.
@@ -212,10 +216,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 Execute a shell command on the host system. Commands are validated against an \
                 allowlist of permitted binaries. Working directory defaults to the agent workspace. \
                 Returns exit code, output, and execution metadata. A command still in the foreground when \
-                its timeout passes is killed, so start a server or other long-lived process in the \
-                background (cmd &): it keeps writing its output to a file the result names with its pid, \
-                and the operator, or you through jclaw_api (POST /api/processes/{pid}/stop), can stop it. \
-                Bind a server you start to 127.0.0.1 unless the user asks for another address.""";
+                its timeout passes is killed, so start a server or a long build with "background": true \
+                rather than appending &: the call returns at once, and the command keeps writing its \
+                output to a file the result names with its pid, which you can read later. The operator, \
+                or you through jclaw_api (POST /api/processes/{pid}/stop), can stop it. Bind a server \
+                you start to 127.0.0.1 unless the user asks for another address.""";
     }
 
     @Override
@@ -231,7 +236,10 @@ public class ShellExecTool implements ToolRegistry.Tool {
                         PARAM_WORKDIR, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION, "Working directory (relative to workspace, or absolute if global paths enabled)"),
                         PARAM_TIMEOUT, Map.of(SchemaKeys.TYPE, SchemaKeys.INTEGER,
-                                SchemaKeys.DESCRIPTION, "Timeout in seconds (default: 30, max: 300)"),
+                                SchemaKeys.DESCRIPTION, "Timeout in seconds (default: 120, max: 600); not applied to a background command"),
+                        PARAM_BACKGROUND, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                                SchemaKeys.DESCRIPTION, "Run the command in the background and return at once with its output "
+                                        + "file and pid, for a server or a long build. Do not also append &."),
                         "env", Map.of(SchemaKeys.TYPE, SchemaKeys.OBJECT,
                                 SchemaKeys.DESCRIPTION, "Additional environment variables as key-value pairs",
                                 SchemaKeys.ADDITIONAL_PROPERTIES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING))
@@ -315,13 +323,15 @@ public class ShellExecTool implements ToolRegistry.Tool {
                     ToolErrorTemplates.shellWorkdirRefused(String.valueOf(e.getMessage())));
         }
 
-        var defaultTimeout = ConfigService.getInt("shell.defaultTimeoutSeconds", 30);
-        var maxTimeout = ConfigService.getInt("shell.maxTimeoutSeconds", 300);
+        var defaultTimeout = ConfigService.getInt("shell.defaultTimeoutSeconds", 120);
+        var maxTimeout = ConfigService.getInt("shell.maxTimeoutSeconds", 600);
         var timeout = defaultTimeout;
         if (args.has(PARAM_TIMEOUT)) {
             timeout = Math.min(args.get(PARAM_TIMEOUT).getAsInt(), maxTimeout);
             if (timeout <= 0) timeout = defaultTimeout;
         }
+        boolean background = args.has(PARAM_BACKGROUND) && !args.get(PARAM_BACKGROUND).isJsonNull()
+                && args.get(PARAM_BACKGROUND).getAsBoolean();
 
         var maxOutputBytes = ConfigService.getInt("shell.maxOutputBytes", 102400);
 
@@ -334,7 +344,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 command.length() > 200 ? command.substring(0, 200) + "…" : command,
                 why.isEmpty() ? "" : " — why: " + why));
 
-        return executeCommand(command, workdir, workspace, timeout, maxOutputBytes, env, startTime, agent);
+        return executeCommand(command, workdir, workspace, timeout, maxOutputBytes, env, startTime, agent, background);
     }
 
     /**
@@ -503,9 +513,10 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return SubprocessEnv.isSensitive(name);
     }
 
+    @SuppressWarnings("java:S107") // one call's whole environment, resolved by execute
     private String executeCommand(String command, Path workdir, Path workspace, int timeoutSec,
                                   int maxOutputBytes, Map<String, String> env, long startTime,
-                                  Agent agent) {
+                                  Agent agent, boolean background) {
         Path output = null;
         FileChannel outputChannel = null;
         boolean keepOutput = false;
@@ -515,7 +526,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
             // reads and empties it through the descriptor alone, never by path again.
             outputChannel = FileChannel.open(output, StandardOpenOption.CREATE_NEW,
                     StandardOpenOption.READ, StandardOpenOption.WRITE);
-            var process = startProcess(command, workdir, workspace, env, output);
+            // A background command runs as a subshell the shell does not wait for, so the call returns at once.
+            var process = startProcess(background ? "(\n" + command + "\n) &\n" : command, workdir, workspace, env, output);
             var sentinel = new Sentinel(process);
 
             // Watchdog: destroy the process after the configured timeout.
@@ -535,17 +547,18 @@ public class ShellExecTool implements ToolRegistry.Tool {
             });
 
             var stopped = new AtomicBoolean(false);
-            ReadResult readResult;
+            OutputTail tail;
             try (var _ = ToolContext.onCancel(() -> {
                 stopped.set(true);
                 BackgroundProcesses.terminate(process.toHandle());
             })) {
-                readResult = readProcessOutput(process, outputChannel, maxOutputBytes);
+                tail = readProcessOutput(process, outputChannel, maxOutputBytes);
             }
-            if (readResult.terminalImage()) {
+            if (tail.imageSeen()) {
                 keepOutput = true;
-                return buildTerminalImageEarlyReturn(readResult.output().toString(), agent, timeoutSec,
-                        startTime, readResult.truncated());
+                var seen = tail.result();
+                return buildTerminalImageEarlyReturn(seen.output().toString(), agent, timeoutSec,
+                        startTime, seen.truncated());
             }
 
             // Ensure process is fully dead before collecting exit code.
@@ -556,7 +569,10 @@ public class ShellExecTool implements ToolRegistry.Tool {
 
             // Most launchers pass fd 3 on; one that closes inherited descriptors is caught only by its &.
             boolean leftRunning = sentinel.stillHeld(SENTINEL_GRACE_MS)
-                    || BACKGROUND_OPERATOR.matcher(command).find();
+                    || BACKGROUND_OPERATOR.matcher(unquoted(command)).find();
+            // What the grace second brought: a background command's first output, such as a port already in use.
+            tail.readAvailable();
+            var readResult = tail.result();
             var out = readResult.output();
             out.append(sentinel.redirectFailure());
             if (readResult.truncated()) {
@@ -573,6 +589,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
                             .append(pids.stream().map(String::valueOf).collect(Collectors.joining(", ")));
                 }
                 out.append(lifetimeNote()).append(']');
+            } else if (background) {
+                out.append("\n[The background command exited within a second; its output is above]");
             }
 
             long durationMs = System.currentTimeMillis() - startTime;
@@ -587,6 +605,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             result.addProperty(FIELD_TRUNCATED, readResult.truncated());
             result.addProperty(FIELD_TIMED_OUT, timedOut.get());
             result.addProperty(FIELD_STOPPED, wasStopped);
+            if (background) result.addProperty(PARAM_BACKGROUND, true);
 
             // Inside the envelope, not replacing it — the model needs the output as well as the remedy.
             var failure = wasStopped ? ToolErrorTemplates.shellStopped(command)
@@ -703,8 +722,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
     /** How long after the shell exits a process it started may take to let go of fd 3 before it counts as left running. */
     private static final long SENTINEL_GRACE_MS = 1_000;
 
-    /** Output read result. {@code terminalImage} short-circuits the caller into the terminal-image early return. */
-    private record ReadResult(StringBuilder output, long totalRead, boolean truncated, boolean terminalImage) {}
+    /** The output read so far. */
+    private record ReadResult(StringBuilder output, long totalRead, boolean truncated) {}
 
     /** Environment variable naming the command's output file, for the shell's own redirect. */
     private static final String OUTPUT_ENV = "JCLAW_EXEC_OUTPUT";
@@ -712,8 +731,18 @@ public class ShellExecTool implements ToolRegistry.Tool {
     /** How often a running command's output file is read, for the terminal-image early return. */
     private static final long OUTPUT_POLL_MS = 50;
 
+    /** How often a running command is recorded as activity of the run and the task fire around it. */
+    private static final long ACTIVITY_EVERY_NANOS = TimeUnit.SECONDS.toNanos(1);
+
     /** A shell {@code &} that sends a job to the background, as opposed to {@code &&}, {@code 2>&1} or {@code &>}. */
     private static final Pattern BACKGROUND_OPERATOR = Pattern.compile("(?<![&>|<])&(?![&>])");
+
+    /** A single- or double-quoted string, blanked before that check: {@code curl 'http://h/?a=1&b=2'} backgrounds nothing. */
+    private static final Pattern QUOTED = Pattern.compile("\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'");
+
+    private static String unquoted(String command) {
+        return QUOTED.matcher(command).replaceAll(" ");
+    }
 
     // A platform thread keeps the timed polling of running commands off the virtual-thread scheduler (JDK-8373224).
     private static final ScheduledExecutorService OUTPUT_POLLER =
@@ -767,12 +796,24 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * bounding the run, never at an idle cut-off: an earlier 5 s one truncated slow commands (npm
      * install, long builds) that paused between writes.
      */
-    private ReadResult readProcessOutput(Process process, FileChannel channel, int maxOutputBytes) throws IOException {
+    private OutputTail readProcessOutput(Process process, FileChannel channel, int maxOutputBytes) throws IOException {
         var tail = new OutputTail(channel, maxOutputBytes);
         var imageSeen = new CompletableFuture<Void>();
+        // Read on the tool's thread: the poller's is bound to neither.
+        var run = SubagentRegistry.currentRun();
+        var taskRunId = ToolContext.taskRunId();
+        var lastActivity = new AtomicLong(System.nanoTime());
         var poll = OUTPUT_POLLER.scheduleWithFixedDelay(() -> {
             try {
                 if (tail.readAvailable()) imageSeen.complete(null);
+                // A running command is activity: the idle budgets that cut a subagent run (300 s) or a task fire
+                // (600 s) see only checkpoints, and since JCLAW-1573 the cut kills the command with the run.
+                long now = System.nanoTime();
+                if (now - lastActivity.get() >= ACTIVITY_EVERY_NANOS) {
+                    lastActivity.set(now);
+                    if (run != null) SubagentRegistry.touch(run.runId());
+                    TaskRunRegistry.touch(taskRunId);
+                }
             } catch (IOException | RuntimeException e) {
                 imageSeen.completeExceptionally(e);
             }
@@ -785,8 +826,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
         } finally {
             poll.cancel(false);
         }
-        boolean image = (imageSeen.isDone() && !imageSeen.isCompletedExceptionally()) || tail.readAvailable();
-        return tail.result(image);
+        tail.readAvailable();
+        return tail;
     }
 
     /** One command's output file, read as it grows, with UTF-8 decoded across reads. */
@@ -847,8 +888,12 @@ public class ShellExecTool implements ToolRegistry.Tool {
             decoder.reset();
         }
 
-        synchronized ReadResult result(boolean terminalImage) {
-            return new ReadResult(new StringBuilder(out), totalRead, truncated, terminalImage);
+        synchronized boolean imageSeen() {
+            return imageSeen;
+        }
+
+        synchronized ReadResult result() {
+            return new ReadResult(new StringBuilder(out), totalRead, truncated);
         }
     }
 

@@ -436,6 +436,78 @@ class ShellExecToolTest extends UnitTest {
     }
 
     @Test
+    void aBackgroundCommandReturnsAtOnceWithItsFileAndPid() throws Exception {
+        long t0 = System.nanoTime();
+        var text = tool.execute("""
+                {"command": "echo starting; sleep 4719", "background": true}
+                """, agent);
+        try {
+            assertTrue(System.nanoTime() - t0 < java.util.concurrent.TimeUnit.SECONDS.toNanos(5),
+                    "the call returned without waiting for the command");
+            assertTrue(text.contains("\"background\":true"), text);
+            assertTrue(text.contains("starting"), "its first second of output is in the result: " + text);
+            assertTrue(Files.exists(backgroundOutput(text)), text);
+            assertEquals(1, sleepers("sleep 4719").size(), "the command keeps running");
+            long pid = sleepers("sleep 4719").getFirst().pid();
+            assertTrue(text.matches("(?s).*; pids? [0-9, ]*\\b" + pid + "\\b.*"), "the result names its pid: " + text);
+        } finally {
+            sleepers("sleep 4719").forEach(ProcessHandle::destroy);
+            if (text.contains("keeps writing its output to")) Files.deleteIfExists(backgroundOutput(text));
+        }
+    }
+
+    @Test
+    void aBackgroundCommandThatEndsAtOnceShowsItsOutput() throws IOException {
+        var before = outputFiles();
+        var text = tool.execute("""
+                {"command": "echo boom; exit 3", "background": true}
+                """, agent);
+        assertTrue(text.contains("boom"), "a port already in use would show the same way: " + text);
+        assertTrue(text.contains("exited within a second"), text);
+        assertFalse(text.contains("keeps writing its output to"), text);
+        assertEquals(before, outputFiles(), "nothing is kept for a command that is already gone");
+    }
+
+    @Test
+    void anAmpersandInsideQuotesLeavesNothingRunningOrBehind() throws IOException {
+        var before = outputFiles();
+        var text = tool.execute("""
+                {"command": "echo 'a=1&b=2' \\"c&d\\""}
+                """, agent);
+        assertTrue(text.contains("a=1&b=2 c&d"), text);
+        assertFalse(text.contains("keeps writing its output to"), "a quoted & backgrounds nothing: " + text);
+        assertEquals(before, outputFiles());
+    }
+
+    @Test
+    void aRunningCommandCountsAsActivityForTheRunAndTheTaskFireAroundIt() throws Exception {
+        long runId = -java.util.concurrent.ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
+        long taskRunId = 991_575_000L + java.util.concurrent.ThreadLocalRandom.current().nextInt(1000);
+        services.SubagentRegistry.register(runId, new java.util.concurrent.CompletableFuture<Void>());
+        services.TaskRunRegistry.register(taskRunId);
+        try {
+            // Both clocks are otherwise touched only at checkpoints, so each would read the whole 3 s.
+            services.SubagentRegistry.callAsRun(runId, () -> agents.ToolContext.withScope(null, taskRunId,
+                    () -> tool.execute("{\"command\": \"sleep 3\"}", agent)));
+            long twoSeconds = java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+            assertTrue(services.SubagentRegistry.nanosSinceActivity(runId) < twoSeconds,
+                    "the subagent run saw the running command as activity");
+            assertTrue(services.TaskRunRegistry.nanosSinceActivity(taskRunId) < twoSeconds,
+                    "so did the task fire");
+        } finally {
+            services.SubagentRegistry.unregister(runId);
+            services.TaskRunRegistry.unregister(taskRunId);
+        }
+    }
+
+    @Test
+    void theSchemaStatesTheTimeoutDefaultsAndTheBackgroundSwitch() {
+        var text = tool.parameters().toString();
+        assertTrue(text.contains("default: 120, max: 600"), text);
+        assertTrue(text.contains("background"), text);
+    }
+
+    @Test
     void anOrdinaryCommandLeavesNoOutputFileBehind() throws IOException {
         var before = outputFiles();
         var result = tool.execute("""

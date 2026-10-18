@@ -155,7 +155,9 @@ public final class ToolErrorTemplates {
                 "`%s` was killed after %d seconds and did not finish.".formatted(command, timeoutSeconds),
                 "'output' holds whatever it printed before the kill. A command that waits on input "
                         + "never finishes here — nothing is attached to its stdin.",
-                "Re-run with a larger 'timeout', or narrow the command so it completes inside one.");
+                "Re-run with a larger 'timeout', or narrow the command so it completes inside one. A server or a "
+                        + "long build belongs in the background: re-run it with 'background': true and read its "
+                        + "output file later.");
     }
 
     public static ErrorTemplate shellStopped(String command) {

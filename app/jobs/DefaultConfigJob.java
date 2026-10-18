@@ -291,8 +291,8 @@ public class DefaultConfigJob extends Job<Void> {
 
         // Shell execution tool — operator-tunable knobs only.
         seedIfAbsent("shell.allowlist", ShellExecTool.DEFAULT_ALLOWLIST);
-        seedIfAbsent("shell.defaultTimeoutSeconds", "30");
-        seedIfAbsent("shell.maxTimeoutSeconds", "300");
+        seedIfAbsent("shell.defaultTimeoutSeconds", "120");
+        seedIfAbsent("shell.maxTimeoutSeconds", "600");
         seedIfAbsent("shell.maxOutputBytes", "102400");
 
         // Web search providers — independent engines, first enabled + keyed one is used.
@@ -493,6 +493,18 @@ public class DefaultConfigJob extends Job<Void> {
         renameKeyIfPresent("scrape.impersonate.profile", FetchSidecarManager.CFG_PROFILE);
 
         moveDataImpulseCredentialsToAPlan();
+
+        // JCLAW-1575: exec's timeouts rose to Claude Code's 120 s and 600 s; a seeded row still at the old default follows.
+        raiseIfStillDefault("shell.defaultTimeoutSeconds", "30", "120");
+        raiseIfStillDefault("shell.maxTimeoutSeconds", "300", "600");
+    }
+
+    /** One-shot: a seeded row still holding {@code oldDefault} takes {@code newDefault}; an operator's own value stays. */
+    private void raiseIfStillDefault(String key, String oldDefault, String newDefault) {
+        if (oldDefault.equals(ConfigService.get(key))) {
+            ConfigService.set(key, newDefault);
+            EventLogger.info(EVENT_CATEGORY_SYSTEM, "Config default raised: %s %s → %s".formatted(key, oldDefault, newDefault));
+        }
     }
 
     /**
