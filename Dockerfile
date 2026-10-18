@@ -300,8 +300,9 @@ EXPOSE 9443/udp
 # and measurements: ZGC (sub-millisecond pauses, so SSE token streams don't
 # stutter), asymmetric Xms 128m / Xmx 2g, SoftMaxHeapSize 1g, a 60 s
 # ZUncommitDelay so memory goes back after load — -Xms is the floor ZGC
-# never uncommits below — compact object headers, a per-pid heap dump and
-# exit on OOM (so `restart: unless-stopped` brings the container back), the
+# never uncommits below — compact object headers, a heap dump named by start
+# time and pid (the JVM is pid 7 on every start here) and exit on OOM (so
+# `restart: unless-stopped` brings the container back), the
 # direct-memory cap and the GC log. Override per-flag with `-e JCLAW_JVM_XMS`
 # / `-e JCLAW_JVM_XMX` / `-e JCLAW_JVM_SOFTMAX`, or pin both heap bounds with
 # `-e JCLAW_JVM_HEAP=4g`.
@@ -354,4 +355,4 @@ EXPOSE 9443/udp
 # is itself replaced by `bash ./play` (exec), which is itself replaced
 # by `java` (exec inside the launcher), so the signal chain is intact
 # end-to-end.
-CMD ["sh", "-c", "export JAVA_TOOL_OPTIONS=\"-Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-128m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}} -XX:+UseZGC -XX:SoftMaxHeapSize=${JCLAW_JVM_SOFTMAX:-1g} -XX:ZUncommitDelay=60 -XX:+UseCompactObjectHeaders -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/logs/heap-oom-%p.hprof -XX:+ExitOnOutOfMemoryError -XX:ErrorFile=/app/logs/hs_err_pid%p.log -XX:MaxDirectMemorySize=256m -Dio.netty.leakDetection.level=DISABLED ${JAVA_TOOL_OPTIONS:-}\" && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443} '-Xlog:gc*:file=/app/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M'"]
+CMD ["sh", "-c", "started=$(date -u +%Y%m%dT%H%M%SZ) && export JAVA_TOOL_OPTIONS=\"-Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-128m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}} -XX:+UseZGC -XX:SoftMaxHeapSize=${JCLAW_JVM_SOFTMAX:-1g} -XX:ZUncommitDelay=60 -XX:+UseCompactObjectHeaders -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/logs/heap-oom-${started}-%p.hprof -XX:+ExitOnOutOfMemoryError -XX:ErrorFile=/app/logs/hs_err-${started}-%p.log -XX:MaxDirectMemorySize=256m -Dio.netty.leakDetection.level=DISABLED ${JAVA_TOOL_OPTIONS:-}\" && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443} '-Xlog:gc*:file=/app/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M'"]

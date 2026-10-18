@@ -3253,9 +3253,12 @@ do_start_prod() {
     #     time unchanged. JCLAW_JVM_OPTS='-XX:-UseCompactObjectHeaders' turns it off.
     #   - HeapDumpOnOutOfMemoryError + ExitOnOutOfMemoryError: dump for
     #     postmortem, then exit cleanly so a process manager can restart.
-    #     The dump name carries the pid: the JVM never overwrites an existing
-    #     dump, so a fixed name left every OOM after the first with none.
-    #   - ErrorFile: a JVM crash log goes to logs/ with the rest, not the cwd.
+    #     The dump name carries the start time and the pid: the JVM never
+    #     overwrites an existing dump, and in a container the pid repeats on
+    #     every start (7 in the Docker image), so a name without the time left
+    #     every OOM after the first with none. HeapDumpPath expands only %p.
+    #   - ErrorFile: a JVM crash log goes to logs/ with the rest, not the cwd,
+    #     named the same way.
     #   - MaxDirectMemorySize: caps Netty off-heap buffer allocation so a
     #     leak here can't exhaust native memory unnoticed.
     #   - io.netty.leakDetection.level=DISABLED: Netty defaults to SIMPLE,
@@ -3289,6 +3292,8 @@ do_start_prod() {
     # live set, which scales with workload rather than with the ceiling, so a
     # fixed fraction of a raised -Xmx would be a guess. Raise it explicitly.
     local softmax="${JCLAW_JVM_SOFTMAX:-1g}"
+    local started
+    started=$(date -u +%Y%m%dT%H%M%SZ)
     local jvm_opts=(
         "-Xms${xms}"
         "-Xmx${xmx}"
@@ -3301,9 +3306,9 @@ do_start_prod() {
         # inherits it. Absolute breaks Windows, where the bundle runs under Git Bash against a
         # native java.exe: /c/Users/... is unresolvable, and -Xlog splits its spec on ':', so a
         # translated C:/... path fails the parser instead of fixing it.
-        "-XX:HeapDumpPath=logs/heap-oom-%p.hprof"
+        "-XX:HeapDumpPath=logs/heap-oom-${started}-%p.hprof"
         "-XX:+ExitOnOutOfMemoryError"
-        "-XX:ErrorFile=logs/hs_err_pid%p.log"
+        "-XX:ErrorFile=logs/hs_err-${started}-%p.log"
         "-XX:MaxDirectMemorySize=256m"
         "-Dio.netty.leakDetection.level=DISABLED"
         "-Xlog:gc*:file=logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
