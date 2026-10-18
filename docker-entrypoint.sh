@@ -97,6 +97,20 @@ if [ ! -f "$CERT_FILE" ] || [ ! -f "$KEY_FILE" ]; then
     chmod 644 "$CERT_FILE"
 fi
 
+# Keep only the two newest OOM heap dumps: each is up to -Xmx, and with
+# ExitOnOutOfMemoryError plus `restart: unless-stopped` an OOM that recurs
+# on every start would otherwise fill the disk. Names begin with the UTC
+# start time, so glob order is age order. Twin of prune_heap_dumps in jclaw.sh.
+prune_heap_dumps() {
+    set -- /app/logs/heap-oom-*.hprof
+    [ -e "$1" ] || return 0
+    while [ "$#" -gt 2 ]; do
+        rm -f "$1"
+        shift
+    done
+}
+prune_heap_dumps
+
 export PLAY_SECRET
 if [ -n "${PLAY_SECRET_PREVIOUS:-}" ]; then
     export PLAY_SECRET_PREVIOUS

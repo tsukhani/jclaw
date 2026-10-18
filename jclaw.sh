@@ -2992,6 +2992,19 @@ check_stale_h2_lock_or_exit() {
     rm -f "$lock_file"
 }
 
+# Keep only the two newest OOM heap dumps in $1: each is up to -Xmx, and an
+# OOM that recurs after every restart would otherwise fill the disk. Names
+# begin with the UTC start time, so glob order is age order. Twin of the
+# function in docker-entrypoint.sh.
+prune_heap_dumps() {
+    set -- "$1"/heap-oom-*.hprof
+    [ -e "$1" ] || return 0
+    while [ "$#" -gt 2 ]; do
+        rm -f "$1"
+        shift
+    done
+}
+
 do_start_prod() {
     cd "$SCRIPT_DIR"
 
@@ -3225,6 +3238,7 @@ do_start_prod() {
         echo "==> Dist install detected (no app/, no frontend/) — skipping precompile + SPA build"
     fi
     mkdir -p "$SCRIPT_DIR/logs"
+    prune_heap_dumps "$SCRIPT_DIR/logs"
 
     # JVM tuning for production. Rationale for each flag:
     #   - ZGC: sub-millisecond pause collector. Matters because SSE streams
