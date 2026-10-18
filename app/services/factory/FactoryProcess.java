@@ -147,9 +147,15 @@ public final class FactoryProcess {
         }
         if (!finished) {
             proc.descendants().forEach(ProcessHandle::destroyForcibly);
-            proc.destroyForcibly();
-            closeQuietly(proc.getInputStream());
+            // Through the handle: Process.destroyForcibly also closes the output stream, losing what is still unread.
+            proc.toHandle().destroyForcibly();
+            closeQuietly(proc.getOutputStream());
             joinQuietly(drainer);
+            // A reparented child can hold the pipe open; closing it ends the drainer's read.
+            if (drainer.isAlive()) {
+                closeQuietly(proc.getInputStream());
+                joinQuietly(drainer);
+            }
             return new ExecResult(-1, out.toString(StandardCharsets.UTF_8), true);
         }
         joinQuietly(drainer);

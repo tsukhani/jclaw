@@ -39,7 +39,8 @@ class FactoryProcessTest extends UnitTest {
     @Test
     void aTimeoutKillsTheProcessAndKeepsWhatItPrinted() {
         long start = System.nanoTime();
-        var res = FactoryProcess.run(List.of("sh", "-c", "echo started; sleep 30"), Duration.ofMillis(500));
+        // Room for the shell to start on a loaded machine: what survives the timeout is the point.
+        var res = FactoryProcess.run(List.of("sh", "-c", "echo started; sleep 30"), Duration.ofSeconds(2));
         var elapsed = Duration.ofNanos(System.nanoTime() - start);
         assertTrue(res.timedOut(), res::toString);
         assertEquals(-1, res.exitCode());
@@ -50,9 +51,24 @@ class FactoryProcessTest extends UnitTest {
     @Test
     void outputSurvivesAnOrphanHoldingThePipeOpen() {
         // The subshell exits at once, so its sleep is reparented out of descendants() and keeps stdout past the join.
-        var res = FactoryProcess.run(List.of("sh", "-c", "echo started; (sleep 5 &); sleep 30"), Duration.ofMillis(500));
+        var res = FactoryProcess.run(List.of("sh", "-c", "echo started; (sleep 5 &); sleep 30"), Duration.ofSeconds(2));
         assertTrue(res.timedOut(), res::toString);
         assertTrue(res.output().contains("started"), res::toString);
+    }
+
+    @Test
+    void aTimeoutKeepsWhatWasStillInThePipe() {
+        // A sink that is slow, like a drainer scheduled late under load, leaves "second" in the pipe when the timeout fires.
+        var res = FactoryProcess.runStreaming(List.of("sh", "-c", "echo first; sleep 0.2; echo second; sleep 30"),
+                Duration.ofMillis(800), (buf, off, len) -> {
+                    try {
+                        Thread.sleep(1200);
+                    } catch (InterruptedException _) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
+        assertTrue(res.timedOut(), res::toString);
+        assertTrue(res.output().contains("second"), res::toString);
     }
 
     @Test
