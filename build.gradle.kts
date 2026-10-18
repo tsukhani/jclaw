@@ -363,7 +363,7 @@ dependencies {
     implementation("net.jqwik:jqwik-api:1.10.1") {
         exclude(group = "org.junit.platform")
     }
-    runtimeOnly("net.jqwik:jqwik-engine:1.10.1") {
+    runtimeOnly("net.jqwik:jqwik-engine:1.10.2") {
         exclude(group = "org.junit.platform")
     }
 
