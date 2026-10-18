@@ -141,9 +141,13 @@ public final class SessionCompactor {
         if (additionalInstructions != null && !additionalInstructions.isBlank()) {
             systemPrompt += "\n\nAdditional user guidance for this summary: " + additionalInstructions.strip();
         }
+        var turns = renderTurns(plan.toSummarize());
+        var prior = plan.priorSummary();
+        var input = prior == null ? turns
+                : PRIOR_SUMMARY_HEADER + "\n\n" + prior + "\n\n[Turns since that summary]\n\n" + turns;
         var sumMessages = List.<ChatMessage>of(
                 ChatMessage.system(systemPrompt),
-                ChatMessage.user(renderTurns(plan.toSummarize()))
+                ChatMessage.user(input)
         );
 
         String summary;
@@ -185,16 +189,24 @@ public final class SessionCompactor {
     // ─── Summary → system-prompt injection helper ────────────────────────
 
     /**
-     * Append the latest compaction summary to {@code basePrompt} as a
-     * labeled section. Returns {@code basePrompt} unchanged when the
-     * conversation has never been compacted. Call this inside the prep
-     * Tx where {@code Conversation} is already managed.
+     * Append the conversation's current compaction summary to {@code basePrompt}
+     * as a labeled section. Returns {@code basePrompt} unchanged when there is
+     * none: never compacted, or {@code /reset} since the last compaction. Call
+     * this inside the prep Tx where {@code Conversation} is already managed.
      */
     public static String appendSummaryToPrompt(String basePrompt, Conversation conversation) {
         if (conversation == null) return basePrompt;
+        var summary = currentSummary(conversation);
+        if (summary == null) return basePrompt;
+        return basePrompt + "\n\n" + PRIOR_SUMMARY_HEADER + "\n\n" + summary;
+    }
+
+    /** The latest summary, unless a {@code /reset} after it cleared the turns it covers. */
+    private static @Nullable String currentSummary(Conversation conversation) {
         var latest = SessionCompaction.findLatest(conversation);
-        if (latest == null || latest.summary == null || latest.summary.isBlank()) return basePrompt;
-        return basePrompt + "\n\n" + PRIOR_SUMMARY_HEADER + "\n\n" + latest.summary;
+        if (latest == null || latest.summary == null || latest.summary.isBlank()) return null;
+        if (conversation.contextSince != null && !latest.compactedAt.isAfter(conversation.contextSince)) return null;
+        return latest.summary;
     }
 
     /**
@@ -225,7 +237,7 @@ public final class SessionCompactor {
      * @param createdAt   creation timestamp
      */
     public record MessageSnapshot(String role, String content, String toolCalls, String toolResults, Instant createdAt) {}
-    record CompactionPlan(List<MessageSnapshot> toSummarize, Instant firstKeptAt) {}
+    record CompactionPlan(List<MessageSnapshot> toSummarize, Instant firstKeptAt, @Nullable String priorSummary) {}
 
     private static Optional<CompactionPlan> buildPlan(Long conversationId, boolean force) {
         var conv = Conversation.<Conversation>findById(conversationId);
@@ -238,7 +250,7 @@ public final class SessionCompactor {
             var m = recent.get(i);
             snaps.add(new MessageSnapshot(m.role, m.content, m.toolCalls, m.toolResults, m.createdAt));
         }
-        return Optional.of(new CompactionPlan(snaps, recent.get(boundary).createdAt));
+        return Optional.of(new CompactionPlan(snaps, recent.get(boundary).createdAt, currentSummary(conv)));
     }
 
     /**
@@ -346,6 +358,8 @@ public final class SessionCompactor {
 
     private static final String SUMMARIZATION_INSTRUCTIONS = """
             You are compressing a conversation between a user and an AI agent so the agent can continue work after older turns are dropped. Produce a single prose summary — no preamble, no meta-commentary — that a future instance of the agent will read in place of the original turns.
+
+            The input may open with the summary an earlier compaction wrote. Your summary replaces it, so carry forward everything it records that still matters.
 
             When summarizing, prioritize in this order:
             1. Active or in-progress tasks: task name, current step, what's been done, what remains, and any pending user decisions.

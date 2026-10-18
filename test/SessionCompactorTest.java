@@ -21,6 +21,7 @@ import services.SessionCompactor.MessageSnapshot;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Unit tests for {@link SessionCompactor} (JCLAW-38).
@@ -241,6 +242,48 @@ class SessionCompactorTest extends UnitTest {
     }
 
     @Test
+    void compact_secondCompactionCarriesTheFirstSummary() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        seedMessages(conv, 25, "Early turn");
+        commitAndReopen();
+        assertTrue(SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> "FIRST SUMMARY").compacted());
+
+        seedMessages(Conversation.findById(conv.id), 25, "Later turn");
+        commitAndReopen();
+        var input = new AtomicReference<String>();
+        var second = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            input.set((String) msgs.get(1).content());
+            return "SECOND SUMMARY";
+        });
+
+        assertTrue(second.compacted(), "reason=" + second.skipReason());
+        assertTrue(input.get().contains("FIRST SUMMARY"), "summarizer input: " + input.get());
+        assertTrue(input.get().contains("Later turn"), "summarizer input: " + input.get());
+        commitAndReopen();
+        var prompt = SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id));
+        assertTrue(prompt.endsWith("SECOND SUMMARY"), "prompt: " + prompt);
+    }
+
+    @Test
+    void compact_leavesOutASummaryThatAResetCleared() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        saveSummary(conv, "PRE-RESET SUMMARY", Instant.now().minusSeconds(600));
+        conv.contextSince = Instant.now().minusSeconds(300);
+        conv.save();
+        seedMessages(conv, 25, "After reset");
+        commitAndReopen();
+
+        var input = new AtomicReference<String>();
+        var result = SessionCompactor.compact(conv.id, "openrouter/test-model", msgs -> {
+            input.set((String) msgs.get(1).content());
+            return "POST-RESET SUMMARY";
+        });
+
+        assertTrue(result.compacted(), "reason=" + result.skipReason());
+        assertFalse(input.get().contains("PRE-RESET SUMMARY"), "summarizer input: " + input.get());
+    }
+
+    @Test
     void compact_keepsOriginalMessagesIntact_afterSuccess() {
         // AC: original turns remain accessible in conversation history.
         var conv = ConversationService.create(agent, "web", "user1");
@@ -316,6 +359,17 @@ class SessionCompactorTest extends UnitTest {
         assertFalse(result.contains("OLDER SUMMARY"));
     }
 
+    @Test
+    void appendSummaryToPrompt_skipsASummaryThatAResetCleared() {
+        var conv = ConversationService.create(agent, "web", "user1");
+        saveSummary(conv, "PRE-RESET SUMMARY", Instant.now().minusSeconds(600));
+        conv.contextSince = Instant.now().minusSeconds(300);
+        conv.save();
+        commitAndReopen();
+
+        assertEquals("SYS", SessionCompactor.appendSummaryToPrompt("SYS", Conversation.findById(conv.id)));
+    }
+
     // ─── renderTurns ────────────────────────────────────────────────────
 
     @Test
@@ -379,12 +433,27 @@ class SessionCompactorTest extends UnitTest {
     }
 
     private static void seedMessages(Conversation conv, int count) {
+        seedMessages(conv, count, "Turn");
+    }
+
+    private static void seedMessages(Conversation conv, int count, String label) {
         // Alternating user/assistant messages (starts with user) so the
         // prefix is always anchorable at a user boundary.
         for (int i = 0; i < count; i++) {
             var role = (i % 2 == 0) ? MessageRole.USER : MessageRole.ASSISTANT;
-            ConversationService.appendMessage(conv, role, "Turn " + i + " content", null, null, null);
+            ConversationService.appendMessage(conv, role, label + " " + i + " content", null, null, null);
         }
+    }
+
+    private static void saveSummary(Conversation conv, String summary, Instant compactedAt) {
+        var sc = new SessionCompaction();
+        sc.conversation = conv;
+        sc.turnCount = 10;
+        sc.summaryTokens = 50;
+        sc.model = "openrouter/test-model";
+        sc.summary = summary;
+        sc.compactedAt = compactedAt;
+        sc.save();
     }
 
     private static void commitAndReopen() {
