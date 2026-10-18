@@ -249,13 +249,15 @@ public final class ParallelToolExecutor {
         // turn's binding so those calls bill the turn that caused them. Same
         // set-on-the-tool's-own-thread shape as ToolContext.withScope.
         var turnTrace = LatencyTrace.current();
+        // Likewise the subagent run, so a wait inside a call links its children to it (JCLAW-1564).
+        var subagentRun = SubagentRegistry.currentRun();
 
         // One virtual thread per parallel-safe call — full concurrency.
         for (int idx : safeCalls) {
             final int i = idx;
             Thread.ofVirtual().name("agent-tool-parallel").start(() -> {
                 try (var _ = LatencyTrace.bind(turnTrace)) {
-                    runSafeCall(ctx, results, i);
+                    SubagentRegistry.runAs(subagentRun, () -> runSafeCall(ctx, results, i));
                 }
             });
         }
@@ -265,7 +267,7 @@ public final class ParallelToolExecutor {
         for (var group : unsafeGroups.values()) {
             Thread.ofVirtual().name("agent-tool-serial").start(() -> {
                 try (var _ = LatencyTrace.bind(turnTrace)) {
-                    runSerialGroup(ctx, results, group);
+                    SubagentRegistry.runAs(subagentRun, () -> runSerialGroup(ctx, results, group));
                 }
             });
         }

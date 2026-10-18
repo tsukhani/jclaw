@@ -109,9 +109,10 @@ final class SubagentSyncRunner {
         var parentStopped = new AtomicBoolean(false);
         var relay = SubagentChatBridge.relayActivity(List.of(runId), SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
         try (var _ = ToolContext.onCancel(() -> {
-            parentStopped.set(true);
-            SubagentRegistry.kill(runId, PARENT_STOPPED_REASON);
-        })) {
+                parentStopped.set(true);
+                SubagentRegistry.kill(runId, PARENT_STOPPED_REASON);
+            });
+             var _ = SubagentRegistry.waitingOn(List.of(runId))) {
             while (true) {
                 try {
                     var result = future.get(IDLE_POLL_INTERVAL_MS, TimeUnit.MILLISECONDS);

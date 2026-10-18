@@ -856,6 +856,55 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
+    void aRunWaitingOnAWorkingChildIsNotCutByItsOwnIdleBudget() throws Exception {
+        // The waiting run records nothing itself: only its child's activity can keep it within budget.
+        var outcome = awaitNestedRun(true);
+        assertEquals(SubagentRun.Status.COMPLETED, outcome.terminalStatus(), outcome.terminalOutcome());
+        assertEquals("waited on a working child", outcome.reply());
+    }
+
+    @Test
+    void aRunWaitingOnASilentChildIsCutByItsOwnIdleBudget() throws Exception {
+        var outcome = awaitNestedRun(false);
+        assertEquals(SubagentRun.Status.TIMEOUT, outcome.terminalStatus());
+        assertTrue(outcome.terminalOutcome().contains("idle"), outcome.terminalOutcome());
+    }
+
+    /** Awaits a run on a 1 s idle budget while that run spends ~2.5 s waiting on a child of its own. */
+    private static SubagentSpawnTool.SyncRunOutcome awaitNestedRun(boolean childWorks) throws Exception {
+        var rnd = java.util.concurrent.ThreadLocalRandom.current();
+        Long waiting = -rnd.nextLong(1, Long.MAX_VALUE);
+        Long child = -rnd.nextLong(1, Long.MAX_VALUE);
+        var waitingFuture = new CompletableFuture<AgentRunner.RunResult>();
+        var childFuture = new CompletableFuture<AgentRunner.RunResult>();
+        SubagentRegistry.register(waiting, waitingFuture);
+        SubagentRegistry.register(child, childFuture);
+        try {
+            Thread.ofVirtual().start(() -> {
+                var inner = SubagentRegistry.callAsRun(waiting,
+                        () -> SubagentSpawnTool.awaitFuture(childFuture, 3600, 3600, child));
+                waitingFuture.complete(new AgentRunner.RunResult("waited on a " + inner.reply(), null));
+            });
+            Thread.ofVirtual().start(() -> {
+                try {
+                    for (int i = 0; i < 10; i++) {
+                        Thread.sleep(250);
+                        if (childWorks) SubagentRegistry.touch(child);
+                    }
+                    childFuture.complete(new AgentRunner.RunResult("working child", null));
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            return SubagentSpawnTool.awaitFuture(waitingFuture, 1, 1800, waiting);
+        } finally {
+            childFuture.complete(new AgentRunner.RunResult("released", null));
+            SubagentRegistry.unregister(waiting);
+            SubagentRegistry.unregister(child);
+        }
+    }
+
+    @Test
     void defaultRunTimeoutConfigIsHonoredAndNonPositiveCoercesToDefault() {
         // JCLAW-812: the operator-configurable global default (Settings →
         // Subagents) is the fallback when a spawn omits runTimeoutSeconds.

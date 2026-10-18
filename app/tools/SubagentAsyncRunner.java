@@ -208,7 +208,7 @@ final class SubagentAsyncRunner {
                     + " (already collected, or not an async spawn).";
         }
         var relay = SubagentChatBridge.relayActivity(List.of(runId), SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
-        try {
+        try (var _ = SubagentRegistry.waitingOn(List.of(runId))) {
             return GsonHolder.GSON.toJson(outcomeMap(runId, awaitOutcomeFuture(f)), Map.class);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
@@ -230,7 +230,7 @@ final class SubagentAsyncRunner {
     static String awaitAsyncOutcomes(List<Long> runIds) {
         var results = new ArrayList<Object>();
         var relay = SubagentChatBridge.relayActivity(runIds, SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
-        try {
+        try (var _ = SubagentRegistry.waitingOn(runIds)) {
             for (var runId : runIds) {
                 var f = ASYNC_OUTCOMES.asMap().remove(runId);
                 forgetOutstanding(runId);

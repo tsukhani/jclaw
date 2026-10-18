@@ -1,5 +1,6 @@
 package services;
 
+import com.google.errorprone.annotations.MustBeClosed;
 import jakarta.persistence.Query;
 import mcp.McpAllowlist;
 import models.Agent;
@@ -81,6 +82,9 @@ public final class SubagentRegistry {
 
     private static final Map<Long, Entry> ACTIVE = new ConcurrentHashMap<>();
 
+    /** Each run another run is waiting on, mapped to the waiting run, while it waits (JCLAW-1564). */
+    private static final Map<Long, Long> WAITING_ON = new ConcurrentHashMap<>();
+
     /** The run a child's own thread executes, bound by {@link #callAsRun} for the thread's whole life. */
     private static final ScopedValue<RunScope> CURRENT_RUN = ScopedValue.newInstance();
 
@@ -157,16 +161,47 @@ public final class SubagentRegistry {
         return CURRENT_RUN.isBound() ? CURRENT_RUN.get() : null;
     }
 
+    /** Run {@code body} as {@code run}'s thread, for work a run hands to a thread of its own; unbound when null. */
+    public static void runAs(@Nullable RunScope run, Runnable body) {
+        if (run == null) body.run();
+        else ScopedValue.where(CURRENT_RUN, run).run(body);
+    }
+
+    /** Ends what {@link #waitingOn} began. */
+    @FunctionalInterface
+    public interface Waiting extends AutoCloseable {
+        @Override void close();
+    }
+
+    /**
+     * While open, activity {@code children} record also counts as activity of the run bound to this
+     * thread, so a run waiting on working children is not idle. A no-op on a thread that runs no child.
+     */
+    @MustBeClosed
+    public static Waiting waitingOn(List<Long> children) {
+        var waiter = currentRun();
+        if (waiter == null) return () -> {};
+        children.forEach(child -> WAITING_ON.put(child, waiter.runId()));
+        return () -> children.forEach(child -> WAITING_ON.remove(child, waiter.runId()));
+    }
+
     /**
      * JCLAW-424: mark the run as having just made progress. Called from
      * {@link agents.AgentRunner#checkSubagentCancel} — i.e. before each LLM
      * round and between tool calls — so the idle-timeout clock resets while
-     * the child is actively working. A no-op when the run isn't registered.
+     * the child is actively working, and the clock of each run waiting on it
+     * ({@link #waitingOn}). A no-op when the run isn't registered.
      */
     public static void touch(Long runId) {
         if (runId == null) return;
-        var entry = ACTIVE.get(runId);
-        if (entry != null) entry.lastActivityNanos().set(System.nanoTime());
+        long now = System.nanoTime();
+        // A model can yield on any run, its own parent included, so links can loop; a chain without one
+        // takes at most one hop per link.
+        int hops = WAITING_ON.size();
+        for (Long id = runId; id != null && hops-- >= 0; id = WAITING_ON.get(id)) {
+            var entry = ACTIVE.get(id);
+            if (entry != null) entry.lastActivityNanos().set(now);
+        }
     }
 
     /**

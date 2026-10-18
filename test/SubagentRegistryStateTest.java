@@ -3,7 +3,9 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.SubagentRegistry;
 
+import java.time.Duration;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -84,6 +86,62 @@ class SubagentRegistryStateTest extends UnitTest {
         assertTrue(SubagentRegistry.nanosSinceActivity(id) >= 0, "registered run reports elapsed nanos");
         SubagentRegistry.touch(id); // resets the clock; still a valid non-negative reading
         assertTrue(SubagentRegistry.nanosSinceActivity(id) >= 0);
+    }
+
+    // ─── activity of a run being waited on (JCLAW-1564) ──────────────────────
+
+    private static final long SETTLE_NANOS = TimeUnit.MILLISECONDS.toNanos(50);
+
+    @Test
+    void activityCarriesUpEveryRunWaitingOnTheOneBelow() throws Exception {
+        var top = reg(1564_0001L, new CompletableFuture<>());
+        var middle = reg(1564_0002L, new CompletableFuture<>());
+        var bottom = reg(1564_0003L, new CompletableFuture<>());
+        SubagentRegistry.callAsRun(top, () -> {
+            try (var _ = SubagentRegistry.waitingOn(List.of(middle))) {
+                return SubagentRegistry.callAsRun(middle, () -> {
+                    try (var _ = SubagentRegistry.waitingOn(List.of(bottom))) {
+                        Thread.sleep(60);
+                        SubagentRegistry.touch(bottom);
+                        assertTrue(SubagentRegistry.nanosSinceActivity(middle) < SETTLE_NANOS, "middle refreshed");
+                        assertTrue(SubagentRegistry.nanosSinceActivity(top) < SETTLE_NANOS, "top refreshed");
+                        return null;
+                    }
+                });
+            }
+        });
+    }
+
+    @Test
+    void activityStopsCountingForARunOnceItStopsWaiting() throws Exception {
+        var waiter = reg(1564_0004L, new CompletableFuture<>());
+        var child = reg(1564_0005L, new CompletableFuture<>());
+        SubagentRegistry.callAsRun(waiter, () -> {
+            try (var _ = SubagentRegistry.waitingOn(List.of(child))) {
+                SubagentRegistry.touch(child);
+            }
+            return null;
+        });
+        Thread.sleep(60);
+        SubagentRegistry.touch(child);
+        assertTrue(SubagentRegistry.nanosSinceActivity(waiter) >= SETTLE_NANOS, "the wait has ended");
+    }
+
+    @Test
+    void runsThatWaitOnEachOtherStillTouchInFiniteTime() throws Exception {
+        // subagent_yield takes any run id, so a child can wait on the run that waits on it.
+        var a = reg(1564_0006L, new CompletableFuture<>());
+        var b = reg(1564_0007L, new CompletableFuture<>());
+        SubagentRegistry.callAsRun(a, () -> {
+            try (var _ = SubagentRegistry.waitingOn(List.of(b))) {
+                return SubagentRegistry.callAsRun(b, () -> {
+                    try (var _ = SubagentRegistry.waitingOn(List.of(a))) {
+                        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> SubagentRegistry.touch(a));
+                        return null;
+                    }
+                });
+            }
+        });
     }
 
     // ─── requestStop / cancel flag ───────────────────────────────────────────

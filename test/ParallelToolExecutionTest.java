@@ -658,4 +658,28 @@ class ParallelToolExecutionTest extends UnitTest {
 
         assertEquals(List.of("false->true"), seen);
     }
+
+    @Test
+    void aCallOnAWorkUnitThreadRunsAsTheSubagentRun() throws Exception {
+        // A subagent wait inside the call links its children to the run it finds bound (JCLAW-1564).
+        long[] ids = seedAgentAndConversation();
+        var agent = (Agent) Agent.findById(ids[0]);
+        var runId = -ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
+        var bound = Collections.synchronizedList(new ArrayList<Long>());
+        ToolRegistry.publish(List.of(stopWatcher(() -> {
+            var run = SubagentRegistry.currentRun();
+            bound.add(run == null ? null : run.runId());
+        }, new ArrayList<>()), sleepTool("safe_x", true)));
+        SubagentRegistry.register(runId, new CompletableFuture<Void>());
+        try {
+            SubagentRegistry.callAsRun(runId, () -> {
+                invokeParallel(List.of(WATCH, ALONGSIDE), agent, ids[1], new ArrayList<>(), null);
+                return null;
+            });
+        } finally {
+            SubagentRegistry.unregister(runId);
+        }
+
+        assertEquals(List.of(runId), bound);
+    }
 }

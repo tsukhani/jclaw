@@ -89,6 +89,39 @@ class SubagentChatBridgeTest extends UnitTest {
     }
 
     @Test
+    void aWaitingTurnHearsFromASubagentWhoseOwnSubagentWorks() throws Exception {
+        long conversationId = freshConversationId();
+        long child = freshConversationId();
+        long grandchild = freshConversationId();
+        var statuses = new CopyOnWriteArrayList<String>();
+        var watching = new AgentRunner.StreamingCallbacks(_ -> { }, _ -> { }, _ -> { }, statuses::add, _ -> { },
+                _ -> { }, _ -> { }, () -> { });
+        SubagentSpawnTool.registerChatCallbacks(conversationId, watching);
+        SubagentRegistry.register(child, new CompletableFuture<Void>());
+        SubagentRegistry.register(grandchild, new CompletableFuture<Void>());
+        var relay = ToolContext.withScope(conversationId, null,
+                () -> SubagentSpawnTool.relayActivityForTest(List.of(child), Duration.ofMillis(50)));
+        try {
+            SubagentRegistry.callAsRun(child, () -> {
+                try (var _ = SubagentRegistry.waitingOn(List.of(grandchild))) {
+                    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                    while (statuses.isEmpty() && System.nanoTime() < deadline) {
+                        SubagentRegistry.touch(grandchild);
+                        Thread.sleep(10);
+                    }
+                }
+                return null;
+            });
+            assertEquals("Subagent still working", statuses.isEmpty() ? null : statuses.getFirst());
+        } finally {
+            relay.cancel(false);
+            SubagentRegistry.unregister(child);
+            SubagentRegistry.unregister(grandchild);
+            SubagentSpawnTool.unregisterChatCallbacks(conversationId, watching);
+        }
+    }
+
+    @Test
     void nothingIsRelayedOutsideAChatTurn() {
         assertTrue(SubagentSpawnTool.relayActivityForTest(List.of(freshConversationId()), Duration.ofMillis(50)).isDone());
     }
