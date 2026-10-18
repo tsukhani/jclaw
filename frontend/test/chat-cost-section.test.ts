@@ -777,8 +777,7 @@ describe('ChatCostSection (JCLAW-28)', () => {
 
   it('clears the chip filter once only one subscription provider has usage', async () => {
     // Selected while both providers had usage; narrowing to agent 1 leaves
-    // only Ollama Cloud, and a kept selection would drop OpenAI's $20 from
-    // the Total.
+    // only Ollama Cloud in use, so the chip no longer has anything to filter.
     stubSubscriptionFixture({
       providers: [
         { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
@@ -812,7 +811,45 @@ describe('ChatCostSection (JCLAW-28)', () => {
 
     expect(ollamaChip.attributes('aria-pressed')).toBe('false')
     expect(ollamaChip.attributes('disabled')).toBeDefined()
-    expect(wrapper.find('tfoot').text()).toContain('$120')
+    wrapper.unmount()
+  })
+
+  it('charges an agent filter its share of each subscription fee', async () => {
+    // Ollama Cloud ($100): main used 900 tokens, helper 100. OpenAI ($20): main only.
+    stubSubscriptionFixture({
+      providers: [
+        { name: 'ollama-cloud', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 100 },
+        { name: 'openai', paymentModality: 'SUBSCRIPTION', subscriptionMonthlyUsd: 20 },
+      ],
+      rows: [
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'kimi-k2.5', modelProvider: 'ollama-cloud',
+          prompt: 600, completion: 300, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 2, channelType: 'web', usage: {
+          modelId: 'glm-5.3-flash', modelProvider: 'ollama-cloud',
+          prompt: 60, completion: 40, promptPrice: 0, completionPrice: 0,
+        } },
+        { agentId: 1, channelType: 'web', usage: {
+          modelId: 'gpt-5', modelProvider: 'openai',
+          prompt: 100, completion: 50, promptPrice: 0, completionPrice: 0,
+        } },
+      ],
+    })
+    const wrapper = await mountSuspended(ChatCostSection, {
+      props: { agents: STUB_AGENTS },
+    })
+    await flushPromises()
+    expect(wrapper.find('tfoot').text()).toMatch(/\$120$/)
+
+    await wrapper.find('select[aria-label="Filter by agent"]').setValue('2')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('glm-5.3-flash')
+    expect(wrapper.text()).not.toContain('kimi-k2.5')
+    expect(wrapper.findAll('[data-testid="subscription-no-usage-row"]')).toHaveLength(0)
+    expect(wrapper.find('tfoot').text()).toMatch(/\$10$/)
+    expect(wrapper.text()).toMatch(/Combined total.*\$10$/)
     wrapper.unmount()
   })
 

@@ -317,6 +317,8 @@ const filter = computed<FleetCostFilter>(() => ({
   agentId: selectedAgentId.value,
   channelType: selectedChannel.value,
 }))
+// An agent or channel filter shows that slice's share of each subscription fee, not the bill.
+const isSliced = computed(() => selectedAgentId.value !== null || selectedChannel.value !== null)
 
 const breakdown = computed<FleetCostBreakdown>(() =>
   computeFleetCost(rows.value, filter.value),
@@ -452,8 +454,10 @@ const windowDays = computed(() => {
 // active, this narrows to the selected provider's bill only, so the
 // Subscription tfoot Total and the Combined Total flow naturally to
 // that provider's number (e.g., $100 for Ollama Cloud rather than
-// $120 for the full configured stack).
+// $120 for the full configured stack). Under an agent or channel filter
+// it is that slice's share instead, which its allocations already are.
 const subscriptionFee = computed(() => {
+  if (isSliced.value) return subscriptionPerModelAllocated.value.reduce((t, m) => t + m.allocatedCost, 0)
   const sel = selectedSubscriptionProvider.value
   if (sel !== null) {
     const p = configuredSubscriptionProviders.value.find(p => p.name === sel)
@@ -641,31 +645,33 @@ const subscriptionPerModel = computed<FleetCostPerModel[]>(() => {
   return items
 })
 
-// Per-provider total tokens within the window — denominator for the
-// allocation key. Sums prompt + completion + reasoning. cached is
-// deliberately NOT added: `prompt` is the *total* input count and
-// cache-read tokens are a subset of it (cached ⊂ prompt — see the
-// MessageUsage contract in utils/usage-cost.ts, where uncachedInput =
-// prompt − cached − cacheCreation). Adding cached again would
-// double-count cache reads — harmless for allocation while subscription
-// rows report cached = 0, but it skews any absolute per-token rate built
-// on the same key. A provider with zero usage this window has no entry;
-// the lookup in `subscriptionPerModelAllocated` defaults to 0 and
+// Per-provider total tokens across the whole window, INDEPENDENT of the
+// agent/channel/chip filters — the denominator for both the allocation
+// below and the effective rate. The flat fee buys every turn the provider
+// served, so a filtered slice is charged its share of that throughput;
+// dividing by the slice's own tokens would charge one agent the whole fee.
+// Sums prompt + completion + reasoning. cached is deliberately NOT added:
+// `prompt` is the *total* input count and cache-read tokens are a subset
+// of it (cached ⊂ prompt — see the MessageUsage contract in
+// utils/usage-cost.ts, where uncachedInput = prompt − cached −
+// cacheCreation); adding it would double-count cache reads and understate
+// the effective $/1M. A provider with zero usage this window has no
+// entry; the lookup in `subscriptionPerModelAllocated` defaults to 0 and
 // short-circuits the division to avoid NaN.
-const subscriptionProviderTokenTotals = computed(() => {
+const subscriptionFleetTokensByProvider = computed(() => {
   const totals = new Map<string, number>()
-  for (const m of subscriptionPerModel.value) {
-    const provider = m.modelProvider
-    if (!provider) continue
+  const fleet = computeFleetCost(subscriptionRows.value, { agentId: null, channelType: null })
+  for (const m of fleet.perModel) {
+    if (!m.modelProvider) continue
     const tokens = m.prompt + m.completion + m.reasoning
-    totals.set(provider, (totals.get(provider) ?? 0) + tokens)
+    totals.set(m.modelProvider, (totals.get(m.modelProvider) ?? 0) + tokens)
   }
   return totals
 })
 
 // Per-model rows with an `allocatedCost` field — provider's pro-rated
-// monthly fee × (this model's tokens / this provider's total tokens this
-// window). Subscription bills are flat-rate at the provider level, so any
+// monthly fee × (this model's tokens / this provider's tokens across all
+// agents and channels this window). Subscription bills are flat-rate at the provider level, so any
 // per-model attribution is a proxy; we expose it as "allocated cost" with
 // a footnote on the section so operators understand it's a derived
 // share-of-tokens figure, not actual per-call billing. Picking the
@@ -676,9 +682,9 @@ const subscriptionPerModelAllocated = computed<(FleetCostPerModel & { allocatedC
   const feeByProvider = new Map(subscriptionProviderBreakdown.value.map(p => [p.name, p.proRatedFee]))
   return subscriptionPerModel.value.map((m) => {
     const provider = m.modelProvider ?? ''
-    const providerTokens = subscriptionProviderTokenTotals.value.get(provider) ?? 0
+    const providerTokens = subscriptionFleetTokensByProvider.value.get(provider) ?? 0
     const providerFee = feeByProvider.get(provider) ?? 0
-    // Same key as subscriptionProviderTokenTotals — cached omitted because
+    // Same key as subscriptionFleetTokensByProvider — cached omitted because
     // it's already counted within prompt.
     const modelTokens = m.prompt + m.completion + m.reasoning
     const allocatedCost = providerTokens > 0
@@ -697,6 +703,9 @@ const unallocatedSubscriptions = computed(() => {
   // by design, not unallocated — listing them would misrepresent the
   // view. They re-appear once the filter is cleared.
   if (selectedSubscriptionProvider.value !== null) return []
+  // An unused fee is no agent's or channel's cost, and a provider only
+  // other agents used would be mislabelled "no usage".
+  if (isSliced.value) return []
   const usedProviders = new Set(
     subscriptionPerModel.value.map(m => m.modelProvider).filter(Boolean),
   )
@@ -705,7 +714,8 @@ const unallocatedSubscriptions = computed(() => {
     .filter(p => p.proRatedFee > 0)
 })
 
-// The subscription table and Combined Total show whenever there is a bill, used or not.
+// The subscription table and Combined Total show whenever there is a row to total: a used
+// model, or, unfiltered, a billed subscription.
 const hasSubscriptionRows = computed(() =>
   subscriptionPerModelAllocated.value.length > 0 || unallocatedSubscriptions.value.length > 0)
 
@@ -713,27 +723,6 @@ const hasSubscriptionRows = computed(() =>
 // Re-express each subscription as a per-token rate so it can be compared
 // against per-token providers, and surface the monthly volume at which the
 // flat fee starts beating per-token pricing.
-
-// Per-provider total tokens across the whole window, INDEPENDENT of the
-// agent/channel/chip filters. The flat fee buys every turn the provider
-// served, so the effective-rate denominator has to be the provider's full
-// token throughput — narrowing it to a filtered slice while the full fee
-// stays in the numerator would overstate the rate. Distinct from
-// `subscriptionProviderTokenTotals`, which is chip-filtered for the
-// allocation table.
-const subscriptionFleetTokensByProvider = computed(() => {
-  const totals = new Map<string, number>()
-  const fleet = computeFleetCost(subscriptionRows.value, { agentId: null, channelType: null })
-  for (const m of fleet.perModel) {
-    if (!m.modelProvider) continue
-    // prompt + completion + reasoning only — cached ⊂ prompt (see
-    // subscriptionProviderTokenTotals); adding it would double-count cache
-    // reads and understate the effective $/1M.
-    const tokens = m.prompt + m.completion + m.reasoning
-    totals.set(m.modelProvider, (totals.get(m.modelProvider) ?? 0) + tokens)
-  }
-  return totals
-})
 
 // Effective $/1M per subscription provider = pro-rated window fee ÷ tokens
 // served this window × 1M. Null when the provider had no usage this window
@@ -1887,6 +1876,7 @@ defineExpose({ refresh })
         @mouseleave="scheduleHideCostTooltip"
       >
         Subscription cost allocated across models by total tokens (prompt + completion + reasoning).
+        Filtered by agent or channel, a model's share is of every agent's tokens on that provider.
       </div>
     </Teleport>
   </div>
