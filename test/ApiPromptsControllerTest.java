@@ -77,6 +77,24 @@ class ApiPromptsControllerTest extends FunctionalTest {
         assertEquals("[]", getContent(resp).trim());
     }
 
+    @Test
+    void listFiltersByTitleIgnoringCase() {
+        login();
+        createPrompt("Article Creator: LinkedIn Posts", "a", "WRITING");
+        createPrompt("Code Review Checklist", "b", "CODING");
+        var arr = JsonParser.parseString(getContent(GET("/api/prompts?title=article%20creator"))).getAsJsonArray();
+        assertEquals(1, arr.size(), arr.toString());
+        assertEquals("Article Creator: LinkedIn Posts", arr.get(0).getAsJsonObject().get("title").getAsString());
+        assertEquals("a", arr.get(0).getAsJsonObject().get("content").getAsString());
+    }
+
+    @Test
+    void listTitleFilterWithNoMatchIsEmpty() {
+        login();
+        createPrompt("Code Review Checklist", "b", "CODING");
+        assertEquals("[]", getContent(GET("/api/prompts?title=Article%20Creator")).trim());
+    }
+
     // ==================== create ====================
 
     @Test

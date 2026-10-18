@@ -17,6 +17,7 @@ import services.PromptImportExportService;
 import utils.ApiResponses;
 
 import java.util.Arrays;
+import java.util.Locale;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
@@ -64,10 +65,15 @@ public class ApiPromptsController extends Controller {
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = PromptView.class))))
-    @Operation(summary = "List all saved prompts, newest-edited first")
+    @Operation(summary = "List saved prompts, newest-edited first, with an optional title filter (case-insensitive substring)")
     @AgentAccess(OPEN)
-    public static void list() {
-        renderJSON(gson.toJson(Prompt.findAllOrdered().stream().map(PromptView::of).toList()));
+    public static void list(@Nullable String title) {
+        var prompts = Prompt.findAllOrdered().stream();
+        if (title != null && !title.isBlank()) {
+            var needle = title.strip().toLowerCase(Locale.ROOT);
+            prompts = prompts.filter(p -> p.title.toLowerCase(Locale.ROOT).contains(needle));
+        }
+        renderJSON(gson.toJson(prompts.map(PromptView::of).toList()));
     }
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = CategoryView.class))))
