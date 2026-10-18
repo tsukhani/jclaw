@@ -913,6 +913,19 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on each
 | `shell.maxTimeoutSeconds`      | 300     | The longest timeout a call may set; JClaw cuts a longer one to this. Has no row in the panel; set it with `POST /api/config`. |
 | `shell.maxOutputBytes`         | 102400  | How much of a command's output reaches the agent (100 KB); the rest is cut, with a note giving the full length. Has no row in the panel; set it with `POST /api/config`. |
 | `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Set it with the **sandbox** control: *Off*, *Untrusted channels only* or *Every run*. JClaw refuses a save of any other value. When this host has no `sandbox-exec` (macOS) or `bwrap` (Linux), the control says so: with the key on, runs are then refused rather than run unconfined. |
+| `shell.backgroundLifetimeHours` | 24     | How many hours a program a shell command left running in the background may run. Every 10 minutes, JClaw stops the ones that have run longer. `0` never stops one. |
+
+### Running in the background
+
+An agent sometimes starts a program that keeps running after its command ends, such as a local web server. **Running in the background** lists these programs. Each row shows the command, the agent, when it started, the addresses it listens on, and the file its output goes to. **Stop** ends the program and anything it started. **Refresh** reads the list again.
+
+JClaw also stops such a program when its lifetime runs out, and when you delete the conversation that started it. Agents can see and stop their own programs too.
+
+:::gotcha
+*(every network interface)* after an address means other machines on your network can reach that program. Agents are told to use `127.0.0.1` unless you ask for something else. Stop a program you did not expect to see.
+:::
+
+A program that closes the files it was given when it started does not appear in the list.
 
 :::gotcha
 The allowlist is the safety floor for shell access, and the seeded list is broad: it includes interpreters and network tools such as `python3`, `node`, `curl` and `wget`. Trim it to what your agents need, and be deliberate about what you add. Emptying it, with no per-agent **Bypass allowlist**, means agents cannot run anything via the shell tool.

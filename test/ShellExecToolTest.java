@@ -460,6 +460,7 @@ class ShellExecToolTest extends UnitTest {
                     """, agent);
             assertFalse(result.contains("\"exitCode\":0"), "the call is refused; got: " + result);
             assertTrue(result.contains(".exec"), "the refusal names the folder; got: " + result);
+            services.BackgroundProcesses.sweep(java.util.List.of(agent));
             assertEquals("keep me", Files.readString(old), "a file behind the link is never deleted");
             try (var files = Files.list(outside)) {
                 assertEquals(1, files.count(), "nothing is created behind the link");
@@ -467,59 +468,6 @@ class ShellExecToolTest extends UnitTest {
         } finally {
             Files.deleteIfExists(dir);
             deleteDir(outside);
-        }
-    }
-
-    @Test
-    void linksPlantedInTheOutputFolderAreNeverFollowed() throws Exception {
-        var dir = AgentService.workspacePath("shell-test-agent").resolve(".exec");
-        Files.createDirectories(dir);
-        var stale = java.nio.file.attribute.FileTime.from(java.time.Instant.now().minus(java.time.Duration.ofDays(3)));
-        // Past the size cap, sparse so it costs no disk.
-        var target = Files.createTempFile("exec-target", ".bin");
-        try (var raf = new java.io.RandomAccessFile(target.toFile(), "rw")) {
-            raf.write("marker".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            raf.setLength(17L * 1024 * 1024);
-        }
-        var symlink = Files.createSymbolicLink(dir.resolve(java.util.UUID.randomUUID() + ".log"), target);
-        Files.getFileAttributeView(symlink, java.nio.file.attribute.BasicFileAttributeView.class,
-                java.nio.file.LinkOption.NOFOLLOW_LINKS).setTimes(stale, null, null);
-        try {
-            var result = tool.execute("""
-                    {"command": "echo hi"}
-                    """, agent);
-            assertTrue(result.contains("hi"), result);
-            assertEquals(17L * 1024 * 1024, Files.size(target), "the linked file is never emptied");
-            try (var in = Files.newInputStream(target)) {
-                assertEquals("marker", new String(in.readNBytes(6), java.nio.charset.StandardCharsets.UTF_8));
-            }
-        } finally {
-            Files.deleteIfExists(symlink);
-            Files.deleteIfExists(target);
-        }
-    }
-
-    @Test
-    void staleOutputFilesAreClearedAndNothingElseIs() throws Exception {
-        var dir = AgentService.workspacePath("shell-test-agent").resolve(".exec");
-        Files.createDirectories(dir);
-        var old = java.nio.file.attribute.FileTime.from(java.time.Instant.now().minus(java.time.Duration.ofDays(3)));
-        var stale = Files.writeString(dir.resolve(java.util.UUID.randomUUID() + ".log"), "old");
-        Files.setLastModifiedTime(stale, old);
-        var fresh = Files.writeString(dir.resolve(java.util.UUID.randomUUID() + ".log"), "new");
-        var agentsOwn = Files.writeString(dir.resolve("notes.txt"), "mine");
-        Files.setLastModifiedTime(agentsOwn, old);
-        try {
-            tool.execute("""
-                    {"command": "echo hi"}
-                    """, agent);
-            assertFalse(Files.exists(stale), "a stale output file is cleared");
-            assertTrue(Files.exists(fresh), "a recent output file is kept");
-            assertTrue(Files.exists(agentsOwn), "a file exec did not name is never touched");
-        } finally {
-            Files.deleteIfExists(stale);
-            Files.deleteIfExists(fresh);
-            Files.deleteIfExists(agentsOwn);
         }
     }
 

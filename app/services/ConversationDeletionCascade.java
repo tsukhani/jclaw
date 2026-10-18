@@ -109,6 +109,10 @@ public final class ConversationDeletionCascade {
         for (var row : agentDirs) {
             AttachmentService.deleteConversationAttachments((String) row[1], (Long) row[0]);
         }
+        // Resolved now, while a subagent's row still leads to the root agent's workspace it ran in.
+        var workspaces = agentDirs.stream().map(row -> BackgroundProcesses.workspaceOf((String) row[1])).toList();
+        var conversationIds = List.copyOf(ids);
+        Tx.afterCommit(() -> BackgroundProcesses.stopForConversations(workspaces, conversationIds));
         // 3b. JCLAW-135: collect the message ids so their CONVERSATION_MESSAGE
         // Lucene docs can be evicted after the delete. The DB cascades
         // chat_message_attachment / message / session_compaction off the

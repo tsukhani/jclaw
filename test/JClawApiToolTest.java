@@ -460,6 +460,7 @@ class JClawApiToolTest extends UnitTest {
             GET /api/printers/default
             GET /api/printers/default/status
             GET /api/printers/options
+            GET /api/processes
             GET /api/prompts
             GET /api/prompts/categories
             GET /api/prompts/export
@@ -517,6 +518,7 @@ class JClawApiToolTest extends UnitTest {
             POST /api/mcp-servers/{id}/test
             POST /api/notifications/{id}/ack
             POST /api/onboarding/tour-progress
+            POST /api/processes/{pid}/stop
             POST /api/prompts
             POST /api/prompts/generate
             POST /api/providers/refresh-prices

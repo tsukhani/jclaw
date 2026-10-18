@@ -140,7 +140,10 @@ function defaultConfigEntries() {
   ]
 }
 
-function setupDefaultApi(opts?: { capturePost?: (body: { key?: string, value?: string }) => void }) {
+function setupDefaultApi(opts?: {
+  capturePost?: (body: { key?: string, value?: string }) => void
+  processes?: () => unknown[]
+}) {
   registerEndpoint('/api/agents', () => [
     { id: 1, name: 'main', modelProvider: 'ollama-cloud', modelId: 'kimi-k2.5',
       enabled: true, isMain: true, providerConfigured: true },
@@ -152,6 +155,7 @@ function setupDefaultApi(opts?: { capturePost?: (body: { key?: string, value?: s
   registerEndpoint('/api/ocr/status', () => DEFAULT_OCR_STATUS)
   registerEndpoint('/api/transcription/state', () => DEFAULT_TRANSCRIPTION_STATE)
   registerEndpoint('/api/sandbox', () => ({ available: true, mechanism: 'bwrap', reason: '' }))
+  registerEndpoint('/api/processes', () => opts?.processes?.() ?? [])
   registerEndpoint('/api/config', {
     method: 'GET',
     handler: () => ({ entries: defaultConfigEntries() }),
@@ -1154,6 +1158,58 @@ describe('Settings page — Skills Promotion', () => {
 describe('Settings page — Shell Execution', () => {
   beforeEach(() => {
     clearNuxtData()
+  })
+
+  const SERVER = {
+    pid: 4242,
+    agentId: 1,
+    agentName: 'main',
+    outputFile: '/srv/workspace/main/.exec/c7-0f0e0d0c-aaaa-bbbb-cccc-111122223333.log',
+    conversationId: 7,
+    command: 'python3 -m http.server 8976',
+    started: '2026-10-18T07:00:00Z',
+    listening: ['*:8976'],
+  }
+
+  it('lists what agents left running in the background and flags a server on every interface', async () => {
+    setupDefaultApi({ processes: () => [SERVER] })
+    const component = await mountSettingsSection('shell')
+
+    const list = component.find('[data-testid="background-processes"]')
+    expect(list.text()).toContain('python3 -m http.server 8976')
+    expect(list.text()).toContain('main · pid 4242')
+    expect(list.text()).toContain('Listening on *:8976')
+    expect(list.text()).toContain('(every network interface)')
+    expect(list.text()).toContain(SERVER.outputFile)
+  })
+
+  it('stops a process and reads the list again', async () => {
+    let stopped = false
+    setupDefaultApi({ processes: () => (stopped ? [] : [SERVER]) })
+    registerEndpoint('/api/processes/4242/stop', {
+      method: 'POST',
+      handler: () => {
+        stopped = true
+        return { status: 'ok' }
+      },
+    })
+    const component = await mountSettingsSection('shell')
+
+    await component.find('[data-testid="stop-4242"]').trigger('click')
+    // The stop, then the list's refetch.
+    await flushPromises()
+    await flushPromises()
+
+    expect(stopped).toBe(true)
+    expect(component.find('[data-testid="background-processes"]').text())
+      .toContain('Nothing an agent started is running in the background.')
+  })
+
+  it('shows the background lifetime, with 0 as never', async () => {
+    setupDefaultApi()
+    const component = await mountSettingsSection('shell')
+    expect(component.text()).toContain('backgroundLifetimeHours')
+    expect(component.text()).toContain('24h')
   })
 
   it('renders the allowlist textarea in edit mode', async () => {

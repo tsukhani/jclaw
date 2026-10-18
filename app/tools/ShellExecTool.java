@@ -10,10 +10,10 @@ import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
 import org.jspecify.annotations.Nullable;
 import services.AgentService;
+import services.BackgroundProcesses;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
-import utils.AppClock;
 import utils.ErrorTemplate;
 import utils.SubprocessEnv;
 import utils.ToolErrorTemplates;
@@ -26,15 +26,10 @@ import java.nio.channels.FileChannel;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.DirectoryIteratorException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.SecureDirectoryStream;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.attribute.BasicFileAttributeView;
-import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
@@ -46,14 +41,10 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -221,7 +212,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 Execute a shell command on the host system. Commands are validated against an \
                 allowlist of permitted binaries. Working directory defaults to the agent workspace. \
                 Returns exit code, output, and execution metadata. A process the command leaves \
-                running in the background (cmd &) keeps writing its output to a file the result names.""";
+                running in the background (cmd &) keeps writing its output to a file the result names, \
+                and the operator can see and stop it. Bind a server you start to 127.0.0.1 unless the \
+                user asks for another address.""";
     }
 
     @Override
@@ -516,9 +509,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
         FileChannel outputChannel = null;
         boolean keepOutput = false;
         try {
-            output = newOutputFile(workspace);
-            // CREATE_NEW never follows a link: this descriptor is the file just made, and the JVM
-            // reads, empties and bounds it through the descriptor alone, never by path again.
+            output = newOutputFile(workspace, ToolContext.conversationId());
+            // CREATE_NEW never follows a link: this descriptor is the file just made, and the call
+            // reads and empties it through the descriptor alone, never by path again.
             outputChannel = FileChannel.open(output, StandardOpenOption.CREATE_NEW,
                     StandardOpenOption.READ, StandardOpenOption.WRITE);
             var process = startProcess(command, workdir, workspace, env, output);
@@ -535,7 +528,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 try {
                     if (!process.waitFor(timeoutSec, TimeUnit.SECONDS)) {
                         timedOut.set(true);
-                        terminate(process);
+                        BackgroundProcesses.terminate(process.toHandle());
                     }
                 } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
             });
@@ -544,13 +537,12 @@ public class ShellExecTool implements ToolRegistry.Tool {
             ReadResult readResult;
             try (var _ = ToolContext.onCancel(() -> {
                 stopped.set(true);
-                terminate(process);
+                BackgroundProcesses.terminate(process.toHandle());
             })) {
                 readResult = readProcessOutput(process, outputChannel, maxOutputBytes);
             }
             if (readResult.terminalImage()) {
                 keepOutput = true;
-                keep(output, outputChannel);
                 return buildTerminalImageEarlyReturn(readResult.output().toString(), agent, timeoutSec,
                         startTime, readResult.truncated());
             }
@@ -572,9 +564,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
             }
             if (leftRunning) {
                 keepOutput = true;
-                keep(output, outputChannel);
                 out.append("\n[Anything this command left running in the background keeps writing its output to ")
-                        .append(output).append(']');
+                        .append(output).append(lifetimeNote()).append(']');
             }
 
             long durationMs = System.currentTimeMillis() - startTime;
@@ -603,12 +594,15 @@ public class ShellExecTool implements ToolRegistry.Tool {
             Thread.currentThread().interrupt();
             return ToolErrorTemplates.render(ToolErrorTemplates.shellInterrupted(command));
         } finally {
-            if (!keepOutput) {
-                closeQuietly(outputChannel);
-                // A process the command left behind unforeseen keeps writing to the deleted file without failing.
-                if (output != null) deleteOutput(output);
-            }
+            closeQuietly(outputChannel);
+            // A process the command left behind unforeseen keeps writing to the deleted file without failing.
+            if (!keepOutput && output != null) deleteOutput(output);
         }
+    }
+
+    private static String lifetimeNote() {
+        long hours = ConfigService.getLong(BackgroundProcesses.LIFETIME_KEY, BackgroundProcesses.DEFAULT_LIFETIME_HOURS);
+        return hours > 0 ? "; JClaw stops it after %d hours".formatted(hours) : "";
     }
 
     private static String killNote(boolean timedOut, boolean stopped, int timeoutSec) {
@@ -616,29 +610,6 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return stopped ? "\n[Process killed: turn stopped]" : "";
     }
 
-    /**
-     * End {@code process} and every descendant: SIGTERM the tree, give it {@link #TERMINATE_GRACE_MS}
-     * to exit, then SIGKILL whatever survives. Descendants are captured first, because a child
-     * whose parent dies is reparented and no longer reachable from the handle.
-     */
-    static void terminate(Process process) {
-        var tree = new ArrayList<ProcessHandle>(process.descendants().toList());
-        tree.add(process.toHandle());
-        tree.forEach(ProcessHandle::destroy);
-        var exits = tree.stream().map(ProcessHandle::onExit).toArray(CompletableFuture[]::new);
-        try {
-            CompletableFuture.allOf(exits).get(TERMINATE_GRACE_MS, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException _) {
-            Thread.currentThread().interrupt();
-        } catch (ExecutionException | TimeoutException _) {
-            // Survivors are force-killed below.
-        }
-        for (var h : tree) {
-            if (h.isAlive()) h.destroyForcibly();
-        }
-    }
-
-    private static final long TERMINATE_GRACE_MS = 500;
 
     /**
      * A negative exit is {@link #buildTerminalImageEarlyReturn}'s deliberate
@@ -665,7 +636,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
         // only where the command could already write; a JVM-side redirect would follow it unconfined.
         // Append mode lets the JVM empty the file mid-write. The pipe, kept on fd 3 and written by no
         // one after a redirect failure, reaches EOF only once every process the command started is gone.
-        var script = "exec 3>&1 >>\"$" + OUTPUT_ENV + "\" 2>&1\n" + command;
+        // fd 4 holds the output file itself, which is how BackgroundProcesses finds those processes later,
+        // whatever they did with their own output.
+        var script = "exec 3>&1 4<\"$" + OUTPUT_ENV + "\" >>\"$" + OUTPUT_ENV + "\" 2>&1\n" + command;
         var argv = HarnessSandbox.wrap(List.of("/bin/sh", "-c", script), workspace.toFile(),
                 List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.nativeToolTrustedOrigin());
         var pb = new ProcessBuilder(argv);
@@ -722,22 +695,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
     /** Output read result. {@code terminalImage} short-circuits the caller into the terminal-image early return. */
     private record ReadResult(StringBuilder output, long totalRead, boolean truncated, boolean terminalImage) {}
 
-    /** Folder in the agent's workspace that holds each command's output file. */
-    private static final String OUTPUT_DIR = ".exec";
-
     /** Environment variable naming the command's output file, for the shell's own redirect. */
     private static final String OUTPUT_ENV = "JCLAW_EXEC_OUTPUT";
 
-    private static final Pattern OUTPUT_FILE_NAME = Pattern.compile("[0-9a-f-]{36}\\.log");
-
     /** How often a running command's output file is read, for the terminal-image early return. */
     private static final long OUTPUT_POLL_MS = 50;
-
-    /** An output file past this is emptied once the result has all it can hold; the writer appends, so it carries on. */
-    private static final long OUTPUT_FILE_CAP_BYTES = 16L * 1024 * 1024;
-
-    /** A kept output file nothing has written to for this long is deleted. */
-    private static final Duration KEPT_OUTPUT_RETENTION = Duration.ofDays(1);
 
     /** A shell {@code &} that sends a job to the background, as opposed to {@code &&}, {@code 2>&1} or {@code &>}. */
     private static final Pattern BACKGROUND_OPERATOR = Pattern.compile("(?<![&>|<])&(?![&>])");
@@ -750,87 +712,23 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 return t;
             });
 
-    /** A kept output file, bounded through the descriptor that created it so no path is resolved again. */
-    private record KeptOutput(FileChannel channel, AtomicLong size, AtomicLong grewAtNanos) {}
-
-    private static final Map<Path, KeptOutput> KEPT_OUTPUT = new ConcurrentHashMap<>();
-    private static final AtomicBoolean KEPT_OUTPUT_BOUND_STARTED = new AtomicBoolean();
 
     /**
-     * A fresh output file name in the workspace's {@link #OUTPUT_DIR}, after deleting stale ones there.
-     * The folder must be a plain one inside the workspace: the JVM works in it unconfined, so a link
-     * standing in for it would carry those operations wherever the agent pointed it.
+     * A fresh output file name in the workspace's {@link BackgroundProcesses#OUTPUT_DIR}, naming the
+     * conversation so deleting it can stop what the command left running. The folder must be a plain one
+     * inside the workspace: the JVM works in it unconfined, so a link standing in for it would carry those
+     * operations wherever the agent pointed it.
      */
-    private static Path newOutputFile(Path workspace) throws IOException {
+    private static Path newOutputFile(Path workspace, @Nullable Long conversationId) throws IOException {
         Files.createDirectories(workspace);
-        var dir = workspace.resolve(OUTPUT_DIR);
+        var dir = workspace.resolve(BackgroundProcesses.OUTPUT_DIR);
         if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(dir);
         if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)
-                || !dir.toRealPath().equals(workspace.toRealPath().resolve(OUTPUT_DIR))) {
-            throw new IOException(OUTPUT_DIR + " in the workspace must be a plain folder, which exec keeps"
-                    + " command output in; remove whatever has taken its place");
+                || !dir.toRealPath().equals(workspace.toRealPath().resolve(BackgroundProcesses.OUTPUT_DIR))) {
+            throw new IOException(BackgroundProcesses.OUTPUT_DIR + " in the workspace must be a plain folder, which"
+                    + " exec keeps command output in; remove whatever has taken its place");
         }
-        deleteStaleOutput(workspace, dir);
-        return dir.resolve(UUID.randomUUID() + ".log");
-    }
-
-    /**
-     * Deletes output files an earlier run kept, once nothing has written to them for
-     * {@link #KEPT_OUTPUT_RETENTION}. Works relative to the folder's descriptor and never follows a
-     * link, so deleting an entry removes that entry and nothing it points to.
-     */
-    private static void deleteStaleOutput(Path workspace, Path dir) {
-        var cutoff = AppClock.now().minus(KEPT_OUTPUT_RETENTION);
-        try (var parent = Files.newDirectoryStream(workspace)) {
-            if (!(parent instanceof SecureDirectoryStream<Path> secureParent)) return;
-            try (var entries = secureParent.newDirectoryStream(dir.getFileName(), LinkOption.NOFOLLOW_LINKS)) {
-                for (var entry : entries) {
-                    var name = entry.getFileName();
-                    if (!OUTPUT_FILE_NAME.matcher(name.toString()).matches() || KEPT_OUTPUT.containsKey(dir.resolve(name))) {
-                        continue;
-                    }
-                    var attrs = entries.getFileAttributeView(name, BasicFileAttributeView.class, LinkOption.NOFOLLOW_LINKS)
-                            .readAttributes();
-                    if (attrs.isRegularFile() && attrs.lastModifiedTime().toInstant().isBefore(cutoff)) {
-                        entries.deleteFile(name);
-                    }
-                }
-            }
-        } catch (IOException | DirectoryIteratorException e) {
-            EventLogger.warn("tool", null, "exec", "Could not clear stale exec output in %s: %s".formatted(dir, e.getMessage()));
-        }
-    }
-
-    /** Holds {@code output} open so it stays bounded while something may go on writing to it. */
-    private static void keep(Path output, FileChannel channel) {
-        KEPT_OUTPUT.put(output, new KeptOutput(channel, new AtomicLong(-1), new AtomicLong(System.nanoTime())));
-        if (KEPT_OUTPUT_BOUND_STARTED.compareAndSet(false, true)) {
-            OUTPUT_POLLER.scheduleWithFixedDelay(ShellExecTool::boundKeptOutput, 10, 10, TimeUnit.MINUTES);
-        }
-    }
-
-    /** Empties kept files past {@link #OUTPUT_FILE_CAP_BYTES}; drops those unwritten for {@link #KEPT_OUTPUT_RETENTION}. */
-    private static void boundKeptOutput() {
-        long now = System.nanoTime();
-        KEPT_OUTPUT.forEach((path, kept) -> {
-            try {
-                long size = kept.channel().size();
-                if (size > OUTPUT_FILE_CAP_BYTES) {
-                    kept.channel().truncate(0);
-                    size = 0;
-                }
-                if (size != kept.size().getAndSet(size)) {
-                    kept.grewAtNanos().set(now);
-                } else if (now - kept.grewAtNanos().get() > KEPT_OUTPUT_RETENTION.toNanos()) {
-                    KEPT_OUTPUT.remove(path);
-                    closeQuietly(kept.channel());
-                    deleteOutput(path);
-                }
-            } catch (IOException e) {
-                KEPT_OUTPUT.remove(path);
-                closeQuietly(kept.channel());
-            }
-        });
+        return dir.resolve((conversationId == null ? "" : "c" + conversationId + "-") + UUID.randomUUID() + ".log");
     }
 
     private static void closeQuietly(@Nullable FileChannel channel) {
@@ -907,7 +805,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             long size = channel.size();
             if (size < position) {
                 restart();
-            } else if (truncated && size > OUTPUT_FILE_CAP_BYTES) {
+            } else if (truncated && size > BackgroundProcesses.OUTPUT_FILE_CAP_BYTES) {
                 totalRead += size - position;
                 channel.truncate(0);
                 restart();
