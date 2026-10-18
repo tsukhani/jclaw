@@ -12,6 +12,7 @@ import services.SubagentRegistry;
 import services.Tx;
 import tools.SubagentSpawnTool.SyncRunOutcome;
 
+import java.util.List;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -106,6 +107,7 @@ final class SubagentSyncRunner {
         long ceilingNanos = ceilingSeconds <= 0 ? Long.MAX_VALUE : TimeUnit.SECONDS.toNanos(ceilingSeconds);
         long startNanos = System.nanoTime();
         var parentStopped = new AtomicBoolean(false);
+        var relay = SubagentChatBridge.relayActivity(List.of(runId), SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
         try (var _ = ToolContext.onCancel(() -> {
             parentStopped.set(true);
             SubagentRegistry.kill(runId, PARENT_STOPPED_REASON);
@@ -142,6 +144,8 @@ final class SubagentSyncRunner {
                     return fromExecutionException(ee);
                 }
             }
+        } finally {
+            relay.cancel(false);
         }
     }
 

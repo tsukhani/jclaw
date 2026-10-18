@@ -207,6 +207,7 @@ final class SubagentAsyncRunner {
             return "Error: no pending async subagent for runId " + runId
                     + " (already collected, or not an async spawn).";
         }
+        var relay = SubagentChatBridge.relayActivity(List.of(runId), SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
         try {
             return GsonHolder.GSON.toJson(outcomeMap(runId, awaitOutcomeFuture(f)), Map.class);
         } catch (InterruptedException _) {
@@ -214,6 +215,8 @@ final class SubagentAsyncRunner {
             return "Error: interrupted while awaiting async subagent " + runId + ".";
         } catch (Exception e) {
             return "Error: failed awaiting async subagent " + runId + ": " + e.getMessage();
+        } finally {
+            relay.cancel(false);
         }
     }
 
@@ -226,33 +229,38 @@ final class SubagentAsyncRunner {
      */
     static String awaitAsyncOutcomes(List<Long> runIds) {
         var results = new ArrayList<Object>();
-        for (var runId : runIds) {
-            var f = ASYNC_OUTCOMES.asMap().remove(runId);
-            forgetOutstanding(runId);
-            if (f == null) {
-                var miss = new LinkedHashMap<String, Object>();
-                miss.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
-                miss.put(SubagentSpawnTool.FIELD_STATUS, "UNKNOWN");
-                miss.put(SubagentSpawnTool.FIELD_ERROR, "no pending async subagent (already collected, or not an async spawn)");
-                results.add(miss);
-                continue;
+        var relay = SubagentChatBridge.relayActivity(runIds, SubagentChatBridge.ACTIVITY_RELAY_INTERVAL);
+        try {
+            for (var runId : runIds) {
+                var f = ASYNC_OUTCOMES.asMap().remove(runId);
+                forgetOutstanding(runId);
+                if (f == null) {
+                    var miss = new LinkedHashMap<String, Object>();
+                    miss.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
+                    miss.put(SubagentSpawnTool.FIELD_STATUS, "UNKNOWN");
+                    miss.put(SubagentSpawnTool.FIELD_ERROR, "no pending async subagent (already collected, or not an async spawn)");
+                    results.add(miss);
+                    continue;
+                }
+                try {
+                    results.add(outcomeMap(runId, awaitOutcomeFuture(f)));
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                    var err = new LinkedHashMap<String, Object>();
+                    err.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
+                    err.put(SubagentSpawnTool.FIELD_STATUS, "FAILED");
+                    err.put(SubagentSpawnTool.FIELD_ERROR, "interrupted while awaiting");
+                    results.add(err);
+                } catch (Exception e) {
+                    var err = new LinkedHashMap<String, Object>();
+                    err.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
+                    err.put(SubagentSpawnTool.FIELD_STATUS, "FAILED");
+                    err.put(SubagentSpawnTool.FIELD_ERROR, e.getMessage());
+                    results.add(err);
+                }
             }
-            try {
-                results.add(outcomeMap(runId, awaitOutcomeFuture(f)));
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-                var err = new LinkedHashMap<String, Object>();
-                err.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
-                err.put(SubagentSpawnTool.FIELD_STATUS, "FAILED");
-                err.put(SubagentSpawnTool.FIELD_ERROR, "interrupted while awaiting");
-                results.add(err);
-            } catch (Exception e) {
-                var err = new LinkedHashMap<String, Object>();
-                err.put(SubagentSpawnTool.FIELD_RUN_ID, String.valueOf(runId));
-                err.put(SubagentSpawnTool.FIELD_STATUS, "FAILED");
-                err.put(SubagentSpawnTool.FIELD_ERROR, e.getMessage());
-                results.add(err);
-            }
+        } finally {
+            relay.cancel(false);
         }
         var payload = new LinkedHashMap<String, Object>();
         payload.put("results", results);

@@ -3,8 +3,17 @@ package tools;
 import agents.AgentRunner;
 import agents.ToolContext;
 import org.jspecify.annotations.Nullable;
+import services.SubagentRegistry;
 
+import java.time.Duration;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * JCLAW-677 / JCLAW-661: Rail A bridge between an open chat SSE turn and a
@@ -35,7 +44,50 @@ final class SubagentChatBridge {
     private static final ConcurrentHashMap<Long, AgentRunner.StreamingCallbacks>
             CHAT_CALLBACKS = new ConcurrentHashMap<>();
 
+    /** How often a chat turn waiting on a subagent hears that the subagent is still working. */
+    static final Duration ACTIVITY_RELAY_INTERVAL = Duration.ofMinutes(1);
+
+    static final String STILL_WORKING_STATUS = "Subagent still working";
+
+    // A platform thread keeps the periodic wait off the virtual-thread scheduler (JDK-8373224).
+    private static final ScheduledExecutorService ACTIVITY_RELAY =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                var t = new Thread(r, "subagent-activity-relay");
+                t.setDaemon(true);
+                return t;
+            });
+
     private SubagentChatBridge() {}
+
+    /**
+     * While the current chat turn waits on {@code runIds}, send its stream a status once per
+     * {@code every} in which one of them recorded activity, so the stream's idle cut measures the
+     * children's silence rather than the wait. Cancel the returned future when the wait ends.
+     */
+    static Future<?> relayActivity(List<Long> runIds, Duration every) {
+        var conversationId = ToolContext.conversationId();
+        if (conversationId == null || CHAT_CALLBACKS.get(conversationId) == null) {
+            return CompletableFuture.completedFuture(null);
+        }
+        var lastRelay = new AtomicLong(System.nanoTime());
+        long nanos = every.toNanos();
+        return ACTIVITY_RELAY.scheduleAtFixedRate(() -> relayIfActive(conversationId, runIds, lastRelay),
+                nanos, nanos, TimeUnit.NANOSECONDS);
+    }
+
+    private static void relayIfActive(Long conversationId, List<Long> runIds, AtomicLong lastRelay) {
+        var cb = CHAT_CALLBACKS.get(conversationId);
+        if (cb == null) return;
+        long sinceRelay = System.nanoTime() - lastRelay.get();
+        for (var runId : runIds) {
+            long idle = SubagentRegistry.nanosSinceActivity(runId);
+            if (idle >= 0 && idle < sinceRelay) {
+                cb.onStatus().accept(STILL_WORKING_STATUS);
+                lastRelay.set(System.nanoTime());
+                return;
+            }
+        }
+    }
 
     /** JCLAW-661: register the open chat turn's streaming callbacks under its
      *  conversation id so a coding run spawned during the turn can pick them up.

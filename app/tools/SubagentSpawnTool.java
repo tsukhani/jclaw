@@ -16,6 +16,7 @@ import services.SubagentRegistry;
 import services.Tx;
 import utils.GsonHolder;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +24,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Future;
 
 /**
  * JCLAW-265: synchronous spawn of a child agent as a subagent.
@@ -793,6 +795,11 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     /** Test seam: the chat-turn callbacks registered for {@code conversationId}, or null. */
     public static AgentRunner.@Nullable StreamingCallbacks chatCallbacksForTest(Long conversationId) {
         return SubagentChatBridge.chatCallbacks(conversationId);
+    }
+
+    /** Test seam: {@link SubagentChatBridge#relayActivity} at the test's own interval. */
+    public static Future<?> relayActivityForTest(List<Long> runIds, Duration every) {
+        return SubagentChatBridge.relayActivity(runIds, every);
     }
 
     /**
