@@ -372,6 +372,25 @@ class ShellExecToolTest extends UnitTest {
         assertTrue(sleepers("sleep 4713", "sleep 4714").isEmpty(), "no process of the timed-out command survives");
     }
 
+    @Test
+    void aSilentProcessLeftInTheBackgroundEndsTheCallButKeepsRunning() throws Exception {
+        // The background sleep inherits the output pipe and never writes, so EOF never comes.
+        var result = new java.util.concurrent.CompletableFuture<String>();
+        Thread.ofVirtual().start(() -> result.complete(tool.execute("""
+                {"command": "sleep 4715 & echo started", "timeout": 120}
+                """, agent)));
+        try {
+            var text = result.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            assertTrue(text.contains("\"exitCode\":0"), text);
+            assertTrue(text.contains("started"), text);
+            assertTrue(text.contains("still running"), text);
+            assertTrue(text.contains("\"timedOut\":false"), text);
+            assertEquals(1, sleepers("sleep 4715").size(), "the background process is left running");
+        } finally {
+            sleepers("sleep 4715").forEach(ProcessHandle::destroy);
+        }
+    }
+
     private static java.util.List<ProcessHandle> sleepers(String... commands) {
         return ProcessHandle.allProcesses()
                 .filter(ProcessHandle::isAlive)

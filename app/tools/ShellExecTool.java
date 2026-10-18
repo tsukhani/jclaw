@@ -19,6 +19,7 @@ import utils.ToolErrorTemplates;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -33,6 +34,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -518,9 +520,12 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 stopped.set(true);
                 terminate(process);
             })) {
-                readResult = readProcessOutput(process, maxOutputBytes, agent, timeoutSec, startTime);
+                readResult = readProcessOutput(process, maxOutputBytes);
             }
-            if (readResult.earlyReturn() != null) return readResult.earlyReturn();
+            if (readResult.terminalImage()) {
+                return buildTerminalImageEarlyReturn(readResult.output().toString(), agent, timeoutSec,
+                        startTime, readResult.truncated());
+            }
 
             // Ensure process is fully dead before collecting exit code.
             if (!process.waitFor(1, TimeUnit.SECONDS)) {
@@ -533,6 +538,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 out.append("\n[Output truncated at %dKB. Total output: %d bytes]"
                         .formatted(maxOutputBytes / 1024, readResult.totalRead()));
             }
+            if (readResult.detached()) out.append(BACKGROUND_NOTE);
 
             long durationMs = System.currentTimeMillis() - startTime;
             var processedOutput = TerminalImageRenderer.replaceTerminalImagesInOutput(out.toString(), agent);
@@ -622,57 +628,86 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return pb.start();
     }
 
-    /** Output read result. {@code earlyReturn} non-null short-circuits the
-     *  caller — used by the terminal-image early-return path. */
-    private record ReadResult(StringBuilder output, int totalRead, boolean truncated, @Nullable String earlyReturn) {}
+    /**
+     * Output read result. {@code terminalImage} short-circuits the caller into the terminal-image
+     * early return; {@code detached} means a background process still held the pipe at return.
+     */
+    private record ReadResult(StringBuilder output, int totalRead, boolean truncated,
+                              boolean terminalImage, boolean detached) {}
+
+    /** How long output may trail the shell's exit before the read stops waiting for EOF. */
+    private static final long EXIT_OUTPUT_GRACE_MS = 1_000;
+
+    private static final String BACKGROUND_NOTE = "\n[A process this command left in the background is still"
+            + " running; output it writes from now on is not captured. Redirect it to a file"
+            + " (cmd > out.log 2>&1 &) to keep it.]";
 
     /**
-     * Blocking-read loop. Reads the process's combined stdout/stderr through
-     * a UTF-8 decoder, applying the {@code maxOutputBytes} truncation cap and
-     * watching for terminal-image (QR-code) block art. When a terminal image
-     * is detected mid-stream the method short-circuits with a fully-rendered
-     * result envelope so the user sees the image without waiting for the
-     * (potentially long-running) interactive process to exit.
+     * Reads the process's combined stdout/stderr until EOF, until terminal-image (QR-code) block art
+     * appears, or until {@link #EXIT_OUTPUT_GRACE_MS} after the shell exits. A process the command
+     * left in the background inherits the pipe and holds it open, so EOF can trail the exit
+     * indefinitely; the JDK's own reclaim at exit ({@code ProcessPipeInputStream.processExited})
+     * needs the stream lock a blocked {@code read} holds, so it cannot end the wait either.
      */
-    private ReadResult readProcessOutput(Process process, int maxOutputBytes, Agent agent,
-                                         int timeoutSec, long startTime) throws IOException {
-        // Read output with blocking reads and a watchdog thread that
-        // enforces the overall deadline. Previous approach used
-        // is.available() polling + 100ms sleep (busy-wait) and a 5-second
-        // idle timeout that prematurely cut off slow commands (npm install,
-        // long builds) that simply paused between writes. Blocking is.read()
-        // on a virtual thread is free (no platform thread consumed during
-        // the block) and returns naturally when the process writes or exits.
-        var out = new StringBuilder();
-        int totalRead = 0;
-        boolean truncated = false;
-
-        // Blocking read loop — wrap in InputStreamReader with explicit UTF-8
-        // so multi-byte characters split across read() boundaries are decoded
-        // correctly (raw new String(byte[]) corrupts partial sequences).
-        var reader = new InputStreamReader(process.getInputStream(),
-                StandardCharsets.UTF_8);
-        var cbuf = new char[4096];
-        int n;
-        // JCLAW-404: scan for terminal-image block art incrementally rather than
-        // re-toString()-ing and re-scanning the whole accumulated buffer on every
-        // chunk (which was O(N²)). The detector only sees the chars actually
-        // appended to `out` this iteration and carries the consecutive-block-run
-        // state across chunks, yielding the same detection result as a full rescan.
-        var imageScan = new TerminalImageScanner();
-        while ((n = reader.read(cbuf)) != -1) {
-            totalRead += n;
-            int before = out.length();
-            truncated = appendBounded(out, cbuf, n, maxOutputBytes, truncated);
-
-            // Check for terminal image — if found, return early but keep process alive
-            if (imageScan.acceptAppended(out, before)) {
-                return new ReadResult(out, totalRead, truncated,
-                        buildTerminalImageEarlyReturn(out.toString(), agent, timeoutSec,
-                                startTime, truncated));
+    private ReadResult readProcessOutput(Process process, int maxOutputBytes) throws IOException {
+        var drain = new OutputDrain(process.getInputStream(), maxOutputBytes);
+        var stoppedAtImage = new CompletableFuture<Boolean>();
+        Thread.ofVirtual().name("shell-exec-reader").start(() -> {
+            try {
+                stoppedAtImage.complete(drain.readToEnd());
+            } catch (IOException | RuntimeException e) {
+                stoppedAtImage.completeExceptionally(e);
             }
+        });
+        // orTimeout runs on the JDK's delay scheduler, so this virtual thread parks untimed (JDK-8373224).
+        process.onExit().thenRun(() -> stoppedAtImage.orTimeout(EXIT_OUTPUT_GRACE_MS, TimeUnit.MILLISECONDS));
+        try {
+            return drain.result(stoppedAtImage.join(), false);
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof TimeoutException) return drain.result(false, true);
+            if (e.getCause() instanceof IOException io) throw io;
+            throw e;
         }
-        return new ReadResult(out, totalRead, truncated, null);
+    }
+
+    /** The read loop, on its own thread so the caller can stop waiting for an EOF that never comes. */
+    private final class OutputDrain {
+        private final InputStreamReader reader;
+        private final int maxOutputBytes;
+        private final StringBuilder out = new StringBuilder();
+        private final TerminalImageScanner imageScan = new TerminalImageScanner();
+        private int totalRead;
+        private boolean truncated;
+
+        OutputDrain(InputStream in, int maxOutputBytes) {
+            // Explicit UTF-8: a multi-byte character split across reads would corrupt as raw bytes.
+            this.reader = new InputStreamReader(in, StandardCharsets.UTF_8);
+            this.maxOutputBytes = maxOutputBytes;
+        }
+
+        /**
+         * Blocking reads, with the watchdog enforcing the overall deadline. The earlier
+         * {@code available()} polling with a 100 ms sleep and a 5 s idle cut-off truncated slow
+         * commands (npm install, long builds) that paused between writes. Returns {@code true}
+         * when it stopped at a terminal image, leaving the process running.
+         */
+        boolean readToEnd() throws IOException {
+            var cbuf = new char[4096];
+            int n;
+            while ((n = reader.read(cbuf)) != -1) {
+                synchronized (this) {
+                    totalRead += n;
+                    int before = out.length();
+                    truncated = appendBounded(out, cbuf, n, maxOutputBytes, truncated);
+                    if (imageScan.acceptAppended(out, before)) return true;
+                }
+            }
+            return false;
+        }
+
+        synchronized ReadResult result(boolean terminalImage, boolean detached) {
+            return new ReadResult(new StringBuilder(out), totalRead, truncated, terminalImage, detached);
+        }
     }
 
     /**
