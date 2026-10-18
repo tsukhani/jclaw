@@ -13,17 +13,27 @@ import services.AgentService;
 import services.ConfigService;
 import services.EventLogger;
 import services.Tx;
+import utils.AppClock;
 import utils.ErrorTemplate;
 import utils.SubprocessEnv;
 import utils.ToolErrorTemplates;
 import utils.WorkspacePathGuard;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.DirectoryIteratorException;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.SecureDirectoryStream;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.BasicFileAttributeView;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -33,13 +43,19 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -204,7 +220,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return """
                 Execute a shell command on the host system. Commands are validated against an \
                 allowlist of permitted binaries. Working directory defaults to the agent workspace. \
-                Returns exit code, output, and execution metadata.""";
+                Returns exit code, output, and execution metadata. A process the command leaves \
+                running in the background (cmd &) keeps writing its output to a file the result names.""";
     }
 
     @Override
@@ -495,15 +512,24 @@ public class ShellExecTool implements ToolRegistry.Tool {
     private String executeCommand(String command, Path workdir, Path workspace, int timeoutSec,
                                   int maxOutputBytes, Map<String, String> env, long startTime,
                                   Agent agent) {
+        Path output = null;
+        FileChannel outputChannel = null;
+        boolean keepOutput = false;
         try {
-            var process = startProcess(command, workdir, workspace, env);
+            output = newOutputFile(workspace);
+            // CREATE_NEW never follows a link: this descriptor is the file just made, and the JVM
+            // reads, empties and bounds it through the descriptor alone, never by path again.
+            outputChannel = FileChannel.open(output, StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.READ, StandardOpenOption.WRITE);
+            var process = startProcess(command, workdir, workspace, env, output);
+            var sentinel = new Sentinel(process);
 
             // Watchdog: destroy the process after the configured timeout.
-            // When destroyed, is.read() in the main loop returns -1 or throws,
-            // breaking the loop cleanly. The flag distinguishes a watchdog kill
-            // from a normal exit — process.isAlive() is false in both cases
-            // after the loop, but only a watchdog kill should produce the
-            // "timed out" markers in the result.
+            // When destroyed, the process exits and the read finishes. The
+            // flag distinguishes a watchdog kill from a normal exit —
+            // process.isAlive() is false in both cases after the read, but
+            // only a watchdog kill should produce the "timed out" markers in
+            // the result.
             var timedOut = new AtomicBoolean(false);
             Thread.ofVirtual().name("shell-exec-watchdog").start(() -> {
                 try {
@@ -520,9 +546,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 stopped.set(true);
                 terminate(process);
             })) {
-                readResult = readProcessOutput(process, maxOutputBytes);
+                readResult = readProcessOutput(process, outputChannel, maxOutputBytes);
             }
             if (readResult.terminalImage()) {
+                keepOutput = true;
+                keep(output, outputChannel);
                 return buildTerminalImageEarlyReturn(readResult.output().toString(), agent, timeoutSec,
                         startTime, readResult.truncated());
             }
@@ -533,12 +561,21 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 process.waitFor(1, TimeUnit.SECONDS);
             }
 
+            // Most launchers pass fd 3 on; one that closes inherited descriptors is caught only by its &.
+            boolean leftRunning = sentinel.stillHeld(SENTINEL_GRACE_MS)
+                    || BACKGROUND_OPERATOR.matcher(command).find();
             var out = readResult.output();
+            out.append(sentinel.redirectFailure());
             if (readResult.truncated()) {
                 out.append("\n[Output truncated at %dKB. Total output: %d bytes]"
                         .formatted(maxOutputBytes / 1024, readResult.totalRead()));
             }
-            if (readResult.detached()) out.append(BACKGROUND_NOTE);
+            if (leftRunning) {
+                keepOutput = true;
+                keep(output, outputChannel);
+                out.append("\n[Anything this command left running in the background keeps writing its output to ")
+                        .append(output).append(']');
+            }
 
             long durationMs = System.currentTimeMillis() - startTime;
             var processedOutput = TerminalImageRenderer.replaceTerminalImagesInOutput(out.toString(), agent);
@@ -565,6 +602,12 @@ public class ShellExecTool implements ToolRegistry.Tool {
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             return ToolErrorTemplates.render(ToolErrorTemplates.shellInterrupted(command));
+        } finally {
+            if (!keepOutput) {
+                closeQuietly(outputChannel);
+                // A process the command left behind unforeseen keeps writing to the deleted file without failing.
+                if (output != null) deleteOutput(output);
+            }
         }
     }
 
@@ -617,96 +660,286 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * propagate: the run must abort, never launch unconfined.
      */
     private static Process startProcess(String command, Path workdir, Path workspace,
-                                        Map<String, String> env) throws IOException {
-        var argv = HarnessSandbox.wrap(List.of("/bin/sh", "-c", command), workspace.toFile(),
+                                        Map<String, String> env, Path output) throws IOException {
+        // The shell opens its own output file, inside any sandbox, so a link planted at that path leads
+        // only where the command could already write; a JVM-side redirect would follow it unconfined.
+        // Append mode lets the JVM empty the file mid-write. The pipe, kept on fd 3 and written by no
+        // one after a redirect failure, reaches EOF only once every process the command started is gone.
+        var script = "exec 3>&1 >>\"$" + OUTPUT_ENV + "\" 2>&1\n" + command;
+        var argv = HarnessSandbox.wrap(List.of("/bin/sh", "-c", script), workspace.toFile(),
                 List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.nativeToolTrustedOrigin());
         var pb = new ProcessBuilder(argv);
         pb.directory(workdir.toFile());
         pb.redirectErrorStream(true);
         pb.environment().clear();
         pb.environment().putAll(env);
+        pb.environment().put(OUTPUT_ENV, output.toString());
         return pb.start();
     }
 
     /**
-     * Output read result. {@code terminalImage} short-circuits the caller into the terminal-image
-     * early return; {@code detached} means a background process still held the pipe at return.
+     * Watches the pipe the command's processes inherit on fd 3. EOF means every one of them has exited;
+     * none writes to it, so a process still holding it never meets a closed pipe. The text it does carry
+     * is the shell's own, from before its redirect: nothing, unless that redirect failed.
      */
-    private record ReadResult(StringBuilder output, int totalRead, boolean truncated,
-                              boolean terminalImage, boolean detached) {}
+    private static final class Sentinel {
+        private final CompletableFuture<Boolean> released = new CompletableFuture<>();
+        private final StringBuilder text = new StringBuilder();
 
-    /** How long output may trail the shell's exit before the read stops waiting for EOF. */
-    private static final long EXIT_OUTPUT_GRACE_MS = 1_000;
+        Sentinel(Process process) {
+            Thread.ofVirtual().name("shell-exec-sentinel").start(() -> {
+                var buf = new byte[4096];
+                int n;
+                try (var in = process.getInputStream()) {
+                    while ((n = in.read(buf)) != -1) {
+                        synchronized (text) {
+                            if (text.length() < 4096) text.append(new String(buf, 0, n, StandardCharsets.UTF_8));
+                        }
+                    }
+                } catch (IOException e) {
+                    // A closed pipe is as good as EOF here.
+                }
+                released.complete(true);
+            });
+        }
 
-    private static final String BACKGROUND_NOTE = "\n[A process this command left in the background is still"
-            + " running; output it writes from now on is not captured. Redirect it to a file"
-            + " (cmd > out.log 2>&1 &) to keep it.]";
+        /** After the shell has exited: whether something it started still holds fd 3, waiting at most {@code graceMs}. */
+        boolean stillHeld(long graceMs) {
+            // completeOnTimeout runs on the JDK's delay scheduler, so this virtual thread parks untimed (JDK-8373224).
+            return !released.copy().completeOnTimeout(false, graceMs, TimeUnit.MILLISECONDS).join();
+        }
 
-    /**
-     * Reads the process's combined stdout/stderr until EOF, until terminal-image (QR-code) block art
-     * appears, or until {@link #EXIT_OUTPUT_GRACE_MS} after the shell exits. A process the command
-     * left in the background inherits the pipe and holds it open, so EOF can trail the exit
-     * indefinitely; the JDK's own reclaim at exit ({@code ProcessPipeInputStream.processExited})
-     * needs the stream lock a blocked {@code read} holds, so it cannot end the wait either.
-     */
-    private ReadResult readProcessOutput(Process process, int maxOutputBytes) throws IOException {
-        var drain = new OutputDrain(process.getInputStream(), maxOutputBytes);
-        var stoppedAtImage = new CompletableFuture<Boolean>();
-        Thread.ofVirtual().name("shell-exec-reader").start(() -> {
-            try {
-                stoppedAtImage.complete(drain.readToEnd());
-            } catch (IOException | RuntimeException e) {
-                stoppedAtImage.completeExceptionally(e);
+        String redirectFailure() {
+            synchronized (text) {
+                return text.toString().isBlank() ? "" : "\n" + text.toString().strip();
             }
-        });
-        // orTimeout runs on the JDK's delay scheduler, so this virtual thread parks untimed (JDK-8373224).
-        process.onExit().thenRun(() -> stoppedAtImage.orTimeout(EXIT_OUTPUT_GRACE_MS, TimeUnit.MILLISECONDS));
-        try {
-            return drain.result(stoppedAtImage.join(), false);
-        } catch (CompletionException e) {
-            if (e.getCause() instanceof TimeoutException) return drain.result(false, true);
-            if (e.getCause() instanceof IOException io) throw io;
-            throw e;
         }
     }
 
-    /** The read loop, on its own thread so the caller can stop waiting for an EOF that never comes. */
-    private final class OutputDrain {
-        private final InputStreamReader reader;
+    /** How long after the shell exits a process it started may take to let go of fd 3 before it counts as left running. */
+    private static final long SENTINEL_GRACE_MS = 1_000;
+
+    /** Output read result. {@code terminalImage} short-circuits the caller into the terminal-image early return. */
+    private record ReadResult(StringBuilder output, long totalRead, boolean truncated, boolean terminalImage) {}
+
+    /** Folder in the agent's workspace that holds each command's output file. */
+    private static final String OUTPUT_DIR = ".exec";
+
+    /** Environment variable naming the command's output file, for the shell's own redirect. */
+    private static final String OUTPUT_ENV = "JCLAW_EXEC_OUTPUT";
+
+    private static final Pattern OUTPUT_FILE_NAME = Pattern.compile("[0-9a-f-]{36}\\.log");
+
+    /** How often a running command's output file is read, for the terminal-image early return. */
+    private static final long OUTPUT_POLL_MS = 50;
+
+    /** An output file past this is emptied once the result has all it can hold; the writer appends, so it carries on. */
+    private static final long OUTPUT_FILE_CAP_BYTES = 16L * 1024 * 1024;
+
+    /** A kept output file nothing has written to for this long is deleted. */
+    private static final Duration KEPT_OUTPUT_RETENTION = Duration.ofDays(1);
+
+    /** A shell {@code &} that sends a job to the background, as opposed to {@code &&}, {@code 2>&1} or {@code &>}. */
+    private static final Pattern BACKGROUND_OPERATOR = Pattern.compile("(?<![&>|<])&(?![&>])");
+
+    // A platform thread keeps the timed polling of running commands off the virtual-thread scheduler (JDK-8373224).
+    private static final ScheduledExecutorService OUTPUT_POLLER =
+            Executors.newSingleThreadScheduledExecutor(r -> {
+                var t = new Thread(r, "shell-exec-output-poller");
+                t.setDaemon(true);
+                return t;
+            });
+
+    /** A kept output file, bounded through the descriptor that created it so no path is resolved again. */
+    private record KeptOutput(FileChannel channel, AtomicLong size, AtomicLong grewAtNanos) {}
+
+    private static final Map<Path, KeptOutput> KEPT_OUTPUT = new ConcurrentHashMap<>();
+    private static final AtomicBoolean KEPT_OUTPUT_BOUND_STARTED = new AtomicBoolean();
+
+    /**
+     * A fresh output file name in the workspace's {@link #OUTPUT_DIR}, after deleting stale ones there.
+     * The folder must be a plain one inside the workspace: the JVM works in it unconfined, so a link
+     * standing in for it would carry those operations wherever the agent pointed it.
+     */
+    private static Path newOutputFile(Path workspace) throws IOException {
+        Files.createDirectories(workspace);
+        var dir = workspace.resolve(OUTPUT_DIR);
+        if (!Files.exists(dir, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(dir);
+        if (!Files.isDirectory(dir, LinkOption.NOFOLLOW_LINKS)
+                || !dir.toRealPath().equals(workspace.toRealPath().resolve(OUTPUT_DIR))) {
+            throw new IOException(OUTPUT_DIR + " in the workspace must be a plain folder, which exec keeps"
+                    + " command output in; remove whatever has taken its place");
+        }
+        deleteStaleOutput(workspace, dir);
+        return dir.resolve(UUID.randomUUID() + ".log");
+    }
+
+    /**
+     * Deletes output files an earlier run kept, once nothing has written to them for
+     * {@link #KEPT_OUTPUT_RETENTION}. Works relative to the folder's descriptor and never follows a
+     * link, so deleting an entry removes that entry and nothing it points to.
+     */
+    private static void deleteStaleOutput(Path workspace, Path dir) {
+        var cutoff = AppClock.now().minus(KEPT_OUTPUT_RETENTION);
+        try (var parent = Files.newDirectoryStream(workspace)) {
+            if (!(parent instanceof SecureDirectoryStream<Path> secureParent)) return;
+            try (var entries = secureParent.newDirectoryStream(dir.getFileName(), LinkOption.NOFOLLOW_LINKS)) {
+                for (var entry : entries) {
+                    var name = entry.getFileName();
+                    if (!OUTPUT_FILE_NAME.matcher(name.toString()).matches() || KEPT_OUTPUT.containsKey(dir.resolve(name))) {
+                        continue;
+                    }
+                    var attrs = entries.getFileAttributeView(name, BasicFileAttributeView.class, LinkOption.NOFOLLOW_LINKS)
+                            .readAttributes();
+                    if (attrs.isRegularFile() && attrs.lastModifiedTime().toInstant().isBefore(cutoff)) {
+                        entries.deleteFile(name);
+                    }
+                }
+            }
+        } catch (IOException | DirectoryIteratorException e) {
+            EventLogger.warn("tool", null, "exec", "Could not clear stale exec output in %s: %s".formatted(dir, e.getMessage()));
+        }
+    }
+
+    /** Holds {@code output} open so it stays bounded while something may go on writing to it. */
+    private static void keep(Path output, FileChannel channel) {
+        KEPT_OUTPUT.put(output, new KeptOutput(channel, new AtomicLong(-1), new AtomicLong(System.nanoTime())));
+        if (KEPT_OUTPUT_BOUND_STARTED.compareAndSet(false, true)) {
+            OUTPUT_POLLER.scheduleWithFixedDelay(ShellExecTool::boundKeptOutput, 10, 10, TimeUnit.MINUTES);
+        }
+    }
+
+    /** Empties kept files past {@link #OUTPUT_FILE_CAP_BYTES}; drops those unwritten for {@link #KEPT_OUTPUT_RETENTION}. */
+    private static void boundKeptOutput() {
+        long now = System.nanoTime();
+        KEPT_OUTPUT.forEach((path, kept) -> {
+            try {
+                long size = kept.channel().size();
+                if (size > OUTPUT_FILE_CAP_BYTES) {
+                    kept.channel().truncate(0);
+                    size = 0;
+                }
+                if (size != kept.size().getAndSet(size)) {
+                    kept.grewAtNanos().set(now);
+                } else if (now - kept.grewAtNanos().get() > KEPT_OUTPUT_RETENTION.toNanos()) {
+                    KEPT_OUTPUT.remove(path);
+                    closeQuietly(kept.channel());
+                    deleteOutput(path);
+                }
+            } catch (IOException e) {
+                KEPT_OUTPUT.remove(path);
+                closeQuietly(kept.channel());
+            }
+        });
+    }
+
+    private static void closeQuietly(@Nullable FileChannel channel) {
+        if (channel == null) return;
+        try {
+            channel.close();
+        } catch (IOException e) {
+            // The descriptor is released either way; there is nothing to recover.
+        }
+    }
+
+    private static void deleteOutput(Path output) {
+        try {
+            Files.deleteIfExists(output);
+        } catch (IOException e) {
+            EventLogger.warn("tool", null, "exec", "Could not delete exec output %s: %s".formatted(output, e.getMessage()));
+        }
+    }
+
+    /**
+     * Reads the command's output file until the shell exits or terminal-image (QR-code) block art
+     * appears. Output goes to a file, not a pipe: a process the command leaves in the background
+     * inherits it, and on a pipe the JDK closes the read end once the shell has exited, so that
+     * process's next write fails (JCLAW-1563). The read ends at the shell's exit, with the watchdog
+     * bounding the run, never at an idle cut-off: an earlier 5 s one truncated slow commands (npm
+     * install, long builds) that paused between writes.
+     */
+    private ReadResult readProcessOutput(Process process, FileChannel channel, int maxOutputBytes) throws IOException {
+        var tail = new OutputTail(channel, maxOutputBytes);
+        var imageSeen = new CompletableFuture<Void>();
+        var poll = OUTPUT_POLLER.scheduleWithFixedDelay(() -> {
+            try {
+                if (tail.readAvailable()) imageSeen.complete(null);
+            } catch (IOException | RuntimeException e) {
+                imageSeen.completeExceptionally(e);
+            }
+        }, OUTPUT_POLL_MS, OUTPUT_POLL_MS, TimeUnit.MILLISECONDS);
+        try {
+            CompletableFuture.anyOf(process.onExit(), imageSeen).join();
+        } catch (CompletionException e) {
+            if (e.getCause() instanceof IOException io) throw io;
+            throw e;
+        } finally {
+            poll.cancel(false);
+        }
+        boolean image = (imageSeen.isDone() && !imageSeen.isCompletedExceptionally()) || tail.readAvailable();
+        return tail.result(image);
+    }
+
+    /** One command's output file, read as it grows, with UTF-8 decoded across reads. */
+    private final class OutputTail {
+        private final FileChannel channel;
         private final int maxOutputBytes;
+        private final ByteBuffer bytes = ByteBuffer.allocate(8192);
+        private final CharBuffer chars = CharBuffer.allocate(8192);
+        private final CharsetDecoder decoder = StandardCharsets.UTF_8.newDecoder()
+                .onMalformedInput(CodingErrorAction.REPLACE)
+                .onUnmappableCharacter(CodingErrorAction.REPLACE);
         private final StringBuilder out = new StringBuilder();
         private final TerminalImageScanner imageScan = new TerminalImageScanner();
-        private int totalRead;
+        private long position;
+        private long totalRead;
         private boolean truncated;
+        private boolean imageSeen;
 
-        OutputDrain(InputStream in, int maxOutputBytes) {
-            // Explicit UTF-8: a multi-byte character split across reads would corrupt as raw bytes.
-            this.reader = new InputStreamReader(in, StandardCharsets.UTF_8);
+        OutputTail(FileChannel channel, int maxOutputBytes) {
+            this.channel = channel;
             this.maxOutputBytes = maxOutputBytes;
         }
 
-        /**
-         * Blocking reads, with the watchdog enforcing the overall deadline. The earlier
-         * {@code available()} polling with a 100 ms sleep and a 5 s idle cut-off truncated slow
-         * commands (npm install, long builds) that paused between writes. Returns {@code true}
-         * when it stopped at a terminal image, leaving the process running.
-         */
-        boolean readToEnd() throws IOException {
-            var cbuf = new char[4096];
+        /** Reads what the file has gained since the last call; true once terminal-image block art has appeared. */
+        synchronized boolean readAvailable() throws IOException {
+            if (imageSeen) return true;
+            long size = channel.size();
+            if (size < position) {
+                restart();
+            } else if (truncated && size > OUTPUT_FILE_CAP_BYTES) {
+                totalRead += size - position;
+                channel.truncate(0);
+                restart();
+            }
             int n;
-            while ((n = reader.read(cbuf)) != -1) {
-                synchronized (this) {
-                    totalRead += n;
-                    int before = out.length();
-                    truncated = appendBounded(out, cbuf, n, maxOutputBytes, truncated);
-                    if (imageScan.acceptAppended(out, before)) return true;
+            while ((n = channel.read(bytes, position)) > 0) {
+                position += n;
+                totalRead += n;
+                bytes.flip();
+                chars.clear();
+                decoder.decode(bytes, chars, false);
+                bytes.compact();
+                chars.flip();
+                int before = out.length();
+                truncated = appendBounded(out, chars.array(), chars.remaining(), maxOutputBytes, truncated);
+                if (imageScan.acceptAppended(out, before)) {
+                    imageSeen = true;
+                    return true;
                 }
             }
             return false;
         }
 
-        synchronized ReadResult result(boolean terminalImage, boolean detached) {
-            return new ReadResult(new StringBuilder(out), totalRead, truncated, terminalImage, detached);
+        /** The file was emptied: read it again from the start. */
+        private void restart() {
+            position = 0;
+            bytes.clear();
+            decoder.reset();
+        }
+
+        synchronized ReadResult result(boolean terminalImage) {
+            return new ReadResult(new StringBuilder(out), totalRead, truncated, terminalImage);
         }
     }
 

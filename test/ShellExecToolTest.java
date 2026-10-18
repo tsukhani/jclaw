@@ -374,21 +374,167 @@ class ShellExecToolTest extends UnitTest {
 
     @Test
     void aSilentProcessLeftInTheBackgroundEndsTheCallButKeepsRunning() throws Exception {
-        // The background sleep inherits the output pipe and never writes, so EOF never comes.
+        // The background sleep inherits the command's output and never writes, so a pipe's EOF never came.
         var result = new java.util.concurrent.CompletableFuture<String>();
         Thread.ofVirtual().start(() -> result.complete(tool.execute("""
                 {"command": "sleep 4715 & echo started", "timeout": 120}
                 """, agent)));
+        String text = null;
         try {
-            var text = result.get(10, java.util.concurrent.TimeUnit.SECONDS);
+            text = result.get(10, java.util.concurrent.TimeUnit.SECONDS);
             assertTrue(text.contains("\"exitCode\":0"), text);
             assertTrue(text.contains("started"), text);
-            assertTrue(text.contains("still running"), text);
+            assertTrue(Files.exists(backgroundOutput(text)), text);
             assertTrue(text.contains("\"timedOut\":false"), text);
             assertEquals(1, sleepers("sleep 4715").size(), "the background process is left running");
         } finally {
             sleepers("sleep 4715").forEach(ProcessHandle::destroy);
+            if (text != null) Files.deleteIfExists(backgroundOutput(text));
         }
+    }
+
+    @Test
+    void aProcessLeftInTheBackgroundKeepsWritingAfterTheCallReturns() throws Exception {
+        // On a pipe, the JDK closed the read end after the shell exited and the next write killed the writer.
+        var text = tool.execute("""
+                {"command": "sleep 1 && for i in $(seq 1 20000); do echo line $i; done && sleep 4718 & echo started"}
+                """, agent);
+        try {
+            assertTrue(text.contains("started"), text);
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(20);
+            while (sleepers("sleep 4718").isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+            assertEquals(1, sleepers("sleep 4718").size(), "the background job wrote 20,000 lines and carried on");
+            var output = backgroundOutput(text);
+            assertTrue(Files.readString(output).contains("line 20000"), "its output is in " + output);
+        } finally {
+            sleepers("sleep 4718").forEach(ProcessHandle::destroy);
+            if (text.contains("keeps writing its output to")) Files.deleteIfExists(backgroundOutput(text));
+        }
+    }
+
+    @Test
+    void aScriptThatBackgroundsAJobItselfIsSeenToLeaveItRunning() throws Exception {
+        // No & in the command itself: only the descriptors the job inherited show it is still running.
+        var script = AgentService.workspacePath("shell-test-agent").resolve("start-server.sh");
+        Files.writeString(script, "(sleep 1; echo server-log-line; sleep 4723) &\necho launched\n");
+        var text = tool.execute("""
+                {"command": "sh %s"}
+                """.formatted(script), agent);
+        try {
+            assertTrue(text.contains("launched"), text);
+            var output = backgroundOutput(text);
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+            while (sleepers("sleep 4723").isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+            assertEquals(1, sleepers("sleep 4723").size(), "the job is still running");
+            assertTrue(Files.readString(output).contains("server-log-line"), "its output is in " + output);
+        } finally {
+            sleepers("sleep 4723").forEach(ProcessHandle::destroy);
+            if (text.contains("keeps writing its output to")) Files.deleteIfExists(backgroundOutput(text));
+            Files.deleteIfExists(script);
+        }
+    }
+
+    @Test
+    void anOrdinaryCommandLeavesNoOutputFileBehind() throws IOException {
+        var before = outputFiles();
+        var result = tool.execute("""
+                {"command": "echo hi"}
+                """, agent);
+        assertTrue(result.contains("hi"), result);
+        assertEquals(before, outputFiles());
+    }
+
+    @Test
+    void anOutputFolderReplacedByALinkIsRefusedAndNothingBehindItIsTouched() throws Exception {
+        var outside = Files.createTempDirectory("exec-outside");
+        var old = Files.writeString(outside.resolve("old.log"), "keep me");
+        Files.setLastModifiedTime(old, java.nio.file.attribute.FileTime.from(
+                java.time.Instant.now().minus(java.time.Duration.ofDays(3))));
+        var dir = AgentService.workspacePath("shell-test-agent").resolve(".exec");
+        deleteDir(dir);
+        Files.createDirectories(dir.getParent());
+        Files.createSymbolicLink(dir, outside);
+        try {
+            var result = tool.execute("""
+                    {"command": "echo hi"}
+                    """, agent);
+            assertFalse(result.contains("\"exitCode\":0"), "the call is refused; got: " + result);
+            assertTrue(result.contains(".exec"), "the refusal names the folder; got: " + result);
+            assertEquals("keep me", Files.readString(old), "a file behind the link is never deleted");
+            try (var files = Files.list(outside)) {
+                assertEquals(1, files.count(), "nothing is created behind the link");
+            }
+        } finally {
+            Files.deleteIfExists(dir);
+            deleteDir(outside);
+        }
+    }
+
+    @Test
+    void linksPlantedInTheOutputFolderAreNeverFollowed() throws Exception {
+        var dir = AgentService.workspacePath("shell-test-agent").resolve(".exec");
+        Files.createDirectories(dir);
+        var stale = java.nio.file.attribute.FileTime.from(java.time.Instant.now().minus(java.time.Duration.ofDays(3)));
+        // Past the size cap, sparse so it costs no disk.
+        var target = Files.createTempFile("exec-target", ".bin");
+        try (var raf = new java.io.RandomAccessFile(target.toFile(), "rw")) {
+            raf.write("marker".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            raf.setLength(17L * 1024 * 1024);
+        }
+        var symlink = Files.createSymbolicLink(dir.resolve(java.util.UUID.randomUUID() + ".log"), target);
+        Files.getFileAttributeView(symlink, java.nio.file.attribute.BasicFileAttributeView.class,
+                java.nio.file.LinkOption.NOFOLLOW_LINKS).setTimes(stale, null, null);
+        try {
+            var result = tool.execute("""
+                    {"command": "echo hi"}
+                    """, agent);
+            assertTrue(result.contains("hi"), result);
+            assertEquals(17L * 1024 * 1024, Files.size(target), "the linked file is never emptied");
+            try (var in = Files.newInputStream(target)) {
+                assertEquals("marker", new String(in.readNBytes(6), java.nio.charset.StandardCharsets.UTF_8));
+            }
+        } finally {
+            Files.deleteIfExists(symlink);
+            Files.deleteIfExists(target);
+        }
+    }
+
+    @Test
+    void staleOutputFilesAreClearedAndNothingElseIs() throws Exception {
+        var dir = AgentService.workspacePath("shell-test-agent").resolve(".exec");
+        Files.createDirectories(dir);
+        var old = java.nio.file.attribute.FileTime.from(java.time.Instant.now().minus(java.time.Duration.ofDays(3)));
+        var stale = Files.writeString(dir.resolve(java.util.UUID.randomUUID() + ".log"), "old");
+        Files.setLastModifiedTime(stale, old);
+        var fresh = Files.writeString(dir.resolve(java.util.UUID.randomUUID() + ".log"), "new");
+        var agentsOwn = Files.writeString(dir.resolve("notes.txt"), "mine");
+        Files.setLastModifiedTime(agentsOwn, old);
+        try {
+            tool.execute("""
+                    {"command": "echo hi"}
+                    """, agent);
+            assertFalse(Files.exists(stale), "a stale output file is cleared");
+            assertTrue(Files.exists(fresh), "a recent output file is kept");
+            assertTrue(Files.exists(agentsOwn), "a file exec did not name is never touched");
+        } finally {
+            Files.deleteIfExists(stale);
+            Files.deleteIfExists(fresh);
+            Files.deleteIfExists(agentsOwn);
+        }
+    }
+
+    private static java.util.Set<Path> outputFiles() throws IOException {
+        var dir = AgentService.workspacePath("shell-test-agent").resolve(".exec");
+        if (!Files.isDirectory(dir)) return java.util.Set.of();
+        try (var files = Files.list(dir)) {
+            return files.collect(java.util.stream.Collectors.toSet());
+        }
+    }
+
+    private static Path backgroundOutput(String result) {
+        var m = java.util.regex.Pattern.compile("keeps writing its output to (\\S+?\\.log)").matcher(result);
+        assertTrue(m.find(), "the result names where background output goes: " + result);
+        return Path.of(m.group(1));
     }
 
     private static java.util.List<ProcessHandle> sleepers(String... commands) {
