@@ -1,6 +1,7 @@
 package channels;
 
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
+import org.telegram.telegrambots.longpolling.interfaces.BackOff;
 
 import java.util.function.Predicate;
 
@@ -47,5 +48,14 @@ public final class TelegramPollingRunnerTestHooks {
     /** JCLAW-436: run the standalone token health-probe synchronously. */
     public static void runTokenHealthProbe() {
         TelegramPollingRunner.probeTokenHealth();
+    }
+
+    /** The SDK app {@code reconcile} builds; constructing it dials nothing. */
+    public static TelegramBotsLongPollingApplication newPollingApp() {
+        return TelegramPollingRunner.newPollingApp();
+    }
+
+    public static BackOff cappedBackOff(BackOff curve) {
+        return TelegramPollingRunner.cappedBackOff(curve);
     }
 }

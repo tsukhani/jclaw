@@ -1,10 +1,14 @@
 package channels;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import models.Agent;
 import models.TelegramBinding;
 import org.telegram.telegrambots.longpolling.BotSession;
 import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
+import org.telegram.telegrambots.longpolling.interfaces.BackOff;
+import org.telegram.telegrambots.longpolling.util.ExponentialBackOff;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
+import org.telegram.telegrambots.longpolling.util.TelegramOkHttpClientFactory;
 import org.telegram.telegrambots.meta.TelegramUrl;
 import org.telegram.telegrambots.meta.api.methods.GetMe;
 import org.telegram.telegrambots.meta.api.methods.updates.GetUpdates;
@@ -22,6 +26,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -74,6 +79,9 @@ public final class TelegramPollingRunner {
     /** getUpdates long-poll timeout (seconds) requested on every poll (JCLAW-375). */
     static final int GET_UPDATES_TIMEOUT_SECONDS = 50;
 
+    /** Longest the SDK may sleep between failed getUpdates polls. */
+    static final long MAX_RETRY_WAIT_MILLIS = 60_000;
+
     /**
      * JCLAW-436: predicate answering "has Telegram permanently rejected this bot
      * token?" — getMe returning 401/403/404 (auth/not-found). The standalone
@@ -101,7 +109,7 @@ public final class TelegramPollingRunner {
         for (var b : desired) desiredById.put(b.id, b);
 
         var app = APP.updateAndGet(existing -> existing != null
-                ? existing : new TelegramBotsLongPollingApplication());
+                ? existing : newPollingApp());
 
         // Stop active bindings that vanished or had their token rotated. Snapshot
         // the active map first so we can mutate it inside the loop.
@@ -133,6 +141,32 @@ public final class TelegramPollingRunner {
         // when the registration set drops to zero so a later reconcile reuses the
         // dispatcher without recreating threads; the next register's session
         // auto-starts the same way.
+    }
+
+    /**
+     * The SDK app with its own defaults except the backoff: past 15 minutes of failed polls its
+     * {@link ExponentialBackOff} sleeps 15 minutes per retry, leaving a bot silent that long after Telegram recovers.
+     */
+    static TelegramBotsLongPollingApplication newPollingApp() {
+        return new TelegramBotsLongPollingApplication(ObjectMapper::new,
+                new TelegramOkHttpClientFactory.DefaultOkHttpClientCreator(),
+                Executors::newSingleThreadScheduledExecutor,
+                () -> cappedBackOff(new ExponentialBackOff()));
+    }
+
+    /** {@code curve}, with no wait longer than {@link #MAX_RETRY_WAIT_MILLIS}. */
+    static BackOff cappedBackOff(BackOff curve) {
+        return new BackOff() {
+            @Override
+            public void reset() {
+                curve.reset();
+            }
+
+            @Override
+            public long nextBackOffMillis() {
+                return Math.min(curve.nextBackOffMillis(), MAX_RETRY_WAIT_MILLIS);
+            }
+        };
     }
 
     /** Stop all active sessions. Safe to call at app shutdown. */
