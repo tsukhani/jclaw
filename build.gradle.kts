@@ -371,7 +371,7 @@ dependencies {
     // native deps — which is the whole point of the printer tool: it works on a
     // box with no CUPS and no OS print subsystem. 3.6.3 rather than the 3.5.9 the
     // ticket named; 3.5.9 is two minors stale and Renovate would bump it on sight.
-    implementation("org.jmdns:jmdns:3.6.3")
+    implementation("org.jmdns:jmdns:3.6.4")
 
     // JCLAW-911: HP JIPP — pure-Java IPP codec for the primary print backend
     // (RFC 8010/8011 over HTTP to port 631). MIT. JIPP is written in Kotlin and
