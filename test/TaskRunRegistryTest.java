@@ -1,11 +1,14 @@
 import agents.AgentRunner;
 import agents.RunCancelledException;
+import agents.TurnCancellation;
 import jobs.DbSchedulerBootstrapJob;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.TaskRunRegistry;
 
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * JCLAW-414: unit contract for {@link TaskRunRegistry} and the
@@ -130,6 +133,7 @@ class TaskRunRegistryTest extends UnitTest {
 
     private static final Long SHUTDOWN_A = 991_144L;
     private static final Long SHUTDOWN_B = 991_145L;
+    private static final Long SHUTDOWN_C = 991_146L;
     private static final Long NEVER_REGISTERED = 991_146L;
 
     /**
@@ -152,6 +156,20 @@ class TaskRunRegistryTest extends UnitTest {
         } finally {
             TaskRunRegistry.unregister(SHUTDOWN_A);
             TaskRunRegistry.unregister(SHUTDOWN_B);
+        }
+    }
+
+    @Test
+    void shutdownCancelRunsNothingRegisteredAgainstTheFlag() throws Exception {
+        TaskRunRegistry.register(SHUTDOWN_C);
+        var ran = new CountDownLatch(1);
+        try (var _ = TurnCancellation.register(TaskRunRegistry.cancelFlag(SHUTDOWN_C), ran::countDown)) {
+            assertEquals(1, DbSchedulerBootstrapJob.cancelInFlightRuns(Set.of(SHUTDOWN_C)));
+            assertTrue(TaskRunRegistry.isCancelled(SHUTDOWN_C), "the fire observes the cancel");
+            // A fire's registered action kills its subagent runs with row writes; teardown stays off the database.
+            assertFalse(ran.await(300, TimeUnit.MILLISECONDS), "shutdown flips the flag without the fire's actions");
+        } finally {
+            TaskRunRegistry.unregister(SHUTDOWN_C);
         }
     }
 

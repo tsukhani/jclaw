@@ -22,6 +22,17 @@ class TurnCancellationTest extends UnitTest {
     }
 
     @Test
+    void anActionWhoseScopeClosesRightAfterTheCancelStillRuns() throws Exception {
+        var flag = new AtomicBoolean(false);
+        var ran = new CountDownLatch(1);
+        // A fire unwinds from the cancel and closes its scope before the action's thread has started.
+        try (var _ = TurnCancellation.register(flag, ran::countDown)) {
+            TurnCancellation.cancel(flag);
+        }
+        assertTrue(ran.await(5, TimeUnit.SECONDS), "the cancel claims the action before the scope can close it");
+    }
+
+    @Test
     void aDeregisteredActionNeverRuns() throws Exception {
         var flag = new AtomicBoolean(false);
         var ran = new AtomicInteger();

@@ -65,6 +65,13 @@ public final class AgentDeletionCascade {
         var names = subtree.stream().map(a -> a.name).toList();
 
         var em = JPA.em();
+        // Resolved now, while the rows still lead to each workspace and conversation (JCLAW-1574).
+        var workspaces = names.stream().map(BackgroundProcesses::workspaceOf).distinct().toList();
+        var rootWorkspaces = subtree.stream().filter(a -> a.parentAgent == null)
+                .map(a -> BackgroundProcesses.workspaceOf(a.name)).toList();
+        var conversationIds = em.createQuery("SELECT c.id FROM Conversation c WHERE c.agent.id IN :ids", Long.class)
+                .setParameter("ids", subtree.stream().map(a -> a.id).toList())
+                .getResultList();
         // Out-of-band cleanup, per subtree node — the cascade only governs rows
         // in FK-linked tables, never the filesystem, string-keyed config, or the
         // external Lucene index:
@@ -95,6 +102,11 @@ public final class AgentDeletionCascade {
         Agent root = Agent.findById(rootId);
         root.delete();
         em.flush();
+
+        // What the subtree's commands left running goes with it: by conversation where it shares a root's
+        // workspace, and everything in a root's own workspace, which is removed below with its files.
+        BackgroundProcesses.stopForConversations(workspaces, conversationIds);
+        rootWorkspaces.forEach(BackgroundProcesses::stopAll);
 
         // Workspace dirs last, after DB state is clean. One per subtree node.
         for (var name : names) {

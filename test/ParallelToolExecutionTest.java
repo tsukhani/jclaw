@@ -727,6 +727,92 @@ class ParallelToolExecutionTest extends UnitTest {
     }
 
     @Test
+    void cancellingATaskRunStopsTheToolItIsRunning() throws Exception {
+        long[] ids = seedAgentAndConversation();
+        long taskRunId = seedTaskRun(ids[0]);
+        // The loop and the sink read the rows on threads of their own.
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        var agent = (Agent) Agent.findById(ids[0]);
+        var run = (models.TaskRun) models.TaskRun.findById(taskRunId);
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var outcome = new CompletableFuture<String>();
+        ToolRegistry.publish(List.of(cancelWatcher(started, outcome)));
+        services.TaskRunRegistry.register(taskRunId);
+        var loop = Thread.ofVirtual().start(() -> {
+            try {
+                invokeParallel(List.of(CANCEL_WATCH), agent, ids[1], new ArrayList<>(), null, new agents.TaskRunSink(run));
+            } catch (Exception e) {
+                outcome.completeExceptionally(e);
+            }
+        });
+        try {
+            assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS), "the tool started");
+            // The operator's cancel, the deadline's and shutdown's all go through here.
+            assertTrue(services.TaskRunRegistry.requestCancel(taskRunId));
+            assertEquals("stopped", outcome.get(10, java.util.concurrent.TimeUnit.SECONDS));
+        } finally {
+            services.TaskRunRegistry.unregister(taskRunId);
+            loop.join(10_000);
+        }
+    }
+
+    @Test
+    void killingARunWhoseRowIsAlreadyTerminalStillStopsItsTool() throws Exception {
+        long[] ids = seedAgentAndConversation();
+        // A yield timeout leaves the row TIMEOUT while the run's thread is still inside a tool.
+        long runId = Tx.run(() -> {
+            var run = runningRun((Agent) Agent.findById(ids[0]), "terminal-row-child");
+            run.status = models.SubagentRun.Status.TIMEOUT;
+            run.save();
+            return run.id;
+        });
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        var agent = (Agent) Agent.findById(ids[0]);
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var outcome = new CompletableFuture<String>();
+        ToolRegistry.publish(List.of(cancelWatcher(started, outcome)));
+        SubagentRegistry.register(runId, new CompletableFuture<Void>());
+        var loop = Thread.ofVirtual().start(() -> {
+            try {
+                SubagentRegistry.callAsRun(runId, () -> {
+                    invokeParallel(List.of(CANCEL_WATCH), agent, ids[1], new ArrayList<>(), null);
+                    return null;
+                });
+            } catch (Exception e) {
+                outcome.completeExceptionally(e);
+            }
+        });
+        try {
+            assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS), "the tool started");
+            assertFalse(SubagentRegistry.kill(runId, "killed by the test").killed(), "the row was already terminal");
+            assertEquals("stopped", outcome.get(10, java.util.concurrent.TimeUnit.SECONDS));
+        } finally {
+            SubagentRegistry.unregister(runId);
+            loop.join(10_000);
+        }
+    }
+
+    private static long seedTaskRun(long agentId) {
+        return Tx.run(() -> {
+            var task = new models.Task();
+            task.agent = (Agent) Agent.findById(agentId);
+            task.name = "parallel-tool-fire";
+            task.type = models.Task.Type.CRON;
+            task.cronExpression = "*/30 * * * *";
+            task.status = models.Task.Status.RUNNING;
+            task.save();
+            var run = new models.TaskRun();
+            run.task = task;
+            run.startedAt = java.time.Instant.now();
+            run.status = models.TaskRun.Status.RUNNING;
+            run.save();
+            return run.id;
+        });
+    }
+
+    @Test
     void killingASubagentKillsTheSyncChildItWaitsOn() throws Exception {
         long[] ids = seedAgentAndConversation();
         long[] runs = Tx.run(() -> {

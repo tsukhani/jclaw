@@ -387,6 +387,7 @@ class ShellExecToolTest extends UnitTest {
             assertTrue(Files.exists(backgroundOutput(text)), text);
             assertTrue(text.contains("\"timedOut\":false"), text);
             assertEquals(1, sleepers("sleep 4715").size(), "the background process is left running");
+            assertTrue(text.contains("; pid " + sleepers("sleep 4715").getFirst().pid()), "the result names its pid: " + text);
         } finally {
             sleepers("sleep 4715").forEach(ProcessHandle::destroy);
             if (text != null) Files.deleteIfExists(backgroundOutput(text));

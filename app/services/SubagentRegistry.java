@@ -448,7 +448,8 @@ public final class SubagentRegistry {
     private static KillResult handleAlreadyTerminal(Long runId, SubagentRun.Status status) {
         var stale = ACTIVE.get(runId);
         if (stale != null) {
-            stale.cancelRequested().set(true);
+            // Through TurnCancellation: a run whose yield timed out is terminal with its thread still mid-tool.
+            TurnCancellation.cancel(stale.cancelRequested());
             // mayInterruptIfRunning=false: the cooperative flag is the
             // signal; we never want the JDK to interrupt the carrier
             // thread (see class comment for the H2 corruption story).

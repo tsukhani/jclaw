@@ -920,7 +920,7 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on each
 
 An agent sometimes starts a program that keeps running after its command ends, such as a local web server. **Running in the background** lists these programs. Each row shows the command, the agent, when it started, the addresses it listens on, and the file its output goes to. **Stop** ends the program and anything it started. **Refresh** reads the list again.
 
-JClaw also stops such a program when its lifetime runs out, and when you delete the conversation that started it. Agents can see and stop their own programs too.
+JClaw also stops such a program when its lifetime runs out, when you delete the conversation that started it, and when you delete the agent. Agents can see and stop their own programs too.
 
 :::gotcha
 *(every network interface)* after an address means other machines on your network can reach that program. Agents are told to use `127.0.0.1` unless you ask for something else. Stop a program you did not expect to see.

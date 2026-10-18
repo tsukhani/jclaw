@@ -10,6 +10,7 @@ import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
 import services.EventLogger;
 import services.SubagentRegistry;
+import services.TaskRunRegistry;
 import utils.LatencyTrace;
 
 import java.util.ArrayList;
@@ -184,10 +185,14 @@ public final class ParallelToolExecutor {
         Long taskRunId = (sink instanceof TaskRunSink trs) ? trs.taskRunId() : null;
         // A subagent's stop flag is bound to the child's own thread, which the work-unit threads below do not inherit.
         var subagentRun = SubagentRegistry.currentRun();
+        // Neither a subagent's loop nor a task fire's passes a turn flag; the run's stop flag or the fire's cancel
+        // flag stands in, so a kill or a cancel stops the tool it is running (JCLAW-1573, JCLAW-1574).
+        var fireCancel = isCancelled == null && subagentRun == null && taskRunId != null
+                ? TaskRunRegistry.cancelFlag(taskRunId) : null;
         BooleanSupplier cancelled = () -> (isCancelled != null && isCancelled.get())
-                || (subagentRun != null && subagentRun.stopRequested());
-        // A subagent's loop passes no turn flag; its stop flag stands in, so a kill stops the tool it is running.
-        var turnCancel = isCancelled != null ? isCancelled : subagentRun != null ? subagentRun.stopFlag() : null;
+                || (subagentRun != null && subagentRun.stopRequested())
+                || (fireCancel != null && fireCancel.get());
+        var turnCancel = isCancelled != null ? isCancelled : subagentRun != null ? subagentRun.stopFlag() : fireCancel;
 
         ToolRegistry.ToolResult[] results = new ToolRegistry.ToolResult[n];
 

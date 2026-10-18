@@ -99,6 +99,24 @@ public final class BackgroundProcesses {
         return false;
     }
 
+    /** Stops everything {@code workspace}'s commands left running, before the workspace goes with its agent. */
+    public static void stopAll(Path workspace) {
+        for (var h : holders(workspace)) {
+            EventLogger.info("tool", null, null, "Stopped background process %d: its agent was deleted"
+                    .formatted(h.process().pid()));
+            terminate(h.process());
+        }
+    }
+
+    /** The pids of the processes, other than this JVM, holding exec output file {@code file}. */
+    public static List<Long> pidsHolding(Path file) {
+        try {
+            return holdersOf(List.of(file.toRealPath())).stream().map(h -> h.process().pid()).toList();
+        } catch (IOException e) {
+            return List.of();
+        }
+    }
+
     /** Stops what commands started in one of {@code conversationIds} left running in {@code workspaces}. */
     public static void stopForConversations(Collection<Path> workspaces, Collection<Long> conversationIds) {
         if (conversationIds.isEmpty()) return;
@@ -196,7 +214,8 @@ public final class BackgroundProcesses {
             var realDir = dir.toRealPath();
             for (var entry : entries) {
                 if (OUTPUT_FILE_NAME.matcher(entry.getFileName().toString()).matches()
-                        && Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)) {
+                        && Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)
+                        && singlyLinked(entry)) {
                     files.add(realDir.resolve(entry.getFileName()));
                 }
             }
@@ -207,9 +226,24 @@ public final class BackgroundProcesses {
         return files;
     }
 
+    /**
+     * exec makes its files with {@code CREATE_NEW}, so each has one link. A hardlink an agent plants in the folder
+     * shares its inode with a file elsewhere, and {@code lsof} would report that file's holders as the link's.
+     */
+    private static boolean singlyLinked(Path file) {
+        try {
+            return ((Number) Files.getAttribute(file, "unix:nlink", LinkOption.NOFOLLOW_LINKS)).intValue() == 1;
+        } catch (IOException | UnsupportedOperationException | IllegalArgumentException e) {
+            return false;
+        }
+    }
+
     /** Every process but this JVM holding one of the output files in {@code workspace}. */
     private static List<Held> holders(Path workspace) {
-        var files = outputFiles(workspace);
+        return holdersOf(outputFiles(workspace));
+    }
+
+    private static List<Held> holdersOf(List<Path> files) {
         if (files.isEmpty()) return List.of();
         var byPid = LINUX ? procHolders(Set.copyOf(files)) : lsofHolders(files);
         long self = ProcessHandle.current().pid();
@@ -371,7 +405,7 @@ public final class BackgroundProcesses {
                             .readAttributes();
                     if (!attrs.isRegularFile()) continue;
                     if (held.contains(name)) {
-                        if (attrs.size() > OUTPUT_FILE_CAP_BYTES) {
+                        if (attrs.size() > OUTPUT_FILE_CAP_BYTES && singlyLinked(workspace.resolve(OUTPUT_DIR).resolve(name))) {
                             try (var channel = entries.newByteChannel(name,
                                     Set.of(StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS))) {
                                 channel.truncate(0);

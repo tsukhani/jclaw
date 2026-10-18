@@ -147,6 +147,19 @@ public final class TaskRunRegistry {
         return true;
     }
 
+    /**
+     * Flip the flag without running what the fire registered against it, for shutdown: the JVM takes the
+     * fire's subagent threads with it and the boot consistency check reconciles their rows, so teardown makes
+     * no database write (JCLAW-1143). Returns what {@link #requestCancel} would.
+     */
+    public static boolean requestCancelWithoutActions(Long taskRunId) {
+        if (taskRunId == null) return false;
+        var entry = ACTIVE.get(taskRunId);
+        if (entry == null) return false;
+        entry.cancel().set(true);
+        return true;
+    }
+
     /** Snapshot of the currently-registered run ids. For tests + introspection. */
     public static Set<Long> activeRunIds() {
         return Set.copyOf(ACTIVE.keySet());

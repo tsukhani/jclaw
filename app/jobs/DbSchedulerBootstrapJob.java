@@ -242,9 +242,12 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
      * guaranteeing none. It is the same cooperative mechanism the deadline watchdog
      * ({@link services.TaskFireDeadline}) and the operator cancel API already use.
      *
-     * <p>Writes nothing: {@code requestCancel} only flips an in-memory flag and the fire
-     * persists its own terminal status on the way out, so teardown stays off the database
-     * (JCLAW-1143).
+     * <p>Writes nothing: it flips each fire's in-memory flag without running what the fire
+     * registered against it ({@code TaskRunRegistry.requestCancelWithoutActions}), since the
+     * registered action kills the fire's subagent runs with row writes, and the fire persists
+     * its own terminal status on the way out, so teardown stays off the database (JCLAW-1143).
+     * The JVM takes the subagent threads with it and the boot consistency check reconciles
+     * their rows.
      *
      * @return how many in-flight fires were asked to stop
      */
@@ -261,7 +264,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
     public static int cancelInFlightRuns(Set<Long> runIds) {
         int asked = 0;
         for (Long runId : runIds) {
-            if (TaskRunRegistry.requestCancel(runId)) asked++;
+            if (TaskRunRegistry.requestCancelWithoutActions(runId)) asked++;
         }
         if (asked > 0) {
             EventLogger.info("task", null, null,

@@ -5,6 +5,7 @@ import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -67,7 +68,7 @@ public final class TurnCancellation {
                 set.remove(reg);
                 return set.isEmpty() ? null : set;
             });
-            runOffThread(List.of(reg));
+            runOffThread(claim(List.of(reg)));
         }
         return reg;
     }
@@ -76,7 +77,16 @@ public final class TurnCancellation {
     public static void cancel(AtomicBoolean flag) {
         flag.set(true);
         var regs = ACTIONS.remove(flag);
-        if (regs != null && !regs.isEmpty()) runOffThread(new ArrayList<>(regs));
+        if (regs != null) runOffThread(claim(regs));
+    }
+
+    /** Claimed on the cancelling thread, so a scope that closes before an action's thread starts cannot take it back. */
+    private static List<Registration> claim(Collection<Registration> regs) {
+        var claimed = new ArrayList<Registration>();
+        for (var reg : regs) {
+            if (reg.claimed.compareAndSet(false, true)) claimed.add(reg);
+        }
+        return claimed;
     }
 
     // Platform threads: an action may wait a timed grace (JDK-8373224) or open a transaction. One each,
@@ -84,7 +94,6 @@ public final class TurnCancellation {
     private static void runOffThread(List<Registration> regs) {
         for (var reg : regs) {
             Thread.ofPlatform().daemon().name("turn-cancel").start(() -> {
-                if (!reg.claimed.compareAndSet(false, true)) return;
                 try {
                     reg.action.run();
                 } catch (RuntimeException e) {

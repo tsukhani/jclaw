@@ -211,10 +211,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
         return """
                 Execute a shell command on the host system. Commands are validated against an \
                 allowlist of permitted binaries. Working directory defaults to the agent workspace. \
-                Returns exit code, output, and execution metadata. A process the command leaves \
-                running in the background (cmd &) keeps writing its output to a file the result names, \
-                and the operator can see and stop it. Bind a server you start to 127.0.0.1 unless the \
-                user asks for another address.""";
+                Returns exit code, output, and execution metadata. A command still in the foreground when \
+                its timeout passes is killed, so start a server or other long-lived process in the \
+                background (cmd &): it keeps writing its output to a file the result names with its pid, \
+                and the operator, or you through jclaw_api (POST /api/processes/{pid}/stop), can stop it. \
+                Bind a server you start to 127.0.0.1 unless the user asks for another address.""";
     }
 
     @Override
@@ -564,8 +565,14 @@ public class ShellExecTool implements ToolRegistry.Tool {
             }
             if (leftRunning) {
                 keepOutput = true;
+                var pids = BackgroundProcesses.pidsHolding(output);
                 out.append("\n[Anything this command left running in the background keeps writing its output to ")
-                        .append(output).append(lifetimeNote()).append(']');
+                        .append(output);
+                if (!pids.isEmpty()) {
+                    out.append(pids.size() == 1 ? "; pid " : "; pids ")
+                            .append(pids.stream().map(String::valueOf).collect(Collectors.joining(", ")));
+                }
+                out.append(lifetimeNote()).append(']');
             }
 
             long durationMs = System.currentTimeMillis() - startTime;
@@ -654,6 +661,10 @@ public class ShellExecTool implements ToolRegistry.Tool {
      * Watches the pipe the command's processes inherit on fd 3. EOF means every one of them has exited;
      * none writes to it, so a process still holding it never meets a closed pipe. The text it does carry
      * is the shell's own, from before its redirect: nothing, unless that redirect failed.
+     *
+     * <p>The read holds the stream's monitor, so the JDK reaper thread that would drain and close the pipe once
+     * the shell exits blocks in {@code processExited} until EOF: one platform thread per process left running,
+     * which is what keeps the pipe alive.
      */
     private static final class Sentinel {
         private final CompletableFuture<Boolean> released = new CompletableFuture<>();

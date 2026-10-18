@@ -48,7 +48,8 @@ class BackgroundProcessesTest extends UnitTest {
 
     @AfterEach
     void teardown() {
-        sleepers("sleep 4751", "sleep 4752", "sleep 4753", "sleep 4754", "sleep 4755", "sleep 4756", "sleep 4757")
+        sleepers("sleep 4751", "sleep 4752", "sleep 4753", "sleep 4754", "sleep 4755", "sleep 4756", "sleep 4757",
+                "sleep 4758", "sleep 4759")
                 .forEach(ProcessHandle::destroyForcibly);
         ConfigService.delete(BackgroundProcesses.LIFETIME_KEY);
         ShellSandboxSync.release();
@@ -144,6 +145,47 @@ class BackgroundProcessesTest extends UnitTest {
         assertFalse(Files.exists(stale), "a stale file nothing holds is deleted");
         assertTrue(Files.exists(fresh), "a recent one is kept");
         assertTrue(Files.exists(agentsOwn), "a file exec did not name is never touched");
+    }
+
+    @Test
+    void aHardlinkPlantedInTheOutputFolderIsNotAnOutputFile() throws Exception {
+        var workspace = AgentService.workspacePath(AGENT);
+        var dir = workspace.resolve(".exec");
+        Files.createDirectories(dir);
+        // Past the size cap, sparse, on the workspace's own volume so it can be hardlinked, and held by a process
+        // that is not one of the agent's: lsof matches a file by inode, so a link would report that process.
+        var target = Files.createTempFile(workspace, "exec-victim", ".bin");
+        try (var raf = new RandomAccessFile(target.toFile(), "rw")) {
+            raf.setLength(17L * 1024 * 1024);
+        }
+        var holder = new ProcessBuilder("/bin/sh", "-c", "exec 4<\"$1\"; exec sleep 4759", "sh", target.toString())
+                .start();
+        var link = Files.createLink(dir.resolve("c1-" + UUID.randomUUID() + ".log"), target);
+        try {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+            while (sleepers("sleep 4759").isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+            assertEquals(1, sleepers("sleep 4759").size(), "the holder is running");
+
+            assertTrue(BackgroundProcesses.list(List.of(agent)).stream().noneMatch(e -> e.command().endsWith("sleep 4759")),
+                    "a process holding a planted hardlink is not listed");
+            assertFalse(BackgroundProcesses.stop(agent, holder.pid()), "nor can it be stopped");
+            AppClock.runWith(Clock.fixed(Instant.now().plus(Duration.ofHours(25)), ZoneOffset.UTC),
+                    () -> BackgroundProcesses.sweep(List.of(agent)));
+            assertEquals(17L * 1024 * 1024, Files.size(target), "the linked file is never emptied");
+            assertEquals(1, sleepers("sleep 4759").size(), "the process outlives the sweep");
+        } finally {
+            holder.destroyForcibly();
+            Files.deleteIfExists(link);
+            Files.deleteIfExists(target);
+        }
+    }
+
+    @Test
+    void deletingTheAgentStopsWhatItsCommandsLeftRunning() throws Exception {
+        execIn(1L, "sleep 4758 & echo started");
+        awaitListed("sleep 4758");
+        AgentService.delete(agent);
+        awaitGone("sleep 4758");
     }
 
     @Test
