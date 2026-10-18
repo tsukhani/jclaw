@@ -2,6 +2,7 @@ package services;
 
 import models.Agent;
 import org.jspecify.annotations.Nullable;
+import play.Play;
 import utils.AppClock;
 
 import java.io.IOException;
@@ -13,6 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.SecureDirectoryStream;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributeView;
 import java.time.Duration;
@@ -35,10 +37,14 @@ import java.util.stream.Collectors;
 
 /**
  * Processes an agent's exec commands left running in the background (JCLAW-1565). A command's shell holds
- * its output file open on fd 4, so each process it starts holds that file until it exits, whether or not it
- * redirects its own output. The holders of a workspace's output files are therefore what its commands left
- * running, found again after a restart, and nothing else is ever signalled. A process that closes the
- * descriptors it inherits is not found.
+ * its output file open on descriptor {@link #HELD_FD}, so each process it starts holds that file there until
+ * it exits, whether or not it redirects its own output. The processes holding a workspace's output files on
+ * that descriptor are therefore what its commands left running, found again after a restart, and nothing else
+ * is ever signalled. An output file is one exec itself created, recorded by device and inode under
+ * {@code data/}, where no command writes: a hardlink an agent plants in the folder shares its inode with a
+ * file elsewhere, and a file it moves in keeps its own, so neither is recorded and whatever holds them is left
+ * alone, however {@code lsof} matches by inode (JCLAW-1574). A process that closes the descriptor it inherits
+ * is not found.
  */
 public final class BackgroundProcesses {
 
@@ -46,6 +52,13 @@ public final class BackgroundProcesses {
 
     /** Folder in an agent's workspace that holds each exec command's output file. */
     public static final String OUTPUT_DIR = ".exec";
+
+    /** The descriptor exec's shell opens the output file on; a holder on any other is not the command's. */
+    public static final String HELD_FD = "4";
+
+    /** The files exec created that still exist, {@code device:inode} to path; the file under {@code data/} mirrors it. */
+    private static final Map<String, Path> RECORDED = new HashMap<>();
+    private static boolean recordLoaded;
 
     /** An output file: {@code c<conversation id>-<uuid>.log}, or {@code <uuid>.log} outside a conversation. */
     public static final Pattern OUTPUT_FILE_NAME = Pattern.compile("(?:c(\\d{1,18})-)?[0-9a-f-]{36}\\.log");
@@ -97,6 +110,88 @@ public final class BackgroundProcesses {
             }
         }
         return false;
+    }
+
+    /** Records {@code file}, which exec has just created, as an output file; until then nothing holding it counts. */
+    public static void recordOutputFile(Path file) {
+        var id = fileId(file);
+        if (id == null) return;
+        synchronized (RECORDED) {
+            loadRecord();
+            if (RECORDED.put(id, file) == null) saveRecord();
+        }
+    }
+
+    /** Forgets {@code file}, which exec has deleted after a call that left nothing running. */
+    public static void forgetOutputFile(Path file) {
+        synchronized (RECORDED) {
+            loadRecord();
+            if (RECORDED.values().removeIf(file::equals)) saveRecord();
+        }
+    }
+
+    private static boolean recorded(Path file) {
+        var id = fileId(file);
+        if (id == null) return false;
+        synchronized (RECORDED) {
+            loadRecord();
+            return RECORDED.containsKey(id);
+        }
+    }
+
+    /** Drops the records whose file is gone or is no longer the one recorded. */
+    private static void pruneRecord() {
+        synchronized (RECORDED) {
+            loadRecord();
+            if (dropStale()) saveRecord();
+        }
+    }
+
+    private static boolean dropStale() {
+        return RECORDED.entrySet().removeIf(e -> !e.getKey().equals(fileId(e.getValue())));
+    }
+
+    private static void loadRecord() {
+        if (recordLoaded) return;
+        recordLoaded = true;
+        try {
+            if (!Files.exists(recordFile())) return;
+            for (var line : Files.readAllLines(recordFile(), StandardCharsets.UTF_8)) {
+                int tab = line.indexOf('\t');
+                if (tab > 0) RECORDED.put(line.substring(0, tab), Path.of(line.substring(tab + 1)));
+            }
+            if (dropStale()) saveRecord();
+        } catch (IOException e) {
+            EventLogger.warn("tool", null, "exec", "Could not read %s: %s".formatted(recordFile(), e.getMessage()));
+        }
+    }
+
+    private static void saveRecord() {
+        var lines = RECORDED.entrySet().stream().map(e -> e.getKey() + "\t" + e.getValue()).toList();
+        var tmp = recordFile().resolveSibling(recordFile().getFileName() + ".tmp");
+        try {
+            Files.createDirectories(recordFile().getParent());
+            Files.write(tmp, lines, StandardCharsets.UTF_8);
+            Files.move(tmp, recordFile(), StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } catch (IOException e) {
+            EventLogger.warn("tool", null, "exec", "Could not write %s: %s".formatted(recordFile(), e.getMessage()));
+        }
+    }
+
+    private static Path recordFile() {
+        // Its own file under the test runner, as the workspace root has, so a test JVM never rewrites the live one.
+        var name = Play.runningInTestMode() ? "exec-outputs-test" : "exec-outputs";
+        return Play.applicationPath.toPath().resolve("data").resolve(name);
+    }
+
+    /** {@code device:inode} of {@code file} itself, never of a link's target; null where it cannot be read. */
+    private static @Nullable String fileId(Path file) {
+        try {
+            var attrs = Files.readAttributes(file, "unix:dev,ino", LinkOption.NOFOLLOW_LINKS);
+            return attrs.get("dev") + ":" + attrs.get("ino");
+        } catch (IOException | UnsupportedOperationException | IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /** Stops everything {@code workspace}'s commands left running, before the workspace goes with its agent. */
@@ -155,6 +250,7 @@ public final class BackgroundProcesses {
             }
             boundOutputFiles(workspace, heldNames, now.minus(OUTPUT_RETENTION));
         }
+        pruneRecord();
     }
 
     /**
@@ -215,7 +311,7 @@ public final class BackgroundProcesses {
             for (var entry : entries) {
                 if (OUTPUT_FILE_NAME.matcher(entry.getFileName().toString()).matches()
                         && Files.isRegularFile(entry, LinkOption.NOFOLLOW_LINKS)
-                        && singlyLinked(entry)) {
+                        && recorded(entry)) {
                     files.add(realDir.resolve(entry.getFileName()));
                 }
             }
@@ -227,8 +323,8 @@ public final class BackgroundProcesses {
     }
 
     /**
-     * exec makes its files with {@code CREATE_NEW}, so each has one link. A hardlink an agent plants in the folder
-     * shares its inode with a file elsewhere, and {@code lsof} would report that file's holders as the link's.
+     * exec makes its files with {@code CREATE_NEW}, so each has one link; emptying a file with more would empty
+     * whatever else the extra link names.
      */
     private static boolean singlyLinked(Path file) {
         try {
@@ -255,13 +351,20 @@ public final class BackgroundProcesses {
     }
 
     private static Map<Long, Path> lsofHolders(List<Path> files) {
-        var args = new ArrayList<String>(List.of(LSOF.toString(), "-nP", "-w", "-Fpn", "--"));
+        var args = new ArrayList<String>(List.of(LSOF.toString(), "-nP", "-w", "-Fpfn", "--"));
         files.forEach(f -> args.add(f.toString()));
         var byPid = new LinkedHashMap<Long, Path>();
         long pid = -1;
+        boolean onHeldFd = false;
         for (var line : lsof(args)) {
-            if (line.startsWith("p")) pid = Long.parseLong(line.substring(1));
-            else if (line.startsWith("n") && pid > 0) byPid.putIfAbsent(pid, Path.of(line.substring(1)));
+            if (line.startsWith("p")) {
+                pid = Long.parseLong(line.substring(1));
+                onHeldFd = false;
+            } else if (line.startsWith("f")) {
+                onHeldFd = HELD_FD.equals(line.substring(1));
+            } else if (line.startsWith("n") && pid > 0 && onHeldFd) {
+                byPid.putIfAbsent(pid, Path.of(line.substring(1)));
+            }
         }
         return byPid;
     }
@@ -304,8 +407,8 @@ public final class BackgroundProcesses {
 
     private static Map<Long, Path> procHolders(Set<Path> files) {
         var byPid = new LinkedHashMap<Long, Path>();
-        forEachProcFd((pid, target) -> {
-            if (files.contains(target)) byPid.putIfAbsent(pid, target);
+        forEachProcFd((pid, fd, target) -> {
+            if (HELD_FD.equals(fd) && files.contains(target)) byPid.putIfAbsent(pid, target);
         });
         return byPid;
     }
@@ -320,7 +423,7 @@ public final class BackgroundProcesses {
             }
         }
         var byPid = new HashMap<Long, List<String>>();
-        forEachProcFd((pid, target) -> {
+        forEachProcFd((pid, _, target) -> {
             var link = target.toString();
             if (!pids.contains(pid) || !link.startsWith("socket:[")) return;
             var address = addressByInode.get(link.substring(8, link.length() - 1));
@@ -329,14 +432,20 @@ public final class BackgroundProcesses {
         return byPid;
     }
 
-    private static void forEachProcFd(java.util.function.BiConsumer<Long, Path> visit) {
+    /** One open descriptor of one process under {@code /proc}: the pid, the descriptor number and what it names. */
+    @FunctionalInterface
+    private interface ProcFdVisitor {
+        void accept(long pid, String fd, Path target);
+    }
+
+    private static void forEachProcFd(ProcFdVisitor visit) {
         try (var procs = Files.newDirectoryStream(Path.of("/proc"), p -> p.getFileName().toString().matches("\\d+"))) {
             for (var proc : procs) {
                 long pid = Long.parseLong(proc.getFileName().toString());
                 try (var fds = Files.newDirectoryStream(proc.resolve("fd"))) {
                     for (var fd : fds) {
                         try {
-                            visit.accept(pid, Files.readSymbolicLink(fd));
+                            visit.accept(pid, fd.getFileName().toString(), Files.readSymbolicLink(fd));
                         } catch (IOException _) {
                             // Closed since the listing.
                         }

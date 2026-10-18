@@ -526,6 +526,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
             // reads and empties it through the descriptor alone, never by path again.
             outputChannel = FileChannel.open(output, StandardOpenOption.CREATE_NEW,
                     StandardOpenOption.READ, StandardOpenOption.WRITE);
+            // By inode, before any command runs: a file anyone later moves or links into the folder is never recorded.
+            BackgroundProcesses.recordOutputFile(output);
             // A background command runs as a subshell the shell does not wait for, so the call returns at once.
             var process = startProcess(background ? "(\n" + command + "\n) &\n" : command, workdir, workspace, env, output);
             var sentinel = new Sentinel(process);
@@ -664,7 +666,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
         // one after a redirect failure, reaches EOF only once every process the command started is gone.
         // fd 4 holds the output file itself, which is how BackgroundProcesses finds those processes later,
         // whatever they did with their own output.
-        var script = "exec 3>&1 4<\"$" + OUTPUT_ENV + "\" >>\"$" + OUTPUT_ENV + "\" 2>&1\n" + command;
+        var script = "exec 3>&1 " + BackgroundProcesses.HELD_FD + "<\"$" + OUTPUT_ENV + "\" >>\"$" + OUTPUT_ENV
+                + "\" 2>&1\n" + command;
         var argv = HarnessSandbox.wrap(List.of("/bin/sh", "-c", script), workspace.toFile(),
                 List.of(), HarnessSandbox.SHELL_SANDBOX_KEY, HarnessSandbox.nativeToolTrustedOrigin());
         var pb = new ProcessBuilder(argv);
@@ -783,6 +786,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
     private static void deleteOutput(Path output) {
         try {
             Files.deleteIfExists(output);
+            BackgroundProcesses.forgetOutputFile(output);
         } catch (IOException e) {
             EventLogger.warn("tool", null, "exec", "Could not delete exec output %s: %s".formatted(output, e.getMessage()));
         }

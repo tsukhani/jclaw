@@ -49,7 +49,7 @@ class BackgroundProcessesTest extends UnitTest {
     @AfterEach
     void teardown() {
         sleepers("sleep 4751", "sleep 4752", "sleep 4753", "sleep 4754", "sleep 4755", "sleep 4756", "sleep 4757",
-                "sleep 4758", "sleep 4759")
+                "sleep 4758", "sleep 4759", "sleep 4760", "sleep 4761")
                 .forEach(ProcessHandle::destroyForcibly);
         ConfigService.delete(BackgroundProcesses.LIFETIME_KEY);
         ShellSandboxSync.release();
@@ -148,12 +148,13 @@ class BackgroundProcessesTest extends UnitTest {
     }
 
     @Test
-    void aHardlinkPlantedInTheOutputFolderIsNotAnOutputFile() throws Exception {
+    void aHardlinkPlantedInTheOutputFolderNamesNoHolder() throws Exception {
         var workspace = AgentService.workspacePath(AGENT);
         var dir = workspace.resolve(".exec");
         Files.createDirectories(dir);
         // Past the size cap, sparse, on the workspace's own volume so it can be hardlinked, and held by a process
-        // that is not one of the agent's: lsof matches a file by inode, so a link would report that process.
+        // that is not one of the agent's, even on the descriptor exec uses: lsof matches a file by inode, so a
+        // link would otherwise report that process. Only a file exec created is recorded.
         var target = Files.createTempFile(workspace, "exec-victim", ".bin");
         try (var raf = new RandomAccessFile(target.toFile(), "rw")) {
             raf.setLength(17L * 1024 * 1024);
@@ -177,6 +178,47 @@ class BackgroundProcessesTest extends UnitTest {
             holder.destroyForcibly();
             Files.deleteIfExists(link);
             Files.deleteIfExists(target);
+        }
+    }
+
+    @Test
+    void aFileMovedIntoTheOutputFolderNamesNoHolder() throws Exception {
+        var workspace = AgentService.workspacePath(AGENT);
+        var dir = workspace.resolve(".exec");
+        Files.createDirectories(dir);
+        // A moved file has one link and a name that fits; what tells it apart is that exec never created it.
+        var victim = Files.createTempFile(workspace, "exec-moved", ".bin");
+        var holder = new ProcessBuilder("/bin/sh", "-c", "exec 4<\"$1\"; exec sleep 4761", "sh", victim.toString())
+                .start();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (sleepers("sleep 4761").isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+        var moved = Files.move(victim, dir.resolve("c1-" + UUID.randomUUID() + ".log"));
+        try {
+            assertTrue(BackgroundProcesses.list(List.of(agent)).stream().noneMatch(e -> e.command().endsWith("sleep 4761")),
+                    "a process holding a moved-in file is not listed");
+            assertFalse(BackgroundProcesses.stop(agent, holder.pid()), "nor can it be stopped");
+        } finally {
+            holder.destroyForcibly();
+            Files.deleteIfExists(moved);
+        }
+    }
+
+    @Test
+    void anAgentHardlinkingItsOwnOutputFileStaysListedAndStoppable() throws Exception {
+        execIn(1L, "sleep 4760 & echo started");
+        var entry = awaitListed("sleep 4760");
+        var dir = Path.of(entry.outputFile()).getParent();
+        // The link is the agent's attempt to hide its server; the file is exec's and its process holds it on fd 4.
+        var link = Files.createLink(dir.resolve("c1-" + UUID.randomUUID() + ".log"), Path.of(entry.outputFile()));
+        try {
+            assertTrue(Files.readString(play.Play.applicationPath.toPath().resolve("data/exec-outputs-test"))
+                    .contains(entry.outputFile()), "the record under data/ names the file exec created");
+            assertTrue(BackgroundProcesses.list(List.of(agent)).stream().anyMatch(e -> e.pid() == entry.pid()),
+                    "a second link to its own file hides nothing");
+            assertTrue(BackgroundProcesses.stop(agent, entry.pid()), "and it can still be stopped");
+            awaitGone("sleep 4760");
+        } finally {
+            Files.deleteIfExists(link);
         }
     }
 
