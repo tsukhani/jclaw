@@ -1,7 +1,7 @@
 ---
 name: diagram-design
 description: Create technical and product diagrams — architecture, flowchart, sequence, state machine, ER / data model, timeline, swimlane, quadrant, nested, tree, layer stack, venn, pyramid — as standalone HTML files with inline SVG. Supports customizing colors and fonts to match your brand.
-version: 1.0.1
+version: 1.0.2
 author: Tarun Sukhani
 tools: [filesystem, web_fetch, documents]
 commands: []
@@ -66,6 +66,21 @@ Each diagram is delivered as a standalone HTML file containing:
 - Embedded CSS (no external dependencies except Google Fonts)
 - Inline SVG (no external images)
 - No JavaScript required
+
+## Exporting As An Image
+
+When the user needs an image file (a PNG for LinkedIn, a slide or a document), screenshot the saved HTML page in a browser:
+
+```bash
+npx -y playwright@1.63.0 screenshot --device "Desktop Chrome HiDPI" --full-page "file://<absolute path>.html" "<absolute path>.png"
+```
+
+- The PNG matches what the user sees when they open the HTML, at 2× resolution. When the page holds only a fixed-size `<svg width="W" height="H">` with no margin around it, add `--viewport-size "W,H"` so the image has no empty border.
+- If it reports a missing browser, run `npx -y playwright@1.63.0 install chromium` once and retry.
+
+Never rasterize the `<svg>` on its own, whether through `XMLSerializer` and a canvas or an SVG-to-PNG converter. Its colors are `var(--…)` tokens defined on the page, and its background and fonts come from the page too, so a detached SVG renders every fill black, drops every stroke, loses the background and falls back to a default font.
+
+Before reporting an export done, open each PNG as an image and compare it with the HTML: light panels, visible lines and arrows, the accent color, the brand fonts. File size, dimensions and average brightness prove nothing; black boxes on a light background pass all three.
 
 ## Examples
 
