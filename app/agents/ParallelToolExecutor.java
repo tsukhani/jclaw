@@ -186,16 +186,18 @@ public final class ParallelToolExecutor {
         var subagentRun = SubagentRegistry.currentRun();
         BooleanSupplier cancelled = () -> (isCancelled != null && isCancelled.get())
                 || (subagentRun != null && subagentRun.stopRequested());
+        // A subagent's loop passes no turn flag; its stop flag stands in, so a kill stops the tool it is running.
+        var turnCancel = isCancelled != null ? isCancelled : subagentRun != null ? subagentRun.stopFlag() : null;
 
         ToolRegistry.ToolResult[] results = new ToolRegistry.ToolResult[n];
 
         if (n == 1) {
-            if (isCancelled == null || !isCancelled.get()) {
-                results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, taskRunId, cancelled, isCancelled,
+            if (turnCancel == null || !turnCancel.get()) {
+                results[0] = runToolCall(toolCalls.getFirst(), agent, conversationId, taskRunId, cancelled, turnCancel,
                         onStatus, offeredTools);
             }
         } else {
-            dispatchMultiToolCalls(toolCalls, agent, conversationId, taskRunId, results, onStatus, isCancelled,
+            dispatchMultiToolCalls(toolCalls, agent, conversationId, taskRunId, results, onStatus, turnCancel,
                     cancelled, offeredTools);
         }
 

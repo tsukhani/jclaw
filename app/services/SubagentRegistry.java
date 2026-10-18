@@ -227,7 +227,8 @@ public final class SubagentRegistry {
     public static void requestStop(Long runId) {
         if (runId == null) return;
         var entry = ACTIVE.get(runId);
-        if (entry != null) entry.cancelRequested().set(true);
+        // Through TurnCancellation, so the tool the run is in the middle of stops too (JCLAW-1573).
+        if (entry != null) TurnCancellation.cancel(entry.cancelRequested());
         // JCLAW-664: a harness run has no cooperative checkpoint to observe the
         // flag, so the idle/ceiling timeout must force-terminate its process here
         // too (no-op for a native run — nothing registered).
@@ -463,7 +464,7 @@ public final class SubagentRegistry {
     private static void flipCancelFlag(Long runId) {
         var entry = ACTIVE.get(runId);
         if (entry != null) {
-            entry.cancelRequested().set(true);
+            TurnCancellation.cancel(entry.cancelRequested());
             entry.future().cancel(false);
         }
     }

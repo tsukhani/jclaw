@@ -659,6 +659,150 @@ class ParallelToolExecutionTest extends UnitTest {
         assertEquals(List.of("false->true"), seen);
     }
 
+    // JCLAW-1573: a killed or timed-out subagent's in-flight tool stops with it.
+    private static final ToolCall CANCEL_WATCH = new ToolCall("cw", "function", new FunctionCall("cancel_watch", "{}"));
+
+    /** Registers a cancel action and reports whether it ran within 5 s. */
+    private static ToolRegistry.Tool cancelWatcher(java.util.concurrent.CountDownLatch started,
+                                                   CompletableFuture<String> outcome) {
+        return new ToolRegistry.Tool() {
+            @Override public String name() { return "cancel_watch"; }
+            @Override public String description() { return "Waits for its turn to be stopped, for the test."; }
+            @Override public Map<String, Object> parameters() {
+                return Map.of("type", "object", "properties", Map.of());
+            }
+            @Override public String execute(String argsJson, Agent agent) {
+                var stopped = new java.util.concurrent.CountDownLatch(1);
+                try (var _ = ToolContext.onCancel(stopped::countDown)) {
+                    started.countDown();
+                    outcome.complete(stopped.await(5, java.util.concurrent.TimeUnit.SECONDS) ? "stopped" : "never");
+                } catch (InterruptedException _) {
+                    Thread.currentThread().interrupt();
+                }
+                return "ok";
+            }
+        };
+    }
+
+    @Test
+    void stoppingASubagentStopsTheToolItIsRunning() throws Exception {
+        assertEquals("stopped", stopASubagentMidTool(List.of(CANCEL_WATCH)));
+    }
+
+    @Test
+    void stoppingASubagentStopsAToolItIsRunningInABatch() throws Exception {
+        assertEquals("stopped", stopASubagentMidTool(List.of(CANCEL_WATCH, ALONGSIDE)));
+    }
+
+    private String stopASubagentMidTool(List<ToolCall> calls) throws Exception {
+        long[] ids = seedAgentAndConversation();
+        // The loop runs on a thread of its own, which reads the conversation.
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        var agent = (Agent) Agent.findById(ids[0]);
+        var runId = -ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
+        var started = new java.util.concurrent.CountDownLatch(1);
+        var outcome = new CompletableFuture<String>();
+        ToolRegistry.publish(List.of(cancelWatcher(started, outcome), sleepTool("safe_x", true)));
+        SubagentRegistry.register(runId, new CompletableFuture<Void>());
+        var loop = Thread.ofVirtual().start(() -> {
+            try {
+                SubagentRegistry.callAsRun(runId, () -> {
+                    invokeParallel(calls, agent, ids[1], new ArrayList<>(), null);
+                    return null;
+                });
+            } catch (Exception e) {
+                outcome.completeExceptionally(e);
+            }
+        });
+        try {
+            assertTrue(started.await(5, java.util.concurrent.TimeUnit.SECONDS), "the tool started");
+            // The idle or ceiling timeout's stop; kill flips the same flag.
+            SubagentRegistry.requestStop(runId);
+            return outcome.get(10, java.util.concurrent.TimeUnit.SECONDS);
+        } finally {
+            SubagentRegistry.unregister(runId);
+            loop.join(10_000);
+        }
+    }
+
+    @Test
+    void killingASubagentKillsTheSyncChildItWaitsOn() throws Exception {
+        long[] ids = seedAgentAndConversation();
+        long[] runs = Tx.run(() -> {
+            var parent = (Agent) Agent.findById(ids[0]);
+            return new long[]{runningRun(parent, "kill-tree-child").id, runningRun(parent, "kill-tree-grandchild").id};
+        });
+        // kill reads and writes the rows on threads of its own.
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        var agent = (Agent) Agent.findById(ids[0]);
+        long child = runs[0];
+        long grandchild = runs[1];
+        var grandchildFuture = new CompletableFuture<AgentRunner.RunResult>();
+        var waiting = new java.util.concurrent.CountDownLatch(1);
+        ToolRegistry.publish(List.of(new ToolRegistry.Tool() {
+            @Override public String name() { return "await_child"; }
+            @Override public String description() { return "Waits on the grandchild, for the test."; }
+            @Override public Map<String, Object> parameters() {
+                return Map.of("type", "object", "properties", Map.of());
+            }
+            @Override public String execute(String argsJson, Agent a) {
+                waiting.countDown();
+                return tools.SubagentSpawnTool.awaitFuture(grandchildFuture, 3600, 3600, grandchild).terminalStatus().name();
+            }
+        }));
+        SubagentRegistry.register(child, new CompletableFuture<Void>());
+        SubagentRegistry.register(grandchild, grandchildFuture);
+        var loop = Thread.ofVirtual().start(() -> {
+            try {
+                SubagentRegistry.callAsRun(child, () -> {
+                    invokeParallel(List.of(new ToolCall("ac", "function", new FunctionCall("await_child", "{}"))),
+                            agent, ids[1], new ArrayList<>(), null);
+                    return null;
+                });
+            } catch (Exception _) {
+                // The assertions below report what matters.
+            }
+        });
+        try {
+            assertTrue(waiting.await(5, java.util.concurrent.TimeUnit.SECONDS), "the child is waiting on the grandchild");
+            assertTrue(SubagentRegistry.kill(child, "killed by the test").killed());
+
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(5);
+            while (!grandchildFuture.isCancelled() && System.nanoTime() < deadline) Thread.sleep(20);
+            assertTrue(grandchildFuture.isCancelled(), "killing the child kills the grandchild it waits on");
+            models.SubagentRun row = null;
+            while (System.nanoTime() < deadline) {
+                JPA.em().clear();
+                row = models.SubagentRun.findById(grandchild);
+                if (row.status == models.SubagentRun.Status.KILLED) break;
+                Thread.sleep(20);
+            }
+            assertEquals(models.SubagentRun.Status.KILLED, row.status);
+        } finally {
+            SubagentRegistry.unregister(child);
+            SubagentRegistry.unregister(grandchild);
+            loop.join(10_000);
+        }
+    }
+
+    private static models.SubagentRun runningRun(Agent parent, String childName) {
+        var childAgent = new Agent();
+        childAgent.name = childName;
+        childAgent.modelProvider = "test";
+        childAgent.modelId = "test";
+        childAgent.parentAgent = parent;
+        childAgent.save();
+        var run = new models.SubagentRun();
+        run.parentAgent = parent;
+        run.childAgent = childAgent;
+        run.childConversation = ConversationService.create(childAgent, "web", null);
+        run.status = models.SubagentRun.Status.RUNNING;
+        run.save();
+        return run;
+    }
+
     @Test
     void aCallOnAWorkUnitThreadRunsAsTheSubagentRun() throws Exception {
         // A subagent wait inside the call links its children to the run it finds bound (JCLAW-1564).
