@@ -829,7 +829,8 @@ Three knobs for the [Tasks](/guide#tasks) subsystem:
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------|
 | `retentionDays`           | 30      | Days a terminal task (`COMPLETED` / `FAILED` / `CANCELLED` / `LOST`) stays in the DB before `TaskCleanupJob` hard-deletes it along with its run history and the subagent runs its fires started. `0` disables auto-cleanup entirely. Active tasks (`PENDING` / `ACTIVE` / `RUNNING`) are never touched. Max: 3650 (≈10 years). |
 | `defaultTimezone`         | *(unset)* | IANA timezone applied to `CRON` / `SCHEDULED` tasks that do not specify their own. Unset, tasks follow the [Timezone](#settings-timezone) setting (`app.timezone`); set it only to run tasks in a different zone. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
-| `fireMaxDurationSeconds`  | 600     | Longest one task run may take. When it elapses JClaw cancels the run at its next safe point, so a wedged run cannot go on forever. `0` turns the limit off. |
+| `fireIdleSeconds`         | 600     | How long one task run may go without doing anything. Work done by the subagents it is waiting on counts. When it elapses JClaw cancels the run, so a stuck run cannot go on forever. `0` turns the limit off. |
+| `fireMaxDurationSeconds`  | 1800    | Longest one task run may take, however busy. When it elapses JClaw cancels the run. `0` turns the limit off. |
 
 The retention TTL is also shown next to the [Tasks](/tasks) page title, so auto-deletes do not surprise you.
 

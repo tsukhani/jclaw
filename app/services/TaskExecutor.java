@@ -114,12 +114,12 @@ public final class TaskExecutor {
         // The finally below clears the slot on every terminal outcome —
         // normal completion, failure (rethrown), or cancel.
         TaskRunRegistry.register(run.id);
-        // JCLAW-803: bound this fire's wall-clock so a wedged agent loop can't
-        // run forever (db-scheduler can't see a hung-but-heartbeating fire).
-        // On deadline the watchdog flips the same cooperative-cancel flag the
+        // JCLAW-803: bound this fire so a wedged agent loop can't run forever
+        // (db-scheduler can't see a hung-but-heartbeating fire). On an idle limit
+        // or the ceiling the watchdog flips the same cooperative-cancel flag the
         // operator-cancel path uses; disarmed in the finally on any exit.
         final var deadline = TaskFireDeadline.arm(run.id);
-        try {
+        try (var _ = SubagentRegistry.stopWhenTaskRunCancelled(run.id)) {
             // JCLAW-21: lifecycle audit — TASK_STARTED bookmark. Operator
             // monitoring (JCLAW-22) reads these to render "running" pills
             // without depending on the heartbeat to catch up. Sibling
@@ -372,8 +372,9 @@ public final class TaskExecutor {
             // onCancelled only acts on a still-RUNNING row) so the run is terminal
             // even if the endpoint's write lagged. Do NOT rethrow — a clean
             // cancellation, not a failure for JClawFailureHandler to classify.
-            boolean timedOut = TaskFireDeadline.wasTimedOut(sink.taskRunId());
-            sink.onCancelled(timedOut ? "Cancelled: exceeded max run duration" : "Cancelled by operator");
+            var timeoutNote = TaskFireDeadline.timeoutNote(sink.taskRunId());
+            boolean timedOut = timeoutNote != null;
+            sink.onCancelled(timeoutNote != null ? timeoutNote : "Cancelled by operator");
             // The fire ended without completing; return the task from RUNNING to
             // its alive state (ACTIVE for recurring, PENDING for one-shot) so it
             // isn't stranded showing RUNNING. Only this fire was canceled — the
@@ -381,7 +382,7 @@ public final class TaskExecutor {
             leaveRunning(task.id, Task.initialStatusFor(task.type));
             EventLogger.info("task", null, null,
                     "TaskExecutor.runTask: task run %d %s".formatted(sink.taskRunId(),
-                            timedOut ? "cancelled after exceeding its max run duration"
+                            timedOut ? "cancelled by its deadline: " + timeoutNote
                                     : "cancelled by operator"));
             return false;
         } catch (RuntimeException e) {

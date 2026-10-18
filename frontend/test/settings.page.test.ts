@@ -485,12 +485,13 @@ describe('Settings page — rows for settings moved out of application.conf', ()
     expect(posted).toEqual({ key: 'ocr.pdf.strategy', value: 'ocr_only' })
   })
 
-  it('shows the task time limit on the Tasks panel', async () => {
+  it('shows the task time limits on the Tasks panel', async () => {
     stubConfig(() => {})
     registerEndpoint('/api/timezones', () => ({ timezones: ['UTC'], default: 'UTC', appDefault: 'UTC' }))
     const component = await mountSettingsSection('tasks')
 
-    expect(component.find('[data-testid="config-field-tasks.fireMaxDurationSeconds"]').text()).toContain('600')
+    expect(component.find('[data-testid="config-field-tasks.fireIdleSeconds"]').text()).toContain('600')
+    expect(component.find('[data-testid="config-field-tasks.fireMaxDurationSeconds"]').text()).toContain('1800')
   })
 
   it('pins the primary provider from the providers the registry lists', async () => {

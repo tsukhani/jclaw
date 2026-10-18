@@ -1,11 +1,13 @@
 package services;
 
+import agents.TurnCancellation;
 import org.jspecify.annotations.Nullable;
 
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * JCLAW-414: in-memory registry of in-flight {@link models.TaskRun}s and their
@@ -34,9 +36,11 @@ public final class TaskRunRegistry {
 
     private TaskRunRegistry() {}
 
-    /** taskRunId → cooperative-cancellation flag. Present iff the run is
-     *  currently executing on this JVM. */
-    private static final Map<Long, AtomicBoolean> ACTIVE = new ConcurrentHashMap<>();
+    /** A fire's cooperative-cancellation flag and when it last recorded activity (JCLAW-1567). */
+    private record Entry(AtomicBoolean cancel, AtomicLong lastActivityNanos) {}
+
+    /** taskRunId → its entry. Present iff the run is currently executing on this JVM. */
+    private static final Map<Long, Entry> ACTIVE = new ConcurrentHashMap<>();
 
     /**
      * JCLAW-803: Task ids with a fire live on this JVM. Distinct from
@@ -55,7 +59,7 @@ public final class TaskRunRegistry {
      *  entry is in the map. No-op on a null id. */
     public static void register(Long taskRunId) {
         if (taskRunId == null) return;
-        ACTIVE.put(taskRunId, new AtomicBoolean(false));
+        ACTIVE.put(taskRunId, new Entry(new AtomicBoolean(false), new AtomicLong(System.nanoTime())));
     }
 
     /** Remove the entry for {@code taskRunId}. Called from a {@code finally}
@@ -101,8 +105,27 @@ public final class TaskRunRegistry {
      */
     public static boolean isCancelled(@Nullable Long taskRunId) {
         if (taskRunId == null) return false;
-        var flag = ACTIVE.get(taskRunId);
-        return flag != null && flag.get();
+        var entry = ACTIVE.get(taskRunId);
+        return entry != null && entry.cancel().get();
+    }
+
+    /** Record that the fire made progress, for its idle limit ({@link TaskFireDeadline}). */
+    public static void touch(@Nullable Long taskRunId) {
+        if (taskRunId == null) return;
+        var entry = ACTIVE.get(taskRunId);
+        if (entry != null) entry.lastActivityNanos().set(System.nanoTime());
+    }
+
+    /** Nanoseconds since the fire last recorded activity, or {@code -1} once it has ended. */
+    public static long nanosSinceActivity(Long taskRunId) {
+        var entry = ACTIVE.get(taskRunId);
+        return entry == null ? -1L : System.nanoTime() - entry.lastActivityNanos().get();
+    }
+
+    /** The fire's cancel flag, for registering what a cancel must also stop; null once it has ended. */
+    public static @Nullable AtomicBoolean cancelFlag(Long taskRunId) {
+        var entry = ACTIVE.get(taskRunId);
+        return entry == null ? null : entry.cancel();
     }
 
     /**
@@ -110,15 +133,17 @@ public final class TaskRunRegistry {
      * loop bails at its next safe checkpoint. Returns {@code true} when an
      * entry existed (the run is in-flight on this JVM and will observe the
      * flag), {@code false} when none is registered (already finished, or never
-     * ran here — the caller still marks the row CANCELED in the DB). Does NOT
-     * write the DB or touch any thread — terminal-status persistence is the
-     * caller's job (see {@code ApiTasksController.cancelRun}).
+     * ran here — the caller still marks the row CANCELED in the DB). Never
+     * touches the fire's thread, and leaves terminal-status persistence to the
+     * caller (see {@code ApiTasksController.cancelRun}); what the fire registered
+     * against the flag, such as stopping its subagents, runs on threads of its own.
      */
     public static boolean requestCancel(Long taskRunId) {
         if (taskRunId == null) return false;
-        var flag = ACTIVE.get(taskRunId);
-        if (flag == null) return false;
-        flag.set(true);
+        var entry = ACTIVE.get(taskRunId);
+        if (entry == null) return false;
+        // Through TurnCancellation, so what the fire registered runs too: stopping its subagents.
+        TurnCancellation.cancel(entry.cancel());
         return true;
     }
 

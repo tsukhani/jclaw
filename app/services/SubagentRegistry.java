@@ -1,5 +1,6 @@
 package services;
 
+import agents.TurnCancellation;
 import com.google.errorprone.annotations.MustBeClosed;
 import jakarta.persistence.Query;
 import mcp.McpAllowlist;
@@ -531,6 +532,25 @@ public final class SubagentRegistry {
             if (row[1] == SubagentRun.Status.RUNNING) kill(runId, "The task run that started it was deleted");
             deleteRun(runId);
         }
+    }
+
+    /**
+     * Until closed, cancelling task run {@code taskRunId} kills every run it started that is still in
+     * flight. A fire waiting on a subagent otherwise reaches its next checkpoint only once the subagent
+     * has finished, and then discards the result (JCLAW-1567).
+     */
+    @MustBeClosed
+    public static TurnCancellation.Registration stopWhenTaskRunCancelled(Long taskRunId) {
+        var flag = TaskRunRegistry.cancelFlag(taskRunId);
+        if (flag == null) return TurnCancellation.Registration.none();
+        return TurnCancellation.register(flag, () -> {
+            List<Long> running = Tx.run(() -> JPA.em().createQuery("SELECT sr.id FROM SubagentRun sr"
+                            + " WHERE sr.parentTaskRun.id = :taskRun AND sr.status = :running", Long.class)
+                    .setParameter("taskRun", taskRunId)
+                    .setParameter("running", SubagentRun.Status.RUNNING)
+                    .getResultList());
+            running.forEach(runId -> kill(runId, "The task run that started it was cancelled"));
+        });
     }
 
     /**

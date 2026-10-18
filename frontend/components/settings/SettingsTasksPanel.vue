@@ -74,8 +74,9 @@ async function saveTasksField(configKey: string, value: string) {
       (<span class="font-mono">PENDING</span> / <span class="font-mono">ACTIVE</span> /
       <span class="font-mono">RUNNING</span>) are never touched. Set to
       <span class="font-mono">0</span> to disable auto-cleanup entirely
-      (tasks retained forever). <span class="font-mono">fireMaxDurationSeconds</span>
-      bounds how long a single run may take.
+      (tasks retained forever). <span class="font-mono">fireIdleSeconds</span>
+      cuts a run that has done nothing for that long, and
+      <span class="font-mono">fireMaxDurationSeconds</span> bounds how long a single run may take.
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
@@ -196,13 +197,22 @@ async function saveTasksField(configKey: string, value: string) {
           </template>
         </div>
         <SettingsConfigField
-          config-key="tasks.fireMaxDurationSeconds"
-          label="fireMaxDurationSeconds"
+          config-key="tasks.fireIdleSeconds"
+          label="fireIdleSeconds"
           kind="number"
           fallback="600"
           :min="0"
           label-width="w-48"
-          tip="Longest one task run may take, in seconds. When it elapses the run is cancelled at its next safe point, so a wedged run cannot go on for ever. 0 turns the limit off."
+          tip="Seconds a task run may go without activity before it is cancelled. Work done by the subagents it is waiting on counts as activity. 0 turns the limit off."
+        />
+        <SettingsConfigField
+          config-key="tasks.fireMaxDurationSeconds"
+          label="fireMaxDurationSeconds"
+          kind="number"
+          fallback="1800"
+          :min="0"
+          label-width="w-48"
+          tip="Longest one task run may take, in seconds, however busy. When it elapses the run is cancelled, with the subagents it is waiting on. 0 turns the limit off."
         />
       </div>
       <ApiErrorAlert

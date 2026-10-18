@@ -34,7 +34,7 @@ public final class TurnCancellation {
         }
 
         /** A registration with nothing behind it, for a scope with no turn flag. */
-        static Registration none() {
+        public static Registration none() {
             return new Registration(null, () -> {});
         }
 

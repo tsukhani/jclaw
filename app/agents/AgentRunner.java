@@ -255,6 +255,8 @@ public class AgentRunner {
      * H2-corruption post-mortem.
      */
     public static void checkTaskRunCancel(@Nullable Long taskRunId) {
+        // Each checkpoint is a round or a tool batch done: activity, for the fire's idle limit (JCLAW-1567).
+        TaskRunRegistry.touch(taskRunId);
         if (TaskRunRegistry.isCancelled(taskRunId)) {
             throw new RunCancelledException(taskRunId, "Task");
         }
