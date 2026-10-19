@@ -17,6 +17,7 @@ import java.io.RandomAccessFile;
 import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileTime;
 import java.time.Clock;
 import java.time.Duration;
@@ -25,6 +26,7 @@ import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -49,7 +51,7 @@ class BackgroundProcessesTest extends UnitTest {
     @AfterEach
     void teardown() {
         sleepers("sleep 4751", "sleep 4752", "sleep 4753", "sleep 4754", "sleep 4755", "sleep 4756", "sleep 4757",
-                "sleep 4758", "sleep 4759", "sleep 4760", "sleep 4761")
+                "sleep 4758", "sleep 4759", "sleep 4760", "sleep 4761", "sleep 4762")
                 .forEach(ProcessHandle::destroyForcibly);
         ConfigService.delete(BackgroundProcesses.LIFETIME_KEY);
         ShellSandboxSync.release();
@@ -145,6 +147,25 @@ class BackgroundProcessesTest extends UnitTest {
         assertFalse(Files.exists(stale), "a stale file nothing holds is deleted");
         assertTrue(Files.exists(fresh), "a recent one is kept");
         assertTrue(Files.exists(agentsOwn), "a file exec did not name is never touched");
+    }
+
+    @Test
+    void aFileSwappedInAfterTheHolderCheckIsNeverEmptied() throws Exception {
+        execIn(1L, "sleep 4762 & echo started");
+        var held = Path.of(awaitListed("sleep 4762").outputFile());
+        // The sweep has already found this name held; then a file exec never created takes it, with one link.
+        var victim = Files.createTempFile(AgentService.workspacePath(AGENT), "exec-swapped", ".bin");
+        try (var raf = new RandomAccessFile(victim.toFile(), "rw")) {
+            raf.setLength(17L * 1024 * 1024);
+        }
+        Files.move(victim, held, StandardCopyOption.REPLACE_EXISTING);
+        var bound = BackgroundProcesses.class.getDeclaredMethod("boundOutputFiles", Path.class, Set.class, Instant.class);
+        bound.setAccessible(true);
+
+        bound.invoke(null, BackgroundProcesses.workspaceOf(AGENT), Set.of(held.getFileName()),
+                Instant.now().minus(Duration.ofDays(1)));
+
+        assertEquals(17L * 1024 * 1024, Files.size(held), "only a file exec recorded is emptied");
     }
 
     @Test

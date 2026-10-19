@@ -323,15 +323,23 @@ public final class BackgroundProcesses {
     }
 
     /**
-     * exec makes its files with {@code CREATE_NEW}, so each has one link; emptying a file with more would empty
-     * whatever else the extra link names.
+     * The file keys of the recorded output files, each read together with the {@code device:inode} it must match,
+     * so a name that now holds another file contributes nothing.
      */
-    private static boolean singlyLinked(Path file) {
-        try {
-            return ((Number) Files.getAttribute(file, "unix:nlink", LinkOption.NOFOLLOW_LINKS)).intValue() == 1;
-        } catch (IOException | UnsupportedOperationException | IllegalArgumentException e) {
-            return false;
+    private static Set<Object> recordedKeys() {
+        var keys = new HashSet<Object>();
+        synchronized (RECORDED) {
+            loadRecord();
+            for (var e : RECORDED.entrySet()) {
+                try {
+                    var attrs = Files.readAttributes(e.getValue(), "unix:dev,ino,fileKey", LinkOption.NOFOLLOW_LINKS);
+                    if (e.getKey().equals(attrs.get("dev") + ":" + attrs.get("ino"))) keys.add(attrs.get("fileKey"));
+                } catch (IOException | UnsupportedOperationException | IllegalArgumentException _) {
+                    // Gone, or no unix view here: nothing of it can be emptied.
+                }
+            }
         }
+        return keys;
     }
 
     /** Every process but this JVM holding one of the output files in {@code workspace}. */
@@ -499,11 +507,13 @@ public final class BackgroundProcesses {
 
     /**
      * Empties held output files past the cap and deletes unheld ones unwritten since {@code cutoff}. Works
-     * relative to the folder's descriptor and never follows a link, so a link planted in the folder leads
-     * nowhere: the sweep runs unconfined.
+     * relative to the folder's descriptor, never follows a link, and empties only a file exec recorded, as
+     * identified through that descriptor, so nothing planted or swapped into the folder is emptied: the sweep
+     * runs unconfined.
      */
     private static void boundOutputFiles(Path workspace, Set<Path> held, Instant cutoff) {
         if (!Files.isDirectory(workspace.resolve(OUTPUT_DIR), LinkOption.NOFOLLOW_LINKS)) return;
+        var recorded = recordedKeys();
         try (var parent = Files.newDirectoryStream(workspace)) {
             if (!(parent instanceof SecureDirectoryStream<Path> secureParent)) return;
             try (var entries = secureParent.newDirectoryStream(Path.of(OUTPUT_DIR), LinkOption.NOFOLLOW_LINKS)) {
@@ -514,7 +524,8 @@ public final class BackgroundProcesses {
                             .readAttributes();
                     if (!attrs.isRegularFile()) continue;
                     if (held.contains(name)) {
-                        if (attrs.size() > OUTPUT_FILE_CAP_BYTES && singlyLinked(workspace.resolve(OUTPUT_DIR).resolve(name))) {
+                        // Between this read and the open, only an inode the agent can already write can be swapped in (JCLAW-1579).
+                        if (attrs.size() > OUTPUT_FILE_CAP_BYTES && recorded.contains(attrs.fileKey())) {
                             try (var channel = entries.newByteChannel(name,
                                     Set.of(StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS))) {
                                 channel.truncate(0);
