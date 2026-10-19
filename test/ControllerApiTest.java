@@ -44,7 +44,7 @@ class ControllerApiTest extends FunctionalTest {
     /**
      * Create an agent via the API and return its id as a String.
      * The "main" name is reserved by the controller, so callers that need the
-     * main agent must use {@link #createMainAgent()}.
+     * main agent use {@link #createTestAgent()}, which stands in for it.
      */
     private String createAgent(String name) {
         var body = """

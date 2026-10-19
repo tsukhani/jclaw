@@ -32,7 +32,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Exercises {@link AgentRunner#executeToolsParallel}'s scheduling model:
+ * Exercises {@link agents.ParallelToolExecutor#executeToolsParallel}'s scheduling model:
  * calls to different tools run on separate virtual threads (parallel),
  * while calls to the SAME tool run sequentially in declared order on one
  * thread (JCLAW-80 — same-tool calls share backend state so concurrent

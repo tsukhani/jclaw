@@ -22,7 +22,7 @@ import java.util.function.Supplier;
  * {@code setAppForTest} seam (exposed publicly through
  * {@code TelegramPollingRunnerTestHooks}).
  *
- * <p>All five touchpoints {@link TelegramPollingRunner} uses are
+ * <p>All five touchpoints {@link channels.TelegramPollingRunner} uses are
  * overridden to be pure in-memory operations:
  * <ul>
  *   <li>{@link #registerBot} — record token, no network call.</li>

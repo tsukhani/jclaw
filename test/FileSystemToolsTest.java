@@ -11,7 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Focused regression coverage for {@link FileSystemTools#editFile}'s CRLF→LF
+ * Focused regression coverage for {@link tools.FsTextEditor#editFile}'s CRLF→LF
  * normalization fallback. The defect (JCLAW-399): a literal edit that only
  * matched after normalizing the WHOLE buffer used to rewrite every CRLF in the
  * file to LF as a side effect. The fix splices newText into the ORIGINAL buffer

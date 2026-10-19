@@ -29,7 +29,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   <li>The tool calls the configured ImageGenerationService and returns the produced bytes on the
  *       {@link agents.ToolRegistry.ToolResult} (happy path), or a typed text error when generation is
  *       unconfigured (no image, no throw).</li>
- *   <li>{@link ConversationSink#appendAssistantMessage(String, String, GeneratedAttachment)} inlines a
+ *   <li>{@link ConversationSink#appendAssistantMessage(String, String, List)} inlines a
  *       produced image onto the assistant turn as a {@code generated=true} IMAGE attachment — the
  *       integration the tool-call commit path relies on.</li>
  * </ul>
