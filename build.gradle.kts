@@ -360,7 +360,7 @@ dependencies {
     // load-bearing: jqwik 1.10 asks for platform 1.14.4, the fork ships 6.1.3, and
     // Gradle's deps precede framework/lib on the classpath — without these the 1.x
     // commons would shadow 6.1.3 and break every existing test.
-    implementation("net.jqwik:jqwik-api:1.10.1") {
+    implementation("net.jqwik:jqwik-api:1.10.2") {
         exclude(group = "org.junit.platform")
     }
     runtimeOnly("net.jqwik:jqwik-engine:1.10.1") {
