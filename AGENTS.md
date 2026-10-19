@@ -21,6 +21,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 ## Where things are
 
 - Rules with their reasons: the sections below. Settled verdicts before re-proposing work: `docs/spikes/` — gitignored, so it holds only what this clone wrote; earlier verdicts are in git history (`git log -- docs/spikes`; the last tracked set is `git show f93376c5^:docs/spikes/`).
+- Every kind of documentation, comments and Javadoc included, is cataloged in `docs/README.md`: what each must agree with, how a docs sweep treats it, and the gates an edit inside a source file runs.
 - Config validation lives in `ConfigService.setWithSideEffects` (a non-null return is the 403), and `deleteWithSideEffects` refuses the same way for a decision selection the router's classifier needs; `POST /api/config` writes any non-reserved key, so "not in the UI" is no reason to skip it. Never seed a key another selection already implies.
 - The fixed-name agents `main`, `__loadtest__`, `__loadtest_tools__` and `__evaltest__` are provisioned by code — never seed or delete them in tests.
 - The AFK factory (`.sandcastle/README.md`) works Jira stories labelled `afk`, or in an epic labelled `afk`, unattended and returns each as a local `agent/<KEY>` branch for review; a story or epic labelled `afk-merge` it also merges, signed, into the checkout's `main` and moves to Done, never pushing. Everything else it writes lives in `~/.jclaw-factory`, never in the checkout.
