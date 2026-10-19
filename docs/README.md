@@ -76,13 +76,15 @@ The full suite still runs in `pre-push` before anything ships.
 
 ## Checking Javadoc references
 
-javac's doclint reports every `{@link}`, `@see` and `@throws` that no longer resolves, across all of `app/`, in a few seconds. Run javac directly into a scratch directory. Never point `compileJava` at another output directory to do this: Gradle then deletes that task's previous outputs, which empties `build/classes/java/main`, and `ArchitectureTest` reads that directory.
+`compileJava` runs javac's doclint (`-Xdoclint:reference/private` in `build.gradle.kts`), so a `{@link}`, `@see`, `@param` or `@throws` in `app/` that names something that moved, or never existed, fails the build. Link a class the file does not import by its fully qualified name.
 
-1. Print the main source set's classpath with an init script kept outside the repo:
+The build does not check `test/`. To check it, run javac directly into a scratch directory. Never point a compile task at another output directory to do this: Gradle then deletes that task's previous outputs, which for `compileJava` empties `build/classes/java/main`, the directory `ArchitectureTest` reads.
+
+1. Print the test source set's classpath with an init script kept outside the repo:
    ```kotlin
    allprojects {
        tasks.register("printDoclintInputs") {
-           val cp = project.extensions.getByType<SourceSetContainer>()["main"].compileClasspath
+           val cp = project.extensions.getByType<SourceSetContainer>()["test"].compileClasspath
            doLast { println("CLASSPATH=" + cp.asPath) }
        }
    }
@@ -92,7 +94,7 @@ javac's doclint reports every `{@link}`, `@see` and `@throws` that no longer res
    ```
 2. Compile with only doclint's reference checks on:
    ```bash
-   git ls-files 'app/*.java' > <scratch>/sources.txt
+   git ls-files 'test/*.java' > <scratch>/sources.txt
    javac -proc:none -encoding UTF-8 -Xdoclint:reference/private -Xmaxerrs 10000 -nowarn \
      -d <scratch>/out -cp "$(cat <scratch>/cp.txt)" @<scratch>/sources.txt
    ```

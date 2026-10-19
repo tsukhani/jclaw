@@ -68,7 +68,7 @@ Fan the work out: one read-only auditor per cluster (a prose cluster, or one top
 *2b — Documentation in source and config files (fix + gate).* Three passes, cheapest first:
 
 - **Mechanical, whole tree, every run.**
-  - Run the doclint check in `docs/README.md` § Checking Javadoc references: every `reference not found` is a dangling `{@link}`, `@see` or `@throws`.
+  - Javadoc references in `app/` need no pass: `compileJava` runs doclint, so a tree that compiles has none. For `test/`, run the check in `docs/README.md` § Checking Javadoc references: every `reference not found` is a dangling `{@link}`, `@see` or `@throws`.
   - Check the names comments cite outside doclint's reach — `Class.member`, `Class#member` and backticked identifiers, paths, config keys, `jclaw.sh` subcommands — in `//` comments, `{@code}` spans, and TypeScript, Python and script comments. Extract them with a script and confirm each exists with `git grep`, skipping JDK and library names.
 - **Change-driven, since the comments baseline.** For each changed code hunk, read the documentation that describes it:
   - the Javadoc of every changed declaration;
@@ -108,7 +108,7 @@ Present a table (file · drift item · `current → correct` · handling · FIX/
 
 15. Re-verify that every command, script, subcommand, and file path the **edited** docs now reference actually exists (`./jclaw.sh` subcommands, `pnpm` scripts in `package.json`, routes/controllers, on-disk paths).
 16. Confirm internal markdown and `/guide#` links in edited files resolve to real targets. Prove the link checker can fail first: feed it a copy with one bad anchor.
-17. For every source or config file edited, run its gate from `docs/README.md` § Gates. Check first that no test run is in flight (`jcmd -l | grep -E "playAutotest|FirePhoque"`): never compile under one. Re-run the doclint check: the fixed references are gone and no new ones appeared.
+17. For every source or config file edited, run its gate from `docs/README.md` § Gates. Check first that no test run is in flight (`jcmd -l | grep -E "playAutotest|FirePhoque"`): never compile under one. The Java gate's `compileJava` also runs doclint over `app/`; after editing Javadoc in `test/`, re-run the check in `docs/README.md` and confirm the fixed references are gone and no new ones appeared.
 18. For approved shipped-text edits, run the tests found in step 14.
 
 **Phase 6 — Commit locally & report (stop here; never push)**
@@ -149,6 +149,6 @@ Present a table (file · drift item · `current → correct` · handling · FIX/
 - **In `docs/architecture/*.md`, correct wrong facts only** — never expand, restructure or add coverage, and never edit a plan document.
 - **Shipped text is behaviour**: edit UI copy, CLI help, tool descriptions, API summaries, prompts and local skills only with the user's per-item approval, and run the tests that pin them.
 - **Never touch** what `docs/README.md` marks **skip**: the seven upstream skills, `workspace/`, `.claude/commands/` and `.claude/workflows/`, directives in comment syntax.
-- **Never redirect `compileJava`'s output** to run a check: Gradle deletes that task's previous outputs and empties `build/classes/java/main`, which `ArchitectureTest` reads. Use the direct-javac doclint recipe.
+- **Never redirect a compile task's output** to run a check: Gradle deletes that task's previous outputs, and for `compileJava` that empties `build/classes/java/main`, which `ArchitectureTest` reads. Use the direct-javac recipe in `docs/README.md`.
 - **Verify before asserting**: confirm a command, script, endpoint, or path exists in the code before writing it into a doc. Never copy a claim from one doc into another without checking the codebase — and treat CLAUDE.md as fallible, not gospel.
 - Don't auto-author entire new pages for coverage gaps without confirming scope first.

@@ -47,6 +47,12 @@ tasks.named<JavaCompile>("compileTestJava") {
     }
 }
 
+// Every Javadoc reference in app/ must resolve: a {@link}, @see, @param or @throws naming a
+// member that moved, or never existed, fails the compile rather than misleading a reader.
+tasks.named<JavaCompile>("compileJava") {
+    options.compilerArgs.add("-Xdoclint:reference/private")
+}
+
 // Import hygiene enforcement for production Java (JCLAW code-audit follow-up). Two
 // steps: removeUnusedImports() strips imports whose name is never referenced (it
 // parses source via google-java-format — verified Java-25-safe: handles unnamed
