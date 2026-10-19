@@ -2308,7 +2308,8 @@ describe('Settings page — provider radios put the saved choice back when a sav
     await component.find(choose).setValue(true)
     await vi.waitFor(() => expect(component.find('[data-testid="api-error"]').exists()).toBe(true))
     expect(component.find('[data-testid="api-error"]').text()).toContain('/api/config')
-    expect((component.find(saved).element as HTMLInputElement).checked).toBe(true)
+    // The banner shows when the save fails; the diarization and caption radios go back only after the refresh that follows it.
+    await vi.waitFor(() => expect((component.find(saved).element as HTMLInputElement).checked).toBe(true))
     expect((component.find(choose).element as HTMLInputElement).checked).toBe(false)
   }
 
