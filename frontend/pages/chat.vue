@@ -1364,7 +1364,7 @@ function exportConversation() {
                     thinkingLock.locked
                       ? `bg-emerald-700/30 text-emerald-800 dark:text-emerald-300 ${thinkingPillInert ? 'cursor-not-allowed' : 'cursor-default'}`
                       : (thinkingActive
-                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25'
+                        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-500/25 hover:text-emerald-800 dark:hover:text-emerald-400'
                         : 'border border-border text-fg-muted hover:text-fg-strong hover:bg-muted'),
                   ]"
                   :aria-disabled="thinkingPillInert"
@@ -1472,7 +1472,7 @@ function exportConversation() {
                 <button
                   v-if="streaming"
                   type="button"
-                  class="p-1.5 text-red-700 dark:text-red-400 hover:text-red-400 transition-colors"
+                  class="p-1.5 text-red-700 dark:text-red-400 hover:text-red-800 dark:hover:text-red-400 transition-colors"
                   title="Stop generating"
                   @click="stopStreaming"
                 >

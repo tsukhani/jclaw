@@ -653,9 +653,9 @@ const lastOp = computed(() => {
         <div
           v-for="b in status?.backups ?? []"
           :key="b.id"
-          class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3 text-xs"
+          class="px-4 py-2 flex flex-wrap items-center gap-3 text-xs"
         >
-          <span class="font-mono text-fg-primary truncate min-w-0 max-sm:basis-full">{{ b.id }}</span>
+          <span class="font-mono text-fg-primary truncate min-w-0 max-sm:basis-full sm:shrink-0">{{ b.id }}</span>
           <span
             v-if="b.unencrypted"
             class="shrink-0 px-1.5 py-0.5 rounded-sm bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300"

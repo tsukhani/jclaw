@@ -118,7 +118,7 @@ function onCloseAutoFocus(event: Event) {
       <button
         type="button"
         class="group inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-base text-fg-strong
-               hover:bg-muted focus:outline-hidden focus:bg-muted transition-colors max-w-[420px]"
+               hover:bg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring focus:bg-muted transition-colors max-w-[420px]"
       >
         <span
           aria-hidden="true"

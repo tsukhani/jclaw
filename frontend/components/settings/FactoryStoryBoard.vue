@@ -61,13 +61,13 @@ const collapsed = ref<Record<string, boolean>>({})
         >
           <button
             type="button"
-            class="w-full text-left px-4 py-2.5 flex max-sm:flex-wrap items-start gap-3 hover:bg-muted/40"
+            class="w-full text-left px-4 py-2.5 flex flex-wrap items-start gap-3 hover:bg-muted/40"
             :aria-pressed="selected === s.key"
             :data-testid="`factory-story-${s.key}`"
             @click="emit('select', s.key)"
           >
             <span class="text-sm font-mono text-fg-strong w-28 shrink-0">{{ s.key }}</span>
-            <span class="text-sm text-fg-strong flex-1 min-w-0">{{ s.summary }}</span>
+            <span class="text-sm text-fg-strong flex-1 min-w-48">{{ s.summary }}</span>
             <span
               v-if="s.autoMerge"
               class="text-xs border px-1 text-sky-800 dark:text-sky-400 border-sky-400/30"

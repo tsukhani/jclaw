@@ -1283,11 +1283,11 @@ function totalSkillCount(agentId: number) {
                     v-for="skill in sortedAgentSkillsMap[agent.id]"
                     :key="skill.name"
                     draggable="true"
-                    class="flex items-center justify-between px-2 py-1 bg-muted cursor-grab active:cursor-grabbing select-none group/skill"
+                    class="flex max-sm:flex-wrap items-center justify-between px-2 py-1 bg-muted cursor-grab active:cursor-grabbing select-none group/skill"
                     @dragstart="onAgentSkillDragStart($event, skill, agent.id)"
                     @dragend="onDragEnd"
                   >
-                    <div class="flex items-center gap-2 min-w-0 flex-1">
+                    <div class="flex items-center gap-2 min-w-0 max-sm:min-w-36 flex-1">
                       <span
                         v-if="skill.icon"
                         aria-hidden="true"
@@ -1395,7 +1395,7 @@ function totalSkillCount(agentId: number) {
         </button>
         <button
           v-if="!isStructuralSkill(editing)"
-          class="p-1.5 text-red-700/70 dark:text-red-400/70 hover:text-red-400 transition-colors"
+          class="p-1.5 text-red-700/70 dark:text-red-400/70 hover:text-red-800 dark:hover:text-red-400 transition-colors"
           title="Delete skill"
           @click="editingAgentId != null ? deleteAgentSkill(editingAgentId, editing) : deleteSkill(editing)"
         >

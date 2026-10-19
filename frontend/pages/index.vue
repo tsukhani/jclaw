@@ -894,22 +894,22 @@ onBeforeUnmount(() => {
             v-if="logs?.events?.length"
           >
             <!-- Column headers — same flex template as data rows so the columns
-               stay aligned to the same shrink-0 widths. Hidden under sm, where
+               stay aligned to the same shrink-0 widths. Hidden under lg, where
                the row wraps and the columns no longer line up. -->
-            <div class="px-4 py-2 hidden sm:flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
+            <div class="px-4 py-2 hidden lg:flex items-center gap-3 text-[10px] uppercase tracking-wider font-medium text-fg-muted border-b border-border bg-muted/30">
               <span class="shrink-0 w-10">Level</span>
-              <span class="shrink-0 w-28 sm:w-44">Category</span>
+              <span class="shrink-0 w-28 lg:w-44">Category</span>
               <span class="shrink-0 w-16">Agent</span>
               <span class="flex-1 min-w-0">Message</span>
               <span class="ml-auto shrink-0 w-48 text-right">Timestamp</span>
             </div>
             <div class="divide-y divide-border">
-              <!-- Wraps under sm: the four fixed columns total 472px, which at a
-                   320px viewport left the message span zero-width (WCAG 1.4.10). -->
+              <!-- Wraps under lg: the four fixed columns total 472px, which left the message
+                   span zero-width at 320px and 38px at 640px (WCAG 1.4.10). -->
               <div
                 v-for="event in logs.events"
                 :key="event.id"
-                class="px-4 py-2.5 flex flex-wrap sm:flex-nowrap items-start gap-3"
+                class="px-4 py-2.5 flex flex-wrap lg:flex-nowrap items-start gap-3"
               >
                 <span
                   :class="{
@@ -921,13 +921,13 @@ onBeforeUnmount(() => {
                 >{{ event.level }}</span>
                 <span
                   :title="event.category"
-                  class="text-xs text-fg-muted shrink-0 w-28 sm:w-44 font-mono truncate mt-0.5"
+                  class="text-xs text-fg-muted shrink-0 w-28 lg:w-44 font-mono truncate mt-0.5"
                 >{{ event.category }}</span>
                 <span
                   :title="event.agentId || ''"
                   class="text-xs text-fg-muted shrink-0 w-16 font-mono truncate mt-0.5"
                 >{{ event.agentId || '—' }}</span>
-                <span class="text-sm text-fg-primary basis-full sm:basis-auto min-w-0 truncate">{{ event.message }}</span>
+                <span class="text-sm text-fg-primary basis-full lg:basis-auto min-w-0 truncate">{{ event.message }}</span>
                 <span class="text-xs text-fg-muted ml-auto shrink-0 w-48 text-right font-mono mt-0.5">{{ formatActivityTimestamp(event.timestamp) }}</span>
               </div>
             </div>
@@ -1039,7 +1039,7 @@ onBeforeUnmount(() => {
               class="px-4 py-2.5 flex flex-wrap sm:flex-nowrap items-center gap-3"
             >
               <span
-                class="shrink-0 px-1.5 py-0.5 text-[10px] uppercase tracking-wide border"
+                class="shrink-0 px-1.5 py-0.5 text-xs uppercase tracking-wide border"
                 :class="SUBAGENT_STATUS_BADGE[run.status]"
               >{{ run.status }}</span>
               <button

@@ -367,14 +367,14 @@ function exportConversation() {
             <div
               v-if="msg.role === 'assistant' && msg.content"
               v-structure-viewers="conversation?.agentId ?? null"
-              class="prose-chat bg-muted border border-border px-3 py-2 text-sm text-fg-primary"
+              class="prose-chat bg-muted border border-border px-3 py-2 text-sm text-fg-primary overflow-x-auto"
               data-testid="message-body-rendered"
               v-html="renderMarkdown(msg.content, conversation?.agentId ?? null)"
             />
             <!-- eslint-enable vue/no-v-html -->
             <div
               v-else
-              class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap"
+              class="bg-muted border border-border px-3 py-2 text-sm text-fg-primary whitespace-pre-wrap break-words"
             >
               {{ msg.content || '(tool call)' }}
             </div>

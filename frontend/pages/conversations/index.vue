@@ -465,8 +465,8 @@ const columns: DataTableColumn<Conversation>[] = [
         h('button', {
           'type': 'button',
           'class': starred
-            ? 'shrink-0 text-amber-500 hover:text-amber-400 transition-colors'
-            : 'shrink-0 text-fg-muted hover:text-amber-500 transition-colors',
+            ? 'shrink-0 text-amber-700 dark:text-amber-500 hover:text-amber-800 dark:hover:text-amber-400 transition-colors'
+            : 'shrink-0 text-fg-muted hover:text-amber-700 dark:hover:text-amber-500 transition-colors',
           'title': starred ? 'Unstar' : 'Star',
           'aria-label': starred ? 'Unstar this conversation' : 'Star this conversation',
           'aria-pressed': starred,

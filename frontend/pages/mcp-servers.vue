@@ -658,7 +658,7 @@ function removeHeaderRow(i: number) {
               </td>
               <td class="px-4 py-2.5">
                 <span
-                  class="text-[10px] font-mono px-1.5 py-px rounded-sm border"
+                  class="text-xs font-mono px-1.5 py-px rounded-sm border"
                   :class="statusBadgeClass[server.status]"
                   :title="server.lastError || ''"
                 >{{ server.status }}</span>
@@ -666,7 +666,7 @@ function removeHeaderRow(i: number) {
               <td class="px-4 py-2.5">
                 <span
                   v-if="server.protocolGeneration"
-                  class="text-[10px] font-mono px-1.5 py-px rounded-sm border"
+                  class="text-xs font-mono px-1.5 py-px rounded-sm border"
                   :class="generationPillClass[server.protocolGeneration]"
                   :title="`JClaw last connected with MCP v${server.protocolGeneration} (revision ${server.protocolVersion})`"
                   data-testid="mcp-protocol-version"

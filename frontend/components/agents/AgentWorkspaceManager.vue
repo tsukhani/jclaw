@@ -333,14 +333,14 @@ watch(() => props.agentId, () => {
         <div
           v-for="row in rows"
           :key="row.entry.path"
-          class="flex items-center gap-2 pr-3 py-1 hover:bg-muted/50 transition-colors"
+          class="flex max-sm:flex-wrap items-center gap-2 pr-3 py-1 hover:bg-muted/50 transition-colors"
           :style="{ paddingLeft: `${12 + row.depth * 16}px` }"
           :data-testid="`ws-row-${row.entry.path}`"
         >
           <button
             v-if="row.entry.kind === 'dir'"
             type="button"
-            class="flex items-center gap-1.5 min-w-0 flex-1 text-left text-fg-primary bg-transparent border-0"
+            class="flex items-center gap-1.5 min-w-0 max-sm:min-w-36 flex-1 text-left text-fg-primary bg-transparent border-0"
             :aria-expanded="isShownOpen(row.entry.path)"
             @click="toggle(row.entry.path)"
           >
@@ -362,7 +362,7 @@ watch(() => props.agentId, () => {
           </button>
           <span
             v-else
-            class="flex items-center gap-1.5 min-w-0 flex-1 text-fg-primary"
+            class="flex items-center gap-1.5 min-w-0 max-sm:min-w-36 flex-1 text-fg-primary"
           >
             <span
               class="w-3 shrink-0"

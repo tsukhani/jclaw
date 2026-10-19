@@ -2001,7 +2001,7 @@ function zoneForTaskRender(task: Task): string | undefined {
         class="mb-4 space-y-2"
         data-testid="trace-coding-runs"
       >
-        <h3 class="text-[10px] font-medium uppercase tracking-wider text-fg-muted">
+        <h3 class="text-xs font-medium uppercase tracking-wider text-fg-muted">
           Coding runs
         </h3>
         <CodingRunMonitor
