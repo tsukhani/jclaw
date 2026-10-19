@@ -12,7 +12,7 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 ## Policy
 
 - Never `git push` a commit: `/deploy` is the only push, run from the main checkout on `main`, never a worktree; `/renovate` deleting its merged `renovate/*` branches is the one other sanctioned push. Never `--no-verify`, never force. Stop at the local commit and report the hash.
-- Never run a `./jclaw.sh` subcommand that stops the instance (`restart`, `stop`, `restore`, `repair`, `reset`, `upgrade`, `uninstall`), or kill the server PID, without asking — the instance may be serving live work; a task that mentions a restart is not the approval.
+- Never run a `./jclaw.sh` subcommand that stops the instance (`restart`, `stop`, `restore`, `repair`, `compact`, `reset`, `upgrade`, `uninstall`), or kill the server PID, without asking — the instance may be serving live work; a task that mentions a restart is not the approval.
 - Never hand-edit the seven upstream-imported skills (`skills/{claude-designer,powerpoint-pptx,humanizer,youtube-transcript,git,frontend-design,ffmpeg-video-processing}`) — a re-import overwrites them; the other skills under `skills/` are local and edited normally. `docs/architecture/` is a snapshot nothing regenerates: correct a wrong fact in place, never expand or restructure it.
 - Commit messages and tags are public on the GitHub mirror: no credentials, customer specifics, or unreleased plans.
 - Don't create worktrees or branches unless asked; work on `main`. Other sessions share this checkout: stage only your own hunks, never `git stash -u`. `/deploy` stages everything (`git add -A`), so check `git status` for other sessions' work before running it.
@@ -246,7 +246,7 @@ bin/diagnostics.test.mjs` its parser tests.
 
 It parses, it does not add builds. It runs `./gradlew compileTestJava` — with `--tests`,
 `play autotest` as well — and reads javac's output plus the xunit reports already on
-disk. Parsing the ~671 reports costs milliseconds against a compile measured in seconds
+disk. Parsing the ~727 reports costs milliseconds against a compile measured in seconds
 and a suite measured in minutes.
 
 Three contracts make the output safe to believe. A clean tree prints `[]`, never nothing:
@@ -328,7 +328,7 @@ JClaw uses **OkHttp 5.x** (with `okhttp-sse` for streaming) as its single outbou
 
 - **No h2c upgrade on cleartext** — OkHttp doesn't send `Upgrade: h2c` on plain HTTP, so the LM Studio Express upgrade-event hang the JDK client had to dodge with a routing rule is structurally absent. One client config, no per-provider HTTP-version pin needed.
 - **Virtual-thread-clean** — Okio 3 has no synchronized blocks in its read path (verified by zero `monitorenter` in disassembled `RealBufferedSource.class` plus zero `Thread is pinned` events under `-Djdk.tracePinnedThreads=full` during a 50-stream c=10 sweep). Pointing OkHttp's `Dispatcher` at `Executors.newVirtualThreadPerTaskExecutor()` gives blocking socket reads the same unmount-during-block behavior the JDK client gets via `AsynchronousSocketChannel`.
-- **Ergonomic SSE** — `okhttp-sse`'s `EventSourceListener` model is more direct than parsing `data:` lines off a `BufferedReader` from the JDK client. Streaming chat ships through a single `OkHttpLlmHttpDriver.streamSse` call.
+- **Ergonomic SSE** — `okhttp-sse`'s `EventSourceListener` model is more direct than parsing `data:` lines off a `BufferedReader` from the JDK client. Streaming chat ships through a single `OkHttpLlmHttpDriver.streamSse` call (`streamNdjson` on Ollama's native wire).
 - **Performance parity** — cloud median 0.94× JDK avg across 7 c=10 runs (kimi-k2.5, qwen3.5, gemini-3-flash-preview); local with `OLLAMA_NUM_PARALLEL=8` at 0.85×. AC3 ±5% met at the median.
 
 All HTTP-client provisioning lives in `app/utils/HttpFactories.java` — a single class that exposes named factory methods (`llmStreaming()`, `llmSingleShot()`, `general()`) so call sites declare *intent* rather than reach into named static fields. Internally it shares two connection pools (LLM/64-slot, general/32-slot) and two dispatchers (LLM uses a virtual-thread executor, general uses OkHttp's default cached pool — request volume on the non-LLM path doesn't justify VT scheduling). The Telegram SDK and `WebFetchTool`/`SsrfGuard` build their own clients with stack-specific tuning that doesn't fit any of the three `HttpFactories` tiers (the SDK has its own internal usage; `SsrfGuard` plugs in a per-request DNS allow-list against tool-fetch SSRF).
@@ -574,7 +574,7 @@ method. Anything else fails the build.
 **What carries the annotation.** Every concrete `AutoCloseable` in `app/`: `McpClient`,
 `McpStdioTransport`, `McpStreamableHttpTransport`, `DirectLuceneMessageSearchRepository`'s
 `LeasedSearcher`, `VoiceVad`, `VoiceSession`, `TaskScope`, `BrowserScreenProxy`,
-`LatencyTrace.bind`, `TurnCancellation.register`, the three
+`LatencyTrace.bind`, `TurnCancellation.register`, `SubagentRegistry.waitingOn`, the three
 delegating telemetry leaves `DelegatingSampler`, `DelegatingSpanExporter` and
 `DelegatingMetricExporter` (OTel's `Sampler` and both exporter interfaces extend `Closeable`),
 and `GenAiSpans.Call.makeCurrent`, which hands out a `Scope`. The
@@ -605,7 +605,7 @@ release at the end of a test body never runs once an assertion above it fails. *
 lease** for any new Lucene test whose window fits in one method.
 
 **Suppressions.** `@SuppressWarnings("MustBeClosed")` with a short reason, and rare — eleven
-sites today. `McpConnectionManager.doConnect` and `McpServerService.testConnection` build a
+sites today. `McpConnectionManager.newClient` and `McpServerService.testClient` build a
 transport that a longer-lived owner closes, and
 `PlaywrightBrowserTool.launchSession` is the same shape with the owner written down: the
 `BrowserScreenProxy` it opens becomes a component of the `BrowserSession` record it returns, and

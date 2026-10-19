@@ -19,10 +19,10 @@ Indexes on `(conversation_id)`, `(conversation_id, created_at)`, `(subagent_run_
 Per-message media. `uuid` (unique, client-facing), `original_filename`, `storage_path`, `mime_type`, `size_bytes`, `kind` (IMAGE/AUDIO/VIDEO/FILE), `transcript` (Whisper), `caption` (non-vision fallback), `video_summary`, `generated` + `generation_metadata`/`generation_job_id`, `deleted`.
 
 ### `memory` — `Memory.java`
-Per-agent long-term memory, scoped by `agent_id` (string), with `text` + `category`. **Lucene-indexed** (JCLAW-415) — full-text search, *not* `LIKE`.
+Per-agent long-term memory, scoped by `agent_id` (FK to `agent`, `ON DELETE CASCADE`), with `text` + `category`. **Lucene-indexed** (JCLAW-415) — full-text search, *not* `LIKE`.
 
 ### `prompt` — `Prompt.java`
-Saved, reusable prompts run into the chat composer (the Prompts Library). Fields: `name` (NOT NULL, 200), `content` (NOT NULL, TEXT), `description` (500), `category` (NOT NULL, 20). Indexed; exposed through `/api/prompts` including generate, import and export.
+Saved, reusable prompts run into the chat composer (the Prompts Library). Fields: `title` (NOT NULL, 200), `content` (NOT NULL, TEXT), `tags` (500), `category` (NOT NULL, 20). Indexed; exposed through `/api/prompts` including generate, import and export.
 
 ### `session_compaction` — `SessionCompaction.java`
 LLM-generated summary of a conversation prefix (JCLAW-38): `conversation_id`, `turn_count`, `summary_tokens`, `model`, `summary`, `compacted_at`.
@@ -38,24 +38,24 @@ One row per fire. Nested enums `Status` (RUNNING/COMPLETED/FAILED/CANCELLED) and
 ### `task_run_message` — `TaskRunMessage.java`
 Per-turn transcript of a run (`turn_index`, `role`, `content`, tool calls/results, `usage_json`, `reasoning`). **Lucene-indexed** for transcript search.
 
-## Channels & bindings (all L2-cached — inbound hot path)
+## Channels & bindings (L2-cached except `WhatsAppConversationWindow` — inbound hot path)
 
 | Entity | Table | Purpose / key fields |
 |---|---|---|
 | `AgentBinding` | `agent_binding` | Generic `(channel_type, peer_id?) → agent` routing + `priority`. |
 | `ChannelConfig` | `channel_config` | Per-channel `config_json` + `enabled` (named-cache eviction). |
-| `SlackBinding` | `slack_binding` | `bot_token` (unique), `signing_secret`, `app_token` (Socket Mode), 1:1 `agent_id`, `transport` (HTTP/SOCKET), team/bot IDs. |
-| `TelegramBinding` | `telegram_binding` | `bot_token` (unique), 1:1 `agent_id`, `telegram_user_id`, `transport` (POLLING/WEBHOOK), `webhook_secret`, reply/notifier policy. |
+| `SlackBinding` | `slack_binding` | `bot_token` (encrypted; unique via `bot_token_lookup`), `signing_secret`, `app_token` (Socket Mode), 1:1 `agent_id`, `transport` (HTTP/SOCKET), team/bot IDs. |
+| `TelegramBinding` | `telegram_binding` | `bot_token` (encrypted; unique via `bot_token_lookup`), 1:1 `agent_id`, `telegram_user_id`, `transport` (POLLING/WEBHOOK), `webhook_secret`, reply/notifier policy. |
 | `TelegramTopicBinding` | `telegram_topic_binding` | Per-forum-topic agent override (`binding_id`, `chat_id`, `thread_id`, `agent_id`). |
 | `WhatsAppBinding` | `whatsapp_binding` | `transport` (CLOUD_API/WHATSAPP_WEB), Cloud-API creds (`phone_number_id`, `access_token`, …) or, for Web, `owner_jid` (the paired account) and `owner_number` (the DM owner), 1:1 `agent_id`. |
 | `WhatsAppConversationWindow` | `whatsapp_conversation_window` | Tracks the 24h Cloud-API free-form messaging window per peer. |
 
-## Skills, tools & MCP (L2-cached)
+## Skills, tools & MCP (L2-cached except `ToolApprovalGrant`)
 
 | Entity | Table | Purpose |
 |---|---|---|
 | `McpServer` | `mcp_server` | MCP server config: `name` (unique), `transport` (STDIO/HTTP), `config_json`, `status`, `requires_approval`. |
-| `AgentToolConfig` | `agent_tool_config` | Per-agent tool enable (absent row = enabled). |
+| `AgentToolConfig` | `agent_tool_config` | Per-agent tool enable (absent row = enabled, except the opt-in tools `ToolRegistry` names). |
 | `AgentSkillConfig` | `agent_skill_config` | Per-agent skill enable. |
 | `AgentSkillAllowedTool` | `agent_skill_allowed_tool` | **Live authority for shell-exec validation** — one row per `(agent, skill, tool)`, written at skill install. Immune to filesystem tampering; un-promotion does not retroactively revoke. |
 | `SkillRegistryTool` | `skill_registry_tool` | Registry snapshot per `(skill, tool)`; install-time source only, not consulted at validation time. |
@@ -92,7 +92,7 @@ Three `@MappedSuperclass` bases carry state that concrete entities were otherwis
 
 | Base | Extracted by | Holds | Subclasses |
 |---|---|---|---|
-| `TimestampedModel` | — | `created_at`/`updated_at` and their callbacks: stamp both on insert, bump `updated_at` on update. Nine entities carried an identical copy. | the two below, plus entities with plain timestamp handling |
+| `TimestampedModel` | — | `created_at`/`updated_at` and their callbacks: stamp both on insert, bump `updated_at` on update. Nine entities carried an identical copy. | `AgentBoundBinding`, plus entities with plain timestamp handling |
 | `AgentFeatureConfig` | JCLAW-408 | The common `agent` FK + `enabled` flag for per-agent feature config | `AgentSkillConfig`, `AgentToolConfig` |
 | `AgentBoundBinding` | JCLAW-723 | The same `agent` FK + `enabled` flag for per-agent channel bindings | `TelegramBinding`, `SlackBinding`, `WhatsAppBinding` |
 

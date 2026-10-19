@@ -11,7 +11,7 @@ The page splits into two sections:
 - **Main Agent**: the built-in singleton. It is always enabled. You cannot rename it or delete it. It is the agent [Chat](/chat) opens on. External [channels](/channels) reach it only through a binding, the same as any other agent.
 - **Custom Agents**: every agent you create yourself. You can enable, disable, edit, or delete these freely. **Delete All** in the section header removes every custom agent at once. It asks for a typed confirmation first, and it leaves the Main Agent alone.
 
-Both kinds use the same configuration surface, with a single difference. You cannot change the Main Agent's **Name**. The Main Agent also gets a couple of extra shell privilege controls that custom agents do not need (see "Shell Exec Privileges" below).
+Both kinds use the same configuration surface, with three differences. You cannot change the Main Agent's **Name**. The Main Agent also gets a couple of extra shell privilege controls that custom agents do not need (see "Shell Exec Privileges" below). Only custom agents have **ACP External Harness**.
 
 ## Creating or editing an agent
 
@@ -49,7 +49,7 @@ Use **Queue (FIFO)** by default. Use **Collect** when users tend to send a burst
 
 ### Tools
 
-Every tool available to the agent appears here, grouped by category: **System**, **Files**, **Web**, **Utilities**. Each tool has its own toggle. A master toggle in the section header enables or disables all of them at once. Tools are first-party capabilities (web fetch, file system, code execution, search, and others), plus any third-party tools that come from the [MCP Servers](/mcp-servers) you ticked for this agent. Each MCP server appears as a single group row whose toggle flips every tool that server contributes.
+Every tool available to the agent appears here, grouped by category: **System**, **Files**, **Web**, **Utilities**. Each tool has its own toggle. A master toggle in the section header enables or disables all of them at once. Tools are first-party capabilities (web fetch, file system, code execution, search, and others). Tools from [MCP Servers](/mcp-servers) are not listed here. Switch a server on in the **MCP Servers** section below.
 
 Tools that need extra setup (an API key, a workspace path, a shell allowlist entry) are configured under the matching [Settings](/guide#settings) section.
 
@@ -57,13 +57,13 @@ See [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) for the full catalog.
 
 ### Skills
 
-Skills are reusable instruction bundles you published on the [Skills](/skills) page. Attaching a skill to an agent injects its content into the agent's system prompt. Use skills for capabilities you want to reuse across multiple agents: a coding style guide, a research methodology, an output format, a persona.
+Skills are reusable instruction bundles you published on the [Skills](/skills) page. Attaching a skill to an agent lists its name and description in the agent's system prompt. The agent reads the skill itself when a task calls for it. Use skills for capabilities you want to reuse across multiple agents: a coding style guide, a research methodology, an output format, a persona.
 
 Skills can also contribute to the agent's effective shell allowlist (see "Shell Allowlist" below).
 
 ### MCP Servers
 
-Servers you connected on [MCP Servers](/mcp-servers) get their own **MCP Servers** sub-section below Tools. It appears once the agent has been saved and at least one server is connected. It shows one row per server. The row has a single server-level toggle (the same switch as that server's group row in Tools) and a chevron. The chevron expands a read-only list of the actions the server exposes. There is no per-action toggling. The agent gets the whole server or nothing.
+Servers you connected on [MCP Servers](/mcp-servers) get their own **MCP Servers** sub-section below Tools. It appears once the agent has been saved and at least one server is connected. It shows one row per server. The row has a single server-level toggle and a chevron. The chevron expands a read-only list of the actions the server exposes. There is no per-action toggling. The agent gets the whole server or nothing.
 
 ### Workspace file contents
 
@@ -99,7 +99,7 @@ Five more sections sit on the same page, one line each:
 - **ACP External Harness** (custom agents only): sets `acpAllowed`, letting this agent spawn [`runtime=acp` subagents](/guide#subagents-acp-harness) under an external coding harness, outside JClaw's tool and workspace confinement.
 - **Memory Autocapture**: automatically capture durable facts from this agent's conversations into long-term memory.
 - **Core memories**: the memories always loaded into this agent's prompt, independent of autocapture, with a cap and a **Migrate excess** action that refiles anything over it.
-- **Content Compression**: shrink large tool output (JSON arrays, code, prose) before it reaches the model: a master toggle, per-type sub-toggles, and an aggressiveness slider.
+- **Content Compression**: shrink large tool output (JSON arrays, code, prose) after the model has read it once: a master toggle, per-type sub-toggles, and an aggressiveness slider. A result of up to 6,000 tokens reaches the model whole the first time, and a larger one is shortened from the start.
 - **Standing Tool Approvals**: the tools this agent may run without being asked, each granted by an "always allow" tap, with **Revoke** on every row. A grant counts only on a turn you started: your web chat, or a channel turn the binding proved is yours. A guest's turn in a group chat still goes through the approval prompt or the off-channel policy.
 
 :::note Tool Approvals

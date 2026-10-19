@@ -61,7 +61,7 @@ Current version: see `application.version` in `conf/application.conf` (the sourc
 
 ### Core backend flows
 
-- **Chat (web)** — `ApiChatController` → `agents.AgentRunner` → `LlmProvider` (OkHttp 5 single-shot/SSE) + tool-call loop (`ToolCallLoopRunner`, bounded rounds) → persists `Message` rows → SSE to browser via `ApiEventsController`.
+- **Chat (web)** — `ApiChatController` → `agents.AgentRunner` → `LlmProvider` (OkHttp 5 single-shot/SSE) + tool-call loop (`ToolCallLoopRunner`, bounded rounds) → persists `Message` rows → SSE to browser on the `/api/chat/stream` response.
 - **Channel inbound** — `WebhookSlackController` / `WebhookTelegramController` / `WebhookWhatsAppController` (and the Telegram/Slack polling/socket runners) → `agents.AgentRouter.resolve` (3-tier: peer binding → channel binding → main agent) → `AgentRunner` → outbound via the matching `channels.Channel` adapter.
 - **Tasks** — `ApiTasksController` writes `task` rows; **db-scheduler** claims due tasks atomically (row-version), runs each via `TaskExecutionHandler` on virtual threads, and handles CRON re-scheduling + backoff retries. Reminders are tasks with `auto_delete_on_complete`.
 - **Skills** — files-on-disk skill definitions; `SkillLoader` + `SkillPromotionService` promote authored skills into the registry. Promoted skills' blessed shell commands persist into `agent_skill_allowed_tool` (the DB — not the workspace file — is authoritative for shell-exec allowlisting).
@@ -69,7 +69,7 @@ Current version: see `application.version` in `conf/application.conf` (the sourc
 
 ### Frontend
 
-Nuxt 4 SPA with `ssr: false`. Single global layout (`layouts/default.vue`), global auth middleware (`middleware/auth.global.ts`) that routes to `/login` (or `/setup-password` on first boot) based on auth + password-set state. Backend access goes through `$fetch`, `fetchParsed` (Zod-validated reads), and `useApiMutation` (POST/PUT/DELETE). A singleton `EventSource` to `/api/events` (in `useEventBus`) provides server-push notifications and streaming tokens. State is `useState`-based singletons — no Pinia.
+Nuxt 4 SPA with `ssr: false`. Single global layout (`layouts/default.vue`), global auth middleware (`middleware/auth.global.ts`) that routes to `/login` (or `/setup-password` on first boot) based on auth + password-set state. Backend access goes through `$fetch`, `fetchParsed` (Zod-validated reads), and `useApiMutation` (POST/PUT/DELETE). A singleton `EventSource` to `/api/events` (in `useEventBus`) provides server-push notifications. State is `useState`-based singletons — no Pinia.
 
 ## Links to detailed docs
 

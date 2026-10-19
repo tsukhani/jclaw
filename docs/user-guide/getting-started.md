@@ -16,13 +16,14 @@ The whole product builds on a single core loop: you send a message in [Chat](/ch
 2. **[Prompts](/guide#prompts)** is your library of saved, reusable prompts. You drop them into the composer.
 3. **[Agents](/guide#agents)** is where you configure the entities that answer you: model, prompt, tools, skills.
 4. **[Conversations & Channels](/guide#conversations-and-channels)** covers your chat history. It also shows how to make agents reachable from Slack, Telegram, and WhatsApp, not only from the web app.
-5. **[Subagents](/guide#subagents)**, **[Tasks](/guide#tasks)**, and **[Reminders](/guide#reminders)** are three kinds of "work outside the current chat turn": parallel work now, scheduled work later, and pure scheduled notifications. [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) compares them side by side, if you do not know which one fits.
+5. **[Subagents](/guide#subagents)** is parallel work now: child agents that a conversation starts.
 6. **[Scrapes](/guide#scrapes)** is where you start, watch, and read background scrapes. A background scrape reads a website page by page, well beyond what fits in one chat turn.
-7. **[Skills, Tools & MCP Servers](/guide#skills-tools-mcp)** shows how you extend what agents can do beyond plain text: web search, shell exec, external systems.
-8. **[Apps](/guide#apps)** turns a repeatable request into a small self-contained web app. The agent builds it. JClaw hosts it.
-9. **[Settings](/guide#settings)** is the operator's control panel for everything above.
-10. **[Memories](/guide#memory)** is what your agents captured about you and your work. It is also where you curate it.
-11. **[Logs & Dashboard](/guide#logs-and-dashboard)** shows what happens across the whole platform.
+7. **[Tasks](/guide#tasks)** is scheduled work for later, and **[Reminders](/guide#reminders)** are pure scheduled notifications. With Subagents, they are three kinds of "work outside the current chat turn". [Subagents, Tasks, or Reminders?](/guide#subagents-tasks-reminders) compares them side by side, if you do not know which one fits.
+8. **[Skills, Tools & MCP Servers](/guide#skills-tools-mcp)** shows how you extend what agents can do beyond plain text: web search, shell exec, external systems.
+9. **[Apps](/guide#apps)** turns a repeatable request into a small self-contained web app. The agent builds it. JClaw hosts it.
+10. **[Settings](/guide#settings)** is the operator's control panel for everything above.
+11. **[Memories](/guide#memory)** is what your agents captured about you and your work. It is also where you curate it.
+12. **[Logs & Dashboard](/guide#logs-and-dashboard)** shows what happens across the whole platform.
 
 Read in that order on your first visit. Skim when you hunt for a specific thing.
 
@@ -55,7 +56,7 @@ The left sidebar is grouped by intent:
 
 At the bottom, two diagnostic rows: your JClaw version (the pip shows API status: green online, red offline, amber when a newer release is available, and the amber pip links to **Settings → Maintenance**) and the Play framework version (a green/amber pip shows whether it matches the pinned `.play-version`). Red on the first dot means the backend is unreachable; most pages fail until it recovers. Below them are your username and **Sign out** (an exit icon when the sidebar is collapsed).
 
-Up in the top bar, the **Search…** box on the right, beside the theme toggle, opens the command palette. <kbd>⌘</kbd>+<kbd>K</kbd> (<kbd>Ctrl</kbd>+<kbd>K</kbd> on Windows and Linux) opens or closes it from any page.
+Up in the top bar, the **Search...** box on the right, beside the theme toggle, opens the command palette. <kbd>⌘</kbd>+<kbd>K</kbd> (<kbd>Ctrl</kbd>+<kbd>K</kbd> on Windows and Linux) opens or closes it from any page.
 
 ## The Guided Tour
 

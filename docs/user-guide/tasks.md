@@ -29,7 +29,7 @@ There is one creation action, `createTask`. It takes a single `schedule` paramet
 | `every 30m` / `every 2h` / `every 1d`           | INTERVAL  | Recur every N (minimum 1 minute via shorthand).        |
 | Spring 6-field cron (`0 0 9 * * *`) or `@daily` | CRON      | Calendar-aligned recurrence.                           |
 
-JClaw stores your original input verbatim, so the **Schedule** column reads "every 30m" back to you, not the normalized "every 1800 seconds."
+The **Schedule** column shows the schedule in plain words. For example, `every 30m` shows as "every 30 min", and `0 0 9 * * *` shows as "daily at 9 AM".
 
 For something that should happen **once** on a given day, use the absolute date-time, **not** a cron. The date-time produces a one-shot `SCHEDULED` task. It shows `PENDING`, fires once, then shows `COMPLETED`. A cron with a fixed month and day (e.g. `0 0 15 13 6 *`) would silently repeat *every year* and show as recurring (`ACTIVE`).
 
@@ -60,7 +60,7 @@ Two ways to stop a task. They are not the same:
 
 ## The Tasks page
 
-The [Tasks](/tasks) page shows every task. It has two view modes, Table and Calendar. You switch between them from the tab strip on the right. Calendar persists in the URL (`?view=calendar`), so refresh and shareable links survive. Table is the default and writes nothing.
+The [Tasks](/tasks) page shows every task. It has two view modes, Table and Calendar. You switch between them with the two icons next to the **Tasks** title. Calendar persists in the URL (`?view=calendar`), so refresh and shareable links survive. Table is the default and writes nothing.
 
 ### Dashboard stats
 
@@ -86,7 +86,7 @@ Tokens combine. `q:summary status:PENDING type:CRON` shows pending cron tasks co
 |---------------|---------------------------------------------------------------------------------------------------------|
 | **Name**      | Short identifier the agent gave the task.                                                               |
 | **Type**      | `IMMEDIATE`, `SCHEDULED`, `INTERVAL`, or `CRON`.                                                        |
-| **Schedule**  | Human-readable form of the schedule (the operator's original input: "every 30m", "0 0 9 * * *").       |
+| **Schedule**  | The schedule in plain words, such as "every 30 min" or "daily at 9 AM".                                 |
 | **Status**    | Color-coded; see *Status states* below.                                                                 |
 | **Agent**     | Which agent owns the task.                                                                              |
 | **Channel**   | Where the task's output is delivered (e.g. a Telegram/Slack target, or `none`), shown as a humanized name. Editable inline when the row is expanded. |
@@ -131,8 +131,8 @@ The transitions, one by one:
 - **Transient failure.** A recoverable error (network blip, rate-limit) bumps the **Retries** counter and reschedules on a backoff: `30s → 60s → 5m → 15m → 1h`. The task returns to its waiting state between attempts, then re-enters `RUNNING` on the retry.
 - **Permanent failure.** A non-recoverable error, or a reached retry cap, ends a one-shot task `FAILED`; **Retry** requeues it. A recurring task ends only that occurrence: the run is recorded as failed, the error shows on the task, and it returns to `ACTIVE` for its next occurrence with a full retry budget. With [Alerts](/guide#settings-alerts) on, JClaw sends you a message when this happens.
 - **Crash recovery.** If the server stops mid-fire, the task is left `RUNNING` with a stale scheduler heartbeat. JClaw marks it `LOST` after about 1 minute so you can see it stalled, then the scheduler automatically re-fires it (about 2 minutes): `LOST → RUNNING → COMPLETED/FAILED`, with no action from you. **Retry** skips the wait.
-- **Time limits.** Two limits are set at **Settings → Tasks**. A fire that does nothing for `fireIdleSeconds` seconds (default `600`, ten minutes) is cancelled. Work done by the subagents it is waiting on counts, so a fire whose subagents are busy keeps going. No fire runs longer than `fireMaxDurationSeconds` seconds (default `1800`, 30 minutes), however busy. `0` turns either limit off.
-- **What a cancel stops.** Cancelling a fire, by hand or through a limit, also stops the subagents it started. The fire itself stops at its next safe point, the top of a model round or between tool calls.
+- **Time limits.** Two limits are set at **Settings → Tasks**. A fire that does nothing for `fireIdleSeconds` seconds (default `600`, ten minutes) is cancelled. Work done by any subagent it started that is still running counts, and so does a shell command that is still running. So a busy fire keeps going. No fire runs longer than `fireMaxDurationSeconds` seconds (default `1800`, 30 minutes), however busy. `0` turns either limit off.
+- **What a cancel stops.** Cancelling a fire, by hand or through a limit, also stops the subagents it started. The tool the fire is running stops too (a running shell command is ended). Then the fire stops at its next safe point, the top of a model round or between tool calls.
 - **Operator stop.** *Cancel* moves a task to `CANCELLED` (the row is kept; `runNow` or **Re-enable** revives it). Cancelling a single in-flight **run** stops only that fire and returns the task to its waiting state. The recurring schedule is left intact.
 
 :::note Reminders ride the same machine
@@ -186,7 +186,7 @@ When in doubt, ask the agent. `task_manager` knows Spring cron and can translate
 `CRON` and `SCHEDULED` tasks need a wall-clock interpretation. The effective zone resolves through this chain:
 
 1. Per-task `timezone` (set by the agent or `updateTask`, validated as IANA: `America/New_York`, `Asia/Tokyo`, etc.).
-2. Operator default at **Settings → Tasks → Default timezone**.
+2. Operator default at **Settings → Tasks → defaultTimezone**.
 3. The `tasks.defaultTimezone` line in `application.conf` (shipped commented-out; uncomment to pin a zone).
 4. The app timezone at **Settings → Timezone** (`app.timezone`), which itself defaults to the server's JVM zone.
 
@@ -194,7 +194,7 @@ When in doubt, ask the agent. `task_manager` knows Spring cron and can translate
 
 ## Retention
 
-Completed, failed, cancelled, and lost tasks are kept for **N days**, then swept by a daily cleanup job. The retention TTL is configured at **Settings → Tasks → Retention** and shown next to the page title, so auto-deletes do not surprise you. Setting retention to `0` disables the sweep.
+Completed, failed, cancelled, and lost tasks are kept for **N days**, then swept by a daily cleanup job. The retention TTL is configured at **Settings → Tasks → retentionDays** and shown in the middle of the page header (for example, "Retention: 30 days"), so auto-deletes do not surprise you. Setting retention to `0` disables the sweep.
 
 Independently of that day-based TTL, JClaw keeps only the **10 most recent runs per task**. Each new fire prunes older run history for that task. A frequently recurring task (an every-30-minutes labeler, say) therefore never grows its run table without bound: you always have the latest ten fires, while the day-based sweep removes whole terminal (completed/failed/cancelled/lost) tasks past the TTL.
 
@@ -202,7 +202,7 @@ A run that is pruned or swept takes the subagent and coding runs it started with
 
 ## Editing a task's instructions
 
-Expand a task's row to see its **Instructions**, the description the agent runs on. If the description is stored as a step list (a JSON array of strings), it renders as numbered steps. A plain description, even one spanning several lines, renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The owning agent, the inline **Channel** editor, and inline editors for the task's **name** and **timezone** live in the same expanded detail.
+Expand a task's row to see its **Instructions**, the description the agent runs on. If the description is stored as a step list (a JSON array of strings), it renders as numbered steps. A plain description, even one spanning several lines, renders verbatim. Click **Edit** to add, remove, reorder, or rewrite steps inline, then **Save** to persist (this updates the task's description). The inline **Channel** editor, and inline editors for the task's **Name** and **Timezone**, live in the same expanded detail. **Timezone** shows only for cron and scheduled tasks. The owning agent is in the **Agent** column.
 
 The same detail has a **Permissions** block:
 

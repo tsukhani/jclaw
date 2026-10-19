@@ -44,7 +44,7 @@ Why it is built this way:
 
 The ASR, diarize and TTS managers add dedicated clients (`AsrSidecarClient`, `DiarizeSidecarClient`, `TtsSidecarClient`), with `services.sidecar.SidecarHttpClient` as the shared HTTP surface and `services.SidecarCapabilityProbe` reporting what the host can actually run.
 
-**Concurrency.** One inference at a time per daemon. Concurrent callers receive `409` and queue on a JVM-wide fair lock, so a second request never starts a second model load.
+**Concurrency.** One inference at a time per daemon. A busy daemon answers `409`; JVM callers queue on a JVM-wide fair lock instead of receiving it, so a second request never starts a second model load.
 
 ## Protocols
 

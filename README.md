@@ -29,9 +29,9 @@
 
 Get JClaw running in one command. The installer downloads the self-contained
 `jclaw-bundle.zip` from the latest GitHub Release, checks it against the release's
-signed checksum list, verifies Java 25+ (the bundle's
-**only** prerequisite) — offering to download a self-contained Zulu JRE 25
-into `~/.jclaw/jre` when none is found — extracts it to `~/.jclaw`, and starts JClaw on
+signed checksum list, verifies Java 25+ with the `jdk.incubator.vector` module (the bundle's
+**only** prerequisite besides `bash`) — offering to download a self-contained Zulu JRE 25
+into `~/.jclaw/jre` when none is found or the one found lacks the module — extracts it to `~/.jclaw`, and starts JClaw on
 <http://localhost:9000>.
 
 **macOS & Linux**
@@ -47,7 +47,7 @@ irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
 ```
 
 > On Windows the bundle runs through **Git Bash** or **WSL** (the launcher is a
-> POSIX shell script). The installer prefers Git Bash; if only WSL is present it
+> bash script). The installer prefers Git Bash; if only WSL is present it
 > launches there; if neither is found it installs and prints how to run it.
 
 Releases after 0.19.25 are signed. `install.sh` refuses a bundle whose signature or
@@ -78,7 +78,7 @@ Release notes for every published version are on the
 shows the newest release's notes too.
 
 **Requirements:** a Java 25+ runtime ([Zulu](https://www.azul.com/downloads/?version=java-25)
-or Temurin), or let the installer download one. Nothing else — the bundle bakes in
+or Temurin), or let the installer download one, plus `bash` (on Alpine, `apk add bash`). Nothing else — the bundle bakes in
 the framework, app dependencies, precompiled classes, and the prebuilt SPA. The one
 exception is the browser tool: the bundle and the Docker image leave out the Node.js its
 Playwright driver runs on and Chromium (roughly 300 MB together), and JClaw downloads both
@@ -95,7 +95,7 @@ Node.js and provide Chromium under `PLAYWRIGHT_BROWSERS_PATH`.
 | `JCLAW_VERSION` | `latest` | Pin a release tag, e.g. `v0.14.7` |
 | `JCLAW_PORT` | `9000` | Port reported on launch |
 | `JCLAW_NO_START` | — | Set to `1` to install without starting |
-| `JCLAW_INSTALL_JRE` | — | Set to `1` to download the Zulu JRE without prompting when Java 25+ is missing |
+| `JCLAW_INSTALL_JRE` | — | Set to `1` to download the Zulu JRE without prompting when no Java 25+ with `jdk.incubator.vector` is found |
 | `JCLAW_NO_JRE` | — | Set to `1` to never auto-install a JRE |
 | `JCLAW_NO_RC_EDIT` | — | Set to `1` to generate completion scripts without editing your shell rc |
 | `JCLAW_FORCE_REINSTALL` | — | Set to `1` to replace an existing install from scratch, **discarding** its database, workspace and credentials (otherwise an existing install is upgraded in place) |
@@ -148,7 +148,7 @@ The implementation is entirely original — no code is shared with any of them. 
 - 🎙️ **Voice, Image & Video** — Real-time voice mode, local ASR/TTS and image/video generation through the optional Python sidecars
 - 🗂️ **Apps** — Static mini-apps under `public/apps`, managed from the Apps page and installable as desktop PWAs
 - 📁 **Workspace Manager** — Browse each agent's workspace with sizes from the Agents page, download a file or a folder as a zip, back up the whole workspace, and delete entries, with Standing Orders files protected
-- 🔔 **Operator Alerts** — Name one channel under **Settings → System → Alerts** and JClaw messages you there when an LLM provider or MCP server circuit breaker opens or recovers, or a recurring task's occurrence fails for good
+- 🔔 **Operator Alerts** — Name one channel under **Settings → System → Alerts** and JClaw messages you there when an LLM provider or MCP server circuit breaker opens or recovers, an MCP server is moved to the Handshake protocol, stored credentials do not decrypt at boot, or a recurring task's occurrence fails for good
 - 🛡️ **Tool Approvals & Sandboxing** — Dangerous actions (shell commands, coding-harness launches) ask you for approval; opt-in OS sandboxing (`shell.sandbox`, `subagent.acp.sandbox`) confines what those processes can write and read
 - 🚀 **Lightweight** — Minimal resource footprint, fast startup
 
@@ -404,7 +404,7 @@ When the toolchain changes (e.g., a new Play version, a JDK bump, a base-image b
 | **JetBrains Gateway** | Container settings → `Rebuild` |
 | **CLI fallback** | `docker build -f .devcontainer/Dockerfile -t jclaw-devcontainer:latest .` from the repo root — the build context is the repo, since the Dockerfile copies `.play-version` (manual, you'd then need to update the IDE config to use the rebuilt image) |
 
-Most rebuilds reuse cached apt + JDK + Node layers and only re-download what changed (e.g., the Play release zip if `PLAY_VERSION` was bumped). Full cold rebuilds run ~5–10 min.
+Most rebuilds reuse cached apt + JDK + Node layers and only re-download what changed (e.g., the Play release zip if `.play-version` was bumped). Full cold rebuilds run ~5–10 min.
 
 #### Troubleshooting
 
@@ -487,7 +487,7 @@ The stored third-party credentials (provider keys, channel tokens, MCP secrets) 
 
 If you'd rather pin the secret yourself (e.g. for multi-host deployments that need a shared cookie key, or rotation managed by your secret-store), drop a `.env` file alongside `docker-compose.yml` with `PLAY_SECRET=<value>` — Compose will forward it into the container and the entrypoint will defer to it instead of generating one. Rotate it the same way, with the outgoing value as `PLAY_SECRET_PREVIOUS=<value>` beside the new one.
 
-You can also set `JCLAW_PORT` and `JCLAW_HTTPS_PORT` in `.env` alongside `docker-compose.yml` instead of passing them inline — Compose reads the same file for variable interpolation in the YAML and for the runtime environment of the `jclaw` service.
+You can also set `JCLAW_PORT` and `JCLAW_HTTPS_PORT` in `.env` alongside `docker-compose.yml` instead of passing them inline — Compose reads that file for variable interpolation in the YAML, which is how the port mappings pick them up.
 
 The container runs in production mode — the Nuxt SPA is already built into the image, so no local Node.js, pnpm, or Play toolchain is required on the host. Open `http://localhost:9000` (or your custom port) once the container is healthy.
 
@@ -602,7 +602,7 @@ sudo mkcert -install             # adds mkcert's CA to the system trust store (a
 docker compose restart jclaw     # JVM reloads the new cert at boot
 ```
 
-Subsequent `docker compose up -d` calls reuse the existing cert — you only need to re-run `./jclaw.sh https` after rotating mkcert's CA or deleting the `certs/` directory. Run `./jclaw.sh no-https` to delete the cert+key (the next start boots HTTP/1.1 only). `conf/application.conf` is never modified by either command.
+Subsequent `docker compose up -d` calls reuse the existing cert — you only need to re-run `./jclaw.sh https` after rotating mkcert's CA or deleting the `certs/` directory. On a host install, `./jclaw.sh no-https` deletes the cert+key (the next start boots HTTP/1.1 only); in the container the entrypoint self-signs a fresh pair on the next start, so HTTPS stays on. `conf/application.conf` is never modified by either command.
 
 ### Custom Ports
 

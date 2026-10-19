@@ -13,9 +13,9 @@ The [Dashboard](/) is the first thing you see after signing in. Five stat cards 
 
 | Card | What it shows |
 | --- | --- |
-| **Agents** | Two sub-stats: **Active** (enabled agents / total agents) and **Size**. Size is the disk footprint of the agents' shared workspace. It turns amber past 10 GB, so a runaway file shows up without a shell. |
+| **Agents** | Two sub-stats: **Active** (enabled agents / total agents) and **Size**, labeled with its unit, such as **Size (in GB)**. Size is the disk footprint of the agents' shared workspace. It turns amber past 10 GB, so a runaway file shows up without a shell. |
 | **Conversations** | A cumulative count of all conversations. Labeled **Total**. |
-| **Channels** | The number of external channels that are currently active: Telegram bindings plus Slack/WhatsApp configs. The in-app web chat is deliberately excluded, so the number matches the cards on [Channels](/channels). |
+| **Channels** | The number of channel types that have at least one enabled binding. Telegram, Slack and WhatsApp each count once, however many bindings they have. The in-app web chat is deliberately excluded, so the number matches the cards on [Channels](/channels). |
 | **Tasks** | Three sub-stats side by side: **Active** (recurring `CRON` / `INTERVAL` in steady state), **Running** (currently firing), **Pending** (`SCHEDULED` / `IMMEDIATE` waiting). |
 | **Reminders** | Two sub-stats: **Active** (recurring reminders) and **Pending** (one-shot reminders waiting to fire). |
 
@@ -29,11 +29,11 @@ The Tasks and Reminders sub-stats, plus three panels, refresh in lockstep on a *
 
 This panel shows persisted token usage and dollar cost, aggregated across your conversations. Header controls:
 
-- **Filters**: Agent (all / specific); Channel (all, or any channel that has cost data in the window. The list is built from the data, not fixed); Window (Last 7 days / Last 30 days / all-time).
+- **Filters**: a **7d / 30d / All** window (default 30d); Agent (**All agents** or one agent); Channel (**All channels**, or any channel that has cost data in the window. The list is built from the data, not fixed).
 - **View**: table or bar chart.
 - **CSV**: download the per-model breakdown.
 
-When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, and similar), a **Subscription** subsection renders first. It shows the pro-rated monthly fee for the selected window. When two or more subscriptions were used in the window, click a provider's chip to narrow the view to it, and click it again to clear. A subscription you did not use in the window still gets a row, marked **no usage**, with its fee, and a bar in the chart. This is true even when nothing was used at all. So, with no agent or channel filter, the subscription **Total** is everything you pay. When you filter by agent or channel, you see that agent's or channel's share instead. A model's cost is its share of all the tokens that provider served in the window, across every agent. Subscriptions the filtered view did not use are left out, and the **Total** is the sum of the shares. The **Per-token** subsection below covers everything billed on usage. It has its own provider chips, one per provider (total spend and average $/1M tokens). They narrow the view the same way, when two or more providers were used. A **Combined Total** row sums the two.
+When you have a subscription provider configured (Anthropic Pro, OpenAI Plus, and similar), a **Subscription** subsection renders first. It shows the pro-rated monthly fee for the selected window. When two or more subscriptions were used in the window, click a provider's chip to narrow the view to it, and click it again to clear. A subscription you did not use in the window still gets a row, marked **no usage**, with its fee, and a bar in the chart. This is true even when nothing was used at all. So, with no agent or channel filter, the subscription **Total** is everything you pay. When you filter by agent or channel, you see that agent's or channel's share instead. A model's cost is its share of all the tokens that provider served in the window, across every agent. Subscriptions the filtered view did not use are left out, and the **Total** is the sum of the shares. The **Per-token** subsection below covers everything billed on usage. It has its own provider chips, one per provider (total spend and average $/1M tokens). They narrow the view the same way, when two or more providers were used. A **Combined total** row sums the two.
 
 A subscription costs $0.00 per token, so its dollar figures do not show how much you use it. To see how many requests your Ollama Cloud account made, open **Cloud usage** on the Ollama Cloud card in [Settings → LLM Providers](/settings?section=providers).
 
@@ -49,14 +49,13 @@ It sits directly above Chat Performance, because that is the blind spot it close
 | **OPEN** | Not serving. Every call fails immediately without reaching the provider, until the cooldown (`llm.breaker.wait-seconds`) elapses. |
 | **HALF&nbsp;OPEN** | Probing. The next few calls decide whether it closes again or reopens for another cooldown. |
 
-The row's reason column says what opened it:
+The row says why it is there. An open breaker reads **tripped on** and the rule that tripped it:
 
 - **consecutive failures**: three exhausted calls in a row. This rule fires first on a low-traffic install.
 - **failure rate** or **slow call rate**: half of the recent window.
 - **probe failed** or **probe slow**: a probe reopened it.
-- **isolated by you**: you isolated it.
 
-A half-open breaker reads **probing** instead. What each subsystem counts as a failure, and the streaming budgets behind a slow call, are described under [LLM Providers](/guide#settings-when-a-provider-misbehaves) and [MCP Servers](/guide#skills-tools-mcp-when-a-server-stops-answering).
+A breaker you isolated reads **isolated by you**. A half-open breaker reads **probing — the next calls decide**. What each subsystem counts as a failure, and the streaming budgets behind a slow call, are described under [LLM Providers](/guide#settings-when-a-provider-misbehaves) and [MCP Servers](/guide#skills-tools-mcp-when-a-server-stops-answering).
 
 Each row here carries **Restore**. **Isolate** asks first. It sits beside the provider or server, on its serving breaker. Isolating is bounded rather than latched. It restarts the ordinary cooldown, so a provider that is actually healthy closes itself again. The provider does not stay dark until you remember it.
 
@@ -122,8 +121,8 @@ This panel is a live tail of the last 10 events. It shows the same message colum
 
 A segmented toggle in the panel header switches the table between four views:
 
-- **All** (default): the event tail described above.
-- **Video**: recent video-generation jobs with their state (`PENDING` / `RUNNING` / `SUCCEEDED` / `FAILED`), prompt, submitted time, and a "see in conversation" link to where each was requested. Use it to track `generate_video` jobs as they run, without leaving the dashboard.
+- **All activity** (default): the event tail described above.
+- **Video jobs**: recent video-generation jobs with their state (`PENDING` / `RUNNING` / `SUCCEEDED` / `FAILED`), prompt, submitted time, and a "see in conversation" link to where each was requested. Use it to track `generate_video` jobs as they run, without leaving the dashboard.
 - **Scrape jobs**: the 10 most recent [background scrapes](/guide#scrapes) with their state, site, progress, and start time. The site links to the job's page on [Scrapes](/scrapes).
 - **Coding runs**: the 10 most recent [coding runs](/guide#subagents-acp-harness) with their status, name, origin, and start time. A run is named by its label, or by its folder when it has no label. A run that failed before it got a folder is listed too, as *Run #ID*, and its log gives the reason. Click the name to open the **Coding run log** panel. See [Watching a coding run](/guide#subagents-coding-run-log) for what each line means. A run started from a chat has a "see in conversation" link. A run started by a task shows *task NAME*.
 
@@ -143,7 +142,7 @@ Three filters sit across the top:
 - **Level**: `ERROR`, `WARN`, or `INFO`.
 - **Search**: free-text match on the message body.
 
-Filters compound. Clear them by setting each one back to **All**.
+Filters compound. Clear them by setting Category back to **All categories**, Level back to **All levels**, and emptying the search box.
 
 ### Auto-refresh
 

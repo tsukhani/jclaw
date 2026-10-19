@@ -116,7 +116,7 @@ Compile-time wire shapes live in `frontend/types/api.ts`; runtime-validated shap
 
 ## Testing strategy
 
-- **Vitest** under `frontend/test/` (~201 files). Environment: **`jsdom`** (a `test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Run with `pnpm test` (alias for `vitest run`).
+- **Vitest** under `frontend/test/` (~208 files). Environment: **`jsdom`** (a `test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Run with `pnpm test` (alias for `vitest run`).
 - **Playwright** E2E under `frontend/tests/e2e/` with `playwright.config.ts`. `pnpm test:e2e`, UI mode `test:e2e:ui`, headed-slow `test:e2e:headed`.
 - Any edit under `frontend/` must be validated with `cd frontend && pnpm test` (per user feedback — `play autotest` does NOT cover Vue/Vitest).
 - `plugins/axe.client.ts` runs a vue-axe/axe-core a11y scan in dev only (tree-shaken from production).

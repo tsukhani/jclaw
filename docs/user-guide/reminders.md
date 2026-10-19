@@ -83,7 +83,7 @@ You can pause a reminder like any task. Ask the agent (`task_manager`'s `pause` 
 | Column | Meaning |
 | --- | --- |
 | **Reminder** | The reminder's name. Expand the row (chevron) to read the text you or the agent wrote. It falls back to the name when the description is empty. |
-| **Schedule** | How it is scheduled, in human form. A recurring reminder shows its cadence ("every Tuesday at 5 PM", "every 30 min"); a one-shot shows a live countdown ("in 3 hours"). Never a raw cron or ISO value. |
+| **Schedule** | How it is scheduled, in human form. A recurring reminder shows its cadence ("weekly on Tue at 5 PM", "every 30 min"); a one-shot shows a live countdown ("in 3 hours"). Never a raw cron or ISO value. |
 | **Status** | The same status values as tasks. A one-time reminder is `PENDING` (waiting), then `COMPLETED`. A recurring one is `ACTIVE`. |
 | **Channel** | `web` or `telegram`, including when the agent inferred the route from the calling chat. `web (auto)` means no delivery was stored at all; such a reminder is delivered nowhere when it fires. A `tool:` delivery shows the bare tool name (for example `send_gmail_message`), but `tool:` delivery does not apply to reminders: the fire skips the agent, so no tool runs and nothing is delivered. |
 | **When** | The exact wall-clock date and time of the next fire, in the effective timezone ("10 Jun 2026 · 1:15 pm"). Shows `—` once a one-time reminder has `COMPLETED`. |

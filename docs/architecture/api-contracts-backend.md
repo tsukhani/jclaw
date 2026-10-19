@@ -1,6 +1,6 @@
 # API Contracts — Backend
 
-Every HTTP surface the Play backend exposes, from `conf/routes` (the single source of truth) and the controllers in `app/controllers/`. **287 method-specific routes across 62 controllers** (130 GET, 96 POST, 38 DELETE, 21 PUT, 1 PATCH, 1 WS), plus two `*` wildcard fallbacks.
+Every HTTP surface the Play backend exposes, from `conf/routes` (the single source of truth) and the controllers in `app/controllers/`. **304 method-specific routes across 68 controllers** (140 GET, 103 POST, 38 DELETE, 21 PUT, 1 PATCH, 1 WS), plus two `*` wildcard fallbacks.
 
 Play 1.x maps each route to a `public static void` method on a controller; the method signature *is* the request contract. Path params in `{braces}` bind by name; everything else arrives as query or form params. Responses are JSON via `renderJSON` unless noted. The backend serves `:9000` (and `:9443` when HTTPS is enabled); the frontend reaches it same-origin at `/api/*` in production and through the Nitro dev-proxy in development.
 
@@ -17,7 +17,7 @@ Three gates, by route family:
 
 | Gate | Applied to | Mechanism |
 |---|---|---|
-| `AuthCheck` (`@With`) | 50 controllers — effectively every `/api/**` business endpoint | **Bearer token** (`Authorization: Bearer <plaintext>`, resolved against `api_token`; the token owner becomes the session username) **or** Play's stateless **session cookie**. Bearer wins: a client sending a token expects it to be the identity, so a stale cookie is never silently honoured. The session bit alone is insufficient — Play 1.x sessions are client-held. |
+| `AuthCheck` (`@With`) | 56 controllers — effectively every `/api/**` business endpoint | **Bearer token** (`Authorization: Bearer <plaintext>`, resolved against `api_token`; the token owner becomes the session username) **or** Play's stateless **session cookie**. Bearer wins: a client sending a token expects it to be the identity, so a stale cookie is never silently honoured. The session bit alone is insufficient — Play 1.x sessions are client-held. |
 | `LoadtestAuthCheck` | `ApiMetricsController` loadtest actions, `ApiEvalsController` | Loopback-only **plus** an `X-Loadtest-Auth` header — keeps model-spending and data-mutating harness endpoints off the network. |
 | `WebhookIngressGate` + per-provider signature | `WebhookTelegram/Slack/WhatsApp` | Inbound webhooks authenticate by provider signature or secret token, not operator session. |
 

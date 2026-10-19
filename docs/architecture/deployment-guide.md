@@ -58,7 +58,7 @@ Shipped `docker-compose.yml`:
 ```yaml
 services:
   jclaw:
-    image: ghcr.io/tsukhani/jclaw:latest
+    image: ${JCLAW_IMAGE:-ghcr.io/tsukhani/jclaw:latest}
     pull_policy: always
     ports:
       - "${JCLAW_PORT:-9000}:9000"
@@ -72,7 +72,7 @@ services:
       - ./certs:/app/certs
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/api/status || exit 1"]
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/api/status"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -93,7 +93,7 @@ On first boot the entrypoint generates a 64-char `PLAY_SECRET` (persisted to `./
 
 | Volume | Purpose |
 |---|---|
-| `./data` | H2 DB file, `attachments/` blobs, `jclaw-lucene/` index. |
+| `./data` | H2 DB file, `jclaw-lucene/` index. |
 | `./logs` | Runtime logs. |
 | `./workspace` | Per-agent workspace files (Standing Orders under `main/`). |
 | `./skills` | Global skills registry (authoring output). |

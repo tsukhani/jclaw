@@ -202,7 +202,7 @@ sets off comes from the render's own context, so it passes the route gate and th
 like every other request.
 
 The JVM sends `timeoutMs` 35 s and `challengeMs` 45 s, which leaves 40 s of its 120 s call timeout
-for the launch, the UA probe (15 s ceiling) and the route gate's resolve budget (15 s).
+for the launch, the UA probe (a launch of its own) and the route gate's resolve budget (15 s).
 `StealthBrowserTest` holds that sum, and `ScrapeSidecarContractTest` holds that the clamps above
 never shorten what the JVM asks for. That timeout covers the render alone: the JVM keeps no more
 renders in flight than this process has permits (`RenderedFetcher.RENDER_SLOTS`), so a render
@@ -378,10 +378,9 @@ Chromium. One `sync_playwright()` context per thread is safe; sharing one across
 threads is not.
 
 The UA probe *is* held under its cache lock, so concurrent cold-start renders queue behind
-one probe instead of each running their own. The probe navigates to a locally fulfilled
-route rather than the network, so the wait is milliseconds and the 15 s timeout is only a
-ceiling; running four of them in parallel would make the failure the retry exists for
-more likely, not less.
+one probe instead of each running their own. The probe reads `navigator.userAgent` from a
+blank page without navigating, so the wait is one browser launch; running four of them in
+parallel would make the failure the retry exists for more likely, not less.
 
 ## Configuration
 

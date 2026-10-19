@@ -60,10 +60,10 @@ The **Export** button in the filter bar downloads `conversations.csv`: the pinne
 
 Select one or more rows and click **Delete N** to delete them. Deletion removes the thread and all its messages permanently. There is no undo.
 
-**Delete all matching** skips pinned conversations, the same way it skips subagent transcripts. It deletes exactly the rows the list shows you a count of. To delete a pinned conversation, unpin it first.
+**Delete all** (it reads **Delete all matching** while a filter is on) skips pinned conversations, the same way it skips subagent transcripts. It deletes exactly the rows the list shows you a count of. To delete a pinned conversation, unpin it first.
 
 :::gotcha Cascade
-Deleting a conversation cascade-deletes every subagent run spawned from it. That removes both the child transcripts and their audit rows on the [Subagents](/subagents) page. If you want to keep a child transcript, open it from [Subagents](/subagents) and use [Chat](/chat) → **Export as Markdown** *before* you delete the parent.
+Deleting a conversation cascade-deletes every subagent run spawned from it. That removes both the child transcripts and their audit rows on the [Subagents](/subagents) page. If you want to keep a child transcript, open it from [Subagents](/subagents) and use [Chat](/chat) → **Export as Markdown** *before* you delete the parent. The file holds only the messages' text, and only the messages the page has loaded. Click **Load earlier messages** first to include older ones.
 :::
 
 ## Channels

@@ -27,7 +27,7 @@ The architectural style is **service-oriented with a static-method convention** 
 | Full-text search | Apache Lucene | 10 | `services.search.LuceneIndexer` owns per-scope `FSDirectory` under `data/jclaw-lucene/`. |
 | Scheduling | db-scheduler | 16.x | Persistent task scheduling (`scheduled_tasks` table) with atomic row-claim, retries, heartbeat recovery. |
 | Browser automation | Playwright for Java | pinned in `build.gradle.kts` | Chromium downloaded on first browser use into `PLAYWRIGHT_BROWSERS_PATH=/app/data/pw-browsers` in Docker. |
-| Document parsing | Apache Tika | 4 | Tika parsers package with several excludes (lucene, cxf, mail) to slim the deploy; Tesseract OCR subprocess. |
+| Document parsing | Apache Tika | 4 | Tika parsers package with several excludes (lucene, mail) to slim the deploy; Tesseract OCR subprocess. |
 | Markdown | flexmark | 0.64.x | Plus extensions: tables, strikethrough, tasklist, autolink, typographic. |
 | PDF | flying-saucer | 9 | PDF output for exports. |
 | Tokenization | JTokkit | 1.x | `llm.TokenUsageEstimator`, Caffeine-memoized prompt measurement. |
@@ -50,7 +50,7 @@ HTTP request ─► AuthCheck @Before ─► ApiChatController.send|streamChat
                                  │              │
                                  ▼              ▼
                       LlmProvider.chat /      ToolCallLoopRunner
-                      streamChat (OkHttp 5,     (per tool call)
+                      chatStream (OkHttp 5,     (per tool call)
                        retry, SSE parse)
                                  │              │
                                  └──────┬───────┘
@@ -78,7 +78,7 @@ For channel webhooks, the prelude changes: `WebhookXController.webhook` → veri
 ### LLM layer (`app/llm/`)
 
 - `sealed abstract class LlmProvider permits OpenAiProvider, OllamaProvider, OpenRouterProvider, TogetherAiProvider` — shared retry policy (max 3, backoff 1s/2s/4s), OpenAI-compatible JSON, SSE parsing.
-- `OkHttpLlmHttpDriver` — the single HTTP driver: single-shot via `Call.execute()`, streaming via `okhttp-sse` `EventSource`. Clients come from `HttpFactories.llmStreaming()` / `llmSingleShot()`.
+- `OkHttpLlmHttpDriver` — the single HTTP driver: single-shot via `Call.execute()`, streaming via `okhttp-sse` `EventSource`. Clients come from `HttpFactories.llmStreamingGuarded()` / `llmSingleShotGuarded()`.
 - `ProviderRegistry` — loads provider configs from the `Config` table, caches with a 60s refresh, resolves by name (substring match), excludes image-only providers.
 - `LlmTypes` — `ChatMessage`, `ToolDef`, `ChatRequest`/`Response`, reasoning/thinking metadata, `Usage`.
 - `TokenUsageEstimator` — JTokkit-backed counting with a Caffeine memo cache (was the #1 CPU hotspot before memoization).
@@ -91,11 +91,11 @@ For channel webhooks, the prelude changes: `WebhookXController.webhook` → veri
 
 ### MCP client (`app/mcp/`)
 
-`McpClient` is a JSON-RPC state machine (DISCONNECTED → INITIALIZING → READY) over a pluggable `McpTransport` (`McpStdioTransport` for child processes, `McpStreamableHttpTransport` for SSE). Discovered tools are bridged into `agents.ToolRegistry` via `McpToolAdapter`. Servers are configured as `McpServer` rows and reconciled by `McpConnectionManager`. Protocol version `2025-06-18`.
+`McpClient` is a JSON-RPC state machine (DISCONNECTED → INITIALIZING → READY) over a pluggable `McpTransport` (`McpStdioTransport` for child processes, `McpStreamableHttpTransport` for SSE). Discovered tools are bridged into `agents.ToolRegistry` via `McpToolAdapter`. Servers are configured as `McpServer` rows and reconciled by `McpConnectionManager`. Protocol versions `2025-06-18` and `2026-07-28`, era detected per server.
 
 ### Memory (`app/memory/`)
 
-`MemoryStore` interface with a single implementation, `JpaMemoryStore` (the `memory` table) — the former pluggable `Neo4jMemoryStore` was dropped (`MemoryStoreFactory.create()`), so vector similarity and graph/ontology now live in Postgres. Memory rows are agent-scoped. Recall is hybrid — keyword plus vector similarity, blended by reciprocal-rank fusion (`ReciprocalRankFusion`) — and the vector backend is dialect-driven: `pgvector` on Postgres (provisioned by `PgVectorProvisioner`), an embedded Lucene HNSW index on H2. Supporting pieces: `MemoryAutoCapture`, `MemoryReranker`, `MemoryDecay`, `MemoryAttentionGate`, `MemoryCategory`, `MemorySafety`.
+`MemoryStore` interface with a single implementation, `JpaMemoryStore` (the `memory` table) — the former pluggable `Neo4jMemoryStore` was dropped (`MemoryStoreFactory.create()`), so vector similarity uses the store's dialect backend and the graph/ontology is per-agent JSONL under `data/memory-graph/`. Memory rows are agent-scoped. Recall is hybrid — keyword plus vector similarity, blended by reciprocal-rank fusion (`ReciprocalRankFusion`) — and the vector backend is dialect-driven: `pgvector` on Postgres (provisioned by `PgVectorProvisioner`), an embedded Lucene HNSW index on H2. Supporting pieces: `MemoryAutoCapture`, `MemoryReranker`, `MemoryDecay`, `MemoryAttentionGate`, `MemoryCategory`, `MemorySafety`.
 
 **Vector memory is configured through the config store, not `conf/application.conf`.** The keys `memory.jpa.vector.enabled` / `.provider` / `.model` / `.dimensions` are written by `POST /api/config` from Settings › Memory › Embeddings; none of them appears in `application.conf`, and no restart is involved. Saving is gated on an embedding probe that confirms the model embeds and records its dimension, and changing the model marks the corpus for re-embedding (`/api/memories/reembed`).
 
@@ -107,7 +107,7 @@ Play `@Every`/`@OnApplicationStart` jobs (task *execution* is owned by db-schedu
 - **Scheduling bootstrap** — `DbSchedulerBootstrapJob` / `DbSchedulerSchemaInitJob` wire db-scheduler; `LostTaskScanJob` / `OrphanReArmJob` recover orphaned runs.
 - **Search** — `FullTextSearchInitJob` opens the Lucene indices at boot; `ShutdownJob` commits + closes them on stop.
 - **Cleanup** — `TaskCleanupJob`, `EventLogCleanupJob` (+`EventLogFlushJob`), `LatencyMetric*Job`, `ConversationQueueEvictionJob`, `BrowserCleanupJob`, `SubagentOrphanRecoveryJob`.
-- **Startup/probes** — `DefaultConfigJob` (seeds `Config` + main agent), `ToolRegistrationJob`, `McpStartupJob`, `TokenizerCalibrationJob`, plus reachability probes (`OllamaLocalProbeJob`, `LmStudioProbeJob`, `TesseractProbeJob`) and price refresh jobs.
+- **Startup/probes** — `DefaultConfigJob` (seeds `Config` + main agent), `ToolRegistrationJob`, `McpStartupJob`, `TokenizerCalibrationJob`, plus reachability probes (`OllamaLocalProbeJob`, `LmStudioProbeJob`, `TesseractProbeJob`) and a price refresh job (`LiteLlmPriceRefreshJob`).
 
 ### Channel adapters (`app/channels/`)
 
@@ -122,7 +122,7 @@ Single server-push pipe multiplexed over `/api/events`. Controllers publish type
 Serializes message processing per conversation to prevent state corruption under concurrent inbound messages, with eviction of stale entries (`ConversationQueueEvictionJob`). Modes: FIFO `queue` (default), `collect` (batch pending into the next prompt), and `interrupt` (cancel in-flight generation, queue the new message for drain).
 
 ### Local ML sidecars (`app/services/{transcription,tts,imagegen,videogen}/`)
-Five on-demand Python daemons on loopback provide capability the JVM cannot: ASR (9529), diarization (9530), image (9527), TTS (9531), video (9528). `services.LocalSidecarDaemon` is the shared spawn/drain/health-poll/stop mechanism for every sidecar manager; ASR, diarize and TTS add dedicated clients over `services.sidecar.SidecarHttpClient`. One inference at a time per daemon — concurrent callers get `409` and queue on a JVM-wide fair lock. Nothing silently degrades: a missing sidecar or prerequisite surfaces an actionable error (JCLAW-614). Full detail in [architecture-sidecar.md](architecture-sidecar.md).
+Seven on-demand Python daemons on loopback provide capability the JVM cannot: ASR (9529), diarization (9530), image (9527), TTS (9531), video (9528), stealth (9532), fetch (9533). `services.LocalSidecarDaemon` is the shared spawn/drain/health-poll/stop mechanism for every sidecar manager; ASR, diarize and TTS add dedicated clients over `services.sidecar.SidecarHttpClient`. One inference at a time per daemon — concurrent callers get `409` and queue on a JVM-wide fair lock. Nothing silently degrades: a missing sidecar or prerequisite surfaces an actionable error (JCLAW-614). Full detail in [architecture-sidecar.md](architecture-sidecar.md).
 
 ### Transcription & diarization (`app/services/transcription/`)
 Every uploaded audio attachment gets a text transcript before it reaches the LLM, so text-only models see the content (audio-capable models still receive native audio). Speaker attribution runs through the `diarize_audio` tool on either of two paths: an audio-capable **cloud** chat model, or the fully **on-device** pyannote sidecar whose speaker turns `DiarizationFusion` fuses with the ASR transcript by time. The local path adds optional per-turn emotion from a separate SER pass.

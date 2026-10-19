@@ -1,6 +1,6 @@
 # Frontend Component Inventory
 
-The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for its base UI (auto-imported from `frontend/components/ui/`), with a layer of feature components on top. Pages compose these rather than inlining everything. **179 components total: 74 UI primitives + 105 feature components**, across 26 pages, 47 composables and 41 utility modules.
+The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for its base UI (auto-imported from `frontend/components/ui/`), with a layer of feature components on top. Pages compose these rather than inlining everything. **182 components total: 74 UI primitives + 108 feature components**, across 26 pages, 47 composables and 43 utility modules.
 
 ## UI primitives (`frontend/components/ui/`)
 
@@ -12,19 +12,19 @@ The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for 
 | alert | 3 | select | 11 |
 | button | 1 | sheet | 9 |
 | command | 9 | table | 9 |
-| dialog | 10 | dropdown-menu | 13 |
+| dialog | 10 | dropdown-menu | 14 |
 
 Variants are composed with `class-variance-authority` + `tailwind-merge` (`composables/ui-utils.ts` exposes the `cn()` helper).
 
 ## Feature components
 
-105 in six families:
+108 in seven families:
 
 | Family | Count | Scope |
 |---|---|---|
 | `components/` (root) | 30 | Cross-page components — the table below |
-| `components/settings/` | 49 | One panel per Settings section, registered in `sections.ts` |
-| `components/chat/` | 18 | Chat-surface pieces split out of `chat.vue` (JCLAW-690) |
+| `components/settings/` | 51 | One panel per Settings section, registered in `sections.ts` |
+| `components/chat/` | 19 | Chat-surface pieces split out of `chat.vue` (JCLAW-690) |
 | `components/prompts/`, `components/guide/` | 3 | Prompt dialog + the user-guide renderer |
 
 ### Settings panels (`components/settings/`)
@@ -45,12 +45,12 @@ Section **ids are stable across renames** — `memory` still addresses the panel
 |---|---|
 | `DataTable.vue` | `@tanstack/vue-table` wrapper for admin lists (tasks, subagent runs). |
 | `CodingRunMonitor.vue` | Live view of an ACP coding-harness subagent run. |
-| `ChatVoiceOverlay` / `IconVoiceWaveform.vue` | Voice-mode overlay and waveform indicator. |
+| `chat/ChatVoiceOverlay` / `IconVoiceWaveform.vue` | Voice-mode overlay and waveform indicator. |
 | `PromptSizeDonut.vue` | System-prompt composition by section (pairs with `/api/agents/{id}/prompt-breakdown`). |
 | `AppCostFields.vue` | Cost inputs for hosted apps. |
 | `GithubStarsButton.vue`, `GithubStarNudge.vue` | Repo star count + nudge. |
 | `ConfirmDialog.vue` | Imperative confirm/destructive-action modal (driven by `useConfirm`, mounted in `app.vue`). |
-| `CommandPalette.vue` | Global `/`-triggered command palette. |
+| `CommandPalette.vue` | Global ⌘K / Ctrl+K command palette. |
 | `ChatContextMeter.vue`, `ChatCompressionSection.vue`, `ChatCostSection.vue` | Chat context/token/cost meters. |
 | `ChatModelCombobox.vue`, `ModelCapabilityPills.vue` | Model selection + capability badges (vision/audio/reasoning). |
 | `LatencyOverlayChart.vue` | Latency histogram overlay. |
@@ -100,7 +100,7 @@ Section **ids are stable across renames** — `memory` still addresses the panel
 
 ## Utilities (`frontend/utils/`)
 
-~41 pure helpers: `format.ts` (date/number/byte), `usage-cost.ts` (token→cost), `tool-calls.ts` + `display-message-filter.ts` (message rendering), `thinking.ts` + `thinking-lock.ts` (reasoning UI), `schedule.ts` + `calendar.ts` + `task-steps.ts` (scheduling), `linkify.ts` + `markdown-links.ts` (link handling), `video-job.ts` and `latency-rows.ts`.
+~43 pure helpers: `format.ts` (date/number/byte), `usage-cost.ts` (token→cost), `tool-calls.ts` + `display-message-filter.ts` (message rendering), `thinking.ts` + `thinking-lock.ts` (reasoning UI), `schedule.ts` + `calendar.ts` + `task-steps.ts` (scheduling), `linkify.ts` + `markdown-links.ts` (link handling), `video-job.ts` and `latency-rows.ts`.
 
 ## Types (`frontend/types/`)
 
@@ -110,7 +110,7 @@ Section **ids are stable across renames** — `memory` still addresses the panel
 
 ## Test coverage
 
-~201 Vitest specs under `frontend/test/` exercise composables and page-level logic under the **`jsdom`** environment (`test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Playwright E2E under `frontend/tests/e2e/` drives the booted stack through the browser.
+~208 Vitest specs under `frontend/test/` exercise composables and page-level logic under the **`jsdom`** environment (`test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Playwright E2E under `frontend/tests/e2e/` drives the booted stack through the browser.
 
 ## Intentional choices
 

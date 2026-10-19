@@ -5,7 +5,7 @@ Annotated directory tree of the jclaw repository. Paths that generate output (lo
 ```
 jclaw/
 ├── app/                          # Play 1.x backend (entry point: conf/routes)
-│   ├── controllers/              # HTTP endpoints. Static-method Play controllers (~62).
+│   ├── controllers/              # HTTP endpoints. Static-method Play controllers (~68).
 │   │   ├── Api*Controller.java   # JSON API (all under /api/*). Guarded by @With(AuthCheck.class).
 │   │   ├── Webhook*Controller.java  # Inbound webhooks — exempted from auth, verified per-channel.
 │   │   ├── AuthCheck.java        # Play @Before interceptor — session cookie + Bearer ApiToken.
@@ -35,7 +35,7 @@ jclaw/
 │   │   ├── ProviderRegistry.java # Config-backed provider set (60s refresh).
 │   │   ├── TokenUsageEstimator.java  # JTokkit counting, Caffeine-memoized.
 │   │   └── LlmTypes.java         # ChatMessage, ToolDef, ChatRequest/Response, Usage.
-│   ├── mcp/                      # Model Context Protocol client (~14 classes).
+│   ├── mcp/                      # Model Context Protocol client (~16 classes).
 │   │   ├── McpClient.java        # JSON-RPC state machine.
 │   │   ├── McpStdioTransport, McpStreamableHttpTransport, McpConnectionManager
 │   │   └── McpToolAdapter.java   # Bridges discovered MCP tools into agents.ToolRegistry.
@@ -49,14 +49,14 @@ jclaw/
 │   │   ├── PlaywrightBrowserTool, DocumentsTool (Tika), GenerateImageTool, GenerateVideoTool
 │   │   ├── TaskTool, SubagentSpawnTool, SubagentYieldTool, MessageTool, ConversationHistoryTool
 │   │   └── JClawApiTool, CheckListTool, DateTimeTool, LoadTestSleepTool
-│   ├── jobs/                     # Play @Every / @OnApplicationStart jobs (~51).
+│   ├── jobs/                     # Play @Every / @OnApplicationStart jobs (~55).
 │   │   ├── DbSchedulerBootstrapJob, DbSchedulerSchemaInitJob  # db-scheduler wiring (task execution).
 │   │   ├── FullTextSearchInitJob # Opens Lucene indices at boot.
 │   │   ├── DefaultConfigJob, ToolRegistrationJob, McpStartupJob, TokenizerCalibrationJob
 │   │   ├── *CleanupJob, *FlushJob # event-log / latency / browser / queue cleanup.
 │   │   ├── OllamaLocalProbeJob, LmStudioProbeJob, TesseractProbeJob  # Reachability probes.
 │   │   └── ShutdownJob           # Commits + closes Lucene, drains executors on stop.
-│   ├── channels/                 # Messaging adapters (~78 classes).
+│   ├── channels/                 # Messaging adapters (~82 classes).
 │   │   ├── Channel.java (iface), ChannelRegistry
 │   │   ├── Slack* (HTTP webhook + Socket Mode), Telegram* (polling + webhook)
 │   │   ├── WhatsApp* (Cloud API) + WhatsAppCobalt* (WhatsApp-Web via it.auties.whatsapp)
@@ -70,7 +70,7 @@ jclaw/
 │   │   ├── TaskSchedulingService, TaskExecutionHandler, ReminderDispatcher  # db-scheduler integration.
 │   │   ├── NotificationBus (SSE fan-out), EventLogger, LatencyMetricRecorder
 │   │   └── LoadTestRunner, LoadTestHarness
-│   ├── utils/                    # Cross-cutting utilities (~50).
+│   ├── utils/                    # Cross-cutting utilities (~53).
 │   │   ├── HttpFactories         # Single OkHttp 5 provisioning (llmStreaming/llmSingleShot/general).
 │   │   ├── SsrfGuard, GsonHolder, JpqlFilter, LatencyStats, LatencyTrace
 │   │   └── VirtualThreads, WebhookUtil, TokenCoalescer
@@ -80,7 +80,7 @@ jclaw/
 │
 ├── conf/                         # Play configuration.
 │   ├── application.conf          # The only config file. %prod. / %test. prefixes; secrets via ${VARNAME}.
-│   ├── routes                    # URL table — ~282 /api/* endpoints + SPA catch-all.
+│   ├── routes                    # URL table — ~300 /api/* endpoints + SPA catch-all.
 │   ├── log4j2.xml / log4j2-prod.xml / log4j2-test.xml  # Logging per mode.
 │   └── messages                  # i18n (default locale).
 │
@@ -96,14 +96,14 @@ jclaw/
 │   ├── middleware/auth.global.ts # Routes to /login or /setup-password based on auth state.
 │   ├── types/                    # api.ts (wire types) + schemas.ts (Zod) + ambient .d.ts.
 │   ├── utils/                    # Pure helpers (format, usage-cost, tool-calls, schedule, …).
-│   ├── test/                     # Vitest unit tests (~201 files).
+│   ├── test/                     # Vitest unit tests (~208 files).
 │   ├── tests/e2e/, playwright.config.ts  # Playwright E2E harness.
 │   ├── vitest.config.ts          # jsdom env.
 │   ├── nuxt.config.ts, components.json, eslint.config.mjs, stylelint.config.mjs
 │   └── package.json              # pnpm pinned via packageManager (bare version).
 │
 ├── sidecar/                      # Seven Python daemons on loopback, uv-run on demand.
-│   │                             # Each: stdlib-only serve.py supervisor + PEP 723 workers.
+│   │                             # asr, diarize, tts: stdlib-only serve.py supervisor + PEP 723 workers.
 │   ├── asr/                      # :9529 Speech recognition — Whisper + MERaLiON (meralion.py,
 │   │                             #       align.py forced alignment for its missing timestamps).
 │   ├── diarize/                  # :9530 pyannote speaker turns + optional SER emotion (ser.py).
@@ -116,7 +116,7 @@ jclaw/
 ├── public/                       # Play static assets; spa/ staged here at start/deploy (gitignored).
 ├── skills/                       # File-system skill definitions (global, promoted-skill source of truth).
 ├── workspace/                    # Per-agent workspace (filesystem-tool scoped; main/ holds Standing Orders).
-├── data/                         # H2 DB file + attachments/ + jclaw-lucene/ index (dev default).
+├── data/                         # H2 DB file + jclaw-lucene/ index (dev default).
 ├── .githooks/                    # pre-commit (lint-staged) + pre-push (full suite) hooks.
 ├── .devcontainer/                # Dev Container (Ubuntu 26.04, Zulu 25, Node 26, Play fork).
 ├── docs/                         # <-- this documentation suite (architecture/ + user-guide/).
@@ -135,5 +135,5 @@ jclaw/
 
 - **Frontend → Backend (dev):** `frontend/nuxt.config.ts` → `nitro.devProxy['/api']` → `http://localhost:9000/api` — no CORS config needed.
 - **Frontend → Backend (prod):** the SPA is `nuxi generate`-d and copied into `public/spa/`. Play serves `/_nuxt/*` via `Application.nuxtAsset` and catches unknown paths via `Application.spa` (renders `public/spa/index.html`), so the frontend and API share origin.
-- **Session coupling:** auth is cookie-backed; `useAuth.checkAuth` pings the auth-status endpoint to detect session validity — no token exchange (the in-process `jclaw_api` tool uses a Bearer `ApiToken` separately).
+- **Session coupling:** auth is cookie-backed; `useAuth.checkAuth` pings `/api/config` to detect session validity — no token exchange (the in-process `jclaw_api` tool uses a Bearer `ApiToken` separately).
 - **SSE channel:** `/api/events` (`ApiEventsController`) + `NotificationBus` backend → `useEventBus` singleton `EventSource` frontend.

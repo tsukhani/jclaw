@@ -28,15 +28,15 @@ The [Prompts](/prompts) page is a grid of prompt cards. In the **All** view, the
 
 ## Creating a prompt
 
-Click **New prompt**. Creation is a two-step flow, but you can stop after either step:
+Click **New prompt**. Creation is a two-step flow:
 
 1. **Describe it**: type a one-line description of what you want the prompt to do, and hit **Generate**. An LLM drafts a title, category, prompt text, and tags from your description.
-2. **Review**: the generated fields pre-fill the same form you would fill by hand. Edit anything, then **Save**.
+2. **Review**: the generated fields pre-fill the form. Edit anything, then **Save**.
 
-Prefer to write it yourself? Fill the form in step 2 directly. Generate is optional.
+For a new prompt, the form opens only after **Generate**. To add a prompt without it, write it in a JSON file and use **Import** (see below).
 
 :::note Generate needs a provider
-The **Generate** step calls your **main agent's** model. So it only works once that agent has a working LLM provider. Without one, the page reports *"Prompt generation is unavailable — configure an LLM provider for the main agent first."* Set one up under [Settings → LLM Providers](/guide#settings). Saving prompts by hand needs no provider.
+The **Generate** step calls your **main agent's** model. So it only works once that agent has a working LLM provider. Without one, the page reports *"Prompt generation is unavailable — configure an LLM provider for the main agent first."* Set one up under [Settings → LLM Providers](/guide#settings). Editing a saved prompt, and **Import**, need no provider.
 :::
 
 ## Running a prompt

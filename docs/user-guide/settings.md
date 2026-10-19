@@ -83,7 +83,7 @@ A change here takes effect without a restart; raise `play.netty.maxContentLength
 
 The default printer the `printer` tool targets, and the job options that default carries. Per-agent enable/disable lives on the [Agents](/agents) page; printing is off for every agent until you turn it on. See [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) for the tool itself.
 
-**Find printers** runs an mDNS browse of the local network and lists what answers; pick one to make it the default. Discovery is an explicit action rather than something the page does on open. A browse takes seconds, and opening Settings to change the timezone should not pay for it. You can also enter a host and port directly. That is the fallback when mDNS is blocked (it is link-local, so VPNs and containers without a multicast route routinely drop it).
+Under **Find printers**, **Scan** runs an mDNS browse of the local network and lists what answers; choose **Set default** on one to make it the default. Discovery is an explicit action rather than something the page does on open. A browse takes seconds, and opening Settings to change the timezone should not pay for it. You can also enter a host and port directly. That is the fallback when mDNS is blocked (it is link-local, so VPNs and containers without a multicast route routinely drop it).
 
 A reachability badge probes the saved default and reports whether it still answers. This matters because a default outlives the DHCP lease it was saved under; without the probe, the only symptom of a moved printer is a print that times out with no hint why.
 
@@ -99,7 +99,7 @@ JClaw exports traces and metrics to an OpenTelemetry collector over OTLP. Off by
 | `otel.exporter.endpoint` | `http://localhost:4318` | Collector base URL; `/v1/traces` and `/v1/metrics` are appended for http/protobuf. |
 | `otel.exporter.protocol` | `http/protobuf` | `http/protobuf` or `grpc`. |
 | `otel.exporter.secretHeaders` | (empty) | Comma-separated `name=value` pairs sent with every export (vendor auth goes here). Shown as dots once saved; **Remove** clears them. |
-| `otel.service.name` | `jclaw` | How this instance is named in the collector. |
+| `otel.service.name` | `jclaw` | How this instance is named in the collector. Takes effect at the next restart. |
 | `otel.traces.sampler.ratio` | `1.0` | Share of root spans recorded, 0–1. |
 | `otel.metrics.interval.seconds` | `60` | Seconds between metric exports. Has no row in the panel and is **read at JVM start only**: set it through `POST /api/config` and restart. |
 
@@ -124,8 +124,10 @@ Alerts are sent through the `main` agent's channel connections, so the channel y
 - **An LLM provider, MCP server or decision provider stops answering.** Its circuit breaker opened, and the message says why: the failure rate, slow calls or failures in a row. You get one message per outage, however many times the breaker retries in between, and at most one every 15 minutes for a provider that keeps dropping out and coming back. An outage still going when those 15 minutes are up is reported then.
 - **It recovers**, but only if you were told it went down.
 - **A run of a recurring task fails for good**, after its retries. The message names the task, the error and when it runs next. The task itself keeps its schedule (see [Tasks](/guide#tasks)).
+- **JClaw moves an MCP server to the Handshake protocol**, because it failed MCP v2 while MCP v1 still worked. It stays on Handshake until you set its Protocol back to Automatic on the MCP Servers page.
+- **Stored credentials do not decrypt at startup.** The message says how many. Put back the `certs/.env` they were saved under and restart, or enter them again in Settings.
 
-Isolating a provider yourself (tripping its breaker by hand) sends nothing. When you save a destination that cannot be used, JClaw refuses it; an alert that cannot be delivered at the time is written to the event log under `OPERATOR_ALERT` instead.
+Isolating a provider yourself (tripping its breaker by hand) sends nothing. When you save a destination that is not `channel:target` with one of those four channels, JClaw refuses it. It does not check then that the channel is connected to `main` or that the conversation exists. An alert that cannot be delivered at the time is written to the event log under `OPERATOR_ALERT` instead.
 
 ## Database
 
@@ -157,9 +159,9 @@ Backups are plain zips: `unzip -l` lists the `jclaw.mv.db` inside, with the memo
 
 ### Restore
 
-Restore replaces the database with a backup: one from the list, or a zip you pick with **Restore from a file…**. JClaw checks the file first. Anything that is not an H2 backup is refused with the reason, and nothing on disk changes. The confirmation names the backup's date, because everything written since it is lost.
+Restore replaces the database with a backup: one from the list, or a zip you pick with **Restore from a file…**. JClaw checks the file first. Anything that is not an H2 backup is refused with the reason, and nothing on disk changes. The confirmation names the backup (its date, for one from the list), because everything written since it is lost.
 
-Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to `jclaw.sh restart`: the instance stops, the file is swapped, the instance starts. The page reconnects on its own, and the strip then says which backup is live. The memory graph is swapped with it. JClaw keeps the displaced file as `data/jclaw.mv.db.pre-restore`, and the displaced graph as `data/memory-graph.pre-restore`, until the next successful backup, so a restore is itself reversible until you have moved on.
+Then the panel hands off to `jclaw.sh restore`, exactly as Restart hands off to `jclaw.sh restart`: the instance stops, the file is swapped, the instance starts. The page reconnects on its own. For 15 minutes, a line under the backups then says which backup it restored from. The memory graph is swapped with it. JClaw keeps the displaced file as `data/jclaw.mv.db.pre-restore`, and the displaced graph as `data/memory-graph.pre-restore`, until the next successful backup, so a restore is itself reversible until you have moved on.
 
 ### Repair
 
@@ -241,7 +243,7 @@ JClaw carries across everything the release does not ship, so an upgrade never r
 
 The rule is inverted on purpose. Rather than listing directories to preserve, a list that goes stale the moment a release adds one, the upgrade keeps *anything the new release does not ship*. The exceptions are build outputs (`precompiled/`, `lib/`, `framework/`, `public/spa/`), which must come from the release verbatim: merging those would leave a deleted class on the classpath or two versions of a jar side by side.
 
-`conf/application.conf` is handled separately. If you never edited it, the release's copy is installed so new settings take effect. If you did, **your file is kept** and the release's copy is written beside it as `conf/application.conf.new-<version>` so you can see what changed. The panel tells you when this happens.
+`conf/application.conf` is handled separately. If you never edited it, the release's copy is installed so new settings take effect. If you did, **your file is kept** and the release's copy is written beside it as `conf/application.conf.new-<version>` so you can see what changed. The upgrade's output in `logs/upgrade.log` says when this happens.
 
 ### If it goes wrong
 
@@ -282,7 +284,7 @@ The page reconnects on its own: it waits for the backend to go down, then polls 
 - **In dev mode** only the Play backend is restarted. The Nuxt dev server on port 3000 keeps running; bouncing it would kill the very server that rendered the page you clicked from.
 - **In a source checkout** a production restart may recompile Java sources and rebuild the SPA. Both steps are gated on staleness and skipped when nothing changed, so this is usually quick. Two timed restarts on a developer clone: **48 s** with both steps skipped, **58 s** with a full SPA rebuild; the SPA is worth about ten seconds, not minutes. A cold Java recompile is the step that can take substantially longer, and it was not exercised in either measurement. The panel errs long when sizing how long it waits for the backend to return (15 minutes for a source checkout), so a genuinely slow restart is still survivable.
 
-If the instance was not started by `jclaw.sh`, the button is disabled and says so; there is nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app does not come back.
+If this install has no `jclaw.sh` that can run, or no shell to run it, the button is disabled and says why; there is nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app does not come back.
 
 ### Password
 
@@ -336,9 +338,9 @@ Agents never fall back to it. An agent whose own provider is not configured runs
 Every model call runs through the same four-link chain, so a slow or broken provider costs you a bounded amount of time and then gets routed around:
 
 1. **Timeout.** A single HTTP attempt gives up after 180 s.
-2. **Retry.** JClaw retries a failed attempt up to three times with a short backoff (a `Retry-After` header from the provider is honored, capped). A 4xx (a request JClaw got wrong, or an exhausted balance) is not retried at all.
-3. **Circuit breaker.** Each provider has its own breaker. Three exhausted calls in a row, or half of the last ten, open it. While it is open, every call to that provider fails in microseconds instead of spending another retry loop. After 60 s it lets three probe calls through, closes again if they all succeed, and re-opens if one does not. A 4xx never counts against the breaker, so a bug in a prompt cannot trip it on a healthy provider.
-4. **Fallback.** If the agent has a fallback provider and model set on its [Agents](/guide#agents) page, a turn whose primary is refused by its breaker runs there instead, on the fallback's own model. Without one, the turn fails fast. A primary that is not configured at all, because it was deleted or its key was cleared, sends the whole turn to the fallback from the start. With no fallback, the turn fails and names the missing provider. JClaw never sends it to another provider instead. The synchronous path (tool loops) fails over on every round; the streaming path fails over only when the breaker refuses the call *before any token has been sent*, including the continuation round after a tool call, because once tokens have reached the screen another provider cannot silently take over. It is one hop: the fallback's own breaker is honored and nothing chains further. Memory auto-capture follows the same fallback, unless the agent has its own auto-capture model override, in which case that override is the whole choice; and it stands aside while a provider's breaker is probing, so the next user turn is the probe rather than a background extraction.
+2. **Retry.** JClaw retries a failed attempt up to three times with a short backoff (a `Retry-After` header from the provider is honored, capped). A 4xx (a request JClaw got wrong, or an exhausted balance) is not retried at all. A rate limit (HTTP 429) is the exception: JClaw waits as its `Retry-After` asks, up to 60 s, and tries again.
+3. **Circuit breaker.** Each provider has its own breaker. Three exhausted calls in a row, or half of the last ten, open it. While it is open, every call to that provider fails in microseconds instead of spending another retry loop. After 60 s it lets three probe calls through, closes again if they all succeed, and re-opens if one does not. A 4xx never counts against the breaker, except a rate limit (429) that is still refused after the retries. So a bug in a prompt cannot trip it on a healthy provider.
+4. **Fallback.** If the agent has a fallback provider and model set on its [Agents](/guide#agents) page, a call the primary fails, after its retries or because its breaker refuses it, runs there instead, on the fallback's own model. Without one, the turn fails fast. A primary that is not configured at all, because it was deleted or its key was cleared, sends the whole turn to the fallback from the start. With no fallback, the turn fails and names the missing provider. JClaw never sends it to another provider instead. The synchronous path (tool loops) fails over on every round; the streaming path fails over only when the breaker refuses the call *before any token has been sent*, including the continuation round after a tool call, because once tokens have reached the screen another provider cannot silently take over. It is one hop: the fallback's own breaker is honored and nothing chains further. Memory auto-capture follows the same fallback, unless the agent has its own auto-capture model override, in which case that override is the whole choice; and it stands aside while a provider's breaker is probing, so the next user turn is the probe rather than a background extraction.
 
 Streaming has two hazards a timeout alone cannot see, and each has its own budget:
 
@@ -364,7 +366,7 @@ Every value is a whole number; JClaw refuses a write outside these bounds.
 
 ## Decision Providers
 
-A decision provider answers a question by choosing among the options it is given, with a probability for each, rather than by writing text. JClaw features call it directly, and it never answers a chat. Each provider has one card, which holds what its features share: the API key and the circuit breaker. A feature's own settings stay on that feature's page.
+A decision provider answers a question by choosing among the options it is given, with a probability for each, rather than by writing text. JClaw features call it directly, and it never answers a chat. Each provider has one card, which holds what its features share, such as the API key or the server address, and the circuit breaker. A feature's own settings stay on that feature's page.
 
 There are three, in this order: **JEV (TypeSafe AI)**, **Laya** and **Ollama**. The JEV card shows **configured** once a key is set and **needs API key** until then.
 
@@ -374,7 +376,7 @@ There are three, in this order: **JEV (TypeSafe AI)**, **Laya** and **Ollama**. 
 
 Saving the key editor without typing anything leaves the stored key as it was. A key saved in the Browser section before this version moves here when JClaw starts, so it does not need entering again.
 
-**Used by** lists the two features that call JEV, each marked **in use** when it has chosen JEV:
+**used by** lists the two features that call JEV, each marked **in use** when it has chosen JEV:
 
 - [Browser](#settings-browser), where the Jev engine sends TypeSafe AI each step's page content: its address and title, visible text, element labels and form values (but not hidden password fields), with the goal and the text typed earlier in the run. The engine choice stays in Browser.
 - [Model Router](#settings-model-router), where the JEV classifier sends the first 4000 characters of each prompt. The classifier timeout and `router.classifier.jev.minConfidence` stay in Model Router.
@@ -387,10 +389,10 @@ Both features share one **circuit breaker**, shown on the card once JEV has been
 
 The **Laya** card is for Laya, an open-weight decision model under the Apache-2.0 license. You run its server, `laya-serve`, yourself. JClaw calls the address on the card and starts nothing. Install it with `pip install "laya[serve]"` and start it with `laya-serve`; [Laya's model card](https://huggingface.co/convaiinnovations/laya) says how. The card shows **reachable** or **not reachable** for that server.
 
-- **Server address** defaults to `http://localhost:8000`, the address `laya-serve` uses on this machine. **Change** sets a different one; JClaw stores the address only when it differs from that default.
+- **server address** defaults to `http://localhost:8000`, the address `laya-serve` uses on this machine. **Change** sets a different one; JClaw stores the address only when it differs from that default.
 - **apiKey (optional)** is the key you started `laya-serve` with, if you set `LAYA_API_KEY`. Leave it unset when the server has none. JClaw masks it like every other secret. JClaw sends the key to the address on the card, whatever that address is, so remove the key before you point the card at a different server. Over an `http://` address the key and your prompts are not encrypted.
-- **Checkpoints** lists Laya's three models with the context each one reads: `english` **512 tokens**, `multilingual` **1,024 tokens** and `typed-decisions` **1,024 tokens**. Tick the ones your server runs; only a ticked checkpoint can be chosen as the Model Router's classifier. You cannot untick the checkpoint the Model Router is using; choose another classifier there first. A checkpoint the server has in memory reads **loaded** after its context, and **Server device** names where the server computes. When the server answers `/health` but says no more, the card still reads **reachable**. If it is `laya-serve` started with a key, set or correct the key to see what it has loaded.
-- **Used by** lists the [Model Router](#settings-model-router)'s prompt classifier, marked **in use** with the checkpoint's name when the classifier is one of these checkpoints. It sends the first 4000 characters of each prompt, only to this server.
+- **checkpoints** lists Laya's three models with the context each one reads: `english` **512 tokens**, `multilingual` **1,024 tokens** and `typed-decisions` **1,024 tokens**. Tick the ones your server runs; only a ticked checkpoint can be chosen as the Model Router's classifier. You cannot untick the checkpoint the Model Router is using; choose another classifier there first. A checkpoint the server has in memory reads **loaded** after its context, and **Server device** names where the server computes. When the server answers `/health` but says no more, the card still reads **reachable**. If it is `laya-serve` started with a key, set or correct the key to see what it has loaded.
+- **used by** lists the [Model Router](#settings-model-router)'s prompt classifier, marked **in use** with the checkpoint's name when the classifier is one of these checkpoints. It sends the first 4000 characters of each prompt, only to this server.
 
 | Key                     | Default   | Meaning                                                                                          |
 |-------------------------|-----------|--------------------------------------------------------------------------------------------------|
@@ -418,9 +420,9 @@ The measurements used laya 0.4.6 on an Apple M4 Pro. There, `english` answered t
 
 The **Ollama** card is for System One decision models, such as `tev1` and `nimble`, running on your own Ollama server. Its card shows **reachable** or **not reachable** for that server.
 
-- **Server address** defaults to the Ollama Local LLM provider's server without `/v1` (marked **from Ollama Local**), or `http://localhost:11434` when Ollama Local has none. **Change** sets a different one; JClaw stores the address only when it differs from that default.
-- **Decision models** lists the installed models whose Ollama capabilities include `decision`. Tick the ones you want; only a ticked model can be chosen as the Model Router's classifier. You cannot untick the model the Model Router is using; choose another classifier there first. A ticked model the server no longer lists stays, marked **not installed**, so you can clear it.
-- **Used by** lists the [Model Router](#settings-model-router)'s prompt classifier, marked **in use** with the model's name when the classifier is one of these models. It sends the first 4000 characters of each prompt, only to this server.
+- **server address** defaults to the Ollama Local LLM provider's server without `/v1` (marked **from Ollama Local**), or `http://localhost:11434` when Ollama Local has none. **Change** sets a different one; JClaw stores the address only when it differs from that default.
+- **decision models** lists the installed models whose Ollama capabilities include `decision`. Tick the ones you want; only a ticked model can be chosen as the Model Router's classifier. You cannot untick the model the Model Router is using; choose another classifier there first. A ticked model the server no longer lists stays, marked **not installed**, so you can clear it.
+- **used by** lists the [Model Router](#settings-model-router)'s prompt classifier, marked **in use** with the model's name when the classifier is one of these models. It sends the first 4000 characters of each prompt, only to this server.
 
 | Key                         | Default   | Meaning                                                                                          |
 |-----------------------------|-----------|--------------------------------------------------------------------------------------------------|
@@ -438,7 +440,7 @@ Web search engines available to the `web_search` tool. Drag rows to **reorder pr
 - **needs API key**: enabled but the key is missing.
 - **disabled**: turned off.
 
-Available providers: **Exa**, **Brave**, **Tavily**, **Perplexity**, **Ollama**, and **Felo**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM does not echo stale snippets.
+Available providers: **Exa**, **Brave Search**, **Tavily**, **Perplexity**, **Ollama**, and **Felo**. Each row links to that provider's signup page. Perplexity additionally exposes a `recencyFilter` (hour / day / week / month / year / none) so the LLM does not echo stale snippets.
 
 ## Proxy Providers
 
@@ -591,7 +593,7 @@ JClaw offers a master toggle, then a backend radio group:
 
 - **OpenRouter**: reuses your OpenRouter API key from LLM Providers; captions with a vision model on OpenRouter.
 - **OpenAI**: reuses your OpenAI API key.
-- **Local VLM (Ollama)**: captions with a vision model you run in your own local Ollama (at `localhost:11434/v1`). There is **no bundled model**: pull a vision model in Ollama (e.g. `ollama pull moondream` or `llava`), add it under [LLM Providers](#settings-llm-providers) and mark it **supports vision**, then pick it here.
+- **Local VLM (Ollama)**: captions with a vision model you run in your own local Ollama (at `localhost:11434/v1`). There is **no bundled model**: pull a vision model in Ollama (e.g. `ollama pull moondream` or `llava`), add it under [LLM Providers](#settings-llm-providers) and tick **Supports Vision**, then pick it here.
 
 The model picker is a dropdown of that backend's **vision-tagged** models; cloud backends are disabled until their key is set. An **Active:** status line shows the current backend and model. With captioning off, non-vision models receive a "description unavailable" note for images.
 
@@ -601,9 +603,9 @@ Backend for the agent's `generate_image` tool (off per-agent by default; turn it
 
 JClaw offers a master toggle, then a backend radio group:
 
-- **BFL (Black Forest Labs)**: the Flux image API. Paste the BFL key **in this panel**. It is separate from [LLM Providers](#settings-llm-providers) and shared with [Video Generation](#settings-video-generation). With BFL selected, a **Model** dropdown lists the image models BFL offers, read from BFL's published API description. Leave it on *Provider default* (`flux-2-pro`), or pick another model such as `flux-3-image`.
+- **Black Forest Labs (Flux)**: the Flux image API. Paste the BFL key **in this panel**. It is separate from [LLM Providers](#settings-llm-providers) and shared with [Video Generation](#settings-video-generation). With BFL selected, a **Model** dropdown lists the image models BFL offers, read from BFL's published API description. Leave it on *Provider default* (`flux-2-pro`), or pick another model such as `flux-3-image`.
 - **OpenAI**: reuses your OpenAI key from LLM Providers; renders with `gpt-image-1`.
-- **Replicate**: hosted models. Set the Replicate key **in this panel** (it is shared with [Video Generation](#settings-video-generation)). The model dropdown is live-discovered from Replicate's curated text-to-image collection, split into **text-to-image** and **image-to-image (Kontext style transfer)** groups; leave it on *Provider default* (`black-forest-labs/flux-schnell`) to let Replicate pick.
+- **Replicate**: hosted models. Set the Replicate key **in this panel** (it is shared with [Video Generation](#settings-video-generation)). The model dropdown is live-discovered from Replicate's curated text-to-image collection, split into **Image-to-image (style transfer)** and **Text-to-image** groups; leave it on *Provider default* (`black-forest-labs/flux-schnell`), the model JClaw uses when none is picked.
 - **Self-Hosted (Flux 2 Klein)**: runs the local image sidecar on your own GPU, no API key. Three runtime gates must clear, each shown inline:
   1. **uv on PATH**: the sidecar runs under [uv](https://astral.sh/uv); install it and restart if the panel reports it missing.
   2. **GPU capability**: click **detect GPU** to probe VRAM. The verdict (runnable, free/total VRAM, and a reason) decides whether the radio is selectable.
@@ -640,7 +642,7 @@ Backend for the agent's `generate_video` tool (off per-agent by default). Like i
 JClaw offers a master toggle, then a backend radio group:
 
 - **Black Forest Labs (Flux)**: FLUX 3 Video, which makes HD clips of 5 to 20 seconds with sound. BFL charges for each second of video, so a clip is 5 seconds unless the agent asks for a longer one. The key is **not** set here; it reuses the BFL key from [Image Generation](#settings-image-generation), so this radio is disabled until that key is configured. A **Model** dropdown lists the video models BFL offers; leave it on *Provider default* (`flux-3-video`).
-- **Replicate**: hosted text-to-video models, live-discovered from Replicate's curated collection (leave on *Provider default*, `wan-video/wan-2.2-t2v-fast`, to let Replicate pick). The Replicate key is **not** set here; it reuses the one from [Image Generation](#settings-image-generation), so this radio is disabled until that key is configured.
+- **Replicate**: hosted text-to-video models, live-discovered from Replicate's curated collection (leave on *Provider default*, `wan-video/wan-2.2-t2v-fast`, the model JClaw uses when none is picked). The Replicate key is **not** set here; it reuses the one from [Image Generation](#settings-image-generation), so this radio is disabled until that key is configured.
 - **Self-Hosted (on this machine)**: runs the local video sidecar. Gated on **uv on PATH**; click **detect GPU** to probe. The probe returns the WAN / LTX engine variants your hardware can run, each tagged **ready** (green), **runs slow** (amber, still selectable), or unavailable (disabled, with the reason). Picking Self-Hosted auto-selects the best runnable engine; the per-engine radios refine the variant.
 
 | Key                      | Default | Meaning                                                                                        |
@@ -686,13 +688,13 @@ An **Advanced — context window & compaction** collapsible reveals four lower-l
 Each list is stored as `router.<class>.models` (`chat`, `summarize`, `agentic`, `reasoning`, `coding`); add models from the dropdown and reorder them with the arrows. JClaw refuses a list naming a model that is not registered under LLM Providers.
 
 - **Prefer subscription and self-hosted models** (`router.preferPrepaid`, on by default): JClaw tries a model on a subscription or a self-hosted provider before a per-token one, whatever the order, so included credit is spent before money. A per-token model in a list that also holds a prepaid one is badged **fallback only**. Off, JClaw follows the lists exactly as written; the budget guard applies either way.
-- **Classifier model** (`router.classifier.provider` / `.model`, default **Keyword rules**): the built-in rules are free and instant but read words rather than intent. A named model is asked for the class and a reasoning effort in one extra call before the reply starts, and sees the first 4000 characters of the prompt. If it is unreachable, slower than **Classifier timeout** (`router.classifier.timeoutSeconds`, 1 to 60 seconds, default 8, shown once a model or JEV is picked) or answers with something else, the keyword rules decide.
+- **classifier model** (`router.classifier.provider` / `.model`, default **Keyword rules (no model call)**): the built-in rules are free and instant but read words rather than intent. A named model is asked for the class and a reasoning effort in one extra call before the reply starts, and sees the first 4000 characters of the prompt. If it is unreachable, slower than **classifier timeout** (`router.classifier.timeoutSeconds`, 1 to 60 seconds, default 8, shown once a model or JEV is picked) or answers with something else, the keyword rules decide.
 - **JEV (TypeSafe AI)** (stored as provider `jev`, model `jev-latest`): TypeSafe AI's decision model as the classifier. One request asks the same two questions, class and effort, about the first 4000 characters of the prompt and nothing else, and JEV answers each with a probability per choice. When its top class is below `router.classifier.jev.minConfidence` (0 to 1, default 0.50, no row in the panel), the keyword rules choose the class and its default effort, and the route notes that JEV was unsure. It uses the TypeSafe API key from [Decision Providers](#settings-decision-providers), and the option is disabled until one is set. The request is tried once within `router.classifier.timeoutSeconds`, never retried; a failure, a timeout, an invalid answer or a missing key falls back to the keyword rules. While JEV's circuit breaker is open or isolated, nothing is sent: the keyword rules decide, and the route notes that the JEV breaker is open. TypeSafe may record or retain the prompts it is sent. Measured on 60 prompts, JEV answered in 0.45 s at the median and 1.4 s at worst; earlier, larger browser-step requests saw about one in nine hang, and the timeout is what bounds that wait. Its default of 8 seconds is sized for LLM classifiers; with JEV, a lower value such as 3 bounds a hang sooner. With JEV, a timeout counts toward the circuit breaker the browser engine shares (see [Decision Providers](#settings-decision-providers)), so keep it at 3 seconds or more. The provider name `jev` is reserved, so no LLM provider can take it.
 - **Ollama decision models** (stored as provider `ollama-decision`, model the model's name): JClaw lists each model ticked on the Ollama card in [Decision Providers](#settings-decision-providers) as **Ollama decision / *model***, and accepts only a ticked one. A ticked model answers the same two questions as JEV, under the same `router.classifier.jev.minConfidence` and classifier timeout, and falls back to the keyword rules the same way; the prompt goes only to your Ollama server. The provider name `ollama-decision` is reserved too.
 - **Laya checkpoints** (stored as provider `laya`, model the checkpoint's name): JClaw lists each checkpoint ticked on the Laya card in [Decision Providers](#settings-decision-providers) with its context, such as **Laya / english (512 tokens)**, and accepts only a ticked one. A checkpoint answers the same two questions as JEV, under the same `router.classifier.jev.minConfidence` and classifier timeout, and falls back to the keyword rules the same way; the prompt goes only to your Laya server. A checkpoint reads only what fits its context: 512 tokens per question for `english`, 1,024 for the other two. A longer prompt is cut, not refused (Laya's model card), and the route then notes how many of its tokens were read. While a Laya checkpoint is chosen, the panel lists its limits, each fact with its source. `english` was right as often as the keyword rules, and the other two less often (measured 2026-10-13 on 40 written test prompts, not live traffic), so read [Laya's limits](#settings-laya-limits) first. The provider name `laya` is reserved too.
 - **Reasoning effort**: a thinking model reasons at the effort the router chose for the prompt: the classifier's, or else the class default. The class default is low for Chat and Summarize, medium for Agent work and Coding, and high for Reasoning. It is fitted to the levels the model offers. A thinking level chosen on the conversation still wins, including off.
 - **Budget guard**: JClaw reads usage from each Ollama Cloud provider's quota windows. Past **Downshift at** (`router.budget.downshiftAt`, default 0.75, shown as 75%) the four heavier classes stop using that provider and fall back to the Chat list; past **Exhausted at** (`router.budget.exhaustedAt`, default 0.95) no class uses it. Downshift must stay below Exhausted. Any provider that answers a call with "out of credit" is also benched for a while.
-  - As of October 2026, ollama.com reports request counts only, with no quota windows. So the thresholds have nothing to act on, and the guard is off. JClaw logs one warning that says so. The router then learns only from "out of credit" (402) and rate-limit (429) replies. While the guard is off, the router asks ollama.com at most once an hour, not once a minute, to see if the quota windows are back. If Ollama reports quota windows again, the guard turns back on by itself, the router asks at most once a minute again, and the event log says so. The request counts are on the Ollama Cloud card in [LLM Providers](#settings-llm-providers) and on the Dashboard.
+  - As of October 2026, ollama.com reports request counts only, with no quota windows. So the thresholds have nothing to act on, and the guard is off. JClaw logs one warning that says so. The router then learns only from "out of credit" (402) and rate-limit (429) replies. While the guard is off, the router asks ollama.com at most once an hour, not once a minute, to see if the quota windows are back. If Ollama reports quota windows again, the guard turns back on by itself, the router asks at most once a minute again, and the event log says so. The request counts are on the Ollama Cloud card in [LLM Providers](#settings-llm-providers).
 
 Beneath the thresholds, a table lists each provider on your lists as **Prepaid** or **Per-token**, with each quota window's usage (amber past downshift, red past exhausted), and names anything benched for running out of credit with the time it returns. A provider with no usage API shows that it is benched only after an out-of-credit reply. A provider whose usage was read without quota windows shows "No quota windows reported: benched only after an out-of-credit reply".
 
@@ -742,7 +744,7 @@ Below Setup:
 
 - **Status**: **Harness** is the factory process: **Start** runs the installer, and **Stop** unloads and removes its LaunchAgent, so any story it is building fails. **Gateway** is the container the sandboxes' network traffic passes through: **Pause** stops it, so no new story starts and running ones fail, and **Resume** starts it again. **Sandboxes** lists the running sandboxes and the story each is building, each with its own **Stop**. Every stop and pause asks first, and a command that fails shows its output under the rows.
 - **Settings**: **Stories built at once** (default 2), **CPUs per sandbox** (6, and no more than Docker has), **Poll interval (seconds)** (120) and **Model** (`claude-opus-5-5`), saved to `settings.env` in the factory home. The factory reads them when it starts, so after a save it restarts itself as soon as no story is running.
-- **Story board**: every story the factory knows, grouped as **Running**, **Waiting**, **In review**, **Blocked or refused** and **Merged**; select a group's heading to fold or unfold it. A running story shows its phase and how long it has been in it; a blocked or refused one shows why; a merged one shows its commit and whether the factory or a person merged it. A story labelled `afk-merge`, or in an epic so labelled, carries an **Auto-merge** badge: once it passes, the factory merges it, signed, into this checkout's `main` and moves it to Done, without pushing. Select a story to read its logs in a panel that slides in from the right, one tab per log; drag the panel's left edge to widen it, and a running story's log refreshes as it grows.
+- **Stories**: every story the factory knows, grouped as **Running**, **Waiting**, **In review**, **Blocked or refused** and **Merged**; select a group's heading to fold or unfold it. A running story shows its phase and how long it has been running; a blocked or refused one shows why; a merged one shows its commit and whether the factory or a person merged it. A story labelled `afk-merge`, or in an epic so labelled, carries an **Auto-merge** badge: once it passes, the factory merges it, signed, into this checkout's `main` and moves it to Done, without pushing. Select a story to read its logs in a panel that slides in from the right, one tab per log; drag the panel's left edge to widen it, and a running story's log refreshes as it grows.
 
 The factory home is `~/.jclaw-factory`, unless the `factory.home` key or the `FACTORY_HOME` environment variable names another directory. On a machine that is not a Mac, the panel says the factory cannot run there instead of showing Status.
 
@@ -823,7 +825,7 @@ Anything missing downloads the first time an agent uses the browser: the officia
 
 ## Tasks
 
-Three knobs for the [Tasks](/guide#tasks) subsystem:
+Four knobs for the [Tasks](/guide#tasks) subsystem:
 
 | Key                       | Default | Meaning                                                                                                |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------|
@@ -896,9 +898,9 @@ This setting is a **fallback, not a replacement for the approval prompt**. When 
 :::gotcha
 `allow` only ever loosens **your own** turns. Someone else on a channel that can reach you is prompted either way, and one that cannot fails closed under both `allow` and `deny`, so raising the setting cannot weaken it. Only `ask` gives an unaskable origin any route through, and only by confirming with you first.
 
-Separately, an agent you have granted **always allow** for a tool runs it with no prompt on your own turns (the web UI, or a Telegram/Slack message the channel proves is yours). JClaw checks that standing grant before this policy, and the grant overrides this policy. So if an agent stopped asking you, a grant is why, not this setting. A standing grant never covers someone else's turn, which is prompted or refused as the table above says.
+Separately, an agent you have granted a standing approval for a tool runs it with no prompt on your own turns (the web UI, or a Telegram/Slack message the channel proves is yours). JClaw checks that standing grant before this policy, and the grant overrides this policy. So if an agent stopped asking you, a grant is why, not this setting. A standing grant never covers someone else's turn, which is prompted or refused as the table above says.
 
-JClaw creates a standing grant when you tap **always allow** on an approval prompt, and it lasts until you revoke it. Tap it only for a tool you are content for that agent to run on your behalf without asking.
+JClaw creates a standing grant when you tap **✓ Always** on an approval prompt, and it lasts until you revoke it. Tap it only for a tool you are content for that agent to run on your behalf without asking.
 :::
 
 Under its two settings rows, the panel lists every standing grant: how many there are, and which tools each agent holds, with a link to that agent. The list is read-only; revoke a grant from the **Standing Tool Approvals** block on the agent's own [Agents](/agents) page.
@@ -929,7 +931,7 @@ JClaw also stops such a program when its lifetime runs out, when you delete the 
 A program that closes the files it was given when it started does not appear in the list.
 
 :::gotcha
-The allowlist is the safety floor for shell access, and the seeded list is broad: it includes interpreters and network tools such as `python3`, `node`, `curl` and `wget`. Trim it to what your agents need, and be deliberate about what you add. Emptying it, with no per-agent **Bypass allowlist**, means agents cannot run anything via the shell tool.
+The allowlist is the safety floor for shell access, and the seeded list is broad: it includes interpreters and network tools such as `python3`, `node`, `curl` and `wget`. Trim it to what your agents need, and be deliberate about what you add. Emptying it, with no per-agent **Bypass allowlist**, means agents can run only the commands their enabled skills allow.
 :::
 
 `shell.sandbox` covers `exec`, `diarize_audio`'s ffmpeg extraction, and the ffmpeg transcode of an audio attachment on its way to a model. On macOS the process runs under `sandbox-exec`: writes are denied outside the agent's workspace and the system temp directories (the two ffmpeg runs get only their temp directory), and reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube` and `~/.netrc` are refused. JClaw's own `data`, `certs`, `conf` and `logs` folders and its backup folder can be neither read nor written. On Linux it runs under `bwrap`, which builds the visible filesystem from nothing, so those secrets and JClaw's folders are absent rather than denied.
@@ -953,7 +955,7 @@ Two operator controls have no panel on this page. They are set and read through 
 | Key / endpoint            | Default        | Meaning                                                                                       |
 |---------------------------|----------------|-----------------------------------------------------------------------------------------------|
 | `web_fetch.allowlist`     | (empty)        | Comma-separated hosts the `web_fetch` tool may reach. Empty means unrestricted.                |
-| `GET /api/metrics/db-pool`| —              | Current HikariCP occupancy: `active`, `idle`, `total`, `awaiting`, `max`. Admin session required. |
+| `GET /api/metrics/db-pool`| —              | Current HikariCP occupancy: `active`, `idle`, `total`, `awaiting`, `max`. Needs you to be signed in. Agents can read it too, through `jclaw_api`. |
 
 Set the allowlist with `POST /api/config`:
 

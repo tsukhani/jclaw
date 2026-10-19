@@ -28,7 +28,7 @@ Skills can also contribute shell commands to an agent's effective allowlist (vis
 The [Skills](/skills) page splits into two columns:
 
 - **Global Skills** (left): the library you have built. Drag any global skill onto an agent on the right to assign it.
-- **Agents** (right): every agent, with the skills currently attached to each.
+- **Agent Skills** (right): every agent, with the skills currently attached to each.
 
 Assigning a skill runs two checks before anything is copied, and a failure shows as a banner on the page. First, every tool the skill's `tools:` frontmatter lists must exist and be enabled for that agent. Otherwise you get *Cannot add skill '…' to agent '…': missing tools — disabled: […]; unknown: […]. Enable the required tools for this agent and try again.* Second, JClaw malware-scans every binary file in the skill by SHA-256 hash, with the scanners configured in [Settings → Malware and Virus Scanners](/guide#settings-malware-and-virus-scanners), and a hit refuses with *malware detected*. With no scanner enabled, the scan is skipped. A scanner that errors or times out fails open. In both cases the skill is added. Verdicts are logged under category `scanner` in [Logs](/logs). Dragging a skill the agent already holds at the same or a newer version only re-enables it, and neither check runs.
 
@@ -205,7 +205,7 @@ Once saved, a header value and an environment variable whose name marks it as a 
 
 ### Testing a server
 
-Each row has a **Test connection** button, and the add/edit form has one too. JClaw connects, lists the server's tools, and reports back, including which MCP protocol version it connected with and whether the server offers MCP v2. A successful test means the server is reachable and speaks MCP; if it fails, the error message is shown inline so you can fix the config. The test uses a connection of its own and leaves the live one alone.
+Each row has a **Test connection** button, and so does a server's edit form. Save a new server first, then test it. JClaw connects, lists the server's tools, and reports back, including which MCP protocol version it connected with and whether the server offers MCP v2. A successful test means the server is reachable and speaks MCP; if it fails, the error message is shown inline so you can fix the config. The test uses a connection of its own and leaves the live one alone.
 
 A successful test does not guarantee a server's tools will work end to end. You still need to attach it to an agent and try one.
 
@@ -237,7 +237,7 @@ A tool that runs and reports its own error (a file that does not exist, a query 
 
 An MCP tool error names the server and says which of three things failed: the connection (the server never answered; its row on this page shows the connection state), the protocol (it answered with a JSON-RPC error, broke the contract, or timed out; its own log is the place to look), or the tool itself (it ran and rejected the arguments). Like the built-in tools' errors, each comes as what broke, what to check, and how to retry.
 
-Once a server has been called, a bolt beside its status on the [MCP Servers](/mcp-servers) page shows its breaker's state: grey while it serves, amber while it probes, red when open. A breaker that is not serving opens a row beneath its server by itself; click the bolt to open a serving one, where you can **Isolate** it by hand. That is useful to take a flaky server out of an agent's reach for a cooldown without disabling it. An isolated server's tool calls fail with `isolated by the operator`, so neither the agent nor the log reads your decision as the server having broken, and a reconnect does not undo it. **Restore** lifts it early, there or from the [Dashboard](/)'s **Circuit Breakers** panel, which lists every breaker that is not serving.
+Once a server has been called, a bolt in the **Actions** column of its row on the [MCP Servers](/mcp-servers) page shows its breaker's state: grey while it serves, amber while it probes, red when open. A breaker that is not serving opens a row beneath its server by itself; click the bolt to open a serving one, where you can **Isolate** it by hand. That is useful to take a flaky server out of an agent's reach for a cooldown without disabling it. An isolated server's tool calls fail with `isolated by the operator`, so neither the agent nor the log reads your decision as the server having broken, and a reconnect does not undo it. **Restore** lifts it early, there or from the [Dashboard](/)'s **Circuit Breakers** panel, which lists every breaker that is not serving.
 
 With [Alerts](/guide#settings-alerts) on, JClaw sends you a message when a server's breaker opens and again when it recovers; isolating one yourself sends nothing.
 

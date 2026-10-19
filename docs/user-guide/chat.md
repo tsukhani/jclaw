@@ -26,7 +26,7 @@ If you do not have any agents yet, [Agents](/guide#agents) is the next stop. Com
 
 Type and press <kbd>Enter</kbd> to send. <kbd>Shift</kbd>+<kbd>Enter</kbd> inserts a newline without sending.
 
-The reply streams in real time. While the model is generating, the **Send** button turns into a **Stop** button. Click it to interrupt the current generation.
+The reply streams in real time. While the model is generating, the **Send** button turns into a **Stop generating** button. Click it to interrupt the current generation.
 
 Replies render as Markdown, and math the model writes in TeX is typeset with KaTeX: `$…$` and `\(…\)` inline, `$$…$$` and `\[…\]` as a display equation. The equation scrolls inside the bubble when it is too wide. A dollar amount in prose stays text: `$` opens math only when a non-space follows it, and closes only after a non-space and before anything but a digit. So "$5 and $10" is left alone. Malformed TeX shows as an inline error rather than breaking the reply.
 
@@ -90,7 +90,7 @@ On an external channel, `/subagent`, `/prompt`, and the `/model` forms that chan
 | `/model` | Show the current model and its capabilities. `/model <provider>/<id>` sets a per-conversation override. `/model reset` clears the override. |
 | `/think` | Show the reasoning effort in force for this conversation. `/think off`, `/think <level>` (one the model advertises) set a per-conversation override; `/think reset` clears it. The agent's default is untouched. |
 | `/usage` | Show how much of the model's context window the current conversation occupies. |
-| `/stop` | Interrupt the current generation. (Same as clicking the Stop button.) |
+| `/stop` | Interrupt the current generation. (Same as clicking the **Stop generating** button.) |
 | `/subagent` | Inspect, kill, or read transcripts of subagent runs spawned from this conversation. See [Subagents](/guide#subagents). |
 | `/prompt` | Search your [Prompts Library](/guide#prompts): `/prompt code review`. In the web composer the prompt's text drops straight into the box; on other channels JClaw replies with it so you can copy and edit it (for the binding's owner only). `/prompt` on its own lists what you have saved. |
 
@@ -143,7 +143,7 @@ Metrics are summed across every round of a turn. So a turn that made several too
 
 ## Exporting a conversation
 
-The composer has an **Export as Markdown** button. It downloads the full thread (messages, tool calls, and reasoning) as a markdown file you can share or archive.
+The composer has an **Export as Markdown** button. It downloads the text of your messages and the agent's replies as a markdown file you can share or archive. Tool calls, reasoning, and older messages the page has not loaded are left out. To include those messages, click **Load earlier messages** first.
 
 ## Running subagents
 
