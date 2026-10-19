@@ -82,7 +82,7 @@ public class AgentService {
 
     /**
      * Six-argument variant with explicit control over workspace folder
-     * materialization. {@link tools.SubagentSpawnTool#bootstrapChild} passes
+     * materialization. {@link tools.SubagentChildBootstrap#bootstrapChild} passes
      * {@code createWorkspace=false} because subagents are delegates of their
      * parent agent — they inherit the parent's workspace via
      * {@link #workspacePath(String)}'s parent-chain walk and never need

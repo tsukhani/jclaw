@@ -422,7 +422,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * Finalize the stream with the complete response. Either replaces the
      * placeholder text with the formatted HTML version (happy path) or
      * deletes the placeholder and delegates to
-     * {@link TelegramChannel#sendMessage(String, String, String, Agent)} for
+     * {@link TelegramChannel#sendTurn} for
      * media-rich / oversize responses.
      *
      * @param finalResponse the complete LLM response text
@@ -1094,10 +1094,10 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     /**
      * Tell the user their response couldn't be delivered (JCLAW-106). Called
-     * from seal()'s three send paths when {@link TelegramChannel#sendMessage}
+     * from seal()'s three send paths when {@link TelegramChannel#sendTurn}
      * returns {@code false} after retries. Rate-limited per conversation so
      * a Telegram outage doesn't spam the chat. The notifier itself uses
-     * {@link TelegramChannel#sendMessage} directly — bypassing this sink —
+     * {@link TelegramChannel#sendText} directly — bypassing this sink —
      * because the sink is already sealed and would refuse further input.
      * If the notifier's own send fails, we log a warning and give up:
      * the user will notice their bot stopped replying anyway.

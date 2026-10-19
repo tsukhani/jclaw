@@ -138,7 +138,7 @@ public final class TelegramReactionNotifier {
      * ({@link controllers.WebhookTelegramController} and the
      * {@link TelegramPollingRunner} poll loop) call
      * this on the same update they pass to
-     * {@link TelegramChannel#parseUpdate(Update, String, String)} so a forward
+     * {@link TelegramChannel#parseUpdate(Update, String, Long)} so a forward
      * routes through {@link TelegramForwardCoalesceBuffer} instead of the
      * text-reassembly / media-group lanes.
      *
@@ -179,7 +179,7 @@ public final class TelegramReactionNotifier {
      * <p>Shared by the polling runner and {@link controllers.WebhookTelegramController}.
      * The event is delivered through {@link AgentRunner#processInboundForAgent}
      * (non-streaming — a reaction notification is a low-volume system event), and
-     * any agent reply is sent back via {@link TelegramChannel#sendMessage}. Runs
+     * any agent reply is sent back via {@link TelegramChannel#sendText}. Runs
      * the agent on a virtual thread so the caller's dispatch loop isn't blocked.
      */
     public static void handleReaction(Agent agent, String botToken, String ownerTelegramUserId,

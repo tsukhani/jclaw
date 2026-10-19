@@ -36,7 +36,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code LuceneIndexer}'s {@code data/jclaw-lucene}). A row would drag in an
  * entity, migration, and a transaction on the hot consume path for no gain.
  *
- * <p>Writes are monotonic: {@link #record} never lowers a stored value, so an
+ * <p>Writes are monotonic: {@link #persist} never lowers a stored value, so an
  * out-of-order or stale update can't rewind the offset.
  */
 public final class TelegramOffsetStore {

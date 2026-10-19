@@ -51,10 +51,10 @@ import java.util.concurrent.Future;
  * {@code "inherit"} (JCLAW-268). Fresh gives the child only its configured
  * system prompt and an empty history. Inherit additionally (a) summarizes the
  * parent's recent turns via a synchronous LLM call (hard-capped at
- * {@link SessionCompactor#PARENT_CONTEXT_MAX_CHARS} characters), stamps the
+ * {@link services.SessionCompactor#PARENT_CONTEXT_MAX_CHARS} characters), stamps the
  * result on the child Conversation, and re-injects it into the child's system
  * prompt each turn via
- * {@link SessionCompactor#appendParentContextToPrompt}, and (b) unions the
+ * {@link services.SessionCompactor#appendParentContextToPrompt}, and (b) unions the
  * parent's enabled tools into the child Agent's tool config so the child can
  * use the same tool surface the parent had — at-spawn snapshot, matching the
  * per-spawn child Agent lifetime JCLAW-265 established.
@@ -70,13 +70,10 @@ import java.util.concurrent.Future;
  * model, and tool-config policies as the parent (operator-toggleable on the
  * child's own agent row going forward).
  *
- * <p><b>Timeout enforcement (best-effort).</b> The synchronous child run is
- * dispatched to a virtual thread and we await up to {@code runTimeoutSeconds}.
- * On {@link TimeoutException} we mark the SubagentRun {@code TIMEOUT} and emit
- * {@code SUBAGENT_TIMEOUT}; the child VT is interrupted but
- * {@code AgentRunner.run} has no first-class cancel hook today, so any
- * in-flight LLM HTTP call or tool execution may continue to completion in the
- * background. Tight cancellation semantics are JCLAW-270 (async path) territory.
+ * <p><b>Timeout enforcement.</b> {@link SubagentSyncRunner#awaitFuture} times a
+ * synchronous child out once it has been idle longer than {@code runTimeoutSeconds}
+ * or has run past the wall-clock ceiling, and stops it cooperatively through
+ * {@link services.SubagentRegistry#requestStop}, never by interrupting its thread.
  *
  * <p>JCLAW-677: this class is the stable public facade + LLM tool contract.
  * The implementation lives in cohesive package-private collaborators in this
@@ -168,10 +165,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      */
     static final int ANNOUNCE_REPLY_MAX_CHARS = 4000;
 
-    /** {@link Message#messageKind} value stamped on async-spawn announce rows. */
+    /** {@link models.Message#messageKind} value stamped on async-spawn announce rows. */
     public static final String MESSAGE_KIND_ANNOUNCE = "subagent_announce";
 
-    /** JCLAW-662: {@link Message#messageKind} value stamped on the child-Conversation
+    /** JCLAW-662: {@link models.Message#messageKind} value stamped on the child-Conversation
      *  rows that persist a coding-harness run's streamed steps, so
      *  {@link controllers.ApiSubagentRunsController#steps} can replay only the
      *  transcript rows and skip any other child-conversation messages. */

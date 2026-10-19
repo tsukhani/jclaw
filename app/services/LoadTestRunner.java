@@ -1044,7 +1044,7 @@ public final class LoadTestRunner {
      * <p>Minted in-process rather than via {@code POST /api/auth/login} (JCLAW-181): the
      * admin password is a PBKDF2 hash in the Config DB (commit caf9422), so there is no
      * plaintext to log in with. Signing with {@link play.Play#secretKey} produces a cookie
-     * {@link AuthCheck} accepts identically to a real login.
+     * {@link controllers.AuthCheck} accepts identically to a real login.
      *
      * <p>Session data: only the keys {@code AuthCheck} actually checks.
      */

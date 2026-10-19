@@ -275,7 +275,7 @@ public class SystemPromptAssembler {
 
     /**
      * Identical to the existing chars/4 estimate used by the context-window trimmer
-     * in {@link AgentRunner#estimateTokens}. Keeping them in sync means breakdown
+     * in {@link ContextWindowManager#estimateTokens}. Keeping them in sync means breakdown
      * numbers line up with the trimmer's numbers; diverging would be confusing.
      */
     private static int approxTokens(int chars) {

@@ -24,7 +24,7 @@ import java.util.List;
  * appending a {@link Message} to a Conversation.
  *
  * <p>Telegram-channel reminders bypass this entity entirely — they go
- * straight to the user's bot binding via {@link channels.TelegramChannel#sendMessage}.
+ * straight to the user's bot binding via {@link channels.TelegramChannel#sendText}.
  * The split exists because Telegram users carry their notifications on
  * their phone; web users need an in-app surface.
  *

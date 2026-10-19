@@ -36,7 +36,7 @@ import java.util.function.Consumer;
  *   <li>{@link #connect(WhatsAppBinding, Consumer)} — an UNPAIRED binding: builds
  *       {@code unregistered(QrHandler)} and feeds each emitted QR string to the
  *       supplied consumer (the runner stores it for {@code WhatsAppQrController}).</li>
- *   <li>{@link #resume(WhatsAppBinding)} — an already-paired binding: builds
+ *   <li>{@link #resume(WhatsAppBinding, Consumer)} — an already-paired binding: builds
  *       {@code registered()} and reconnects without a QR.</li>
  * </ul>
  *

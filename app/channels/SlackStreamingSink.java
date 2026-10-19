@@ -30,7 +30,7 @@ import java.util.Objects;
  * Only when no token ever arrives (or the draft post fails) does it post once via
  * {@link SlackChannel#sendMessage}.
  *
- * <p>Single-threaded by contract: {@link AgentRunner#runStreaming} drives
+ * <p>Single-threaded by contract: {@link agents.AgentRunner#runStreaming} drives
  * update/seal/error sequentially on one virtual thread, and {@link #begin()} runs
  * before it (happens-before via thread start), so no synchronization is needed.
  */

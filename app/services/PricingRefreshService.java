@@ -27,7 +27,7 @@ import java.util.concurrent.TimeUnit;
  * don't expose pricing in their {@code /v1/models} responses. OpenAI, Anthropic
  * direct, Google direct, Mistral direct all return bare model lists with
  * no cost data. OpenRouter and Together AI are the exceptions — they publish
- * per-model pricing that {@link ModelDiscoveryService#inferPrice} captures at
+ * per-model pricing that {@link services.discovery.ModelCatalogParser#inferPrice} captures at
  * discovery time (OpenRouter via {@code pricing.{prompt,completion}},
  * Together via {@code pricing.{input,output}}), so this backfill normally
  * finds their prices already set and is a no-op for them. It still runs over

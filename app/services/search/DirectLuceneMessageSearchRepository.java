@@ -481,7 +481,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
 
     /**
      * Pairs a {@link SearcherManager#acquire()} with its matching
-     * {@link SearcherManager#release(IndexSearcher)} so callers can use
+     * {@link SearcherManager#release} so callers can use
      * try-with-resources around the lease.
      */
     private static final class LeasedSearcher implements AutoCloseable {

@@ -918,7 +918,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
      *       branch the full scan applies on every call), so a 5th block-art line
      *       that is still mid-line triggers detection at the same moment.</li>
      * </ul>
-     * Block-art-ness of each line is decided by {@link #isBlockArtLine}, the
+     * Block-art-ness of each line is decided by {@link TerminalImageRenderer#isBlockArtLine}, the
      * same predicate the full scan used.
      */
     private final class TerminalImageScanner {

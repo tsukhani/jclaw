@@ -646,7 +646,7 @@ public final class ExtractionPipeline {
         });
     }
 
-    /** {@link #relate(OntologySchema, String, List, Map, String, Decider)} with no endpoint gating. */
+    /** Runs {@link #relateStage} with no endpoint gating. */
     public static Relations relate(OntologySchema schema, String text, List<Typed> terms, String model,
                                    Decider decider) {
         var stage = relateStage(schema, terms, Map.of(), Voice.OWNER, (_, _) -> true);

@@ -553,7 +553,7 @@ public class ApiSubagentRunsController extends Controller {
      * JCLAW-662: GET /api/subagent-runs/{id}/steps — the ordered, persisted step
      * transcript for a coding-harness run. Returns the child-Conversation
      * {@code codingrun_step} rows (stamped by
-     * {@link SubagentSpawnTool#dispatchHarnessEvent}) oldest-first — insertion
+     * {@link tools.SubagentAcpRunner#dispatchHarnessEvent}) oldest-first — insertion
      * order equals {@code seq} order since each step is persisted as it streams
      * in — so a client that reconnects mid-run can replay what it missed and then
      * resume tailing the live {@link services.NotificationBus} rail.

@@ -74,7 +74,7 @@ public final class TextSummaryVideoAdapter {
         return summary;
     }
 
-    /** The effective frame count: the duration-aware count capped at the {@link #MAX_FRAMES} limit. */
+    /** The effective frame count: the duration-aware count capped at {@link #maxFrames()}. */
     public static int effectiveFrameCount(double durationSeconds) {
         return Math.min(FrameSampler.frameCountFor(durationSeconds), maxFrames());
     }

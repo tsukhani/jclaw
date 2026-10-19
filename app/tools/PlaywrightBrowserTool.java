@@ -129,7 +129,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
      * <p>{@link #lock} is stable for the agent's lifetime and is held for the
      * full duration of each {@code execute()} call, so parallel browser tool
      * calls in one streaming round (dispatched on separate virtual threads by
-     * {@link agents.AgentRunner#executeToolsParallel}) serialize against the
+     * {@link agents.ParallelToolExecutor#executeToolsParallel}) serialize against the
      * same {@link Page} — Playwright's Page is not thread-safe — and a launch or
      * teardown can never overlap a live Page op. Concurrent navigate / screenshot
      * calls on the same Page otherwise corrupt its internal request map and

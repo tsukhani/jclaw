@@ -14,7 +14,7 @@ import java.util.concurrent.ScheduledExecutorService;
  * Java has no "tests-only" visibility — but the name makes accidental production
  * use obvious.
  *
- * <p>{@link #flush} and {@link #pendingLength} exist to replace
+ * <p>{@link #flush} and {@link #appendPending} exist to replace
  * {@code getDeclaredMethod("flush")} / {@code getDeclaredField("pending")} reflection
  * in the integration test. A private-member lookup compiles fine and then throws
  * {@code NoSuchMethodException} at runtime the moment the member is renamed or moved

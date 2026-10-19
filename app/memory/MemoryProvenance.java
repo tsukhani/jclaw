@@ -24,9 +24,11 @@ import java.util.List;
  *       {@code prov:wasDerivedFrom} from the newer fact given by {@code supersededById}</td></tr>
  * </table>
  *
+ * <p>Construction throws {@link IllegalArgumentException} when {@code derivedFrom} and
+ * {@code authorType} disagree.
+ *
  * @param derivedFrom ids of the memories this one is derived from; non-empty exactly when
  *                    {@code authorType} is {@link MemoryAuthorType#CONSOLIDATION_DERIVED}
- * @throws IllegalArgumentException when {@code derivedFrom} and {@code authorType} disagree
  */
 public record MemoryProvenance(@Nullable Long sourceConversationId, @Nullable Long sourceMessageId,
                                String actor, MemoryAuthorType authorType, List<Long> derivedFrom) {

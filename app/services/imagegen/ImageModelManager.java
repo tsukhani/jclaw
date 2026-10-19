@@ -29,7 +29,7 @@ import java.util.function.Consumer;
  * {@code huggingface_hub}, which knows the exact multi-file diffusers set), with
  * this manager <em>triggering</em> it and <em>relaying</em> progress to the
  * Settings UI. So this is the status/orchestration half of
- * {@link services.transcription.WhisperModelManager}'s pattern — same state
+ * {@link services.transcription.ModelPrefetchStore}'s pattern — same state
  * machine, single-flight coalescing, and pollable {@link ModelStatus} snapshot —
  * but the bytes move inside the sidecar's {@code POST /pull}, not here.
  *

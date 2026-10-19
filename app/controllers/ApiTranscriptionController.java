@@ -35,7 +35,7 @@ import static utils.GsonHolder.GSON;
  *       every couple of seconds while a download is in flight, then stops
  *       once every model has settled to AVAILABLE / ABSENT / ERROR.</li>
  *   <li>{@code POST /api/transcription/models/{id}/download} — kicks off a
- *       background download via {@link WhisperModelManager#ensureAvailable}.
+ *       background download via {@link AsrModelStore#prefetch}.
  *       Returns immediately with {@code {status: "downloading"}}; progress
  *       is observed through the polling endpoint above.</li>
  * </ul>

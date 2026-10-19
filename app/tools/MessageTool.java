@@ -43,7 +43,7 @@ import java.util.Set;
  * agent's active conversation, picks up its {@code channelType} +
  * {@code peerId}, and dispatches there. AC-5 of JCLAW-327: subagent
  * conversations inherit the parent's channel context at spawn time (see
- * {@link SubagentSpawnTool#resolveChildConversation}), so the child's
+ * {@link SubagentChildBootstrap#resolveChildConversation}), so the child's
  * own conversation already points at the right Telegram chat.
  *
  * <p>Explicit overrides are accepted for the "talk to a specific target"
@@ -560,7 +560,7 @@ public class MessageTool implements ToolRegistry.Tool {
      * agent's (or an ancestor's) Telegram binding and the chat id from
      * {@code target} or the agent's active conversation peer, then calls the
      * matching {@link TelegramChannel} primitive. {@code reply} sends
-     * {@code message} via {@link TelegramChannel#sendMessage} quoting
+     * {@code message} via {@link TelegramChannel#sendReplyWithQuote} quoting
      * {@code messageId}; {@code edit} replaces a bot-sent message's text via
      * {@link TelegramChannel#editMessageText}. Gated per-action by
      * {@link #actionEnabled}: a disabled action returns a {@code not-enabled}
