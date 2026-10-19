@@ -76,26 +76,4 @@ The full suite still runs in `pre-push` before anything ships.
 
 ## Checking Javadoc references
 
-`compileJava` runs javac's doclint (`-Xdoclint:reference/private` in `build.gradle.kts`), so a `{@link}`, `@see`, `@param` or `@throws` in `app/` that names something that moved, or never existed, fails the build. Link a class the file does not import by its fully qualified name.
-
-The build does not check `test/`. To check it, run javac directly into a scratch directory. Never point a compile task at another output directory to do this: Gradle then deletes that task's previous outputs, which for `compileJava` empties `build/classes/java/main`, the directory `ArchitectureTest` reads.
-
-1. Print the test source set's classpath with an init script kept outside the repo:
-   ```kotlin
-   allprojects {
-       tasks.register("printDoclintInputs") {
-           val cp = project.extensions.getByType<SourceSetContainer>()["test"].compileClasspath
-           doLast { println("CLASSPATH=" + cp.asPath) }
-       }
-   }
-   ```
-   ```bash
-   ./gradlew -q printDoclintInputs -I <init-script> | sed -n 's/^CLASSPATH=//p' > <scratch>/cp.txt
-   ```
-2. Compile with only doclint's reference checks on:
-   ```bash
-   git ls-files 'test/*.java' > <scratch>/sources.txt
-   javac -proc:none -encoding UTF-8 -Xdoclint:reference/private -Xmaxerrs 10000 -nowarn \
-     -d <scratch>/out -cp "$(cat <scratch>/cp.txt)" @<scratch>/sources.txt
-   ```
-   Each `reference not found` names a symbol that moved or is gone. `git log -S'<name>'` finds where it went.
+`compileJava` and `compileTestJava` run javac's doclint (`-Xdoclint:reference/private` in `build.gradle.kts`), so a `{@link}`, `@see`, `@param` or `@throws` in `app/` or `test/` that names something that moved, or never existed, fails the build with `reference not found`. Link a class the file does not import by its fully qualified name; `git log -S'<name>'` finds where a moved member went.

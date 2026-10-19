@@ -47,10 +47,12 @@ tasks.named<JavaCompile>("compileTestJava") {
     }
 }
 
-// Every Javadoc reference in app/ must resolve: a {@link}, @see, @param or @throws naming a
-// member that moved, or never existed, fails the compile rather than misleading a reader.
-tasks.named<JavaCompile>("compileJava") {
-    options.compilerArgs.add("-Xdoclint:reference/private")
+// Every Javadoc reference in app/ and test/ must resolve: a {@link}, @see, @param or @throws
+// naming a member that moved, or never existed, fails the compile rather than misleading a reader.
+listOf("compileJava", "compileTestJava").forEach { taskName ->
+    tasks.named<JavaCompile>(taskName) {
+        options.compilerArgs.add("-Xdoclint:reference/private")
+    }
 }
 
 // Import hygiene enforcement for production Java (JCLAW code-audit follow-up). Two
