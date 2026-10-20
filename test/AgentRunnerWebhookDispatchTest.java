@@ -1,6 +1,10 @@
 import agents.AgentRunner;
+import channels.ChannelTransport;
+import channels.TelegramChannel;
 import models.Agent;
 import models.AgentBinding;
+import models.TelegramBinding;
+import models.TelegramTopicBinding;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
@@ -9,6 +13,7 @@ import play.test.UnitTest;
 import services.ConfigService;
 
 import java.lang.reflect.Method;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -197,6 +202,95 @@ class AgentRunnerWebhookDispatchTest extends UnitTest {
         // Must not throw — the catch at AgentRunner.java:1132 swallows.
         assertDoesNotThrow(() ->
                 dispatchToChannelMethod().invoke(null, null, "telegram", "tg-user-2", "hello"));
+    }
+
+    // ─── dispatchToChannel into Telegram groups (JCLAW-1605) ────────────
+
+    @Test
+    void aGroupReplyGoesThroughTheAgentsOwnBot() throws Exception {
+        var agent = createAgent("tg-1605-group", "openrouter", "test-model");
+        var token = "jclaw1605-group-" + System.nanoTime();
+        bindTelegram(agent, token, "16050", true);
+        commitAndReopen();
+
+        var sends = sendMessagesOf(agent, token, "-1001605", "queued answer");
+        assertEquals(1, sends.size(), "the reply reaches the group");
+        var body = sends.getFirst().body();
+        assertTrue(body.contains("\"chat_id\":\"-1001605\"") && body.contains("queued answer"), body);
+        assertFalse(body.contains("message_thread_id"), "a plain group has no topic: " + body);
+    }
+
+    @Test
+    void aTopicReplyCarriesItsThreadId() throws Exception {
+        var agent = createAgent("tg-1605-topic", "openrouter", "test-model");
+        var token = "jclaw1605-topic-" + System.nanoTime();
+        bindTelegram(agent, token, "16051", true);
+        commitAndReopen();
+
+        var sends = sendMessagesOf(agent, token, "-1001605:topic:7", "topic answer");
+        assertEquals(1, sends.size());
+        var body = sends.getFirst().body();
+        assertTrue(body.contains("\"chat_id\":\"-1001605\"") && body.contains("\"message_thread_id\":7"),
+                "the key splits into the chat and its topic: " + body);
+    }
+
+    @Test
+    void aTopicOverrideAgentsReplyGoesThroughTheBotThatMapsIt() throws Exception {
+        var botAgent = createAgent("tg-1605-bot", "openrouter", "test-model");
+        var topicAgent = createAgent("tg-1605-override", "openrouter", "test-model");
+        var token = "jclaw1605-override-" + System.nanoTime();
+        var binding = bindTelegram(botAgent, token, "16052", true);
+        var mapping = new TelegramTopicBinding();
+        mapping.binding = binding;
+        mapping.chatId = "-1001605";
+        mapping.threadId = 9;
+        mapping.agent = topicAgent;
+        mapping.save();
+        commitAndReopen();
+
+        var sends = sendMessagesOf(topicAgent, token, "-1001605:topic:9", "override answer");
+        assertEquals(1, sends.size(), "the override agent has no bot of its own; the mapping's bot sends");
+        assertTrue(sends.getFirst().body().contains("\"message_thread_id\":9"), sends.getFirst().body());
+    }
+
+    @Test
+    void aDisabledBindingSendsNothingToAGroup() throws Exception {
+        var agent = createAgent("tg-1605-disabled", "openrouter", "test-model");
+        var token = "jclaw1605-disabled-" + System.nanoTime();
+        bindTelegram(agent, token, "16053", false);
+        commitAndReopen();
+
+        assertEquals(0, sendMessagesOf(agent, token, "-1001605", "dropped").size());
+    }
+
+    private static List<MockTelegramServer.RecordedRequest> sendMessagesOf(Agent agent, String token, String peerId,
+                                                                           String text) throws Exception {
+        try (var mock = new MockTelegramServer()) {
+            mock.start();
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            try {
+                AgentRunner.dispatchToChannel(agent, "telegram", peerId, text);
+                return mock.requests().stream().filter(r -> r.method().equalsIgnoreCase("sendMessage")).toList();
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+    }
+
+    private static TelegramBinding bindTelegram(Agent agent, String token, String ownerUserId, boolean enabled) {
+        var binding = new TelegramBinding();
+        binding.agent = agent;
+        binding.botToken = token;
+        binding.telegramUserId = ownerUserId;
+        binding.transport = ChannelTransport.POLLING;
+        binding.enabled = enabled;
+        binding.save();
+        return binding;
+    }
+
+    private static void commitAndReopen() {
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────

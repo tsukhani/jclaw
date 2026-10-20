@@ -1,5 +1,6 @@
 package channels;
 
+import agents.TelegramMessageAddressing;
 import channels.Channel.SendResult;
 import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.methods.send.SendAudio;
@@ -51,7 +52,9 @@ final class TelegramMediaSender {
      */
     SendResult sendPhoto(String peerId, File file, @Nullable String caption) {
         if (file == null) return SendResult.FAILED;
-        return trySendPhoto(peerId, file, file.getName(), null, null, caption)
+        // A forum topic's conversation key carries its thread id, which Telegram takes as its own field (JCLAW-1605).
+        var to = TelegramMessageAddressing.chatAddress(peerId);
+        return trySendPhoto(to.chatId(), file, file.getName(), null, to.threadId(), caption)
                 ? SendResult.OK : SendResult.FAILED;
     }
 
@@ -62,7 +65,8 @@ final class TelegramMediaSender {
      */
     SendResult sendDocument(String peerId, File file, @Nullable String caption) {
         if (file == null) return SendResult.FAILED;
-        return trySendDocument(peerId, file, file.getName(), null, null, caption)
+        var to = TelegramMessageAddressing.chatAddress(peerId);
+        return trySendDocument(to.chatId(), file, file.getName(), null, to.threadId(), caption)
                 ? SendResult.OK : SendResult.FAILED;
     }
 

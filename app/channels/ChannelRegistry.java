@@ -1,10 +1,12 @@
 package channels;
 
+import agents.TelegramMessageAddressing;
 import models.Agent;
 import models.ChannelType;
 import models.Conversation;
 import models.SlackBinding;
 import models.TelegramBinding;
+import models.TelegramTopicBinding;
 import models.WhatsAppBinding;
 import org.jspecify.annotations.Nullable;
 
@@ -53,7 +55,7 @@ public final class ChannelRegistry {
         if (type == null) return null;
         return switch (type) {
             case TELEGRAM -> {
-                var binding = TelegramBinding.findEnabledByAgentAndUser(agent, peerId);
+                var binding = telegramBindingFor(agent, peerId);
                 // A bot token that did not decrypt reads as null (JCLAW-1455), and forToken refuses one.
                 yield binding == null || binding.botToken == null ? null : TelegramChannel.forToken(binding.botToken);
             }
@@ -82,5 +84,24 @@ public final class ChannelRegistry {
             // yields it for a missing binding), so callers skip rather than throw.
             case VOICE -> null;
         };
+    }
+
+    /**
+     * A DM's key is the owner's user id, which names its binding. A group's key is its chat id
+     * (JCLAW-1605): the agent's own bot serves it, or, for a forum topic that runs on an override
+     * agent, the bot whose topic mapping names that agent.
+     */
+    private static @Nullable TelegramBinding telegramBindingFor(Agent agent, String peerId) {
+        if (!TelegramMessageAddressing.isGroupPeer(peerId)) {
+            return TelegramBinding.findEnabledByAgentAndUser(agent, peerId);
+        }
+        var to = TelegramMessageAddressing.chatAddress(peerId);
+        var threadId = to.threadId();
+        if (threadId != null) {
+            var mapping = TelegramTopicBinding.findByAgentAndTopic(agent, to.chatId(), threadId);
+            if (mapping != null && mapping.binding.enabled) return mapping.binding;
+        }
+        var own = TelegramBinding.findByAgent(agent);
+        return own != null && own.enabled ? own : null;
     }
 }

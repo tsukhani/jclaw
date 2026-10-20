@@ -79,4 +79,11 @@ public class TelegramTopicBinding extends Model {
                 "binding = ?1 AND chatId = ?2 AND threadId = ?3",
                 binding, chatId, threadId).first();
     }
+
+    /** The mapping that runs {@code agent} in this forum topic, whichever bot's binding holds it. */
+    public static TelegramTopicBinding findByAgentAndTopic(Agent agent, String chatId, Integer threadId) {
+        return TelegramTopicBinding.find(
+                "agent = ?1 AND chatId = ?2 AND threadId = ?3",
+                agent, chatId, threadId).first();
+    }
 }

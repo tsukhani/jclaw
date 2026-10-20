@@ -6,14 +6,20 @@ import org.jspecify.annotations.Nullable;
  * JCLAW-370: pure, side-effect-free Telegram conversation-keying and
  * sender-attribution helpers. Extracted from {@link AgentRunner} (JCLAW-678);
  * {@code AgentRunner.telegramConversationPeerId} / {@code telegramSenderAttributed}
- * remain as public delegators for the channel callers.
+ * remain as public delegators for the channel callers. Public so the channel side
+ * reads a key back with {@link #chatAddress} rather than a copy of its format.
  */
-final class TelegramMessageAddressing {
+public final class TelegramMessageAddressing {
 
     private TelegramMessageAddressing() {}
 
     /** Telegram {@code chat.type} for a one-on-one DM; everything else is a group context. */
     private static final String TELEGRAM_CHAT_TYPE_PRIVATE = "private";
+
+    private static final String TOPIC_SEPARATOR = ":topic:";
+
+    /** Where Telegram addresses a send: the chat, and the forum topic within it or null. */
+    public record ChatAddress(String chatId, @Nullable Integer threadId) {}
 
     /**
      * JCLAW-370: compute the conversation peer key for an inbound Telegram
@@ -39,13 +45,21 @@ final class TelegramMessageAddressing {
             return ownerKey;
         }
         return messageThreadId != null
-                ? chatId + ":topic:" + messageThreadId
+                ? chatId + TOPIC_SEPARATOR + messageThreadId
                 : chatId;
     }
 
     /** Whether a {@link #telegramConversationPeerId} names a group: Telegram group chat ids are negative, user ids positive. */
-    static boolean isGroupPeer(String peerId) {
+    public static boolean isGroupPeer(String peerId) {
         return peerId.startsWith("-");
+    }
+
+    /** A {@link #telegramConversationPeerId} read back; a DM's key is the owner's user id, which is also its chat id. */
+    public static ChatAddress chatAddress(String peerId) {
+        int at = peerId.indexOf(TOPIC_SEPARATOR);
+        return at < 0
+                ? new ChatAddress(peerId, null)
+                : new ChatAddress(peerId.substring(0, at), Integer.valueOf(peerId.substring(at + TOPIC_SEPARATOR.length())));
     }
 
     /**

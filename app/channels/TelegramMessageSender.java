@@ -1,5 +1,6 @@
 package channels;
 
+import agents.TelegramMessageAddressing;
 import channels.Channel.SendResult;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
@@ -122,7 +123,9 @@ final class TelegramMessageSender {
      * what makes prose, photo, prose sequences arrive as the agent composed them.
      */
     SendResult sendText(String peerId, String text, Agent agent) {
-        return sendTurn(peerId, text, agent, null, null) ? SendResult.OK : SendResult.FAILED;
+        // A forum topic's conversation key carries its thread id, which Telegram takes as its own field (JCLAW-1605).
+        var to = TelegramMessageAddressing.chatAddress(peerId);
+        return sendTurn(to.chatId(), text, agent, null, to.threadId()) ? SendResult.OK : SendResult.FAILED;
     }
 
     /**

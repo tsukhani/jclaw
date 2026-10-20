@@ -884,12 +884,10 @@ class SubagentYieldToolTest extends UnitTest {
 
     @Test
     void anOwnersFailedRunInAGroupSendsTheNeutralLine() throws Exception {
-        // Telegram cannot yet send to a group from here: no binding matches a group's chat id, so a
-        // binding keyed by one stands in for the delivery.
         var parent = createAgent("p-1603-group", "test-provider", "test-model");
         var token = "jclaw1603-group-" + System.nanoTime();
         var groupPeer = "-1001603";
-        bindTelegram(parent, token, groupPeer);
+        bindTelegram(parent, token, "16034");
         var groupConv = ConversationService.create(parent, "telegram", groupPeer);
         var run = seedRunningSubagentRun(parent, groupConv);
         commitAndReopen();
