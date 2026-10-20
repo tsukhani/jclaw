@@ -480,6 +480,14 @@ class ShellExecToolTest extends UnitTest {
     }
 
     @Test
+    void aLongQuotedArgumentStillReturnsItsResult() {
+        var json = new com.google.gson.JsonObject();
+        json.addProperty("command", "echo \"" + "x".repeat(100_000) + "\" | wc -c");
+        var text = tool.execute(json.toString(), agent);
+        assertTrue(text.contains("\"exitCode\":0") && text.contains("100001"), text);
+    }
+
+    @Test
     void aRunningCommandCountsAsActivityForTheRunAndTheTaskFireAroundIt() throws Exception {
         long runId = -java.util.concurrent.ThreadLocalRandom.current().nextLong(1, Long.MAX_VALUE);
         long taskRunId = 991_575_000L + java.util.concurrent.ThreadLocalRandom.current().nextInt(1000);

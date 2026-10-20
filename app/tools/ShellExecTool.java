@@ -581,19 +581,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
                 out.append("\n[Output truncated at %dKB. Total output: %d bytes]"
                         .formatted(maxOutputBytes / 1024, readResult.totalRead()));
             }
-            if (leftRunning) {
-                keepOutput = true;
-                var pids = BackgroundProcesses.pidsHolding(output);
-                out.append("\n[Anything this command left running in the background keeps writing its output to ")
-                        .append(output);
-                if (!pids.isEmpty()) {
-                    out.append(pids.size() == 1 ? "; pid " : "; pids ")
-                            .append(pids.stream().map(String::valueOf).collect(Collectors.joining(", ")));
-                }
-                out.append(lifetimeNote()).append(']');
-            } else if (background) {
-                out.append("\n[The background command exited within a second; its output is above]");
-            }
+            if (leftRunning) keepOutput = true;
+            appendBackgroundNote(out, output, leftRunning, background);
 
             long durationMs = System.currentTimeMillis() - startTime;
             var processedOutput = TerminalImageRenderer.replaceTerminalImagesInOutput(out.toString(), agent);
@@ -625,6 +614,22 @@ public class ShellExecTool implements ToolRegistry.Tool {
             closeQuietly(outputChannel);
             // A process the command left behind unforeseen keeps writing to the deleted file without failing.
             if (!keepOutput && output != null) deleteOutput(output);
+        }
+    }
+
+    /** Names the file and pids of what a command left running, or says a background command has already exited. */
+    private static void appendBackgroundNote(StringBuilder out, Path output, boolean leftRunning, boolean background) {
+        if (leftRunning) {
+            var pids = BackgroundProcesses.pidsHolding(output);
+            out.append("\n[Anything this command left running in the background keeps writing its output to ")
+                    .append(output);
+            if (!pids.isEmpty()) {
+                out.append(pids.size() == 1 ? "; pid " : "; pids ")
+                        .append(pids.stream().map(String::valueOf).collect(Collectors.joining(", ")));
+            }
+            out.append(lifetimeNote()).append(']');
+        } else if (background) {
+            out.append("\n[The background command exited within a second; its output is above]");
         }
     }
 
@@ -702,7 +707,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
                             if (text.length() < 4096) text.append(new String(buf, 0, n, StandardCharsets.UTF_8));
                         }
                     }
-                } catch (IOException e) {
+                } catch (IOException _) {
                     // A closed pipe is as good as EOF here.
                 }
                 released.complete(true);
@@ -740,8 +745,11 @@ public class ShellExecTool implements ToolRegistry.Tool {
     /** A shell {@code &} that sends a job to the background, as opposed to {@code &&}, {@code 2>&1} or {@code &>}. */
     private static final Pattern BACKGROUND_OPERATOR = Pattern.compile("(?<![&>|<])&(?![&>])");
 
-    /** A single- or double-quoted string, blanked before that check: {@code curl 'http://h/?a=1&b=2'} backgrounds nothing. */
-    private static final Pattern QUOTED = Pattern.compile("\"(?:\\\\.|[^\"\\\\])*\"|'[^']*'");
+    /**
+     * A single- or double-quoted string, blanked before that check: {@code curl 'http://h/?a=1&b=2'} backgrounds nothing.
+     * Possessive, since a backtracking group recurses once per character and a long quoted argument overflows the stack.
+     */
+    private static final Pattern QUOTED = Pattern.compile("\"(?:\\\\.|[^\"\\\\])*+\"|'[^']*+'");
 
     private static String unquoted(String command) {
         return QUOTED.matcher(command).replaceAll(" ");
@@ -778,7 +786,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
         if (channel == null) return;
         try {
             channel.close();
-        } catch (IOException e) {
+        } catch (IOException _) {
             // The descriptor is released either way; there is nothing to recover.
         }
     }

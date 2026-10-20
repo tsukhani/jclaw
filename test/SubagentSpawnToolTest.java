@@ -871,7 +871,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     /** Awaits a run on a 1 s idle budget while that run spends ~2.5 s waiting on a child of its own. */
-    private static SubagentSpawnTool.SyncRunOutcome awaitNestedRun(boolean childWorks) throws Exception {
+    private static SubagentSpawnTool.SyncRunOutcome awaitNestedRun(boolean childWorks) {
         var rnd = java.util.concurrent.ThreadLocalRandom.current();
         Long waiting = -rnd.nextLong(1, Long.MAX_VALUE);
         Long child = -rnd.nextLong(1, Long.MAX_VALUE);

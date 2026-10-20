@@ -137,7 +137,7 @@ public class CheckListTool implements ToolRegistry.Tool {
         try {
             var parsed = JsonParser.parseString(checklist);
             return parsed.isJsonArray() ? parsed.getAsJsonArray() : null;
-        } catch (JsonParseException e) {
+        } catch (JsonParseException _) {
             return null;
         }
     }

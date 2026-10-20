@@ -192,7 +192,10 @@ public final class ParallelToolExecutor {
         BooleanSupplier cancelled = () -> (isCancelled != null && isCancelled.get())
                 || (subagentRun != null && subagentRun.stopRequested())
                 || (fireCancel != null && fireCancel.get());
-        var turnCancel = isCancelled != null ? isCancelled : subagentRun != null ? subagentRun.stopFlag() : fireCancel;
+        @Nullable AtomicBoolean turnCancel;
+        if (isCancelled != null) turnCancel = isCancelled;
+        else if (subagentRun != null) turnCancel = subagentRun.stopFlag();
+        else turnCancel = fireCancel;
 
         ToolRegistry.ToolResult[] results = new ToolRegistry.ToolResult[n];
 

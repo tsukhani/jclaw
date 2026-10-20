@@ -191,7 +191,7 @@ public final class BackgroundProcesses {
         try {
             var attrs = Files.readAttributes(file, "unix:dev,ino", LinkOption.NOFOLLOW_LINKS);
             return attrs.get("dev") + ":" + attrs.get("ino");
-        } catch (IOException | UnsupportedOperationException | IllegalArgumentException e) {
+        } catch (IOException | UnsupportedOperationException | IllegalArgumentException _) {
             return null;
         }
     }
@@ -209,7 +209,7 @@ public final class BackgroundProcesses {
     public static List<Long> pidsHolding(Path file) {
         try {
             return holdersOf(List.of(file.toRealPath())).stream().map(h -> h.process().pid()).toList();
-        } catch (IOException e) {
+        } catch (IOException _) {
             return List.of();
         }
     }
@@ -450,22 +450,29 @@ public final class BackgroundProcesses {
 
     private static void forEachProcFd(ProcFdVisitor visit) {
         try (var procs = Files.newDirectoryStream(Path.of("/proc"), p -> p.getFileName().toString().matches("\\d+"))) {
-            for (var proc : procs) {
-                long pid = Long.parseLong(proc.getFileName().toString());
-                try (var fds = Files.newDirectoryStream(proc.resolve("fd"))) {
-                    for (var fd : fds) {
-                        try {
-                            visit.accept(pid, fd.getFileName().toString(), Files.readSymbolicLink(fd));
-                        } catch (IOException _) {
-                            // Closed since the listing.
-                        }
-                    }
-                } catch (IOException | DirectoryIteratorException _) {
-                    // Another user's process, or one that has exited.
-                }
-            }
+            for (var proc : procs) forEachFd(Long.parseLong(proc.getFileName().toString()), proc, visit);
         } catch (IOException | DirectoryIteratorException e) {
             EventLogger.warn("tool", null, "exec", "Could not read /proc: %s".formatted(e.getMessage()));
+        }
+    }
+
+    private static void forEachFd(long pid, Path proc, ProcFdVisitor visit) {
+        try (var fds = Files.newDirectoryStream(proc.resolve("fd"))) {
+            for (var fd : fds) {
+                var target = linkTarget(fd);
+                if (target != null) visit.accept(pid, fd.getFileName().toString(), target);
+            }
+        } catch (IOException | DirectoryIteratorException _) {
+            // Another user's process, or one that has exited.
+        }
+    }
+
+    private static @Nullable Path linkTarget(Path fd) {
+        try {
+            return Files.readSymbolicLink(fd);
+        } catch (IOException _) {
+            // Closed since the listing.
+            return null;
         }
     }
 
@@ -502,7 +509,7 @@ public final class BackgroundProcesses {
         try {
             var address = InetAddress.getByAddress(bytes).getHostAddress();
             return bytes.length == 4 ? address : "[" + address + "]";
-        } catch (UnknownHostException e) {
+        } catch (UnknownHostException _) {
             return hex;
         }
     }
