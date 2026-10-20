@@ -856,7 +856,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void aRunWaitingOnAWorkingChildIsNotCutByItsOwnIdleBudget() throws Exception {
+    void aRunWaitingOnAWorkingChildIsNotCutByItsOwnIdleBudget() {
         // The waiting run records nothing itself: only its child's activity can keep it within budget.
         var outcome = awaitNestedRun(true);
         assertEquals(SubagentRun.Status.COMPLETED, outcome.terminalStatus(), outcome.terminalOutcome());
@@ -864,7 +864,7 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void aRunWaitingOnASilentChildIsCutByItsOwnIdleBudget() throws Exception {
+    void aRunWaitingOnASilentChildIsCutByItsOwnIdleBudget() {
         var outcome = awaitNestedRun(false);
         assertEquals(SubagentRun.Status.TIMEOUT, outcome.terminalStatus());
         assertTrue(outcome.terminalOutcome().contains("idle"), outcome.terminalOutcome());
