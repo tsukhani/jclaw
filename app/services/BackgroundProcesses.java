@@ -135,7 +135,9 @@ public final class BackgroundProcesses {
         if (id == null) return false;
         synchronized (RECORDED) {
             loadRecord();
-            return RECORDED.containsKey(id);
+            var path = RECORDED.get(id);
+            // ext4 gives a deleted file's inode to the next file made, so a record counts only while its own name holds it.
+            return path != null && id.equals(fileId(path));
         }
     }
 

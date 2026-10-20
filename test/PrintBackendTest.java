@@ -111,7 +111,7 @@ class PrintBackendTest extends UnitTest {
 
     @Test
     void lpdSendsTheRfc1179Sequence() throws Exception {
-        try (var server = new ServerSocket(0)) {
+        try (var server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
             var daemon = lpdDaemon(server);
             var document = "PDFBYTES".getBytes(StandardCharsets.UTF_8);
             LpdClient.print("127.0.0.1", server.getLocalPort(), "lp", "invoice.pdf",
@@ -180,7 +180,7 @@ class PrintBackendTest extends UnitTest {
 
     @Test
     void lpdSurfacesADaemonRefusal() throws Exception {
-        try (var server = new ServerSocket(0)) {
+        try (var server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
             // Non-zero first ack = refusal. Reporting this as success is how a job
             // silently vanishes, so it must throw.
             CompletableFuture.runAsync(() -> {
@@ -201,7 +201,7 @@ class PrintBackendTest extends UnitTest {
 
     @Test
     void rawSocketStreamsTheDocumentVerbatim() throws Exception {
-        try (var server = new ServerSocket(0)) {
+        try (var server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
             var received = CompletableFuture.supplyAsync(() -> {
                 try (var socket = server.accept()) {
                     return socket.getInputStream().readAllBytes();
@@ -302,7 +302,7 @@ class PrintBackendTest extends UnitTest {
         // The point of the whole droppedAttributes field. A duplex request that
         // falls back to port 9100 prints single-sided, and the operator would
         // otherwise learn that from the paper.
-        try (var server = new ServerSocket(0)) {
+        try (var server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
             CompletableFuture.runAsync(() -> {
                 try (var socket = server.accept()) {
                     socket.getInputStream().readAllBytes();
@@ -328,7 +328,7 @@ class PrintBackendTest extends UnitTest {
 
     @Test
     void aFallbackWithNoAttributesRequestedReportsNothingDropped() throws Exception {
-        try (var server = new ServerSocket(0)) {
+        try (var server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
             CompletableFuture.runAsync(() -> {
                 try (var socket = server.accept()) {
                     socket.getInputStream().readAllBytes();

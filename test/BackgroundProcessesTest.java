@@ -14,6 +14,7 @@ import utils.AppClock;
 
 import java.io.IOException;
 import java.io.RandomAccessFile;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -51,7 +52,7 @@ class BackgroundProcessesTest extends UnitTest {
     @AfterEach
     void teardown() {
         sleepers("sleep 4751", "sleep 4752", "sleep 4753", "sleep 4754", "sleep 4755", "sleep 4756", "sleep 4757",
-                "sleep 4758", "sleep 4759", "sleep 4760", "sleep 4761", "sleep 4762")
+                "sleep 4758", "sleep 4759", "sleep 4760", "sleep 4761", "sleep 4762", "sleep 4763")
                 .forEach(ProcessHandle::destroyForcibly);
         ConfigService.delete(BackgroundProcesses.LIFETIME_KEY);
         ShellSandboxSync.release();
@@ -225,6 +226,29 @@ class BackgroundProcessesTest extends UnitTest {
     }
 
     @Test
+    void aRecordWhoseFileIsGoneNamesNoHolderForTheFileGivenItsInode() throws Exception {
+        var workspace = AgentService.workspacePath(AGENT);
+        var dir = workspace.resolve(".exec");
+        Files.createDirectories(dir);
+        var victim = Files.createTempFile(workspace, "exec-reused", ".bin");
+        // Moving the recorded file off its name leaves the record ext4 leaves when it gives a deleted file's inode to a new one.
+        BackgroundProcesses.recordOutputFile(victim);
+        var holder = new ProcessBuilder("/bin/sh", "-c", "exec 4<\"$1\"; exec sleep 4763", "sh", victim.toString())
+                .start();
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (sleepers("sleep 4763").isEmpty() && System.nanoTime() < deadline) Thread.sleep(50);
+        var moved = Files.move(victim, dir.resolve("c1-" + UUID.randomUUID() + ".log"));
+        try {
+            assertTrue(BackgroundProcesses.list(List.of(agent)).stream().noneMatch(e -> e.command().endsWith("sleep 4763")),
+                    "a record counts only while its own name holds the inode");
+            assertFalse(BackgroundProcesses.stop(agent, holder.pid()), "nor can it be stopped");
+        } finally {
+            holder.destroyForcibly();
+            Files.deleteIfExists(moved);
+        }
+    }
+
+    @Test
     void anAgentHardlinkingItsOwnOutputFileStaysListedAndStoppable() throws Exception {
         execIn(1L, "sleep 4760 & echo started");
         var entry = awaitListed("sleep 4760");
@@ -280,7 +304,7 @@ class BackgroundProcessesTest extends UnitTest {
     @Test
     void aServerIsListedWithTheAddressItListensOn() throws Exception {
         int port;
-        try (var probe = new ServerSocket(0)) {
+        try (var probe = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
             port = probe.getLocalPort();
         }
         var text = execIn(1L, "python3 -m http.server %d --bind 127.0.0.1 & echo started".formatted(port));
