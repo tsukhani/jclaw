@@ -258,7 +258,7 @@ final class ChannelInboundDispatcher {
      * or a Telegram conversation with no enabled binding) drops the dispatch,
      * matching the prior null-branch behavior.
      */
-    static void dispatchToChannel(Agent agent, String channelType, String peerId, String text) {
+    static void dispatchToChannel(Agent agent, String channelType, @Nullable String peerId, String text) {
         if (peerId == null || text == null) return;
         try {
             var channel = Tx.run(() ->

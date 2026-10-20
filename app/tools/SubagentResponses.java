@@ -2,6 +2,7 @@ package tools;
 
 import agents.AgentRunner;
 import agents.ToolContext;
+import models.Agent;
 import models.Conversation;
 import models.Message;
 import models.MessageRole;
@@ -16,6 +17,7 @@ import utils.GsonHolder;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * JCLAW-677: response shaping into the parent transcript, extracted from
@@ -105,6 +107,11 @@ final class SubagentResponses {
      * cap on the announce body, NOT the JCLAW-291 model-output truncation
      * flag. The two flow through {@link #postAnnounceMessage} as separate
      * parameters.
+     *
+     * <p>A fire-and-forget announce is also sent, after the commit, as plain text to the parent
+     * conversation's channel: nothing else carries it to Telegram, Slack or WhatsApp, and the
+     * model never sees a SYSTEM announce to relay it. Web chat has no peer and stays card-only.
+     * A yielded announce sends nothing here; the resumed reply is the message.
      */
     @SuppressWarnings("java:S1181")
     static Boolean postAnnounceAndReadYieldFlag(Long runId, @Nullable Long childConvId,
@@ -124,13 +131,19 @@ final class SubagentResponses {
         var displayTruncatedBody = truncateForAnnounce(announceBody);
         final var modelOutputTruncated = outcome.replyTruncated();
         try {
-            return Tx.run(() -> {
+            var delivery = new AtomicReference<@Nullable PostedAnnounce>();
+            boolean yielded = Tx.run(() -> {
                 var run = (SubagentRun) SubagentRun.findById(runId);
                 boolean isYielded = run != null && run.yielded;
-                postAnnounceMessage(parentConvId, runId, label, status,
-                        displayTruncatedBody, childConvId, isYielded, modelOutputTruncated);
+                delivery.set(postAnnounceMessage(parentConvId, runId, label, status,
+                        displayTruncatedBody, childConvId, isYielded, modelOutputTruncated));
                 return isYielded;
             });
+            var posted = delivery.get();
+            if (!yielded && posted != null) {
+                AgentRunner.dispatchToChannel(posted.agent(), posted.channelType(), posted.peerId(), posted.text());
+            }
+            return yielded;
         } catch (Throwable t) {
             EventLogger.warn(SubagentSpawnTool.SUBAGENT_CHANNEL,
                     "Failed to post announce Message for run " + runId
@@ -139,8 +152,11 @@ final class SubagentResponses {
         }
     }
 
+    /** Where a saved announce row can be sent, read inside the transaction that saved it. */
+    private record PostedAnnounce(Agent agent, String channelType, @Nullable String peerId, String text) {}
+
     /**
-     * JCLAW-273: re-invoke {@link AgentRunner#runYieldResume} on the parent
+     * JCLAW-273: re-invoke {@link AgentRunner#resumeAndDeliver} on the parent
      * conversation after a yielded async run terminates. The announce
      * Message has already been persisted as a USER-role row (see
      * {@link #postAnnounceMessage}); the resume entrypoint runs the
@@ -154,6 +170,9 @@ final class SubagentResponses {
      * other turn's queue acquisition). Failures are caught + logged at the
      * caller — losing the resume must not lose the audit row or the
      * announce.
+     *
+     * <p>{@code resumeAndDeliver} also sends the resumed reply to the parent's channel; a resume
+     * queued behind a busy conversation is sent by the queue's drain instead.
      */
     static void resumeParentAfterYield(Long parentConvId, Long runId) {
         var conv = Tx.run(() -> (Conversation) Conversation.findById(parentConvId));
@@ -173,7 +192,7 @@ final class SubagentResponses {
                             + " for run " + runId);
             return;
         }
-        AgentRunner.runYieldResume(parentAgent, conv);
+        AgentRunner.resumeAndDeliver(parentAgent, conv);
     }
 
     /**
@@ -207,13 +226,15 @@ final class SubagentResponses {
      * the LLM sees in the rebuilt context — keep it the rich-prose form
      * (status + reply) so a model that doesn't understand the metadata
      * still gets a coherent user turn.
+     *
+     * @return the parent's channel and the plain text, or null when the parent conversation is gone
      */
-    private static void postAnnounceMessage(Long parentConvId, Long runId, @Nullable String label,
+    private static @Nullable PostedAnnounce postAnnounceMessage(Long parentConvId, Long runId, @Nullable String label,
                                             SubagentRun.Status status, String truncatedReply,
                                             @Nullable Long childConvId, boolean yielded,
                                             boolean modelOutputTruncated) {
         var parentConv = (Conversation) Conversation.findById(parentConvId);
-        if (parentConv == null) return;
+        if (parentConv == null) return null;
 
         var payload = new LinkedHashMap<String, Object>();
         payload.put(SubagentSpawnTool.BUS_RUN_ID, runId);
@@ -248,5 +269,6 @@ final class SubagentResponses {
 
         parentConv.messageCount++;
         parentConv.save();
+        return new PostedAnnounce(parentConv.agent, parentConv.channelType, parentConv.peerId, fallback);
     }
 }
