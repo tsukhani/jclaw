@@ -10,6 +10,7 @@ import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConversationService;
+import tools.SubagentSpawnTool;
 import utils.GsonHolder;
 
 import java.util.List;
@@ -60,6 +61,12 @@ class MessageHydratorTest extends UnitTest {
 
     private static String toolCallJson(String id, String name, String args) {
         return GsonHolder.GSON.toJson(toolCall(id, name, args));
+    }
+
+    private static void appendAnnounce(Conversation conv, String content) {
+        var announce = ConversationService.appendMessage(conv, MessageRole.SYSTEM, content, null, null, null);
+        announce.messageKind = SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE;
+        announce.save();
     }
 
     // ─── buildMessages: empty / system-only inputs ──────────────────────
@@ -257,6 +264,45 @@ class MessageHydratorTest extends UnitTest {
         var sys = messages.get(1);
         assertEquals(MessageRole.SYSTEM.value, sys.role());
         assertEquals("context note", sys.content());
+    }
+
+    @Test
+    void buildMessagesHydratesASystemAnnounceAsTheAgentsOwnReply() {
+        var conv = ConversationService.create(agent, "telegram", "user1");
+        ConversationService.appendMessage(conv, MessageRole.USER, "spawn it", null, null, null);
+        ConversationService.appendMessage(conv, MessageRole.ASSISTANT, "spawned", null, null, null);
+        appendAnnounce(conv, "Subagent completed (subagent run): 42");
+        commitAndReopen();
+        var fresh = Conversation.<Conversation>findById(conv.id);
+
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
+        assertEquals(4, messages.size());
+        var announce = messages.get(3);
+        assertEquals(MessageRole.ASSISTANT.value, announce.role());
+        assertEquals("Subagent completed (subagent run): 42", announce.content());
+        assertNull(announce.toolCalls());
+    }
+
+    @Test
+    void buildMessagesPlacesAnAnnounceSavedMidRoundAfterTheToolResult() {
+        // Saved between a tool call and its result, the announce would split the pair, which
+        // providers reject.
+        var conv = ConversationService.create(agent, "telegram", "user1");
+        ConversationService.appendMessage(conv, MessageRole.USER, "do two things", null, null, null);
+        ConversationService.appendMessage(conv, MessageRole.ASSISTANT, null,
+                toolCallJson("call_1", "exec", "{}"), null, null);
+        appendAnnounce(conv, "Subagent completed (subagent run): 42");
+        ConversationService.appendMessage(conv, MessageRole.TOOL, "done", null, "call_1", null);
+        ConversationService.appendMessage(conv, MessageRole.ASSISTANT, "all done", null, null, null);
+        commitAndReopen();
+        var fresh = Conversation.<Conversation>findById(conv.id);
+
+        var messages = MessageHydrator.buildMessages("SP", fresh).messages();
+        assertEquals(List.of("system", "user", "assistant", "tool", "assistant", "assistant"),
+                messages.stream().map(m -> m.role()).toList());
+        assertEquals("call_1", messages.get(3).toolCallId(), "the result still follows its call");
+        assertEquals("Subagent completed (subagent run): 42", messages.get(4).content());
+        assertEquals("all done", messages.get(5).content());
     }
 
     @Test

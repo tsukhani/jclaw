@@ -9,6 +9,7 @@ import models.MessageAttachment;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import services.ConversationService;
+import tools.SubagentSpawnTool;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -118,9 +119,19 @@ public final class MessageHydrator {
         // visited before its TOOL row.
         var toolNamesById = new HashMap<String, String>();
 
+        // JCLAW-1602: an announce reaches the model as its own reply, as the user saw it arrive.
+        // Saved from another thread, it can sort inside a tool round, so it waits for the results.
+        var heldAnnounces = new ArrayList<ChatMessage>();
+
         var history = ConversationService.loadRecentMessages(conversation);
         for (var msg : history) {
             var role = MessageRole.fromValue(msg.role);
+            if (role == MessageRole.SYSTEM && SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE.equals(msg.messageKind)) {
+                heldAnnounces.add(ChatMessage.assistant(msg.content));
+                if (!insideToolRound(messages.getLast())) releaseHeld(messages, heldAnnounces);
+                continue;
+            }
+            if (role != MessageRole.TOOL) releaseHeld(messages, heldAnnounces);
             messages.add(switch (role != null ? role : MessageRole.USER) {
                 case USER -> hydrateUserMessage(msg, messages.size(), audioBearers, imageBearers, videoBearers);
                 case ASSISTANT -> hydrateAssistantMessage(msg, toolNamesById);
@@ -136,8 +147,19 @@ public final class MessageHydrator {
                 case SYSTEM -> ChatMessage.system(msg.content);
             });
         }
+        releaseHeld(messages, heldAnnounces);
 
         return new Hydration(messages, audioBearers, imageBearers, videoBearers);
+    }
+
+    private static boolean insideToolRound(ChatMessage last) {
+        return MessageRole.TOOL.value.equals(last.role())
+                || (last.toolCalls() != null && !last.toolCalls().isEmpty());
+    }
+
+    private static void releaseHeld(List<ChatMessage> messages, List<ChatMessage> held) {
+        messages.addAll(held);
+        held.clear();
     }
 
     /**

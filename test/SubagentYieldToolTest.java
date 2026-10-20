@@ -1,3 +1,4 @@
+import agents.MessageHydrator;
 import agents.ToolRegistry;
 import channels.ChannelTransport;
 import channels.TelegramChannel;
@@ -662,13 +663,12 @@ class SubagentYieldToolTest extends UnitTest {
     }
 
     @Test
-    void loadRecentMessagesIncludesUserRoleAnnounceAndExcludesSystemAnnounce() {
-        // JCLAW-273 filter: USER-role announces (yield resumes) flow into LLM
-        // context; SYSTEM-role announces (plain async fire-and-forget) do not.
+    void bothAnnounceRolesReachTheModel() {
+        // JCLAW-273: a yield resume's USER-role announce is the parent's next input.
+        // JCLAW-1602: a fire-and-forget SYSTEM-role announce reads as the parent's own reply.
         var parent = createAgent("p-filter", "test-provider", "test-model");
         var parentConv = ConversationService.create(parent, "web", "u-filter");
 
-        // System-role announce (filtered out).
         var sysAnnounce = new Message();
         sysAnnounce.conversation = parentConv;
         sysAnnounce.role = MessageRole.SYSTEM.value;
@@ -676,7 +676,6 @@ class SubagentYieldToolTest extends UnitTest {
         sysAnnounce.messageKind = SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE;
         sysAnnounce.save();
 
-        // User-role announce (kept in LLM context).
         var userAnnounce = new Message();
         userAnnounce.conversation = parentConv;
         userAnnounce.role = MessageRole.USER.value;
@@ -686,16 +685,14 @@ class SubagentYieldToolTest extends UnitTest {
 
         commitAndReopen();
 
-        var loaded = Tx.run(() -> ConversationService.loadRecentMessages(
-                Conversation.findById(parentConv.id)));
-        assertTrue(loaded.stream().anyMatch(m ->
-                        MessageRole.USER.value.equals(m.role)
-                                && SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE.equals(m.messageKind)),
-                "USER-role yield announce must appear in LLM context");
-        assertTrue(loaded.stream().noneMatch(m ->
-                        MessageRole.SYSTEM.value.equals(m.role)
-                                && SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE.equals(m.messageKind)),
-                "SYSTEM-role plain-async announce must remain filtered out");
+        var modelInput = Tx.run(() -> MessageHydrator.buildMessages("SP",
+                Conversation.findById(parentConv.id)).messages());
+        assertTrue(modelInput.stream().anyMatch(m -> MessageRole.USER.value.equals(m.role())
+                        && "Subagent completed (yield)".equals(m.content())),
+                "USER-role yield announce must reach the model as user input");
+        assertTrue(modelInput.stream().anyMatch(m -> MessageRole.ASSISTANT.value.equals(m.role())
+                        && "Subagent completed".equals(m.content())),
+                "SYSTEM-role plain-async announce must reach the model as the agent's own reply");
     }
 
     // ───────── Channel delivery (GH-13) ─────────

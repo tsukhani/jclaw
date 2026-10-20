@@ -1,4 +1,5 @@
 import agents.AgentRunner;
+import agents.MessageHydrator;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -2166,6 +2167,11 @@ class SubagentSpawnToolTest extends UnitTest {
                 "truncated reply must be exactly 4000 chars, got: " + announceReply.length());
         assertTrue(announceReply.endsWith("..."),
                 "truncated reply must end with the ellipsis marker");
+        // JCLAW-1602: the plain text is what the model and the channel read, and a bare ellipsis
+        // there reads as the whole reply.
+        assertTrue(((Message) announces.getFirst()).content.endsWith(
+                        "... [cut at 4000 characters; subagent run " + runId + "'s conversation has the full text]"),
+                "the plain text must say it was cut and name the run holding the full text");
 
         // The child Conversation still carries the full reply on its
         // assistant Message — operator can click "View full" to see it.
@@ -2180,12 +2186,9 @@ class SubagentSpawnToolTest extends UnitTest {
     }
 
     @Test
-    void asyncAnnounceMessageIsExcludedFromLlmContext() throws Exception {
-        // JCLAW-270 regression: announce messages must NOT feed into a future
-        // turn's LLM context (they're UI-only structured cards; surfacing them
-        // would risk the model re-acknowledging an already-delivered result).
-        // {@link ConversationService#loadRecentMessages} filters by
-        // messageKind == null.
+    void asyncAnnounceReachesTheModelAsTheAgentsOwnReply() throws Exception {
+        // JCLAW-1602: the user saw the result arrive from the agent, so the agent's next turn
+        // must be able to read it.
         startLlmServer(simpleResponse("Subagent reply: async."));
         configureProvider();
 
@@ -2198,14 +2201,17 @@ class SubagentSpawnToolTest extends UnitTest {
         var parsed = JsonParser.parseString(reply).getAsJsonObject();
         var runId = Long.parseLong(parsed.get("run_id").getAsString());
         awaitTerminalStatus(runId, SubagentRun.Status.COMPLETED, 10_000);
-        assertEquals(1, awaitAnnounces(parentConv.id, 1, 5_000).size(),
-                "the announce must land before its absence from the LLM context means anything");
+        var announces = awaitAnnounces(parentConv.id, 1, 5_000);
+        assertEquals(1, announces.size(), "the announce must land before the model can read it");
+        var announceText = announces.getFirst().content;
+        assertFalse(announceText.contains("[cut at"), "a short reply carries no cut marker");
 
         JPA.em().clear();
         var conv = (Conversation) Conversation.findById(parentConv.id);
-        var llmHistory = Tx.run(() -> ConversationService.loadRecentMessages(conv));
-        assertTrue(llmHistory.stream().noneMatch(m -> SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE.equals(m.messageKind)),
-                "announce-kind messages must be filtered out of LLM context assembly");
+        var modelInput = Tx.run(() -> MessageHydrator.buildMessages("SP", conv).messages());
+        assertTrue(modelInput.stream().anyMatch(m -> MessageRole.ASSISTANT.value.equals(m.role())
+                        && announceText.equals(m.content())),
+                "the announce reaches the model as an assistant message carrying its text");
     }
 
     // ─── JCLAW-291: cooperative cancellation ─────────────────────────────

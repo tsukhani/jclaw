@@ -104,8 +104,8 @@ public class Message extends Model {
      *
      * <p>The chat view inspects this field and, when set, switches the message
      * to a kind-specific render path (the subagent announce card) instead of
-     * the assistant-or-user bubble. The LLM's view of history excludes these
-     * rows entirely so they never feed back into a future turn's context.
+     * the assistant-or-user bubble. The model reads a SYSTEM-role announce as
+     * its own earlier reply ({@code agents.MessageHydrator}, JCLAW-1602).
      */
     @Column(name = "message_kind")
     public String messageKind;

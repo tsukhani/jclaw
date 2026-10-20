@@ -100,8 +100,8 @@ final class SubagentResponses {
      * snapshot of {@link SubagentRun#yielded}. A parent that called
      * subagent_yield expects USER-role delivery (the announce IS its next
      * user message); a fire-and-forget async caller expects SYSTEM-role
-     * (the JCLAW-270 semantics — visible card, never feeds back into LLM
-     * context).
+     * (the JCLAW-270 card, which the model reads as its own earlier reply,
+     * JCLAW-1602).
      *
      * <p>NB: the local {@code displayTruncatedBody} is the 4000-char display
      * cap on the announce body, NOT the JCLAW-291 model-output truncation
@@ -109,8 +109,8 @@ final class SubagentResponses {
      * parameters.
      *
      * <p>A fire-and-forget announce is also sent, after the commit, as plain text to the parent
-     * conversation's channel: nothing else carries it to Telegram, Slack or WhatsApp, and the
-     * model never sees a SYSTEM announce to relay it. Web chat has no peer and stays card-only.
+     * conversation's channel: nothing else carries it to Telegram, Slack or WhatsApp. Web chat
+     * has no peer and stays card-only.
      * A yielded announce sends nothing here; the resumed reply is the message.
      */
     @SuppressWarnings("java:S1181")
@@ -129,6 +129,8 @@ final class SubagentResponses {
                 ? outcome.reply()
                 : failureOrPartialBody;
         var displayTruncatedBody = truncateForAnnounce(announceBody);
+        boolean displayCut = announceBody != null
+                && announceBody.length() > SubagentSpawnTool.ANNOUNCE_REPLY_MAX_CHARS;
         final var modelOutputTruncated = outcome.replyTruncated();
         try {
             var delivery = new AtomicReference<@Nullable PostedAnnounce>();
@@ -136,7 +138,7 @@ final class SubagentResponses {
                 var run = (SubagentRun) SubagentRun.findById(runId);
                 boolean isYielded = run != null && run.yielded;
                 delivery.set(postAnnounceMessage(parentConvId, runId, label, status,
-                        displayTruncatedBody, childConvId, isYielded, modelOutputTruncated));
+                        displayTruncatedBody, displayCut, childConvId, isYielded, modelOutputTruncated));
                 return isYielded;
             });
             var posted = delivery.get();
@@ -163,8 +165,7 @@ final class SubagentResponses {
      * standard prompt-assembly + LLM pipeline against the now-extended
      * conversation history WITHOUT re-appending a user message (which
      * would duplicate the announce). The LLM picks up the announce via
-     * {@link services.ConversationService#loadRecentMessages}, whose
-     * JCLAW-273 filter keeps USER-role announces in LLM context.
+     * {@link services.ConversationService#loadRecentMessages}.
      *
      * <p>Runs in the announce VT (so the call is naturally outside any
      * other turn's queue acquisition). Failures are caught + logged at the
@@ -213,8 +214,7 @@ final class SubagentResponses {
      * Persist the announce Message into the parent Conversation. The role
      * depends on whether the parent yielded into this run (JCLAW-273): a
      * fire-and-forget async caller gets a {@link MessageRole#SYSTEM}-role
-     * row (kept out of the LLM's view by
-     * {@link services.ConversationService#loadRecentMessages}), while a
+     * row, which the LLM reads as its own earlier reply, while a
      * yielded caller gets a {@link MessageRole#USER}-role row that the LLM
      * sees as its next user-role input on resume. Either way the row is
      * stamped with {@link SubagentSpawnTool#MESSAGE_KIND_ANNOUNCE} so the chat UI
@@ -222,16 +222,17 @@ final class SubagentResponses {
      * "View full" link to the child Conversation).
      *
      * <p>{@code content} carries a plain-text fallback for transports that
-     * don't understand the card. For yielded rows the plain text is what
-     * the LLM sees in the rebuilt context — keep it the rich-prose form
-     * (status + reply) so a model that doesn't understand the metadata
-     * still gets a coherent user turn.
+     * don't understand the card. The plain text is what the LLM sees in
+     * the rebuilt context — keep it the rich-prose form (status + reply)
+     * so a model that doesn't understand the metadata still gets a
+     * coherent turn. When the reply was cut for display it says so and
+     * names the run, since a bare ellipsis reads as the whole reply.
      *
      * @return the parent's channel and the plain text, or null when the parent conversation is gone
      */
     private static @Nullable PostedAnnounce postAnnounceMessage(Long parentConvId, Long runId, @Nullable String label,
                                             SubagentRun.Status status, String truncatedReply,
-                                            @Nullable Long childConvId, boolean yielded,
+                                            boolean replyCut, @Nullable Long childConvId, boolean yielded,
                                             boolean modelOutputTruncated) {
         var parentConv = (Conversation) Conversation.findById(parentConvId);
         if (parentConv == null) return null;
@@ -254,6 +255,10 @@ final class SubagentResponses {
         var fallback = "Subagent " + status.name().toLowerCase() + " (" + fallbackLabel + ")"
                 + (truncatedReply != null && !truncatedReply.isBlank()
                         ? ": " + truncatedReply
+                        : "")
+                + (replyCut
+                        ? " [cut at " + SubagentSpawnTool.ANNOUNCE_REPLY_MAX_CHARS + " characters; subagent run "
+                                + runId + "'s conversation has the full text]"
                         : "");
 
         var msg = new Message();

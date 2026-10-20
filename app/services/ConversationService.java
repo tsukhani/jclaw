@@ -508,28 +508,15 @@ public class ConversationService {
      * The two are orthogonal — a user can {@code /reset} a compacted
      * conversation, or compaction can fire on a conversation that's
      * already had a reset — so the effective floor is {@code max(..)}.
+     *
+     * <p>Every row in the window is returned, whatever its {@code messageKind};
+     * {@link agents.MessageHydrator} decides how each one reaches the model.
      */
     public static List<Message> loadRecentMessages(Conversation conversation) {
         var maxMessages = effectiveHistoryLimit(conversation);
         var floor = latestOf(conversation.contextSince, conversation.compactionSince);
-        // findRecent returns DESC order; reversed() returns a read-only ASC view
-        // without copying — uses JDK 21 SequencedCollection.
-        var recent = Message.findRecent(conversation, maxMessages, floor).reversed();
-        // JCLAW-270 + JCLAW-273: drop SYSTEM-role subagent-announce rows from
-        // LLM context assembly (UI-only fire-and-forget cards — surfacing them
-        // to the model would feed a system prompt the model didn't author and
-        // risk re-acknowledging an already-delivered subagent result). USER-
-        // role announces — JCLAW-273 yield resumes — are the parent's next
-        // user input by construction and MUST stay in context so the LLM
-        // sees what it's resuming on. Rows without a messageKind discriminator
-        // (the dominant case — regular user/assistant/tool messages) always
-        // pass through. A stop marker stays too: without it the model reads the
-        // stopped request as still pending and carries it out (JCLAW-1388).
-        return recent.stream()
-                .filter(m -> m.messageKind == null
-                        || MessageRole.USER.value.equals(m.role)
-                        || MESSAGE_KIND_STOP_MARKER.equals(m.messageKind))
-                .toList();
+        // findRecent returns DESC order; reversed() is the ASC view, without copying.
+        return Message.findRecent(conversation, maxMessages, floor).reversed();
     }
 
     /**
