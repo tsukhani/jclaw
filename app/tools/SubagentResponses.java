@@ -1,6 +1,8 @@
 package tools;
 
 import agents.AgentRunner;
+import agents.DangerousActionGate;
+import agents.SystemPromptAssembler;
 import agents.ToolContext;
 import models.Agent;
 import models.Conversation;
@@ -25,6 +27,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * lifecycle events, the async announce card, and the yielded-parent resume.
  */
 final class SubagentResponses {
+
+    /** What a chat receives when a background run fails or times out, unless the owner reads it alone. */
+    static final String FAILURE_NOTICE = "A background task did not finish. Ask me if you want the details.";
 
     private SubagentResponses() {}
 
@@ -112,6 +117,11 @@ final class SubagentResponses {
      * conversation's channel: nothing else carries it to Telegram, Slack or WhatsApp. Web chat
      * has no peer and stays card-only.
      * A yielded announce sends nothing here; the resumed reply is the message.
+     *
+     * <p>A failure's text is an exception message, so it is sent only when the owner started the
+     * run in a chat that is not a group; any other chat gets {@link #FAILURE_NOTICE} (JCLAW-1603).
+     * The saved row keeps the text, and the model reads it there. The async thread inherits the
+     * spawning turn's owner flag.
      */
     @SuppressWarnings("java:S1181")
     static Boolean postAnnounceAndReadYieldFlag(Long runId, @Nullable Long childConvId,
@@ -143,7 +153,10 @@ final class SubagentResponses {
             });
             var posted = delivery.get();
             if (!yielded && posted != null) {
-                AgentRunner.dispatchToChannel(posted.agent(), posted.channelType(), posted.peerId(), posted.text());
+                var text = status == SubagentRun.Status.COMPLETED || ownerReadsAlone(posted)
+                        ? posted.text()
+                        : FAILURE_NOTICE;
+                AgentRunner.dispatchToChannel(posted.agent(), posted.channelType(), posted.peerId(), text);
             }
             return yielded;
         } catch (Throwable t) {
@@ -156,6 +169,13 @@ final class SubagentResponses {
 
     /** Where a saved announce row can be sent, read inside the transaction that saved it. */
     private record PostedAnnounce(Agent agent, String channelType, @Nullable String peerId, String text) {}
+
+    /** In a group the owner asks but everyone reads, so owner-initiated is not enough. */
+    private static boolean ownerReadsAlone(PostedAnnounce posted) {
+        var peerId = posted.peerId();
+        return DangerousActionGate.ownerInitiated() && peerId != null
+                && Boolean.FALSE.equals(SystemPromptAssembler.isGroupChat(posted.channelType(), peerId));
+    }
 
     /**
      * JCLAW-273: re-invoke {@link AgentRunner#resumeAndDeliver} on the parent

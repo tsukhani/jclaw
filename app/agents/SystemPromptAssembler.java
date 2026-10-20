@@ -536,25 +536,36 @@ public class SystemPromptAssembler {
         };
     }
 
-    /**
-     * Read off the peer key rather than {@link Conversation#chatType}, which only Telegram and
-     * WhatsApp stamp and only at creation: a conversation started by {@code /new} keeps the peer
-     * key but loses the chat type. Web and voice say they are private in their channel guidance.
-     */
+    /** Web and voice say they are private in their channel guidance. */
     private static void appendChatAudience(SectionedBuilder b, @Nullable Conversation conversation) {
         // A subagent's conversation copies its parent chat's peer key, but its transcript goes only to the parent agent.
         if (conversation == null || conversation.peerId == null || conversation.channelType == null
                 || conversation.parentConversation != null) return;
-        var peerId = conversation.peerId;
-        var audience = switch (conversation.channelType) {
-            case "whatsapp" -> chatAudience("WhatsApp", WhatsAppInbound.isGroupPeer(peerId));
-            case "telegram" -> chatAudience("Telegram", TelegramMessageAddressing.isGroupPeer(peerId));
-            case "slack" -> chatAudience("Slack", SlackInbound.isGroupPeer(peerId));
+        var group = isGroupChat(conversation.channelType, conversation.peerId);
+        if (group == null) return;
+        var channel = switch (conversation.channelType) {
+            case "whatsapp" -> "WhatsApp";
+            case "telegram" -> "Telegram";
+            case "slack" -> "Slack";
+            default -> conversation.channelType;
+        };
+        b.startSection("Chat Audience");
+        b.sb.append("\n## Chat Audience\n").append(chatAudience(channel, group));
+    }
+
+    /**
+     * Whether a channel chat is a group, or null for a channel without group chats (web, voice).
+     * Read off the peer key rather than {@link Conversation#chatType}, which only Telegram and
+     * WhatsApp stamp and only at creation: a conversation started by {@code /new} keeps the peer
+     * key but loses the chat type.
+     */
+    public static @Nullable Boolean isGroupChat(String channelType, String peerId) {
+        return switch (channelType) {
+            case "whatsapp" -> WhatsAppInbound.isGroupPeer(peerId);
+            case "telegram" -> TelegramMessageAddressing.isGroupPeer(peerId);
+            case "slack" -> SlackInbound.isGroupPeer(peerId);
             default -> null;
         };
-        if (audience == null) return;
-        b.startSection("Chat Audience");
-        b.sb.append("\n## Chat Audience\n").append(audience);
     }
 
     private static String chatAudience(String channel, boolean group) {

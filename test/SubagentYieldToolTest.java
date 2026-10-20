@@ -1,3 +1,4 @@
+import agents.DangerousActionGate;
 import agents.MessageHydrator;
 import agents.ToolRegistry;
 import channels.ChannelTransport;
@@ -843,6 +844,130 @@ class SubagentYieldToolTest extends UnitTest {
         JPA.em().clear();
         assertEquals(0, Message.count("conversation.id = ?1 AND messageKind = ?2",
                 parentConvId, SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE), "a killed run posts no announce");
+    }
+
+    // ───────── Failure text a guest may read (JCLAW-1603) ─────────
+
+    @Test
+    void aGuestsFailedRunSendsTheNeutralLineWhileTheAnnounceKeepsTheError() throws Exception {
+        var parent = createAgent("p-1603-guest", "test-provider", "test-model");
+        var token = "jclaw1603-guest-" + System.nanoTime();
+        bindTelegram(parent, token, "16031");
+        var telegramConv = ConversationService.create(parent, "telegram", "16031");
+        var run = seedRunningSubagentRun(parent, telegramConv);
+        commitAndReopen();
+
+        var body = sendOfAFailingRun(run.id, run.childConversation.id, telegramConv.id, parent.name, token, false);
+        assertTrue(body.contains("A background task did not finish. Ask me if you want the details.")
+                        && !body.contains("vanished") && !body.contains("Subagent failed"),
+                "a guest reads the neutral line, not the exception message: " + body);
+        EventLogger.flush();
+        JPA.em().clear();
+        assertEquals(1, Message.count("conversation.id = ?1 AND messageKind = ?2 AND content LIKE ?3",
+                        telegramConv.id, SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE, "Subagent failed%vanished%"),
+                "the saved announce, which the model reads, keeps the error text");
+    }
+
+    @Test
+    void anOwnersFailedRunSendsTheFullAnnounce() throws Exception {
+        var parent = createAgent("p-1603-owner", "test-provider", "test-model");
+        var token = "jclaw1603-owner-" + System.nanoTime();
+        bindTelegram(parent, token, "16032");
+        var telegramConv = ConversationService.create(parent, "telegram", "16032");
+        var run = seedRunningSubagentRun(parent, telegramConv);
+        commitAndReopen();
+
+        var body = sendOfAFailingRun(run.id, run.childConversation.id, telegramConv.id, parent.name, token, true);
+        assertTrue(body.contains("Subagent failed") && body.contains("Subagent rows vanished"),
+                "the owner reads the error text: " + body);
+    }
+
+    @Test
+    void anOwnersFailedRunInAGroupSendsTheNeutralLine() throws Exception {
+        // Telegram cannot yet send to a group from here: no binding matches a group's chat id, so a
+        // binding keyed by one stands in for the delivery.
+        var parent = createAgent("p-1603-group", "test-provider", "test-model");
+        var token = "jclaw1603-group-" + System.nanoTime();
+        var groupPeer = "-1001603";
+        bindTelegram(parent, token, groupPeer);
+        var groupConv = ConversationService.create(parent, "telegram", groupPeer);
+        var run = seedRunningSubagentRun(parent, groupConv);
+        commitAndReopen();
+
+        var body = sendOfAFailingRun(run.id, run.childConversation.id, groupConv.id, parent.name, token, true);
+        assertTrue(body.contains("A background task did not finish. Ask me if you want the details.")
+                        && !body.contains("vanished"),
+                "the owner asked, but every member reads the reply: " + body);
+    }
+
+    @Test
+    void aGuestsTimedOutRunSendsTheNeutralLine() throws Exception {
+        var release = new java.util.concurrent.CountDownLatch(1);
+        startLlmServer(exchange -> {
+            try {
+                release.await(20, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            var bytes = simpleResponse("Too late").getBytes();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        configureProvider();
+        var parent = createAgent("p-1603-timeout", "test-provider", "test-model");
+        var token = "jclaw1603-timeout-" + System.nanoTime();
+        bindTelegram(parent, token, "16033");
+        var telegramConv = ConversationService.create(parent, "telegram", "16033");
+        var run = seedRunningSubagentRun(parent, telegramConv);
+        commitAndReopen();
+
+        try (var mock = new MockTelegramServer()) {
+            mock.start();
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            try {
+                DangerousActionGate.withOwnerInitiated(false, () -> {
+                    SubagentSpawnTool.runAsyncAndAnnounce(run.id, run.childAgent.id, run.childConversation.id,
+                            telegramConv.id, parent.name, "session", "fresh", "slow", 1, "wait for the model");
+                    return null;
+                });
+                assertEquals(1, mock.countRequests("sendMessage"));
+                var body = mock.requests().getLast().body();
+                assertTrue(body.contains("A background task did not finish. Ask me if you want the details.")
+                                && !body.contains("idle budget"),
+                        "a guest reads the neutral line on a timeout too: " + body);
+            } finally {
+                release.countDown();
+                TelegramChannel.clearForTest(token);
+            }
+        }
+        EventLogger.flush();
+        JPA.em().clear();
+        assertEquals(1, Message.count("conversation.id = ?1 AND messageKind = ?2 AND content LIKE ?3",
+                        telegramConv.id, SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE, "Subagent timeout%idle budget%"),
+                "the saved announce keeps the timeout reason");
+    }
+
+    /** Announces {@code runId} against a child agent that does not exist, so the run fails with
+     *  an internal message, and returns the body of the one message sent to the Telegram chat. */
+    private static String sendOfAFailingRun(Long runId, Long childConvId, Long parentConvId, String parentName,
+                                            String token, boolean ownerInitiated) throws Exception {
+        try (var mock = new MockTelegramServer()) {
+            mock.start();
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            try {
+                DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
+                    SubagentSpawnTool.runAsyncAndAnnounce(runId, -1L, childConvId, parentConvId, parentName,
+                            "session", "fresh", "failing", 30, "never starts");
+                    return null;
+                });
+                assertEquals(1, mock.countRequests("sendMessage"), "one message goes out");
+                return mock.requests().getLast().body();
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
     }
 
     // ───────── helpers ─────────
