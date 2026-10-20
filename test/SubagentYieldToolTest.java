@@ -742,11 +742,11 @@ class SubagentYieldToolTest extends UnitTest {
     }
 
     @Test
-    void aYieldedRunSendsOnlyTheResumedReplyToATelegramParent() throws Exception {
-        // The child's call answers first; the parent's resume turn answers second.
+    void aYieldedRunSendsOnlyTheResumedReplyToATelegramParentAndNothingToAWebParent() throws Exception {
+        // Each run's child call answers first; the parent's resume turn answers second.
         var calls = new java.util.concurrent.atomic.AtomicInteger();
         startLlmServer(exchange -> {
-            var bytes = simpleResponse(calls.getAndIncrement() == 0 ? "Child result" : "Parent wrap-up").getBytes();
+            var bytes = simpleResponse(calls.getAndIncrement() % 2 == 0 ? "Child result" : "Parent wrap-up").getBytes();
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, bytes.length);
             exchange.getResponseBody().write(bytes);
@@ -761,6 +761,10 @@ class SubagentYieldToolTest extends UnitTest {
         var run = seedRunningSubagentRun(parent, telegramConv);
         run.yielded = true;
         run.save();
+        var webConv = ConversationService.create(parent, "web", peer);
+        var webRun = seedNamedSubagentRun(parent, webConv, "web");
+        webRun.yielded = true;
+        webRun.save();
         commitAndReopen();
 
         try (var mock = new MockTelegramServer()) {
@@ -774,11 +778,18 @@ class SubagentYieldToolTest extends UnitTest {
                 var body = mock.requests().getLast().body();
                 assertTrue(body.contains("Parent wrap-up") && !body.contains("Subagent completed"),
                         "the resumed reply is the message: " + body);
+
+                SubagentSpawnTool.runAsyncAndAnnounce(webRun.id, webRun.childAgent.id, webRun.childConversation.id,
+                        webConv.id, parent.name, "session", "fresh", "yield-web", 30, "do the thing");
+                assertEquals(1, mock.countRequests("sendMessage"), "web chat reads the resumed reply and sends nothing");
             } finally {
                 TelegramChannel.clearForTest(token);
             }
         }
         EventLogger.flush();
+        JPA.em().clear();
+        assertEquals(1, Message.count("conversation.id = ?1 AND role = ?2 AND content = ?3",
+                webConv.id, MessageRole.ASSISTANT.value, "Parent wrap-up"), "the web parent's resume still ran");
     }
 
     @Test
