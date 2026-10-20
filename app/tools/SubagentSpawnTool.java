@@ -357,7 +357,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 SchemaKeys.DESCRIPTION,
                 "When true (default false), return the child's run id immediately so you can "
                         + "spawn more or do other work, then collect with subagent_yield. In a chat "
-                        + "a completion card is posted to your conversation; in a task fire you "
+                        + "a completion card is posted to your conversation and the result is also sent to the "
+                        + "chat's channel (Telegram, Slack, WhatsApp); in a task fire you "
                         + "block-await the result with subagent_yield. Only with mode=\"session\"."));
         props.put(ARG_RUNTIME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,

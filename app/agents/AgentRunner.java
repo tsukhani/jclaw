@@ -1002,9 +1002,7 @@ public class AgentRunner {
      * or a Telegram conversation with no enabled binding) drops the dispatch,
      * matching the prior null-branch behavior.
      */
-    // Package-private so QueueDrainOrchestrator (JCLAW-299) can dispatch
-    // queued replies back through the originating channel.
-    static void dispatchToChannel(Agent agent, String channelType, String peerId, String text) {
+    public static void dispatchToChannel(Agent agent, String channelType, @Nullable String peerId, String text) {
         ChannelInboundDispatcher.dispatchToChannel(agent, channelType, peerId, text);
     }
 

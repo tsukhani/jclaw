@@ -1,10 +1,13 @@
 import agents.ToolRegistry;
+import channels.ChannelTransport;
+import channels.TelegramChannel;
 import com.google.gson.JsonParser;
 import models.Agent;
 import models.Conversation;
 import models.Message;
 import models.MessageRole;
 import models.SubagentRun;
+import models.TelegramBinding;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -695,6 +698,145 @@ class SubagentYieldToolTest extends UnitTest {
                 "SYSTEM-role plain-async announce must remain filtered out");
     }
 
+    // ───────── Channel delivery (GH-13) ─────────
+
+    @Test
+    void asyncWithoutYieldSendsTheAnnounceToATelegramParentOnceAndNothingToAWebParent() throws Exception {
+        startLlmServer(simpleResponse("MCP config updated."));
+        configureProvider();
+        var parent = createAgent("p-gh13-async", "test-provider", "test-model");
+        var token = "gh13-async-" + System.nanoTime();
+        var peer = "13001";
+        bindTelegram(parent, token, peer);
+        var telegramConv = ConversationService.create(parent, "telegram", peer);
+        // Same peer id as the Telegram binding, so only the channel type keeps it off Telegram.
+        var webConv = ConversationService.create(parent, "web", peer);
+        var telegramRun = seedNamedSubagentRun(parent, telegramConv, "tg");
+        var webRun = seedNamedSubagentRun(parent, webConv, "web");
+        commitAndReopen();
+
+        try (var mock = new MockTelegramServer()) {
+            mock.start();
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            try {
+                SubagentSpawnTool.runAsyncAndAnnounce(telegramRun.id, telegramRun.childAgent.id,
+                        telegramRun.childConversation.id, telegramConv.id, parent.name,
+                        "session", "fresh", "mcp-edit", 30, "update the MCP server");
+                assertEquals(1, mock.countRequests("sendMessage"), "the announce goes out on the Telegram chat once");
+                var body = mock.requests().getLast().body();
+                assertTrue(body.contains("Subagent completed") && body.contains("MCP config updated."),
+                        "the plain-text announce is what is sent: " + body);
+
+                SubagentSpawnTool.runAsyncAndAnnounce(webRun.id, webRun.childAgent.id,
+                        webRun.childConversation.id, webConv.id, parent.name,
+                        "session", "fresh", "mcp-edit", 30, "update the MCP server");
+                assertEquals(1, mock.countRequests("sendMessage"), "web chat shows the card and sends nothing");
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+        EventLogger.flush();
+        JPA.em().clear();
+        assertEquals(1, Message.count("conversation.id = ?1 AND messageKind = ?2",
+                webConv.id, SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE), "the web card is still saved");
+    }
+
+    @Test
+    void aYieldedRunSendsOnlyTheResumedReplyToATelegramParent() throws Exception {
+        // The child's call answers first; the parent's resume turn answers second.
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        startLlmServer(exchange -> {
+            var bytes = simpleResponse(calls.getAndIncrement() == 0 ? "Child result" : "Parent wrap-up").getBytes();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        configureProvider();
+        var parent = createAgent("p-gh13-yield", "test-provider", "test-model");
+        var token = "gh13-yield-" + System.nanoTime();
+        var peer = "13002";
+        bindTelegram(parent, token, peer);
+        var telegramConv = ConversationService.create(parent, "telegram", peer);
+        var run = seedRunningSubagentRun(parent, telegramConv);
+        run.yielded = true;
+        run.save();
+        commitAndReopen();
+
+        try (var mock = new MockTelegramServer()) {
+            mock.start();
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            try {
+                SubagentSpawnTool.runAsyncAndAnnounce(run.id, run.childAgent.id, run.childConversation.id,
+                        telegramConv.id, parent.name, "session", "fresh", "yield-tg", 30, "do the thing");
+                assertEquals(1, mock.countRequests("sendMessage"),
+                        "a yielded run sends the resumed reply and not the announce");
+                var body = mock.requests().getLast().body();
+                assertTrue(body.contains("Parent wrap-up") && !body.contains("Subagent completed"),
+                        "the resumed reply is the message: " + body);
+            } finally {
+                TelegramChannel.clearForTest(token);
+            }
+        }
+        EventLogger.flush();
+    }
+
+    @Test
+    void anOperatorKillSendsNothingToATelegramParent() throws Exception {
+        var release = new java.util.concurrent.CountDownLatch(1);
+        startLlmServer(exchange -> {
+            try {
+                release.await(20, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            var bytes = simpleResponse("Too late").getBytes();
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        configureProvider();
+        var parent = createAgent("p-gh13-kill", "test-provider", "test-model");
+        var token = "gh13-kill-" + System.nanoTime();
+        var peer = "13003";
+        bindTelegram(parent, token, peer);
+        var telegramConv = ConversationService.create(parent, "telegram", peer);
+        var run = seedRunningSubagentRun(parent, telegramConv);
+        var runId = run.id;
+        var childAgentId = run.childAgent.id;
+        var childConvId = run.childConversation.id;
+        var parentConvId = telegramConv.id;
+        var parentName = parent.name;
+        commitAndReopen();
+
+        try (var mock = new MockTelegramServer()) {
+            mock.start();
+            TelegramChannel.installForTest(token, mock.telegramUrl());
+            try {
+                var announcer = Thread.ofVirtual().start(() -> SubagentSpawnTool.runAsyncAndAnnounce(
+                        runId, childAgentId, childConvId, parentConvId, parentName,
+                        "session", "fresh", "kill-tg", 30, "never finishes"));
+                var deadline = System.nanoTime() + 10_000_000_000L;
+                while (!services.SubagentRegistry.isActive(runId) && System.nanoTime() < deadline) {
+                    Thread.sleep(20);
+                }
+                assertTrue(services.SubagentRegistry.kill(runId, "operator stop").killed());
+                announcer.join(15_000);
+                release.countDown();
+                assertFalse(announcer.isAlive(), "the announce thread returns after the kill");
+                assertEquals(0, mock.countRequests("sendMessage"), "a killed run sends nothing");
+            } finally {
+                release.countDown();
+                TelegramChannel.clearForTest(token);
+            }
+        }
+        EventLogger.flush();
+        JPA.em().clear();
+        assertEquals(0, Message.count("conversation.id = ?1 AND messageKind = ?2",
+                parentConvId, SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE), "a killed run posts no announce");
+    }
+
     // ───────── helpers ─────────
 
     private Agent createAgent(String name, String provider, String model) {
@@ -702,6 +844,16 @@ class SubagentYieldToolTest extends UnitTest {
         agent.enabled = true;
         agent.save();
         return agent;
+    }
+
+    private static void bindTelegram(Agent agent, String token, String peer) {
+        var binding = new TelegramBinding();
+        binding.agent = agent;
+        binding.botToken = token;
+        binding.telegramUserId = peer;
+        binding.transport = ChannelTransport.POLLING;
+        binding.enabled = true;
+        binding.save();
     }
 
     private SubagentRun seedRunningSubagentRun(Agent parent, Conversation parentConv) {
