@@ -114,6 +114,10 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     static final String FIELD_NOTE = "note";
     static final String INLINE_RAN_AS_SESSION =
             "mode=\"inline\" ran as mode=\"session\": a task fire has no conversation to embed the child into.";
+    static final String ASYNC_RAN_IN_FOREGROUND =
+            "async ran in the foreground: this chat is a group or a guest's, where a background result would "
+                    + "reach it unedited. Relay the reply yourself; there is nothing to collect with subagent_yield. "
+                    + "To run several children in parallel here, pass them as one tasks[] batch.";
 
     static final String FIELD_STATUS = "status";
     static final String FIELD_LABEL = "label";
@@ -356,10 +360,12 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         props.put("async", Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                 SchemaKeys.DESCRIPTION,
                 "When true (default false), return the child's run id immediately so you can "
-                        + "spawn more or do other work, then collect with subagent_yield. In a chat "
-                        + "a completion card is posted to your conversation and the result is also sent to the "
-                        + "chat's channel (Telegram, Slack, WhatsApp); in a task fire you "
-                        + "block-await the result with subagent_yield. Only with mode=\"session\"."));
+                        + "spawn more or do other work, then collect with subagent_yield. In a chat only "
+                        + "its owner reads (web chat, or the owner's private chat), a completion card is posted "
+                        + "to your conversation and the result is also sent to the chat's channel; in a group or "
+                        + "a guest's chat the child runs in the foreground and you relay its result (a tasks[] batch "
+                        + "still runs in parallel there). In a task "
+                        + "fire you block-await the result with subagent_yield. Only with mode=\"session\"."));
         props.put(ARG_RUNTIME, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION,
                 "Child runtime: \"native\" (default) runs a JClaw subagent, or \"acp\" runs the "
@@ -491,26 +497,31 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // on terminal state (completion / failure / timeout). Async + inline
         // was already rejected up top so this branch can hard-assume session
         // mode (inlineMode == false, runIdForMarker == null).
+        @Nullable String note = inlineRanAsSession ? INLINE_RAN_AS_SESSION : null;
         if (parsed.asyncRequested()) {
             // JCLAW-497: a task fire has no persistent conversation to resume into,
             // so the announce/resume model can't deliver there. Use a block-await
             // handoff instead — dispatch the child (parallel) and let subagent_yield
             // collect its result inline. Chat keeps the announce/resume path.
-            if (parentConvIdFinal == null) {
+            if (parentConv == null) {
                 return SubagentAsyncRunner.launchAsyncSpawnForTask(runId, childAgentId, childConvId,
                         parentAgent.name, parsed, runIdStr);
             }
-            return SubagentAsyncRunner.launchAsyncSpawn(runId, childAgentId, childConvId, parentConvIdFinal,
-                    parentAgent.name, parsed, runIdStr);
+            // JCLAW-1604: an announce reaches the chat unedited, so only a chat the owner reads alone gets one.
+            if (SubagentResponses.ownerReadsAlone(parentConv.id, parentConv.channelType, parentConv.peerId)) {
+                return SubagentAsyncRunner.launchAsyncSpawn(runId, childAgentId, childConvId, parentConv.id,
+                        parentAgent.name, parsed, runIdStr);
+            }
+            note = ASYNC_RAN_IN_FOREGROUND;
         }
 
         return runSyncSpawn(runId, bootstrap, parentConvIdFinal, parentAgent.name, parsed,
-                SubagentAcpRunner.isAcpRuntime(args), inlineRanAsSession);
+                SubagentAcpRunner.isAcpRuntime(args), note);
     }
 
     private static String runSyncSpawn(Long runId, SubagentChildBootstrap.Bootstrap child, @Nullable Long parentConvId,
                                        String parentAgentName, SubagentSpawnArgs parsed,
-                                       boolean acpBridged, boolean inlineRanAsSession) {
+                                       boolean acpBridged, @Nullable String note) {
         var runIdStr = String.valueOf(runId);
         var childConvId = child.childConvId();
         final boolean inlineMode = MODE_INLINE.equals(parsed.resolvedMode());
@@ -556,7 +567,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         payload.put(FIELD_STATUS, runOutcome.terminalStatus().name());
         var failure = runOutcome.failure();
         if (failure != null) payload.put(FIELD_ERROR, failure);
-        if (inlineRanAsSession) payload.put(FIELD_NOTE, INLINE_RAN_AS_SESSION);
+        if (note != null) payload.put(FIELD_NOTE, note);
         // JCLAW-291: hint to the parent LLM that the child's reply was cut
         // off — useful when the parent decides whether to re-summarize or
         // to surface the truncation to the user.

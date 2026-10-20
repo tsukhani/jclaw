@@ -153,7 +153,8 @@ final class SubagentResponses {
             });
             var posted = delivery.get();
             if (!yielded && posted != null) {
-                var text = status == SubagentRun.Status.COMPLETED || ownerReadsAlone(posted)
+                var text = status == SubagentRun.Status.COMPLETED
+                        || ownerReadsAlone(parentConvId, posted.channelType(), posted.peerId())
                         ? posted.text()
                         : FAILURE_NOTICE;
                 AgentRunner.dispatchToChannel(posted.agent(), posted.channelType(), posted.peerId(), text);
@@ -170,11 +171,14 @@ final class SubagentResponses {
     /** Where a saved announce row can be sent, read inside the transaction that saved it. */
     private record PostedAnnounce(Agent agent, String channelType, @Nullable String peerId, String text) {}
 
-    /** In a group the owner asks but everyone reads, so owner-initiated is not enough. */
-    private static boolean ownerReadsAlone(PostedAnnounce posted) {
-        var peerId = posted.peerId();
-        return DangerousActionGate.ownerInitiated() && peerId != null
-                && Boolean.FALSE.equals(SystemPromptAssembler.isGroupChat(posted.channelType(), peerId));
+    /**
+     * Whether only the owner reads what this turn sends to the conversation: an operator turn (the
+     * channel's owner, or web chat) in a chat that is not a group, where the owner asks but every
+     * member reads. The spawn-time and send-time checks both read this one (JCLAW-1604, JCLAW-1603).
+     */
+    static boolean ownerReadsAlone(Long conversationId, String channelType, @Nullable String peerId) {
+        return DangerousActionGate.operatorTurn(conversationId)
+                && (peerId == null || !Boolean.TRUE.equals(SystemPromptAssembler.isGroupChat(channelType, peerId)));
     }
 
     /**

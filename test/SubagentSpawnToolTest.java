@@ -1,4 +1,5 @@
 import agents.AgentRunner;
+import agents.DangerousActionGate;
 import agents.MessageHydrator;
 import agents.ToolRegistry;
 import com.google.gson.JsonParser;
@@ -1129,13 +1130,19 @@ class SubagentSpawnToolTest extends UnitTest {
     /** {@link #invokeOnVirtualThread} with the conversation bound the way ParallelToolExecutor binds a chat turn's. */
     private String invokeOnVirtualThreadInConversation(Long parentAgentId, Long conversationId, String argsJson)
             throws Exception {
+        return invokeOnVirtualThreadInConversation(parentAgentId, conversationId, argsJson, false);
+    }
+
+    private String invokeOnVirtualThreadInConversation(Long parentAgentId, Long conversationId, String argsJson,
+                                                       boolean ownerInitiated) throws Exception {
         var resultRef = new AtomicReference<String>();
         var errorRef = new AtomicReference<Exception>();
         var thread = Thread.ofVirtual().start(() -> {
             try {
                 var parent = Tx.run(() -> (Agent) Agent.findById(parentAgentId));
-                resultRef.set(agents.ToolContext.withConversation(conversationId,
-                        () -> new SubagentSpawnTool().execute(argsJson, parent)));
+                resultRef.set(DangerousActionGate.withOwnerInitiated(ownerInitiated,
+                        () -> agents.ToolContext.withConversation(conversationId,
+                                () -> new SubagentSpawnTool().execute(argsJson, parent))));
             } catch (Exception e) {
                 errorRef.set(e);
             }
@@ -2183,6 +2190,56 @@ class SubagentSpawnToolTest extends UnitTest {
                 "child conversation must have at least one assistant message");
         assertEquals(5000, ((Message) childMessages.getFirst()).content.length(),
                 "child conversation's assistant message must retain the untruncated reply");
+    }
+
+    // ─── JCLAW-1604: background only where the owner reads the chat alone ───
+
+    @Test
+    void asyncInAGuestsPrivateChatRunsInTheForeground() throws Exception {
+        startLlmServer(simpleResponse("Subagent reply: guest."));
+        configureProvider();
+        var parent = createAgent("p-1604-guest", "spawn-provider", "test-model");
+        var conv = ConversationService.create(parent, "telegram", "16041");
+        commitAndReopen();
+
+        var parsed = JsonParser.parseString(invokeOnVirtualThreadInConversation(parent.id, conv.id,
+                "{\"task\":\"go\",\"async\":true}", false)).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString(), "the child ran to the end before returning");
+        assertEquals("Subagent reply: guest.", parsed.get("reply").getAsString());
+        assertTrue(parsed.get("note").getAsString().startsWith("async ran in the foreground"));
+        JPA.em().clear();
+        assertEquals(0, Message.count("conversation.id = ?1 AND messageKind = ?2",
+                conv.id, SubagentSpawnTool.MESSAGE_KIND_ANNOUNCE), "no announce reaches the chat unedited");
+    }
+
+    @Test
+    void asyncInAGroupRunsInTheForegroundEvenForTheOwner() throws Exception {
+        startLlmServer(simpleResponse("Subagent reply: group."));
+        configureProvider();
+        var parent = createAgent("p-1604-group", "spawn-provider", "test-model");
+        var conv = ConversationService.create(parent, "telegram", "-1001604");
+        commitAndReopen();
+
+        var parsed = JsonParser.parseString(invokeOnVirtualThreadInConversation(parent.id, conv.id,
+                "{\"task\":\"go\",\"async\":true}", true)).getAsJsonObject();
+        assertEquals("COMPLETED", parsed.get("status").getAsString(), "every member reads a group's replies");
+        assertTrue(parsed.has("note"));
+    }
+
+    @Test
+    void asyncInTheOwnersPrivateChatStaysInTheBackground() throws Exception {
+        startLlmServer(simpleResponse("Subagent reply: owner."));
+        configureProvider();
+        var parent = createAgent("p-1604-owner", "spawn-provider", "test-model");
+        var conv = ConversationService.create(parent, "telegram", "16043");
+        commitAndReopen();
+
+        var parsed = JsonParser.parseString(invokeOnVirtualThreadInConversation(parent.id, conv.id,
+                "{\"task\":\"go\",\"async\":true}", true)).getAsJsonObject();
+        assertEquals("RUNNING", parsed.get("status").getAsString());
+        assertFalse(parsed.has("note"));
+        awaitTerminalStatus(Long.parseLong(parsed.get("run_id").getAsString()), SubagentRun.Status.COMPLETED, 10_000);
+        assertEquals(1, awaitAnnounces(conv.id, 1, 5_000).size(), "the owner's chat gets the announce");
     }
 
     @Test
