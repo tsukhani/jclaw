@@ -2489,7 +2489,8 @@ do_reset() {
     # pattern — passing -user sa -password "" lands a 28000 invalid-
     # auth error against the very database we created.
     #
-    # Relative and run from $SCRIPT_DIR, exactly as application.conf spells it: under
+    # file: names the same file the app opens through retry: (db.url); a running app is reached through AUTO_SERVER.
+    # Relative and run from $SCRIPT_DIR, as db.url spells the path: under
     # Git Bash an absolute $SCRIPT_DIR is /c/Users/..., which the native java.exe reads
     # as the current drive's root (C:\c\Users\...) — same trap as the -Xlog paths in
     # do_start_prod (JCLAW-1104).
