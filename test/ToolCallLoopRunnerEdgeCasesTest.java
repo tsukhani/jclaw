@@ -23,9 +23,11 @@ import services.SubagentRegistry;
 import services.Tx;
 
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -40,9 +42,9 @@ import java.util.concurrent.atomic.AtomicReference;
  * recovery. These tests fill the remaining branches: tool execution
  * exceptions, registered-tool args-validation failures, empty
  * {@code choices()} provider responses, the cancellation checkpoint
- * between rounds, the {@code yieldRequestedInLastRound} positive
- * branch, and the {@code yieldRequestedInLastRound} negative-shape
- * branches.
+ * between rounds, the empty reply after tool calls, the
+ * {@code yieldRequestedInLastRound} positive branch, and the
+ * {@code yieldRequestedInLastRound} negative-shape branches.
  *
  * <p>The JCLAW-300 streaming-failover edge is intentionally not
  * duplicated here.
@@ -387,6 +389,62 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
                 "Loop must round-trip through the tool and continue to the next LLM call");
     }
 
+    @Test
+    void emptyReplyAfterToolCallsIsRetriedWithASynthesisNudge() throws Exception {
+        var bodies = new CopyOnWriteArrayList<String>();
+        startLlmServer(exchange -> {
+            bodies.add(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
+            String body = switch (bodies.size()) {
+                case 1 -> DATETIME_TOOL_CALL;
+                case 2 -> simpleResponse("");
+                default -> simpleResponse("The report.");
+            };
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+        new jobs.ToolRegistrationJob().doJob();
+
+        var agent = createAgent("empty-continuation-agent");
+        var convo = ConversationService.create(agent, "web", "user1");
+
+        play.db.jpa.JPA.em().getTransaction().commit();
+        play.db.jpa.JPA.em().getTransaction().begin();
+
+        var result = runOnVirtualThread(agent, convo, "Research this.");
+
+        assertEquals("The report.", result.response(), "a subagent run on this path must not end with a blank reply");
+        assertEquals(3, bodies.size(), "tool round, empty reply, one retry");
+        assertTrue(bodies.get(2).contains("Synthesize the final response"), "the retry carries the synthesis nudge");
+    }
+
+    @Test
+    void emptyReplyAfterToolCallsThatStaysEmptyEndsInADiagnostic() throws Exception {
+        var callCount = new AtomicInteger(0);
+        startLlmServer(exchange -> {
+            String body = callCount.getAndIncrement() == 0 ? DATETIME_TOOL_CALL : simpleResponse("");
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.getBytes().length);
+            exchange.getResponseBody().write(body.getBytes());
+            exchange.close();
+        });
+        configureProvider();
+        new jobs.ToolRegistrationJob().doJob();
+
+        var agent = createAgent("still-empty-agent");
+        var convo = ConversationService.create(agent, "web", "user1");
+
+        play.db.jpa.JPA.em().getTransaction().commit();
+        play.db.jpa.JPA.em().getTransaction().begin();
+
+        var result = runOnVirtualThread(agent, convo, "Research this.");
+
+        assertTrue(result.response().contains("returned no synthesis after tool calls"), result.response());
+        assertEquals(3, callCount.get(), "no fallback is configured, so one retry on the primary");
+    }
+
     // =========================================================
     // AC: Cancellation token honoured between tool calls
     //   A flipped SubagentRegistry cancel flag for a RUNNING SubagentRun
@@ -620,6 +678,12 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
                 "[{\"id\":\"test-model\",\"name\":\"Test\",\"contextWindow\":100000,\"maxTokens\":4096}]");
         llm.ProviderRegistry.refresh();
     }
+
+    private static final String DATETIME_TOOL_CALL = """
+        {"choices":[{"index":0,"message":{"role":"assistant","content":"",
+        "tool_calls":[{"id":"dt","type":"function","function":{"name":"datetime","arguments":"{\\"action\\":\\"now\\"}"}}]},
+        "finish_reason":"tool_calls"}],
+        "usage":{"prompt_tokens":10,"completion_tokens":5}}""";
 
     private static String simpleResponse(String content) {
         return """

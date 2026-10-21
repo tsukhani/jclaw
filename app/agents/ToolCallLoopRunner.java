@@ -365,8 +365,37 @@ public final class ToolCallLoopRunner {
         EventLogger.warn("llm", agent.name, conversation.channelType,
                 "Reply stopped with no content on the first call (finish_reason=%s) — retrying with reasoning off"
                         .formatted(finishReason));
+        var answered = retrySyncSynthesis(agent, conversation, primary, fallback, currentMessages, tools, ANSWER_NUDGE);
+        return answered != null ? answered : new LoopOutcome("*[The model stopped before writing an answer. "
+                + "Try again with thinking off or a larger output budget.]*", true);
+    }
+
+    /**
+     * Sync twin of {@link #retryEmptyContinuation} (JCLAW-1199): a subagent runs on this path, and an
+     * empty reply after tool calls would otherwise end its run COMPLETED with no answer.
+     */
+    @SuppressWarnings("java:S107")
+    private static LoopOutcome recoverEmptySyncContinuation(Agent agent, Conversation conversation, LlmProvider primary,
+                                                            LlmProvider.@Nullable Fallback fallback,
+                                                            ArrayList<ChatMessage> currentMessages,
+                                                            @Nullable List<ToolDef> tools, int round,
+                                                            @Nullable String finishReason) {
+        EventLogger.warn("llm", agent.name, conversation.channelType,
+                "Empty continuation after tool calls in round %d (finish_reason=%s) — retrying with synthesis nudge, reasoning off"
+                        .formatted(round + 1, finishReason));
+        var answered = retrySyncSynthesis(agent, conversation, primary, fallback, currentMessages, tools, SYNTHESIS_NUDGE);
+        return answered != null ? answered : new LoopOutcome("*[The model returned no synthesis after tool calls. "
+                + "Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*");
+    }
+
+    /** The nudge with reasoning off on the primary, then on the fallback; null when every retry came back empty. */
+    @SuppressWarnings("java:S107")
+    private static @Nullable LoopOutcome retrySyncSynthesis(Agent agent, Conversation conversation, LlmProvider primary,
+                                                            LlmProvider.@Nullable Fallback fallback,
+                                                            ArrayList<ChatMessage> currentMessages,
+                                                            @Nullable List<ToolDef> tools, String nudge) {
         var retryMessages = new ArrayList<>(currentMessages);
-        retryMessages.add(ChatMessage.user(ANSWER_NUDGE));
+        retryMessages.add(ChatMessage.user(nudge));
         var modelId = Objects.requireNonNull(
                 ModelResolver.effectiveModelId(agent, conversation), NO_MODEL_CONFIGURED);
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, retryMessages, tools);
@@ -383,8 +412,7 @@ public final class ToolCallLoopRunner {
         }
         EventLogger.warn("llm", agent.name, conversation.channelType,
                 "Every synthesis retry returned empty content — emitting diagnostic fallback");
-        return new LoopOutcome("*[The model stopped before writing an answer. "
-                + "Try again with thinking off or a larger output budget.]*", true);
+        return null;
     }
 
     /** One reasoning-off retry on {@code provider}; null when it answered nothing or failed. */
@@ -440,7 +468,12 @@ public final class ToolCallLoopRunner {
                 }
                 return new LoopOutcome(text, true);
             }
-            return new LoopOutcome(MessageHydrator.contentAsString(assistantMsg.content()));
+            var text = MessageHydrator.contentAsString(assistantMsg.content());
+            if (round > 0 && text.isBlank()) {
+                return recoverEmptySyncContinuation(agent, conversation, primary, fallback, currentMessages, tools,
+                        round, choice.finishReason());
+            }
+            return new LoopOutcome(text);
         }
 
         // Check for truncated response (max tokens hit mid-tool-call)
