@@ -70,18 +70,15 @@ _port_pids() {
     return 2
 }
 port_pids()          { _port_pids "$1"; }
-# True while $1 has a listener. The wait loop only needs yes/no, so it reads
-# netstat's table instead of walking pids, which also stops a Chrome tab's
-# CLOSE_WAIT socket on the port from holding a restart; bind() is what the wait
-# protects, and only a LISTEN socket blocks it. Windows keeps the pid walk.
-_port_held() {
-    if [[ "$IS_WINDOWS" == 0 ]] && command -v netstat >/dev/null 2>&1; then
-        ! _port_quiet "$1" listen
-    else
-        [[ -n "$(port_pids "$1")" ]]
-    fi
+# True when something accepts a connection on 127.0.0.1:$1. bash's own /dev/tcp:
+# loopback refuses at once when nothing listens, so no tool and no timeout. It is
+# the only pre-start check because bind() would not fail in its place: Netty's
+# SO_REUSEADDR binds *:PORT beside another process's 127.0.0.1:PORT, and loopback
+# traffic then goes to that process while Play logs "Listening" (measured
+# 2026-10-21).
+port_answers() {
+    ( exec 3<>"/dev/tcp/127.0.0.1/$1" ) 2>/dev/null
 }
-port_listener_pids() { _port_pids "$1" listen; }
 
 # How to refer to this script in help/usage text: the global `jclaw` shim when
 # it's on PATH and resolves to THIS install (the shim `exec`s jclaw.sh, so $0
@@ -2506,11 +2503,8 @@ do_reset() {
         echo "==> Done. Cleared the admin password hash."
         # ConfigService caches each key for 60s, and the DELETE above went in behind
         # the JVM's back, so a live instance keeps answering passwordSet=true until
-        # the entry ages out. An unreadable probe advises the restart too — it is
-        # harmless on a stopped app, whereas staying quiet strands the operator.
-        local listeners probe_rc=0
-        listeners=$(port_listener_pids "$BACKEND_PORT") || probe_rc=$?
-        if [[ $probe_rc -ne 0 || -n "$listeners" ]]; then
+        # the entry ages out.
+        if port_answers "$BACKEND_PORT"; then
             echo "    Restart so the app stops serving the cached hash:"
             echo "        ${INVOKE} restart"
         else
@@ -3052,28 +3046,14 @@ do_start_prod() {
         exit 1
     fi
 
-    # Refuse to start if the port is held by anything (a foreign process from
-    # a different deploy dir, or a prior instance still inside its shutdown
-    # hooks). The pid-file check above only catches OUR own server.pid; a
-    # JVM running from /tmp/JClaw/ — say, a pre-existing prod deploy — has
-    # its own pid file there and is invisible to us. Without this guard,
-    # Play tries to bind, fails with "Could not bind on port 9000", aborts
-    # startup → ShutdownJob fires → JPA work in the shutdown sequence
-    # produces a giant Hibernate trace that buries the real one-line error.
-    #
-    # -sTCP:LISTEN is load-bearing: a plain `lsof -ti :PORT` matches any
-    # socket on the port, including client-side CLOSE_WAITs (e.g. a Chrome
-    # tab that was talking to a now-dead JVM). Only a LISTENing socket
-    # blocks bind(), so filtering by state avoids false positives.
-    local listeners probe_rc=0
-    listeners=$(port_listener_pids "$BACKEND_PORT") || probe_rc=$?
-    if (( probe_rc == 2 )); then
-        echo "Warning: cannot tell whether port $BACKEND_PORT is free (no lsof, no netstat); starting anyway." >&2
-    elif [[ -n "$listeners" ]]; then
-        local holder
-        holder=$(port_pids "$BACKEND_PORT" | tr '\n' ' ')
-        echo "Error: Port $BACKEND_PORT is already in use (pid: ${holder% })."
-        echo "       Run '$0 stop' first, or kill the holder."
+    # Refuse to start when something already answers on the port: a foreign
+    # process, or a prior instance still inside its shutdown hooks. The pid-file
+    # check above only catches OUR own server.pid. Nothing here names the holder:
+    # that took lsof, which walks every descriptor of every process (20-80 s
+    # beside a VM holding 47k), and the operator finds it faster than we can.
+    if port_answers "$BACKEND_PORT"; then
+        echo "Error: something already answers on port $BACKEND_PORT."
+        echo "       Stop it first ('$0 stop' if it is JClaw), then start again."
         exit 1
     fi
 
@@ -3544,24 +3524,14 @@ do_start_dev() {
         exit 1
     fi
 
-    # Refuse to start if the port is held by anything (a foreign process,
-    # or a prior instance still inside its shutdown hooks). Without this,
-    # Play silently fails to bind, exits, and the polling loop below would
-    # see a stale listener and falsely declare success.
-    #
-    # -sTCP:LISTEN is load-bearing: a plain `lsof -ti :PORT` matches any
-    # socket on the port, including client-side CLOSE_WAITs (e.g. a Chrome
-    # tab that was talking to a now-dead JVM). Only a LISTENing socket
-    # blocks bind(), so filtering by state avoids false positives.
-    local listeners probe_rc=0
-    listeners=$(port_listener_pids "$BACKEND_PORT") || probe_rc=$?
-    if (( probe_rc == 2 )); then
-        echo "Warning: cannot tell whether port $BACKEND_PORT is free (no lsof, no netstat); starting anyway." >&2
-    elif [[ -n "$listeners" ]]; then
-        local holder
-        holder=$(port_pids "$BACKEND_PORT" | tr '\n' ' ')
-        echo "Error: Port $BACKEND_PORT is already in use (pid: ${holder% })."
-        echo "       Run '$0 --dev stop' first, or kill the holder."
+    # Refuse to start when something already answers on the port: a foreign
+    # process, or a prior instance still inside its shutdown hooks. The pid-file
+    # check above only catches OUR own server.pid. Nothing here names the holder:
+    # that took lsof, which walks every descriptor of every process (20-80 s
+    # beside a VM holding 47k), and the operator finds it faster than we can.
+    if port_answers "$BACKEND_PORT"; then
+        echo "Error: something already answers on port $BACKEND_PORT."
+        echo "       Stop it first ('$0 --dev stop' if it is JClaw), then start again."
         exit 1
     fi
 
@@ -3693,7 +3663,7 @@ wait_for_port_free() {
     local port=$1
     local timeout=${2:-30}
     local waited=0
-    while _port_held "$port"; do
+    while port_answers "$port"; do
         sleep 1
         waited=$((waited + 1))
         (( waited >= timeout )) && return 1
@@ -4806,11 +4776,9 @@ do_e2e() {
 
     local base="${JCLAW_E2E_BASE_URL:-}"
     if [[ -z "$base" ]]; then
-        # -sTCP:LISTEN is load-bearing: a plain `lsof -ti :PORT` also matches
-        # client sockets connected to that port, not just the listener.
-        if [[ -n "$(port_listener_pids "$FRONTEND_PORT")" ]]; then
+        if port_answers "$FRONTEND_PORT"; then
             base="http://localhost:$FRONTEND_PORT"
-        elif [[ -n "$(port_listener_pids "$BACKEND_PORT")" ]]; then
+        elif port_answers "$BACKEND_PORT"; then
             base="http://localhost:$BACKEND_PORT"
         else
             echo "Error: no JClaw server is listening on :$FRONTEND_PORT or :$BACKEND_PORT." >&2
