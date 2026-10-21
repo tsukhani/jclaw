@@ -32,6 +32,19 @@ installed_classes() {
     fi
 }
 
+# True when netstat is present and shows no TCP socket on $1 ("listen": no
+# listener). netstat reads the kernel table in milliseconds; macOS lsof first walks
+# every descriptor of every process, 20-80 s beside a descriptor-heavy one (a
+# Virtualization.framework VM held 47k, measured 2026-10-21), so it only runs once
+# netstat has seen something. A failed or missing netstat is "not quiet".
+_port_quiet() {
+    local port="$1" mode="${2:-}"
+    command -v netstat >/dev/null 2>&1 || return 1
+    netstat -an 2>/dev/null | awk -v p="[.:]${port}\$" -v m="$mode" '
+        $1 ~ /^tcp/ && ($4 ~ p || (m != "listen" && $5 ~ p)) && (m != "listen" || $6 == "LISTEN") { found = 1; exit }
+        END { exit found ? 1 : 0 }'
+}
+
 # One pid per line for sockets on $1; pass "listen" to keep only LISTENing ones.
 # lsof is absent from Git Bash, so Windows falls back to netstat. Exit 2 means
 # NEITHER tool exists: callers must not read that as "the port is free", which is
@@ -39,10 +52,11 @@ installed_classes() {
 _port_pids() {
     local port="$1" mode="${2:-}"
     if command -v lsof >/dev/null 2>&1; then
+        _port_quiet "$port" "$mode" && return 0
         if [[ "$mode" == listen ]]; then
-            lsof -ti :"$port" -sTCP:LISTEN 2>/dev/null || true
+            lsof -nP -ti :"$port" -sTCP:LISTEN 2>/dev/null || true
         else
-            lsof -ti :"$port" 2>/dev/null || true
+            lsof -nP -ti :"$port" 2>/dev/null || true
         fi
         return 0
     fi
