@@ -40,6 +40,7 @@ import utils.PlayConfig;
 import utils.Strings;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -536,7 +537,15 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                              @Nullable Integer maxTokens, @Nullable String thinkingMode,
                              @Nullable Integer timeoutSeconds, @Nullable String channel) {
         return LlmResilience.guard(config.name(), () ->
-                dispatchChat(model, messages, tools, maxTokens, thinkingMode, timeoutSeconds, channel));
+                dispatchChat(model, messages, tools, maxTokens, thinkingMode, timeoutSeconds, channel, false));
+    }
+
+    /** {@link #chat} for a caller with a fallback: a timed-out attempt ends the call instead of being retried here. */
+    private ChatResponse chatFailingOverOnTimeout(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                                                  @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                                                  @Nullable String channel) {
+        return LlmResilience.guard(config.name(), () ->
+                dispatchChat(model, messages, tools, maxTokens, thinkingMode, null, channel, true));
     }
 
     /** One whole chat call, retry loop included — the unit {@link LlmResilience#guard} records a single
@@ -544,7 +553,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     @SuppressWarnings("java:S107") // same call surface as chat(), which this is the body of
     private ChatResponse dispatchChat(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
                                       @Nullable Integer maxTokens, @Nullable String thinkingMode,
-                                      @Nullable Integer timeoutSeconds, @Nullable String channel) {
+                                      @Nullable Integer timeoutSeconds, @Nullable String channel,
+                                      boolean timeoutEndsCall) {
         var request = new ChatRequest(model, messages, tools, false, maxTokens, thinkingMode);
         var wire = wireFor(request);
         // JCLAW-882: the sync dispatch point. Counted before the wire call so a
@@ -555,13 +565,13 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         try (var _ = call.makeCurrent()) {
             ChatResponse response;
             try {
-                response = sendOnce(wire, request, timeoutSeconds, channel);
+                response = sendOnce(wire, request, timeoutSeconds, channel, timeoutEndsCall);
             } catch (RuntimeException e) {
                 // JCLAW-1158: nothing answers at the wire's endpoint, so the same request travels
                 // the OpenAI-compatible wire, which every provider serves.
                 if (wire == openAiWire || !wire.endpointAbsent(e)) throw e;
                 noteEndpointAbsent(wire, e);
-                response = sendOnce(openAiWire, request, timeoutSeconds, channel);
+                response = sendOnce(openAiWire, request, timeoutSeconds, channel, timeoutEndsCall);
             }
             noteCachedCall(LatencyTrace.current(), response.usage());
             call.response(response.id(), response.model(), response.usage(), finishReasons(response));
@@ -575,11 +585,11 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
 
     /** One request on one wire, the JCLAW-1076 tools retry included. */
     private ChatResponse sendOnce(ChatWire wire, ChatRequest request,
-                                  @Nullable Integer timeoutSeconds, @Nullable String channel) {
+                                  @Nullable Integer timeoutSeconds, @Nullable String channel, boolean timeoutEndsCall) {
         String responseBody;
         try {
             responseBody = executeWithRetry(wire.uri(), wire.serialize(request), request.model(),
-                    timeoutSeconds, channel);
+                    timeoutSeconds, channel, timeoutEndsCall);
         } catch (RuntimeException e) {
             // JCLAW-1076: the provider has just told us this model can't use
             // tools. Retry once without them rather than failing the turn. The
@@ -588,7 +598,7 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             ToolCapabilityMemo.record(config.name(), request.model());
             var retry = withoutTools(request);
             responseBody = executeWithRetry(wire.uri(), wire.serialize(retry), retry.model(),
-                    timeoutSeconds, channel);
+                    timeoutSeconds, channel, timeoutEndsCall);
         }
         // A provider can return a 200 whose body is garbage (truncated JSON, an
         // HTML error page, a missing "choices" array). Parsing then throws a raw
@@ -992,8 +1002,12 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                                                  @Nullable Integer maxTokens,
                                                  @Nullable String thinkingMode,
                                                  @Nullable String channel) {
+        // Retrying a 180 s timeout on the same provider spent up to 12 minutes per call before the fallback ran.
+        boolean canFailOver = fallback != null && fallback.coversFor(primary);
         try {
-            return primary.chat(model, messages, tools, maxTokens, thinkingMode, channel);
+            return canFailOver
+                    ? primary.chatFailingOverOnTimeout(model, messages, tools, maxTokens, thinkingMode, channel)
+                    : primary.chat(model, messages, tools, maxTokens, thinkingMode, channel);
         } catch (LlmException e) {
             SubscriptionUsage.noteFailure(e);
             if (fallback != null && fallback.coversFor(primary)) {
@@ -1237,6 +1251,12 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
     /** The same retry loop against an absolute endpoint, for a wire not rooted at {@link ProviderConfig#baseUrl} (JCLAW-1158). */
     protected String executeWithRetry(URI uri, String json, String model,
                                       @Nullable Integer timeoutSeconds, @Nullable String channel) {
+        return executeWithRetry(uri, json, model, timeoutSeconds, channel, false);
+    }
+
+    /** The retry loop; with {@code timeoutEndsCall}, a timed-out attempt throws at once for the caller to fail over. */
+    private String executeWithRetry(URI uri, String json, String model, @Nullable Integer timeoutSeconds,
+                                    @Nullable String channel, boolean timeoutEndsCall) {
         var auth = HttpKeys.BEARER_PREFIX + config.apiKey();
         var timeout = Duration.ofSeconds(timeoutSeconds != null ? timeoutSeconds : 180);
         var site = callSite(model);
@@ -1257,6 +1277,9 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
             } catch (Exception e) {
                 lastException = e;
             }
+            if (timeoutEndsCall && timedOut(lastException)) {
+                throw exhausted("%s timed out, so it was not retried".formatted(config.name()), lastException, site);
+            }
 
             // The 429 path already parked for the (clamped) Retry-After, so
             // don't stack the standard backoff on top of it.
@@ -1266,6 +1289,11 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         }
 
         throw exhausted("All retries exhausted for " + config.name(), lastException, site);
+    }
+
+    /** OkHttp reports both its call timeout and a read timeout as an {@link InterruptedIOException}. */
+    private static boolean timedOut(@Nullable Exception e) {
+        return e instanceof LlmException.Transport && e.getCause() instanceof InterruptedIOException;
     }
 
     /** The exhausted-retries failure, carrying the last attempt's category and its remedy: every

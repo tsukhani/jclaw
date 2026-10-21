@@ -5,11 +5,16 @@ import llm.LlmTypes.ProviderConfig;
 import llm.OpenAiProvider;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
+import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import utils.CircuitBreakers;
+import utils.HttpFactories;
 
+import java.net.SocketTimeoutException;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * JCLAW-300: pin {@link LlmProvider#chatWithFailover} — the primary→
@@ -154,6 +159,48 @@ class LlmProviderFailoverTest extends UnitTest {
         assertTrue(primaryServer.getRequestCount() >= 1, "primary contacted before rethrow");
     }
 
+    @Test
+    void aTimeoutOnThePrimaryFailsOverAtOnceInsteadOfRetrying() throws Exception {
+        primaryServer = new MockWebServer();
+        primaryServer.start();
+        secondaryServer = new MockWebServer();
+        secondaryServer.start();
+        secondaryServer.enqueue(jsonResponse(200, completionBody("from-secondary", "ok")));
+        var primaryName = "timeout-primary-" + System.nanoTime();
+        var secondaryName = "timeout-secondary-" + System.nanoTime();
+        var primary = openAiPointingAt(primaryServer, primaryName);
+        var secondary = openAiPointingAt(secondaryServer, secondaryName);
+        var attempts = new AtomicInteger();
+        try {
+            var result = HttpFactories.callWith(timingOut(primaryServer.getPort(), attempts),
+                    () -> LlmProvider.chatWithFailover(primary, new LlmProvider.Fallback(secondary, "fallback-model"),
+                            "test-model", List.of(), List.of(), null, null, "web"));
+
+            assertEquals("from-secondary", result.id());
+            assertEquals(1, attempts.get(), "a timeout is not retried on a provider a fallback covers");
+        } finally {
+            CircuitBreakers.remove(primaryName);
+            CircuitBreakers.remove(secondaryName);
+        }
+    }
+
+    @Test
+    void aTimeoutWithNoFallbackIsStillRetried() throws Exception {
+        primaryServer = new MockWebServer();
+        primaryServer.start();
+        var primaryName = "timeout-alone-" + System.nanoTime();
+        var primary = openAiPointingAt(primaryServer, primaryName);
+        var attempts = new AtomicInteger();
+        try {
+            assertThrows(LlmProvider.LlmException.class, () -> HttpFactories.callWith(
+                    timingOut(primaryServer.getPort(), attempts),
+                    () -> LlmProvider.chatWithFailover(primary, null, "test-model", List.of(), List.of(), null, null, "web")));
+            assertEquals(4, attempts.get(), "with nowhere to fail over to, the retries are the only recourse");
+        } finally {
+            CircuitBreakers.remove(primaryName);
+        }
+    }
+
     // === Helpers ===
 
     private OpenAiProvider openAiPointingAt(MockWebServer server, String name) {
@@ -162,6 +209,15 @@ class LlmProviderFailoverTest extends UnitTest {
         var config = new ProviderConfig(name, baseUrl, "sk-test",
                 List.of(new ModelInfo("test-model", "Test", 100000, 4096, false)));
         return new OpenAiProvider(config);
+    }
+
+    /** A transport whose calls to {@code port} time out at once, counting each attempt; other ports pass through. */
+    private static OkHttpClient timingOut(int port, AtomicInteger attempts) {
+        return new OkHttpClient.Builder().addInterceptor(chain -> {
+            if (chain.request().url().port() != port) return chain.proceed(chain.request());
+            attempts.incrementAndGet();
+            throw new SocketTimeoutException("timeout");
+        }).build();
     }
 
     private static MockResponse jsonResponse(int code, String body) {
