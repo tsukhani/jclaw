@@ -571,7 +571,9 @@ const peekTaskId = ref<number | null>(null)
 
 // Opening another run while a trace or its silent refresh is in flight: only the newest answer counts.
 const traceLoads = useLatestRequest()
-function fetchTrace(runId: number): Promise<[TaskRunMessageView[], SubagentRunView[]]> {
+// Named, not inline Promise<[…[]]>: CodeQL blanks `]]>` in Vue scripts as an XHTML CDATA end, breaking its parse.
+type TraceParts = [TaskRunMessageView[], SubagentRunView[]]
+function fetchTrace(runId: number): Promise<TraceParts> {
   return Promise.all([
     $fetch<TaskRunMessageView[]>(`/api/task-runs/${runId}/messages`),
     $fetch<SubagentRunView[]>(`/api/subagent-runs?coding=true&parentTaskRunId=${runId}`),
