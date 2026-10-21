@@ -1312,7 +1312,7 @@ function zoneForTaskRender(task: Task): string | undefined {
                 {{ deliveryLabel(task) }}
               </td>
               <td class="px-4 py-2.5 text-fg-muted text-xs">
-                {{ task.nextRunAt ? formatDateTime(task.nextRunAt as string, zoneForTaskRender(task)) : '—' }}
+                {{ task.nextRunAt ? formatDateTime(task.nextRunAt, zoneForTaskRender(task)) : '—' }}
               </td>
               <td class="px-4 py-2.5 text-fg-muted text-xs">
                 {{ task.retryCount }}/{{ task.maxRetries }}

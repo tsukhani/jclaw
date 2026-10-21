@@ -85,10 +85,10 @@ const { data: previewData, refresh: refreshPreview }
 
 // Only worth showing when the launch differs from the stored command — a bare
 // harness with no override would just repeat the row above it.
-const showsLaunch = computed(() => {
+const launch = computed(() => {
   const p = previewData.value
-  if (!p || !p.command) return false
-  return p.effective !== p.command || p.env.length > 0 || !!p.rejection
+  if (!p || !p.command) return null
+  return p.effective !== p.command || p.env.length > 0 || !!p.rejection ? p : null
 })
 
 // Auto-detect the ACP coding harnesses installed on the host (claude/pi/codex).
@@ -296,33 +296,33 @@ async function saveAcpModel(value: string) {
               <!-- Derived, not stored: the flags are appended per launch path
                    (AcpCommandPreview), so writing them back would pass them twice. -->
               <div
-                v-if="showsLaunch"
+                v-if="launch"
                 class="space-y-0.5"
                 data-testid="acp-launch-preview"
               >
                 <!-- codex's override is a six-flag inline TOML block; let it wrap. -->
                 <p class="text-xs text-fg-muted break-words">
                   launches
-                  <span class="font-mono text-fg-primary">{{ previewData!.effective }}</span>
+                  <span class="font-mono text-fg-primary">{{ launch.effective }}</span>
                   <!-- Naming the harness explains the flags: acp.harness is what picks them,
                        and a hand-edited command can leave it pointing elsewhere. -->
-                  <span class="ml-1">(harness {{ previewData!.harness }})</span>
+                  <span class="ml-1">(harness {{ launch.harness }})</span>
                   <span
-                    v-if="previewData!.acpAdapter"
+                    v-if="launch.acpAdapter"
                     class="ml-1"
                   >— real ACP over stdio replaces the command above</span>
                 </p>
                 <p
-                  v-if="previewData!.env.length"
+                  v-if="launch.env.length"
                   class="text-xs text-fg-muted"
                 >
-                  env <span class="font-mono">{{ previewData!.env.join(', ') }}</span>
+                  env <span class="font-mono">{{ launch.env.join(', ') }}</span>
                 </p>
                 <p
-                  v-if="previewData!.rejection"
+                  v-if="launch.rejection"
                   class="text-xs text-rose-700 dark:text-rose-400"
                 >
-                  {{ previewData!.rejection }}
+                  {{ launch.rejection }}
                 </p>
               </div>
             </div>

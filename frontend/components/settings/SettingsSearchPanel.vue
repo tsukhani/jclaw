@@ -140,6 +140,12 @@ function searchPriority(providerId: string): number {
 const sortedSearchProviderIds = computed(() => {
   return Object.keys(SEARCH_PROVIDERS).sort((a, b) => searchPriority(a) - searchPriority(b))
 })
+// Paired with its entry so the template needs no lookup assertion: CodeQL reads template
+// expressions as plain JavaScript, where `!` is a parse error that drops the expression.
+const sortedSearchProviders = computed(() => sortedSearchProviderIds.value.flatMap((id) => {
+  const provider = SEARCH_PROVIDERS[id]
+  return provider ? [{ id, provider }] : []
+}))
 
 // --- Search provider drag-and-drop reordering ---
 const dragSearchProvider = ref<string | null>(null)
@@ -209,7 +215,7 @@ function onSearchDragEnd() {
     />
     <!-- eslint-disable-next-line vuejs-accessibility/no-static-element-interactions -- drag-drop reorder: HTML5 drag events have no keyboard equivalent; rule does not differentiate them from click -->
     <div
-      v-for="id in sortedSearchProviderIds"
+      v-for="{ id, provider } in sortedSearchProviders"
       :key="id"
       draggable="true"
       :class="[
@@ -232,7 +238,7 @@ function onSearchDragEnd() {
             class="cursor-grab active:cursor-grabbing text-fg-muted hover:text-fg-muted select-none"
             title="Drag to reorder priority"
           >⠿</span>
-          <span class="text-sm font-medium text-fg-strong">{{ SEARCH_PROVIDERS[id]!.label }}</span>
+          <span class="text-sm font-medium text-fg-strong">{{ provider.label }}</span>
           <span
             v-if="searchActive(id)"
             class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
@@ -252,7 +258,7 @@ function onSearchDragEnd() {
           :title="searchEnabled(id) ? 'Disable provider' : 'Enable provider'"
           role="switch"
           :aria-checked="searchEnabled(id)"
-          :aria-label="`${SEARCH_PROVIDERS[id]!.label} search provider`"
+          :aria-label="`${provider.label} search provider`"
           @click="toggleSearchEnabled(id)"
         >
           <span
@@ -262,13 +268,13 @@ function onSearchDragEnd() {
         </button>
       </div>
       <div class="px-4 py-2.5 text-xs text-fg-muted leading-relaxed border-b border-border">
-        {{ SEARCH_PROVIDERS[id]!.description }}
+        {{ provider.description }}
         <a
-          :href="SEARCH_PROVIDERS[id]!.signupUrl"
+          :href="provider.signupUrl"
           target="_blank"
           rel="noopener"
           class="text-fg-primary hover:text-fg-strong underline ml-1"
-        >Get an API key → {{ SEARCH_PROVIDERS[id]!.signupLabel }}</a>
+        >Get an API key → {{ provider.signupLabel }}</a>
       </div>
       <div class="divide-y divide-border">
         <!-- apiKey -->
@@ -278,8 +284,8 @@ function onSearchDragEnd() {
             v-model="editValue"
             :saved="!!searchApiKey(id)"
             :editing="editingKey === `search.${id}.apiKey`"
-            :label="`${SEARCH_PROVIDERS[id]!.label} API key`"
-            :placeholder="SEARCH_PROVIDERS[id]!.apiKeyPlaceholder"
+            :label="`${provider.label} API key`"
+            :placeholder="provider.apiKeyPlaceholder"
             removable
             @edit="editingKey = `search.${id}.apiKey`"
             @save="updateEntry(`search.${id}.apiKey`)"

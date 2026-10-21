@@ -80,6 +80,8 @@ const PAD_B = 26
 // Which bar (if any) is currently under the user's cursor — drives the
 // hover-revealed count label and a subtle highlight on the bar itself.
 const hoveredBarIdx = ref<number | null>(null)
+// The bar itself, so the template narrows it under v-if instead of asserting the index.
+const hoveredBar = computed(() => (hoveredBarIdx.value === null ? null : plot.value?.bars[hoveredBarIdx.value] ?? null))
 
 function formatMs(ms: number): string {
   if (ms <= 0) return '0 ms'
@@ -430,15 +432,15 @@ const plot = computed(() => {
            of the curve so it remains readable over the density overlay. -->
       <g data-testid="bar-counts">
         <text
-          v-if="hoveredBarIdx !== null && plot.bars[hoveredBarIdx]"
-          :x="plot.bars[hoveredBarIdx]!.labelX"
-          :y="Math.max(PAD_T + 10, plot.bars[hoveredBarIdx]!.y - 4)"
+          v-if="hoveredBar"
+          :x="hoveredBar.labelX"
+          :y="Math.max(PAD_T + 10, hoveredBar.y - 4)"
           fill="var(--color-fg-strong)"
           font-size="10"
           font-family="ui-monospace, SFMono-Regular, monospace"
           text-anchor="middle"
           font-weight="600"
-        >{{ plot.bars[hoveredBarIdx]!.count }}</text>
+        >{{ hoveredBar.count }}</text>
       </g>
 
       <!-- Percentile markers — always visible since only one series is in view.

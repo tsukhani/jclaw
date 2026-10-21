@@ -54,7 +54,7 @@ interface SubagentRunSlice {
   collapsed: boolean
 }
 
-defineProps<{
+const props = defineProps<{
   msg: Message
   msgIdx: number
   // Exists solely to force re-render on shallowRef nested-field mutations; not read in the template.
@@ -86,6 +86,11 @@ const emit = defineEmits<{
   (e: 'toggle-tool-call-expansion', tc: ToolCall): void
   (e: 'set-tok-stats-hover-key', key: string | number | null): void
 }>()
+
+// Resolved once so the template narrows them under v-if; CodeQL reads template expressions as plain
+// JavaScript, where a `!` assertion is a parse error that drops the expression from its analysis.
+const quoted = computed(() => quotedParts(props.msg))
+const route = computed(() => routeOf(props.msg))
 
 /** A reply's quoted block: stored in its text, or held client-side on an optimistic row (JCLAW-1299). */
 function quotedParts(msg: Message): QuotedReplyParts | null {
@@ -242,16 +247,16 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
         />
         <!-- eslint-enable vue/no-v-html -->
         <div
-          v-else-if="quotedParts(msg)"
+          v-else-if="quoted"
           class="inline-block bg-muted rounded-2xl text-fg-strong px-4 py-2 text-base whitespace-pre-wrap break-words"
         >
           <blockquote
             data-testid="message-quote"
             class="mb-1.5 border-l-2 border-input pl-2 text-sm text-fg-muted line-clamp-4"
-            :title="quotedParts(msg)!.quoted"
+            :title="quoted.quoted"
           >
-            <span class="block text-xs font-medium">{{ quotedParts(msg)!.label }}</span>{{ quotedParts(msg)!.quoted }}
-          </blockquote>{{ quotedParts(msg)!.reply }}
+            <span class="block text-xs font-medium">{{ quoted.label }}</span>{{ quoted.quoted }}
+          </blockquote>{{ quoted.reply }}
         </div>
         <div
           v-else
@@ -462,33 +467,33 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
              footer below, because on an Auto conversation the model changes from turn to turn.
              Shown from the stream's route frame, so it names the model while it is answering. -->
         <div
-          v-if="routeOf(msg)"
+          v-if="route"
           class="flex flex-wrap items-center gap-1.5 mt-1.5 text-xs text-fg-muted"
-          :title="routeDescription(routeOf(msg)!)"
+          :title="routeDescription(route)"
           data-testid="route-badge"
         >
           <ArrowsRightLeftIcon
             class="w-3.5 h-3.5 shrink-0"
             aria-hidden="true"
           />
-          <span class="sr-only">{{ routeDescription(routeOf(msg)!) }}</span>
-          <span aria-hidden="true">Auto · {{ routeClassLabel(routeOf(msg)!) }} →</span>
+          <span class="sr-only">{{ routeDescription(route) }}</span>
+          <span aria-hidden="true">Auto · {{ routeClassLabel(route) }} →</span>
           <span
             class="font-mono text-fg-strong"
             aria-hidden="true"
-          >{{ routeOf(msg)!.model }}</span>
+          >{{ route.model }}</span>
           <span
-            v-if="routeOf(msg)!.thinkingMode"
+            v-if="route.thinkingMode"
             aria-hidden="true"
             data-testid="route-effort"
-          >· {{ routeOf(msg)!.thinkingMode }} effort</span>
+          >· {{ route.thinkingMode }} effort</span>
           <span
-            v-if="routeOf(msg)!.failover"
+            v-if="route.failover"
             class="px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20"
             aria-hidden="true"
           >failover</span>
           <span
-            v-if="routeOf(msg)!.downshifted"
+            v-if="route.downshifted"
             class="px-1.5 py-0.5 text-[10px] uppercase tracking-wide rounded text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-900/50 bg-amber-50/50 dark:bg-amber-950/20"
             aria-hidden="true"
           >budget</span>

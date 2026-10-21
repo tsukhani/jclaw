@@ -306,7 +306,11 @@ watch(bindings, (list) => {
   }
 }, { immediate: true })
 
-function usageLabel(u: WhatsAppUsageState): string {
+// Keyed by binding so the template needs no assertion on the lookup: CodeQL reads template
+// expressions as plain JavaScript, where `!` is a parse error that drops the expression.
+function usageLabel(id: number): string {
+  const u = usages.value[id]
+  if (!u) return ''
   const replies = (u.replies ?? 0).toLocaleString('en-US')
   if ((u.replies ?? 0) > u.allowance) {
     return `${replies} replies this month, ${(u.billed ?? 0).toLocaleString('en-US')} billed`
@@ -314,12 +318,14 @@ function usageLabel(u: WhatsAppUsageState): string {
   return `${replies} of ${u.allowance.toLocaleString('en-US')} free replies this month`
 }
 
-function usageWarning(u: WhatsAppUsageState): boolean {
-  return (u.replies ?? 0) >= u.allowance * USAGE_WARNING_SHARE
+function usageWarning(id: number): boolean {
+  const u = usages.value[id]
+  return !!u && (u.replies ?? 0) >= u.allowance * USAGE_WARNING_SHARE
 }
 
-function usagePercent(u: WhatsAppUsageState): number {
-  return Math.min(100, ((u.replies ?? 0) / u.allowance) * 100)
+function usagePercent(id: number): number {
+  const u = usages.value[id]
+  return u ? Math.min(100, ((u.replies ?? 0) / u.allowance) * 100) : 0
 }
 
 // ── JCLAW-1411: a reply Meta refused or failed to deliver, shown for 24h ────
@@ -616,24 +622,24 @@ onBeforeUnmount(stopPoll)
         >
           <p
             :id="`usage-label-${b.id}`"
-            :class="usageWarning(usages[b.id]!) ? 'text-amber-700 dark:text-amber-300' : 'text-fg-muted'"
+            :class="usageWarning(b.id) ? 'text-amber-700 dark:text-amber-300' : 'text-fg-muted'"
           >
-            {{ usageLabel(usages[b.id]!) }}
+            {{ usageLabel(b.id) }}
           </p>
           <div
             role="progressbar"
             :aria-labelledby="`usage-label-${b.id}`"
             aria-valuemin="0"
-            :aria-valuemax="usages[b.id]!.allowance"
-            :aria-valuenow="Math.min(usages[b.id]!.replies ?? 0, usages[b.id]!.allowance)"
-            :aria-valuetext="usageLabel(usages[b.id]!)"
+            :aria-valuemax="usages[b.id]?.allowance"
+            :aria-valuenow="Math.min(usages[b.id]?.replies ?? 0, usages[b.id]?.allowance ?? 0)"
+            :aria-valuetext="usageLabel(b.id)"
             class="h-1.5 w-full bg-muted rounded-full overflow-hidden"
           >
             <div
               data-testid="usage-fill"
               class="h-full transition-[width]"
-              :class="usageWarning(usages[b.id]!) ? 'bg-amber-500' : 'bg-emerald-600 dark:bg-emerald-500'"
-              :style="{ width: `${usagePercent(usages[b.id]!)}%` }"
+              :class="usageWarning(b.id) ? 'bg-amber-500' : 'bg-emerald-600 dark:bg-emerald-500'"
+              :style="{ width: `${usagePercent(b.id)}%` }"
             />
           </div>
         </div>
