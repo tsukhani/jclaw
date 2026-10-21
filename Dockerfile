@@ -42,7 +42,9 @@
 # deadlocked in JVM shutdown after logging "Done.", hanging the build until the
 # pipeline timeout. Everything this stage emits is arch-neutral except
 # sherpa-onnx's native lib, which -PtargetArch selects for the target below.
-FROM --platform=$BUILDPLATFORM azul/zulu-openjdk:25.0.3 AS bundle-stage
+# Major tag plus digest: Azul re-pushes version tags with OS updates, so only a
+# digest is reproducible, and Renovate bumps it on each push.
+FROM --platform=$BUILDPLATFORM azul/zulu-openjdk:25@sha256:619853c48bc54a7f79c610dfdc3c8025fa34f196de471cd22cd8c769dbabbe4d AS bundle-stage
 
 ENV DEBIAN_FRONTEND=noninteractive
 
