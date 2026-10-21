@@ -13,7 +13,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
-    "typescript": "^5.9.3"
+    "typescript": "^6.0.0"
   },
   "packageManager": "pnpm@12.14.0"
 }
