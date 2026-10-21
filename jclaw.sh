@@ -70,6 +70,17 @@ _port_pids() {
     return 2
 }
 port_pids()          { _port_pids "$1"; }
+# True while $1 has a listener. The wait loop only needs yes/no, so it reads
+# netstat's table instead of walking pids, which also stops a Chrome tab's
+# CLOSE_WAIT socket on the port from holding a restart; bind() is what the wait
+# protects, and only a LISTEN socket blocks it. Windows keeps the pid walk.
+_port_held() {
+    if [[ "$IS_WINDOWS" == 0 ]] && command -v netstat >/dev/null 2>&1; then
+        ! _port_quiet "$1" listen
+    else
+        [[ -n "$(port_pids "$1")" ]]
+    fi
+}
 port_listener_pids() { _port_pids "$1" listen; }
 
 # How to refer to this script in help/usage text: the global `jclaw` shim when
@@ -3682,7 +3693,7 @@ wait_for_port_free() {
     local port=$1
     local timeout=${2:-30}
     local waited=0
-    while [[ -n "$(port_pids "$port")" ]]; do
+    while _port_held "$port"; do
         sleep 1
         waited=$((waited + 1))
         (( waited >= timeout )) && return 1
