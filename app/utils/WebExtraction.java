@@ -546,7 +546,7 @@ public final class WebExtraction {
      */
     public static String extractText(String html, String url) {
         var readable = readable(html, url);
-        var markdown = HTML_TO_MARKDOWN.convert(readable.contentHtml()).strip();
+        var markdown = HTML_TO_MARKDOWN.convert(withoutNestedTables(readable.contentHtml())).strip();
 
         var result = new StringBuilder();
         var title = readable.title();
@@ -560,6 +560,21 @@ public final class WebExtraction {
                     + "\n\n[Truncated: extracted text exceeds %d characters]".formatted(MAX_TEXT_LENGTH);
         }
         return result.toString();
+    }
+
+    /** flexmark re-runs a regex over each cell's rendered text, doubling the work per nesting level (26 unclosed tables
+     *  spun one web_fetch for over half an hour), and Markdown tables cannot nest: the outer tables become blocks. */
+    private static String withoutNestedTables(String html) {
+        if (html.indexOf("<table") == html.lastIndexOf("<table")) return html;
+        var doc = Jsoup.parseBodyFragment(html);
+        doc.outputSettings().prettyPrint(false);
+        for (var table : doc.body().select("table:has(table)")) {
+            for (var part : table.select("caption, thead, tbody, tfoot, tr, th, td")) {
+                if (part.closest("table") == table) part.tagName("div");
+            }
+            table.tagName("div");
+        }
+        return doc.body().html();
     }
 
     /** A page's main content as HTML, and its title — shared so Markdown and plain text read the same content. */

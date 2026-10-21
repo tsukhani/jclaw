@@ -362,6 +362,25 @@ class WebFetchToolTest extends UnitTest {
     }
 
     @Test
+    void unclosedTablesNestedDeepConvertInsteadOfSpinning() {
+        // Each unclosed <table> opens inside the last; flexmark's cell regex doubled its work per level.
+        var html = new StringBuilder("<html><head><title>Directory</title></head><body>");
+        for (int i = 0; i < 26; i++) html.append("<table><tr><td>LEVEL").append(i).append(" listing<td>more");
+        var text = assertTimeoutPreemptively(Duration.ofSeconds(10),
+                () -> extractText(html.append("</body></html>").toString(), "http://example.test/"));
+        for (int i = 0; i < 26; i++) assertTrue(text.contains("LEVEL" + i), "level " + i + " kept: " + text);
+    }
+
+    @Test
+    void aDataTableInsideALayoutTableStaysATable() {
+        var html = "<html><body><table><tr><td><h2>Prices</h2><table><tr><th>Item</th><th>Price</th></tr>"
+                + "<tr><td>Tea</td><td>3</td></tr></table></td></tr></table></body></html>";
+        var text = extractText(html, "http://example.test/");
+        assertTrue(text.lines().anyMatch(l -> l.matches("\\|\\s*Tea\\s*\\|\\s*3\\s*\\|")),
+                "the inner table keeps its rows: " + text);
+    }
+
+    @Test
     void extractTextStripsScriptAndStyleAndNav() {
         var html = "<html><head><title>X</title></head><body>"
                 + "<nav>NAV-CONTENT</nav>"
