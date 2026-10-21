@@ -668,6 +668,10 @@ Environment:
                           the heap — raise it when you raise -Xmx.
   JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins for value
                           flags, e.g. -XX:MaxDirectMemorySize=512m).
+  JCLAW_AOT=off           Start without the JDK's AOT cache. A production start
+                          keeps one by default, training a new one (one extra
+                          start and stop) when the JDK, the JVM options or the
+                          libraries change. Needs JDK 25.0.4, 26.0.2 or 27.
   JCLAW_FORCE_SPA_BUILD   Rebuild the SPA even when public/spa looks up to
                           date. The build is normally skipped unless a
                           frontend file is newer than public/spa; set this
@@ -699,6 +703,10 @@ Environment:
   JCLAW_JVM_SOFTMAX       ZGC soft heap target (default: 1g). Not derived from
                           the heap — raise it when you raise -Xmx.
   JCLAW_JVM_OPTS          Extra JVM flags appended last (last-wins).
+  JCLAW_AOT=off           Start without the JDK's AOT cache. A production start
+                          keeps one by default, training a new one (one extra
+                          start and stop) when the JDK, the JVM options or the
+                          libraries change. Needs JDK 25.0.4, 26.0.2 or 27.
 
 Examples:
   ${INVOKE} start                              # Default port 9000
@@ -1544,6 +1552,8 @@ HTTPS_INSTALL_CA=false
 EVAL_ARGS=()
 # Arguments forwarded verbatim to bin/diagnostics.mjs.
 DIAGNOSTICS_ARGS=()
+# Launch arguments for the internal aot-cache command.
+AOT_ARGS=()
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -1715,6 +1725,14 @@ while [[ $# -gt 0 ]]; do
                 exit 0
             fi
             DIAGNOSTICS_ARGS=("$@")
+            break
+            ;;
+        aot-cache)
+            # Internal: the Docker image's CMD keeps the AOT cache current here before `./play run`.
+            # Everything after it is that launch's arguments, which the cache must be trained with.
+            COMMAND="$1"
+            shift
+            AOT_ARGS=("$@")
             break
             ;;
         setup|init-worktree|loadtest|test|e2e|dist|bundle)
@@ -3024,6 +3042,130 @@ prune_heap_dumps() {
     done
 }
 
+# ─── The JDK's AOT cache (PF-185) ───
+# `play start` and `play run` give the JVM the cache whenever its file exists, so keeping the cache
+# on means training it when it is missing or no longer fits, and dropping one the JVM refused.
+
+# A bundle's launcher keeps it in the bundle root; a start through Gradle keeps it under build/.
+aot_cache_file() {
+    if [[ "$(upgrade_install_kind)" == bundle ]]; then
+        echo "$SCRIPT_DIR/app.aot"
+    else
+        echo "$SCRIPT_DIR/build/play/aot/app.aot"
+    fi
+}
+
+# JCLAW_AOT_DIR keeps the cache elsewhere and links it into place: the Docker image puts it on the data volume.
+aot_store_dir() {
+    if [[ -n "${JCLAW_AOT_DIR:-}" ]]; then
+        echo "$JCLAW_AOT_DIR"
+    else
+        dirname "$(aot_cache_file)"
+    fi
+}
+
+# JDK-8377932: before 25.0.4, 26.0.2 and 27 the JVM keeps serving classes from a cache whose jars changed.
+aot_jdk_has_fix() {
+    local version major minor patch rest
+    version=$(java -XshowSettings:properties -version 2>&1 | awk -F' = ' '$1 ~ /java\.version$/ { print $2; exit }' || true)
+    [[ -n "$version" ]] || return 1
+    IFS=. read -r major minor patch rest <<< "$version"
+    major=${major%%[!0-9]*}
+    minor=${minor%%[!0-9]*}
+    patch=${patch%%[!0-9]*}
+    major=${major:-0}
+    minor=${minor:-0}
+    patch=${patch:-0}
+    if (( major >= 27 )); then return 0; fi
+    if (( major == 26 )) && (( minor > 0 || patch >= 2 )); then return 0; fi
+    if (( major == 25 )) && (( minor > 0 || patch >= 4 )); then return 0; fi
+    return 1
+}
+
+# What the JVM checks a cache against: its own build, the launch options and the jars it loads.
+aot_fingerprint() {
+    # A container's JVM echoes JAVA_TOOL_OPTIONS, per-start file names included; the options are counted below.
+    java -version 2>&1 | grep -v '^Picked up ' || true
+    # Per-start file names and logging change nothing the cache holds.
+    # shellcheck disable=SC2086
+    printf '%s\n' "$@" ${JAVA_TOOL_OPTIONS:-} | grep -v -E '^-XX:(HeapDumpPath|ErrorFile)=|^-Xlog:' || true
+    grep -E '^jvm\.memory' "$SCRIPT_DIR/conf/application.conf" 2>/dev/null || true
+    if [[ "$(upgrade_install_kind)" == bundle ]]; then
+        find "$SCRIPT_DIR/lib" "$SCRIPT_DIR/framework" -name '*.jar' -exec ls -ln {} + 2>/dev/null \
+            | awk '{ print $5, $NF }' | sed "s|$SCRIPT_DIR/||" | sort || true
+    else
+        (cd "$SCRIPT_DIR" && cksum build.gradle.kts settings.gradle.kts .play-version 2>/dev/null) || true
+    fi
+}
+
+# Before a production start: train the cache when it is missing or no longer fits. A failed
+# training run never stops the start, which then runs without a cache. The arguments are the start's.
+aot_prepare() {
+    local cache store stamp want reason
+    cache=$(aot_cache_file)
+    store=$(aot_store_dir)
+    stamp="$store/app.aot.fingerprint"
+    if [[ "${JCLAW_AOT:-on}" == off ]]; then
+        rm -f "$cache" "$store/app.aot" "$stamp"
+        echo "    AOT cache: off (JCLAW_AOT=off)"
+        return 0
+    fi
+    if [[ "$IS_WINDOWS" == 1 ]]; then
+        echo "    AOT cache: not on Windows, where the JVM cannot be stopped gracefully to write one"
+        return 0
+    fi
+    if ! aot_jdk_has_fix; then
+        rm -f "$cache" "$store/app.aot" "$stamp"
+        echo "    AOT cache: off: this JDK can serve stale classes from one (JDK-8377932); 25.0.4, 26.0.2 or 27 turns it on"
+        return 0
+    fi
+    # Only a checksum is kept: the options can carry an operator's credentials, an exporter header say.
+    want=$(aot_fingerprint "$@" | cksum)
+    if [[ -n "${JCLAW_AOT_DIR:-}" && -f "$store/app.aot" ]]; then
+        ln -sf "$store/app.aot" "$cache"
+    fi
+    if [[ -f "$cache" && -f "$stamp" && "$(cat "$stamp" 2>/dev/null || true)" == "$want" ]]; then
+        echo "    AOT cache: up to date"
+        return 0
+    fi
+    if [[ -f "$cache" ]]; then
+        reason="the JDK, the JVM options or the libraries changed"
+    else
+        reason="there is none yet"
+    fi
+    rm -f "$stamp"
+    mkdir -p "$SCRIPT_DIR/logs" "$store"
+    echo "==> Training the AOT cache (${reason}): one full start and stop..."
+    if play aot-gen --%prod "$@" > "$SCRIPT_DIR/logs/aot-gen.log" 2>&1; then
+        if [[ -n "${JCLAW_AOT_DIR:-}" ]]; then
+            mv -f "$cache" "$store/app.aot"
+            ln -sf "$store/app.aot" "$cache"
+        fi
+        printf '%s\n' "$want" > "$stamp"
+        echo "    AOT cache: trained ($(du -h "$store/app.aot" 2>/dev/null | cut -f1 || true))"
+    else
+        rm -f "$cache" "$store/app.aot"
+        echo "    AOT cache: training failed, so this start runs without one. Details: logs/aot-gen.log"
+        tail -5 "$SCRIPT_DIR/logs/aot-gen.log" 2>/dev/null | sed 's/^/      /' || true
+    fi
+    return 0
+}
+
+# After a production start. A refused cache costs only time, but it would be refused at every start:
+# drop it, so the next start trains a new one. The JVM reports a refusal at the error level.
+aot_check_used() {
+    local cache store
+    cache=$(aot_cache_file)
+    store=$(aot_store_dir)
+    [[ -f "$cache" ]] || return 0
+    if grep -q -E '\[error *\]\[aot' "$SCRIPT_DIR/logs/system.out" 2>/dev/null; then
+        rm -f "$cache" "$store/app.aot" "$store/app.aot.fingerprint"
+        echo "    AOT cache: the JVM refused it (logs/system.out); the next start trains a new one"
+    else
+        echo "    AOT cache: in use"
+    fi
+}
+
 do_start_prod() {
     cd "$SCRIPT_DIR"
 
@@ -3378,12 +3520,14 @@ do_start_prod() {
         echo "    JVM: -Xms${xms} -Xmx${xmx}, ZGC softmax ${softmax}, GC log → logs/gc.log"
     fi
     [[ -n "${JCLAW_JVM_OPTS:-}" ]] && echo "    Extra JVM opts: ${JCLAW_JVM_OPTS}"
+    aot_prepare --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
     play start --%prod --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
 
     # `play start` forks, so this banner used to announce a server that was not
     # reachable yet, and every "restart, then do X" sequence inherited the gap:
     # `${INVOKE} e2e` straight after a restart found no listener and refused.
     wait_for_backend_ready || return 1
+    aot_check_used
 
     echo ""
     echo "JClaw is running (production):"
@@ -6501,6 +6645,9 @@ case "$COMMAND" in
         ;;
     evals)
         do_evals
+        ;;
+    aot-cache)
+        aot_prepare ${AOT_ARGS[@]+"${AOT_ARGS[@]}"}
         ;;
     diagnostics)
         do_diagnostics

@@ -252,9 +252,12 @@ RUN echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/80-retries && \
 # is_container, alongside a /.dockerenv probe for images built elsewhere.
 # PLAYWRIGHT_BROWSERS_PATH puts the first-use Chromium on the data volume beside the
 # driver's Node.js (data/playwright-node), so neither re-downloads on an image upgrade.
+# JCLAW_AOT_DIR keeps the JDK's AOT cache on the data volume as well, so it outlives the container;
+# jclaw.sh links it into the bundle root, where the launcher looks for it.
 ENV JAVA_HOME=/usr/lib/jvm/zulu25 \
     LANG=C.UTF-8 \
     PLAYWRIGHT_BROWSERS_PATH=/app/data/pw-browsers \
+    JCLAW_AOT_DIR=/app/data/aot \
     JCLAW_CONTAINER=1
 
 # Entrypoint script. Cache hits unless docker-entrypoint.sh changes.
@@ -353,8 +356,14 @@ EXPOSE 9443/udp
 # lands on Play's graceful-shutdown hooks rather than on a script that's
 # already gone.
 #
+# `jclaw.sh aot-cache` keeps the JDK's AOT cache current before the launch, with
+# the same options and arguments: on the first start, and after the JRE, these
+# options or the image's libraries change, it trains a cache with one full start
+# and stop, which ./play run then loads. It never fails the start, and
+# `-e JCLAW_AOT=off` turns it off.
+#
 # Shell-form CMD is required for env-var expansion. The `sh -c` shell
 # is itself replaced by `bash ./play` (exec), which is itself replaced
 # by `java` (exec inside the launcher), so the signal chain is intact
 # end-to-end.
-CMD ["sh", "-c", "started=$(date -u +%Y%m%dT%H%M%SZ) && export JAVA_TOOL_OPTIONS=\"-Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-128m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}} -XX:+UseZGC -XX:SoftMaxHeapSize=${JCLAW_JVM_SOFTMAX:-1g} -XX:ZUncommitDelay=60 -XX:+UseCompactObjectHeaders -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/logs/heap-oom-${started}-%p.hprof -XX:+ExitOnOutOfMemoryError -XX:ErrorFile=/app/logs/hs_err-${started}-%p.log -XX:MaxDirectMemorySize=256m -Dio.netty.leakDetection.level=DISABLED ${JAVA_TOOL_OPTIONS:-}\" && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443} '-Xlog:gc*:file=/app/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M'"]
+CMD ["sh", "-c", "started=$(date -u +%Y%m%dT%H%M%SZ) && export JAVA_TOOL_OPTIONS=\"-Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-128m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}} -XX:+UseZGC -XX:SoftMaxHeapSize=${JCLAW_JVM_SOFTMAX:-1g} -XX:ZUncommitDelay=60 -XX:+UseCompactObjectHeaders -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/logs/heap-oom-${started}-%p.hprof -XX:+ExitOnOutOfMemoryError -XX:ErrorFile=/app/logs/hs_err-${started}-%p.log -XX:MaxDirectMemorySize=256m -Dio.netty.leakDetection.level=DISABLED ${JAVA_TOOL_OPTIONS:-}\" && { bash ./jclaw.sh aot-cache --https.port=${JCLAW_HTTPS_PORT:-9443} || true; } && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443} '-Xlog:gc*:file=/app/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M'"]
