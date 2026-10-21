@@ -446,6 +446,8 @@ export interface Message {
   _thinkingStartedAt?: number
   /** Client-only: the router's choice from the stream's status frame, until the usage record carries it (JCLAW-1222). */
   _route?: MessageRoute
+  /** Client-only: prompt tokens of the stream's latest model call, until the usage record carries `lastPrompt`. */
+  _contextTokens?: number
 }
 
 /** A config entry from /api/config. */

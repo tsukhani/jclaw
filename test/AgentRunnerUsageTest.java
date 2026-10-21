@@ -1,3 +1,4 @@
+import agents.AgentRunner;
 import agents.UsageMetricsBuilder;
 import com.google.gson.JsonParser;
 import llm.LlmProvider;
@@ -8,6 +9,8 @@ import llm.TokenUsageEstimator;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -517,9 +520,47 @@ class AgentRunnerUsageTest extends UnitTest {
                 "an explicit null must normalise rather than propagate");
     }
 
+    // --- per-round context frame ---
+
+    @Test
+    void eachRoundReportsTheContextItRanOnSoTheMeterMovesMidTurn() {
+        var turn = new LlmProvider.TurnUsage();
+        var statuses = new ArrayList<String>();
+        UsageMetricsBuilder.addRoundAndReport(turn, roundWithUsage(new Usage(100, 10, 110, 0, 0, 0)), statusSink(statuses));
+        UsageMetricsBuilder.addRoundAndReport(turn, roundWithUsage(new Usage(250, 20, 270, 0, 0, 0)), statusSink(statuses));
+
+        assertEquals(List.of("{\"contextTokens\":100}", "{\"contextTokens\":250}"), statuses);
+        assertEquals(350, turn.promptTokens(), "the round still folds into the turn");
+    }
+
+    @Test
+    void aRoundWithoutProviderUsageReportsTheEstimatedContext() {
+        var turn = new LlmProvider.TurnUsage();
+        var statuses = new ArrayList<String>();
+        var estimated = LlmProvider.StreamAccumulator.builder()
+                .promptTokenEstimate(new TokenUsageEstimator.ChatRequestTokens(40, 5, 45, "cl100k_base", false))
+                .build();
+        UsageMetricsBuilder.addRoundAndReport(turn, estimated, statusSink(statuses));
+
+        assertEquals(List.of("{\"contextTokens\":45}"), statuses);
+    }
+
+    @Test
+    void aRoundThatMeasuredNothingReportsNothing() {
+        var statuses = new ArrayList<String>();
+        UsageMetricsBuilder.addRoundAndReport(new LlmProvider.TurnUsage(), roundWithUsage(null), statusSink(statuses));
+
+        assertTrue(statuses.isEmpty(), "a zero reading would empty the meter mid-turn: " + statuses);
+    }
+
     // --- Helpers ---
 
     private static LlmProvider.StreamAccumulator roundWithUsage(Usage u) {
         return LlmProvider.StreamAccumulator.builder().usage(u).build();
+    }
+
+    private static AgentRunner.StreamingCallbacks statusSink(List<String> statuses) {
+        return new AgentRunner.StreamingCallbacks(_ -> { }, _ -> { }, _ -> { }, statuses::add, _ -> { }, _ -> { },
+                _ -> { }, () -> { });
     }
 }

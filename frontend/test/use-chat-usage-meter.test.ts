@@ -50,6 +50,18 @@ describe('useChatUsageMeter', () => {
     expect(legacy.api.contextPromptTokens.value).toBe(30_000)
   })
 
+  it('reads a streaming reply\'s context frame until its usage lands', () => {
+    const earlier = assistant({ prompt: 90_000, lastPrompt: 90_000, completion: 4_000, reasoning: 300, cached: 500 })
+    const live = { role: 'assistant', content: 'working', _contextTokens: 131_072 } as Message
+    const { api, displayMessages } = mountMeter([earlier, user(), live], true)
+    expect(api.contextPromptTokens.value).toBe(131_072)
+    // The earlier turn's completion, thinking and cache counts belong to a different context.
+    expect(api.latestAssistantUsage.value).toMatchObject({ completion: 0, reasoning: 0, cached: 0 })
+
+    displayMessages.value = [earlier, user(), { ...live, usage: { prompt: 400_000, lastPrompt: 140_000, completion: 900 } as MessageUsage }]
+    expect(api.contextPromptTokens.value).toBe(140_000)
+  })
+
   it('conversationCumulativeTokens sums prompt + completion across assistant turns', () => {
     const { api } = mountMeter([
       assistant({ prompt: 10, completion: 5 }),

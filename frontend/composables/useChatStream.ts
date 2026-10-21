@@ -290,9 +290,25 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     }
   }
 
+  /** Parse the context frame the backend sends after every model call, so the meter moves mid-turn. */
+  function tryApplyContextFromStatusContent(ctx: StreamContext, content: string): boolean {
+    if (!content.startsWith('{"contextTokens"')) return false
+    try {
+      const parsed = JSON.parse(content) as { contextTokens?: number }
+      if (typeof parsed.contextTokens !== 'number') return false
+      messages.value[ctx.assistantIdx]!._contextTokens = parsed.contextTokens
+      triggerRef(messages)
+      return true
+    }
+    catch {
+      return false
+    }
+  }
+
   function handleStreamStatusEvent(ctx: StreamContext, event: { content?: string }) {
     const content = event.content
-    if (content && (tryApplyUsageFromStatusContent(ctx, content) || tryApplyRouteFromStatusContent(ctx, content))) return
+    if (content && (tryApplyUsageFromStatusContent(ctx, content) || tryApplyRouteFromStatusContent(ctx, content)
+      || tryApplyContextFromStatusContent(ctx, content))) return
     // Sent just before the call runs, whereas its tool_call frame arrives only once it has finished —
     // too late to show a first-use download while it happens. Scoped to this turn, like the image bar.
     if (content === 'Using tool: browser') {

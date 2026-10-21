@@ -20,6 +20,11 @@ export interface UseChatUsageMeter {
   conversationCostSummary: Ref<{ label: string, tooltip: string, turnCount: number } | null>
 }
 
+/** A mid-turn reading: the prompt alone, since the call's completion is already inside the next call's prompt. */
+function liveContextUsage(tokens: number): MessageUsage {
+  return { prompt: tokens, lastPrompt: tokens, completion: 0, total: tokens, reasoning: 0, cached: 0, durationMs: 0 }
+}
+
 export function useChatUsageMeter(
   displayMessages: Ref<Message[]>,
   streaming: Ref<boolean>,
@@ -60,13 +65,16 @@ export function useChatUsageMeter(
    * Latest assistant turn's usage block, or null when the conversation has none
    * yet. Drives the top-right context meter's numbers — we show the prompt/
    * completion from the most recent turn because that represents the context
-   * about to be resent on the next request.
+   * about to be resent on the next request. A turn still streaming has no usage
+   * yet, so the context its latest call ran on stands in until the usage lands.
    */
   const latestAssistantUsage = computed<MessageUsage | null>(() => {
     const msgs = displayMessages.value ?? []
     for (let i = msgs.length - 1; i >= 0; i--) {
       const m = msgs[i]
-      if (m?.role === 'assistant' && m.usage) return m.usage
+      if (m?.role !== 'assistant') continue
+      if (m.usage) return m.usage
+      if (m._contextTokens) return liveContextUsage(m._contextTokens)
     }
     return null
   })

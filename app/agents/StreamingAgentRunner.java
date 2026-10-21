@@ -415,7 +415,7 @@ final class StreamingAgentRunner {
         // round-local reasoning/content timing into TurnUsage so the
         // turn-level reasoningDurationMs spans first-reasoning → first-content
         // across every round (matches the frontend's live measurement).
-        turnUsage.addRound(accumulator);
+        UsageMetricsBuilder.addRoundAndReport(turnUsage, accumulator, cb);
 
         // Check for truncated response (max tokens hit mid-tool-call)
         if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason()) && !accumulator.toolCalls().isEmpty()) {

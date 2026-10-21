@@ -210,6 +210,22 @@ describe('useChatStream', () => {
     expect(assistant._route).toMatchObject({ provider: 'openrouter', model: 'glm-5.3-flash', failover: true })
   })
 
+  it('takes each context frame onto the reply so the meter moves before the turn ends', async () => {
+    const deps = makeDeps({ input: ref('hello') })
+    streamWith([
+      'data: {"type":"init","conversationId":42}\n',
+      `data: ${JSON.stringify({ type: 'status', content: '{"contextTokens":116155}' })}\n`,
+      `data: ${JSON.stringify({ type: 'status', content: '{"contextTokens":131072}' })}\n`,
+      'data: {"type":"token","content":"hi"}\n',
+      'data: {"type":"complete","content":"hi"}\n',
+    ])
+    const { api } = await mountStream(deps)
+    await api.sendMessage()
+    await flushPromises()
+
+    expect(deps.messages.value[1]!._contextTokens).toBe(131072)
+  })
+
   it('stamps the reasoning→content transition (collapses the thinking card once)', async () => {
     const deps = makeDeps({ input: ref('think then answer') })
     streamWith([

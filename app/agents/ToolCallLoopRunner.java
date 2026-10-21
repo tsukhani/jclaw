@@ -616,7 +616,7 @@ public final class ToolCallLoopRunner {
         // Fold this round's usage into the turn-level cumulative (JCLAW-76).
         // Runs regardless of whether the round resolves to more tool calls,
         // truncation, synthesis, or empty-retry — every round contributes.
-        ctx.turnUsage().addRound(accumulator);
+        UsageMetricsBuilder.addRoundAndReport(ctx.turnUsage(), accumulator, ctx.cb());
 
         // Truncation guard: if the model hit max_tokens mid-tool-call, the tool arguments
         // will be an incomplete JSON fragment. Passing that to ToolRegistry.execute causes
@@ -756,7 +756,7 @@ public final class ToolCallLoopRunner {
                 maxTokens, null, ctx.channelType());
         var cancelled = awaitOrCancel(ctx, retry, priorContent, round);
         if (cancelled != null) return SynthesisRecovery.cancelledWith(cancelled);
-        ctx.turnUsage().addRound(retry);
+        UsageMetricsBuilder.addRoundAndReport(ctx.turnUsage(), retry, ctx.cb());
         if (hasContent(retry)) return SynthesisRecovery.answered(retry.content(), retry.finishReason());
 
         var last = retry;
@@ -770,7 +770,7 @@ public final class ToolCallLoopRunner {
                     ctx.cb().onToken(), ctx.cb().onReasoning(), maxTokens, null, ctx.channelType());
             cancelled = awaitOrCancel(ctx, second, priorContent, round);
             if (cancelled != null) return SynthesisRecovery.cancelledWith(cancelled);
-            ctx.turnUsage().addRound(second);
+            UsageMetricsBuilder.addRoundAndReport(ctx.turnUsage(), second, ctx.cb());
             if (hasContent(second)) return SynthesisRecovery.answered(second.content(), second.finishReason());
             last = second;
         }

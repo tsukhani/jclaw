@@ -212,6 +212,17 @@ public final class UsageMetricsBuilder {
     }
 
     /**
+     * Fold one round into the turn and send the context that call ran on as a {@code contextTokens}
+     * status frame, so the chat's context meter moves each round instead of only when the turn ends.
+     */
+    public static void addRoundAndReport(LlmProvider.TurnUsage turnUsage, LlmProvider.StreamAccumulator round,
+                                         AgentRunner.StreamingCallbacks cb) {
+        turnUsage.addRound(round);
+        int tokens = turnUsage.hasProviderUsage() ? turnUsage.lastPromptTokens() : turnUsage.lastJtokkitPromptTokens();
+        if (tokens > 0) cb.onStatus().accept("{\"contextTokens\":%d}".formatted(tokens));
+    }
+
+    /**
      * Log usage, build the usage JSON payload (including pricing), and
      * invoke the status + complete callbacks. Caller is responsible for
      * having computed {@code usageJson} via {@link #buildUsageJson}
