@@ -6,6 +6,7 @@ import play.test.FunctionalTest;
 import services.RestartService;
 import services.UpgradeService;
 
+import java.nio.file.Files;
 import java.util.ArrayList;
 
 /**
@@ -26,6 +27,16 @@ class ApiSystemControllerTest extends FunctionalTest {
         upgrades.clear();
         RestartService.spawnerForTest = spawned::add;
         UpgradeService.spawnerForTest = upgrades::add;
+        clearAotFiles();
+    }
+
+    private static void clearAotFiles() {
+        try {
+            Files.deleteIfExists(RestartService.aotDir().resolve("aot-cache.off"));
+            Files.deleteIfExists(RestartService.aotDir().resolve("aot-cache.status"));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @AfterEach
@@ -88,6 +99,52 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertTrue(getContent(response).contains("\"status\":\"ok\""));
         assertEquals(1, spawned.size());
         assertTrue(spawned.getFirst().command().contains("restart"));
+    }
+
+    // --- AOT cache switch ---
+
+    @Test
+    void theAotCacheSwitchRequiresAuth() {
+        assertEquals(401, POST("/api/system/aot-cache", "application/json", "{\"enabled\": false}").status.intValue());
+        assertFalse(Files.exists(RestartService.aotDir().resolve("aot-cache.off")));
+    }
+
+    @Test
+    void theAotCacheSwitchIsOnUntilSwitchedOffAndOnlyEverTouchesTheTestDirectory() throws Exception {
+        // The autotest server shares the checkout's data/, which the live instance's jclaw.sh reads.
+        assertEquals("aot-test", RestartService.aotDir().getFileName().toString());
+        login();
+        assertTrue(getContent(GET("/api/system/restart")).contains("\"aotCacheEnabled\":true"));
+
+        var off = POST("/api/system/aot-cache", "application/json", "{\"enabled\": false}");
+        assertIsOk(off);
+        assertTrue(getContent(off).contains("\"enabled\":false"));
+        assertTrue(Files.exists(RestartService.aotDir().resolve("aot-cache.off")));
+        assertTrue(getContent(GET("/api/system/restart")).contains("\"aotCacheEnabled\":false"));
+
+        assertIsOk(POST("/api/system/aot-cache", "application/json", "{\"enabled\": true}"));
+        assertFalse(Files.exists(RestartService.aotDir().resolve("aot-cache.off")));
+        assertEquals(0, spawned.size());
+    }
+
+    @Test
+    void theAotCacheSwitchRejectsAnythingButABoolean() {
+        login();
+        for (var body : new String[] {"{}", "{\"enabled\": \"no\"}", "{\"enabled\": 1}", "{\"enabled\": null}"}) {
+            assertEquals(400, POST("/api/system/aot-cache", "application/json", body).status.intValue(), body);
+        }
+        assertFalse(Files.exists(RestartService.aotDir().resolve("aot-cache.off")));
+    }
+
+    @Test
+    void preflightReportsWhatTheLastStartDidWithTheCache() throws Exception {
+        login();
+        assertTrue(getContent(GET("/api/system/restart")).contains("\"aotCacheEnabled\":true"));
+        Files.createDirectories(RestartService.aotDir());
+        Files.writeString(RestartService.aotDir().resolve("aot-cache.status"), "in use\n");
+        var body = getContent(GET("/api/system/restart"));
+        assertTrue(body.contains("\"aotCacheStatus\":\"in use\""), body);
+        assertTrue(body.contains("\"aotCacheStatusAt\":\""), body);
     }
 
     // --- Upgrade ---

@@ -672,6 +672,7 @@ Environment:
                           keeps one by default, training a new one (one extra
                           start and stop) when the JDK, the JVM options or the
                           libraries change. Needs JDK 25.0.4, 26.0.2 or 27.
+                          Settings > Maintenance > Restart has the same switch.
   JCLAW_FORCE_SPA_BUILD   Rebuild the SPA even when public/spa looks up to
                           date. The build is normally skipped unless a
                           frontend file is newer than public/spa; set this
@@ -707,6 +708,7 @@ Environment:
                           keeps one by default, training a new one (one extra
                           start and stop) when the JDK, the JVM options or the
                           libraries change. Needs JDK 25.0.4, 26.0.2 or 27.
+                          Settings > Maintenance > Restart has the same switch.
 
 Examples:
   ${INVOKE} start                              # Default port 9000
@@ -3064,10 +3066,14 @@ aot_store_dir() {
     fi
 }
 
+aot_java_version() {
+    java -XshowSettings:properties -version 2>&1 | awk -F' = ' '$1 ~ /java\.version$/ { print $2; exit }' || true
+}
+
 # JDK-8377932: before 25.0.4, 26.0.2 and 27 the JVM keeps serving classes from a cache whose jars changed.
 aot_jdk_has_fix() {
     local version major minor patch rest
-    version=$(java -XshowSettings:properties -version 2>&1 | awk -F' = ' '$1 ~ /java\.version$/ { print $2; exit }' || true)
+    version=$(aot_java_version)
     [[ -n "$version" ]] || return 1
     IFS=. read -r major minor patch rest <<< "$version"
     major=${major%%[!0-9]*}
@@ -3098,6 +3104,13 @@ aot_fingerprint() {
     fi
 }
 
+# Settings > Maintenance > Restart reads this line back as what the last start did with the cache.
+aot_status() {
+    mkdir -p "$SCRIPT_DIR/data" 2>/dev/null || true
+    printf '%s\n' "$1" > "$SCRIPT_DIR/data/aot-cache.status" 2>/dev/null || true
+    echo "    AOT cache: $1"
+}
+
 # Before a production start: train the cache when it is missing or no longer fits. A failed
 # training run never stops the start, which then runs without a cache. The arguments are the start's.
 aot_prepare() {
@@ -3107,16 +3120,23 @@ aot_prepare() {
     stamp="$store/app.aot.fingerprint"
     if [[ "${JCLAW_AOT:-on}" == off ]]; then
         rm -f "$cache" "$store/app.aot" "$stamp"
-        echo "    AOT cache: off (JCLAW_AOT=off)"
+        aot_status "off (JCLAW_AOT=off)"
         return 0
     fi
+    # The switch Settings > Maintenance > Restart writes.
+    if [[ -f "$SCRIPT_DIR/data/aot-cache.off" ]]; then
+        rm -f "$cache" "$store/app.aot" "$stamp"
+        aot_status "off (switched off in Settings)"
+        return 0
+    fi
+    # The JVM writes the cache as it exits normally, and a JVM on Windows can only be ended at once.
     if [[ "$IS_WINDOWS" == 1 ]]; then
-        echo "    AOT cache: not on Windows, where the JVM cannot be stopped gracefully to write one"
+        aot_status "off: not available on Windows"
         return 0
     fi
     if ! aot_jdk_has_fix; then
         rm -f "$cache" "$store/app.aot" "$stamp"
-        echo "    AOT cache: off: this JDK can serve stale classes from one (JDK-8377932); 25.0.4, 26.0.2 or 27 turns it on"
+        aot_status "off: needs Java 25.0.4, 26.0.2 or 27, and this is $(aot_java_version) (JDK-8377932)"
         return 0
     fi
     # Only a checksum is kept: the options can carry an operator's credentials, an exporter header say.
@@ -3125,7 +3145,7 @@ aot_prepare() {
         ln -sf "$store/app.aot" "$cache"
     fi
     if [[ -f "$cache" && -f "$stamp" && "$(cat "$stamp" 2>/dev/null || true)" == "$want" ]]; then
-        echo "    AOT cache: up to date"
+        aot_status "up to date"
         return 0
     fi
     if [[ -f "$cache" ]]; then
@@ -3142,10 +3162,10 @@ aot_prepare() {
             ln -sf "$store/app.aot" "$cache"
         fi
         printf '%s\n' "$want" > "$stamp"
-        echo "    AOT cache: trained ($(du -h "$store/app.aot" 2>/dev/null | cut -f1 || true))"
+        aot_status "trained ($(du -h "$store/app.aot" 2>/dev/null | cut -f1 || true))"
     else
         rm -f "$cache" "$store/app.aot"
-        echo "    AOT cache: training failed, so this start runs without one. Details: logs/aot-gen.log"
+        aot_status "training failed, so this start runs without one (logs/aot-gen.log)"
         tail -5 "$SCRIPT_DIR/logs/aot-gen.log" 2>/dev/null | sed 's/^/      /' || true
     fi
     return 0
@@ -3160,9 +3180,9 @@ aot_check_used() {
     [[ -f "$cache" ]] || return 0
     if grep -q -E '\[error *\]\[aot' "$SCRIPT_DIR/logs/system.out" 2>/dev/null; then
         rm -f "$cache" "$store/app.aot" "$store/app.aot.fingerprint"
-        echo "    AOT cache: the JVM refused it (logs/system.out); the next start trains a new one"
+        aot_status "refused by the JVM (logs/system.out); the next start trains a new one"
     else
-        echo "    AOT cache: in use"
+        aot_status "in use"
     fi
 }
 

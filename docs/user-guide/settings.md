@@ -284,6 +284,10 @@ The page reconnects on its own: it waits for the backend to go down, then polls 
 - **In dev mode** only the Play backend is restarted. The Nuxt dev server on port 3000 keeps running; bouncing it would kill the very server that rendered the page you clicked from.
 - **In a source checkout** a production restart may recompile Java sources and rebuild the SPA. Both steps are gated on staleness and skipped when nothing changed, so this is usually quick. Two timed restarts on a developer clone: **48 s** with both steps skipped, **58 s** with a full SPA rebuild; the SPA is worth about ten seconds, not minutes. A cold Java recompile is the step that can take substantially longer, and it was not exercised in either measurement. The panel errs long when sizing how long it waits for the backend to return (15 minutes for a source checkout), so a genuinely slow restart is still survivable.
 
+The **AOT cache** switch below the button decides whether JClaw starts from a cache of the Java classes it loads. With the cache, a start is about a second faster. To build the cache, JClaw runs once: the first start after you switch it on, after an upgrade, or after Java or the JVM settings change starts and stops JClaw one extra time before the real start. The switch takes effect at the next start or restart. It does not change the instance that is running now.
+
+**Last start:** shows what the most recent start did with the cache, for example `in use` or `off (switched off in Settings)`. The cache needs Java 25.0.4, 26.0.2 or 27 or later, and it does not work on Windows. In those cases JClaw starts without it, and **Last start:** says why. From a shell, `JCLAW_AOT=off ./jclaw.sh start` starts once without the cache.
+
 If this install has no `jclaw.sh` that can run, or no shell to run it, the button is disabled and says why; there is nothing to hand off to. Helper output goes to `logs/restart.log`, which is the first place to look if the app does not come back.
 
 ### Password

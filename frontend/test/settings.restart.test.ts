@@ -27,6 +27,7 @@ const Harness = defineComponent({
 
 let preflight: Record<string, unknown>
 let restartPosts = 0
+let aotPosts: Array<Record<string, unknown>> = []
 
 registerEndpoint('/api/system/restart', {
   method: 'GET',
@@ -40,6 +41,17 @@ registerEndpoint('/api/system/restart', {
   },
 })
 
+registerEndpoint('/api/system/aot-cache', {
+  method: 'POST',
+  handler: async (event) => {
+    const { readBody } = await import('h3')
+    const body = await readBody(event) as Record<string, unknown>
+    aotPosts.push(body)
+    preflight = { ...preflight, aotCacheEnabled: body.enabled }
+    return { status: 'ok', enabled: body.enabled }
+  },
+})
+
 function available(over: Record<string, unknown> = {}) {
   return {
     available: true,
@@ -49,6 +61,9 @@ function available(over: Record<string, unknown> = {}) {
     rebuildExpected: false,
     runningTasks: 0,
     activeSubagentRuns: 0,
+    aotCacheEnabled: true,
+    aotCacheStatus: null,
+    aotCacheStatusAt: null,
     ...over,
   }
 }
@@ -64,6 +79,7 @@ function dialogButton(label: string): HTMLButtonElement | null {
 beforeEach(() => {
   clearNuxtData()
   restartPosts = 0
+  aotPosts = []
   preflight = available()
   document.body.innerHTML = ''
 })
@@ -191,5 +207,45 @@ describe('SettingsRestartPanel — confirmation', () => {
 
     // Stop the reconnect poll this started; nothing here is serving /api/status.
     c.unmount()
+  })
+})
+
+describe('SettingsRestartPanel — AOT cache', () => {
+  it('shows the cache switched on, and what the last start did with it', async () => {
+    preflight = available({ aotCacheStatus: 'in use', aotCacheStatusAt: '2026-10-21T13:31:00Z' })
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find('[data-testid="aot-cache-toggle"]').attributes('aria-checked')).toBe('true')
+    expect(c.find('[data-testid="aot-cache-status"]').text()).toContain('Last start: in use')
+  })
+
+  it('says nothing about a last start before any start wrote one', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find('[data-testid="aot-cache-status"]').exists()).toBe(false)
+  })
+
+  it('switches the cache off for the next start', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    await c.find('[data-testid="aot-cache-toggle"]').trigger('click')
+    await vi.waitFor(() => expect(aotPosts).toEqual([{ enabled: false }]))
+    await vi.waitFor(() =>
+      expect(c.find('[data-testid="aot-cache-toggle"]').attributes('aria-checked')).toBe('false'))
+    // Switching the cache is not a restart.
+    expect(restartPosts).toBe(0)
+  })
+
+  it('switches it back on when it is off', async () => {
+    preflight = available({ aotCacheEnabled: false, aotCacheStatus: 'off (switched off in Settings)' })
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find('[data-testid="aot-cache-toggle"]').attributes('aria-checked')).toBe('false')
+    await c.find('[data-testid="aot-cache-toggle"]').trigger('click')
+    await vi.waitFor(() => expect(aotPosts).toEqual([{ enabled: true }]))
   })
 })

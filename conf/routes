@@ -339,6 +339,7 @@ GET     /api/factory/setup/install/{id}         ApiFactorySetupController.instal
 # POST hands off to jclaw.sh and acks 202 — the JVM it reboots is this one.
 GET     /api/system/restart                     ApiSystemController.restartPreflight
 POST    /api/system/restart                     ApiSystemController.restart
+POST    /api/system/aot-cache                   ApiSystemController.setAotCache
 
 # OpenTelemetry export (JCLAW-34). GET is the runtime's view of the otel.* keys;
 # POST emits one span and reports whether the collector confirmed it.

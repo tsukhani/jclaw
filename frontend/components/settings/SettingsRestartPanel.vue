@@ -15,6 +15,9 @@ interface RestartPreflight {
   rebuildExpected: boolean
   runningTasks: number
   activeSubagentRuns: number
+  aotCacheEnabled: boolean
+  aotCacheStatus: string | null
+  aotCacheStatusAt: string | null
 }
 
 const { confirm } = useConfirm()
@@ -172,6 +175,26 @@ function watchForReturn(p: RestartPreflight) {
 
 const busy = computed(() => phase.value !== 'idle')
 
+// jclaw.sh reads the switch before it launches the JVM, so it applies from the next start.
+const aotSaving = ref(false)
+const aotEnabled = computed(() => preflight.value?.aotCacheEnabled ?? true)
+const aotStatusAt = computed(() => {
+  const at = preflight.value?.aotCacheStatusAt
+  return at ? new Date(at).toLocaleString() : null
+})
+
+async function toggleAotCache() {
+  if (!preflight.value || aotSaving.value) return
+  aotSaving.value = true
+  failure.value = null
+  const res = await mutate('/api/system/aot-cache', { method: 'POST', body: { enabled: !aotEnabled.value } })
+  if (!res) {
+    failure.value = mutationError.value ?? 'The AOT cache setting was not saved.'
+  }
+  await refresh()
+  aotSaving.value = false
+}
+
 const statusLine = computed(() => {
   switch (phase.value) {
     case 'requesting': return 'Handing off to the restart helper…'
@@ -222,6 +245,50 @@ const statusLine = computed(() => {
           @click="handleRestart"
         >
           {{ busy ? 'Restarting…' : 'Restart' }}
+        </button>
+      </div>
+
+      <div class="px-4 py-2.5 border-t border-border flex items-center justify-between gap-4">
+        <div class="min-w-0">
+          <span
+            id="aot-cache-label"
+            class="text-sm font-medium text-fg-strong"
+          >AOT cache</span>
+          <div class="text-xs text-fg-muted mt-0.5">
+            Starts JClaw from a cache of the Java classes it loads, about a second faster. After an
+            upgrade, or when Java or the JVM settings change, the next start first runs JClaw once to
+            build a new cache. Takes effect at the next start or restart.
+          </div>
+          <div
+            v-if="preflight?.aotCacheStatus"
+            class="text-xs text-fg-muted mt-0.5"
+            data-testid="aot-cache-status"
+          >
+            Last start: {{ preflight.aotCacheStatus }}<template v-if="aotStatusAt">
+              ({{ aotStatusAt }})
+            </template>
+          </div>
+        </div>
+        <button
+          role="switch"
+          :aria-checked="aotEnabled"
+          aria-labelledby="aot-cache-label"
+          :title="aotEnabled ? 'Start without the AOT cache' : 'Start from the AOT cache'"
+          :disabled="!preflight || busy || aotSaving"
+          :class="[
+            'relative w-9 h-5 shrink-0 rounded-full transition-colors',
+            aotEnabled
+              ? 'bg-emerald-600 hover:bg-emerald-700 dark:hover:bg-emerald-600'
+              : 'bg-muted hover:bg-muted ring-1 ring-inset ring-input dark:ring-0',
+            !preflight || busy || aotSaving ? 'cursor-not-allowed opacity-60' : 'cursor-pointer',
+          ]"
+          data-testid="aot-cache-toggle"
+          @click="toggleAotCache"
+        >
+          <span
+            :class="aotEnabled ? 'translate-x-4' : 'translate-x-0.5'"
+            class="block w-4 h-4 bg-white rounded-full transition-transform"
+          />
         </button>
       </div>
 

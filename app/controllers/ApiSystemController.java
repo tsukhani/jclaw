@@ -13,6 +13,8 @@ import services.SubagentRegistry;
 import services.UpgradeService;
 import utils.ApiResponses;
 
+import java.io.IOException;
+
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
@@ -46,10 +48,17 @@ public class ApiSystemController extends Controller {
      *                           interrupts
      * @param activeSubagentRuns subagent runs live in THIS JVM, which a restart
      *                           interrupts
+     * @param aotCacheEnabled    whether the next production start uses the JDK's
+     *                           AOT cache (the switch jclaw.sh reads)
+     * @param aotCacheStatus     jclaw.sh's line about how the last start used the
+     *                           cache, or null before any start wrote one
+     * @param aotCacheStatusAt   when that line was written (ISO-8601), or null
      */
     public record RestartPreflight(boolean available, @Nullable String unavailableReason, String mode,
                                    boolean backendOnly, boolean rebuildExpected,
-                                   long runningTasks, int activeSubagentRuns) {}
+                                   long runningTasks, int activeSubagentRuns,
+                                   boolean aotCacheEnabled, @Nullable String aotCacheStatus,
+                                   @Nullable String aotCacheStatusAt) {}
 
     /**
      * GET /api/system/restart — what a restart would do and what it would
@@ -60,12 +69,39 @@ public class ApiSystemController extends Controller {
     public static void restartPreflight() {
         var plan = RestartService.plan();
         var unavailable = RestartService.unavailableReason();
+        var aot = RestartService.aotCacheState();
+        var aotAt = aot.lastStatusAt();
 
         renderJSON(GSON.toJson(new RestartPreflight(
                 unavailable == null, unavailable, plan.mode(),
                 plan.backendOnly(), plan.rebuildExpected(),
                 TaskRun.count("status = ?1", TaskRun.Status.RUNNING),
-                SubagentRegistry.activeRunIds().size())));
+                SubagentRegistry.activeRunIds().size(),
+                aot.enabled(), aot.lastStatus(), aotAt == null ? null : aotAt.toString())));
+    }
+
+    /**
+     * POST /api/system/aot-cache {@code {"enabled": true|false}} — whether the next production
+     * start uses the JDK's AOT cache. jclaw.sh reads the switch before it launches the JVM, so
+     * the running instance is unchanged until it restarts.
+     */
+    @AgentAccess(value = OPERATOR_ONLY, reason = "changes how the next start launches the JVM")
+    public static void setAotCache() {
+        var body = JsonBodyReader.readJsonBody();
+        var field = body == null ? null : body.get("enabled");
+        if (field == null || !field.isJsonPrimitive() || !field.getAsJsonPrimitive().isBoolean()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Field 'enabled' must be true or false.");
+            return;
+        }
+        boolean enabled = field.getAsBoolean();
+        try {
+            RestartService.setAotCacheEnabled(enabled);
+        } catch (IOException e) {
+            ApiResponses.errorAndLog(e, 500, ApiResponses.INTERNAL_ERROR,
+                    "Could not save the AOT cache setting: " + e.getMessage());
+            return;
+        }
+        ApiResponses.ok("enabled", enabled);
     }
 
     /**

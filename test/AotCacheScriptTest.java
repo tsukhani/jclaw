@@ -23,7 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AotCacheScriptTest extends UnitTest {
 
     private static final List<String> FUNCTIONS = List.of("upgrade_install_kind", "aot_cache_file",
-            "aot_store_dir", "aot_jdk_has_fix", "aot_fingerprint", "aot_prepare", "aot_check_used");
+            "aot_store_dir", "aot_java_version", "aot_jdk_has_fix", "aot_status", "aot_fingerprint", "aot_prepare", "aot_check_used");
 
     private static final String JAVA_STUB = """
             #!/bin/sh
@@ -109,13 +109,31 @@ class AotCacheScriptTest extends UnitTest {
         var home = gradleHome();
         prepare(home, Map.of(), "--http.port=9000");
         var old = prepare(home, Map.of("STUB_JAVA_VERSION", "25.0.2"), "--http.port=9000");
-        assertTrue(old.contains("this JDK can serve stale classes from one (JDK-8377932)"), old);
+        assertTrue(old.contains("off: needs Java 25.0.4, 26.0.2 or 27, and this is 25.0.2 (JDK-8377932)"), old);
         assertFalse(Files.exists(gradleCache(home)));
 
         prepare(home, Map.of(), "--http.port=9000");
         var off = prepare(home, Map.of("JCLAW_AOT", "off"), "--http.port=9000");
         assertTrue(off.contains("AOT cache: off (JCLAW_AOT=off)"), off);
         assertFalse(Files.exists(gradleCache(home)));
+        assertEquals(2, calls().size());
+    }
+
+    @Test
+    void theSettingsSwitchTurnsTheCacheOffUntilItIsSwitchedBackOn() throws Exception {
+        var home = gradleHome();
+        prepare(home, Map.of(), "--http.port=9000");
+        Files.createDirectories(home.resolve("data"));
+        Files.writeString(home.resolve("data/aot-cache.off"), "switched off\n");
+        var off = prepare(home, Map.of(), "--http.port=9000");
+        assertTrue(off.contains("AOT cache: off (switched off in Settings)"), off);
+        assertFalse(Files.exists(gradleCache(home)));
+        assertEquals("off (switched off in Settings)", status(home));
+
+        Files.delete(home.resolve("data/aot-cache.off"));
+        var on = prepare(home, Map.of(), "--http.port=9000");
+        assertTrue(on.contains("Training the AOT cache (there is none yet)"), on);
+        assertTrue(status(home).startsWith("trained"), status(home));
         assertEquals(2, calls().size());
     }
 
@@ -167,11 +185,13 @@ class AotCacheScriptTest extends UnitTest {
         Files.createDirectories(home.resolve("logs"));
         Files.writeString(home.resolve("logs/system.out"), "[0.017s][info   ][aot] Opened AOT cache\n");
         assertEquals("AOT cache: in use", run(home, Map.of(), "aot_check_used").strip());
+        assertEquals("in use", status(home));
 
         Files.writeString(home.resolve("logs/system.out"),
                 "[0.017s][error  ][aot] shared class paths mismatch (hint: enable -Xlog:class+path=info)\n");
         var refused = run(home, Map.of(), "aot_check_used");
-        assertTrue(refused.contains("the JVM refused it"), refused);
+        assertTrue(refused.contains("refused by the JVM"), refused);
+        assertTrue(status(home).startsWith("refused by the JVM"), status(home));
         assertFalse(Files.exists(gradleCache(home)));
         assertTrue(prepare(home, Map.of(), "--http.port=9000").contains("Training the AOT cache (there is none yet)"));
     }
@@ -223,6 +243,10 @@ class AotCacheScriptTest extends UnitTest {
         assertTrue(p.waitFor(30, TimeUnit.SECONDS), "the harness hung");
         assertEquals(0, p.exitValue(), () -> "the harness exited non-zero:\n" + out);
         return out;
+    }
+
+    private static String status(Path home) throws Exception {
+        return Files.readString(home.resolve("data/aot-cache.status")).strip();
     }
 
     private List<String> calls() throws Exception {

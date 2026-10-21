@@ -6,6 +6,9 @@ import utils.HandoffShell;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Consumer;
@@ -229,5 +232,60 @@ public final class RestartService {
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
                 .redirectErrorStream(true)
                 .start();
+    }
+
+    /** While this file exists, jclaw.sh starts the JVM without the JDK's AOT cache. */
+    static final String AOT_OFF_FILE = "aot-cache.off";
+
+    /** The line jclaw.sh writes about how the last start used the AOT cache. */
+    static final String AOT_STATUS_FILE = "aot-cache.status";
+
+    private static final int AOT_STATUS_MAX_CHARS = 300;
+
+    /**
+     * The AOT cache switch and what the last start did with the cache.
+     *
+     * @param enabled      whether the next production start uses the cache
+     * @param lastStatus   jclaw.sh's line about the last start, or null before any start wrote one
+     * @param lastStatusAt when that line was written, or null with it
+     */
+    public record AotCacheState(boolean enabled, @Nullable String lastStatus, @Nullable Instant lastStatusAt) {}
+
+    /**
+     * Where jclaw.sh keeps the switch and the status line: {@code data/}, beside the database. The
+     * autotest server shares this checkout's {@code data/}, so in test mode it is a directory of its own.
+     */
+    public static Path aotDir() {
+        var data = Play.applicationPath.toPath().resolve("data");
+        return Play.runningInTestMode() ? data.resolve("aot-test") : data;
+    }
+
+    public static AotCacheState aotCacheState() {
+        var dir = aotDir();
+        boolean enabled = !Files.exists(dir.resolve(AOT_OFF_FILE));
+        var status = dir.resolve(AOT_STATUS_FILE);
+        try {
+            if (!Files.isRegularFile(status)) return new AotCacheState(enabled, null, null);
+            var line = Files.readAllLines(status).stream().map(String::strip).filter(l -> !l.isEmpty()).findFirst().orElse(null);
+            if (line == null) return new AotCacheState(enabled, null, null);
+            if (line.length() > AOT_STATUS_MAX_CHARS) line = line.substring(0, AOT_STATUS_MAX_CHARS);
+            return new AotCacheState(enabled, line, Files.getLastModifiedTime(status).toInstant());
+        } catch (IOException e) {
+            return new AotCacheState(enabled, null, null);
+        }
+    }
+
+    /** Takes effect at the next start or restart: jclaw.sh reads the switch before it launches the JVM. */
+    public static void setAotCacheEnabled(boolean enabled) throws IOException {
+        var dir = aotDir();
+        var off = dir.resolve(AOT_OFF_FILE);
+        if (enabled) {
+            Files.deleteIfExists(off);
+        } else {
+            Files.createDirectories(dir);
+            Files.writeString(off, "Settings > Maintenance > Restart switched the AOT cache off. "
+                    + "jclaw.sh starts without it while this file exists.\n");
+        }
+        EventLogger.info(CATEGORY, "AOT cache switched " + (enabled ? "on" : "off") + " from the next start");
     }
 }
