@@ -14,10 +14,17 @@ import type { MessageUsageRow } from '~/utils/conversation-messages'
 export interface UseChatUsageMeter {
   shouldShowModelSwitchIndicator: (idx: number) => boolean
   latestAssistantUsage: ComputedRef<MessageUsage | null>
-  /** What the context meter fills with: the latest turn's final call, not its per-round sum. */
-  contextPromptTokens: ComputedRef<number>
+  /** What the context meter shows: the latest turn's final call, not its per-round sums. */
+  contextUsage: ComputedRef<ContextUsage>
   conversationCumulativeTokens: ComputedRef<number>
   conversationCostSummary: Ref<{ label: string, tooltip: string, turnCount: number } | null>
+}
+
+export interface ContextUsage {
+  prompt: number
+  completion: number
+  reasoning: number
+  cached: number
 }
 
 /** A mid-turn reading: the prompt alone, since the call's completion is already inside the next call's prompt. */
@@ -79,11 +86,16 @@ export function useChatUsageMeter(
     return null
   })
 
-  // JCLAW-1201: `prompt` sums every call of a tool turn, so on an 8-round turn it read as
-  // 8x the context. Rows persisted before the field exists fall back to the sum.
-  const contextPromptTokens = computed(() => {
+  // JCLAW-1201: the unprefixed fields sum every call of a tool turn, so on an 8-round turn the
+  // prompt read as 8x the context. Rows persisted before the `last` fields exist fall back to the sums.
+  const contextUsage = computed<ContextUsage>(() => {
     const u = latestAssistantUsage.value
-    return u?.lastPrompt ?? u?.prompt ?? 0
+    return {
+      prompt: u?.lastPrompt ?? u?.prompt ?? 0,
+      completion: u?.lastCompletion ?? u?.completion ?? 0,
+      reasoning: u?.lastReasoning ?? u?.reasoning ?? 0,
+      cached: u?.lastCached ?? u?.cached ?? 0,
+    }
   })
 
   /**
@@ -147,7 +159,7 @@ export function useChatUsageMeter(
   return {
     shouldShowModelSwitchIndicator,
     latestAssistantUsage,
-    contextPromptTokens,
+    contextUsage,
     conversationCumulativeTokens,
     conversationCostSummary,
   }

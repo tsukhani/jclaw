@@ -43,23 +43,26 @@ describe('useChatUsageMeter', () => {
     expect(api.latestAssistantUsage.value).toBeNull()
   })
 
-  it('contextPromptTokens prefers the final call over the per-turn sum (JCLAW-1201)', () => {
-    const { api } = mountMeter([assistant({ prompt: 247_000, lastPrompt: 40_000, completion: 5 })])
-    expect(api.contextPromptTokens.value).toBe(40_000)
-    const legacy = mountMeter([assistant({ prompt: 30_000, completion: 5 })])
-    expect(legacy.api.contextPromptTokens.value).toBe(30_000)
+  it('contextUsage prefers the final call over the per-turn sums (JCLAW-1201)', () => {
+    const { api } = mountMeter([assistant({
+      prompt: 18_878_532, lastPrompt: 254_066, completion: 93_588, lastCompletion: 1_100,
+      reasoning: 33_573, lastReasoning: 400, cached: 18_468_731, lastCached: 252_000,
+    })])
+    expect(api.contextUsage.value).toEqual({ prompt: 254_066, completion: 1_100, reasoning: 400, cached: 252_000 })
+    const legacy = mountMeter([assistant({ prompt: 30_000, completion: 5, reasoning: 2, cached: 100 })])
+    expect(legacy.api.contextUsage.value).toEqual({ prompt: 30_000, completion: 5, reasoning: 2, cached: 100 })
   })
 
   it('reads a streaming reply\'s context frame until its usage lands', () => {
     const earlier = assistant({ prompt: 90_000, lastPrompt: 90_000, completion: 4_000, reasoning: 300, cached: 500 })
     const live = { role: 'assistant', content: 'working', _contextTokens: 131_072 } as Message
     const { api, displayMessages } = mountMeter([earlier, user(), live], true)
-    expect(api.contextPromptTokens.value).toBe(131_072)
+    expect(api.contextUsage.value.prompt).toBe(131_072)
     // The earlier turn's completion, thinking and cache counts belong to a different context.
     expect(api.latestAssistantUsage.value).toMatchObject({ completion: 0, reasoning: 0, cached: 0 })
 
     displayMessages.value = [earlier, user(), { ...live, usage: { prompt: 400_000, lastPrompt: 140_000, completion: 900 } as MessageUsage }]
-    expect(api.contextPromptTokens.value).toBe(140_000)
+    expect(api.contextUsage.value.prompt).toBe(140_000)
   })
 
   it('conversationCumulativeTokens sums prompt + completion across assistant turns', () => {

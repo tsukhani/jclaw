@@ -267,9 +267,15 @@ interface LlmStreamCarriers {
         boolean hasJtokkitUsage;
         int jtokkitPromptTokens;
         int jtokkitCompletionTokens;
-        /** Prompt tokens of the most recent round only (JCLAW-1201): the context a turn ends on, where the sums above are what it cost. */
+        /** The most recent round's counts (JCLAW-1201): the context a turn ends on, where the sums above are what it cost. */
         int lastPromptTokens;
         int lastJtokkitPromptTokens;
+        int lastCompletionTokens;
+        int lastJtokkitCompletionTokens;
+        int lastReasoningTokens;
+        int lastJtokkitReasoningTokens;
+        int lastReasoningChars;
+        int lastCachedTokens;
         int jtokkitReasoningTokens;
         int jtokkitTotalTokens;
         @Nullable String jtokkitEncoding;
@@ -306,9 +312,12 @@ interface LlmStreamCarriers {
                 promptTokens += u.promptTokens();
                 lastPromptTokens = u.promptTokens();
                 completionTokens += u.completionTokens();
+                lastCompletionTokens = u.completionTokens();
                 totalTokens += u.totalTokens();
                 reasoningTokens += u.reasoningTokens();
+                lastReasoningTokens = u.reasoningTokens();
                 cachedTokens += u.cachedTokens();
+                lastCachedTokens = u.cachedTokens();
                 cacheCreationTokens += u.cacheCreationTokens();
                 costUsd += u.costUsd();
                 providerMetrics = providerMetrics.plus(u.providerMetrics());
@@ -316,6 +325,7 @@ interface LlmStreamCarriers {
             addJtokkitRound(acc);
             if (acc.reasoningDetected) reasoningDetected = true;
             reasoningChars += acc.reasoningChars();
+            lastReasoningChars = acc.reasoningChars();
             reasoningText.append(acc.reasoningText());
             if (acc.reasoningStartNanos != 0L && turnReasoningStartNanos == 0L) {
                 turnReasoningStartNanos = acc.reasoningStartNanos;
@@ -335,10 +345,12 @@ interface LlmStreamCarriers {
             }
             if (acc.completionTokenEstimate != null) {
                 jtokkitCompletionTokens += acc.completionTokenEstimate.tokens();
+                lastJtokkitCompletionTokens = acc.completionTokenEstimate.tokens();
                 noteJtokkitEncoding(acc.completionTokenEstimate.encodingName(), acc.completionTokenEstimate.modelMatched());
             }
             if (acc.reasoningTokenEstimate != null) {
                 jtokkitReasoningTokens += acc.reasoningTokenEstimate.tokens();
+                lastJtokkitReasoningTokens = acc.reasoningTokenEstimate.tokens();
                 noteJtokkitEncoding(acc.reasoningTokenEstimate.encodingName(), acc.reasoningTokenEstimate.modelMatched());
             }
             jtokkitTotalTokens = jtokkitPromptTokens + jtokkitCompletionTokens;
@@ -381,6 +393,12 @@ interface LlmStreamCarriers {
         public int promptTokens() { return promptTokens; }
         public int lastPromptTokens() { return lastPromptTokens; }
         public int lastJtokkitPromptTokens() { return lastJtokkitPromptTokens; }
+        public int lastCompletionTokens() { return lastCompletionTokens; }
+        public int lastJtokkitCompletionTokens() { return lastJtokkitCompletionTokens; }
+        public int lastReasoningTokens() { return lastReasoningTokens; }
+        public int lastJtokkitReasoningTokens() { return lastJtokkitReasoningTokens; }
+        public int lastReasoningChars() { return lastReasoningChars; }
+        public int lastCachedTokens() { return lastCachedTokens; }
         public int completionTokens() { return completionTokens; }
         public int totalTokens() { return totalTokens; }
         public int reasoningTokens() { return reasoningTokens; }

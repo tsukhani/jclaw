@@ -39,6 +39,9 @@ class AgentRunnerUsageTest extends UnitTest {
         assertEquals(75, t.cachedTokens());
         assertEquals(2, t.cacheCreationTokens());
         assertTrue(t.hasProviderUsage());
+        assertEquals(800, t.lastCompletionTokens());
+        assertEquals(0, t.lastReasoningTokens());
+        assertEquals(25, t.lastCachedTokens());
     }
 
     @Test
@@ -171,6 +174,9 @@ class AgentRunnerUsageTest extends UnitTest {
         assertTrue(obj.get("estimated").getAsBoolean());
         assertEquals(24, obj.get("jtokkitPrompt").getAsInt());
         assertEquals("cl100k_base", obj.get("jtokkitEncoding").getAsString());
+        assertEquals(8, obj.get("lastCompletion").getAsInt());
+        assertEquals(3, obj.get("lastReasoning").getAsInt());
+        assertEquals(0, obj.get("lastCached").getAsInt());
     }
 
     @Test
@@ -201,6 +207,22 @@ class AgentRunnerUsageTest extends UnitTest {
 
         // 300 chars / 4 chars-per-token, rounded up = 75
         assertEquals(75, obj.get("reasoning").getAsInt());
+        assertEquals(25, obj.get("lastReasoning").getAsInt(), "the final round's 100 chars alone");
+    }
+
+    @Test
+    void theMetersBreakdownIsTheFinalCallNotTheTurnsSum() {
+        var turn = new LlmProvider.TurnUsage();
+        turn.addRound(roundWithUsage(new Usage(240_000, 1_200, 241_200, 300, 239_000, 0)));
+        turn.addRound(roundWithUsage(new Usage(254_000, 900, 254_900, 150, 253_000, 0)));
+
+        var json = UsageMetricsBuilder.buildUsageJson(turn, null, System.currentTimeMillis(), null, null);
+        var obj = JsonParser.parseString(json).getAsJsonObject();
+
+        assertEquals(900, obj.get("lastCompletion").getAsInt());
+        assertEquals(150, obj.get("lastReasoning").getAsInt());
+        assertEquals(253_000, obj.get("lastCached").getAsInt());
+        assertEquals(492_000, obj.get("cached").getAsInt(), "the cost keeps every call's cache reads");
     }
 
     @Test

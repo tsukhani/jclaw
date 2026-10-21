@@ -324,8 +324,7 @@ const {
 // lives in useChatUsageMeter, deriving off displayMessages + streaming.
 const {
   shouldShowModelSwitchIndicator,
-  latestAssistantUsage,
-  contextPromptTokens,
+  contextUsage,
   conversationCumulativeTokens,
   conversationCostSummary,
 } = useChatUsageMeter(displayMessages, streaming, earlierUsages)
@@ -785,10 +784,10 @@ function exportConversation() {
         <span class="ml-auto flex items-center gap-2">
           <ChatContextMeter
             v-if="!isEmptyChat"
-            :prompt-tokens="contextPromptTokens"
-            :completion-tokens="latestAssistantUsage?.completion ?? 0"
-            :reasoning-tokens="latestAssistantUsage?.reasoning ?? 0"
-            :cached-tokens="latestAssistantUsage?.cached ?? 0"
+            :prompt-tokens="contextUsage.prompt"
+            :completion-tokens="contextUsage.completion"
+            :reasoning-tokens="contextUsage.reasoning"
+            :cached-tokens="contextUsage.cached"
             :context-window="(selectedModelInfo?.contextWindow as number | undefined) ?? null"
             :cumulative-tokens="conversationCumulativeTokens"
             :compaction-count="currentConversation?.compactionCount ?? 0"

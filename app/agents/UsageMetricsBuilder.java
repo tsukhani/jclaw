@@ -52,11 +52,20 @@ public final class UsageMetricsBuilder {
      * truthy.
      */
     static int effectiveReasoningTokens(LlmProvider.TurnUsage turnUsage) {
-        if (turnUsage.reasoningTokens() > 0) return turnUsage.reasoningTokens();
-        if (turnUsage.jtokkitReasoningTokens() > 0) return turnUsage.jtokkitReasoningTokens();
-        if (!turnUsage.reasoningDetected()) return 0;
-        var chars = turnUsage.reasoningChars();
-        if (chars <= 0) return 0;
+        return reasoningTokens(turnUsage.reasoningTokens(), turnUsage.jtokkitReasoningTokens(),
+                turnUsage.reasoningDetected(), turnUsage.reasoningChars());
+    }
+
+    /** {@link #effectiveReasoningTokens} for the turn's final round alone, which the context meter reads. */
+    static int lastReasoningTokens(LlmProvider.TurnUsage turnUsage) {
+        return reasoningTokens(turnUsage.lastReasoningTokens(), turnUsage.lastJtokkitReasoningTokens(),
+                turnUsage.reasoningDetected(), turnUsage.lastReasoningChars());
+    }
+
+    private static int reasoningTokens(int reported, int jtokkit, boolean detected, int chars) {
+        if (reported > 0) return reported;
+        if (jtokkit > 0) return jtokkit;
+        if (!detected || chars <= 0) return 0;
         // Round up: a small amount of text still represents at least one
         // reasoning token on the wire, and rounding down would silently
         // swallow short traces.
@@ -102,12 +111,15 @@ public final class UsageMetricsBuilder {
         var providerUsage = turnUsage.hasProviderUsage();
         var usageMap = new JsonObject();
         usageMap.addProperty("prompt", providerUsage ? turnUsage.promptTokens() : turnUsage.jtokkitPromptTokens());
-        // JCLAW-1201: the context meter fills with the final call, not the per-round sum above.
-        usageMap.addProperty("lastPrompt", providerUsage ? turnUsage.lastPromptTokens() : turnUsage.lastJtokkitPromptTokens());
         usageMap.addProperty("completion", providerUsage ? turnUsage.completionTokens() : turnUsage.jtokkitCompletionTokens());
         usageMap.addProperty("total", providerUsage ? turnUsage.totalTokens() : turnUsage.jtokkitTotalTokens());
         usageMap.addProperty("reasoning", effectiveReasoningTokens(turnUsage));
         usageMap.addProperty("cached", providerUsage ? turnUsage.cachedTokens() : 0);
+        // JCLAW-1201: the context meter reads the final call, not the per-round sums above.
+        usageMap.addProperty("lastPrompt", providerUsage ? turnUsage.lastPromptTokens() : turnUsage.lastJtokkitPromptTokens());
+        usageMap.addProperty("lastCompletion", providerUsage ? turnUsage.lastCompletionTokens() : turnUsage.lastJtokkitCompletionTokens());
+        usageMap.addProperty("lastReasoning", lastReasoningTokens(turnUsage));
+        usageMap.addProperty("lastCached", providerUsage ? turnUsage.lastCachedTokens() : 0);
         usageMap.addProperty("cacheCreation", providerUsage ? turnUsage.cacheCreationTokens() : 0);
         // JCLAW-901: only emitted when the provider actually reported a cost. Absent
         // rather than 0 on purpose — a hard 0 cannot be told apart from "this call was
