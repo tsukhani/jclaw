@@ -22,8 +22,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class AotCacheScriptTest extends UnitTest {
 
-    private static final List<String> FUNCTIONS = List.of("upgrade_install_kind", "aot_cache_file",
-            "aot_store_dir", "aot_java_version", "aot_jdk_has_fix", "aot_status", "aot_fingerprint", "aot_prepare", "aot_check_used");
+    private static final List<String> FUNCTIONS = List.of("port_answers", "upgrade_install_kind", "aot_cache_file",
+            "aot_store_dir", "aot_java_version", "aot_jdk_has_fix", "aot_spare_port", "aot_status", "aot_fingerprint", "aot_prepare", "aot_check_used");
 
     private static final String JAVA_STUB = """
             #!/bin/sh
@@ -72,12 +72,42 @@ class AotCacheScriptTest extends UnitTest {
         var first = prepare(home, Map.of(), "--http.port=9000 -Xmx2g -XX:HeapDumpPath=logs/heap-1-%p.hprof");
         assertTrue(first.contains("Training the AOT cache (there is none yet)"), first);
         assertTrue(first.contains("AOT cache: trained"), first);
-        assertEquals(List.of("aot-gen --%prod --http.port=9000 -Xmx2g -XX:HeapDumpPath=logs/heap-1-%p.hprof"), calls());
+        assertEquals(1, calls().size());
+        assertTrue(calls().getFirst().matches("aot-gen --%prod --http\\.port=1\\d{4} -Xmx2g -XX:HeapDumpPath=logs/heap-1-%p\\.hprof"),
+                calls().getFirst());
 
         // A start's own heap dump name differs every time and must not retrain.
         var second = prepare(home, Map.of(), "--http.port=9000 -Xmx2g -XX:HeapDumpPath=logs/heap-2-%p.hprof");
         assertTrue(second.contains("AOT cache: up to date"), second);
         assertEquals(1, calls().size());
+    }
+
+    @Test
+    void trainingNeverAnswersOnTheInstancesOwnPorts() throws Exception {
+        var home = gradleHome();
+        // An occupied candidate is skipped rather than shared.
+        try (var held = new java.net.ServerSocket()) {
+            boolean holding;
+            try {
+                held.bind(new java.net.InetSocketAddress("127.0.0.1", 10000));
+                holding = true;
+            } catch (java.io.IOException alreadyTaken) {
+                holding = false;
+            }
+            prepare(home, Map.of(), "--http.port=9000 -Xmx2g -Dhttps.port=9443");
+            var m = java.util.regex.Pattern.compile("--http\\.port=(\\d+) -Xmx2g -Dhttps\\.port=(\\d+)").matcher(calls().getFirst());
+            assertTrue(m.find(), calls().getFirst());
+            int http = Integer.parseInt(m.group(1));
+            int https = Integer.parseInt(m.group(2));
+            assertTrue(http != 9000 && https != 9443 && http != https, calls().getFirst());
+            if (holding) assertTrue(http > 10000, "training took the held port " + http);
+        }
+        // Ports change nothing the cache holds, and HTTPS switched off stays off for training.
+        assertTrue(prepare(home, Map.of(), "--http.port=9100 -Xmx2g -Dhttps.port=8443").contains("AOT cache: up to date"));
+        Files.delete(gradleCache(home));
+        prepare(home, Map.of(), "--http.port=9000 -Xmx2g -Dhttps.port=-1");
+        assertTrue(calls().getLast().endsWith(" -Dhttps.port=-1"), calls().getLast());
+        assertEquals(2, calls().size());
     }
 
     @Test
@@ -146,7 +176,8 @@ class AotCacheScriptTest extends UnitTest {
                         + " -Dotel.exporter.otlp.headers=Authorization=Bearer-s3cr3t-token");
         var first = prepare(home, env, "--https.port=9443");
         assertTrue(first.contains("AOT cache: trained"), first);
-        assertEquals(List.of("aot-gen --%prod --https.port=9443"), calls());
+        assertEquals(1, calls().size());
+        assertTrue(calls().getFirst().matches("aot-gen --%prod --https\\.port=1\\d{4} --http\\.port=1\\d{4}"), calls().getFirst());
         var stamp = Files.readString(store.resolve("app.aot.fingerprint"));
         assertFalse(stamp.contains("s3cr3t") || stamp.contains("-Xmx2g"), () -> "the fingerprint kept the options in the clear: " + stamp);
         assertTrue(Files.isRegularFile(store.resolve("app.aot"), java.nio.file.LinkOption.NOFOLLOW_LINKS));
@@ -221,7 +252,7 @@ class AotCacheScriptTest extends UnitTest {
 
     private String run(Path home, Map<String, String> env, String commands) throws Exception {
         var script = Files.readString(repo().resolve("jclaw.sh"));
-        var harness = new StringBuilder("set -euo pipefail\nSCRIPT_DIR='" + home + "'\nIS_WINDOWS=0\n");
+        var harness = new StringBuilder("set -euo pipefail\nSCRIPT_DIR='" + home + "'\nIS_WINDOWS=0\nBACKEND_PORT=9000\n");
         for (var name : FUNCTIONS) {
             var m = Pattern.compile("(?ms)^" + Pattern.quote(name) + "\\(\\) \\{\\n.*?^\\}\\n").matcher(script);
             assertTrue(m.find(), "jclaw.sh no longer defines " + name);

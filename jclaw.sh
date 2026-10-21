@@ -3092,9 +3092,10 @@ aot_jdk_has_fix() {
 aot_fingerprint() {
     # A container's JVM echoes JAVA_TOOL_OPTIONS, per-start file names included; the options are counted below.
     java -version 2>&1 | grep -v '^Picked up ' || true
-    # Per-start file names and logging change nothing the cache holds.
+    # Per-start file names, logging and ports change nothing the cache holds.
     # shellcheck disable=SC2086
-    printf '%s\n' "$@" ${JAVA_TOOL_OPTIONS:-} | grep -v -E '^-XX:(HeapDumpPath|ErrorFile)=|^-Xlog:' || true
+    printf '%s\n' "$@" ${JAVA_TOOL_OPTIONS:-} \
+        | grep -v -E '^-XX:(HeapDumpPath|ErrorFile)=|^-Xlog:|^--https?\.port=|^-Dhttps?\.port=' || true
     grep -E '^jvm\.memory' "$SCRIPT_DIR/conf/application.conf" 2>/dev/null || true
     if [[ "$(upgrade_install_kind)" == bundle ]]; then
         find "$SCRIPT_DIR/lib" "$SCRIPT_DIR/framework" -name '*.jar' -exec ls -ln {} + 2>/dev/null \
@@ -3102,6 +3103,15 @@ aot_fingerprint() {
     else
         (cd "$SCRIPT_DIR" && cksum build.gradle.kts settings.gradle.kts .play-version 2>/dev/null) || true
     fi
+}
+
+# The first port from $1 up that nothing answers on.
+aot_spare_port() {
+    local port=$1
+    while port_answers "$port"; do
+        port=$((port + 1))
+    done
+    echo "$port"
 }
 
 # Settings > Maintenance > Restart reads this line back as what the last start did with the cache.
@@ -3155,8 +3165,24 @@ aot_prepare() {
     fi
     rm -f "$stamp"
     mkdir -p "$SCRIPT_DIR/logs" "$store"
-    echo "==> Training the AOT cache (${reason}): one full start and stop..."
-    if play aot-gen --%prod "$@" > "$SCRIPT_DIR/logs/aot-gen.log" 2>&1; then
+    # The training run answers on spare ports, so nothing that reaches JClaw's own ports (a browser,
+    # the Restart page's reconnect poll, Funnel traffic, a health check) talks to a JVM about to stop.
+    local http_spare https_spare arg named_http=false
+    local train_args=()
+    http_spare=$(aot_spare_port $((BACKEND_PORT + 1000)))
+    https_spare=$(aot_spare_port $((http_spare + 1)))
+    for arg in "$@"; do
+        case "$arg" in
+            --http.port=*) train_args+=("--http.port=$http_spare"); named_http=true ;;
+            --https.port=-1|-Dhttps.port=-1) train_args+=("$arg") ;;
+            --https.port=*) train_args+=("--https.port=$https_spare") ;;
+            -Dhttps.port=*) train_args+=("-Dhttps.port=$https_spare") ;;
+            *) train_args+=("$arg") ;;
+        esac
+    done
+    [[ "$named_http" == true ]] || train_args+=("--http.port=$http_spare")
+    echo "==> Training the AOT cache (${reason}): one full start and stop on port ${http_spare}..."
+    if play aot-gen --%prod "${train_args[@]}" > "$SCRIPT_DIR/logs/aot-gen.log" 2>&1; then
         if [[ -n "${JCLAW_AOT_DIR:-}" ]]; then
             mv -f "$cache" "$store/app.aot"
             ln -sf "$store/app.aot" "$cache"

@@ -85,6 +85,11 @@ function durationHint(p: RestartPreflight): string {
     : 'JClaw will be unavailable for roughly 30–60 seconds.'
 }
 
+// jclaw.sh decides at start whether the cache must be rebuilt, so the preflight cannot know; say what it costs.
+function aotHint(p: RestartPreflight): string {
+  return p.aotCacheEnabled ? 'A restart that has to rebuild the AOT cache takes about 30 seconds longer. ' : ''
+}
+
 async function handleRestart() {
   failure.value = null
 
@@ -95,7 +100,7 @@ async function handleRestart() {
 
   const ok = await confirm({
     title: 'Restart JClaw',
-    message: `${interruptionSummary(p)} ${durationHint(p)} `
+    message: `${interruptionSummary(p)} ${durationHint(p)} ${aotHint(p)}`
       + 'This page reconnects automatically once the backend is back.',
     confirmText: 'Restart',
     variant: 'danger',

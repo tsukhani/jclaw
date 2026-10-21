@@ -239,6 +239,27 @@ describe('SettingsRestartPanel — AOT cache', () => {
     expect(restartPosts).toBe(0)
   })
 
+  it('warns in the confirmation that a rebuild of the cache adds time, only while it is on', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    await c.find('button').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[role="dialog"]')?.textContent)
+      .toContain('A restart that has to rebuild the AOT cache takes about 30 seconds longer.')
+    dialogButton('Cancel')?.click()
+    await flushPromises()
+
+    preflight = available({ aotCacheEnabled: false })
+    clearNuxtData()
+    document.body.innerHTML = ''
+    const off = await mountSuspended(Harness)
+    await flushPromises()
+    await off.find('button').trigger('click')
+    await flushPromises()
+    expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('AOT cache')
+    dialogButton('Cancel')?.click()
+  })
+
   it('switches it back on when it is off', async () => {
     preflight = available({ aotCacheEnabled: false, aotCacheStatus: 'off (switched off in Settings)' })
     const c = await mountSuspended(Harness)
