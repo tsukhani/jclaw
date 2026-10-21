@@ -69,10 +69,7 @@ class AgentRunnerCoreTest extends UnitTest {
                     .getAsJsonObject();
             model.set(json.get("model").getAsString());
             var resp = simpleResponse("from the fallback");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, resp.getBytes().length);
-            exchange.getResponseBody().write(resp.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, resp);
         });
         configureProvider();
         var agent = createAgent("fallback-serves-agent", "removed-provider", "removed-model");
@@ -95,10 +92,7 @@ class AgentRunnerCoreTest extends UnitTest {
         startLlmServer(exchange -> {
             called.set(true);
             var resp = simpleResponse("from a provider the agent never named");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, resp.getBytes().length);
-            exchange.getResponseBody().write(resp.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, resp);
         });
         configureProvider();
         var agent = createAgent("no-fallback-agent", "removed-provider", "removed-model");
@@ -147,10 +141,7 @@ class AgentRunnerCoreTest extends UnitTest {
                     .getAsJsonObject().getAsJsonArray("messages");
             lastMessage.set(messages.get(messages.size() - 1).toString());
             var resp = simpleResponse("Carrying on.");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, resp.getBytes().length);
-            exchange.getResponseBody().write(resp.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, resp);
         });
         configureProvider();
         var agent = createAgent("checklist-reminder-agent", "core-provider", "test-model");
@@ -207,10 +198,7 @@ class AgentRunnerCoreTest extends UnitTest {
             } else {
                 body = simpleResponse("The current time is 2026-04-13T18:00:00Z.");
             }
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
         // Register the datetime tool so execute() finds it
@@ -239,10 +227,7 @@ class AgentRunnerCoreTest extends UnitTest {
                 "tool_calls":[{"id":"call_t","type":"function","function":{"name":"datetime","arguments":"{\\"acti"}}]},
                 "finish_reason":"length"}],
                 "usage":{"prompt_tokens":10,"completion_tokens":4096}}""";
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -273,10 +258,7 @@ class AgentRunnerCoreTest extends UnitTest {
                 {"choices":[{"index":0,"message":{"role":"assistant","content":"Here is the start of my answer but it gets cut o"},
                 "finish_reason":"length"}],
                 "usage":{"prompt_tokens":42,"completion_tokens":256}}""";
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -320,10 +302,7 @@ class AgentRunnerCoreTest extends UnitTest {
                 "finish_reason":"tool_calls"}],
                 "usage":{"prompt_tokens":10,"completion_tokens":5}}"""
                     .formatted(System.nanoTime());
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
         new jobs.ToolRegistrationJob().doJob();
@@ -348,10 +327,7 @@ class AgentRunnerCoreTest extends UnitTest {
         startLlmServer(exchange -> {
             try { llmGate.await(10, TimeUnit.SECONDS); } catch (InterruptedException _) {}
             var body = simpleResponse("First response");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -406,10 +382,7 @@ class AgentRunnerCoreTest extends UnitTest {
                 "tool_calls":[{"id":"call_m","type":"function","function":{"name":"datetime","arguments":"{\\"act"}}]},
                 "finish_reason":"max_tokens"}],
                 "usage":{"prompt_tokens":10,"completion_tokens":4096}}""";
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -438,10 +411,7 @@ class AgentRunnerCoreTest extends UnitTest {
                 "tool_calls":[{"id":"bad","type":"function","function":{"name":"datetime","arguments":"{not valid json"}}]},
                 "finish_reason":"tool_calls"}],
                 "usage":{"prompt_tokens":10,"completion_tokens":5}}""";
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
         new jobs.ToolRegistrationJob().doJob();
@@ -545,10 +515,7 @@ class AgentRunnerCoreTest extends UnitTest {
                 captured.set(json.get("max_tokens").getAsInt());
             }
             var resp = simpleResponse("ok");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, resp.getBytes().length);
-            exchange.getResponseBody().write(resp.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, resp);
         });
         ConfigService.set("provider.core-provider.baseUrl", "http://127.0.0.1:" + port);
         ConfigService.set("provider.core-provider.apiKey", "sk-test");
@@ -579,10 +546,7 @@ class AgentRunnerCoreTest extends UnitTest {
             if (json.has("max_tokens")) {
                 captured.set(json.get("max_tokens").getAsInt());
             }
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, responseBody.getBytes().length);
-            exchange.getResponseBody().write(responseBody.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, responseBody);
         };
     }
 
@@ -606,10 +570,7 @@ class AgentRunnerCoreTest extends UnitTest {
 
     private void startLlmServer(String staticResponse) throws Exception {
         startLlmServer(exchange -> {
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, staticResponse.getBytes().length);
-            exchange.getResponseBody().write(staticResponse.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, staticResponse);
         });
     }
 

@@ -544,10 +544,7 @@ class SubagentYieldToolTest extends UnitTest {
             // Second call and beyond: respond immediately so the parent's
             // resume turn lands cleanly.
             var body = simpleResponse(n == 1 ? "child-late" : "resume-ok");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -744,11 +741,7 @@ class SubagentYieldToolTest extends UnitTest {
         // Each run's child call answers first; the parent's resume turn answers second.
         var calls = new java.util.concurrent.atomic.AtomicInteger();
         startLlmServer(exchange -> {
-            var bytes = simpleResponse(calls.getAndIncrement() % 2 == 0 ? "Child result" : "Parent wrap-up").getBytes();
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, bytes.length);
-            exchange.getResponseBody().write(bytes);
-            exchange.close();
+            LlmReplyFixture.send(exchange, simpleResponse(calls.getAndIncrement() % 2 == 0 ? "Child result" : "Parent wrap-up"));
         });
         configureProvider();
         var parent = createAgent("p-gh13-yield", "test-provider", "test-model");
@@ -799,11 +792,7 @@ class SubagentYieldToolTest extends UnitTest {
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
-            var bytes = simpleResponse("Too late").getBytes();
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, bytes.length);
-            exchange.getResponseBody().write(bytes);
-            exchange.close();
+            LlmReplyFixture.send(exchange, simpleResponse("Too late"));
         });
         configureProvider();
         var parent = createAgent("p-gh13-kill", "test-provider", "test-model");
@@ -907,11 +896,7 @@ class SubagentYieldToolTest extends UnitTest {
             } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
-            var bytes = simpleResponse("Too late").getBytes();
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, bytes.length);
-            exchange.getResponseBody().write(bytes);
-            exchange.close();
+            LlmReplyFixture.send(exchange, simpleResponse("Too late"));
         });
         configureProvider();
         var parent = createAgent("p-1603-timeout", "test-provider", "test-model");
@@ -1036,10 +1021,7 @@ class SubagentYieldToolTest extends UnitTest {
 
     private void startLlmServer(String staticResponse) throws Exception {
         startLlmServer(exchange -> {
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, staticResponse.getBytes().length);
-            exchange.getResponseBody().write(staticResponse.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, staticResponse);
         });
     }
 

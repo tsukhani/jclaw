@@ -1052,6 +1052,102 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
                 onReasoning, maxTokens, thinkingMode, channel);
     }
 
+    /**
+     * {@link #chatWithFailover} over a streamed exchange, for the sync tool loop: a stream is limited by
+     * silence rather than by the length of the reply, so a long answer that keeps producing tokens is not
+     * cut off at 180 s and asked again from the top. Nothing reaches a reader before this returns, so unlike
+     * the chat's stream a failed attempt can still be retried or handed to the fallback.
+     */
+    @SuppressWarnings("java:S107") // chatWithFailover's call surface
+    public static ChatResponse chatStreamedWithFailover(LlmProvider primary, @Nullable Fallback fallback,
+                                                        String model, List<ChatMessage> messages,
+                                                        @Nullable List<ToolDef> tools, @Nullable Integer maxTokens,
+                                                        @Nullable String thinkingMode, @Nullable String channel) {
+        boolean canFailOver = fallback != null && fallback.coversFor(primary);
+        try {
+            return primary.chatStreamed(model, messages, tools, maxTokens, thinkingMode, channel, canFailOver);
+        } catch (LlmException e) {
+            SubscriptionUsage.noteFailure(e);
+            if (fallback != null && fallback.coversFor(primary)) {
+                EventLogger.warn("llm", "Failing over from %s to %s: %s"
+                        .formatted(primary.config().name(), fallback.describe(), e.getMessage()));
+                return fallback.provider().chatStreamed(fallback.modelId(), messages, tools, maxTokens, thinkingMode,
+                        channel, false);
+            }
+            throw e;
+        }
+    }
+
+    /** {@link #chat}'s contract, retries included, over a streamed exchange. */
+    public ChatResponse chatStreamed(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                                     @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                                     @Nullable String channel) {
+        return chatStreamed(model, messages, tools, maxTokens, thinkingMode, channel, false);
+    }
+
+    /** One breaker outcome for the whole call, retries included, as {@link #chat} records; {@code timeoutEndsCall} is {@link #executeWithRetry}'s. */
+    @SuppressWarnings("java:S107")
+    private ChatResponse chatStreamed(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                                      @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                                      @Nullable String channel, boolean timeoutEndsCall) {
+        return LlmResilience.guard(config.name(), () ->
+                streamWithRetry(model, messages, tools, maxTokens, thinkingMode, channel, timeoutEndsCall));
+    }
+
+    @SuppressWarnings("java:S107") // chatStreamed's call surface
+    private ChatResponse streamWithRetry(String model, List<ChatMessage> messages, @Nullable List<ToolDef> tools,
+                                         @Nullable Integer maxTokens, @Nullable String thinkingMode,
+                                         @Nullable String channel, boolean timeoutEndsCall) {
+        var site = callSite(model);
+        Exception last = null;
+        for (int attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            var stream = chatStreamAccumulate(LlmResilience.beginAttemptStream(), model, messages, tools, _ -> { },
+                    _ -> { }, maxTokens, thinkingMode, channel);
+            try {
+                stream.awaitCompletion();
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                throw new LlmException("Interrupted during request to " + config.name(), ie);
+            }
+            var error = stream.error();
+            if (error == null) return streamedResponse(stream, model);
+            last = error instanceof IOException io
+                    ? new LlmException.Transport("Transport failure calling %s: %s".formatted(config.name(),
+                            io.getMessage()), io, site.failure(Remedy.UNCLASSIFIED, null))
+                    : error;
+            if (!retriedOnStream(last)) {
+                throw last instanceof LlmException e ? e
+                        : new LlmException("Malformed stream from " + config.name(), last, site.failure(Remedy.UNCLASSIFIED, null));
+            }
+            if (timeoutEndsCall && timedOut(last)) {
+                throw exhausted("%s timed out, so it was not retried".formatted(config.name()), last, site);
+            }
+            if (attempt < MAX_RETRIES) backoffBeforeRetry(attempt);
+        }
+        throw exhausted("All retries exhausted for " + config.name(), last, site);
+    }
+
+    /** The failures {@link #executeWithRetry} retries; an abandoned stream is not one. */
+    private static boolean retriedOnStream(Exception e) {
+        return switch (e) {
+            case LlmException.ServerError _, LlmException.Transport _ -> true;
+            case LlmException.RateLimited r -> r.failure() == null || r.failure().remedy() != Remedy.QUOTA_EXHAUSTED;
+            default -> false;
+        };
+    }
+
+    /** A stream that carried no choice reads as a reply without choices, which the sync loop reports as no response. */
+    private static ChatResponse streamedResponse(StreamAccumulator stream, String model) {
+        var content = stream.content();
+        var calls = stream.toolCalls();
+        if (content.isEmpty() && calls.isEmpty() && stream.finishReason() == null) {
+            return new ChatResponse(null, model, List.of(), stream.usage());
+        }
+        var message = new ChatMessage(MessageRole.ASSISTANT.value, content.isEmpty() && !calls.isEmpty() ? null : content,
+                calls.isEmpty() ? null : calls, null, null);
+        return new ChatResponse(null, model, List.of(new Choice(0, message, stream.finishReason())), stream.usage());
+    }
+
     // ─── Shared internals ────────────────────────────────────────────────
 
     /** Whether this request actually put a tools array on the wire — the precondition for the JCLAW-1076 retry. */

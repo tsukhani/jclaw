@@ -442,10 +442,7 @@ class TaskRetryRoundtripTest extends UnitTest {
         llmServer = com.sun.net.httpserver.HttpServer.create(
                 new java.net.InetSocketAddress("127.0.0.1", 0), 0);
         llmServer.createContext("/chat/completions", exchange -> {
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, staticResponse.getBytes().length);
-            exchange.getResponseBody().write(staticResponse.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, staticResponse);
         });
         llmServer.start();
         port = llmServer.getAddress().getPort();

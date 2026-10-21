@@ -479,10 +479,7 @@ class TaskExecutorTest extends UnitTest {
         llmServer.createContext("/chat/completions", exchange -> {
             lastLlmRequest.set(new String(exchange.getRequestBody().readAllBytes(),
                     java.nio.charset.StandardCharsets.UTF_8));
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, staticResponse.getBytes().length);
-            exchange.getResponseBody().write(staticResponse.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, staticResponse);
         });
         llmServer.start();
         port = llmServer.getAddress().getPort();

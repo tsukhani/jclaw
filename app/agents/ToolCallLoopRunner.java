@@ -245,9 +245,8 @@ public final class ToolCallLoopRunner {
         var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, sendMessages, tools);
         ChatResponse response;
         try {
-            response = (fallback != null)
-                    ? LlmProvider.chatWithFailover(primary, fallback, effectiveModelId, sendMessages, tools, maxTokens, thinkingMode, conversation.channelType)
-                    : primary.chat(effectiveModelId, sendMessages, tools, maxTokens, thinkingMode, conversation.channelType);
+            response = LlmProvider.chatStreamedWithFailover(primary, fallback, effectiveModelId, sendMessages, tools,
+                    maxTokens, thinkingMode, conversation.channelType);
         } catch (Exception e) {
             var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, imageBearers,
                     audioState, visionState, supportsAudioInitially, currentMessages);
@@ -420,7 +419,7 @@ public final class ToolCallLoopRunner {
                                                    List<ChatMessage> messages, @Nullable List<ToolDef> tools,
                                                    @Nullable Integer maxTokens, @Nullable String channel) {
         try {
-            var response = provider.chat(modelId, messages, tools, maxTokens, null, channel);
+            var response = provider.chatStreamed(modelId, messages, tools, maxTokens, null, channel);
             if (response == null || response.choices() == null || response.choices().isEmpty()) return null;
             var choice = response.choices().getFirst();
             var text = MessageHydrator.contentAsString(choice.message().content());

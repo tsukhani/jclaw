@@ -114,10 +114,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
                 receivedToolResultText.set(reqBody);
                 body = simpleResponse("Tool failed but I recovered.");
             }
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -170,10 +167,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
                 continuationBody.set(new String(exchange.getRequestBody().readAllBytes()));
                 body = simpleResponse("Sorry, the input was malformed.");
             }
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -230,10 +224,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
                 "finish_reason":"tool_calls"}],
                 "usage":{"prompt_tokens":10,"completion_tokens":5}}"""
                     .formatted(System.nanoTime());
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -282,10 +273,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
                 continuationBody.set(new String(exchange.getRequestBody().readAllBytes()));
                 body = simpleResponse("Tried, but the call was malformed.");
             }
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
         new jobs.ToolRegistrationJob().doJob();
@@ -367,10 +355,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
             } else {
                 body = simpleResponse("Continued past empty content.");
             }
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
         new jobs.ToolRegistrationJob().doJob();
@@ -399,10 +384,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
                 case 2 -> simpleResponse("");
                 default -> simpleResponse("The report.");
             };
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
         new jobs.ToolRegistrationJob().doJob();
@@ -425,10 +407,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
         var callCount = new AtomicInteger(0);
         startLlmServer(exchange -> {
             String body = callCount.getAndIncrement() == 0 ? DATETIME_TOOL_CALL : simpleResponse("");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
         new jobs.ToolRegistrationJob().doJob();
@@ -458,10 +437,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
         startLlmServer(exchange -> {
             llmCalls.incrementAndGet();
             var body = simpleResponse("should never reach here");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -520,10 +496,7 @@ class ToolCallLoopRunnerEdgeCasesTest extends UnitTest {
         startLlmServer(exchange -> {
             var body = """
                 {"choices":[],"usage":{"prompt_tokens":1,"completion_tokens":0}}""";
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 

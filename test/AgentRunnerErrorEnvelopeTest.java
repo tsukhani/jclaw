@@ -163,10 +163,7 @@ class AgentRunnerErrorEnvelopeTest extends UnitTest {
         var emptyChoices = """
             {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":0}}""";
         startLlmServer(exchange -> {
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, emptyChoices.getBytes().length);
-            exchange.getResponseBody().write(emptyChoices.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, emptyChoices);
         });
         configureProvider();
 

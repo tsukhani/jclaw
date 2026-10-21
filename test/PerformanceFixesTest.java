@@ -296,10 +296,7 @@ class PerformanceFixesTest extends UnitTest {
             var body = """
                     {"choices":[{"index":0,"message":{"role":"assistant","content":"pong"},"finish_reason":"stop"}],
                      "usage":{"prompt_tokens":1,"completion_tokens":1}}""";
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.length());
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         server.start();
         var port = server.getAddress().getPort();

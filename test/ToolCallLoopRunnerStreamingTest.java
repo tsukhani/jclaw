@@ -106,6 +106,10 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                     : """
                         {"choices":[{"index":0,"message":{"role":"assistant","content":"Got it via transcript."},"finish_reason":"stop"}],
                          "usage":{"prompt_tokens":10,"completion_tokens":5}}""";
+            if (status == 200) {
+                LlmReplyFixture.send(exchange, body);
+                return;
+            }
             exchange.getResponseHeaders().set("Content-Type", "application/json");
             byte[] bytes = body.getBytes();
             exchange.sendResponseHeaders(status, bytes.length);
@@ -149,11 +153,7 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                     : """
                         {"choices":[{"index":0,"message":{"role":"assistant","content":"Answer after the retry."},"finish_reason":"stop"}],
                          "usage":{"prompt_tokens":10,"completion_tokens":5}}""";
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            byte[] bytes = body.getBytes();
-            exchange.sendResponseHeaders(200, bytes.length);
-            exchange.getResponseBody().write(bytes);
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         var provider = openAiProviderForSyncServer("sync-reason-cut");
         var agent = persistAgent("sync-reason-cut-agent");
@@ -659,10 +659,7 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                 body = """
                     {"choices":[{"index":0,"message":{"role":"assistant","content":"should not reach"},"finish_reason":"stop"}]}""";
             }
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureSyncProvider();
 

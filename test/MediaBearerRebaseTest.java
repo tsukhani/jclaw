@@ -249,10 +249,7 @@ class MediaBearerRebaseTest extends UnitTest {
     }
 
     private static void respond(com.sun.net.httpserver.HttpExchange exchange, String body) throws java.io.IOException {
-        exchange.getResponseHeaders().set("Content-Type", "application/json");
-        exchange.sendResponseHeaders(200, body.getBytes().length);
-        exchange.getResponseBody().write(body.getBytes());
-        exchange.close();
+        LlmReplyFixture.send(exchange, body);
     }
 
     /** Non-vision model — the caption downgrade is what puts the image into a text part. */

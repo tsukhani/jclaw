@@ -49,11 +49,7 @@ class FencedPromptCatalogTest extends UnitTest {
         llmServer.createContext("/chat/completions", exchange -> {
             var body = JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             systemPrompt.set(body.getAsJsonObject().getAsJsonArray("messages").get(0).getAsJsonObject().get("content").getAsString());
-            var reply = REPLY.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, reply.length);
-            exchange.getResponseBody().write(reply);
-            exchange.close();
+            LlmReplyFixture.send(exchange, REPLY);
         });
         llmServer.start();
         ConfigService.set("provider." + provider + ".baseUrl", "http://127.0.0.1:" + llmServer.getAddress().getPort());

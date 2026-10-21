@@ -178,11 +178,7 @@ class SubagentSpawnToolTest extends UnitTest {
         var calls = new AtomicInteger();
         startLlmServer(exchange -> {
             calls.incrementAndGet();
-            var body = simpleResponse("child done").getBytes();
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
-            exchange.close();
+            LlmReplyFixture.send(exchange, simpleResponse("child done"));
         });
         configureProvider();
         var parent = createAgent("p-task-inherit", "spawn-provider", "test-model");
@@ -222,11 +218,7 @@ class SubagentSpawnToolTest extends UnitTest {
                 }
             }
             offered.add(names);
-            var body = simpleResponse("child done").getBytes();
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.length);
-            exchange.getResponseBody().write(body);
-            exchange.close();
+            LlmReplyFixture.send(exchange, simpleResponse("child done"));
         });
         configureProvider();
         var open = createAgent("p-task-tools-open", "spawn-provider", "test-model");
@@ -392,10 +384,7 @@ class SubagentSpawnToolTest extends UnitTest {
             String body = n == 1
                     ? simpleResponse("Canned summary of parent turns.")
                     : simpleResponse("BATCH_CHILD_OK");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -1251,10 +1240,7 @@ class SubagentSpawnToolTest extends UnitTest {
             try { llmGate.await(15, java.util.concurrent.TimeUnit.SECONDS); }
             catch (InterruptedException _) { Thread.currentThread().interrupt(); }
             var body = simpleResponse("late");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -1520,10 +1506,7 @@ class SubagentSpawnToolTest extends UnitTest {
             String body = n == 1
                     ? simpleResponse("Canned summary of parent turns.")
                     : simpleResponse("Subagent reply: inherited.");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -1618,10 +1601,7 @@ class SubagentSpawnToolTest extends UnitTest {
                 return;
             }
             String body = simpleResponse("Subagent reply: degraded.");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -2074,10 +2054,7 @@ class SubagentSpawnToolTest extends UnitTest {
             try { llmGate.await(15, java.util.concurrent.TimeUnit.SECONDS); }
             catch (InterruptedException _) { Thread.currentThread().interrupt(); }
             var body = simpleResponse("late");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -2641,10 +2618,7 @@ class SubagentSpawnToolTest extends UnitTest {
 
     private void startLlmServer(String staticResponse) throws Exception {
         startLlmServer(exchange -> {
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, staticResponse.getBytes().length);
-            exchange.getResponseBody().write(staticResponse.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, staticResponse);
         });
     }
 

@@ -259,10 +259,7 @@ class AgentRunnerSubagentTest extends UnitTest {
         startLlmServer(exchange -> {
             llmCallCount.incrementAndGet();
             var body = simpleResponse("should never be sent");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -333,10 +330,7 @@ class AgentRunnerSubagentTest extends UnitTest {
     void runYieldResumeDoesNotDuplicateTheAnnounceMessage() throws Exception {
         startLlmServer(exchange -> {
             var body = simpleResponse("Resumed reply after child finished.");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -471,10 +465,7 @@ class AgentRunnerSubagentTest extends UnitTest {
         startLlmServer(exchange -> {
             var body = simpleResponse(replies.getAndIncrement() == 0
                     ? "Blocker reply." : "Resumed reply after drain.");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
 
@@ -557,10 +548,7 @@ class AgentRunnerSubagentTest extends UnitTest {
     void anInlineChildLeavesItsParentOwningTheConversation() throws Exception {
         startLlmServer(exchange -> {
             var body = simpleResponse("child done");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
         });
         configureProvider();
         var parent = createAgent("inline-owner-parent", "test-provider", "test-model");

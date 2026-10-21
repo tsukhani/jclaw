@@ -5,6 +5,7 @@ import llm.LlmTypes.ProviderConfig;
 import llm.OpenAiProvider;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
+import mockwebserver3.SocketEffect;
 import okhttp3.OkHttpClient;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -201,6 +202,93 @@ class LlmProviderFailoverTest extends UnitTest {
         }
     }
 
+    @Test
+    void aStreamedCallAssemblesTheReplyWithItsToolCalls() throws Exception {
+        primaryServer = new MockWebServer();
+        primaryServer.start();
+        primaryServer.enqueue(sseResponse(LlmReplyFixture.sse("""
+                {"choices":[{"index":0,"message":{"role":"assistant","content":"",
+                "tool_calls":[{"id":"t1","type":"function","function":{"name":"datetime","arguments":"{}"}}]},
+                "finish_reason":"tool_calls"}]}""")));
+        var name = "streamed-" + System.nanoTime();
+        try {
+            var result = LlmProvider.chatStreamedWithFailover(openAiPointingAt(primaryServer, name), null,
+                    "test-model", List.of(), List.of(), null, null, "web");
+
+            var choice = result.choices().getFirst();
+            assertEquals("tool_calls", choice.finishReason());
+            assertNull(choice.message().content(), "a tool-call reply without text carries no content, as a sync one does");
+            assertEquals("datetime", choice.message().toolCalls().getFirst().function().name());
+        } finally {
+            CircuitBreakers.remove(name);
+        }
+    }
+
+    @Test
+    void aStreamedCallRetriesAServerErrorAndThenAnswers() throws Exception {
+        primaryServer = new MockWebServer();
+        primaryServer.start();
+        primaryServer.enqueue(jsonResponse(500, "{\"error\":\"primary synthetic\"}"));
+        primaryServer.enqueue(sseResponse(LlmReplyFixture.sse(completionBody("second-try", "answered"))));
+        var name = "streamed-retry-" + System.nanoTime();
+        try {
+            var result = LlmProvider.chatStreamedWithFailover(openAiPointingAt(primaryServer, name), null,
+                    "test-model", List.of(), List.of(), null, null, "web");
+
+            assertEquals("answered", result.choices().getFirst().message().content());
+            assertEquals(2, primaryServer.getRequestCount());
+        } finally {
+            CircuitBreakers.remove(name);
+        }
+    }
+
+    @Test
+    void aBrokenStreamIsRetriedAndThenFailsOver() throws Exception {
+        // A canned transport cannot reach the stream's own thread, so the primary's server breaks the stream itself.
+        primaryServer = new MockWebServer();
+        primaryServer.start();
+        for (var i = 0; i < 4; i++) {
+            primaryServer.enqueue(new MockResponse.Builder()
+                    .code(200)
+                    .addHeader("Content-Type", "text/event-stream")
+                    .body(": keepalive\n\n".repeat(2000))
+                    .onResponseBody(new SocketEffect.CloseSocket())
+                    .build());
+        }
+        secondaryServer = new MockWebServer();
+        secondaryServer.start();
+        secondaryServer.enqueue(sseResponse(LlmReplyFixture.sse(completionBody("from-secondary", "fallback answer"))));
+        var primaryName = "streamed-broken-" + System.nanoTime();
+        var secondaryName = "streamed-fallback-" + System.nanoTime();
+        try {
+            var result = LlmProvider.chatStreamedWithFailover(openAiPointingAt(primaryServer, primaryName),
+                    new LlmProvider.Fallback(openAiPointingAt(secondaryServer, secondaryName), "fallback-model"),
+                    "test-model", List.of(), List.of(), null, null, "web");
+
+            assertEquals("fallback answer", result.choices().getFirst().message().content());
+            assertEquals(4, primaryServer.getRequestCount(), "a broken stream is retried like a failed sync call");
+        } finally {
+            CircuitBreakers.remove(primaryName);
+            CircuitBreakers.remove(secondaryName);
+        }
+    }
+
+    @Test
+    void aStreamThatCarriedNoChoiceReadsAsNoResponse() throws Exception {
+        primaryServer = new MockWebServer();
+        primaryServer.start();
+        primaryServer.enqueue(sseResponse(LlmReplyFixture.sse("{\"choices\":[]}")));
+        var name = "streamed-empty-" + System.nanoTime();
+        try {
+            var result = LlmProvider.chatStreamedWithFailover(openAiPointingAt(primaryServer, name), null,
+                    "test-model", List.of(), List.of(), null, null, "web");
+
+            assertTrue(result.choices().isEmpty(), "the sync loop reports this as no response: " + result);
+        } finally {
+            CircuitBreakers.remove(name);
+        }
+    }
+
     // === Helpers ===
 
     private OpenAiProvider openAiPointingAt(MockWebServer server, String name) {
@@ -218,6 +306,14 @@ class LlmProviderFailoverTest extends UnitTest {
             attempts.incrementAndGet();
             throw new SocketTimeoutException("timeout");
         }).build();
+    }
+
+    private static MockResponse sseResponse(String body) {
+        return new MockResponse.Builder()
+                .code(200)
+                .addHeader("Content-Type", "text/event-stream")
+                .body(body)
+                .build();
     }
 
     private static MockResponse jsonResponse(int code, String body) {

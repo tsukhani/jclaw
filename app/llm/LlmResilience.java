@@ -266,6 +266,19 @@ public final class LlmResilience {
     }
 
     /**
+     * The guard for one attempt of a call {@link #guard} charges as a whole: the stream keeps its first-chunk
+     * and stall deadlines, but its outcome goes to a breaker nothing reads, so a retry is not a second failure.
+     */
+    public static StreamGuard beginAttemptStream() {
+        var guard = new StreamGuard(new CircuitBreaker(config()), System::nanoTime, firstChunkBudgetNanos(),
+                stallAbortBudgetNanos(), CircuitBreaker.Admission.NOT_A_PROBE);
+        if (guard.stallBudgetNanos > 0L || guard.firstChunkBudgetNanos > 0L || guard.stallAbortNanos > 0L) {
+            watch(guard);
+        }
+        return guard;
+    }
+
+    /**
      * Test seam: the same guard on a caller-supplied monotonic source, so a stall test needs no
      * sleep. It reports token-less, against whichever HALF_OPEN window is current, so a test can
      * take the permit with {@code allowRequest()} itself.

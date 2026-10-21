@@ -36,11 +36,7 @@ class TaskModelPinTest extends UnitTest {
         llmServer.createContext("/chat/completions", exchange -> {
             var body = new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8);
             calledModel.set(JsonParser.parseString(body).getAsJsonObject().get("model").getAsString());
-            var reply = REPLY.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, reply.length);
-            exchange.getResponseBody().write(reply);
-            exchange.close();
+            LlmReplyFixture.send(exchange, REPLY);
         });
         llmServer.start();
 

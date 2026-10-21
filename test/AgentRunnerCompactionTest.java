@@ -95,10 +95,7 @@ class AgentRunnerCompactionTest extends UnitTest {
                 // Actual chat call after compaction.
                 responseBody = simpleResponse("Reply after compaction.");
             }
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, responseBody.getBytes().length);
-            exchange.getResponseBody().write(responseBody.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, responseBody);
         });
         // Use a tiny contextWindow + relaxed compaction thresholds so a
         // modest seed of messages is enough to cross the budget AND clear
@@ -200,10 +197,7 @@ class AgentRunnerCompactionTest extends UnitTest {
         startLlmServer(exchange -> {
             callCount.incrementAndGet();
             var responseBody = simpleResponse("Plain reply.");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, responseBody.getBytes().length);
-            exchange.getResponseBody().write(responseBody.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, responseBody);
         });
         configureProvider(); // large context window, default 100k
 
@@ -248,10 +242,7 @@ class AgentRunnerCompactionTest extends UnitTest {
             // responses can carry the same shape; the assertions look at
             // the DB state, not at the response wiring.
             var body = simpleResponse("Round response.");
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, body.getBytes().length);
-            exchange.getResponseBody().write(body.getBytes());
-            exchange.close();
+            LlmReplyFixture.send(exchange, body);
             // Discard the request body — we already read it.
             assertNotNull(bytes);
         });
