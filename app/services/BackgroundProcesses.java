@@ -5,6 +5,7 @@ import org.jspecify.annotations.Nullable;
 import play.Play;
 import utils.AppClock;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -400,12 +401,24 @@ public final class BackgroundProcesses {
                     .redirectError(ProcessBuilder.Redirect.DISCARD)
                     .redirectInput(ProcessBuilder.Redirect.from(new java.io.File("/dev/null")))
                     .start();
-            byte[] out;
-            try (var in = process.getInputStream()) {
-                out = in.readAllBytes();
+            // Read on another thread: end of stream arrives only when lsof exits, so reading
+            // first would wait out a slow lsof (20-80 s beside a descriptor-heavy process) and
+            // never reach the timeout.
+            var out = new ByteArrayOutputStream();
+            var reader = Thread.ofVirtual().name("lsof-reader").start(() -> {
+                try (var in = process.getInputStream()) {
+                    in.transferTo(out);
+                } catch (IOException _) {
+                    // the pipe closes when the process is destroyed; what was read still counts
+                }
+            });
+            if (!process.waitFor(LSOF_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                EventLogger.warn("tool", null, "exec",
+                        "lsof did not finish within %ds; its answer is partial".formatted(LSOF_TIMEOUT_SECONDS));
             }
-            if (!process.waitFor(LSOF_TIMEOUT_SECONDS, TimeUnit.SECONDS)) process.destroyForcibly();
-            return new String(out, StandardCharsets.UTF_8).lines().toList();
+            reader.join();
+            return out.toString(StandardCharsets.UTF_8).lines().toList();
         } catch (IOException e) {
             EventLogger.warn("tool", null, "exec", "Could not run lsof: %s".formatted(e.getMessage()));
             return List.of();
