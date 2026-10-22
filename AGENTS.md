@@ -268,6 +268,16 @@ the previous build. This also means a single run never mixes `compile` records w
 `test`/`arch` ones — not a limitation of the parser, but of what a broken tree can
 physically produce.
 
+### Mutation testing
+```bash
+./jclaw.sh mutation <git-ref>   # PIT on the changed app/ classes, Stryker on the changed frontend/ files
+```
+
+It reports a score per tool and never gates (JF-17); `bin/README.md` is the contract. Only tests that need
+no running Play count under PIT: a booted Play compiles and loads its own copy of `app/`, so a mutant PIT
+plants never reaches a database-backed test. Exit 2 is a harness that measured nothing; read it as no
+result, never as 0%.
+
 ### E2E
 ```bash
 ./jclaw.sh e2e                                # Playwright suite against an already-running server
