@@ -118,10 +118,11 @@
       matchPackageNames: ["io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha"],
       ignoreUnstable: false,
     },
-    // Keep h3 on the major @nuxt/test-utils serves registerEndpoint mocks with: the tests call
-    // readBody, getQuery and setResponseStatus from the declared h3 on events test-utils' own h3
-    // built, and h3 2 on h3 1 events failed 438 tests while lint and typecheck passed. Lift once
-    // `require.resolve('h3/package.json', {paths: [<@nuxt/test-utils dir>]})` is 2.x.
+    // Keep h3 on the major Nuxt's server runtime uses: @nuxt/test-utils builds registerEndpoint
+    // events with the h3 resolved from Nuxt's app (Nitro's), the tests call readBody, getQuery and
+    // setResponseStatus from the declared h3, and h3 2 on h3 1 events failed 438 tests while lint
+    // and typecheck passed. Lift once `require.resolve('h3/package.json', {paths: [<nitropack
+    // dir>]})` is 2.x; test-utils takes h3 as a peer, so resolving from it only finds this pin.
     {
       matchFileNames: ["frontend/package.json"],
       matchPackageNames: ["h3"],
