@@ -87,6 +87,7 @@ class TaskExecutionHandlerTest extends UnitTest {
             llmServer.stop(0);
             llmServer = null;
         }
+        DeferredSchedulerCalls.discard();
         services.TaskSchedulingServiceTestHooks.reset();
         // Reset the static handoff so the next test starts clean.
         TaskExecutionHandler.setSchedulerClient(null);
@@ -692,6 +693,7 @@ class TaskExecutionHandlerTest extends UnitTest {
         commitAndReopen();
 
         int registered = BootConsistencyCheck.sweep(stub.proxy());
+        commitAndReopen(); // the sweep's job transaction, which register waits on
 
         assertEquals(1, registered,
                 "orphan PENDING Task should be re-registered by the sweep");
@@ -888,6 +890,166 @@ class TaskExecutionHandlerTest extends UnitTest {
                 () -> "resume must re-arm once the flag commits; calls=" + stub.scheduleIfNotExists.size());
     }
 
+    // === Task writes arm db-scheduler only after they commit (JCLAW-1515) ===
+
+    /** Run on a CANCELLED one-shot: armed before PENDING commits, the fire reads CANCELLED and drops the row. */
+    @Test
+    void runNowArmsOnlyAfterTheRevivedStatusCommits() {
+        var agent = createAgent("runnow-commit-agent");
+        var task = persistTask(agent, "Cancelled one-shot", "Now.",
+                Task.Type.IMMEDIATE, null, null, null);
+        task.status = Task.Status.CANCELLED;
+        task.save();
+        commitAndReopen();
+
+        task.status = Task.Status.PENDING;
+        task.save();
+        TaskSchedulingService.runNow(task.id);
+
+        assertTrue(stub.reschedules.isEmpty() && stub.scheduleIfNotExists.isEmpty(),
+                "armed before PENDING committed; the fire would read CANCELLED and drop the row");
+        commitAndReopen();
+        assertEquals(1, stub.reschedules.size(), "runNow must try the existing row once the revive commits");
+        assertEquals(1, stub.scheduleIfNotExists.size(),
+                () -> "with no row to reschedule, runNow must arm one; calls=" + stub.scheduleIfNotExists.size());
+    }
+
+    /** Re-enable: a CANCELLED interval task armed before ACTIVE commits is skipped as CANCELLED. */
+    @Test
+    void registerArmsOnlyAfterTheReenabledStatusCommits() {
+        var agent = createAgent("reenable-commit-agent");
+        var task = persistTask(agent, "Cancelled interval", "Recur.",
+                Task.Type.INTERVAL, null, null, 3600L);
+        task.status = Task.Status.CANCELLED;
+        task.save();
+        commitAndReopen();
+
+        task.status = Task.Status.ACTIVE;
+        task.save();
+        TaskSchedulingService.register(task);
+
+        assertTrue(stub.scheduleIfNotExists.isEmpty(), "armed before ACTIVE committed");
+        commitAndReopen();
+        assertEquals(1, stub.scheduleIfNotExists.size(),
+                () -> "register must arm once the re-enable commits; calls=" + stub.scheduleIfNotExists.size());
+    }
+
+    @Test
+    void registerArmsACreatedTaskOnlyAfterItsRowCommits() {
+        var agent = createAgent("create-commit-agent");
+        var task = persistTask(agent, "Fresh one-shot", "Now.",
+                Task.Type.IMMEDIATE, null, null, null);
+        TaskSchedulingService.register(task);
+
+        assertTrue(stub.scheduleIfNotExists.isEmpty(), "armed before the Task row committed");
+        commitAndReopen();
+        assertEquals(1, stub.scheduleIfNotExists.size(),
+                () -> "register must arm once the create commits; calls=" + stub.scheduleIfNotExists.size());
+    }
+
+    /** A schedule edit: armed before it commits, the immediate fire runs and saves the old row. */
+    @Test
+    void updateReArmsOnlyAfterTheEditCommits() {
+        var agent = createAgent("update-commit-agent");
+        var task = persistTask(agent, "Interval", "Recur.",
+                Task.Type.INTERVAL, null, null, 3600L);
+        task.status = Task.Status.ACTIVE;
+        task.save();
+        commitAndReopen();
+
+        task.intervalSeconds = 60L;
+        task.save();
+        TaskSchedulingService.update(task);
+
+        assertTrue(stub.cancels.isEmpty() && stub.scheduleIfNotExists.isEmpty(), "re-armed before the edit committed");
+        commitAndReopen();
+        assertEquals(1, stub.cancels.size(), "update must drop the old row once the edit commits");
+        assertEquals(1, stub.scheduleIfNotExists.size(),
+                () -> "update must re-arm once the edit commits; calls=" + stub.scheduleIfNotExists.size());
+    }
+
+    /**
+     * Retry on a LOST task: both deferred, and the stale row must be gone by the time register
+     * re-arms, or the insert collides with it.
+     */
+    @Test
+    void retryRemovesTheStaleRowThenReArmsOnlyAfterTheResetCommits() throws Exception {
+        var agent = createAgent("retry-commit-agent");
+        var task = persistTask(agent, "Lost one-shot", "Now.",
+                Task.Type.IMMEDIATE, null, null, null);
+        task.status = Task.Status.LOST;
+        task.save();
+        commitAndReopen();
+        insertScheduledRow(task.id);
+        try {
+            var rowAtArm = new ArrayList<Boolean>();
+            stub.beforeScheduleIfNotExists = id -> rowAtArm.add(scheduledRowExists(Long.valueOf(id)));
+
+            task.status = Task.Status.PENDING;
+            task.retryCount = 0;
+            task.save();
+            TaskSchedulingService.forceRemoveStaleRow(task.id);
+            TaskSchedulingService.register(task);
+
+            assertTrue(stub.scheduleIfNotExists.isEmpty(), "re-armed before the retry committed");
+            assertTrue(scheduledRowExists(task.id), "the stale row was removed before the retry committed");
+            commitAndReopen();
+            assertEquals(1, stub.scheduleIfNotExists.size(),
+                    () -> "retry must re-arm once it commits; calls=" + stub.scheduleIfNotExists.size());
+            assertEquals(List.of(false), rowAtArm, "register re-armed while the stale row was still there");
+            assertFalse(scheduledRowExists(task.id), "the stale row must be removed after the commit");
+        } finally {
+            deleteScheduledRow(task.id);
+        }
+    }
+
+    private static void insertScheduledRow(Long taskId) throws Exception {
+        try (var conn = play.db.DB.getDataSource().getConnection()) {
+            conn.setAutoCommit(true);
+            try (var ps = conn.prepareStatement("INSERT INTO scheduled_tasks "
+                    + "(task_name, task_instance, execution_time, picked, picked_by, last_heartbeat, version) "
+                    + "VALUES (?, ?, ?, ?, ?, ?, ?)")) {
+                ps.setString(1, TaskExecutionHandler.TASK_NAME);
+                ps.setString(2, taskId.toString());
+                ps.setTimestamp(3, java.sql.Timestamp.from(Instant.now()));
+                ps.setBoolean(4, true);
+                ps.setString(5, "test-scheduler");
+                ps.setTimestamp(6, java.sql.Timestamp.from(Instant.now().minusSeconds(120)));
+                ps.setLong(7, 1L);
+                ps.executeUpdate();
+            }
+        }
+    }
+
+    private static boolean scheduledRowExists(Long taskId) {
+        try (var conn = play.db.DB.getDataSource().getConnection()) {
+            conn.setAutoCommit(true);
+            try (var ps = conn.prepareStatement(
+                    "SELECT COUNT(*) FROM scheduled_tasks WHERE task_name = ? AND task_instance = ?")) {
+                ps.setString(1, TaskExecutionHandler.TASK_NAME);
+                ps.setString(2, taskId.toString());
+                try (var rs = ps.executeQuery()) {
+                    rs.next();
+                    return rs.getInt(1) > 0;
+                }
+            }
+        } catch (java.sql.SQLException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private static void deleteScheduledRow(Long taskId) throws Exception {
+        try (var conn = play.db.DB.getDataSource().getConnection()) {
+            conn.setAutoCommit(true);
+            try (var ps = conn.prepareStatement(
+                    "DELETE FROM scheduled_tasks WHERE task_name = ? AND task_instance = ?")) {
+                ps.setString(1, TaskExecutionHandler.TASK_NAME);
+                ps.setString(2, taskId.toString());
+                ps.executeUpdate();
+            }
+        }
+    }
+
     /**
      * scheduleIfNotExists, not schedule: a one-shot paused and resumed before
      * its fire time still holds its row, and re-arming must leave that row's
@@ -1002,6 +1164,9 @@ class TaskExecutionHandlerTest extends UnitTest {
         final List<ScheduleCall> schedules = new ArrayList<>();
         final List<ScheduleCall> scheduleIfNotExists = new ArrayList<>();
         final List<TaskInstanceId> cancels = new ArrayList<>();
+        final List<TaskInstanceId> reschedules = new ArrayList<>();
+        /** Runs with the instance id before a scheduleIfNotExists is recorded. */
+        java.util.function.Consumer<String> beforeScheduleIfNotExists = _ -> { };
         final List<String> scheduledIds = new ArrayList<>();
         boolean throwOnSchedule = false;
         /** What scheduleIfNotExists reports: true = no row existed, so it armed one. */
@@ -1027,10 +1192,16 @@ class TaskExecutionHandlerTest extends UnitTest {
             if ("scheduleIfNotExists".equals(name) && args != null && args.length == 2
                     && args[0] instanceof TaskInstance<?> inst
                     && args[1] instanceof Instant when) {
+                beforeScheduleIfNotExists.accept(inst.getId());
                 scheduleIfNotExists.add(new ScheduleCall(inst, when));
                 // schedules means "created": production schedules through this method now.
                 if (scheduleIfNotExistsReturns) schedules.add(new ScheduleCall(inst, when));
                 return scheduleIfNotExistsReturns;
+            }
+            if ("reschedule".equals(name) && args != null && args.length == 2
+                    && args[0] instanceof TaskInstanceId id && args[1] instanceof Instant) {
+                reschedules.add(id);
+                return false;
             }
             if ("cancel".equals(name) && args != null && args.length == 1
                     && args[0] instanceof TaskInstanceId id) {

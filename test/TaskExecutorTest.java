@@ -295,6 +295,44 @@ class TaskExecutorTest extends UnitTest {
                 "leaveRunning flips a still-RUNNING task to the target state");
     }
 
+    /**
+     * JCLAW-1515: opening the run flips the status alone. A full-row save from an entity loaded
+     * before a PATCH committed would write the PATCH's old description and schedule back.
+     */
+    @Test
+    void openingARunKeepsAnEditCommittedAfterTheTaskWasLoaded() throws Exception {
+        var agent = createAgent("open-run-agent", "p", "m");
+        var task = persistTask(agent, "recurring", "Old prompt.", Task.Type.CRON);
+        task.cronExpression = "0 0 4 * * *";
+        task.status = Task.Status.ACTIVE;
+        task.save();
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+
+        var open = TaskExecutor.class.getDeclaredMethod("openRunningTaskRun", Task.class);
+        open.setAccessible(true);
+        onVirtualThread(() -> Tx.run(() -> {
+            var loaded = (Task) Task.findById(task.id);
+            try {
+                onVirtualThread(() -> Tx.run(() -> {
+                    var edit = (Task) Task.findById(task.id);
+                    edit.description = "New prompt.";
+                    edit.cronExpression = "0 30 5 * * *";
+                    edit.save();
+                }));
+                open.invoke(null, loaded);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        }));
+        JPA.em().clear();
+
+        var after = (Task) Task.findById(task.id);
+        assertEquals("New prompt.", after.description, "opening the run wrote the old description back");
+        assertEquals("0 30 5 * * *", after.cronExpression, "opening the run wrote the old schedule back");
+        assertEquals(Task.Status.RUNNING, after.status, "opening the run must still flip the task to RUNNING");
+    }
+
     // === Auto-delivery wire (Bug 1 fix) ===
 
     @Test

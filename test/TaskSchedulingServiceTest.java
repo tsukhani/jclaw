@@ -8,6 +8,7 @@ import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.EventLogger;
@@ -23,6 +24,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Unit tests for {@link TaskSchedulingService}'s call shape, using a
@@ -73,7 +75,7 @@ class TaskSchedulingServiceTest extends UnitTest {
         var future = Instant.now().plus(Duration.ofHours(1));
         var task = persistTask(Task.Type.SCHEDULED, future, null);
 
-        TaskSchedulingService.register(task);
+        outsideTx(() -> TaskSchedulingService.register(task));
 
         assertEquals(1, stub.schedules.size(), "expected one schedule call");
         var s = stub.schedules.getFirst();
@@ -86,7 +88,7 @@ class TaskSchedulingServiceTest extends UnitTest {
     void registerSchedulesAnImmediateTaskAtTheClocksInstant() {
         var task = persistTask(Task.Type.IMMEDIATE, null, null);
 
-        AppClock.runWith(FIXED, () -> TaskSchedulingService.register(task));
+        outsideTx(() -> AppClock.runWith(FIXED, () -> TaskSchedulingService.register(task)));
 
         assertEquals(1, stub.schedules.size());
         assertEquals(FIXED_NOW, stub.schedules.getFirst().when);
@@ -98,7 +100,7 @@ class TaskSchedulingServiceTest extends UnitTest {
         task.status = Task.Status.CANCELLED;
         task.save();
 
-        TaskSchedulingService.register(task);
+        outsideTx(() -> TaskSchedulingService.register(task));
         assertTrue(stub.schedules.isEmpty(),
                 "register() on a CANCELLED Task should be a no-op");
     }
@@ -107,7 +109,7 @@ class TaskSchedulingServiceTest extends UnitTest {
     void registerSkipsCronWithBlankExpression() {
         var task = persistTask(Task.Type.CRON, null, "");
 
-        TaskSchedulingService.register(task);
+        outsideTx(() -> TaskSchedulingService.register(task));
         assertTrue(stub.schedules.isEmpty(),
                 "CRON Task with blank cronExpression should not register");
     }
@@ -141,7 +143,7 @@ class TaskSchedulingServiceTest extends UnitTest {
         var future = Instant.now().plus(Duration.ofHours(2));
         var task = persistTask(Task.Type.SCHEDULED, future, null);
 
-        TaskSchedulingService.update(task);
+        outsideTx(() -> TaskSchedulingService.update(task));
 
         assertEquals(1, stub.cancels.size(), "update() must cancel first");
         assertEquals(1, stub.schedules.size(), "update() must then schedule");
@@ -153,7 +155,7 @@ class TaskSchedulingServiceTest extends UnitTest {
     void runNowReschedulesExistingRow() {
         stub.rescheduleReturns = true;
 
-        AppClock.runWith(FIXED, () -> TaskSchedulingService.runNow(123L));
+        outsideTx(() -> AppClock.runWith(FIXED, () -> TaskSchedulingService.runNow(123L)));
 
         assertEquals(1, stub.reschedules.size());
         var r = stub.reschedules.getFirst();
@@ -167,7 +169,7 @@ class TaskSchedulingServiceTest extends UnitTest {
         stub.rescheduleReturns = false;
         var task = persistTask(Task.Type.IMMEDIATE, null, null);
 
-        TaskSchedulingService.runNow(task.id);
+        outsideTx(() -> TaskSchedulingService.runNow(task.id));
 
         assertEquals(1, stub.reschedules.size(), "reschedule attempted first");
         assertEquals(1, stub.schedules.size(), "schedule fired as fallback");
@@ -177,13 +179,39 @@ class TaskSchedulingServiceTest extends UnitTest {
     @Test
     void runNowOnUnknownTaskIdIsANoopBeyondReschedule() {
         stub.rescheduleReturns = false;
-        TaskSchedulingService.runNow(999_999L);
+        outsideTx(() -> TaskSchedulingService.runNow(999_999L));
 
         assertEquals(1, stub.reschedules.size());
         assertTrue(stub.schedules.isEmpty(), "no fallback schedule when Task missing");
     }
 
     // === Helpers ===
+
+    /**
+     * Run {@code call} with no transaction, as TaskTool does: the fixture rows commit first, and the
+     * scheduler call must land before {@code call} returns rather than wait for a commit.
+     */
+    private static void outsideTx(Runnable call) {
+        JPA.em().getTransaction().commit();
+        var failure = new AtomicReference<Throwable>();
+        try {
+            Thread.ofVirtual().start(() -> {
+                try {
+                    assertFalse(JPA.isInsideTransaction(), "the call must run outside a transaction");
+                    call.run();
+                } catch (Throwable t) {
+                    failure.set(t);
+                }
+            }).join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        } finally {
+            JPA.em().getTransaction().begin();
+        }
+        if (failure.get() instanceof Error e) throw e;
+        if (failure.get() != null) throw new IllegalStateException(failure.get());
+    }
 
     private Agent persistAgent() {
         var a = new Agent();
@@ -202,7 +230,8 @@ class TaskSchedulingServiceTest extends UnitTest {
         var task = persistTask(Task.Type.SCHEDULED, Instant.now().plus(Duration.ofHours(1)), null);
         stub.scheduleIfNotExistsReturns = false; // a row already holds this task
 
-        var logged = EventLogger.captureForTest(() -> TaskSchedulingService.register(task));
+        var logged = new ArrayList<EventLogger.Captured>();
+        outsideTx(() -> logged.addAll(EventLogger.captureForTest(() -> TaskSchedulingService.register(task))));
 
         assertTrue(stub.schedules.isEmpty(), "nothing was created, so nothing is recorded");
         // Paired: this message proves the log is being read, so the zero below is a real zero.
@@ -216,7 +245,8 @@ class TaskSchedulingServiceTest extends UnitTest {
     void registerLogsScheduledWhenItCreatedTheRow() {
         var task = persistTask(Task.Type.SCHEDULED, Instant.now().plus(Duration.ofHours(1)), null);
 
-        var logged = EventLogger.captureForTest(() -> TaskSchedulingService.register(task));
+        var logged = new ArrayList<EventLogger.Captured>();
+        outsideTx(() -> logged.addAll(EventLogger.captureForTest(() -> TaskSchedulingService.register(task))));
 
         assertEquals(1L, loggedLike(logged, "Scheduled Task '" + task.name + "'"));
         assertEquals(0L, loggedLike(logged, "Task '" + task.name + "' already has a pending fire"));

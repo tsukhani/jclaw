@@ -750,7 +750,8 @@ public class ApiTasksController extends Controller {
             // LOST rows are picked=true with a stale heartbeat — the regular
             // cancel API refuses to touch them. forceRemoveStaleRow deletes
             // the row directly so the subsequent register inserts a clean
-            // new fire row without tripping the PK constraint.
+            // new fire row without tripping the PK constraint. Both run after the
+            // commit, in this order.
             TaskSchedulingService.forceRemoveStaleRow(task.id);
         }
         TaskSchedulingService.register(task);

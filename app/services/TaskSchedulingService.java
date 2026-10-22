@@ -106,12 +106,19 @@ public final class TaskSchedulingService {
      * shouldn't pass those, but the guard keeps the service tolerant
      * of imports / retries that accidentally call register on a
      * non-fireable Task.
+     *
+     * <p>Arms after the ambient transaction commits, or at once outside one: an
+     * immediate fire reads the committed row on db-scheduler's own connection.
      */
     public static void register(Task task) {
         Objects.requireNonNull(task, "task");
         if (task.id == null) {
             throw new IllegalArgumentException("task must be persisted before registration");
         }
+        Tx.afterCommit(() -> arm(task));
+    }
+
+    private static void arm(Task task) {
         if (isTerminal(task.status)) {
             EventLogger.info("task",
                     task.agent != null ? task.agent.name : null, null,
@@ -130,15 +137,17 @@ public final class TaskSchedulingService {
      * based on the Task's current shape. Canceling-then-registering
      * keeps the code path identical to first-time registration —
      * cheaper to maintain than a partial-update path that has to
-     * detect whether the schedule changed.
+     * detect whether the schedule changed. Deferred like {@link #register}.
      */
     public static void update(Task task) {
         Objects.requireNonNull(task, "task");
         if (task.id == null) {
             throw new IllegalArgumentException("task must be persisted before update");
         }
-        cancelSchedulerRow(task.id);
-        register(task);
+        Tx.afterCommit(() -> {
+            cancelSchedulerRow(task.id);
+            arm(task);
+        });
     }
 
     /**
@@ -165,10 +174,17 @@ public final class TaskSchedulingService {
      * have already flipped status back to PENDING — otherwise
      * {@link services.TaskExecutionHandler}'s CANCELED-skip swallows
      * the fire body at pick-up time. The API's {@code /run} endpoint
-     * is the canonical caller and does that revive itself.
+     * is the canonical caller and does that revive itself. Deferred like
+     * {@link #register}, or the fire reads the status from before that revive.
      */
     public static void runNow(Long taskId) {
         Objects.requireNonNull(taskId, PARAM_TASK_ID);
+        // Read before deferring, while the ambient session is still inside its transaction.
+        Task task = Tx.run(() -> (Task) Task.findById(taskId));
+        Tx.afterCommit(() -> fireNow(taskId, task));
+    }
+
+    private static void fireNow(Long taskId, @Nullable Task task) {
         SchedulerClient client = client();
         if (client == null) return;
         var instanceId = TaskInstanceId.of(TaskExecutionHandler.TASK_NAME, taskId.toString());
@@ -194,7 +210,6 @@ public final class TaskSchedulingService {
                             .formatted(taskId));
             return;
         }
-        Task task = Tx.run(() -> (Task) Task.findById(taskId));
         if (task == null) {
             EventLogger.warn("task", null, null,
                     "Task id %d run-now: Task row not found; nothing to schedule"
@@ -418,9 +433,17 @@ public final class TaskSchedulingService {
      * <p>Direct JDBC delete is intentional: it avoids re-implementing
      * the version-aware optimistic-lock branch of db-scheduler's
      * repository, which we cannot reach through the public surface.
+     *
+     * <p>Deferred like {@link #register}; a {@link #register} the same
+     * transaction calls afterwards runs after it, in registration order.
      */
     public static void forceRemoveStaleRow(Long taskId) {
         Objects.requireNonNull(taskId, PARAM_TASK_ID);
+        Tx.afterCommit(() -> removeStaleRowNow(taskId));
+    }
+
+    /** {@link #forceRemoveStaleRow} at once, for a fire's completion that re-inserts the row next. */
+    static void removeStaleRowNow(Long taskId) {
         var ds = DB.getDataSource();
         if (ds == null) return;
         var sql = "DELETE FROM scheduled_tasks WHERE task_name = ? AND task_instance = ?";

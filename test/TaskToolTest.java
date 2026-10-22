@@ -69,6 +69,7 @@ class TaskToolTest extends UnitTest {
 
     @AfterEach
     void tearDown() {
+        DeferredSchedulerCalls.discard();
         services.TaskSchedulingServiceTestHooks.reset();
         EventLogger.flush();
     }
@@ -140,6 +141,7 @@ class TaskToolTest extends UnitTest {
         var result = execute("""
                 {"action":"createTask","name":"now-task","description":"do it",
                  "schedule":"now"}""");
+        commitAndReopen();
         assertTrue(result.contains("immediate execution"),
                 "IMMEDIATE branch reply; got: " + result);
 
@@ -389,6 +391,7 @@ class TaskToolTest extends UnitTest {
 
         var reply = execute("""
                 {"action":"runNow","name":"runme"}""");
+        commitAndReopen();
         assertTrue(reply.contains("run-now triggered"),
                 "runNow happy path; got: " + reply);
         // reschedule() called against the stub with the matching Task id.
@@ -624,6 +627,7 @@ class TaskToolTest extends UnitTest {
         // the correct task id when the schedule changes.
         tool.execute("""
                 {"action":"createTask","name":"u-rearm","schedule":"every 1h"}""", agent);
+        commitAndReopen();
         var taskId = findTaskByName("u-rearm").id;
         stub.cancels.clear();
         stub.schedules.clear();
@@ -631,6 +635,7 @@ class TaskToolTest extends UnitTest {
 
         var result = tool.execute("""
                 {"action":"updateTask","name":"u-rearm","schedule":"every 2h"}""", agent);
+        commitAndReopen();
         assertTrue(result.contains("updated"), result);
 
         // update() cancels the existing scheduler row then registers a fresh one.
@@ -645,12 +650,14 @@ class TaskToolTest extends UnitTest {
         // A non-schedule patch must NOT touch the scheduler (scheduleChanged=false).
         tool.execute("""
                 {"action":"createTask","name":"u-no-rearm","schedule":"every 1h"}""", agent);
+        commitAndReopen();
         stub.cancels.clear();
         stub.schedules.clear();
         stub.reschedules.clear();
 
         var result = tool.execute("""
                 {"action":"updateTask","name":"u-no-rearm","description":"new desc"}""", agent);
+        commitAndReopen();
         assertTrue(result.contains("updated"), result);
         assertEquals(0, stub.cancels.size(), "description-only update must not re-arm the scheduler");
         assertEquals(0, stub.schedules.size(), "description-only update must not re-arm the scheduler");
@@ -939,6 +946,12 @@ class TaskToolTest extends UnitTest {
                     Task.find("name = ?1 ORDER BY id DESC", name).fetch();
             return list.isEmpty() ? null : (Task) list.getFirst();
         });
+    }
+
+    /** The test's transaction wraps the tool, which defers its scheduler calls to the commit (JCLAW-1515). */
+    private static void commitAndReopen() {
+        play.db.jpa.JPA.em().getTransaction().commit();
+        play.db.jpa.JPA.em().getTransaction().begin();
     }
 
     private long countTasksWithName(String name) {
