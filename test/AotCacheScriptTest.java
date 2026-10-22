@@ -12,10 +12,6 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * Runs jclaw.sh's AOT cache functions against stub {@code java} and {@code play} executables, so
  * the gate, the fingerprint and the training decisions are tested as written rather than restated.
@@ -91,7 +87,7 @@ class AotCacheScriptTest extends UnitTest {
             try {
                 held.bind(new java.net.InetSocketAddress("127.0.0.1", 10000));
                 holding = true;
-            } catch (java.io.IOException alreadyTaken) {
+            } catch (java.io.IOException _) {
                 holding = false;
             }
             prepare(home, Map.of(), "--http.port=9000 -Xmx2g -Dhttps.port=9443");

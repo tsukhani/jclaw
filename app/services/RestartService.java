@@ -270,7 +270,7 @@ public final class RestartService {
             if (line == null) return new AotCacheState(enabled, null, null);
             if (line.length() > AOT_STATUS_MAX_CHARS) line = line.substring(0, AOT_STATUS_MAX_CHARS);
             return new AotCacheState(enabled, line, Files.getLastModifiedTime(status).toInstant());
-        } catch (IOException e) {
+        } catch (IOException _) {
             return new AotCacheState(enabled, null, null);
         }
     }

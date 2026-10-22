@@ -110,7 +110,7 @@ class ApiSystemControllerTest extends FunctionalTest {
     }
 
     @Test
-    void theAotCacheSwitchIsOnUntilSwitchedOffAndOnlyEverTouchesTheTestDirectory() throws Exception {
+    void theAotCacheSwitchIsOnUntilSwitchedOffAndOnlyEverTouchesTheTestDirectory() {
         // The autotest server shares the checkout's data/, which the live instance's jclaw.sh reads.
         assertEquals("aot-test", RestartService.aotDir().getFileName().toString());
         login();

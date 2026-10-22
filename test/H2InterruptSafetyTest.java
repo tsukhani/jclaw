@@ -11,10 +11,6 @@ import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.util.regex.Pattern;
 
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-
 /**
  * JF-15: a thread interrupted during a cold read must not close the file database for every other
  * thread. The suite runs H2 in memory, where no file is involved, so this opens a temporary file
@@ -60,7 +56,7 @@ class H2InterruptSafetyTest extends UnitTest {
                 Thread.currentThread().interrupt();
                 try (var s = held.createStatement(); var rs = s.executeQuery("SELECT SUM(LENGTH(payload)) FROM t")) {
                     rs.next();
-                } catch (SQLException ignored) {
+                } catch (SQLException _) {
                     // Whether the read itself fails is not the point: what matters is the database afterwards.
                 }
             });

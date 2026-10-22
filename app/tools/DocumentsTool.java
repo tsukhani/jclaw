@@ -12,7 +12,7 @@ import org.apache.tika.metadata.Metadata;
 import org.apache.tika.parser.AutoDetectParser;
 import org.apache.tika.parser.ParseContext;
 import org.apache.tika.parser.ocr.TesseractOCRConfig;
-import org.apache.tika.parser.pdf.OcrConfig;
+import org.apache.tika.parser.pages.TextPolicy;
 import org.apache.tika.parser.pdf.PDFParserConfig;
 import org.apache.tika.sax.BodyContentHandler;
 import org.jspecify.annotations.Nullable;
@@ -484,12 +484,10 @@ public class DocumentsTool implements ToolRegistry.Tool {
         ocr.setSkipOcr(!ocrActive);
         ctx.set(TesseractOCRConfig.class, ocr);
 
-        var pdfOcr = new OcrConfig();
-        pdfOcr.setStrategy(ocrActive
-                ? parsePdfStrategy(configOrDefault(KEY_OCR_PDF_STRATEGY, "auto"))
-                : OcrConfig.Strategy.NO_OCR);
         var pdf = new PDFParserConfig();
-        pdf.setOcr(pdfOcr);
+        pdf.pages().setText(ocrActive
+                ? parsePdfStrategy(configOrDefault(KEY_OCR_PDF_STRATEGY, "auto"))
+                : TextPolicy.EXTRACT);
         pdf.setExtractInlineImages(ocrActive);
         ctx.set(PDFParserConfig.class, pdf);
 
@@ -518,12 +516,13 @@ public class DocumentsTool implements ToolRegistry.Tool {
         }
     }
 
-    private static OcrConfig.Strategy parsePdfStrategy(String s) {
+    // The saved values are the deprecated OcrConfig.Strategy names; renaming them would orphan stored settings.
+    private static TextPolicy parsePdfStrategy(String s) {
         return switch (s.toLowerCase(Locale.ROOT)) {
-            case "no_ocr" -> OcrConfig.Strategy.NO_OCR;
-            case "ocr_only" -> OcrConfig.Strategy.OCR_ONLY;
-            case "ocr_and_text_extraction" -> OcrConfig.Strategy.OCR_AND_TEXT_EXTRACTION;
-            default -> OcrConfig.Strategy.AUTO;
+            case "no_ocr" -> TextPolicy.EXTRACT;
+            case "ocr_only" -> TextPolicy.OCR;
+            case "ocr_and_text_extraction" -> TextPolicy.EXTRACT_AND_OCR;
+            default -> TextPolicy.AUTO;
         };
     }
 

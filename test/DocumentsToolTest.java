@@ -178,7 +178,7 @@ class DocumentsToolTest extends UnitTest {
         // still hitting Tesseract on scanned PDFs. Tika's AutoDetectParser
         // service-loads TesseractOCRParser by default whenever the binary is
         // on PATH, so an empty ParseContext is NOT sufficient — TesseractOCRConfig
-        // skipOcr=true plus PDFParserConfig OCR_STRATEGY.NO_OCR are the load-
+        // skipOcr=true plus PDFParserConfig's TextPolicy.EXTRACT are the load-
         // bearing settings.
         //
         // Contract: when the toggle is off and a document yields no extractable
