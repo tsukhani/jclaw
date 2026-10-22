@@ -336,11 +336,12 @@ dependencies {
 
     // JCLAW-34: OpenTelemetry. The SDK runs in-process (traces + metrics over OTLP) so
     // the collector endpoint can change without a restart; the Java agent is optional
-    // and attaches through PF-92's javaagent.path instead. Both BOMs so every artifact
-    // moves together. The OTLP sender's OkHttp is okhttp-jvm 5.x, the same artifact
+    // and attaches through PF-92's javaagent.path instead. Only the instrumentation BOM:
+    // it imports the core and -alpha BOMs it was built against, so a core BOM pinned
+    // beside it can run ahead of the api-incubator its -alpha one pins (core 1.67 broke
+    // OtelRuntime.init). The OTLP sender's OkHttp is okhttp-jvm 5.x, the same artifact
     // family pinned below — no exclusion needed, unlike the telegrambots graph.
-    implementation(platform("io.opentelemetry:opentelemetry-bom:1.66.0"))
-    implementation(platform("io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha:2.31.1-alpha"))
+    implementation(platform("io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha:2.32.0-alpha"))
     implementation("io.opentelemetry:opentelemetry-api")
     implementation("io.opentelemetry:opentelemetry-sdk")
     implementation("io.opentelemetry:opentelemetry-exporter-otlp")

@@ -111,14 +111,12 @@
       matchPackageNames: ["typescript"],
       allowedVersions: "<7",
     },
-    // Hold the core OTel BOM at the core version the instrumentation BOM imports. Its own
-    // -bom-alpha pins opentelemetry-api-incubator, so a core minor run ahead of it mixed sdk 1.67
-    // with incubator 1.65.0-alpha: OtelRuntime.init died on a missing ConfigUtil, the autotest
-    // server answered 500 and the run left no test reports. Raise the cap to the core version
-    // the newest opentelemetry-instrumentation-bom-alpha pom imports, and bump both BOMs together.
+    // Renovate reads an -alpha version as unstable and never offered this BOM a new minor. It is
+    // the only OTel BOM build.gradle.kts imports and it brings the core BOM it was built against,
+    // so each update moves core and instrumentation as a matched pair.
     {
-      matchPackageNames: ["io.opentelemetry:opentelemetry-bom"],
-      allowedVersions: "<1.67.0",
+      matchPackageNames: ["io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha"],
+      ignoreUnstable: false,
     },
     // Keep h3 on the major @nuxt/test-utils serves registerEndpoint mocks with: the tests call
     // readBody, getQuery and setResponseStatus from the declared h3 on events test-utils' own h3
