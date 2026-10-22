@@ -111,6 +111,24 @@
       matchPackageNames: ["typescript"],
       allowedVersions: "<7",
     },
+    // Hold the core OTel BOM at the core version the instrumentation BOM imports. Its own
+    // -bom-alpha pins opentelemetry-api-incubator, so a core minor run ahead of it mixed sdk 1.67
+    // with incubator 1.65.0-alpha: OtelRuntime.init died on a missing ConfigUtil, the autotest
+    // server answered 500 and the run left no test reports. Raise the cap to the core version
+    // the newest opentelemetry-instrumentation-bom-alpha pom imports, and bump both BOMs together.
+    {
+      matchPackageNames: ["io.opentelemetry:opentelemetry-bom"],
+      allowedVersions: "<1.67.0",
+    },
+    // Keep h3 on the major @nuxt/test-utils serves registerEndpoint mocks with: the tests call
+    // readBody, getQuery and setResponseStatus from the declared h3 on events test-utils' own h3
+    // built, and h3 2 on h3 1 events failed 438 tests while lint and typecheck passed. Lift once
+    // `require.resolve('h3/package.json', {paths: [<@nuxt/test-utils dir>]})` is 2.x.
+    {
+      matchFileNames: ["frontend/package.json"],
+      matchPackageNames: ["h3"],
+      allowedVersions: "<2",
+    },
     {
       groupName: "eslint",
       matchManagers: ["npm"],
