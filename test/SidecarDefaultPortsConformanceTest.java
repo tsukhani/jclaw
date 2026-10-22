@@ -10,6 +10,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -22,24 +23,41 @@ import java.util.stream.Stream;
  */
 class SidecarDefaultPortsConformanceTest extends UnitTest {
 
+    private static final Pattern DAEMON = Pattern.compile("new LocalSidecarDaemon\\(");
     private static final Pattern DAEMON_CONFIG = Pattern.compile(
             "new LocalSidecarDaemon\\.Config\\(\\s*\"(sidecar/[^\"]+)\"\\s*,\\s*\"[^\"]+\"\\s*,\\s*[^,]+,\\s*(\\d+)");
 
     // Seven managers exist today; a regex that silently stopped matching must not pass by finding none.
-    private static final int KNOWN_MANAGERS = 7;
+    static final int KNOWN_MANAGERS = 7;
+
+    /** The source of each file in {@code app/} that constructs a {@code LocalSidecarDaemon}, by path. */
+    static Map<Path, String> managerSources() throws IOException {
+        var sources = new TreeMap<Path, String>();
+        try (Stream<Path> files = Files.walk(Path.of(Play.applicationPath.getAbsolutePath(), "app"))) {
+            for (var file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".java"))::iterator) {
+                var source = Files.readString(file);
+                if (DAEMON.matcher(source).find()) sources.put(file, source);
+            }
+        }
+        return sources;
+    }
 
     @Test
     void everySidecarManagerDeclaresADistinctDefaultPort() throws IOException {
         var root = Path.of(Play.applicationPath.getAbsolutePath());
         Map<String, Integer> ports = new LinkedHashMap<>();
-        try (Stream<Path> files = Files.walk(root.resolve("app/services"))) {
-            for (var file : (Iterable<Path>) files.filter(p -> p.toString().endsWith(".java"))::iterator) {
-                var m = DAEMON_CONFIG.matcher(Files.readString(file));
-                while (m.find()) {
-                    ports.put(m.group(1), Integer.parseInt(m.group(2)));
-                }
+        var unreadable = new ArrayList<String>();
+        for (var source : managerSources().entrySet()) {
+            var m = DAEMON_CONFIG.matcher(source.getValue());
+            long read = 0;
+            while (m.find()) {
+                ports.put(m.group(1), Integer.parseInt(m.group(2)));
+                read++;
             }
+            // A port passed as a constant is not read, and the clash check below would skip that sidecar.
+            if (read < DAEMON.matcher(source.getValue()).results().count()) unreadable.add(root.relativize(source.getKey()).toString());
         }
+        assertEquals(List.of(), unreadable, () -> "no literal default port to check in " + unreadable);
         assertTrue(ports.size() >= KNOWN_MANAGERS, () -> "scan found only " + ports);
         for (var dir : ports.keySet()) {
             assertTrue(Files.isDirectory(root.resolve(dir)), () -> dir + " has no sidecar directory");

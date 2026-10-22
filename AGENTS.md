@@ -829,7 +829,9 @@ Keys are read live under each manager's prefix — `<prefix>.port`, `.timeoutSec
 model needs one — and each sidecar's README documents its own. Default ports: image 9527,
 video 9528, asr 9529, diarize 9530, tts 9531, stealth 9532, fetch 9533.
 `SidecarDefaultPortsConformanceTest` fails on any two managers sharing one: tts and fetch both
-compiled in 9531 until JCLAW-1172, and whichever spawned second died on the bind.
+compiled in 9531 until JCLAW-1172, and whichever spawned second died on the bind. It also fails on a
+manager whose port is not a literal number, since it cannot check that one. `ShutdownJob` stops the
+managers from a list kept by hand, and `SidecarShutdownConformanceTest` fails on one missing from it.
 
 Two supporting pieces. `services.sidecar.SidecarHttpClient` is the shared skeleton for the
 inference clients (ASR, diarization, TTS): each of those sidecars handles one inference at a
