@@ -80,6 +80,17 @@ class SecretRedactorTest extends UnitTest {
             "-----BEGIN PRIVATE KEY-----", "12345678:", "\\\\\\\\", "password=\"", "password: \"a ", "password=a\n", "password=''",
             "token: ", "\"x\":\"y\",", "'", "x'\\''", "X-Api-Key: a\\\"", "credentials=", "credentials\":"})
     void aTextThatRepeatsATriggerIsScannedInLinearTime(String trigger) {
+        assertScannedInLinearTime(trigger);
+    }
+
+    @Test
+    void aNameFollowedByMoreBackslashesThanTheLimitIsScannedInLinearTime() {
+        // 33 is one past SecretRedactor.MAX_DEPTH, where the fail-closed rule takes over (JF-18).
+        assertScannedInLinearTime("password" + "\\".repeat(33));
+        assertScannedInLinearTime("token" + "\\".repeat(40) + "u003d");
+    }
+
+    private static void assertScannedInLinearTime(String trigger) {
         // The text is model-controlled. Bare, and again inside one long quoted string, where every match
         // shares one far closing quote: a scan that restarts from each match is quadratic, minutes at this size.
         for (var open : List.of("", "\"", "'", "{\"command\":\"curl \\\"")) {
@@ -323,6 +334,18 @@ class SecretRedactorTest extends UnitTest {
     }
 
     @Test
+    void pastTheDepthLimitTheRestOfTheLineIsMasked() {
+        // Six levels put 63 backslashes before the inner quotes; no quote there can be read, so the redactor fails closed (JF-18).
+        for (var levels : List.of(6, 7)) {
+            var text = nested(levels, "{\"password\":\"correct horse battery\",\"next\":1}");
+            assertEquals(text.substring(0, text.indexOf("password") + "password".length()) + SecretRedactor.MASK + "\nnext line",
+                    SecretRedactor.redact(text + "\nnext line"));
+        }
+        var q = "\\".repeat(33) + "\"";
+        assertFalse(SecretRedactor.redact("{" + q + "password" + q + ":" + q + "s3cret" + q + "}").contains("s3cret"));
+    }
+
+    @Test
     void aHeaderWithNoQuotesIsMaskedToTheEndOfItsLine() {
         assertEquals("Request headers: Authorization: Bearer " + SecretRedactor.MASK + "\nnext line",
                 SecretRedactor.redact("Request headers: Authorization: Bearer abc.def-ghi_jkl012345\nnext line"));
@@ -378,7 +401,7 @@ class SecretRedactorTest extends UnitTest {
 
     @Test
     void aSecretIsMaskedInJsonNestedFiveLevelsDeep() {
-        // Five levels put 31 backslashes before the inner quotes; six (63) is past the 32 the redactor reads and leaks (JF-18).
+        // Five levels put 31 backslashes before the inner quotes, within the 32 the redactor reads.
         var inner = "{\"password\":\"%s\",\"next\":1}";
         assertEquals(nested(5, inner.formatted(SecretRedactor.MASK)), SecretRedactor.redact(nested(5, inner.formatted("s3cret"))));
         var atTheLimit = "{%1$spassword%1$s:%1$s%2$s%1$s,%1$snext%1$s:1}";

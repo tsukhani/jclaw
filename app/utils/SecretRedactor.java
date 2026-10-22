@@ -80,6 +80,14 @@ public final class SecretRedactor {
             + "(?:api[-_]?key|access[-_]?token|auth[-_]?token|token|secret|password|passwd|pass|pwd|auth|jwt|signature|sig|key)"
             + EQUALS), Bare.WORD, false);
 
+    /**
+     * A credential name followed by more backslashes than {@link #MAX_DEPTH}, as in JSON nested six levels or more: no
+     * quote there can be read, so the rest of the line is masked rather than the value left whole (JF-18).
+     */
+    private static final Named TOO_DEEP = new Named(Pattern.compile("(?i)(?:api[-_ ]?key|access[-_]?key|private[-_]?key"
+            + "|subscription[-_]?key|secret|password|passwd|passphrase|token|credentials?|authorization|cookie|jwt)"
+            + NAME_TAIL + "(?=\\\\{" + (MAX_DEPTH + 1) + "})"), Bare.LINE, false);
+
     /** X-Plex-Token: ..., bot_token=..., GITHUB_TOKEN_2=...; {@link #namesACredential} drops counts and cursors. */
     private static final Named TOKEN = new Named(Pattern.compile("(?i)token(?<tail>" + NAME_TAIL + ")" + SEPARATOR), Bare.WORD, true);
     private static final Pattern COUNT_TAIL = Pattern.compile(
@@ -118,6 +126,7 @@ public final class SecretRedactor {
         }
         out = maskAfter(out, TOKEN);
         out = maskAfter(out, CONFIG_WRITE);
+        out = maskAfter(out, TOO_DEEP);
         return TOKEN_SHAPE.matcher(out).replaceAll(Matcher.quoteReplacement(MASK));
     }
 
@@ -164,6 +173,7 @@ public final class SecretRedactor {
 
     /** The value that follows the name {@code m} matched. {@code quotes} is read forward, so call with rising matches. */
     private static Value valueAfter(String text, Named rule, MatchResult m, LineQuotes quotes) {
+        if (rule == TOO_DEEP) return new Value(m.end(), endOfLine(text, m.end()), "");
         var own = quoteAt(text, m.end());
         int from = own == null ? m.end() : m.end() + own.depth() + own.token().length();
         var quote = own == null ? quotes.around(m.end()) : own;
