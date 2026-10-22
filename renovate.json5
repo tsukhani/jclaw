@@ -128,6 +128,13 @@
       matchPackageNames: ["h3"],
       allowedVersions: "<2",
     },
+    // Keep POI on the version Tika resolves: DocumentWriter's poi-ooxml-full must match Tika's poi and
+    // poi-ooxml (JCLAW-1142), and Tika 4.1.0 and its 4.2.0 line pin POI 5.5.1, so a POI 6 bump alone
+    // splits the pair. Lift once the latest tika-parent pom's poi.version is 6.x, and bump with it.
+    {
+      matchPackageNames: ["org.apache.poi:*"],
+      allowedVersions: "<6",
+    },
     {
       groupName: "eslint",
       matchManagers: ["npm"],
