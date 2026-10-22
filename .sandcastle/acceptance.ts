@@ -1,6 +1,7 @@
 // Acceptance tests first (JF-17): for a story with acceptance criteria the factory commits one failing test per
 // criterion and stops for the operator to approve them before any code is written, because the agent that reads a
 // criterion would otherwise also write the test that judges its reading.
+import { autoMerges } from "./board.ts";
 import type { Snapshot } from "./tracker.ts";
 
 export const APPROVED = "afk-tests-approved";
@@ -14,8 +15,9 @@ export type TestsStage =
   | { stage: "rewrite"; feedback: string }
   | { stage: "approved" };
 
+// An afk-merge story builds and merges unattended, so it never stops for review.
 export const testsStage = (s: Snapshot, header: string): TestsStage => {
-  if (!/acceptance criteria/i.test(s.description)) return { stage: "skip" };
+  if (!/acceptance criteria/i.test(s.description) || autoMerges(s)) return { stage: "skip" };
   if (s.labels.includes(APPROVED)) return { stage: "approved" };
   let offer = -1;
   s.comments.forEach((c, i) => {
@@ -29,6 +31,8 @@ export const testsStage = (s: Snapshot, header: string): TestsStage => {
     .join("\n\n");
   return { stage: "rewrite", feedback };
 };
+
+export const testsOffered = (s: Snapshot, header: string): boolean => s.comments.some((c) => c.body.startsWith(testsOffer(header)));
 
 export const awaitingTestsApproval = (s: Snapshot, header: string): boolean =>
   s.comments

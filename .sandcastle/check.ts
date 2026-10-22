@@ -13,7 +13,7 @@ import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeV
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
-import { APPROVED, awaitingTestsApproval, onlyTests, testsStage } from "./acceptance.ts";
+import { APPROVED, awaitingTestsApproval, onlyTests, testsOffered, testsStage } from "./acceptance.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
   key: "T-1", summary: "", description: "", labels: [], blockedBy: [], updated: "", fetchedAt: "",
@@ -42,6 +42,10 @@ check("criteria, never offered: write the tests", stageOf(withCriteria([])), { s
 check("tests sent back with a comment: rewrite them", stageOf(withCriteria([], TESTS_OFFER, "assert the count too")), { stage: "rewrite", feedback: "Reviewer: assert the count too" });
 check("tests sent back with nothing said", stageOf(withCriteria([], TESTS_OFFER)), { stage: "rewrite", feedback: "" });
 check("approved tests: build against them", stageOf(withCriteria([APPROVED], TESTS_OFFER)), { stage: "approved" });
+check("an afk-merge story never stops for its tests", stageOf(withCriteria(["afk-merge"])), { stage: "skip" });
+check("nor does a story in an afk-merge epic", stageOf({ ...withCriteria([]), parent: { key: "E-1", summary: "", description: "", labels: ["afk-merge"] } }), { stage: "skip" });
+check("no-afk-merge opts back into the stop", stageOf({ ...withCriteria(["no-afk-merge"]), parent: { key: "E-1", summary: "", description: "", labels: ["afk-merge"] } }), { stage: "write" });
+check("tests offered earlier are built on once the story auto-merges", testsOffered(withCriteria(["afk-merge"], TESTS_OFFER), "h3. AFK factory"), true);
 check("the tests offer is not an implementation offer", feedbackOf(withCriteria([], TESTS_OFFER, "a note")), undefined);
 check("tests awaiting approval are never merged", awaitingTestsApproval(withCriteria([], TESTS_OFFER), "h3. AFK factory"), true);
 check("an implementation offered after the tests merges", awaitingTestsApproval(withCriteria([APPROVED], TESTS_OFFER, OFFER), "h3. AFK factory"), false);

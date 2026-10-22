@@ -167,9 +167,10 @@ criterion still goes green.
   branch before approving.
 - **Change them:** comment what to change and send it back without the label. The next round rewrites the tests and
   stops again. Sending it back with neither a comment nor the label blocks it.
-- `afk-merge` never merges a story whose tests await approval: there is nothing built to merge.
-
-A story with no acceptance criteria skips the stop, and a branch that already holds an implementation is built on.
+A story labelled `afk-merge`, or in an `afk-merge` epic without `no-afk-merge`, skips the stop and builds and merges
+unattended as before, and so does a story with no acceptance criteria. A story already waiting with its tests is
+never merged even if it gains `afk-merge` meanwhile; send it back and the next round builds on its tests and merges.
+A branch that already holds an implementation is built on.
 
 ### A whole epic
 

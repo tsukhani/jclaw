@@ -11,7 +11,7 @@ import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, facto
 import { githubTracker } from "./github.ts";
 import { jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
-import { APPROVED, approvedTestsNote, awaitingTestsApproval, onlyTests, testsOffer, testsStage } from "./acceptance.ts";
+import { APPROVED, approvedTestsNote, awaitingTestsApproval, onlyTests, testsOffer, testsOffered, testsStage } from "./acceptance.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
@@ -226,7 +226,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
       if (!onlyTests(changedOnBranch())) throw new Error("the test writer changed files outside test/, frontend/test/ and frontend/tests/");
       stoppedForTests = true;
       return undefined;
-    } else if (alreadyAhead > 0 && !(tests.stage === "approved" && onlyTests(changedOnBranch()))) {
+    } else if (alreadyAhead > 0 && !((tests.stage === "approved" || testsOffered(picked, tracker.header)) && onlyTests(changedOnBranch()))) {
       console.log(`[${key} implement] skipped: ${branch} is already ${alreadyAhead} commit(s) ahead of main`);
       builtDiff(key);
     } else if (mode.bmad) {
