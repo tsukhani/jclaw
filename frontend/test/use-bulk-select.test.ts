@@ -8,7 +8,6 @@ import { useConfirm } from '~/composables/useConfirm'
 type Row = { id: number }
 type Api = ReturnType<typeof useBulkSelect<Row>>
 
-/** Every request the endpoints answered, and whether the composable reported itself busy at the time. */
 const requests: { method: string, id: number, busy: boolean }[] = []
 
 /** Rows 1..3; the ids `refuse` names answer their DELETE with a 502 envelope naming the path. */
@@ -36,7 +35,6 @@ async function mount(refuse: (id: number) => boolean, opts: Partial<UseBulkSelec
   return api
 }
 
-/** {@link mount} in select mode with every row selected. */
 async function harness(refuse: (id: number) => boolean, onComplete?: () => void, opts: Partial<UseBulkSelectOptions<Row>> = {}) {
   const api = await mount(refuse, { onComplete, ...opts })
   api.enter()

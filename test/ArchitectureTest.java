@@ -261,8 +261,7 @@ class ArchitectureTest extends UnitTest {
 
     /**
      * Twelve of the thirteen top-level packages already form one dependency cycle, so a new cycle can only
-     * mean a new edge inside it. The edges on it are frozen in {@code archunit_store/top-level-package-cycles}:
-     * a new one fails, and one that is removed fails until its line is deleted from the store.
+     * mean a new edge inside it.
      */
     @Test
     void noNewDependencyJoinsTheTopLevelPackageCycle() {
@@ -292,7 +291,6 @@ class ArchitectureTest extends UnitTest {
         rule.check(APP_CLASSES);
     }
 
-    /** A dependency from a class in one top-level app package to a class in another. */
     record PackageEdge(String from, String to) implements Comparable<PackageEdge> {
         @Override
         public int compareTo(PackageEdge other) {
@@ -324,7 +322,6 @@ class ArchitectureTest extends UnitTest {
         return dot < 0 ? packageName : packageName.substring(0, dot);
     }
 
-    /** The edges whose target reaches back to their source. */
     private static Set<PackageEdge> cyclicEdges(Set<PackageEdge> edges) {
         var next = new HashMap<String, Set<String>>();
         edges.forEach(e -> next.computeIfAbsent(e.from(), k -> new HashSet<>()).add(e.to()));

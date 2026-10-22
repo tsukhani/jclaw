@@ -34,7 +34,6 @@ check("sent back with feedback", feedbackOf(ticket("old note", OFFER, "rename th
 check("feedback survives a later gave-up", feedbackOf(ticket(OFFER, GAVE_UP, "rename the helper")), "Reviewer: rename the helper");
 check("second rejection reads only the newest round", feedbackOf(ticket(OFFER, "first round", OFFER, "second round")), "Reviewer: second round");
 
-// Acceptance tests first: a story with criteria gets its tests written and approved before any code.
 const TESTS_OFFER = "h3. AFK factory: acceptance tests ready for review\nread them";
 const withCriteria = (labels: string[], ...bodies: string[]): Snapshot => ({ ...ticket(...bodies), description: "h3. Acceptance criteria\n* it works", labels });
 const stageOf = (t: Snapshot) => testsStage(t, "h3. AFK factory");

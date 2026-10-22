@@ -1,7 +1,5 @@
 // node --test bin/mutation.test.mjs
-// Fixtures are trimmed from real PIT 1.30.1 and Stryker 10.0.0 reports, including the two runs that
-// measured nothing: a PIT run that detected no mutant and Stryker's vitest runner under vitest 5,
-// which reported every mutant Survived without running a test.
+// Fixtures are trimmed from real PIT 1.30.1 and Stryker 10.0.0 reports, the two that measured nothing included.
 
 import { deepStrictEqual, strictEqual } from "node:assert";
 import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";

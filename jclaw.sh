@@ -4994,14 +4994,14 @@ do_diagnostics() {
     node "$SCRIPT_DIR/bin/diagnostics.mjs" ${DIAGNOSTICS_ARGS[@]+"${DIAGNOSTICS_ARGS[@]}"}
 }
 
-# PIT and Stryker over what changed since a git ref (JF-17). Exit 2 is a harness that measured nothing.
+# A missing node exits 2, the code bin/mutation.mjs gives a harness that could not run.
 do_mutation() {
     cd "$SCRIPT_DIR"
     ( check_node ) >&2 || exit 2
     node "$SCRIPT_DIR/bin/mutation.mjs" ${MUTATION_ARGS[@]+"${MUTATION_ARGS[@]}"}
 }
 
-# Advisory comment review (JF-17): claude -p scores added comments against AGENTS.md section 8.
+# A missing node or claude exits 2, the code bin/comment-review.mjs gives a review that could not run.
 do_comment_review() {
     cd "$SCRIPT_DIR"
     ( check_node ) >&2 || exit 2

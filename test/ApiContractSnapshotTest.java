@@ -20,9 +20,6 @@ import java.util.regex.Pattern;
  * that file and checks its hand-written ones against them ({@code frontend/types/api-contract.check.ts}), so renaming a
  * field of one of these Java types fails here, and once the file is regenerated, fails {@code pnpm typecheck} wherever
  * the SPA still reads the old name.
- *
- * <p>On a mismatch this writes {@code api-contract.openapi.received.json} beside the file. If the change is intended,
- * move it over the snapshot, then run {@code pnpm gen:api-contract} in {@code frontend/} and fix what typecheck reports.
  */
 class ApiContractSnapshotTest extends UnitTest {
 

@@ -36,7 +36,6 @@ public final class ApprovedText {
                 + (then.isEmpty() ? "" : ", then " + then));
     }
 
-    /** Pretty JSON with a stable order, followed by a newline. */
     public static String canonicalJson(JsonElement json) {
         return GsonHolder.GSON.newBuilder().setPrettyPrinting().create().toJson(sorted(json)) + "\n";
     }

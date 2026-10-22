@@ -1,6 +1,5 @@
 #!/usr/bin/env node
-// Mutation testing over what changed since a git ref: PIT on the changed app/ classes, Stryker on the
-// changed frontend/ files, each against the tests that name them. Scores are reported, never gated.
+// Mutation testing of what changed since a git ref; scores are reported, never gated (JF-17).
 // Exit codes and report paths: bin/README.md.
 
 import { spawnSync } from "node:child_process";

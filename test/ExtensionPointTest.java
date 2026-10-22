@@ -13,9 +13,8 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Extension points (JF-17): each seam meant to be pluggable takes a dummy through the seam alone, and the dummy is
- * discovered and gated like a real one. A tool and an LLM provider do. A channel and a sidecar cannot be added that
- * way: JF-19 and JF-20 record what each would need.
+ * Extension points (JF-17): a dummy added through a pluggable seam alone is discovered and gated like a real one. A
+ * channel and a sidecar cannot be added that way: JF-19 and JF-20 record what each would need.
  */
 class ExtensionPointTest extends UnitTest {
 

@@ -30,7 +30,6 @@ export const testsStage = (s: Snapshot, header: string): TestsStage => {
   return { stage: "rewrite", feedback };
 };
 
-// In review with its tests rather than its implementation: there is nothing to merge yet.
 export const awaitingTestsApproval = (s: Snapshot, header: string): boolean =>
   s.comments
     .filter((c) => c.body.startsWith(testsOffer(header)) || c.body.startsWith(`${header}: ready for review`))
@@ -39,7 +38,7 @@ export const awaitingTestsApproval = (s: Snapshot, header: string): boolean =>
 export const isTestPath = (path: string) =>
   /^(test|frontend\/test|frontend\/tests)\//.test(path) || /\.(test|spec)\.ts$/.test(path);
 
-// No implementation yet: the branch changes test files only. The operator may have edited the tests before approving.
+// Judged by path, not by commit: the operator may have edited the tests before approving.
 export const onlyTests = (changed: string[]) => changed.length > 0 && changed.every(isTestPath);
 
 export const approvedTestsNote = (stage: TestsStage): string =>

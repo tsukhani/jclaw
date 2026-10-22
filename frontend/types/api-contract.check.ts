@@ -1,7 +1,5 @@
-// Compile-time contract (JF-17): every field the hand-written API types read is one the Java response type sends, as
-// generated from the backend's OpenAPI spec into api-contract.generated.ts. `pnpm typecheck` fails on a field the SPA
-// reads that Java does not send, which is what renaming a Java field produces, and the error names it. A field only
-// Java sends is unread, so it passes. ApiContractSnapshotTest keeps the generated side current.
+// Compile-time contract (JF-17): every field the hand-written API types read must be one the Java response type sends
+// (api-contract.generated.ts, kept current by ApiContractSnapshotTest). A field only Java sends is unread, so it passes.
 import type { components } from './api-contract.generated'
 import type { Agent, Breaker, Conversation, Message, MessageAttachment, Prompt, ScrapeJob, Task } from './api'
 import type { Conversation as ParsedConversation, Message as ParsedMessage, MessageAttachment as ParsedMessageAttachment } from './schemas'
@@ -12,7 +10,6 @@ type KnownKeys<T> = keyof { [K in keyof T as string extends K ? never : number e
 type NotSent<Hand, Generated, ClientOnly = never> = Exclude<KnownKeys<Hand>, keyof Generated | ClientOnly>
 type Agrees<D extends never> = D
 
-// Chat UI state kept on the message object; never on the wire.
 type MessageUiState = '_contextTokens' | '_key' | '_quote' | '_route' | '_thinkingDurationMs' | '_thinkingStartedAt'
   | 'thinkingCollapsed' | 'toolCallsCollapsed'
 

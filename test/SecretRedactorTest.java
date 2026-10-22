@@ -366,7 +366,6 @@ class SecretRedactorTest extends UnitTest {
         assertEquals(atTheLimit.formatted(q, SecretRedactor.MASK), SecretRedactor.redact(atTheLimit.formatted(q, "s3cret")));
     }
 
-    /** {@code s} serialized as a JSON string value {@code levels} times over, the way logged arguments nest. */
     private static String nested(int levels, String s) {
         for (int i = 0; i < levels; i++) {
             s = "{\"args\":\"" + json(s) + "\"}";

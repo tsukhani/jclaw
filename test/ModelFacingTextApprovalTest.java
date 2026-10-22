@@ -18,11 +18,8 @@ import java.time.ZoneOffset;
 import java.util.Set;
 
 /**
- * Approval tests for the text the model reads (JF-17): the assembled system prompt, the tool definitions and the
- * {@code jclaw_api} discover surface, each compared with a checked-in file in {@code test/approved/}. A change to any
- * of them fails here and writes {@code <name>.received.txt} beside the approved file; read the diff, and if the model
- * should now read exactly that, move the received file over the approved one. Kept to these three, because a snapshot
- * approved without reading is noise.
+ * Approval tests for the text the model reads (JF-17): the system prompt, the tool definitions and the {@code jclaw_api}
+ * discover surface, against {@code test/approved/}. Kept to these three, because a snapshot approved without reading is noise.
  */
 class ModelFacingTextApprovalTest extends UnitTest {
 
@@ -53,7 +50,6 @@ class ModelFacingTextApprovalTest extends UnitTest {
     @Test
     void theSystemPromptIsApproved() throws IOException {
         var prompt = AppClock.callWith(FIXED, () -> SystemPromptAssembler.assemble(agent, null, Set.of(), "web").systemPrompt());
-        // The environment block names the machine and the run; everything else is the text itself.
         assertApproved("system-prompt", prompt
                 .replaceAll("- Agent ID: \\d+", "- Agent ID: <id>")
                 .replaceAll("- JClaw version: .*", "- JClaw version: <version>")
