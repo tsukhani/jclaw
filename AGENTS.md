@@ -1018,6 +1018,8 @@ for (var p : printers) { ... }
 
 **Javadoc is held to the same bar.** Stating a public contract — parameters, return, thrown conditions, threading — earns its length. Prose rationale *inside* a Javadoc block does not: it faces the same delete test as any other comment, and a private helper usually needs no Javadoc at all. A ten-line block explaining why a two-line method exists is the same defect as a ten-line inline comment.
 
+**`./jclaw.sh comment-review <ref>` scores the comments a change adds against this section** with `claude -p`: keep, cut or shorten, per comment. It advises and never gates (JF-17).
+
 **Provenance for a *change* belongs in the commit message, not the code.** "Why this must stay" is a comment; "why I added this" is history. Explaining the bug you just fixed, in the code that fixes it, duplicates the commit body and ages into noise within one refactor.
 
 **During refactors, comments move with the logic they explain.** A comment recording *why* a check exists is frequently the only surviving record of a bug that was actually hit, and deleting it as clutter is how the bug comes back.

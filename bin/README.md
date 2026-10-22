@@ -10,6 +10,8 @@ trees. Nothing here ships in a `play dist` tarball.
 | `mutation.mjs` | Mutation testing of what changed since a git ref — see below |
 | `mutation.test.mjs` | Its report and guard tests: `node --test bin/mutation.test.mjs` |
 | `mutation.init.gradle.kts` | Resolves PIT for `mutation.mjs` without adding it to the build |
+| `comment-review.mjs` | Advisory scoring of added comments against AGENTS.md section 8 — see below |
+| `comment-review.test.mjs` | Its diff-parsing tests: `node --test bin/comment-review.test.mjs` |
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
 | `jacocoagent.jar`, `jacococli.jar` | JaCoCo, invoked by the coverage workflow |
 
@@ -144,3 +146,26 @@ Arcmutate history plugin; open-source PIT refuses `--historyInputLocation` witho
 | 2 | A harness measured nothing (no mutant detected, survivors that ran no test, no mutants generated, stale test classes) or could not run |
 
 A changed file no test names is reported as skipped, not as a fault: there is nothing to run.
+
+## comment-review.mjs
+
+```bash
+./jclaw.sh comment-review HEAD~1   # the comments the last commit and the working tree add
+```
+
+AGENTS.md section 8 calls redundant comments the commonest defect in agent-written code, and no
+gate can judge one: whether a comment restates its code is a reading, not a pattern. The command
+finds each comment a diff adds (`//`, `/* */`, `#` and trailing forms, consecutive lines joined),
+sends them with their hunks and the section's text to `claude -p` with every tool disabled, and
+prints a verdict per comment: `keep`, `cut` (the delete test removes it) or `shorten`, with the part
+of the rule behind it and, for `shorten`, a shorter version.
+
+It reports and never gates (JF-17). The section is read from AGENTS.md on each run, so the rubric
+cannot drift from the rule. Generated files, `archunit_store/` and `test/approved/` are skipped. A
+diff too large for one prompt (150,000 characters) is reviewed from its first comments, and the
+command says how many it left out. Fifty comments take about four minutes.
+
+| Code | Meaning |
+| --- | --- |
+| 0 | Reviewed, whatever the verdicts |
+| 2 | The review could not run: no `claude` on PATH, a failed call, or an answer without verdicts |
