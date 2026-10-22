@@ -28,7 +28,7 @@ Review branch `{{SOURCE_BRANCH}}`, which implements ticket {{KEY}}: {{SUMMARY}}.
 
 1. Check every acceptance criterion against the diff, not against the commit message.
 2. Check AGENTS.md's conventions on the changed lines: comment discipline (section 8), nullness annotations, American spelling, test base classes and locks.
-3. Check that the tests pin the new behaviour and would fail without it.
+3. For each acceptance criterion, find the test that proves it and hold it to AGENTS.md's Writing tests: it asserts the outcome exactly, covers the failure paths and both sides of any limit involved, and would fail without the change. Where a criterion has no such test, write it.
 4. Check that every point of the human reviewer's feedback, if any, is addressed, and that the lessons are followed.
 
 Git prints `error: Unable to create '…/packed-refs.lock': Read-only file system` after commits: expected, since the repository's shared metadata is read-only here, and the commit still succeeded.

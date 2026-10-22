@@ -47,6 +47,15 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 - A production start keeps the JDK's AOT cache current (`aot_prepare` in `jclaw.sh`; the Docker `CMD` calls it as `jclaw.sh aot-cache`): when the JDK, the JVM options or the jars changed, it first trains a cache with a full start and stop of the real instance on spare ports (`BACKEND_PORT` + 1000 up, so 9000 and 9443 stay dark), and it never uses one on a JDK without JDK-8377932's fix (25.0.4, 26.0.2, 27), where a stale cache serves old library classes. A changed application class is still loaded fresh, so a code-only restart keeps the cache. `JCLAW_AOT=off` starts without one.
 - A broken `test/` class fails `./jclaw.sh dist|bundle`: precompile compiles tests without running them.
 
+## Writing tests
+
+- Assert the outcome a caller or the operator sees, exactly: `assertEquals` on the returned value, the response body or the rendered text, not "contains", "not null" or "did not throw". `SecretRedactorTest` checked that a secret was gone and passed while the mask ate the rest of the line or stopped short and leaked the tail (JF-17).
+- Cover the behaviour, not only the bug in hand: the success path, each failure path (refused, missing, malformed, the upstream down) and both sides of every limit (`n` and `n + 1`, empty and one). `use-bulk-select.test.ts` had three tests for JCLAW-1221 and none showing that cancelling the confirmation deletes nothing.
+- A bug fix starts with a test that fails on the unfixed code; say in the commit body that you saw it fail.
+- Choose the layer by what the behaviour crosses: pure logic, a `UnitTest`; a route, a controller or the database, a `FunctionalTest`; a composable or component, a vitest file under `frontend/test/` that drives it as a page does (mount, act, assert the request sent and the state shown); a journey across pages, one Playwright spec under `frontend/tests/`.
+- Stub only what crosses a process or network boundary (`HttpFactories.runWith`, `registerEndpoint`, a `*ForTest` seam), never the code under test: a test that stubs what it checks passes whatever the code does.
+- Name a test after the behaviour it pins (`cancellingTheConfirmationDeletesNothing`), so a failure says what broke.
+
 ## Conventions that differ from defaults
 
 - Config keys live in the Config DB; document an unseeded key in `conf/application.conf`, and never seed a key whose absence already means "off".

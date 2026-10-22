@@ -18,7 +18,7 @@ Emit exactly one <brief> block as the last thing in your response, containing JS
 <brief>
 {
   "summary": "two or three sentences: what changed and why",
-  "acceptanceCriteria": [{ "criterion": "text", "met": true, "evidence": "file, test or commit that shows it" }],
+  "acceptanceCriteria": [{ "criterion": "text", "met": true, "evidence": "the test that proves it (Class.method or spec file and name), or the file or commit where no test can" }],
   "decisions": ["each decision the ticket asked to be made or recorded, with its reason"],
   "risks": ["anything the reviewer should check by hand"],
   "testsRun": ["test classes or commands run during implementation and review"]
