@@ -6,6 +6,9 @@ import services.TailscaleFunnel;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * JCLAW-84: Tailscale Funnel CLI integration. Exercised with an injected
@@ -14,11 +17,11 @@ import java.util.List;
  */
 class TailscaleFunnelTest extends UnitTest {
 
-    // The latch is a process-global static; reset it so a prior method's successful
-    // enable() cannot leak into the next one.
+    // The latches are process-global statics; reset them so a prior method's enable()
+    // or stop cannot leak into the next one.
     @BeforeEach
     void clearFunnelLatch() {
-        TailscaleFunnel.resetFunnelStartedForTest();
+        TailscaleFunnel.resetForTest();
     }
 
     /** Scriptable response for a captured command. */
@@ -232,5 +235,110 @@ class TailscaleFunnelTest extends UnitTest {
         assertFalse(TailscaleFunnel.enable(9000, fake, 1, 0));
         assertFalse(TailscaleFunnel.funnelStartedHere(),
                 "a failed enable must not make shutdown try to tear anything down");
+    }
+
+    // ---- JF-16: the boot reconcile runs after the port opens, so a stop can land mid-enable ----
+
+    private static final String SERVING_STATUS = "https://host.tailnet.ts.net (Funnel on)\n|-- / proxy http://127.0.0.1:9000";
+
+    /** The funnel subcommand of every funnel call, in order: {@code --bg}, {@code status}, {@code reset}. */
+    private static List<String> funnelVerbs(FakeRunner fake) {
+        return fake.calls.stream().filter(c -> c.size() > 2 && c.get(1).equals("funnel")).map(c -> c.get(2)).toList();
+    }
+
+    @Test
+    void aStopDuringAnEnableWaitsForItAndTakesTheFunnelDown() throws Exception {
+        var enableRunning = new CountDownLatch(1);
+        var releaseEnable = new CountDownLatch(1);
+        var fake = new FakeRunner(cmd -> {
+            if (cmd.contains("which")) return ok("/usr/bin/tailscale");
+            if (cmd.contains("--bg")) {
+                enableRunning.countDown();
+                try {
+                    assertTrue(releaseEnable.await(5, TimeUnit.SECONDS));
+                } catch (InterruptedException e) {
+                    throw new AssertionError(e);
+                }
+                return ok("");
+            }
+            if (cmd.contains("status")) return ok(SERVING_STATUS);
+            return ok("");
+        });
+
+        var enabled = new AtomicBoolean();
+        var enabler = Thread.ofPlatform().start(() -> enabled.set(TailscaleFunnel.enable(9000, fake, 1, 0)));
+        assertTrue(enableRunning.await(5, TimeUnit.SECONDS));
+        var stopper = startStopAndAwaitIt(fake);
+        releaseEnable.countDown();
+        joinBoth(enabler, stopper);
+
+        assertTrue(enabled.get(), "the enable in flight must finish");
+        assertEquals(List.of("--bg", "status", "reset"), funnelVerbs(fake));
+        assertFalse(TailscaleFunnel.funnelStartedHere());
+    }
+
+    @Test
+    void aStopBetweenAttemptsEndsTheRetries() throws Exception {
+        var firstAttemptRunning = new CountDownLatch(1);
+        var failFirstAttempt = new CountDownLatch(1);
+        var fake = new FakeRunner(cmd -> {
+            if (cmd.contains("which")) return ok("/usr/bin/tailscale");
+            if (cmd.contains("--bg")) {
+                firstAttemptRunning.countDown();
+                try {
+                    assertTrue(failFirstAttempt.await(5, TimeUnit.SECONDS));
+                } catch (InterruptedException e) {
+                    throw new AssertionError(e);
+                }
+                return failed("Funnel not available");
+            }
+            return ok("");
+        });
+
+        var enabled = new AtomicBoolean(true);
+        var enabler = Thread.ofPlatform().start(() -> enabled.set(TailscaleFunnel.enable(9000, fake, 3, 0)));
+        assertTrue(firstAttemptRunning.await(5, TimeUnit.SECONDS));
+        var stopper = startStopAndAwaitIt(fake);
+        failFirstAttempt.countDown();
+        joinBoth(enabler, stopper);
+
+        assertFalse(enabled.get());
+        assertEquals(List.of("--bg"), funnelVerbs(fake));
+    }
+
+    @Test
+    void reconcileDoesNothingOnceAStopHasBegun() {
+        var fake = new FakeRunner(cmd -> ok(""));
+        TailscaleFunnel.disableIfEnabled(fake);
+
+        assertEquals(new TailscaleFunnel.Status(false, null, "JClaw is stopping"), TailscaleFunnel.reconcile());
+    }
+
+    /** Starts a stop on its own thread and returns once it has finished or queued behind the lock. */
+    private static Thread startStopAndAwaitIt(FakeRunner fake) throws InterruptedException {
+        var stopper = Thread.ofPlatform().start(() -> TailscaleFunnel.disableIfEnabled(fake));
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (stopper.isAlive() && stopper.getState() != Thread.State.WAITING) {
+            assertTrue(System.nanoTime() < deadline, "the stop neither finished nor queued behind the enable");
+            Thread.sleep(5);
+        }
+        return stopper;
+    }
+
+    private static void joinBoth(Thread enabler, Thread stopper) throws InterruptedException {
+        enabler.join(5000);
+        stopper.join(5000);
+        assertFalse(enabler.isAlive(), "the enable never returned");
+        assertFalse(stopper.isAlive(), "the stop never returned");
+    }
+
+    @Test
+    void noEnableRunsOnceAStopHasBegun() {
+        var fake = new FakeRunner(cmd -> cmd.contains("which") ? ok("/usr/bin/tailscale") : ok(SERVING_STATUS));
+        TailscaleFunnel.disableIfEnabled(fake);
+
+        assertFalse(TailscaleFunnel.enable(9000, fake, 1, 0));
+        assertEquals(List.of(), fake.calls);
+        assertFalse(TailscaleFunnel.funnelStartedHere());
     }
 }

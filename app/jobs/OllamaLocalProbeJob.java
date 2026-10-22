@@ -18,7 +18,7 @@ import services.OllamaLocalProbe;
  * per-request cost would be all noise, no signal. A restart picks up new
  * state.
  */
-@OnApplicationStart
+@OnApplicationStart(async = true)
 @NoTransaction
 public class OllamaLocalProbeJob extends Job<Void> {
 

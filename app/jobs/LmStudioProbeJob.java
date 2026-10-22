@@ -13,7 +13,7 @@ import services.LmStudioProbe;
  * under default logging) when connection-refused so a fresh install without
  * LM Studio running stays quiet.
  */
-@OnApplicationStart
+@OnApplicationStart(async = true)
 @NoTransaction
 public class LmStudioProbeJob extends Job<Void> {
 

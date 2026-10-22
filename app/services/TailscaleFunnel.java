@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Tailscale Funnel integration (JCLAW-84): expose JClaw's local HTTP port to the
@@ -105,6 +106,12 @@ public final class TailscaleFunnel {
      *  otherwise leave it running with nothing to tear it down. */
     private static volatile boolean funnelStartedHere = false;
 
+    /** Serializes every funnel change: the boot reconcile runs after the port opens (JF-16), so a
+     *  toggle or a stop can land mid-enable and must not finish before it. */
+    private static final ReentrantLock MUTATION = new ReentrantLock();
+    /** Set once teardown begins, so an enable still queued behind the lock cannot reopen the funnel. */
+    private static volatile boolean stopping = false;
+
     /** Start funneling {@code localPort} to the public internet (idempotent). */
     public static boolean enable(int localPort) {
         boolean ok = enable(localPort, PROCESS_RUNNER);
@@ -122,8 +129,11 @@ public final class TailscaleFunnel {
     /** Visible for tests: the "this JVM started a funnel" latch that teardown reads. */
     public static boolean funnelStartedHere() { return funnelStartedHere; }
 
-    /** Visible for tests: reset the latch. */
-    public static void resetFunnelStartedForTest() { funnelStartedHere = false; }
+    /** Visible for tests: reset the started and stopping latches. */
+    public static void resetForTest() {
+        funnelStartedHere = false;
+        stopping = false;
+    }
 
     /** Drop the cached status so the next {@link #status()} re-probes immediately,
      *  rather than serving a pre-toggle snapshot for up to the TTL. */
@@ -157,20 +167,46 @@ public final class TailscaleFunnel {
      * returns the unavailable {@link Status} so the caller can surface why.
      */
     public static Status reconcile() {
-        if (!isFunnelEnabled()) {
-            return new Status(false, null, "Tailscale Funnel is disabled");
+        MUTATION.lock();
+        try {
+            if (stopping) {
+                return new Status(false, null, "JClaw is stopping");
+            }
+            // Short transactions: the boot job calls this outside one, and the tailscale calls can take a minute.
+            if (!Tx.run(TailscaleFunnel::isFunnelEnabled)) {
+                return new Status(false, null, "Tailscale Funnel is disabled");
+            }
+            var st = status();
+            if (st.available()) {
+                enable(Tx.run(TailscaleFunnel::configuredPort));
+                return status();
+            }
+            return st;
+        } finally {
+            MUTATION.unlock();
         }
-        var st = status();
-        if (st.available()) {
-            enable(configuredPort());
-            return status();
-        }
-        return st;
+    }
+
+    /** True once teardown has begun; nothing reopens the funnel after it. */
+    public static boolean isStopping() {
+        return stopping;
     }
 
     /** Tear down the funnel on shutdown, but only if this instance enabled it. */
     public static void disableIfEnabled() {
-        if (funnelStartedHere) disable();
+        disableIfEnabled(PROCESS_RUNNER);
+        invalidateStatusCache();
+    }
+
+    /** Waits for an enable in flight, so a stop during the boot reconcile still tears it down. */
+    public static void disableIfEnabled(Runner runner) {
+        stopping = true;
+        MUTATION.lock();
+        try {
+            if (funnelStartedHere) disable(runner);
+        } finally {
+            MUTATION.unlock();
+        }
     }
 
     // ===================== command builders (pure) =====================
@@ -293,23 +329,35 @@ public final class TailscaleFunnel {
      * and {@code retryMillis} are parameters so tests run without sleeping.
      */
     public static boolean enable(int localPort, Runner runner, int attempts, long retryMillis) {
-        var bin = detectBinary(runner);
-        String lastError = null;
-        for (int attempt = 1; attempt <= attempts; attempt++) {
-            var res = runner.run(enableCmd(bin, localPort), EXEC_TIMEOUT);
-            if (res.ok() && funnelServing(bin, runner)) {
-                EventLogger.info(CATEGORY, null, null, "Funnel enabled on local port " + localPort
-                        + (attempt > 1 ? " (attempt " + attempt + ")" : ""));
-                funnelStartedHere = true;
-                return true;
+        MUTATION.lock();
+        try {
+            if (stopping) return notEnabledWhileStopping(localPort);
+            var bin = detectBinary(runner);
+            String lastError = null;
+            for (int attempt = 1; attempt <= attempts; attempt++) {
+                if (stopping) return notEnabledWhileStopping(localPort);
+                var res = runner.run(enableCmd(bin, localPort), EXEC_TIMEOUT);
+                if (res.ok() && funnelServing(bin, runner)) {
+                    EventLogger.info(CATEGORY, null, null, "Funnel enabled on local port " + localPort
+                            + (attempt > 1 ? " (attempt " + attempt + ")" : ""));
+                    funnelStartedHere = true;
+                    return true;
+                }
+                lastError = res.ok()
+                        ? "command exited 0 but funnel is not serving (node may be re-syncing)"
+                        : firstNonBlank(res.stderr(), res.stdout(), "exit " + res.exitCode());
+                if (attempt < attempts && retryMillis > 0) sleepQuietly(retryMillis);
             }
-            lastError = res.ok()
-                    ? "command exited 0 but funnel is not serving (node may be re-syncing)"
-                    : firstNonBlank(res.stderr(), res.stdout(), "exit " + res.exitCode());
-            if (attempt < attempts && retryMillis > 0) sleepQuietly(retryMillis);
+            EventLogger.warn(CATEGORY, null, null, "Funnel enable failed (port " + localPort
+                    + ") after " + attempts + " attempt(s): " + lastError);
+            return false;
+        } finally {
+            MUTATION.unlock();
         }
-        EventLogger.warn(CATEGORY, null, null, "Funnel enable failed (port " + localPort
-                + ") after " + attempts + " attempt(s): " + lastError);
+    }
+
+    private static boolean notEnabledWhileStopping(int localPort) {
+        EventLogger.info(CATEGORY, null, null, "Funnel not enabled on local port " + localPort + ": JClaw is stopping");
         return false;
     }
 
@@ -330,16 +378,21 @@ public final class TailscaleFunnel {
     }
 
     public static boolean disable(Runner runner) {
-        var bin = detectBinary(runner);
-        var res = runner.run(resetCmd(bin), EXEC_TIMEOUT);
-        if (res.ok()) {
-            EventLogger.info(CATEGORY, null, null, "Funnel reset");
-            funnelStartedHere = false;
-            return true;
+        MUTATION.lock();
+        try {
+            var bin = detectBinary(runner);
+            var res = runner.run(resetCmd(bin), EXEC_TIMEOUT);
+            if (res.ok()) {
+                EventLogger.info(CATEGORY, null, null, "Funnel reset");
+                funnelStartedHere = false;
+                return true;
+            }
+            EventLogger.warn(CATEGORY, null, null, "Funnel reset failed: "
+                    + firstNonBlank(res.stderr(), res.stdout(), "exit " + res.exitCode()));
+            return false;
+        } finally {
+            MUTATION.unlock();
         }
-        EventLogger.warn(CATEGORY, null, null, "Funnel reset failed: "
-                + firstNonBlank(res.stderr(), res.stdout(), "exit " + res.exitCode()));
-        return false;
     }
 
     // ===================== real ProcessBuilder runner =====================
