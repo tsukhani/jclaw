@@ -303,6 +303,26 @@ class SecretRedactorTest extends UnitTest {
     }
 
     @Test
+    void masksExactlyWhereTheTextEndsMidValueAndWhereQuotesNest() {
+        // A text may stop inside an escape or an unclosed quote; reading past its end would throw and lose the log line.
+        var m = SecretRedactor.MASK;
+        assertEquals("exec: export PASSWORD=" + m, SecretRedactor.redact("exec: export PASSWORD=\\"));
+        assertEquals("exec: run --password '" + m + "'\\", SecretRedactor.redact("exec: run --password 'abc'\\"));
+        assertEquals("exec: run --password \"" + m, SecretRedactor.redact("exec: run --password \"abc\\"));
+        assertEquals("exec: curl https://x/?token=" + m, SecretRedactor.redact("exec: curl https://x/?token=ab\\"));
+        assertEquals("\\u0026media_api_key\\u003d" + m + "\\u0026page\\u003d2",
+                SecretRedactor.redact("\\u0026media_api_key\\u003dSECRET\\u0026page\\u003d2"));
+        assertEquals("tokenCount:token=" + m, SecretRedactor.redact("tokenCount:token=abc123"));
+        assertEquals("exec: PASSWORD=" + m + " next", SecretRedactor.redact("exec: PASSWORD=u0027abc next"));
+        assertEquals("args: {\"command\":\"mytool --password \\u0027" + m + "\\u0027 --verbose\"}",
+                SecretRedactor.redact("args: {\"command\":\"mytool --password \\u0027abc def\\u0027 --verbose\"}"));
+        assertEquals("args: {\"tool\":\"exec\",\"args\":\"{\\\"command\\\":\\\"sh -c \\\\\\\"PASSWORD=" + m + "\\\\\\\" next\\\"}\"}",
+                SecretRedactor.redact("args: {\"tool\":\"exec\",\"args\":\"{\\\"command\\\":\\\"sh -c \\\\\\\"PASSWORD=abc def\\\\\\\" next\\\"}\"}"));
+        assertEquals("\\\"x password=" + m + "\\\" tail", SecretRedactor.redact("\\\"x password=abc def\\\" tail"));
+        assertEquals("exec: sh -c \"mytool --password    " + m + "\" next", SecretRedactor.redact("exec: sh -c \"mytool --password    \nhunter2\" next"));
+    }
+
+    @Test
     void aHeaderWithNoQuotesIsMaskedToTheEndOfItsLine() {
         assertEquals("Request headers: Authorization: Bearer " + SecretRedactor.MASK + "\nnext line",
                 SecretRedactor.redact("Request headers: Authorization: Bearer abc.def-ghi_jkl012345\nnext line"));

@@ -121,6 +121,18 @@ describe('useBulkSelect — selection', () => {
     expect(api.selectedIds.value.size).toBe(0)
   })
 
+  it('leaves the selection alone when no row is selectable any more', async () => {
+    // Subagent Runs: rows selected before they started RUNNING stay selected.
+    const running = ref(false)
+    const api = await mount(() => false, { selectable: () => !running.value })
+    api.enter()
+    api.toggle(1)
+    running.value = true
+
+    api.toggleAll()
+    expect([...api.selectedIds.value]).toEqual([1])
+  })
+
   it('selects nothing before the rows have loaded', async () => {
     const api = await mount(() => false, { rows: ref<Row[] | null>(null) })
     api.enter()
