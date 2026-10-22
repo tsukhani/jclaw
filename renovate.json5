@@ -105,7 +105,9 @@
     // `typescript/lib/tsc`, and bump typescript + vue-tsc + @vue/language-core
     // together. Its `@typescript/typescript6` alias branch runs TS 6 under the
     // `typescript` name; it is not native-compiler support.
+    // Frontend only: the factory runs plain tsc, which passes on TS 7.
     {
+      matchFileNames: ["frontend/package.json"],
       matchPackageNames: ["typescript"],
       allowedVersions: "<7",
     },
