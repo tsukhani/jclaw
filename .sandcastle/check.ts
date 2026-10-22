@@ -13,7 +13,6 @@ import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeV
 import { BACKOFF_MS, Overloads, afterFailure, overloadReason, resetsOverloads, transientApiFailure } from "./overload.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths } from "./plan.ts";
 import { overruled, rejectionFeedback, type Snapshot } from "./tracker.ts";
-import { APPROVED, awaitingTestsApproval, onlyTests, testsOffered, testsStage } from "./acceptance.ts";
 
 const ticket = (...bodies: string[]): Snapshot => ({
   key: "T-1", summary: "", description: "", labels: [], blockedBy: [], updated: "", fetchedAt: "",
@@ -33,25 +32,6 @@ check("sent back without a comment", feedbackOf(ticket(OFFER)), "");
 check("sent back with feedback", feedbackOf(ticket("old note", OFFER, "rename the helper")), "Reviewer: rename the helper");
 check("feedback survives a later gave-up", feedbackOf(ticket(OFFER, GAVE_UP, "rename the helper")), "Reviewer: rename the helper");
 check("second rejection reads only the newest round", feedbackOf(ticket(OFFER, "first round", OFFER, "second round")), "Reviewer: second round");
-
-const TESTS_OFFER = "h3. AFK factory: acceptance tests ready for review\nread them";
-const withCriteria = (labels: string[], ...bodies: string[]): Snapshot => ({ ...ticket(...bodies), description: "h3. Acceptance criteria\n* it works", labels });
-const stageOf = (t: Snapshot) => testsStage(t, "h3. AFK factory");
-check("no criteria, no tests stage", stageOf(ticket()), { stage: "skip" });
-check("criteria, never offered: write the tests", stageOf(withCriteria([])), { stage: "write" });
-check("tests sent back with a comment: rewrite them", stageOf(withCriteria([], TESTS_OFFER, "assert the count too")), { stage: "rewrite", feedback: "Reviewer: assert the count too" });
-check("tests sent back with nothing said", stageOf(withCriteria([], TESTS_OFFER)), { stage: "rewrite", feedback: "" });
-check("approved tests: build against them", stageOf(withCriteria([APPROVED], TESTS_OFFER)), { stage: "approved" });
-check("an afk-merge story never stops for its tests", stageOf(withCriteria(["afk-merge"])), { stage: "skip" });
-check("nor does a story in an afk-merge epic", stageOf({ ...withCriteria([]), parent: { key: "E-1", summary: "", description: "", labels: ["afk-merge"] } }), { stage: "skip" });
-check("no-afk-merge opts back into the stop", stageOf({ ...withCriteria(["no-afk-merge"]), parent: { key: "E-1", summary: "", description: "", labels: ["afk-merge"] } }), { stage: "write" });
-check("tests offered earlier are built on once the story auto-merges", testsOffered(withCriteria(["afk-merge"], TESTS_OFFER), "h3. AFK factory"), true);
-check("the tests offer is not an implementation offer", feedbackOf(withCriteria([], TESTS_OFFER, "a note")), undefined);
-check("tests awaiting approval are never merged", awaitingTestsApproval(withCriteria([], TESTS_OFFER), "h3. AFK factory"), true);
-check("an implementation offered after the tests merges", awaitingTestsApproval(withCriteria([APPROVED], TESTS_OFFER, OFFER), "h3. AFK factory"), false);
-check("a branch of tests only has no implementation", onlyTests(["test/FooTest.java", "frontend/test/foo.test.ts", "frontend/tests/foo.spec.ts"]), true);
-check("a branch that touches app/ has one", onlyTests(["test/FooTest.java", "app/Foo.java"]), false);
-check("an empty branch has neither", onlyTests([]), false);
 
 // The frontend gate against a scripted sandbox shell. The report has the shape vitest writes with --reporter=json.
 const vitestReport = (failed: string[]) =>

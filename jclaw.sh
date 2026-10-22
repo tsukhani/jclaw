@@ -136,7 +136,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|diagnostics|mutation|comment-review|test|e2e|dist|bundle|backup|restore|repair|compact|db-clean|db-status|completion|shim|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|diagnostics|test|e2e|dist|bundle|backup|restore|repair|compact|db-clean|db-status|completion|shim|uninstall|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -179,11 +179,6 @@ Commands:
             Compile (and optionally test) and print every compile error,
             test failure and ArchUnit violation as one JSON array — the
             machine-readable form of what 'test' prints for a human.
-  mutation  Mutation-test what changed since a git ref: PIT on app/ classes,
-            Stryker on frontend/ files, each score printed. Reports only.
-  comment-review
-            Score the comments added since a git ref against AGENTS.md
-            section 8 with claude -p. Advisory: it never fails a build.
   test      Run backend tests (play autotest), frontend tests (pnpm test),
             and frontend quality gates (stylelint, lint, typecheck), and
             report a consolidated pass/fail summary. Exits non-zero on any
@@ -407,7 +402,7 @@ EOF
 # distinguish the per-command help path from the bare-help path.
 is_known_command() {
     case "$1" in
-        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|compact|db-clean|db-status|loadtest|evals|diagnostics|mutation|comment-review|test|e2e|dist|bundle|completion|uninstall)
+        https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|compact|db-clean|db-status|loadtest|evals|diagnostics|test|e2e|dist|bundle|completion|uninstall)
             return 0
             ;;
         *)
@@ -439,8 +434,6 @@ usage_for() {
         grapheval) usage_grapheval ;;
         evals)    usage_evals    ;;
         diagnostics) usage_diagnostics ;;
-        mutation) usage_mutation ;;
-        comment-review) usage_comment_review ;;
         test)     usage_test     ;;
         e2e)      usage_e2e      ;;
         dist)     usage_dist     ;;
@@ -1272,75 +1265,6 @@ EOF
     fi
 }
 
-usage_mutation() {
-    if is_developer_clone; then
-        cat <<EOF
-Usage: ${INVOKE} mutation <git-ref>
-
-Mutation-test the code that changed since <git-ref>, committed or not (JF-17).
-PIT runs on the changed app/ classes against the unit tests that name them;
-Stryker runs on the changed frontend/ files against the test files that import
-them, in a temporary copy of frontend/. Each score is printed with its report
-under build/reports/mutation/. A score never fails the command.
-
-A test that needs a running Play (the database, Fixtures) cannot run under
-PIT and is skipped, and a FunctionalTest is never selected. Tests are compiled
-with \`./gradlew compileTestJava\` first: \`play autotest\` compiles them its own way
-and leaves the classes PIT reads stale.
-
-Exit codes: 0 measured, 2 a harness measured nothing (no mutant detected, or
-survivors that ran no test) or could not run. bin/README.md has the details.
-
-Examples:
-  ${INVOKE} mutation HEAD~1     # what the last commit and the working tree changed
-  ${INVOKE} mutation main       # everything on this branch
-EOF
-    else
-        cat <<EOF
-Usage: ${INVOKE} mutation
-
-Not available in this distribution. The 'mutation' command compiles and runs
-the test sources of a developer checkout; neither ships in a 'play dist'
-tarball.
-
-For the full list of commands in this distribution: ${INVOKE} help
-EOF
-    fi
-}
-
-usage_comment_review() {
-    if is_developer_clone; then
-        cat <<EOF
-Usage: ${INVOKE} comment-review <git-ref>
-
-Score every comment added since <git-ref>, committed or not, against AGENTS.md
-section 8 (JF-17). The comments, the diff hunks around them and the section go
-to \`claude -p\` with no tools; each comment comes back keep, cut or shorten,
-with the part of the rule it meets or breaks. Nothing is edited, and the
-verdicts never fail the command: reviewers and the factory read them.
-
-Needs the Claude Code CLI (\`claude\`) on PATH, logged in. About four
-minutes for fifty comments.
-
-Exit codes: 0 reviewed, whatever the verdicts; 2 the review could not run
-(no claude, a failed call, or an answer with no verdicts).
-
-Examples:
-  ${INVOKE} comment-review HEAD~1   # the last commit and the working tree
-  ${INVOKE} comment-review main     # everything on this branch
-EOF
-    else
-        cat <<EOF
-Usage: ${INVOKE} comment-review
-
-Not available in this distribution. The 'comment-review' command reads the git
-history of a developer checkout, which a 'play dist' tarball does not have.
-
-For the full list of commands in this distribution: ${INVOKE} help
-EOF
-    fi
-}
-
 usage_test() {
     if is_developer_clone; then
         cat <<EOF
@@ -1630,10 +1554,6 @@ HTTPS_INSTALL_CA=false
 EVAL_ARGS=()
 # Arguments forwarded verbatim to bin/diagnostics.mjs.
 DIAGNOSTICS_ARGS=()
-# Arguments forwarded verbatim to bin/mutation.mjs.
-MUTATION_ARGS=()
-# Arguments forwarded verbatim to bin/comment-review.mjs.
-COMMENT_REVIEW_ARGS=()
 # Launch arguments for the internal aot-cache command.
 AOT_ARGS=()
 
@@ -1807,34 +1727,6 @@ while [[ $# -gt 0 ]]; do
                 exit 0
             fi
             DIAGNOSTICS_ARGS=("$@")
-            break
-            ;;
-        mutation)
-            if ! is_developer_clone; then
-                echo "Error: 'mutation' is a developer-only command, not available in this distribution." >&2
-                exit 2
-            fi
-            COMMAND="$1"
-            shift
-            if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-                usage_mutation
-                exit 0
-            fi
-            MUTATION_ARGS=("$@")
-            break
-            ;;
-        comment-review)
-            if ! is_developer_clone; then
-                echo "Error: 'comment-review' is a developer-only command, not available in this distribution." >&2
-                exit 2
-            fi
-            COMMAND="$1"
-            shift
-            if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-                usage_comment_review
-                exit 0
-            fi
-            COMMENT_REVIEW_ARGS=("$@")
             break
             ;;
         aot-cache)
@@ -4994,24 +4886,6 @@ do_diagnostics() {
     node "$SCRIPT_DIR/bin/diagnostics.mjs" ${DIAGNOSTICS_ARGS[@]+"${DIAGNOSTICS_ARGS[@]}"}
 }
 
-# A missing node exits 2, the code bin/mutation.mjs gives a harness that could not run.
-do_mutation() {
-    cd "$SCRIPT_DIR"
-    ( check_node ) >&2 || exit 2
-    node "$SCRIPT_DIR/bin/mutation.mjs" ${MUTATION_ARGS[@]+"${MUTATION_ARGS[@]}"}
-}
-
-# A missing node or claude exits 2, the code bin/comment-review.mjs gives a review that could not run.
-do_comment_review() {
-    cd "$SCRIPT_DIR"
-    ( check_node ) >&2 || exit 2
-    if ! command -v claude >/dev/null 2>&1; then
-        echo "Error: the Claude Code CLI (claude) is not on PATH." >&2
-        exit 2
-    fi
-    node "$SCRIPT_DIR/bin/comment-review.mjs" ${COMMENT_REVIEW_ARGS[@]+"${COMMENT_REVIEW_ARGS[@]}"}
-}
-
 # A boot failure JClaw explains prints a "What broke:" block (utils.StartupErrorTemplates), and the
 # stack traces Play logs after it push that block out of the 20-line tail below.
 print_startup_error_block() {
@@ -5342,8 +5216,6 @@ do_completion() {
             loadtest      "Run the load-test harness"
             evals         "Validate or score the eval dataset"
             diagnostics   "Report build and test failures as JSON"
-            mutation      "Mutation-test what changed since a git ref"
-            comment-review "Score added comments against AGENTS.md section 8"
             test          "Run backend + frontend tests"
             dist          "Build the developer-distribution zip"
             bundle        "Build the self-contained bundle zip"
@@ -6826,12 +6698,6 @@ case "$COMMAND" in
         ;;
     diagnostics)
         do_diagnostics
-        ;;
-    mutation)
-        do_mutation
-        ;;
-    comment-review)
-        do_comment_review
         ;;
     test)
         check_prereqs

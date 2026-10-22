@@ -49,7 +49,6 @@ AI agent platform on a Play 1.x fork (Java 25, virtual threads) with a Nuxt 4 SP
 
 ## Conventions that differ from defaults
 
-- A story with acceptance criteria starts with its tests: the first commit is one failing test per criterion, named after it (a `FunctionalTest` or `UnitTest`, a vitest file, or a Playwright spec), and the operator approves those tests before any implementation, because an agent that writes both judges its own reading of each criterion. The AFK factory stops for that approval unless the story is labelled `afk-merge`, which builds and merges unattended (`.sandcastle/README.md`, Acceptance tests first); an interactive session shows the tests and waits.
 - Config keys live in the Config DB; document an unseeded key in `conf/application.conf`, and never seed a key whose absence already means "off".
 - `git grep -P`, never `-E`, for `\b`, `\d`, `\s` — macOS `git grep -E` drops them silently and matches nothing.
 - Frontend API writes go through `useApiMutation().mutate` or inside `useSaveAttempt().attempt`, never a bare `$fetch` with a write method (`useSettingsConfig.ts` is the one allow-listed store): the ESLint rule `jclaw/no-bare-write-fetch` fails the lint on a literal method, but not on one held in a variable. A handler read issued with a bare `$fetch` whose key can change mid-flight takes a `useLatestRequest()` token and returns if it is stale; `useFetch` refetches are already aborted by Nuxt. The Settings store's `refresh()` keeps the last good copy on failure, so call it after a failed write too.
@@ -268,16 +267,6 @@ only `compile` records. javac gates the test run, so the reports on disk would d
 the previous build. This also means a single run never mixes `compile` records with
 `test`/`arch` ones — not a limitation of the parser, but of what a broken tree can
 physically produce.
-
-### Mutation testing
-```bash
-./jclaw.sh mutation <git-ref>   # PIT on the changed app/ classes, Stryker on the changed frontend/ files
-```
-
-It reports a score per tool and never gates (JF-17); `bin/README.md` is the contract. Only tests that need
-no running Play count under PIT: a booted Play compiles and loads its own copy of `app/`, so a mutant PIT
-plants never reaches a database-backed test. Exit 2 is a harness that measured nothing; read it as no
-result, never as 0%.
 
 ### E2E
 ```bash
@@ -1017,8 +1006,6 @@ for (var p : printers) { ... }
 **Length is one line.** A second line requires a reader who would otherwise get it wrong. A fifth means the code is unclear — fix the code (§3), don't explain it. Match the density around you: a new entry in a list of one-line comments gets one line. In the Settings banner's prefix list (`managed-prefixes.ts`), `playwright.`, `jtokkit.` and `memory.` run several lines because one is a deliberately-retained retired namespace and the other two cover keys written autonomously by a job — all genuinely surprising. Every ordinary entry beside them is a single line, and a new one that isn't will be sent back.
 
 **Javadoc is held to the same bar.** Stating a public contract — parameters, return, thrown conditions, threading — earns its length. Prose rationale *inside* a Javadoc block does not: it faces the same delete test as any other comment, and a private helper usually needs no Javadoc at all. A ten-line block explaining why a two-line method exists is the same defect as a ten-line inline comment.
-
-**`./jclaw.sh comment-review <ref>` scores the comments a change adds against this section** with `claude -p`: keep, cut or shorten, per comment. It advises and never gates (JF-17).
 
 **Provenance for a *change* belongs in the commit message, not the code.** "Why this must stay" is a comment; "why I added this" is history. Explaining the bug you just fixed, in the code that fixes it, duplicates the commit body and ages into noise within one refactor.
 

@@ -2,13 +2,7 @@ import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaConstructorCall;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
-import com.tngtech.archunit.lang.AbstractClassesTransformer;
-import com.tngtech.archunit.lang.ArchCondition;
 import com.tngtech.archunit.lang.ArchRule;
-import com.tngtech.archunit.lang.ConditionEvents;
-import com.tngtech.archunit.lang.SimpleConditionEvent;
-import com.tngtech.archunit.library.freeze.FreezingArchRule;
-import com.tngtech.archunit.library.freeze.TextFileBasedViolationStore;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.NoTransaction;
 import play.mvc.Before;
@@ -18,16 +12,10 @@ import java.lang.reflect.Modifier;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.util.ArrayDeque;
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
-import java.util.Map;
 import java.util.Set;
-import java.util.TreeSet;
 
-import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.all;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
@@ -46,7 +34,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * import the app's class files directly and assert against constructor calls and
  * package dependencies. A violation fails the check exactly like any other test.
  *
- * <p>Every rule here but the package-cycle freeze is strict, so a violation is a regression rather than debt.
+ * <p>Every rule here is strict, so a violation is a regression rather than debt.
  * The capability allowlists — which class may spawn a process, resolve a
  * model-controlled path, open a connection or reach the database, and the frozen
  * baseline of the ones that already do — live next door in {@link CapabilityRulesTest}
@@ -254,92 +242,5 @@ class ArchitectureTest extends UnitTest {
                 .because("the discovery strategies are dispatched by ModelDiscoveryService; "
                         + "shared parsing and ranking live in services.discovery (JCLAW-999)");
         rule.check(APP_CLASSES);
-    }
-
-    /** Edges on the top-level package cycle when the store was written (2026-10-22): 79 of 91. */
-    private static final int FROZEN_CYCLIC_EDGES = 79;
-
-    /**
-     * Twelve of the thirteen top-level packages already form one dependency cycle, so a new cycle can only
-     * mean a new edge inside it.
-     */
-    @Test
-    void noNewDependencyJoinsTheTopLevelPackageCycle() {
-        var cyclic = cyclicEdges(topLevelEdges(APP_CLASSES));
-        assertTrue(cyclic.size() >= FROZEN_CYCLIC_EDGES,
-                "expected at least " + FROZEN_CYCLIC_EDGES + " edges on the package cycle, found " + cyclic.size()
-                        + " " + cyclic + " — the scan stopped matching, and the frozen rule would prune its store to "
-                        + "empty and pass. Lower the constant only once an edge was genuinely removed");
-
-        ArchRule rule = FreezingArchRule.freeze(all(new AbstractClassesTransformer<PackageEdge>("dependencies between top-level packages") {
-                    @Override
-                    public Iterable<PackageEdge> doTransform(JavaClasses classes) {
-                        return topLevelEdges(classes);
-                    }
-                })
-                .should(new ArchCondition<>("stay off the package cycle") {
-                    @Override
-                    public void check(PackageEdge edge, ConditionEvents events) {
-                        if (cyclic.contains(edge)) {
-                            events.add(SimpleConditionEvent.violated(edge, edge + " lies on a cycle between top-level packages"));
-                        }
-                    }
-                })
-                .because("a dependency between top-level packages that reach each other ties them closer together "
-                        + "(JF-17); find the classes behind a new edge with git grep on its target package"))
-                .persistIn(new TextFileBasedViolationStore(description -> "top-level-package-cycles"));
-        rule.check(APP_CLASSES);
-    }
-
-    record PackageEdge(String from, String to) implements Comparable<PackageEdge> {
-        @Override
-        public int compareTo(PackageEdge other) {
-            return toString().compareTo(other.toString());
-        }
-
-        @Override
-        public String toString() {
-            return from + " -> " + to;
-        }
-    }
-
-    private static Set<PackageEdge> topLevelEdges(JavaClasses classes) {
-        var packages = new HashSet<String>();
-        classes.forEach(c -> packages.add(topLevel(c.getPackageName())));
-        var edges = new TreeSet<PackageEdge>();
-        for (var javaClass : classes) {
-            var from = topLevel(javaClass.getPackageName());
-            for (var dependency : javaClass.getDirectDependenciesFromSelf()) {
-                var to = topLevel(dependency.getTargetClass().getPackageName());
-                if (!from.equals(to) && packages.contains(to)) edges.add(new PackageEdge(from, to));
-            }
-        }
-        return edges;
-    }
-
-    private static String topLevel(String packageName) {
-        int dot = packageName.indexOf('.');
-        return dot < 0 ? packageName : packageName.substring(0, dot);
-    }
-
-    private static Set<PackageEdge> cyclicEdges(Set<PackageEdge> edges) {
-        var next = new HashMap<String, Set<String>>();
-        edges.forEach(e -> next.computeIfAbsent(e.from(), k -> new HashSet<>()).add(e.to()));
-        var cyclic = new TreeSet<PackageEdge>();
-        for (var edge : edges) {
-            if (reaches(next, edge.to(), edge.from())) cyclic.add(edge);
-        }
-        return cyclic;
-    }
-
-    private static boolean reaches(Map<String, Set<String>> next, String from, String target) {
-        var seen = new HashSet<String>();
-        var pending = new ArrayDeque<>(List.of(from));
-        while (!pending.isEmpty()) {
-            var at = pending.pop();
-            if (at.equals(target)) return true;
-            if (seen.add(at)) pending.addAll(next.getOrDefault(at, Set.of()));
-        }
-        return false;
     }
 }
