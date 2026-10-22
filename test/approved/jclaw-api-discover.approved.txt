@@ -1,0 +1,145 @@
+Callable JClaw API endpoints (143). Invoke one by calling this tool with method + path (and body for mutating verbs); endpoints not listed here are operator-only and will be refused.
+
+- DELETE /api/conversations/{id}/model-override - Clear a conversation's model override, reverting to the agent default (idempotent)
+- DELETE /api/conversations/{id}/pin - Unpin a conversation (idempotent)
+- DELETE /api/conversations/{id}/star - Unstar a conversation (idempotent)
+- DELETE /api/conversations/{id}/thinking-override - clear thinking override
+- DELETE /api/mcp-servers/{id} - Disconnect and delete an MCP server by id
+- DELETE /api/prompts/{id} - Delete a prompt by id
+- DELETE /api/scrape-jobs/{id} - Delete a scrape job that is not waiting or running, its page records and its workspace folder
+- DELETE /api/subagent-runs - Bulk delete terminal subagent runs by ids or filter (RUNNING rows are skipped)  [body: ids, filter]
+- DELETE /api/subagent-runs/{id} - Delete a terminal subagent run with its transcript and the agent it spawned
+- DELETE /api/tasks/{id} - Hard-delete a task by id along with its runs, messages, notifications, and scheduler row
+- GET /api/agents - List agents (id, name, modelProvider, modelId, enabled, isMain)
+- GET /api/agents/{agentId}/core-migration - One agent's core-memory usage against the cap
+- GET /api/agents/{id} - Get one agent's full details by id
+- GET /api/agents/{id}/prompt-breakdown - Per-section breakdown of the system prompt this agent would receive next turn
+- GET /api/agents/{id}/prompt-text - Full assembled system prompt text this agent would receive next turn
+- GET /api/agents/{id}/shell/effective-allowlist - Effective shell allowlist for an agent: global config unioned with enabled-skill commands
+- GET /api/agents/{id}/skills - List an agent's installed skills and their enabled state
+- GET /api/agents/{id}/skills/{name}/files - List files in an agent workspace skill folder with metadata and detected tool dependencies
+- GET /api/agents/{id}/skills/{name}/files/{<.+>filePath} - Read a text file from an agent workspace skill
+- GET /api/agents/{id}/tools - List an agent's tools and their enabled state
+- GET /api/apps - List operator-hosted mini-apps discovered under public/apps/
+- GET /api/apps/{slug}/files/{uuid} - file
+- GET /api/attachments/{uuid} - Stream the raw bytes of a persisted chat-message attachment (inline for media, attachment otherwise)
+- GET /api/breakers - Every registered circuit breaker with its state, window counters and last reason
+- GET /api/channels - List all stored channel configurations
+- GET /api/channels/active - Get the count and set of channel types currently doing work, aggregated across web, telegram, and ChannelConfig
+- GET /api/channels/whatsapp/bindings - list
+- GET /api/channels/whatsapp/bindings/{id}/qr - status
+- GET /api/config - List all config rows (sensitive values masked)
+- GET /api/config/{key} - Read a config value by key
+- GET /api/conversations - List conversations with optional channel, agent, name, peer, starred, pinned, and full-text (q) filters, paginated
+- GET /api/conversations/channels - List the distinct channel types currently in use across conversations
+- GET /api/conversations/{id} - Get a single conversation by id, in the same shape as one list row
+- GET /api/conversations/{id}/messages - List a conversation's messages in ascending order, by offset or by a message-id cursor
+- GET /api/conversations/{id}/queue - Get the busy flag and queued-message count for a conversation
+- GET /api/imagegen/bfl/models - List selectable Black Forest Labs image models
+- GET /api/imagegen/capability - Local image-gen host capability (GPU, free VRAM, whether Flux can run)
+- GET /api/imagegen/local/state - Snapshot local image-gen config, uv availability, and the local image model download status
+- GET /api/imagegen/models - List selectable Replicate image models (text-to-image + Kontext image-to-image)
+- GET /api/imagegen/progress - Live step-progress of an in-flight local image generation (chat bar)
+- GET /api/logging/levels - List per-logger level overrides plus the valid level names
+- GET /api/mcp-servers - List MCP servers with status and tool count
+- GET /api/mcp-servers/{id} - Get a single MCP server by id
+- GET /api/metrics/compression - List raw compression-metric rows since a timestamp for client-side aggregation
+- GET /api/metrics/cost - List per-turn cost rows since a timestamp for client-side aggregation
+- GET /api/metrics/db-pool - Current HikariCP connection-pool occupancy (active, idle, total, awaiting, max)
+- GET /api/metrics/jvm - JVM runtime state (heap, non-heap, RSS, GC, threads, uptime, CPU)
+- GET /api/metrics/latency - Snapshot latency segment histograms as JSON
+- GET /api/metrics/latency/rows - Windowed latency percentiles by segment, filterable by agent and channel
+- GET /api/metrics/logs - Disk used by the log directory (live file, archives, total)
+- GET /api/notifications - List notifications newest-first, filtered by unread/all status with a result cap
+- GET /api/ocr/status - Report OCR provider availability and operator-enabled state for the Settings page
+- GET /api/onboarding/tour-status - Return the guided-tour max step reached, total steps, and whether the intro dialog should auto-show
+- GET /api/printers - discover
+- GET /api/printers/default - get default
+- GET /api/printers/default/status - Probe whether the saved default printer answers at its address
+- GET /api/printers/options - options
+- GET /api/processes - List the processes agents' shell commands left running in the background, oldest first
+- GET /api/prompts - List saved prompts, newest-edited first, with an optional title filter (case-insensitive substring)
+- GET /api/prompts/categories - List the fixed prompt categories (value, label)
+- GET /api/prompts/export - Export all prompts as a portable JSON document
+- GET /api/providers - List configured LLM providers
+- GET /api/providers/{name}/embedding-models - List a provider's models unfiltered, for the embedding picker
+- GET /api/providers/{name}/models - List a provider's configured models (id + display name)
+- GET /api/providers/{name}/reachable - Check whether a provider's endpoint is reachable right now
+- GET /api/providers/{name}/video-models - List a provider's video-capable models from its live API
+- GET /api/router/status - Model router availability, budget thresholds and per-provider quota usage
+- GET /api/router/usage/ollama-cloud - Ollama Cloud request counts over the last 24 hours, 7 days or 30 days
+- GET /api/scrape-jobs - List background scrape jobs, newest first, filtered by agent and state
+- GET /api/scrape-jobs/{id} - Get one background scrape job with its counts and options
+- GET /api/scrape-jobs/{id}/download - Download the file combining every page of a scrape job
+- GET /api/scrape-jobs/{id}/pages - List a scrape job's pages in the order they were read, after a cursor
+- GET /api/scrape-jobs/{id}/pages/{pageId}/content - Get one scraped page's content as text
+- GET /api/skills - List all skills in the global registry
+- GET /api/skills/by-agent - List every agent's installed skills and enabled state, keyed by agent id
+- GET /api/skills/catalog/search - Browse or search a skill catalog
+- GET /api/skills/catalogs - List the configured skill catalogs (static dumps + dynamic registries)
+- GET /api/skills/{name} - Get a global skill with its full SKILL.md content
+- GET /api/skills/{name}/files - List files in a global skill folder with metadata and detected tool dependencies
+- GET /api/skills/{name}/files/{<.+>filePath} - Read a text file from a global skill folder
+- GET /api/slash-commands - List the built-in slash commands (literal, name, description)
+- GET /api/status - Report service health, app name/version, run mode, and Play framework version vs. expected
+- GET /api/subagent-runs - List subagent runs with optional filters and pagination
+- GET /api/subagent-runs/{id}/steps - Ordered persisted step transcript for a subagent coding run
+- GET /api/subagents/acp-command - Preview the effective ACP harness launch command
+- GET /api/subagents/acp-harnesses - Detect installed ACP coding harnesses (claude/pi/codex/gemini/opencode + custom) on PATH
+- GET /api/system/restart - restart preflight
+- GET /api/system/upgrade - upgrade preflight
+- GET /api/system/upgrade/status - upgrade status
+- GET /api/task-runs/recent - Recent TaskRuns across all tasks for the calendar/timeline (range via from/to or rolling last hours)
+- GET /api/task-runs/search - Full-text search task-run transcripts (q, limit) returning matching messages with task/run context
+- GET /api/task-runs/{id}/messages - Turn-by-turn message trace for one TaskRun (turnIndex order), 404 if run missing
+- GET /api/tasks - List tasks filtered by status/type/agent/payloadType and full-text q, paginated with X-Total-Count
+- GET /api/tasks/stats - Task dashboard KPIs (runs today, success rate, avg duration, pending/running/paused/active/failed counts, retention days)
+- GET /api/tasks/{id}/delivery-advisory - Preflight Slack delivery reachability advisory for one task (null when reachable / N/A)
+- GET /api/tasks/{id}/runs - Paginated TaskRun history for one task (startedAt DESC), 404 if task missing
+- GET /api/timezones - List IANA timezone ids plus the effective task-scheduling and app default zones
+- GET /api/tools - List all globally-registered tools (name, category, description)
+- GET /api/tools/meta - List tool metadata (category, icon, actions) for the admin UI
+- GET /api/transcription/diarization/models - diarization models
+- GET /api/transcription/state - Snapshot transcription config, ffmpeg availability, and per-Whisper-model download status
+- GET /api/tts/state - Snapshot both TTS engines, the selected one, and per-model readiness
+- GET /api/videogen/bfl/models - List selectable Black Forest Labs video models
+- GET /api/videogen/capability - Local video-gen host capability (GPU, free VRAM, per-engine runnable tiers)
+- GET /api/videogen/jobs - Status of video-generation jobs by id (chat progress polling)
+- GET /api/videogen/jobs/recent - Most-recent video-generation jobs (dashboard Recent Activity — video view)
+- GET /api/videogen/models - Discover Replicate text-to-video models (Settings model dropdown)
+- GET /api/videogen/state - Selected video-generation provider and its effective model
+- GET /api/workspace/stats - Total on-disk size of the agent workspace root, for the dashboard's runaway-growth line
+- PATCH /api/tasks/{id} - Patch a task by id from a JSON body of changed fields, re-registering the scheduler when the schedule changes  [body: name, agentId, schedule, description, delivery, payloadType, modelProvider, modelId, enabledToolNames, autoDeleteOnComplete, paused, timezone]
+- POST /api/agents - Create an agent  [body: name, modelProvider, modelId, thinkingMode, description, enabled, serviceAgent]
+- POST /api/mcp-servers - Add an MCP server (STDIO or HTTP)  [body: name, enabled, requiresApproval, transport, command, args, env, url, headers, protocol]
+- POST /api/mcp-servers/{id}/test - Test an MCP server connection by id (probe); returns success, toolCount, toolNames
+- POST /api/notifications/{id}/ack - Mark a notification acknowledged (idempotent), without deleting it
+- POST /api/onboarding/tour-progress - Record guided-tour progress, upserting the max step reached (clamped to [1, totalSteps])  [body: step]
+- POST /api/processes/{pid}/stop - Stop a process an agent's shell command left running in the background, with its descendants
+- POST /api/prompts - Create a prompt  [body: id, title, content, tags, category, categoryLabel, createdAt, updatedAt]
+- POST /api/prompts/generate - Generate a prompt (title, category, content, tags) from a description; does not save
+- POST /api/providers/refresh-prices - Manually refresh LiteLLM model prices (synchronous)
+- POST /api/providers/{name}/discover-models - Discover a provider's available models from its live API
+- POST /api/providers/{name}/embedding-probe - Check whether a model serves embeddings, and at what dimension
+- POST /api/providers/{name}/models - Add a model to a provider by id  [body: id, name, contextWindow, maxTokens, supportsThinking, supportsVision, supportsAudio, alwaysThinks, promptPrice, completionPrice, cachedReadPrice, cacheWritePrice]
+- POST /api/scrape-jobs/{id}/cancel - Stop a waiting or running scrape job; one running finishes the fetches in flight
+- POST /api/scrape-jobs/{id}/pause - Pause a waiting or running scrape job; one running finishes the fetches in flight and keeps its place
+- POST /api/scrape-jobs/{id}/resume - Resume a paused or interrupted scrape job from the pages it has already read
+- POST /api/subagent-runs/{id}/kill - Kill a running subagent  [body: reason]
+- POST /api/task-runs/{runId}/cancel - Cancel an in-progress task run by runId (cooperative flag + stamp CANCELLED), 400 if not RUNNING
+- POST /api/tasks - Create a task from a JSON body (agentId, name, schedule + optional fields) and register it with the scheduler  [body: name, agentId, schedule, description, delivery, payloadType, modelProvider, modelId, enabledToolNames, autoDeleteOnComplete, paused, timezone]
+- POST /api/tasks/{id}/cancel - Cancel a PENDING or ACTIVE task by id (sets status CANCELLED and unschedules)
+- POST /api/tasks/{id}/pause - Pause a PENDING or ACTIVE task by id so it won't fire until resumed
+- POST /api/tasks/{id}/reenable - Re-arm a CANCELLED task's schedule at its next natural fire without firing immediately
+- POST /api/tasks/{id}/resume - Resume a paused PENDING or ACTIVE task by id so it fires on schedule again
+- POST /api/tasks/{id}/retry - Retry a FAILED or LOST task by id (reset retryCount/lastError and re-register to fire now)
+- POST /api/tasks/{id}/run - Fire a task immediately by id, reviving a CANCELLED task first so the run isn't skipped
+- PUT /api/agents/{id} - Update an agent by id  [body: name, modelProvider, modelId, thinkingMode, description, enabled, serviceAgent]
+- PUT /api/conversations/{id}/model-override - Set a conversation-scoped model provider/model override, validated against the provider registry  [body: modelProvider, modelId]
+- PUT /api/conversations/{id}/name - Rename a conversation; the name is non-blank and at most 100 characters  [body: name]
+- PUT /api/conversations/{id}/pin - Pin a conversation, up to a cap of 10 (idempotent below the cap)
+- PUT /api/conversations/{id}/star - Star a conversation (idempotent)
+- PUT /api/conversations/{id}/thinking-override - set thinking override
+- PUT /api/mcp-servers/{id} - Update an MCP server by id; it reconnects automatically  [body: name, enabled, requiresApproval, transport, command, args, env, url, headers, protocol]
+- PUT /api/prompts/{id} - Update a prompt by id (partial: only supplied fields change)  [body: id, title, content, tags, category, categoryLabel, createdAt, updatedAt]
+- WS /api/voice - socket

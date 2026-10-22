@@ -294,3 +294,6 @@ evals/scrape/.cache/
 docs/*/
 !docs/architecture/
 !docs/user-guide/
+
+# ModelFacingTextApprovalTest writes what the model read beside the approved file when they differ.
+test/approved/*.received.txt
