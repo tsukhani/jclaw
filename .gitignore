@@ -297,3 +297,5 @@ docs/*/
 
 # ModelFacingTextApprovalTest writes what the model read beside the approved file when they differ.
 test/approved/*.received.txt
+# ApiContractSnapshotTest writes the generated contract here when it differs from the snapshot.
+frontend/types/api-contract.openapi.received.json

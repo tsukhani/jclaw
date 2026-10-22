@@ -31,6 +31,7 @@ export default withNuxt(
       'test-results',
       'tests/e2e/.auth',
       'components/ui/**', // shadcn-nuxt copies these in verbatim — don't lint vendor UI
+      'types/api-contract.generated.ts', // openapi-typescript output: pnpm gen:api-contract
     ],
   },
   {

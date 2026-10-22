@@ -1,8 +1,5 @@
 import agents.SystemPromptAssembler;
 import agents.ToolRegistry;
-import com.google.gson.JsonArray;
-import com.google.gson.JsonElement;
-import com.google.gson.JsonObject;
 import models.Agent;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,12 +11,10 @@ import utils.AppClock;
 import utils.GsonHolder;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
-import java.util.Comparator;
 import java.util.Set;
 
 /**
@@ -68,30 +63,7 @@ class ModelFacingTextApprovalTest extends UnitTest {
 
     @Test
     void theToolDefinitionsAreApproved() throws IOException {
-        var defs = GsonHolder.GSON.toJsonTree(ToolRegistry.getToolDefsForAgent(agent));
-        assertApproved("tool-definitions", GsonHolder.GSON.newBuilder().setPrettyPrinting().create().toJson(sortedKeys(defs)) + "\n");
-    }
-
-    /**
-     * Schemas built with {@code Map.of} and {@code Set.of} iterate in an order the JDK salts per JVM, so object keys and
-     * lists of plain values ({@code enum}, {@code required}, where order means nothing) are sorted; the tool list is not.
-     */
-    private static JsonElement sortedKeys(JsonElement json) {
-        if (json instanceof JsonObject object) {
-            var sorted = new JsonObject();
-            object.keySet().stream().sorted().forEach(key -> sorted.add(key, sortedKeys(object.get(key))));
-            return sorted;
-        }
-        if (json instanceof JsonArray array) {
-            var elements = array.asList().stream().map(ModelFacingTextApprovalTest::sortedKeys).toList();
-            if (elements.stream().allMatch(JsonElement::isJsonPrimitive)) {
-                elements = elements.stream().sorted(Comparator.comparing(JsonElement::getAsString)).toList();
-            }
-            var copy = new JsonArray();
-            elements.forEach(copy::add);
-            return copy;
-        }
-        return json;
+        assertApproved("tool-definitions", ApprovedText.canonicalJson(GsonHolder.GSON.toJsonTree(ToolRegistry.getToolDefsForAgent(agent))));
     }
 
     @Test
@@ -100,16 +72,6 @@ class ModelFacingTextApprovalTest extends UnitTest {
     }
 
     private static void assertApproved(String name, String received) throws IOException {
-        var approvedFile = APPROVED.resolve(name + ".approved.txt");
-        var receivedFile = APPROVED.resolve(name + ".received.txt");
-        if (Files.exists(approvedFile) && Files.readString(approvedFile).equals(received)) {
-            Files.deleteIfExists(receivedFile);
-            return;
-        }
-        Files.createDirectories(APPROVED);
-        Files.writeString(receivedFile, received);
-        fail((Files.exists(approvedFile) ? "The model-facing text changed" : "No approved text yet")
-                + ": compare " + receivedFile + " with " + approvedFile
-                + ", and if the model should now read exactly that, move the received file over the approved one");
+        ApprovedText.assertApproved(APPROVED.resolve(name + ".approved.txt"), APPROVED.resolve(name + ".received.txt"), received);
     }
 }
