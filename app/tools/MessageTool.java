@@ -102,8 +102,8 @@ public class MessageTool implements ToolRegistry.Tool {
     private static final String ACTION_REPLY = "reply";
     private static final String ACTION_EDIT = "edit";
     private static final String ACTION_POLL = "poll";
-    private static final Set<String> ALLOWED_ACTIONS =
-            Set.of(ACTION_SEND, ACTION_DELETE, ACTION_PIN, ACTION_UNPIN,
+    private static final List<String> ALLOWED_ACTIONS =
+            List.of(ACTION_SEND, ACTION_DELETE, ACTION_PIN, ACTION_UNPIN,
                     ACTION_REACT, ACTION_REPLY, ACTION_EDIT, ACTION_POLL);
 
     /**
@@ -249,7 +249,7 @@ public class MessageTool implements ToolRegistry.Tool {
     public Map<String, Object> parameters() {
         var props = new LinkedHashMap<String, Object>();
         props.put(PARAM_ACTION, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                SchemaKeys.ENUM, List.copyOf(ALLOWED_ACTIONS),
+                SchemaKeys.ENUM, ALLOWED_ACTIONS,
                 SchemaKeys.DESCRIPTION,
                 "What to do: \"send\" a new message, or (Telegram only) \"reply\" / "
                         + "\"edit\" / \"delete\" / \"pin\" / \"unpin\" / \"react\" on an "

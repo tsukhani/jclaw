@@ -4,9 +4,13 @@ import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 
 import java.math.BigDecimal;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SequencedCollection;
+import java.util.SequencedMap;
 
 /**
  * Immutable record types for the OpenAI-compatible chat completions API.
@@ -65,7 +69,30 @@ public final class LlmTypes {
             FunctionDef function
     ) {
         public static ToolDef of(String name, String description, Map<String, Object> parameters) {
-            return new ToolDef("function", new FunctionDef(name, description, parameters));
+            return new ToolDef("function", new FunctionDef(name, description, orderedMap(parameters)));
+        }
+
+        /**
+         * A schema built with {@code Map.of}, {@code Set.of} or a hash iterates in an order the JDK salts per JVM, which
+         * reordered the tools sent to the model on every restart: those are sorted, and a sequenced one keeps its order.
+         */
+        private static <K, V> Map<K, V> orderedMap(Map<K, V> map) {
+            var entries = map.entrySet().stream();
+            if (!(map instanceof SequencedMap<?, ?>)) entries = entries.sorted(Comparator.comparing(e -> String.valueOf(e.getKey())));
+            var copy = new LinkedHashMap<K, V>();
+            entries.forEach(e -> copy.put(e.getKey(), ordered(e.getValue())));
+            return copy;
+        }
+
+        @SuppressWarnings("unchecked")
+        private static <T> T ordered(T value) {
+            if (value instanceof Map<?, ?> map) return (T) orderedMap(map);
+            if (value instanceof Collection<?> items) {
+                var stream = items.stream().map(ToolDef::ordered);
+                if (!(items instanceof SequencedCollection<?>)) stream = stream.sorted(Comparator.comparing(String::valueOf));
+                return (T) stream.toList();
+            }
+            return value;
         }
     }
 

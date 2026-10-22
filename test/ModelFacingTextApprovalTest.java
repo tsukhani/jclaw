@@ -59,7 +59,8 @@ class ModelFacingTextApprovalTest extends UnitTest {
 
     @Test
     void theToolDefinitionsAreApproved() throws IOException {
-        assertApproved("tool-definitions", ApprovedText.canonicalJson(GsonHolder.GSON.toJsonTree(ToolRegistry.getToolDefsForAgent(agent))));
+        // Unsorted, so an order that changes between runs fails here too.
+        assertApproved("tool-definitions", GsonHolder.GSON.newBuilder().setPrettyPrinting().create().toJson(ToolRegistry.getToolDefsForAgent(agent)) + "\n");
     }
 
     @Test

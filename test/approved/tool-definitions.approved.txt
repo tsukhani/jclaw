@@ -1,22 +1,23 @@
 [
   {
+    "type": "function",
     "function": {
-      "description": "Manage background tasks — the abstraction for ANY scheduled or recurring work. If the operator asks for \"a subagent that runs every X\" or \"something that fires every X minutes\", they mean a Task: subagents (subagent_spawn) fire ONCE and have no schedule parameter. Tasks run asynchronously via the agent; pick the operation with 'action', and see each parameter for its rules.\n\nBefore creating a recurring task, call listRecurringTasks and cancelTask/deleteTask any prior attempts with similar names, so duplicates don't accumulate. A one-shot reminder is SCHEDULED rather than recurring, so it does NOT appear in listRecurringTasks — use listReminders to find one before updating or cancelling it by name.\n\nWhen the user says \"remind me to X\", create a task with payloadType=\"reminder\". When normalizing an EXISTING task whose delivery target is still described only in its prose, infer it, set the `delivery` field with updateTask, and drop the now-redundant send step from the description.",
       "name": "task_manager",
+      "description": "Manage background tasks — the abstraction for ANY scheduled or recurring work. If the operator asks for \"a subagent that runs every X\" or \"something that fires every X minutes\", they mean a Task: subagents (subagent_spawn) fire ONCE and have no schedule parameter. Tasks run asynchronously via the agent; pick the operation with 'action', and see each parameter for its rules.\n\nBefore creating a recurring task, call listRecurringTasks and cancelTask/deleteTask any prior attempts with similar names, so duplicates don't accumulate. A one-shot reminder is SCHEDULED rather than recurring, so it does NOT appear in listRecurringTasks — use listReminders to find one before updating or cancelling it by name.\n\nWhen the user says \"remind me to X\", create a task with payloadType=\"reminder\". When normalizing an EXISTING task whose delivery target is still described only in its prose, infer it, set the `delivery` field with updateTask, and drop the now-redundant send step from the description.",
       "parameters": {
         "properties": {
           "action": {
             "description": "The action to perform",
             "enum": [
-              "cancelTask",
               "createTask",
-              "deleteTask",
-              "listRecurringTasks",
-              "listReminders",
+              "updateTask",
               "pause",
               "resume",
               "runNow",
-              "updateTask"
+              "cancelTask",
+              "deleteTask",
+              "listRecurringTasks",
+              "listReminders"
             ],
             "type": "string"
           },
@@ -70,21 +71,21 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Get the current date and time, convert between timezones, or perform date/time calculations. This is a single tool with an 'action' parameter. Use action=\"now\" to get the current date and time in a given timezone (default: server timezone). Use action=\"convert\" to convert a timestamp from one timezone to another. Use action=\"calculate\" to add or subtract a duration from a timestamp, or compute the difference between two timestamps.",
       "name": "datetime",
+      "description": "Get the current date and time, convert between timezones, or perform date/time calculations. This is a single tool with an 'action' parameter. Use action=\"now\" to get the current date and time in a given timezone (default: server timezone). Use action=\"convert\" to convert a timestamp from one timezone to another. Use action=\"calculate\" to add or subtract a duration from a timestamp, or compute the difference between two timestamps.",
       "parameters": {
         "properties": {
           "action": {
             "description": "The action to perform",
             "enum": [
-              "calculate",
+              "now",
               "convert",
-              "now"
+              "calculate"
             ],
             "type": "string"
           },
@@ -115,11 +116,11 @@
           "unit": {
             "description": "Unit for the amount in calculate",
             "enum": [
-              "days",
-              "hours",
               "minutes",
-              "months",
+              "hours",
+              "days",
               "weeks",
+              "months",
               "years"
             ],
             "type": "string"
@@ -130,13 +131,13 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Speaker-attributed transcription of an uploaded audio recording, produced by the audio-capable model configured in Settings (Transcription → Diarization). Use it when the user asks to identify, separate, or label the speakers in a recording — ordinary voice notes are already transcribed automatically. The result is a verbatim transcript, one line per speaker turn. Enrolled voices are matched automatically: once action 'enroll_voice' has saved a reference sample under a 'speaker_name' (from an attachment containing ONLY that person), every later diarization sends the stored samples along so matching voices are labelled by name without guessing. Requires a configured diarization model; if none is set the tool says so — relay that to the user rather than retrying.",
       "name": "diarize_audio",
+      "description": "Speaker-attributed transcription of an uploaded audio recording, produced by the audio-capable model configured in Settings (Transcription → Diarization). Use it when the user asks to identify, separate, or label the speakers in a recording — ordinary voice notes are already transcribed automatically. The result is a verbatim transcript, one line per speaker turn. Enrolled voices are matched automatically: once action 'enroll_voice' has saved a reference sample under a 'speaker_name' (from an attachment containing ONLY that person), every later diarization sends the stored samples along so matching voices are labelled by name without guessing. Requires a configured diarization model; if none is set the tool says so — relay that to the user rather than retrying.",
       "parameters": {
         "properties": {
           "action": {
@@ -175,13 +176,13 @@
         "required": [],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Retrieve the full, uncompressed original of a content-compressed tool result — pass the hash from its [compressed — ccr_retrieve(\"<hash>\")] marker.",
       "name": "ccr_retrieve",
+      "description": "Retrieve the full, uncompressed original of a content-compressed tool result — pass the hash from its [compressed — ccr_retrieve(\"<hash>\")] marker.",
       "parameters": {
         "properties": {
           "hash": {
@@ -194,13 +195,13 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Search the official JClaw user guide to answer questions about how JClaw works — its features, settings, agents, chat, tasks, subagents, conversations and channels, skills/tools/MCP, reminders, and the logs/dashboard. Pass the user's question as 'query'; the tool returns the most relevant user-guide sections, each with its source page and an in-app deep link. Use this whenever the user asks how to do something in JClaw, how a JClaw feature behaves, or WHETHER JClaw can do something at all (\"can JClaw…\", \"does JClaw support…\"), then answer concisely from the returned sections and cite each source as a Markdown link using the \"Link\" path the tool returns (e.g. /guide#tasks) — never invent a citation URL, and do not paste whole sections verbatim. The guide is the authority on what JClaw can do: do not answer from prior knowledge, and do not infer a capability from API output — an endpoint reporting a feature unavailable on THIS install (e.g. an upgrade refused on a source checkout) says nothing about whether JClaw supports it in general.",
       "name": "jclaw_docs",
+      "description": "Search the official JClaw user guide to answer questions about how JClaw works — its features, settings, agents, chat, tasks, subagents, conversations and channels, skills/tools/MCP, reminders, and the logs/dashboard. Pass the user's question as 'query'; the tool returns the most relevant user-guide sections, each with its source page and an in-app deep link. Use this whenever the user asks how to do something in JClaw, how a JClaw feature behaves, or WHETHER JClaw can do something at all (\"can JClaw…\", \"does JClaw support…\"), then answer concisely from the returned sections and cite each source as a Markdown link using the \"Link\" path the tool returns (e.g. /guide#tasks) — never invent a citation URL, and do not paste whole sections verbatim. The guide is the authority on what JClaw can do: do not answer from prior knowledge, and do not infer a capability from API output — an endpoint reporting a feature unavailable on THIS install (e.g. an upgrade refused on a source checkout) says nothing about whether JClaw supports it in general.",
       "parameters": {
         "properties": {
           "query": {
@@ -213,13 +214,13 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Create and manage a structured checklist for tracking multi-step work. Submit a list of items; each item requires three fields: `content` (imperative form, e.g. \"Run tests\"), `status` (one of pending, in_progress, completed), and `activeForm` (present-progressive form, e.g. \"Running tests\"). At most one item may be in_progress at a time (zero is also valid, e.g. before starting or after finishing).",
       "name": "checklist",
+      "description": "Create and manage a structured checklist for tracking multi-step work. Submit a list of items; each item requires three fields: `content` (imperative form, e.g. \"Run tests\"), `status` (one of pending, in_progress, completed), and `activeForm` (present-progressive form, e.g. \"Running tests\"). At most one item may be in_progress at a time (zero is also valid, e.g. before starting or after finishing).",
       "parameters": {
         "properties": {
           "items": {
@@ -233,17 +234,17 @@
                 },
                 "status": {
                   "enum": [
-                    "completed",
+                    "pending",
                     "in_progress",
-                    "pending"
+                    "completed"
                   ],
                   "type": "string"
                 }
               },
               "required": [
-                "activeForm",
                 "content",
-                "status"
+                "status",
+                "activeForm"
               ],
               "type": "object"
             },
@@ -255,25 +256,25 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Read, write, edit, list, and patch plain text files in the agent's workspace. Actions: 'readFile' reads a file (1 MB cap; use the 'documents' tool for PDF/DOCX/XLSX/PPTX). 'writeFile' creates or overwrites a file with its full content — use only for brand-new files or wholesale replacement. 'appendFile' appends content to the end of an existing file, or creates it if missing. Use this to build up large files across multiple tool calls when a single writeFile would exceed your output token budget (e.g. long markdown drafts, logs, incremental emission). The LLM picks the chunk size. 'editFile' is the DEFAULT for modifying an existing file: it applies a batch of {oldText, newText} replacements. Each oldText must appear exactly once in the file; include enough surrounding context to disambiguate. Edits apply atomically — if any entry fails, nothing is written. 'editLines' edits by 1-indexed inclusive line numbers when you already know which lines to change (e.g., after readFile). The file's native line endings (LF vs CRLF) and UTF-8 encoding are preserved. All operations validate before any are written. 'applyPatch' applies a multi-file patch in OpenClaw/unified-diff format (*** Update File: / *** Add File: / *** Delete File: / *** Move to:). All files are validated before any are written. 'listFiles' lists a directory. All paths are relative to the workspace. For rich document formats use the 'documents' tool — and for large rich documents, draft the markdown here via writeFile + appendFile, then call documents.renderDocument with the source path.",
       "name": "filesystem",
+      "description": "Read, write, edit, list, and patch plain text files in the agent's workspace. Actions: 'readFile' reads a file (1 MB cap; use the 'documents' tool for PDF/DOCX/XLSX/PPTX). 'writeFile' creates or overwrites a file with its full content — use only for brand-new files or wholesale replacement. 'appendFile' appends content to the end of an existing file, or creates it if missing. Use this to build up large files across multiple tool calls when a single writeFile would exceed your output token budget (e.g. long markdown drafts, logs, incremental emission). The LLM picks the chunk size. 'editFile' is the DEFAULT for modifying an existing file: it applies a batch of {oldText, newText} replacements. Each oldText must appear exactly once in the file; include enough surrounding context to disambiguate. Edits apply atomically — if any entry fails, nothing is written. 'editLines' edits by 1-indexed inclusive line numbers when you already know which lines to change (e.g., after readFile). The file's native line endings (LF vs CRLF) and UTF-8 encoding are preserved. All operations validate before any are written. 'applyPatch' applies a multi-file patch in OpenClaw/unified-diff format (*** Update File: / *** Add File: / *** Delete File: / *** Move to:). All files are validated before any are written. 'listFiles' lists a directory. All paths are relative to the workspace. For rich document formats use the 'documents' tool — and for large rich documents, draft the markdown here via writeFile + appendFile, then call documents.renderDocument with the source path.",
       "parameters": {
         "properties": {
           "action": {
             "description": "The file operation to perform",
             "enum": [
+              "readFile",
+              "writeFile",
               "appendFile",
-              "applyPatch",
+              "listFiles",
               "editFile",
               "editLines",
-              "listFiles",
-              "readFile",
-              "writeFile"
+              "applyPatch"
             ],
             "type": "string"
           },
@@ -297,8 +298,8 @@
                 }
               },
               "required": [
-                "newText",
-                "oldText"
+                "oldText",
+                "newText"
               ],
               "type": "object"
             },
@@ -319,9 +320,9 @@
                 },
                 "op": {
                   "enum": [
-                    "delete",
+                    "replace",
                     "insert",
-                    "replace"
+                    "delete"
                   ],
                   "type": "string"
                 },
@@ -353,22 +354,22 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Read and write rich document formats. 'readDocument' extracts text from PDF, DOCX, DOC, XLSX, PPTX, RTF, ODT, HTML, EPUB and more via Apache Tika. 'writeDocument' authors HTML, PDF, or DOCX from markdown 'content'. 'appendDocument' appends markdown to a workspace draft — use it for documents too large for one call's output budget: append repeatedly to the SAME path (a .md extension, NOT .docx/.pdf — text cannot be appended to a binary format), then 'renderDocument' to convert the accumulated draft. 'renderDocument' renders an existing workspace markdown file ('sourcePath') to HTML, PDF, or DOCX. Standard markdown is supported (headings, emphasis, code, lists, quotes, tables, rules); XLSX and PPTX authoring is not. Paths are workspace-relative. If the target exists, write and render append -1, -2 etc. before the extension and report the actual path in the response — reference that path when replying to the user.",
       "name": "documents",
+      "description": "Read and write rich document formats. 'readDocument' extracts text from PDF, DOCX, DOC, XLSX, PPTX, RTF, ODT, HTML, EPUB and more via Apache Tika. 'writeDocument' authors HTML, PDF, or DOCX from markdown 'content'. 'appendDocument' appends markdown to a workspace draft — use it for documents too large for one call's output budget: append repeatedly to the SAME path (a .md extension, NOT .docx/.pdf — text cannot be appended to a binary format), then 'renderDocument' to convert the accumulated draft. 'renderDocument' renders an existing workspace markdown file ('sourcePath') to HTML, PDF, or DOCX. Standard markdown is supported (headings, emphasis, code, lists, quotes, tables, rules); XLSX and PPTX authoring is not. Paths are workspace-relative. If the target exists, write and render append -1, -2 etc. before the extension and report the actual path in the response — reference that path when replying to the user.",
       "parameters": {
         "properties": {
           "action": {
             "description": "The document operation to perform",
             "enum": [
-              "appendDocument",
               "readDocument",
-              "renderDocument",
-              "writeDocument"
+              "writeDocument",
+              "appendDocument",
+              "renderDocument"
             ],
             "type": "string"
           },
@@ -379,9 +380,9 @@
           "format": {
             "description": "Output format for writeDocument/renderDocument: html, pdf, or docx. If omitted, inferred from the target path extension.",
             "enum": [
-              "docx",
               "html",
-              "pdf"
+              "pdf",
+              "docx"
             ],
             "type": "string"
           },
@@ -400,22 +401,30 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Manage the files of a hosted app (the Apps page's static sites under public/apps/<slug>/). Your filesystem tools are confined to your workspace and cannot read or write public/apps/ — this tool bridges the two, so build apps in your workspace, then install them here. One `action`:\n- `stage`: copy an already-installed app from public/apps/<slug>/ into your workspace (default dir `<slug>`) so you can edit it for an update. Idempotent — an existing workspace copy is kept unless `overwrite` is true.\n- `validate`: check that the built app is well-formed — a parseable app.json with name and version, an index.html, and a valid slug — without writing anything. The app is auto-located (see install), so just pass the slug.\n- `install`: validate, then publish the built app to public/apps/<slug>/, replacing any existing app at that slug. The source is auto-located — the workspace-root `<slug>/` (direct build) or the newest `coding/<session>/<slug>/` (a runtime=acp harness build lands there) — so just pass the slug; set `source` only to override. Returns the /apps/<slug>/ url.",
       "name": "app_install",
+      "description": "Manage the files of a hosted app (the Apps page's static sites under public/apps/<slug>/). Your filesystem tools are confined to your workspace and cannot read or write public/apps/ — this tool bridges the two, so build apps in your workspace, then install them here. One `action`:\n- `stage`: copy an already-installed app from public/apps/<slug>/ into your workspace (default dir `<slug>`) so you can edit it for an update. Idempotent — an existing workspace copy is kept unless `overwrite` is true.\n- `validate`: check that the built app is well-formed — a parseable app.json with name and version, an index.html, and a valid slug — without writing anything. The app is auto-located (see install), so just pass the slug.\n- `install`: validate, then publish the built app to public/apps/<slug>/, replacing any existing app at that slug. The source is auto-located — the workspace-root `<slug>/` (direct build) or the newest `coding/<session>/<slug>/` (a runtime=acp harness build lands there) — so just pass the slug; set `source` only to override. Returns the /apps/<slug>/ url.",
       "parameters": {
         "properties": {
           "action": {
             "description": "stage (public/apps -> workspace), validate (check a built app), or install (workspace -> public/apps).",
             "enum": [
-              "install",
               "stage",
-              "validate"
+              "validate",
+              "install"
             ],
+            "type": "string"
+          },
+          "slug": {
+            "description": "App id under public/apps/. Lowercase letters, digits, and hyphens only.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Optional override for validate/install: workspace-relative directory holding the built app. Omit to auto-locate it (workspace-root <slug>/, or the newest coding/<session>/<slug>/ from a harness build).",
             "type": "string"
           },
           "dest": {
@@ -425,14 +434,6 @@
           "overwrite": {
             "description": "For stage: overwrite an existing workspace copy (default false — an existing copy is kept).",
             "type": "boolean"
-          },
-          "slug": {
-            "description": "App id under public/apps/. Lowercase letters, digits, and hyphens only.",
-            "type": "string"
-          },
-          "source": {
-            "description": "Optional override for validate/install: workspace-relative directory holding the built app. Omit to auto-locate it (workspace-root <slug>/, or the newest coding/<session>/<slug>/ from a harness build).",
-            "type": "string"
           }
         },
         "required": [
@@ -441,15 +442,29 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Fetch the content of a URL as readable Markdown — best for reading, summarizing, saving content, or answering questions about a page. Handles HTML articles, PDFs and Office documents. Use extract to pull specific values instead of the whole page.",
       "name": "web_fetch",
+      "description": "Fetch the content of a URL as readable Markdown — best for reading, summarizing, saving content, or answering questions about a page. Handles HTML articles, PDFs and Office documents. Use extract to pull specific values instead of the whole page.",
       "parameters": {
         "properties": {
+          "url": {
+            "description": "The URL to fetch",
+            "type": "string"
+          },
+          "format": {
+            "description": "How to return the content: 'markdown' (default), 'text' (no markup) or 'json' (a record per page); 'html' only when the user asks for the raw page source",
+            "enum": [
+              "markdown",
+              "text",
+              "json",
+              "html"
+            ],
+            "type": "string"
+          },
           "extract": {
             "additionalProperties": {
               "type": "string"
@@ -457,23 +472,9 @@
             "description": "Return only these values instead of the page content: field name to CSS selector, with @attr to read an attribute, e.g. {\"price\": \".price\", \"next\": \"a.next@href\"}. The result is JSON.",
             "type": "object"
           },
-          "format": {
-            "description": "How to return the content: 'markdown' (default), 'text' (no markup) or 'json' (a record per page); 'html' only when the user asks for the raw page source",
-            "enum": [
-              "html",
-              "json",
-              "markdown",
-              "text"
-            ],
-            "type": "string"
-          },
           "metadata": {
             "description": "Include the page's own structured data (title, description, OpenGraph, JSON-LD). The result is JSON.",
             "type": "boolean"
-          },
-          "url": {
-            "description": "The URL to fetch",
-            "type": "string"
           }
         },
         "required": [
@@ -481,64 +482,44 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Read a starting URL and the pages it links to, returning all of them as one Markdown document with each page's source URL as a heading. Use this for a documentation site, a multi-page article, or any question that needs more than one page. Use extract to collect specific values from every page, and save to write a large crawl to a workspace file. For a crawl of many pages set background: it runs as a job after this turn ends and reports back when it finishes. For a single page use web_fetch instead — it is faster and cheaper.",
       "name": "web_scrape",
+      "description": "Read a starting URL and the pages it links to, returning all of them as one Markdown document with each page's source URL as a heading. Use this for a documentation site, a multi-page article, or any question that needs more than one page. Use extract to collect specific values from every page, and save to write a large crawl to a workspace file. For a crawl of many pages set background: it runs as a job after this turn ends and reports back when it finishes. For a single page use web_fetch instead — it is faster and cheaper.",
       "parameters": {
         "properties": {
           "background": {
             "description": "Run the crawl as a background job instead of inside this turn. Returns a job id at once; pages are written to a workspace folder as they are read, and a message here says when the job ends. Use it for a crawl of more pages than one turn can read",
             "type": "boolean"
           },
-          "extract": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "description": "Return only these values instead of the page content: field name to CSS selector, with @attr to read an attribute, e.g. {\"price\": \".price\", \"next\": \"a.next@href\"}. The result is JSON.",
-            "type": "object"
-          },
-          "format": {
-            "description": "How to return the content: 'markdown' (default), 'text' (no markup) or 'json' (a record per page)",
-            "enum": [
-              "json",
-              "markdown",
-              "text"
-            ],
-            "type": "string"
-          },
           "language": {
-            "description": "Preferred language for sites that publish translations, as an hreflang code such as 'en', 'ja' or 'pt-BR' (default '%s'). Other translations of a page are skipped so the page budget is spent on distinct content.",
+            "description": "Preferred language for sites that publish translations, as an hreflang code such as 'en', 'ja' or 'pt-BR' (default 'en'). Other translations of a page are skipped so the page budget is spent on distinct content.",
             "type": "string"
           },
           "maxDepth": {
-            "description": "How many links deep to follow; 0 reads only the starting URL. Defaults to the operator's limit (%d unless changed in Settings); a larger value is capped to that limit",
+            "description": "How many links deep to follow; 0 reads only the starting URL. Defaults to the operator's limit (2 unless changed in Settings); a larger value is capped to that limit",
             "type": "integer"
           },
           "maxMinutes": {
-            "description": "With background, how many minutes the job may run. Defaults to the operator's limit (%d unless changed in Settings); a larger value is capped to that limit",
+            "description": "With background, how many minutes the job may run. Defaults to the operator's limit (60 unless changed in Settings); a larger value is capped to that limit",
             "type": "integer"
           },
           "maxPages": {
-            "description": "Maximum pages to read. Defaults to the operator's limit (%d unless changed in Settings, %d with background); a larger value is capped to that limit",
+            "description": "Maximum pages to read. Defaults to the operator's limit (25 unless changed in Settings, 500 with background); a larger value is capped to that limit",
             "type": "integer"
-          },
-          "metadata": {
-            "description": "Include the page's own structured data (title, description, OpenGraph, JSON-LD). The result is JSON.",
-            "type": "boolean"
           },
           "proxy": {
             "description": "With background only, and only when the user asks for it: the DataImpulse plan the job goes out through, as {\"provider\": \"dataimpulse\", \"plan\": \"mobile\"}. Omit it to use the operator's proxy setting",
             "properties": {
               "plan": {
                 "enum": [
-                  "datacenter",
-                  "mobile",
+                  "residential",
                   "premium-residential",
-                  "residential"
+                  "mobile",
+                  "datacenter"
                 ],
                 "type": "string"
               },
@@ -550,8 +531,8 @@
               }
             },
             "required": [
-              "plan",
-              "provider"
+              "provider",
+              "plan"
             ],
             "type": "object"
           },
@@ -570,6 +551,26 @@
           "url": {
             "description": "The URL to start from",
             "type": "string"
+          },
+          "format": {
+            "description": "How to return the content: 'markdown' (default), 'text' (no markup) or 'json' (a record per page)",
+            "enum": [
+              "markdown",
+              "text",
+              "json"
+            ],
+            "type": "string"
+          },
+          "extract": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Return only these values instead of the page content: field name to CSS selector, with @attr to read an attribute, e.g. {\"price\": \".price\", \"next\": \"a.next@href\"}. The result is JSON.",
+            "type": "object"
+          },
+          "metadata": {
+            "description": "Include the page's own structured data (title, description, OpenGraph, JSON-LD). The result is JSON.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -577,13 +578,13 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Search the web for current information. Returns relevant results with titles, URLs, and content snippets. Use this to find up-to-date information, research topics, or answer questions about recent events.",
       "name": "web_search",
+      "description": "Search the web for current information. Returns relevant results with titles, URLs, and content snippets. Use this to find up-to-date information, research topics, or answer questions about recent events.",
       "parameters": {
         "properties": {
           "numResults": {
@@ -600,13 +601,13 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Execute a shell command on the host system. Commands are validated against an allowlist of permitted binaries. Working directory defaults to the agent workspace. Returns exit code, output, and execution metadata. A command still in the foreground when its timeout passes is killed, so start a server or a long build with \"background\": true rather than appending &: the call returns at once, and the command keeps writing its output to a file the result names with its pid, which you can read later. The operator, or you through jclaw_api (POST /api/processes/{pid}/stop), can stop it. Bind a server you start to 127.0.0.1 unless the user asks for another address.",
       "name": "exec",
+      "description": "Execute a shell command on the host system. Commands are validated against an allowlist of permitted binaries. Working directory defaults to the agent workspace. Returns exit code, output, and execution metadata. A command still in the foreground when its timeout passes is killed, so start a server or a long build with \"background\": true rather than appending &: the call returns at once, and the command keeps writing its output to a file the result names with its pid, which you can read later. The operator, or you through jclaw_api (POST /api/processes/{pid}/stop), can stop it. Bind a server you start to 127.0.0.1 unless the user asks for another address.",
       "parameters": {
         "properties": {
           "background": {
@@ -643,55 +644,15 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Spawn a child subagent to carry out a task on your behalf. The child runs in its own fresh conversation and you receive its final assistant reply. Use this when a task is well-scoped and benefits from an isolated context (long research, separate tool surface, exploratory work). Fires ONCE per call — there is no schedule/interval parameter. For anything recurring or scheduled (\"every 30 seconds\", \"every minute\", \"every day at 9am\"), even if the operator describes it as a \"subagent\", use the `task` tool's createTask action instead — that is the abstraction that carries cron/interval and can invoke an agent on each fire.",
       "name": "subagent_spawn",
+      "description": "Spawn a child subagent to carry out a task on your behalf. The child runs in its own fresh conversation and you receive its final assistant reply. Use this when a task is well-scoped and benefits from an isolated context (long research, separate tool surface, exploratory work). Fires ONCE per call — there is no schedule/interval parameter. For anything recurring or scheduled (\"every 30 seconds\", \"every minute\", \"every day at 9am\"), even if the operator describes it as a \"subagent\", use the `task` tool's createTask action instead — that is the abstraction that carries cron/interval and can invoke an agent on each fire.",
       "parameters": {
         "properties": {
-          "agentId": {
-            "description": "Optional id of an existing Agent row to run as the child; defaults to a fresh clone of the calling agent",
-            "type": "integer"
-          },
-          "async": {
-            "description": "When true (default false), return the child's run id immediately so you can spawn more or do other work, then collect with subagent_yield. In a chat only its owner reads (web chat, or the owner's private chat), a completion card is posted to your conversation and the result is also sent to the chat's channel; in a group or a guest's chat the child runs in the foreground and you relay its result (a tasks[] batch still runs in parallel there). In a task fire you block-await the result with subagent_yield. Only with mode=\"session\".",
-            "type": "boolean"
-          },
-          "context": {
-            "description": "Context inheritance mode: \"fresh\" (default) for an empty child history, or \"inherit\" to summarize the parent's recent turns into the child's system prompt and grant the child the union of the parent's enabled tools and its own.",
-            "type": "string"
-          },
-          "folder": {
-            "description": "With runtime=\"acp\" only: the name of the folder the coding harness works in. Name an existing folder to continue a project there; a new name creates it. Omit it for a fresh folder named from the task. One folder name, never a path.",
-            "type": "string"
-          },
-          "label": {
-            "description": "Optional short display name for the spawn",
-            "type": "string"
-          },
-          "mode": {
-            "description": "Spawn mode: \"session\" (default) creates a child Conversation that renders as a separate row in the operator's sidebar, or \"inline\" to run the child within the parent's conversation as a collapsible nested-turn block. A task fire has no conversation, so there \"inline\" runs as \"session\".",
-            "type": "string"
-          },
-          "modelId": {
-            "description": "Optional model id override for the child. With runtime=\"acp\" it replaces the harness's own default model (alone, the harness keeps its own endpoint and login); it also overrides the operator's Settings default for the harness.",
-            "type": "string"
-          },
-          "modelProvider": {
-            "description": "Optional provider override for the child (a configured JClaw provider name). With runtime=\"acp\" the coding harness is pointed at that provider's endpoint — claude and codex accept this; pi and gemini take modelId only.",
-            "type": "string"
-          },
-          "runTimeoutSeconds": {
-            "description": "Idle budget: seconds of inactivity (no LLM round/tool call) before the run times out; active work resets it, so it need not cover total runtime (default 300)",
-            "type": "integer"
-          },
-          "runtime": {
-            "description": "Child runtime: \"native\" (default) runs a JClaw subagent, or \"acp\" runs the operator-configured external agent harness (e.g. a Codex/Claude/Gemini CLI) with your task on stdin, capturing its output as the reply. Composes with sync, async, and batch.",
-            "type": "string"
-          },
           "task": {
             "description": "Instruction for the child subagent (required unless you pass 'tasks' for a batch)",
             "type": "string"
@@ -702,28 +663,60 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "label": {
+            "description": "Optional short display name for the spawn",
+            "type": "string"
+          },
+          "agentId": {
+            "description": "Optional id of an existing Agent row to run as the child; defaults to a fresh clone of the calling agent",
+            "type": "integer"
+          },
+          "mode": {
+            "description": "Spawn mode: \"session\" (default) creates a child Conversation that renders as a separate row in the operator's sidebar, or \"inline\" to run the child within the parent's conversation as a collapsible nested-turn block. A task fire has no conversation, so there \"inline\" runs as \"session\".",
+            "type": "string"
+          },
+          "modelProvider": {
+            "description": "Optional provider override for the child (a configured JClaw provider name). With runtime=\"acp\" the coding harness is pointed at that provider's endpoint — claude and codex accept this; pi and gemini take modelId only.",
+            "type": "string"
+          },
+          "modelId": {
+            "description": "Optional model id override for the child. With runtime=\"acp\" it replaces the harness's own default model (alone, the harness keeps its own endpoint and login); it also overrides the operator's Settings default for the harness.",
+            "type": "string"
+          },
+          "context": {
+            "description": "Context inheritance mode: \"fresh\" (default) for an empty child history, or \"inherit\" to summarize the parent's recent turns into the child's system prompt and grant the child the union of the parent's enabled tools and its own.",
+            "type": "string"
+          },
+          "runTimeoutSeconds": {
+            "description": "Idle budget: seconds of inactivity (no LLM round/tool call) before the run times out; active work resets it, so it need not cover total runtime (default 300)",
+            "type": "integer"
+          },
+          "async": {
+            "description": "When true (default false), return the child's run id immediately so you can spawn more or do other work, then collect with subagent_yield. In a chat only its owner reads (web chat, or the owner's private chat), a completion card is posted to your conversation and the result is also sent to the chat's channel; in a group or a guest's chat the child runs in the foreground and you relay its result (a tasks[] batch still runs in parallel there). In a task fire you block-await the result with subagent_yield. Only with mode=\"session\".",
+            "type": "boolean"
+          },
+          "runtime": {
+            "description": "Child runtime: \"native\" (default) runs a JClaw subagent, or \"acp\" runs the operator-configured external agent harness (e.g. a Codex/Claude/Gemini CLI) with your task on stdin, capturing its output as the reply. Composes with sync, async, and batch.",
+            "type": "string"
+          },
+          "folder": {
+            "description": "With runtime=\"acp\" only: the name of the folder the coding harness works in. Name an existing folder to continue a project there; a new name creates it. Omit it for a fresh folder named from the task. One folder name, never a path.",
+            "type": "string"
           }
         },
         "required": [],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Suspend this turn until the named async-spawned subagent finishes. When invoked, your AgentRunner loop exits without emitting a final assistant reply; once the child terminates (completion, failure, or timeout), its final output is delivered back as your next user-role message and your loop resumes from there. Use this after a `subagent_spawn` call with `async=true` when you want to block your logical turn on the child's result rather than continuing in parallel; see the parameters for single, batch, and collect-all forms.",
       "name": "subagent_yield",
+      "description": "Suspend this turn until the named async-spawned subagent finishes. When invoked, your AgentRunner loop exits without emitting a final assistant reply; once the child terminates (completion, failure, or timeout), its final output is delivered back as your next user-role message and your loop resumes from there. Use this after a `subagent_spawn` call with `async=true` when you want to block your logical turn on the child's result rather than continuing in parallel; see the parameters for single, batch, and collect-all forms.",
       "parameters": {
         "properties": {
-          "all": {
-            "description": "BATCH COLLECT: when true, block-await EVERY outstanding async child you spawned in this turn/task and return them all — no need to list run_ids.",
-            "type": "boolean"
-          },
-          "conversationId": {
-            "description": "Child conversation id returned by the prior subagent_spawn call. Resolves to the most-recent SubagentRun whose childConversation matches; ignored when runId is provided.",
-            "type": "string"
-          },
           "runId": {
             "description": "Run id returned by a prior subagent_spawn call with async=true. Provide this OR conversationId (runId wins when both set).",
             "type": "string"
@@ -735,6 +728,14 @@
             },
             "type": "array"
           },
+          "all": {
+            "description": "BATCH COLLECT: when true, block-await EVERY outstanding async child you spawned in this turn/task and return them all — no need to list run_ids.",
+            "type": "boolean"
+          },
+          "conversationId": {
+            "description": "Child conversation id returned by the prior subagent_spawn call. Resolves to the most-recent SubagentRun whose childConversation matches; ignored when runId is provided.",
+            "type": "string"
+          },
           "timeoutSeconds": {
             "description": "Caller-tightened resume budget in seconds (0-3600, default 300). If the child hasn't terminated by then a synthetic TIMEOUT announce resumes your turn. Pass 0 to disable the yield timeout — the parent waits until the child terminates via its own spawn-time runTimeoutSeconds.",
             "type": "integer"
@@ -742,25 +743,25 @@
         },
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Read the full message list for the child conversation of a previously-spawned subagent run. Returns role, content, tool calls/results, message kind/metadata, and timestamps for each message. Use this to inspect what the child actually did (multi-turn reasoning, tool invocations, intermediate replies) after a subagent_spawn or subagent_yield call has terminated. Required: `runId` (the run id returned from subagent_spawn). Optional: `limit` (1-200, default 50), `beforeMessageId` (cursor — return only messages with id < this value; use to page back through long transcripts). Permission: the calling agent must be the run's parent agent.",
       "name": "conversation_history",
+      "description": "Read the full message list for the child conversation of a previously-spawned subagent run. Returns role, content, tool calls/results, message kind/metadata, and timestamps for each message. Use this to inspect what the child actually did (multi-turn reasoning, tool invocations, intermediate replies) after a subagent_spawn or subagent_yield call has terminated. Required: `runId` (the run id returned from subagent_spawn). Optional: `limit` (1-200, default 50), `beforeMessageId` (cursor — return only messages with id < this value; use to page back through long transcripts). Permission: the calling agent must be the run's parent agent.",
       "parameters": {
         "properties": {
-          "beforeMessageId": {
-            "description": "Pagination cursor: return only messages with id < this value. Use the smallest id from a previous page to walk back through history.",
+          "runId": {
+            "description": "Run id returned by a prior subagent_spawn call (required).",
             "type": "string"
           },
           "limit": {
             "description": "Maximum messages to return (1-200, default 50).",
             "type": "integer"
           },
-          "runId": {
-            "description": "Run id returned by a prior subagent_spawn call (required).",
+          "beforeMessageId": {
+            "description": "Pagination cursor: return only messages with id < this value. Use the smallest id from a previous page to walk back through history.",
             "type": "string"
           }
         },
@@ -769,25 +770,20 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Send a message between this agent and a related subagent run, without blocking. Use this from a PARENT to nudge a running child (target=\"child\" + the runId from subagent_spawn) — the message is appended to the child's conversation as user input and the child sees it on its next turn. Use this from a CHILD to push a status update back to its parent (target=\"parent\" — the runId is inferred from the active SubagentRun where this agent is the child). The parent sees the message on its next turn; it is not woken or interrupted. Required: `message` (the text to deliver). Optional: `target` (parent|child; defaults to \"parent\" when the caller is a running child, \"child\" otherwise), `runId` (required when target=\"child\"), `payloadType` (text|json|markdown; recorded in metadata, content is delivered verbatim).",
       "name": "conversation_send",
+      "description": "Send a message between this agent and a related subagent run, without blocking. Use this from a PARENT to nudge a running child (target=\"child\" + the runId from subagent_spawn) — the message is appended to the child's conversation as user input and the child sees it on its next turn. Use this from a CHILD to push a status update back to its parent (target=\"parent\" — the runId is inferred from the active SubagentRun where this agent is the child). The parent sees the message on its next turn; it is not woken or interrupted. Required: `message` (the text to deliver). Optional: `target` (parent|child; defaults to \"parent\" when the caller is a running child, \"child\" otherwise), `runId` (required when target=\"child\"), `payloadType` (text|json|markdown; recorded in metadata, content is delivered verbatim).",
       "parameters": {
         "properties": {
-          "message": {
-            "description": "The message content to deliver (required).",
-            "type": "string"
-          },
-          "payloadType": {
-            "description": "Hint about the message's structure (recorded in metadata, content is still delivered verbatim). Defaults to \"text\".",
+          "target": {
+            "description": "Delivery direction. \"parent\" appends to the parent conversation of this child's active run; \"child\" appends to the named child's conversation (runId required). When omitted, inferred from the calling agent's role.",
             "enum": [
-              "json",
-              "markdown",
-              "text"
+              "parent",
+              "child"
             ],
             "type": "string"
           },
@@ -795,11 +791,16 @@
             "description": "Run id of the target child (required when target=\"child\"; ignored when target=\"parent\").",
             "type": "string"
           },
-          "target": {
-            "description": "Delivery direction. \"parent\" appends to the parent conversation of this child's active run; \"child\" appends to the named child's conversation (runId required). When omitted, inferred from the calling agent's role.",
+          "message": {
+            "description": "The message content to deliver (required).",
+            "type": "string"
+          },
+          "payloadType": {
+            "description": "Hint about the message's structure (recorded in metadata, content is still delivered verbatim). Defaults to \"text\".",
             "enum": [
-              "child",
-              "parent"
+              "text",
+              "json",
+              "markdown"
             ],
             "type": "string"
           }
@@ -809,22 +810,26 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "List the subagent runs owned by the calling agent (rows where this agent is the parent). Use this to discover active or recent children — run ids, labels, status, timing, and a short preview of each run's outcome. All parameters are optional: `status` (RUNNING|COMPLETED|FAILED|KILLED|TIMEOUT), `labelGlob` (operator-friendly glob, * matches any chars; e.g. \"probe-*\"), `agentId` (narrow to a specific child agent id), `limit` (1-100, default 20), `offset` (default 0). Returns: {count, has_more, runs: [{runId, childConversationId, childAgentId, label, status, startedAt, endedAt, outcomePreview}]}.",
       "name": "conversation_list",
+      "description": "List the subagent runs owned by the calling agent (rows where this agent is the parent). Use this to discover active or recent children — run ids, labels, status, timing, and a short preview of each run's outcome. All parameters are optional: `status` (RUNNING|COMPLETED|FAILED|KILLED|TIMEOUT), `labelGlob` (operator-friendly glob, * matches any chars; e.g. \"probe-*\"), `agentId` (narrow to a specific child agent id), `limit` (1-100, default 20), `offset` (default 0). Returns: {count, has_more, runs: [{runId, childConversationId, childAgentId, label, status, startedAt, endedAt, outcomePreview}]}.",
       "parameters": {
         "properties": {
-          "agentId": {
-            "description": "Filter by child agent id (optional).",
-            "type": "integer"
+          "status": {
+            "description": "Filter by status: RUNNING, COMPLETED, FAILED, KILLED, TIMEOUT (optional).",
+            "type": "string"
           },
           "labelGlob": {
             "description": "Filter by label glob (* matches any sequence of characters). Literal % and _ in the rest of the string are escaped.",
             "type": "string"
+          },
+          "agentId": {
+            "description": "Filter by child agent id (optional).",
+            "type": "integer"
           },
           "limit": {
             "description": "Maximum rows to return (1-100, default 20).",
@@ -833,57 +838,31 @@
           "offset": {
             "description": "Row offset for pagination (default 0).",
             "type": "integer"
-          },
-          "status": {
-            "description": "Filter by status: RUNNING, COMPLETED, FAILED, KILLED, TIMEOUT (optional).",
-            "type": "string"
           }
         },
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   },
   {
+    "type": "function",
     "function": {
-      "description": "Send a message to an external chat channel (Telegram, Slack, or WhatsApp) at any point during your turn — not just at task / subagent completion. Useful for pushing progress updates from long-running work (downloads, builds, scans) back to the user who started the conversation. `send` posts a new message; `reply` / `edit` / `delete` / `pin` / `unpin` / `react` act on an existing Telegram message (`edit` only on bot-sent ones, and the bot token comes from the agent's Telegram binding); `poll` posts a native Telegram poll. `channel` and `target` both default to the calling agent's active conversation — a subagent inherits its parent's — so only a cross-channel send needs both passed explicitly. These actions may be disabled by the operator, in which case you get a `not-enabled` result.",
       "name": "message",
+      "description": "Send a message to an external chat channel (Telegram, Slack, or WhatsApp) at any point during your turn — not just at task / subagent completion. Useful for pushing progress updates from long-running work (downloads, builds, scans) back to the user who started the conversation. `send` posts a new message; `reply` / `edit` / `delete` / `pin` / `unpin` / `react` act on an existing Telegram message (`edit` only on bot-sent ones, and the bot token comes from the agent's Telegram binding); `poll` posts a native Telegram poll. `channel` and `target` both default to the calling agent's active conversation — a subagent inherits its parent's — so only a cross-channel send needs both passed explicitly. These actions may be disabled by the operator, in which case you get a `not-enabled` result.",
       "parameters": {
         "properties": {
           "action": {
             "description": "What to do: \"send\" a new message, or (Telegram only) \"reply\" / \"edit\" / \"delete\" / \"pin\" / \"unpin\" / \"react\" on an existing message.",
             "enum": [
+              "send",
               "delete",
-              "edit",
               "pin",
-              "poll",
+              "unpin",
               "react",
               "reply",
-              "send",
-              "unpin"
+              "edit",
+              "poll"
             ],
-            "type": "string"
-          },
-          "allow_multiple": {
-            "description": "Optional for action=\"poll\": allow voters to pick multiple options (default false).",
-            "type": "boolean"
-          },
-          "anonymous": {
-            "description": "Optional for action=\"poll\": whether votes are anonymous (default true). Pass false to show who voted for what.",
-            "type": "boolean"
-          },
-          "channel": {
-            "description": "Channel to deliver on. Defaults to the calling agent's active conversation channel — e.g. a subagent spawned from a Telegram thread inherits \"telegram\" and doesn't need to pass this. \"web\" routes to the in-app chat (the JClaw conversation the user is viewing); use this for users who started the chat from the web UI rather than an external messenger.",
-            "enum": [
-              "slack",
-              "telegram",
-              "web",
-              "whatsapp"
-            ],
-            "type": "string"
-          },
-          "emoji": {
-            "description": "Reaction emoji for action=\"react\" (e.g. \"👍\"). Blank or omitted clears the bot's reaction.",
             "type": "string"
           },
           "message": {
@@ -894,9 +873,17 @@
             "description": "Telegram message id to act on (required for reply / edit / delete / pin / unpin / react).",
             "type": "integer"
           },
-          "open_period": {
-            "description": "Optional for action=\"poll\": seconds (5-600) the poll stays open before auto-closing. Omit to leave it open indefinitely.",
-            "type": "integer"
+          "emoji": {
+            "description": "Reaction emoji for action=\"react\" (e.g. \"👍\"). Blank or omitted clears the bot's reaction.",
+            "type": "string"
+          },
+          "quote": {
+            "description": "Optional for action=\"reply\": a verbatim excerpt of the replied-to message to natively quote (Telegram highlights it above your reply). Must be an exact substring of the target message; if it isn't, the reply is still sent without the quote. Omit to reply without a highlighted excerpt.",
+            "type": "string"
+          },
+          "question": {
+            "description": "Poll question for action=\"poll\" (required; 1-300 chars).",
+            "type": "string"
           },
           "options": {
             "description": "Poll answer options for action=\"poll\" (required; 2-10 strings, each 1-100 chars).",
@@ -905,12 +892,26 @@
             },
             "type": "array"
           },
-          "question": {
-            "description": "Poll question for action=\"poll\" (required; 1-300 chars).",
-            "type": "string"
+          "anonymous": {
+            "description": "Optional for action=\"poll\": whether votes are anonymous (default true). Pass false to show who voted for what.",
+            "type": "boolean"
           },
-          "quote": {
-            "description": "Optional for action=\"reply\": a verbatim excerpt of the replied-to message to natively quote (Telegram highlights it above your reply). Must be an exact substring of the target message; if it isn't, the reply is still sent without the quote. Omit to reply without a highlighted excerpt.",
+          "allow_multiple": {
+            "description": "Optional for action=\"poll\": allow voters to pick multiple options (default false).",
+            "type": "boolean"
+          },
+          "open_period": {
+            "description": "Optional for action=\"poll\": seconds (5-600) the poll stays open before auto-closing. Omit to leave it open indefinitely.",
+            "type": "integer"
+          },
+          "channel": {
+            "description": "Channel to deliver on. Defaults to the calling agent's active conversation channel — e.g. a subagent spawned from a Telegram thread inherits \"telegram\" and doesn't need to pass this. \"web\" routes to the in-app chat (the JClaw conversation the user is viewing); use this for users who started the chat from the web UI rather than an external messenger.",
+            "enum": [
+              "telegram",
+              "slack",
+              "whatsapp",
+              "web"
+            ],
             "type": "string"
           },
           "target": {
@@ -923,7 +924,6 @@
         ],
         "type": "object"
       }
-    },
-    "type": "function"
+    }
   }
 ]

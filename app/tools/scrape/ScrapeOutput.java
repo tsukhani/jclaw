@@ -138,22 +138,23 @@ public final class ScrapeOutput {
         return record;
     }
 
-    /** The three output parameters, for a tool's schema. */
+    /** The three output parameters, for a tool's schema; ordered, since callers put them into their own ordered properties. */
     public static Map<String, Object> schema(boolean htmlAllowed) {
-        return Map.of(
-                ARG_FORMAT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
+        var schema = new LinkedHashMap<String, Object>();
+        schema.put(ARG_FORMAT, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                         SchemaKeys.ENUM, formatNames(htmlAllowed),
                         SchemaKeys.DESCRIPTION, "How to return the content: 'markdown' (default), 'text' "
                                 + "(no markup) or 'json' (a record per page)"
-                                + (htmlAllowed ? "; 'html' only when the user asks for the raw page source" : "")),
-                ARG_EXTRACT, Map.of(SchemaKeys.TYPE, SchemaKeys.OBJECT,
+                                + (htmlAllowed ? "; 'html' only when the user asks for the raw page source" : "")));
+        schema.put(ARG_EXTRACT, Map.of(SchemaKeys.TYPE, SchemaKeys.OBJECT,
                         SchemaKeys.ADDITIONAL_PROPERTIES, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING),
                         SchemaKeys.DESCRIPTION, "Return only these values instead of the page content: "
                                 + "field name to CSS selector, with @attr to read an attribute, e.g. "
-                                + "{\"price\": \".price\", \"next\": \"a.next@href\"}. The result is JSON."),
-                ARG_METADATA, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
+                                + "{\"price\": \".price\", \"next\": \"a.next@href\"}. The result is JSON."));
+        schema.put(ARG_METADATA, Map.of(SchemaKeys.TYPE, SchemaKeys.BOOLEAN,
                         SchemaKeys.DESCRIPTION, "Include the page's own structured data (title, description, "
                                 + "OpenGraph, JSON-LD). The result is JSON."));
+        return schema;
     }
 
     private static @Nullable Format formatNamed(String name) {

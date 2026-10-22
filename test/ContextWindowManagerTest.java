@@ -1,6 +1,7 @@
 import agents.ContextWindowManager;
 import llm.LlmProvider;
 import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.FunctionDef;
 import llm.LlmTypes.ModelInfo;
 import llm.LlmTypes.ProviderConfig;
 import llm.LlmTypes.ToolDef;
@@ -145,7 +146,7 @@ class ContextWindowManagerTest extends UnitTest {
         var full = ToolDef.of("abcd", "efgh", Map.of("k", "v"));
         assertEquals(3, estimateToolTokens(List.of(full)));
         // name(8) only — null description and null parameters are skipped.
-        var nameOnly = ToolDef.of("aaaaaaaa", null, null);
+        var nameOnly = new ToolDef("function", new FunctionDef("aaaaaaaa", null, null));
         assertEquals(2, estimateToolTokens(List.of(nameOnly)));
     }
 

@@ -81,7 +81,7 @@ public class ConversationSendTool implements ToolRegistry.Tool {
     private static final Set<String> ALLOWED_TARGETS = Set.of(TARGET_PARENT, TARGET_CHILD);
 
     private static final String DEFAULT_PAYLOAD_TYPE = "text";
-    private static final Set<String> ALLOWED_PAYLOAD_TYPES = Set.of("text", "json", "markdown");
+    private static final List<String> ALLOWED_PAYLOAD_TYPES = List.of("text", "json", "markdown");
 
     private static final String ERR_RUN_ID = "Error: runId ";
 
@@ -145,7 +145,7 @@ public class ConversationSendTool implements ToolRegistry.Tool {
         props.put(PARAM_MESSAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                 SchemaKeys.DESCRIPTION, "The message content to deliver (required)."));
         props.put(PARAM_PAYLOAD_TYPE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
-                SchemaKeys.ENUM, List.copyOf(ALLOWED_PAYLOAD_TYPES),
+                SchemaKeys.ENUM, ALLOWED_PAYLOAD_TYPES,
                 SchemaKeys.DESCRIPTION,
                 "Hint about the message's structure (recorded in metadata, content "
                         + "is still delivered verbatim). Defaults to \"text\"."));

@@ -48,6 +48,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -190,15 +191,15 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                 SchemaKeys.DESCRIPTION, "The URL to start from"),
                         ARG_MAX_PAGES, Map.of(SchemaKeys.TYPE, "integer",
                                 SchemaKeys.DESCRIPTION,
-                                "Maximum pages to read. Defaults to the operator's limit (%d unless "
+                                ("Maximum pages to read. Defaults to the operator's limit (%d unless "
                                 + "changed in Settings, %d with background); a larger value is capped "
-                                + "to that limit"
+                                + "to that limit")
                                         .formatted(DEFAULT_MAX_PAGES, WebScrapeSettings.DEFAULT_JOB_MAX_PAGES)),
                         ARG_MAX_DEPTH, Map.of(SchemaKeys.TYPE, "integer",
                                 SchemaKeys.DESCRIPTION,
-                                "How many links deep to follow; 0 reads only the starting URL. "
+                                ("How many links deep to follow; 0 reads only the starting URL. "
                                 + "Defaults to the operator's limit (%d unless changed in Settings); "
-                                + "a larger value is capped to that limit"
+                                + "a larger value is capped to that limit")
                                         .formatted(WebScrapeSettings.DEFAULT_MAX_DEPTH)),
                         ARG_SAME_HOST, Map.of(SchemaKeys.TYPE, "boolean",
                                 SchemaKeys.DESCRIPTION,
@@ -220,9 +221,9 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                 + "crawl of more pages than one turn can read"),
                         ScrapeJobRequest.ARG_MAX_MINUTES, Map.of(SchemaKeys.TYPE, "integer",
                                 SchemaKeys.DESCRIPTION,
-                                "With background, how many minutes the job may run. Defaults to the "
+                                ("With background, how many minutes the job may run. Defaults to the "
                                 + "operator's limit (%d unless changed in Settings); a larger value "
-                                + "is capped to that limit"
+                                + "is capped to that limit")
                                         .formatted(WebScrapeSettings.DEFAULT_JOB_MAX_MINUTES)),
                         ScrapeJobRequest.ARG_PROXY, Map.of(SchemaKeys.TYPE, SchemaKeys.OBJECT,
                                 SchemaKeys.DESCRIPTION,
@@ -238,19 +239,19 @@ public class WebScrapeTool implements ToolRegistry.Tool {
                                 SchemaKeys.REQUIRED, List.of(ScrapeJobRequest.PROXY_PROVIDER, ScrapeJobRequest.PROXY_PLAN)),
                         ARG_LANGUAGE, Map.of(SchemaKeys.TYPE, SchemaKeys.STRING,
                                 SchemaKeys.DESCRIPTION,
-                                "Preferred language for sites that publish translations, as an "
+                                ("Preferred language for sites that publish translations, as an "
                                 + "hreflang code such as 'en', 'ja' or 'pt-BR' (default '%s'). "
                                 + "Other translations of a page are skipped so the page budget "
-                                + "is spent on distinct content."
+                                + "is spent on distinct content.")
                                         .formatted(WebScrapeSettings.DEFAULT_LANGUAGE))
                 )),
                 SchemaKeys.REQUIRED, List.of(ARG_URL)
         );
     }
 
-    /** Past Map.of's ten pairs, so the shared output arguments are merged in. */
+    /** Past Map.of's ten pairs, so the shared output arguments are merged in; the tool's own come first, by name, as Map.of keeps no order. */
     private static Map<String, Object> withOutputArguments(Map<String, Object> own) {
-        var props = new LinkedHashMap<String, Object>(own);
+        var props = new LinkedHashMap<String, Object>(new TreeMap<>(own));
         props.putAll(ScrapeOutput.schema(false));
         return props;
     }
