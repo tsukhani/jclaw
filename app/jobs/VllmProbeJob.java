@@ -16,7 +16,7 @@ import utils.Strings;
  * cached-probe service — nothing reads a cached vLLM result; Settings → Video Interpretation
  * live-probes {@code /api/providers/vllm/reachable} on demand).
  */
-@OnApplicationStart
+@OnApplicationStart(async = true)
 @NoTransaction
 public class VllmProbeJob extends Job<Void> {
 
