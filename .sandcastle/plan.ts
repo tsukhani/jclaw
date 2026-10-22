@@ -101,4 +101,4 @@ export const heldFiles = (key: string, run: RunningStory, changedOn: (key: strin
   run.built ? new Set(changedOn(key)) : run.predicted;
 
 // The phases whose completion means the branch holds the story's real diff.
-export const buildsTheDiff = (phase: string) => phase === "implement" || phase === "build" || phase === "rework";
+export const buildsTheDiff = (phase: string) => phase === "tests" || phase === "implement" || phase === "build" || phase === "rework";

@@ -153,6 +153,24 @@ To Do (afk) ─► claimed, In Progress + afk-running ─► implement / rework 
   and its branch keeps what it had committed. If a run left uncommitted changes in its worktree, the story is blocked
   before anything else runs, and the comment names the files and the worktree: commit or discard them there first.
 
+### Acceptance tests first
+
+A story whose description has acceptance criteria stops once before any code is written (JF-17). The first run, the
+`tests` phase, commits one failing test per criterion, named after it, and nothing else: the harness refuses a branch
+that changes files outside `test/`, `frontend/test/` and `frontend/tests/`. The story then goes to Review with a comment
+starting `acceptance tests ready for review`, and its commit body maps each criterion to its test and how the test fails
+today. Without this stop, the agent that reads a criterion also writes the test that judges its reading, so a misread
+criterion still goes green.
+
+- **Approve:** label it `afk-tests-approved` and send it back (to To Do in Jira; on GitHub, remove `afk-review`). The next round builds against the tests, which
+  every later prompt is told not to weaken, and offers the result for review as usual. You may edit the tests on the
+  branch before approving.
+- **Change them:** comment what to change and send it back without the label. The next round rewrites the tests and
+  stops again. Sending it back with neither a comment nor the label blocks it.
+- `afk-merge` never merges a story whose tests await approval: there is nothing built to merge.
+
+A story with no acceptance criteria skips the stop, and a branch that already holds an implementation is built on.
+
 ### A whole epic
 
 Label an epic `afk` and every To Do story in it that is in the active sprint becomes a candidate, with no label of its
@@ -334,7 +352,7 @@ Jira user.
   `git branch -d agent/<KEY>` and `git -C ~/.jclaw-factory/jclaw branch -D agent/<KEY>` (the re-sign gave the merged
   commits new hashes, so the clone's copy needs `-D`). Or label it `afk-merge` and the factory does all of this (see
   [Auto-merge](#auto-merge)).
-- **Model API overloads:** when an agent phase (`spec`, `build`, `implement`, `rework`, `repair-N`, `review`, `brief`)
+- **Model API overloads:** when an agent phase (`tests`, `spec`, `build`, `implement`, `rework`, `repair-N`, `review`, `brief`)
   fails and the last lines of that run in its log, `logs/<KEY>-<phase>.log`, carry Claude Code's
   `API Error` for a 529 overload, a 500, 502, 503 or 504, an `overloaded_error` or a rate limit, the story is not
   blocked. It goes back to To Do without `afk-blocked`, its branch keeps every commit, and a comment says the model API

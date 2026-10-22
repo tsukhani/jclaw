@@ -11,6 +11,7 @@ import { CPUS, assertReady, ensureBmadSeed, ensureGradleSeed, ensureImage, facto
 import { githubTracker } from "./github.ts";
 import { jira } from "./jira.ts";
 import { overruled, promptContext, rejectionFeedback, type Snapshot, type Tracker } from "./tracker.ts";
+import { APPROVED, approvedTestsNote, awaitingTestsApproval, onlyTests, testsOffer, testsStage } from "./acceptance.ts";
 import { MergeRefused, followMain, landBranch, landedAs, leftoverChanges, mergeVerdict, restartEmptyBranch, type Report } from "./merge.ts";
 import { bmadOutcome, buildHaltReason, buildMode, buildsTheDiff, heldFiles, parsePlan, pickNonOverlapping, sensitivePaths, type BuildMode, type RunningStory, type StoryPlan } from "./plan.ts";
 import { BOARD_FILE, CLONE, ENV_FILE, FACTORY_HOME, HERE, LOGS, REPO_ROOT, SETTINGS_FILE, STATE } from "./paths.ts";
@@ -145,11 +146,13 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
   const tracker = trackerFor(key);
   const m = tracker.markup;
   const feedback = rejectionFeedback(picked, tracker.header);
+  const tests = testsStage(picked, tracker.header);
   const lessons = fs.existsSync(LESSONS) ? fs.readFileSync(LESSONS, "utf8").trim() : "";
-  const promptArgs = { KEY: key, SUMMARY: picked.summary, DESCRIPTION: promptContext(picked), LESSONS: lessons || "None yet." };
+  const promptArgs = { KEY: key, SUMMARY: picked.summary, DESCRIPTION: promptContext(picked) + approvedTestsNote(tests), LESSONS: lessons || "None yet." };
   const withFeedback = { ...promptArgs, FEEDBACK: feedback || "None: this is the first submission." };
   let bmadVersion: string | undefined;
   let freshBuild = false;
+  let stoppedForTests = false;
   // A resumed or reworked story keeps the way its first build went, which the `bmad` label records.
   const builtWithBmad = () => bmadVersion !== undefined || picked.labels.includes("bmad");
   let lesson: string | undefined;
@@ -186,6 +189,7 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
       git("branch", branch, "main");
     }
     const alreadyAhead = restartEmptyBranch(REPO, branch);
+    const changedOnBranch = () => git("diff", "--name-only", `main...${branch}`).split("\n").filter(Boolean);
     const leftover = leftoverChanges(REPO, branch);
     if (leftover) {
       throw new Error(`An earlier run left uncommitted changes to ${leftover.files.join(", ")} in ${leftover.path}. Commit or discard them, then retry.`);
@@ -206,7 +210,23 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
         lesson = said;
         fs.appendFileSync(LESSONS, `- ${said} (${key} review, ${new Date().toISOString().slice(0, 10)})\n`);
       }
-    } else if (alreadyAhead > 0) {
+    } else if ((tests.stage === "write" || tests.stage === "rewrite") && !(alreadyAhead > 0 && !onlyTests(changedOnBranch()))) {
+      // A branch that already holds an implementation, from before this stage existed or a crashed run, is built on.
+      if (tests.stage === "rewrite" && tests.feedback === "") {
+        throw new Error(`its acceptance tests came back from review with neither a comment nor the ${APPROVED} label: comment what to change, or add the label to approve them`);
+      }
+      // A run that committed the tests and stopped before offering them offers what it wrote.
+      if (!(tests.stage === "write" && alreadyAhead > 0 && onlyTests(changedOnBranch()))) {
+        const draft = tests.stage === "rewrite" ? tests.feedback : "None: this is the first draft.";
+        current = await timed("tests", () =>
+          sandbox.run({ name: `tests ${key}`, agent, promptFile: `${HERE}/prompts/tests.md`, promptArgs: { ...promptArgs, FEEDBACK: draft }, idleTimeoutSeconds: 1200, logging: logTo("tests") }),
+        );
+        if (current.commits.length === 0) throw new Error("the test writer made no commits");
+      }
+      if (!onlyTests(changedOnBranch())) throw new Error("the test writer changed files outside test/, frontend/test/ and frontend/tests/");
+      stoppedForTests = true;
+      return undefined;
+    } else if (alreadyAhead > 0 && !(tests.stage === "approved" && onlyTests(changedOnBranch()))) {
       console.log(`[${key} implement] skipped: ${branch} is already ${alreadyAhead} commit(s) ahead of main`);
       builtDiff(key);
     } else if (mode.bmad) {
@@ -332,6 +352,17 @@ const processStory = async (picked: Snapshot, mode: BuildMode): Promise<void> =>
     const brief = await build();
     // A local branch in the operator's checkout, where merging it into main puts it in the next /deploy.
     gitIn(CHECKOUT, "fetch", "--quiet", REPO, `${branch}:${branch}`);
+    if (stoppedForTests) {
+      await tracker.reviewing(key);
+      await tracker.comment(key, [
+        testsOffer(tracker.header),
+        `The acceptance tests are on local branch ${m.code(branch)} in the checkout of this comment's author, not pushed. No code is written yet. Read them with ${m.code(`git log -p main..${branch}`)}: each commit body maps a criterion to its test and says how the test fails today.`,
+        `To approve them as what the ticket means, label it ${m.code(APPROVED)} and send it back: the factory then builds against them and offers the result for review as usual. To change them, comment what to change and send it back.`,
+      ].join("\n"));
+      board.set(key, { state: "review" });
+      console.log(`[${key} tests] → Review for approval`);
+      return;
+    }
     const sensitive = sensitivePaths(gitIn(REPO, "diff", "--name-only", `main...${branch}`).split("\n").filter(Boolean));
     if (sensitive.length > 0) console.log(`[${key}] changes files that run on the Mac once merged: ${sensitive.join(", ")}`);
     await tracker.reviewing(key);
@@ -476,6 +507,9 @@ const decline = async (story: Snapshot, reason: string) => {
 const land = async (key: string): Promise<void> => {
   const tracker = trackerFor(key);
   const m = tracker.markup;
+  if (awaitingTestsApproval(await tracker.snapshotToState(key), tracker.header)) {
+    return note(`merge ${key}`, `[${key} merge] skipped: its acceptance tests await approval, and nothing is built yet`);
+  }
   const reportFile = `${LOGS}/${key}-report.json`;
   const report = fs.existsSync(reportFile) ? (JSON.parse(fs.readFileSync(reportFile, "utf8")) as Report) : undefined;
   // A refusal takes the label off the story, or opts it out of its epic's, so nothing retries until the operator says so.
