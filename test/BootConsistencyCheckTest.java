@@ -60,6 +60,7 @@ class BootConsistencyCheckTest extends UnitTest {
 
     @AfterEach
     void tearDown() {
+        DeferredSchedulerCalls.discard();
         services.TaskSchedulingServiceTestHooks.reset();
     }
 
@@ -71,6 +72,7 @@ class BootConsistencyCheckTest extends UnitTest {
         var orphanB = persistTask("orphan-b", Task.Status.PENDING);
 
         int registered = BootConsistencyCheck.sweep(stub.proxy());
+        commitAndReopen();
 
         assertEquals(2, registered, "both orphans should register");
         assertEquals(2, stub.schedules.size(),
@@ -93,6 +95,7 @@ class BootConsistencyCheckTest extends UnitTest {
         stub.scheduledIds.add(alreadyScheduled.id.toString());
 
         int registered = BootConsistencyCheck.sweep(stub.proxy());
+        commitAndReopen();
 
         assertEquals(1, registered,
                 "only the orphan should register; the already-scheduled is skipped");
@@ -111,6 +114,7 @@ class BootConsistencyCheckTest extends UnitTest {
         persistTask("cancelled", Task.Status.CANCELLED);
 
         int registered = BootConsistencyCheck.sweep(stub.proxy());
+        commitAndReopen();
 
         assertEquals(1, registered,
                 "exactly the one PENDING Task should register; the four "
@@ -126,6 +130,7 @@ class BootConsistencyCheckTest extends UnitTest {
         persistTask("completed", Task.Status.COMPLETED);
 
         int registered = BootConsistencyCheck.sweep(stub.proxy());
+        commitAndReopen();
 
         assertEquals(0, registered);
         assertTrue(stub.schedules.isEmpty(),
@@ -160,6 +165,7 @@ class BootConsistencyCheckTest extends UnitTest {
         stub.scheduledIds.add(t2.id.toString());
 
         int registered = BootConsistencyCheck.sweep(stub.proxy());
+        commitAndReopen();
 
         assertEquals(0, registered);
         assertTrue(stub.schedules.isEmpty());
@@ -172,6 +178,7 @@ class BootConsistencyCheckTest extends UnitTest {
         var orphan = persistTask("orphan", Task.Status.PENDING);
 
         int registered = BootConsistencyCheck.reArmOrphans(stub.proxy());
+        commitAndReopen();
 
         assertEquals(1, registered, "reArmOrphans should register the orphan");
         assertEquals(orphan.id.toString(), stub.schedules.getFirst().instance.getId());
@@ -277,6 +284,12 @@ class BootConsistencyCheckTest extends UnitTest {
     }
 
     // === Helpers ===
+
+    /** A job's register arms when its transaction commits; the test's transaction stands in for it. */
+    private static void commitAndReopen() {
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+    }
 
     private Long persistRun(Task task, Instant startedAt, TaskRun.Status status, Instant completedAt) {
         var r = new TaskRun();
@@ -399,6 +412,7 @@ class BootConsistencyCheckTest extends UnitTest {
         ageUpdatedAt(task.id, Instant.now().minusSeconds(600));
 
         BootConsistencyCheck.reArmOrphans(stub.proxy());
+        commitAndReopen();
 
         assertEquals(Task.Status.ACTIVE, ((Task) Task.findById(task.id)).status);
         assertTrue(stub.schedules.stream()

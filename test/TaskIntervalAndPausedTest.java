@@ -6,6 +6,7 @@ import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.TaskExecutionHandler;
@@ -55,6 +56,7 @@ class TaskIntervalAndPausedTest extends UnitTest {
 
     @AfterEach
     void tearDown() {
+        DeferredSchedulerCalls.discard();
         services.TaskSchedulingServiceTestHooks.reset();
     }
 
@@ -66,6 +68,7 @@ class TaskIntervalAndPausedTest extends UnitTest {
 
         var before = Instant.now();
         TaskSchedulingService.register(task);
+        commitAndReopen();
         var after = Instant.now();
 
         assertEquals(1, stub.schedules.size());
@@ -82,6 +85,7 @@ class TaskIntervalAndPausedTest extends UnitTest {
     void registerIntervalSkipsWhenIntervalSecondsIsNull() {
         var task = persistInterval(null);
         TaskSchedulingService.register(task);
+        commitAndReopen();
         assertTrue(stub.schedules.isEmpty(),
                 "INTERVAL Task with null intervalSeconds must not register");
     }
@@ -90,10 +94,12 @@ class TaskIntervalAndPausedTest extends UnitTest {
     void registerIntervalSkipsWhenIntervalSecondsIsZeroOrNegative() {
         var zero = persistInterval(0L);
         TaskSchedulingService.register(zero);
+        commitAndReopen();
         assertTrue(stub.schedules.isEmpty(), "intervalSeconds=0 skipped");
 
         var negative = persistInterval(-1L);
         TaskSchedulingService.register(negative);
+        commitAndReopen();
         assertTrue(stub.schedules.isEmpty(), "intervalSeconds=-1 skipped");
     }
 
@@ -103,6 +109,7 @@ class TaskIntervalAndPausedTest extends UnitTest {
     void pauseFlipsTheFlagWithoutTouchingTheScheduler() {
         var task = persistInterval(60L);
         TaskSchedulingService.register(task);
+        commitAndReopen();
         int schedulesBefore = stub.schedules.size();
         int cancelsBefore = stub.cancels.size();
 
@@ -154,6 +161,12 @@ class TaskIntervalAndPausedTest extends UnitTest {
     }
 
     // === Helpers ===
+
+    /** Inside a transaction register arms on commit (JCLAW-1515); commit so the stub sees it. */
+    private static void commitAndReopen() {
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+    }
 
     private Agent persistAgent() {
         var a = new Agent();

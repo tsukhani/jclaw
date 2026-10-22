@@ -215,13 +215,16 @@ public final class TaskExecutor {
             // only alive/lost states; a task canceled in the race window between
             // the handler's CANCELED check and here stays CANCELED (the run we
             // open is reconciled by the normal completion path).
-            switch (resolvedTask.status) {
-                case PENDING, ACTIVE, LOST -> {
-                    resolvedTask.status = Task.Status.RUNNING;
-                    resolvedTask.save();
-                }
-                default -> { /* terminal / canceled — never resurrect */ }
-            }
+            // A bulk UPDATE of the status alone: a full-row save would write this
+            // entity's older copy of an edit committed since it was loaded.
+            JPA.em().createQuery("UPDATE Task t SET t.status = :running, t.updatedAt = :now "
+                            + "WHERE t.id = :id AND t.status IN :alive")
+                    .setParameter("running", Task.Status.RUNNING)
+                    .setParameter("now", AppClock.now())
+                    .setParameter("id", resolvedTask.id)
+                    .setParameter("alive", List.of(Task.Status.PENDING, Task.Status.ACTIVE, Task.Status.LOST))
+                    .executeUpdate();
+            JPA.em().refresh(resolvedTask);
             var r = new TaskRun();
             r.task = resolvedTask;
             r.startedAt = AppClock.now();

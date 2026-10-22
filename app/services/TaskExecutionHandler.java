@@ -335,7 +335,7 @@ public final class TaskExecutionHandler {
                     task.agent != null ? task.agent.name : null, null,
                     "Task '%s' schedule row was re-picked mid-fire; removing it by identity instead: %s"
                             .formatted(task.name, e.getMessage()));
-            TaskSchedulingService.forceRemoveStaleRow(task.id);
+            TaskSchedulingService.removeStaleRowNow(task.id);
         }
     }
 
