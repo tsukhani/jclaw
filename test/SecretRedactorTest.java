@@ -273,4 +273,104 @@ class SecretRedactorTest extends UnitTest {
         assertFalse(seen.getFirst().message().contains(KEY), "the file line and the stored row are built from this message");
         assertTrue(seen.getFirst().message().contains("X-Api-Key: " + SecretRedactor.MASK), seen.getFirst().message());
     }
+
+    @Test
+    void masksExactlyTheValueAndKeepsWhatFollowsIt() {
+        // assertMasked proves the secret is gone; these pin where the value ends, which is where a tail leaks or a line is eaten.
+        var m = SecretRedactor.MASK;
+        assertEquals("args: {\"command\":\"curl https://x.example.com/api?apikey\\u003d" + m + "\\u0026page\\u003d2 next\"}",
+                SecretRedactor.redact("args: {\"command\":\"curl https://x.example.com/api?apikey\\u003d" + KEY + "\\u0026page\\u003d2 next\"}"));
+        assertEquals("args: {\"command\":\"mytool --password \\u0022" + m + "\\u0022 --verbose\"}",
+                SecretRedactor.redact("args: {\"command\":\"mytool --password \\u0022abc def\\u0022 --verbose\"}"));
+        assertEquals("args: {\"command\":\"curl -H \\\"X-Api-Key: " + m + "\\\" https://x\"}",
+                SecretRedactor.redact("args: {\"command\":\"curl -H \\\"X-Api-Key: " + KEY + "\\\" https://x\"}"));
+        assertEquals("args: {\"access_token\": " + m + ", \"scope\": \"read\"}",
+                SecretRedactor.redact("args: {\"access_token\": 99887766, \"scope\": \"read\"}"));
+        assertEquals("exec: mytool --password '" + m + "' --verbose", SecretRedactor.redact("exec: mytool --password 'it'\\''s-a-secret' --verbose"));
+        assertEquals("exec: run --token \"" + m + "\" --verbose", SecretRedactor.redact("exec: run --token \"tk1\"\"tk2\" --verbose"));
+        assertEquals("exec: curl -u admin:" + m + " https://x", SecretRedactor.redact("exec: curl -u admin:hunter2 https://x"));
+        assertEquals("exec: curl https://x/?token=" + m + "&page=2", SecretRedactor.redact("exec: curl https://x/?token=ab\\&cd&page=2"));
+        assertEquals("exec: PASSWORD=" + m + " next", SecretRedactor.redact("exec: PASSWORD=ab\\ cd next"));
+        assertEquals("exec: curl -H 'Authorization: Bearer " + m + "' https://x\nnext line",
+                SecretRedactor.redact("exec: curl -H 'Authorization: Bearer abcdefghij0123456789' https://x\nnext line"));
+        assertEquals("args: {\"command\":\"curl https://x.example.com/api?a\\u003d1\\u0026media_api_key\\u003d" + m + "\\u0026page\\u003d2 next\"}",
+                SecretRedactor.redact("args: {\"command\":\"curl https://x.example.com/api?a\\u003d1\\u0026media_api_key\\u003dSECRET\\u0026page\\u003d2 next\"}"));
+        assertEquals("exec: PASSWORD=" + m + " next", SecretRedactor.redact("exec: PASSWORD=ab&cd next"));
+        assertEquals("exec: sh -c \"PASSWORD=" + m + "\" next", SecretRedactor.redact("exec: sh -c \"PASSWORD=abc def\" next"));
+        assertEquals("args: {\"command\":\"sh -c \\u0027PASSWORD\\u003d" + m + "\\u0027 next\"}",
+                SecretRedactor.redact("args: {\"command\":\"sh -c \\u0027PASSWORD\\u003dabc def\\u0027 next\"}"));
+        assertEquals("?token=" + m + "&page=2", SecretRedactor.redact("?token=abc&page=2"));
+    }
+
+    @Test
+    void aHeaderWithNoQuotesIsMaskedToTheEndOfItsLine() {
+        assertEquals("Request headers: Authorization: Bearer " + SecretRedactor.MASK + "\nnext line",
+                SecretRedactor.redact("Request headers: Authorization: Bearer abc.def-ghi_jkl012345\nnext line"));
+        assertEquals("Request headers: Cookie: " + SecretRedactor.MASK + "\nAccept: */*",
+                SecretRedactor.redact("Request headers: Cookie: session=abc123; theme=dark\nAccept: */*"));
+    }
+
+    @Test
+    void aFragmentEndsAValueInAUrlButBelongsToItInAFormBody() {
+        // A # inside a query value arrives as %23, so a raw one starts the fragment; a form body has no fragment.
+        assertEquals("GET https://x.test/cb?a=1&token=" + SecretRedactor.MASK + "#frag", SecretRedactor.redact("GET https://x.test/cb?a=1&token=abc123#frag"));
+        assertEquals("GET https://x.test/cb?token=" + SecretRedactor.MASK + "#frag", SecretRedactor.redact("GET https://x.test/cb?token=abc123#frag"));
+        assertEquals("api?a\\u003d1\\u0026media_api_key\\u003d" + SecretRedactor.MASK + "#frag",
+                SecretRedactor.redact("api?a\\u003d1\\u0026media_api_key\\u003dSECRET#frag"));
+        assertEquals("body a=1&token=" + SecretRedactor.MASK, SecretRedactor.redact("body a=1&token=abc123#frag"));
+    }
+
+    @Test
+    void aFieldIsInAUrlQueryWhenItsQuestionMarkIsWithin512Characters() {
+        var query = "q=" + "v".repeat(509);   // puts the ? exactly 512 characters behind the &
+        assertEquals("https://x.test/p?" + query + "&token=" + SecretRedactor.MASK + "#frag",
+                SecretRedactor.redact("https://x.test/p?" + query + "&token=abc#frag"));
+        assertEquals("https://x.test/p?v" + query + "&token=" + SecretRedactor.MASK, SecretRedactor.redact("https://x.test/p?v" + query + "&token=abc#frag"));
+    }
+
+    @Test
+    void aFieldNameIsTracedBackUpTo128CharactersToTheAmpersandBeforeIt() {
+        // Past the bound the value runs to the end of the word: too much is masked, never too little.
+        var name = "p".repeat(128) + "api_key";
+        assertEquals("x=1&" + name + "=" + SecretRedactor.MASK + "&next=1", SecretRedactor.redact("x=1&" + name + "=SECRET&next=1"));
+        assertEquals("x=1&p" + name + "=" + SecretRedactor.MASK, SecretRedactor.redact("x=1&p" + name + "=SECRET&next=1"));
+    }
+
+    @Test
+    void anEmptyValueHasNothingToMask() {
+        for (var line : List.of("GET https://x.test/?api_key=&page=2", "args: {\"password\": \"\", \"user\": \"bob\"}")) {
+            assertEquals(line, SecretRedactor.redact(line));
+        }
+    }
+
+    @Test
+    void anEmptyAssignmentMasksTheWordAfterIt() {
+        // The text cannot say whether that word is the value, so it is masked, even on the next line.
+        assertEquals("exec: export API_KEY= " + SecretRedactor.MASK + " run", SecretRedactor.redact("exec: export API_KEY= && run"));
+        assertEquals("password=\n" + SecretRedactor.MASK + " line", SecretRedactor.redact("password=\nnext line"));
+    }
+
+    @Test
+    void aQuoteLeftOpenOnOneLineDoesNotChangeHowTheNextIsRead() {
+        assertEquals("echo \"unterminated\nsay \"hi\" password=" + SecretRedactor.MASK + " def",
+                SecretRedactor.redact("echo \"unterminated\nsay \"hi\" password=abc def"));
+    }
+
+    @Test
+    void aSecretIsMaskedInJsonNestedFiveLevelsDeep() {
+        // Five levels put 31 backslashes before the inner quotes; six (63) is past the 32 the redactor reads and leaks (JF-18).
+        var inner = "{\"password\":\"%s\",\"next\":1}";
+        assertEquals(nested(5, inner.formatted(SecretRedactor.MASK)), SecretRedactor.redact(nested(5, inner.formatted("s3cret"))));
+        var atTheLimit = "{%1$spassword%1$s:%1$s%2$s%1$s,%1$snext%1$s:1}";
+        var q = "\\".repeat(32) + "\"";
+        assertEquals(atTheLimit.formatted(q, SecretRedactor.MASK), SecretRedactor.redact(atTheLimit.formatted(q, "s3cret")));
+    }
+
+    /** {@code s} serialized as a JSON string value {@code levels} times over, the way logged arguments nest. */
+    private static String nested(int levels, String s) {
+        for (int i = 0; i < levels; i++) {
+            s = "{\"args\":\"" + json(s) + "\"}";
+        }
+        return s;
+    }
 }
