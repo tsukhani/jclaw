@@ -1003,6 +1003,26 @@ class TaskExecutionHandlerTest extends UnitTest {
         }
     }
 
+    /** Hibernate stops at the first after-commit synchronization that throws, skipping the rest. */
+    @Test
+    void oneFailedDeferredArmDoesNotSkipTheNext() {
+        var agent = createAgent("deferred-failure-agent");
+        persistTask(agent, "Orphan A", "Recover.", Task.Type.IMMEDIATE, null, null, null);
+        persistTask(agent, "Orphan B", "Recover.", Task.Type.IMMEDIATE, null, null, null);
+        commitAndReopen();
+        var attempts = new ArrayList<String>();
+        stub.beforeScheduleIfNotExists = id -> {
+            attempts.add(id);
+            if (attempts.size() == 1) throw new RuntimeException("Stub: first arm failed");
+        };
+
+        assertEquals(2, BootConsistencyCheck.sweep(stub.proxy()));
+        commitAndReopen();
+
+        assertEquals(2, attempts.size(), () -> "the second orphan was never armed; attempts=" + attempts);
+        assertEquals(1, stub.scheduleIfNotExists.size(), "the orphan after the failure must still arm");
+    }
+
     private static void insertScheduledRow(Long taskId) throws Exception {
         try (var conn = play.db.DB.getDataSource().getConnection()) {
             conn.setAutoCommit(true);

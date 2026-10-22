@@ -9,6 +9,7 @@ import jobs.DbSchedulerBootstrapJob;
 import models.Task;
 import org.jspecify.annotations.Nullable;
 import play.db.DB;
+import play.db.jpa.JPA;
 import utils.AppClock;
 
 import java.sql.SQLException;
@@ -115,7 +116,7 @@ public final class TaskSchedulingService {
         if (task.id == null) {
             throw new IllegalArgumentException("task must be persisted before registration");
         }
-        Tx.afterCommit(() -> arm(task));
+        afterCommit(task.id, () -> arm(task));
     }
 
     private static void arm(Task task) {
@@ -144,7 +145,7 @@ public final class TaskSchedulingService {
         if (task.id == null) {
             throw new IllegalArgumentException("task must be persisted before update");
         }
-        Tx.afterCommit(() -> {
+        afterCommit(task.id, () -> {
             cancelSchedulerRow(task.id);
             arm(task);
         });
@@ -181,7 +182,7 @@ public final class TaskSchedulingService {
         Objects.requireNonNull(taskId, PARAM_TASK_ID);
         // Read before deferring, while the ambient session is still inside its transaction.
         Task task = Tx.run(() -> (Task) Task.findById(taskId));
-        Tx.afterCommit(() -> fireNow(taskId, task));
+        afterCommit(taskId, () -> fireNow(taskId, task));
     }
 
     private static void fireNow(Long taskId, @Nullable Task task) {
@@ -231,6 +232,26 @@ public final class TaskSchedulingService {
     }
 
     // --- Internal ---
+
+    /**
+     * {@link Tx#afterCommit}, logging rather than throwing a deferred failure: Hibernate stops at
+     * the first synchronization that throws, so one task's failed arm would skip every later one.
+     */
+    private static void afterCommit(Long taskId, Runnable action) {
+        if (!JPA.isInsideTransaction()) {
+            action.run();
+            return;
+        }
+        Tx.afterCommit(() -> {
+            try {
+                action.run();
+            } catch (RuntimeException e) {
+                EventLogger.warn("task", null, null,
+                        "Task id %d: deferred scheduler call failed after commit: %s"
+                                .formatted(taskId, e.getMessage()));
+            }
+        });
+    }
 
     private static @Nullable SchedulerClient client() {
         SchedulerClient client = clientSupplier.get();
@@ -357,7 +378,7 @@ public final class TaskSchedulingService {
         });
         // After commit: through the API this joins the request's transaction, and a past-due re-arm
         // fires at once, so armed earlier the handler reads the old paused=true and drops the row.
-        if (task != null) Tx.afterCommit(() -> reArmOneShotIfDropped(task));
+        if (task != null) afterCommit(task.id, () -> reArmOneShotIfDropped(task));
     }
 
     /**
@@ -439,7 +460,7 @@ public final class TaskSchedulingService {
      */
     public static void forceRemoveStaleRow(Long taskId) {
         Objects.requireNonNull(taskId, PARAM_TASK_ID);
-        Tx.afterCommit(() -> removeStaleRowNow(taskId));
+        afterCommit(taskId, () -> removeStaleRowNow(taskId));
     }
 
     /** {@link #forceRemoveStaleRow} at once, for a fire's completion that re-inserts the row next. */
