@@ -14,6 +14,9 @@ import java.util.Map;
  * {@link channels.ChannelRegistry#forConversation}, which carries the per-binding
  * Telegram token and returns a real {@link channels.WebChannel}, so dispatch
  * never branches on the type.
+ *
+ * <p>{@code app} and {@code subagent} conversations carry values outside this enum on purpose: neither has a
+ * transport, so {@link #fromValue} returns null and every dispatcher treats that as no external channel.
  */
 public enum ChannelType implements ValueEnum {
 
