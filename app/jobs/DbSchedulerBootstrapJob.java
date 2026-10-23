@@ -66,7 +66,7 @@ import java.util.concurrent.Executors;
  * The crash-recovery case (Task persisted but register() never
  * ran) is closed by the same sweep.
  *
- * <p>Static {@link #scheduler} reference exposed so {@link ShutdownJob}
+ * <p>Static {@link #scheduler()} reference exposed so {@link ShutdownJob}
  * can stop the same instance (via {@link #shutdownGracefully}), and so
  * {@link services.TaskSchedulingService} can read it for
  * {@code SchedulerClient.schedule}-style operations.
@@ -74,18 +74,54 @@ import java.util.concurrent.Executors;
 @OnApplicationStart(priority = 100)
 public class DbSchedulerBootstrapJob extends Job<Void> {
 
-    /**
-     * The running {@link Scheduler} instance. {@code volatile} because
-     * boot runs on the startup thread while {@link ShutdownJob}'s
-     * {@code @OnApplicationStop} callback (which fans out to
-     * {@link #shutdownGracefully}) runs on a different thread.
-     */
-    // S3077 targets compound mutation on volatile non-primitives; a pure reference handoff is the canonical valid use.
-    @SuppressWarnings("java:S3077")
-    private static volatile @Nullable Scheduler scheduler;
+    private static final Lifecycle LIFECYCLE = new Lifecycle();
 
     public static @Nullable Scheduler scheduler() {
-        return scheduler;
+        return LIFECYCLE.current();
+    }
+
+    /**
+     * Holds the built {@link Scheduler} from its publish to its stop. The start and the stop share
+     * one lock (JF-22): the MCP teardown ends the gate's wait early, so a stop must win over a
+     * start that has not run yet.
+     */
+    public static final class Lifecycle {
+        /** {@code volatile} for {@link #current()}, which readers call without the lock. */
+        // S3077 targets compound mutation on volatile non-primitives; a pure reference handoff is the canonical valid use.
+        @SuppressWarnings("java:S3077")
+        private volatile @Nullable Scheduler current;
+
+        public @Nullable Scheduler current() {
+            return current;
+        }
+
+        public synchronized void publish(Scheduler built) {
+            current = built;
+        }
+
+        /**
+         * Starts {@code built} unless it was stopped, or replaced by a dev reload, while the gate
+         * waited: {@code start()} on a stopped scheduler submits to its shut-down executors.
+         *
+         * @return whether it started
+         */
+        public synchronized boolean startIfCurrent(Scheduler built) {
+            if (current != built) return false;
+            built.start();
+            return true;
+        }
+
+        /** Stops the published scheduler after {@code beforeStop}; does nothing when none is published. */
+        public synchronized void stop(Runnable beforeStop) {
+            Scheduler local = current;
+            if (local == null) return;
+            try {
+                beforeStop.run();
+                local.stop();
+            } finally {
+                current = null;
+            }
+        }
     }
 
     @Override
@@ -199,7 +235,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         // Publish the SchedulerClient synchronously so web-UI CRUD can schedule
         // tasks immediately (TaskSchedulingService.register writes via 'built').
         TaskExecutionHandler.setSchedulerClient(built);
-        scheduler = built;
+        LIFECYCLE.publish(built);
 
         // JCLAW-496: DEFER the polling start and the overdue-task sweep onto a
         // background thread that first waits (bounded) for MCP connections to
@@ -209,7 +245,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
         // root trigger behind JCLAW-495). Nothing fires until built.start() runs.
         Thread.ofVirtual().name("scheduler-mcp-gate").start(() -> {
             McpConnectionManager.awaitStartupConnected();
-            built.start();
+            if (!LIFECYCLE.startIfCurrent(built)) return;
             EventLogger.info("task", null, null,
                     "db-scheduler started (polling 2s, virtual-thread executor, "
                     + "registered task '%s')".formatted(TaskExecutionHandler.TASK_NAME));
@@ -289,16 +325,11 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
      * the other components and gets cut off by the latch await).
      */
     public static void shutdownGracefully() {
-        Scheduler local = scheduler;
-        if (local == null) return;
         try {
-            cancelInFlightRuns();
-            local.stop();
+            LIFECYCLE.stop(DbSchedulerBootstrapJob::cancelInFlightRuns);
         } catch (Exception e) {
             EventLogger.warn("task", null, null,
                     "db-scheduler stop raised: %s".formatted(e.getMessage()));
-        } finally {
-            scheduler = null;
         }
     }
 
