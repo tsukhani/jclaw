@@ -83,7 +83,7 @@ class VideoGenerationJobServiceTest extends UnitTest {
     @Test
     void submitFailureLandsJobInFailed() {
         server.enqueue(new MockResponse.Builder().code(402).body(buf("no credits")).build());
-        var job = VideoGenerationJobService.submit(1L, 1L, req());
+        var job = VideoGenerationJobService.submit(seedAgent().id, null, req());
         assertEquals(State.FAILED, job.state);
         assertNotNull(job.errorMessage);
         assertNotNull(job.completedAt);
@@ -92,7 +92,7 @@ class VideoGenerationJobServiceTest extends UnitTest {
     @Test
     void tickTransitionsRunningToSucceeded() {
         server.enqueue(json("{\"id\":\"pred_2\",\"status\":\"starting\"}"));     // submit
-        var job = VideoGenerationJobService.submit(1L, 1L, req());
+        var job = VideoGenerationJobService.submit(seedAgent().id, null, req());
         assertEquals(State.RUNNING, job.state);
 
         server.enqueue(json("{\"status\":\"succeeded\",\"output\":[\"https://cdn/v.mp4\"]}")); // poll
@@ -107,7 +107,7 @@ class VideoGenerationJobServiceTest extends UnitTest {
     @Test
     void tickTransitionsRunningToFailed() {
         server.enqueue(json("{\"id\":\"pred_3\",\"status\":\"starting\"}"));
-        var job = VideoGenerationJobService.submit(1L, 1L, req());
+        var job = VideoGenerationJobService.submit(seedAgent().id, null, req());
 
         server.enqueue(json("{\"status\":\"failed\",\"error\":\"safety filter\"}"));
         VideoGenerationJobService.tickOnce();
@@ -120,7 +120,7 @@ class VideoGenerationJobServiceTest extends UnitTest {
     @Test
     void tickStaysRunningWhileProcessing() {
         server.enqueue(json("{\"id\":\"pred_4\",\"status\":\"starting\"}"));
-        var job = VideoGenerationJobService.submit(1L, 1L, req());
+        var job = VideoGenerationJobService.submit(seedAgent().id, null, req());
 
         server.enqueue(json("{\"status\":\"processing\"}"));
         VideoGenerationJobService.tickOnce();
@@ -154,7 +154,7 @@ class VideoGenerationJobServiceTest extends UnitTest {
     @Test
     void tickTimesOutLongRunningJob() {
         server.enqueue(json("{\"id\":\"pred_5\",\"status\":\"starting\"}"));
-        var job = VideoGenerationJobService.submit(1L, 1L, req());
+        var job = VideoGenerationJobService.submit(seedAgent().id, null, req());
 
         // maxJobMinutes=0 → any RUNNING job is past the bound immediately. The enqueued "processing"
         // response is a safety net: if the timeout check failed to short-circuit, the tick would
