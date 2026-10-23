@@ -154,7 +154,7 @@ sonar {
             "sonar.exclusions",
             "**/node_modules/**, **/dist/**, **/.nuxt/**, **/.output/**, " +
                 "**/public/spa/**, **/precompiled/**, **/workspace/**, " +
-                "**/skills/**, app/views/**, frontend/test/**, " +
+                "app/views/**, frontend/test/**, " +
                 "**/*.md, **/*.txt, **/*.sh, **/*.xml, **/*.yaml, **/*.yml, " +
                 "**/*.properties, **/*.sql",
         )
