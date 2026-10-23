@@ -111,25 +111,28 @@ public class EventLogger {
         while ((e = pending.poll()) != null) batch.add(e);
         if (batch.isEmpty()) return;
 
-        writeShutdownBatch(batch, rows -> Tx.run(() -> { for (var ev : rows) ev.save(); }));
+        writeShutdownBatch(batch, EventLogger::writeOnNewConnection);
     }
 
     /**
      * Writes {@code batch} with {@code write}, and once more on a new connection outside the pool
-     * if that throws; never throws. At SIGTERM, H2's own exit hook can close the database under
-     * the pool's connections, and Hikari hands a recently used one back unchecked; a new
-     * connection reopens the database. Public so a test can make the write fail without the
-     * process-global queue, which any concurrent test can drain.
+     * if that throws; never throws. Production's write is that same new-connection write, in its
+     * own transaction: at SIGTERM, H2's own exit hook can close the database at any moment, under
+     * the pool's connections (Hikari hands a recently used one back unchecked) and before
+     * ShutdownJob's job transaction commits (it waits for every teardown component). A new
+     * connection reopens it; the retry covers a close in the middle of the first write. Public so a
+     * test can make the first write fail without the process-global queue, which any concurrent
+     * test can drain.
      */
     public static void writeShutdownBatch(List<EventLog> batch, Consumer<List<EventLog>> write) {
         try {
             write.accept(batch);
             return;
         } catch (Exception first) {
-            Logger.info("Writing %d shutdown event logs on a new connection after: %s", batch.size(), rootCause(first));
+            Logger.info("Writing %d shutdown event logs again on a new connection after: %s", batch.size(), rootCause(first));
         }
         try {
-            writeUnpooled(batch);
+            writeOnNewConnection(batch);
         } catch (Exception ex) {
             Logger.warn("Failed to flush %d event logs on shutdown: %s", batch.size(), rootCause(ex));
         }
@@ -142,20 +145,31 @@ public class EventLogger {
         return root;
     }
 
-    private static void writeUnpooled(List<EventLog> batch) throws SQLException {
+    /**
+     * Throws only for a failure before the commit starts, so the retry never writes a batch twice.
+     * The inserts are flushed first for that reason: a commit that throws may still have gone through.
+     */
+    private static void writeOnNewConnection(List<EventLog> batch) {
         SessionFactory sessions;
         try (var em = JPA.newEntityManager()) {
             sessions = em.getEntityManagerFactory().unwrap(SessionFactory.class);
         }
+        var committing = false;
         try (var connection = DB.getDataSource().unwrap(TelemetryDataSource.class).getConnection();
              var session = sessions.withOptions().connection(connection).openSession()) {
             var tx = session.beginTransaction();
             for (var ev : batch) {
-                // The failed write may have numbered rows it never committed, and persist refuses an id.
+                // A failed first write may have numbered rows it never committed, and persist refuses an id.
                 ev.id = null;
                 session.persist(ev);
             }
+            session.flush();
+            committing = true;
             tx.commit();
+        } catch (SQLException | RuntimeException e) {
+            if (!committing) throw new IllegalStateException(e);
+            Logger.warn("Shutdown event-log commit or close failed for %d rows, not retried since the commit may have gone through: %s",
+                    batch.size(), rootCause(e));
         }
     }
 

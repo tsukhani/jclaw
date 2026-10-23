@@ -1,6 +1,7 @@
 import models.EventLog;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.EventLogger;
@@ -11,6 +12,7 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * EventLogger persists to the shared EventLog table via a process-global
@@ -199,6 +201,31 @@ class EventLoggerTest extends UnitTest {
         assertEquals(1, events.size());
         assertEquals("eltest.shutdown-tail", events.getFirst().category);
         assertEquals("queued but not yet batched", events.getFirst().message);
+    }
+
+    // ShutdownJob runs inside a job transaction, which H2's exit hook can close before it commits.
+    @Test
+    void theShutdownFlushCommitsOnItsOwnWhateverTheTransactionAroundItDoes() throws InterruptedException {
+        EventLogger.record("INFO", "eltest.own-tx", "outlives a rolled-back job transaction", null);
+        var failure = new AtomicReference<Throwable>();
+
+        // Its own thread: the fork's withTransaction replaces this thread's JPA context instead of nesting.
+        Thread.ofPlatform().start(() -> {
+            try {
+                JPA.withTransaction("default", false, () -> {
+                    row("eltest.own-tx-sentinel", "rolled back with the job transaction").save();
+                    EventLogger.flushPendingForShutdown();
+                    JPA.setRollbackOnly();
+                    return null;
+                });
+            } catch (Throwable t) {
+                failure.set(t);
+            }
+        }).join();
+
+        assertNull(failure.get());
+        assertEquals(List.of(), messages("eltest.own-tx-sentinel"));
+        assertEquals(List.of("outlives a rolled-back job transaction"), messages("eltest.own-tx"));
     }
 
     @Test
