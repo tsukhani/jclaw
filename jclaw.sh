@@ -3321,12 +3321,6 @@ do_start_prod() {
             echo "==> Skipping precompile (precompiled/ is up to date)"
         fi
 
-        validate_pnpm_pin
-
-        echo "==> Installing frontend dependencies..."
-        cd "$SCRIPT_DIR/frontend"
-        pnpm install --frozen-lockfile 2>/dev/null || pnpm install
-
         # Rebuild the SPA only when it's actually stale, mirroring the
         # precompile guard above (JCLAW-887). Two reasons, the second the
         # important one:
@@ -3396,6 +3390,14 @@ do_start_prod() {
         fi
 
         if [[ -n "$spa_rebuild_reason" ]]; then
+            # Only the build needs pnpm (about 2 s to resolve the pin and check the install); the
+            # staleness check above already covers package.json and the lockfile.
+            validate_pnpm_pin
+
+            echo "==> Installing frontend dependencies..."
+            cd "$SCRIPT_DIR/frontend"
+            pnpm install --frozen-lockfile 2>/dev/null || pnpm install
+
             echo "==> Generating static SPA ($spa_rebuild_reason)..."
             npx nuxi generate
 
@@ -3403,7 +3405,7 @@ do_start_prod() {
             rm -rf "$SCRIPT_DIR/public/spa"
             cp -r .output/public "$SCRIPT_DIR/public/spa"
         else
-            echo "==> Skipping SPA build (public/spa is up to date)"
+            echo "==> Skipping the SPA build and frontend dependencies (public/spa is up to date)"
         fi
 
         cd "$SCRIPT_DIR"
@@ -4913,7 +4915,7 @@ wait_for_backend_ready() {
         return 0
     fi
     echo "==> Waiting for the backend to answer on port ${BACKEND_PORT}..."
-    local waited=0 pid
+    local deadline=$((SECONDS + 120)) pid
     while true; do
         pid=$(cat "$SCRIPT_DIR/server.pid" 2>/dev/null || true)
         if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
@@ -4927,9 +4929,9 @@ wait_for_backend_ready() {
         if curl -fs -m 5 -o /dev/null "http://localhost:${BACKEND_PORT}/api/status" 2>/dev/null; then
             return 0
         fi
-        sleep 1
-        waited=$((waited + 1))
-        if [[ $waited -ge 120 ]]; then
+        # A short poll, because the first answer is when start returns; a 1 s sleep added up to a second.
+        sleep 0.2
+        if (( SECONDS >= deadline )); then
             echo "Error: backend did not answer on port ${BACKEND_PORT} within 120 seconds." >&2
             echo "       Check logs/system.out for details." >&2
             [[ -n "$pid" ]] && kill_tree "$pid"
