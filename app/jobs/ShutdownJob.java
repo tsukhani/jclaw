@@ -39,7 +39,8 @@ import java.util.concurrent.TimeUnit;
  * teardown, not because nothing shared is in play. Play stops plugins in reverse
  * registration order and runs {@code @OnApplicationStop} jobs synchronously, so
  * JobsPlugin (700) completes this method before JPAPlugin (400) and DBPlugin (300)
- * close — the datasource is open throughout. Teardown still avoids the database:
+ * close — the pool is open throughout, though H2's own exit hook may already have
+ * closed the database under it (see conf/application.conf). Teardown still avoids the database:
  * a component that needs a connection has no useful recovery when it cannot get
  * one, and the one observed failure here was a shutdown-time config read.
  *
@@ -93,7 +94,7 @@ public class ShutdownJob extends Job<Void> {
 
     @Override
     public void doJob() {
-        // From here on EventLogger is file-only: the JPA layer is tearing down,
+        // From here on EventLogger is file-only: H2's exit hook may have closed the database,
         // so the shutdown logging below would otherwise trip a batched DB flush
         // into a doomed "begin transaction failed" WARN. (Set in every
         // @OnApplicationStop hook — whichever runs first wins; the rest no-op.)

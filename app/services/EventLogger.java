@@ -1,12 +1,17 @@
 package services;
 
 import models.EventLog;
+import org.hibernate.SessionFactory;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
+import play.db.DB;
+import play.db.jpa.JPA;
+import services.telemetry.TelemetryDataSource;
 import utils.AppClock;
 import utils.GsonHolder;
 import utils.SecretRedactor;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -66,8 +71,9 @@ public class EventLogger {
 
     /** Set at the start of graceful shutdown (by the @OnApplicationStop hooks).
      *  Once true, EventLogger logs to the file only and skips DB persistence:
-     *  the JPA layer is tearing down, so a batched flush would fail to begin a
-     *  transaction and emit a spurious "Failed to flush N event logs" WARN.
+     *  H2's own exit hook may already have closed the database, so a batched
+     *  flush would fail to begin a transaction and emit a "Failed to flush N
+     *  event logs" WARN.
      *  File logging — the actual shutdown observability — is unaffected. */
     private static final AtomicBoolean shuttingDown = new AtomicBoolean(false);
 
@@ -105,15 +111,56 @@ public class EventLogger {
         while ((e = pending.poll()) != null) batch.add(e);
         if (batch.isEmpty()) return;
 
+        writeShutdownBatch(batch, rows -> Tx.run(() -> { for (var ev : rows) ev.save(); }));
+    }
+
+    /**
+     * Writes {@code batch} with {@code write}, and once more on a new connection outside the pool
+     * if that throws; never throws. At SIGTERM, H2's own exit hook can close the database under
+     * the pool's connections, and Hikari hands a recently used one back unchecked; a new
+     * connection reopens the database. Public so a test can make the write fail without the
+     * process-global queue, which any concurrent test can drain.
+     */
+    public static void writeShutdownBatch(List<EventLog> batch, Consumer<List<EventLog>> write) {
         try {
-            Tx.run(() -> { for (var ev : batch) ev.save(); });
+            write.accept(batch);
+            return;
+        } catch (Exception first) {
+            Logger.info("Writing %d shutdown event logs on a new connection after: %s", batch.size(), rootCause(first));
+        }
+        try {
+            writeUnpooled(batch);
         } catch (Exception ex) {
-            Logger.warn("Failed to flush %d event logs on shutdown: %s", batch.size(), ex.getMessage());
+            Logger.warn("Failed to flush %d event logs on shutdown: %s", batch.size(), rootCause(ex));
+        }
+    }
+
+    /** Hibernate's message is "JDBC begin transaction failed"; H2's 90121 is at the bottom of the chain. */
+    private static Throwable rootCause(Throwable t) {
+        var root = t;
+        for (var cause = root.getCause(); cause != null && cause != root; cause = root.getCause()) root = cause;
+        return root;
+    }
+
+    private static void writeUnpooled(List<EventLog> batch) throws SQLException {
+        SessionFactory sessions;
+        try (var em = JPA.newEntityManager()) {
+            sessions = em.getEntityManagerFactory().unwrap(SessionFactory.class);
+        }
+        try (var connection = DB.getDataSource().unwrap(TelemetryDataSource.class).getConnection();
+             var session = sessions.withOptions().connection(connection).openSession()) {
+            var tx = session.beginTransaction();
+            for (var ev : batch) {
+                // The failed write may have numbered rows it never committed, and persist refuses an id.
+                ev.id = null;
+                session.persist(ev);
+            }
+            tx.commit();
         }
     }
 
     /** True once graceful shutdown has begun. Lets shutdown-path code skip DB
-     *  work that can't run (the JPA layer is tearing down) and isn't needed —
+     *  work that can't run (H2's exit hook may have closed the database) and isn't needed —
      *  e.g. MCP allowlist revocation, which the next boot's connect resyncs. */
     public static boolean isShuttingDown() {
         return shuttingDown.get();

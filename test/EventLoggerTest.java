@@ -10,6 +10,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * EventLogger persists to the shared EventLog table via a process-global
@@ -198,5 +199,62 @@ class EventLoggerTest extends UnitTest {
         assertEquals(1, events.size());
         assertEquals("eltest.shutdown-tail", events.getFirst().category);
         assertEquals("queued but not yet batched", events.getFirst().message);
+    }
+
+    @Test
+    void aShutdownBatchWhoseWriteFailsIsStillWritten() {
+        var batch = List.of(row("eltest.retry", "first"), row("eltest.retry", "second"));
+
+        EventLogger.writeShutdownBatch(batch, rows -> {
+            throw new IllegalStateException("JDBC begin transaction failed");
+        });
+
+        assertEquals(List.of("first", "second"), messages("eltest.retry"));
+    }
+
+    @Test
+    void aShutdownBatchIsWrittenAgainAfterTheFailedWriteNumberedItsRows() {
+        var batch = List.of(row("eltest.retry-numbered", "numbered, never committed"));
+
+        EventLogger.writeShutdownBatch(batch, rows -> {
+            rows.forEach(e -> e.id = 990_001L);
+            throw new IllegalStateException("Database is already closed");
+        });
+
+        assertEquals(List.of("numbered, never committed"), messages("eltest.retry-numbered"));
+    }
+
+    @Test
+    void aShutdownBatchWhoseWriteSucceedsIsNotWrittenAgain() {
+        var writes = new AtomicInteger();
+
+        EventLogger.writeShutdownBatch(List.of(row("eltest.no-retry", "stored by the write")),
+                rows -> writes.incrementAndGet());
+
+        assertEquals(1, writes.get());
+        assertEquals(List.of(), messages("eltest.no-retry"));
+    }
+
+    // A null message breaks the NOT NULL column, standing in for a database neither connection can write.
+    @Test
+    void aShutdownBatchNeitherWriteCanStoreIsDroppedWithoutThrowing() {
+        EventLogger.writeShutdownBatch(List.of(row("eltest.unstorable", null)), rows -> {
+            throw new IllegalStateException("JDBC begin transaction failed");
+        });
+
+        assertEquals(List.of(), messages("eltest.unstorable"));
+    }
+
+    private static EventLog row(String category, String message) {
+        var e = new EventLog();
+        e.timestamp = AppClock.now();
+        e.level = "INFO";
+        e.category = category;
+        e.message = message;
+        return e;
+    }
+
+    private static List<String> messages(String category) {
+        return mine(category).stream().map(e -> e.message).sorted().toList();
     }
 }
