@@ -52,7 +52,7 @@ and the eval suites.
 | UAT-11 Channels | `channels.uat.spec.ts` | Bindings; webhooks stay un-gated |
 | UAT-12 Dashboard | `dashboard.uat.spec.ts` | Four panels, metrics endpoints, logs |
 | UAT-13/14 Apps & guide | `apps-guide.uat.spec.ts` | Hosted apps, cache headers, guide chapters |
-| UAT-15 Chat | `chat.uat.spec.ts` | Mocked stream: tokens, tool calls, error recovery |
+| UAT-15 Chat | `chat.uat.spec.ts` | Mocked stream: tokens, tool calls, error recovery; the checklist spinner across a held-open turn on a stubbed conversation, writes blocked |
 | UAT-22 Browser setup | `browser-setup.uat.spec.ts` | Settings components read live, never downloaded; Download now and the chat bar run on a mocked setup endpoint behind `blockApiWrites` |
 | UAT-16 Accessibility | `accessibility.uat.spec.ts` | axe-core, serious+critical only |
 | UAT-17 Circuit breakers | `breakers.uat.spec.ts` | Breakers not serving on the dashboard; every breaker on its provider card or beneath its MCP server; read-only |

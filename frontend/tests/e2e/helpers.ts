@@ -148,6 +148,49 @@ export async function blockApiWrites(page: Page): Promise<() => string[]> {
   return () => blocked
 }
 
+type HeldStream = { open: () => boolean, push: (event: object) => void, end: () => void }
+
+/**
+ * Answer `/api/chat/stream` with a stream the test feeds frame by frame, for states that last only while a
+ * turn streams; `route.fulfill` delivers the whole body at once. Call before the first navigation: the fetch
+ * is replaced before the page's scripts run, and every other request passes through.
+ */
+export async function holdChatStream(page: Page) {
+  await page.addInitScript(() => {
+    const realFetch = window.fetch.bind(window)
+    const encoder = new TextEncoder()
+    let controller: ReadableStreamDefaultController<Uint8Array> | null = null
+    ;(window as unknown as { e2eStream: HeldStream }).e2eStream = {
+      open: () => controller !== null,
+      push: event => controller?.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n`)),
+      end: () => {
+        controller?.close()
+        controller = null
+      },
+    }
+    window.fetch = (input, init) => {
+      const url = input instanceof Request ? input.url : String(input)
+      if (!url.includes('/api/chat/stream')) return realFetch(input, init)
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          controller = c
+        },
+      })
+      return Promise.resolve(new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }))
+    }
+  })
+  return {
+    /** Resolves once the page has sent its turn. */
+    opened: async () => {
+      await page.waitForFunction(() => (window as unknown as { e2eStream: HeldStream }).e2eStream.open())
+    },
+    push: (...events: object[]) => page.evaluate((frames) => {
+      for (const frame of frames) (window as unknown as { e2eStream: HeldStream }).e2eStream.push(frame)
+    }, events),
+    end: () => page.evaluate(() => (window as unknown as { e2eStream: HeldStream }).e2eStream.end()),
+  }
+}
+
 /** Collect console errors for the lifetime of the page. Returns a getter so a
  *  test can assert at the end rather than racing the handler. */
 export function collectConsoleErrors(page: Page): () => string[] {

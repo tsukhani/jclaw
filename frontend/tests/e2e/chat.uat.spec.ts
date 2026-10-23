@@ -1,12 +1,13 @@
 import type { Page } from '@playwright/test'
-import type { Agent, ConfigResponse, ProviderModelDef } from '~/types/api'
+import type { Agent, ChecklistItem, ConfigResponse, Conversation, ProviderModelDef } from '~/types/api'
 import { ROUTER_MODEL_ID, ROUTER_PROVIDER } from '../../utils/model-route'
-import { test, expect, gotoPage, json, E2E_PREFIX } from './helpers'
+import { test, expect, gotoPage, json, blockApiWrites, holdChatStream, E2E_PREFIX } from './helpers'
 
 /**
  * UAT-15 — Chat, the core product path.
  *
- * /api/chat/stream is mocked at the Playwright route level throughout. A live
+ * /api/chat/stream is mocked throughout: at the Playwright route level, or held open in the page
+ * where a state lasts only while the turn streams. A live
  * turn would spend a real model call per assertion and make the suite's
  * runtime depend on provider latency; what is under test here is the client
  * half — SSE parsing, message rendering, tool-call display, error surfacing —
@@ -44,6 +45,27 @@ async function supportsThinking(page: Page, agent: Agent): Promise<boolean> {
 /** The model picker, whose label is "<model name><provider>". */
 function modelPicker(page: Page, agent: Agent) {
   return page.locator('button').filter({ hasText: agent.modelProvider }).first()
+}
+
+/** Serve `id`, which no real row can carry, as one of `agent`'s web chats with `checklist` stored on it. */
+async function stubConversation(page: Page, agent: Agent, id: number, checklist: ChecklistItem[]) {
+  const row: Conversation = {
+    id, agentId: agent.id, agentName: agent.name, channelType: 'web', peerId: null, preview: 'e2e-uat plan it',
+    messageCount: 1, createdAt: '2026-10-23T10:00:00Z', updatedAt: '2026-10-23T10:00:00Z', checklist,
+  }
+  await page.route(url => url.pathname === '/api/conversations', async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const response = await route.fetch()
+    const rows = await response.json() as Conversation[]
+    const forAgent = new URL(route.request().url()).searchParams.get('agentId') === String(agent.id)
+    return route.fulfill({ response, json: forAgent ? [row, ...rows] : rows })
+  })
+  await page.route(url => url.pathname === `/api/conversations/${id}`, route => route.fulfill({ json: row }))
+  await page.route(url => url.pathname === `/api/conversations/${id}/messages`, route => route.fulfill({
+    json: new URL(route.request().url()).searchParams.has('before')
+      ? []
+      : [{ id: id * 10 + 1, role: 'user', content: 'e2e-uat plan it', createdAt: '2026-10-23T10:00:00Z' }],
+  }))
 }
 
 test.describe('UAT-15 chat', () => {
@@ -193,6 +215,53 @@ test.describe('UAT-15 chat', () => {
     await page.getByRole('button', { name: 'Send' }).click()
 
     await expect(page.getByText('Searched.')).toBeVisible({ timeout: 15_000 })
+  })
+
+  test('the checklist spins only a step the running turn has in progress', async ({ page, request }) => {
+    // Agents often reply with a step still in_progress, and the next turn shows that stored list until its own checklist call.
+    const agents = (await json(request, '/api/agents')).body as Agent[]
+    const agent = agents.find(a => a.isMain) ?? agents[0]!
+    await stubConversation(page, agent, 990301, [
+      { content: 'Run tests', status: 'completed', activeForm: 'Running tests' },
+      { content: 'Fix the parser', status: 'in_progress', activeForm: 'Fixing the parser' },
+    ])
+    const blocked = await blockApiWrites(page)
+    const stream = await holdChatStream(page)
+    const panel = page.getByTestId('chat-checklist')
+    const rows = panel.getByTestId('chat-checklist-item')
+    const spinner = panel.locator('.animate-spin')
+    const stop = page.getByRole('button', { name: 'Stop generating' })
+
+    await gotoPage(page, '/chat?conversation=990301')
+    await expect(rows).toHaveText(['Run tests(done)', 'Fix the parser(not finished)'])
+    await expect(spinner).toHaveCount(0)
+
+    await page.getByPlaceholder('Send a message...').fill('carry on')
+    await page.getByRole('button', { name: 'Send' }).click()
+    await stream.opened()
+    await stream.push({ type: 'init', conversationId: 990301 })
+    // The turn is running, but nothing in it has touched the stored step yet.
+    await expect(stop).toBeVisible()
+    await expect(rows).toHaveText(['Run tests(done)', 'Fix the parser(not finished)'])
+    await expect(spinner).toHaveCount(0)
+
+    await stream.push({
+      type: 'tool_call', id: 'tc1', name: 'checklist',
+      arguments: JSON.stringify({ items: [
+        { content: 'Fix the parser', status: 'completed', activeForm: 'Fixing the parser' },
+        { content: 'Commit', status: 'in_progress', activeForm: 'Committing' },
+      ] }),
+      resultText: 'Checklist updated successfully (2 items).',
+    })
+    await expect(rows).toHaveText(['Fix the parser(done)', 'Committing(in progress)'])
+    await expect(spinner).toHaveCount(1)
+
+    await stream.push({ type: 'complete', content: 'Parser fixed.' })
+    await stream.end()
+    await expect(stop).toHaveCount(0)
+    await expect(rows).toHaveText(['Fix the parser(done)', 'Commit(not finished)'])
+    await expect(spinner).toHaveCount(0)
+    expect(blocked()).toEqual([])
   })
 
   test('a stream error surfaces to the operator rather than hanging', async ({ page }) => {
