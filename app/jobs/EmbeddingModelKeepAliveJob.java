@@ -3,7 +3,6 @@ package jobs;
 import play.Play;
 import play.db.jpa.NoTransaction;
 import play.jobs.Every;
-import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EmbeddingModelKeepAlive;
 
@@ -29,7 +28,7 @@ import services.EmbeddingModelKeepAlive;
 @OnApplicationStart(async = true)
 @Every("30mn")
 @NoTransaction
-public class EmbeddingModelKeepAliveJob extends Job<Void> {
+public class EmbeddingModelKeepAliveJob extends PeriodicJob {
 
     @Override
     public void doJob() {

@@ -5,7 +5,6 @@ import models.Agent;
 import play.Play;
 import play.db.jpa.NoTransaction;
 import play.jobs.Every;
-import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.AgentService;
 import services.Tx;
@@ -19,7 +18,7 @@ import java.util.List;
 @OnApplicationStart(async = true)
 @Every("30mn")
 @NoTransaction
-public class OwnerNameMemoryRewriteJob extends Job<Void> {
+public class OwnerNameMemoryRewriteJob extends PeriodicJob {
 
     @Override
     public void doJob() {

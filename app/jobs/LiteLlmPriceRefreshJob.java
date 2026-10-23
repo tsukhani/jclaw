@@ -1,7 +1,6 @@
 package jobs;
 
 import play.Logger;
-import play.jobs.Job;
 import play.jobs.On;
 import services.PricingRefreshService;
 
@@ -25,7 +24,7 @@ import services.PricingRefreshService;
  * @see PricingRefreshService
  */
 @On("0 0 3 * * ?")
-public class LiteLlmPriceRefreshJob extends Job<Void> {
+public class LiteLlmPriceRefreshJob extends PeriodicJob {
 
     @Override
     public void doJob() {

@@ -1,7 +1,6 @@
 package jobs;
 
 import play.jobs.Every;
-import play.jobs.Job;
 import services.ConfigService;
 import services.ConversationQueue;
 import services.EventLogger;
@@ -12,7 +11,7 @@ import services.EventLogger;
  * {@code conversation.queue.idleEvictionMs} (default 1h).
  */
 @Every("1h")
-public class ConversationQueueEvictionJob extends Job<Void> {
+public class ConversationQueueEvictionJob extends PeriodicJob {
 
     private static final long DEFAULT_IDLE_MS = 3_600_000L;
 

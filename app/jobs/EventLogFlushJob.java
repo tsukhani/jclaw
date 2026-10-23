@@ -2,7 +2,6 @@ package jobs;
 
 import play.Play;
 import play.jobs.Every;
-import play.jobs.Job;
 import services.EventLogger;
 
 /**
@@ -20,7 +19,7 @@ import services.EventLogger;
  * JCLAW-334 note). Tests call {@code EventLogger.flush()} explicitly anyway.
  */
 @Every("30s")
-public class EventLogFlushJob extends Job<Void> {
+public class EventLogFlushJob extends PeriodicJob {
 
     @Override
     public void doJob() {

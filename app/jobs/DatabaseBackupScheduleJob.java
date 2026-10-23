@@ -1,7 +1,6 @@
 package jobs;
 
 import play.jobs.Every;
-import play.jobs.Job;
 import services.database.DatabaseService;
 
 /**
@@ -12,7 +11,7 @@ import services.database.DatabaseService;
  * needs no catch-up — the next day's backup is the catch-up.
  */
 @Every("1min")
-public class DatabaseBackupScheduleJob extends Job<Void> {
+public class DatabaseBackupScheduleJob extends PeriodicJob {
 
     @Override
     public void doJob() {

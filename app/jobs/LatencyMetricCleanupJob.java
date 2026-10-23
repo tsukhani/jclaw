@@ -2,7 +2,6 @@ package jobs;
 
 import models.LatencyMetric;
 import play.jobs.Every;
-import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.Tx;
@@ -26,7 +25,7 @@ import java.time.temporal.ChronoUnit;
 // never elapses on an instance restarted more often than daily.
 @OnApplicationStart(async = true)
 @Every("24h")
-public class LatencyMetricCleanupJob extends Job<Void> {
+public class LatencyMetricCleanupJob extends PeriodicJob {
 
     private static final String EVENT_CATEGORY = "LATENCY_CLEANUP";
     private static final String CONFIG_KEY = "latency.metrics.retentionDays";

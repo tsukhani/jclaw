@@ -3,7 +3,6 @@ package jobs;
 import models.EventLog;
 import org.jspecify.annotations.Nullable;
 import play.jobs.Every;
-import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.ConfigService;
 import services.EventLogger;
@@ -21,7 +20,7 @@ import java.time.temporal.ChronoUnit;
  */
 @OnApplicationStart(async = true)
 @Every("24h")
-public class EventLogCleanupJob extends Job<Void> {
+public class EventLogCleanupJob extends PeriodicJob {
 
     /** Settings &gt; Logging. */
     public static final String CONFIG_KEY = "logs.retentionDays";

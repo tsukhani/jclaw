@@ -4,7 +4,6 @@ import models.DeliveredMessage;
 import models.Task;
 import play.db.jpa.JPA;
 import play.jobs.Every;
-import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
 import services.SubagentRegistry;
@@ -53,7 +52,7 @@ import java.util.List;
 // never elapses on an instance restarted more often than daily.
 @OnApplicationStart(async = true)
 @Every("24h")
-public class TaskCleanupJob extends Job<Void> {
+public class TaskCleanupJob extends PeriodicJob {
 
     private static final String EVENT_CATEGORY = "TASK_CLEANUP";
     private static final String CONFIG_KEY = "tasks.retentionDays";

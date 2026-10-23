@@ -2,7 +2,6 @@ package jobs;
 
 import play.Play;
 import play.jobs.Every;
-import play.jobs.Job;
 import services.EventLogger;
 import services.LostTaskDetector;
 
@@ -24,7 +23,7 @@ import services.LostTaskDetector;
  * rather than waiting up to 30 s for this job's first tick.
  */
 @Every("30s")
-public class LostTaskScanJob extends Job<Void> {
+public class LostTaskScanJob extends PeriodicJob {
 
     @Override
     public void doJob() {

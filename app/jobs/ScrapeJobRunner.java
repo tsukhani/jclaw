@@ -2,7 +2,6 @@ package jobs;
 
 import play.Play;
 import play.jobs.Every;
-import play.jobs.Job;
 import services.scrape.ScrapeJobService;
 
 /**
@@ -14,7 +13,7 @@ import services.scrape.ScrapeJobService;
  * left waiting. Inert in test mode so tests drive {@link ScrapeJobService#tickOnce} themselves.
  */
 @Every("5s")
-public class ScrapeJobRunner extends Job<Void> {
+public class ScrapeJobRunner extends PeriodicJob {
 
     @Override
     public void doJob() {

@@ -1,7 +1,6 @@
 package jobs;
 
 import play.jobs.Every;
-import play.jobs.Job;
 import services.EventLogger;
 
 /**
@@ -24,7 +23,7 @@ import services.EventLogger;
  * overlaps the boot sweep is a harmless no-op.
  */
 @Every("1h")
-public class OrphanReArmJob extends Job<Void> {
+public class OrphanReArmJob extends PeriodicJob {
 
     @Override
     public void doJob() {

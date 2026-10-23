@@ -4,7 +4,6 @@ import models.Agent;
 import play.Play;
 import play.db.jpa.NoTransaction;
 import play.jobs.Every;
-import play.jobs.Job;
 import services.BackgroundProcesses;
 import services.Tx;
 
@@ -13,7 +12,7 @@ import java.util.ArrayList;
 /** Stops background processes past their lifetime and bounds their output files (JCLAW-1565). */
 @Every("10mn")
 @NoTransaction
-public class BackgroundProcessSweepJob extends Job<Void> {
+public class BackgroundProcessSweepJob extends PeriodicJob {
 
     @Override
     public void doJob() {

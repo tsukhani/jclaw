@@ -2,7 +2,6 @@ package jobs;
 
 import play.Play;
 import play.jobs.Every;
-import play.jobs.Job;
 import services.LatencyMetricRecorder;
 
 /**
@@ -17,7 +16,7 @@ import services.LatencyMetricRecorder;
  * process-global queue. Tests call {@code LatencyMetricRecorder.flush()} explicitly.
  */
 @Every("30s")
-public class LatencyMetricFlushJob extends Job<Void> {
+public class LatencyMetricFlushJob extends PeriodicJob {
 
     @Override
     public void doJob() {

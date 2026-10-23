@@ -8,7 +8,6 @@ import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import play.jobs.Every;
-import play.jobs.Job;
 import services.ConfigService;
 import services.EventLogger;
 import utils.AppClock;
@@ -58,7 +57,7 @@ import java.util.Map;
  * 5 seconds for &lt; 10k recent messages.
  */
 @Every("30min")
-public class TokenizerCalibrationJob extends Job<Void> {
+public class TokenizerCalibrationJob extends PeriodicJob {
 
     /** How far back to look for samples each run. */
     private static final int LOOKBACK_DAYS = 7;

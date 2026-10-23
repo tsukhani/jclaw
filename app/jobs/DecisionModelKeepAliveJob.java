@@ -4,7 +4,6 @@ import llm.routing.RouterClassifier;
 import play.Play;
 import play.db.jpa.NoTransaction;
 import play.jobs.Every;
-import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 
 /**
@@ -16,7 +15,7 @@ import play.jobs.OnApplicationStart;
 @OnApplicationStart(async = true)
 @Every("30mn")
 @NoTransaction
-public class DecisionModelKeepAliveJob extends Job<Void> {
+public class DecisionModelKeepAliveJob extends PeriodicJob {
 
     @Override
     public void doJob() {

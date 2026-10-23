@@ -4,7 +4,6 @@ import channels.TelegramPollingRunner;
 import play.Play;
 import play.db.jpa.NoTransaction;
 import play.jobs.Every;
-import play.jobs.Job;
 
 /**
  * JCLAW-436: periodically probe every enabled POLLING binding's bot token
@@ -25,7 +24,7 @@ import play.jobs.Job;
  */
 @Every("5min")
 @NoTransaction
-public class TelegramTokenHealthJob extends Job<Void> {
+public class TelegramTokenHealthJob extends PeriodicJob {
 
     @Override
     public void doJob() {

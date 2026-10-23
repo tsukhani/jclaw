@@ -139,7 +139,7 @@ public class EventLogger {
     }
 
     /** Hibernate's message is "JDBC begin transaction failed"; H2's 90121 is at the bottom of the chain. */
-    private static Throwable rootCause(Throwable t) {
+    public static Throwable rootCause(Throwable t) {
         var root = t;
         for (var cause = root.getCause(); cause != null && cause != root; cause = root.getCause()) root = cause;
         return root;

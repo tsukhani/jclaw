@@ -2,7 +2,6 @@ package jobs;
 
 import play.Play;
 import play.jobs.Every;
-import play.jobs.Job;
 import services.videogen.VideoGenerationJobService;
 
 /**
@@ -17,7 +16,7 @@ import services.videogen.VideoGenerationJobService;
  * avoid the JDK-25 VT {@code Thread.sleep} starvation footgun.
  */
 @Every("5s")
-public class VideoGenerationJobRunner extends Job<Void> {
+public class VideoGenerationJobRunner extends PeriodicJob {
 
     @Override
     public void doJob() {
