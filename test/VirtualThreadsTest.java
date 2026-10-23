@@ -150,7 +150,7 @@ class VirtualThreadsTest extends UnitTest {
             taskStarted.countDown();
             try {
                 Thread.sleep(300);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 taskSawInterrupt.set(true);
             }
             taskFinished.set(true);
