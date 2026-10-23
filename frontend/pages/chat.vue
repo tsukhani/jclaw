@@ -1043,7 +1043,7 @@ function exportConversation() {
         <ChatChecklist
           v-if="openChecklist"
           :items="openChecklist"
-          :running="streaming"
+          :running="streaming && liveChecklist !== null"
         />
 
         <!-- Input -->

@@ -499,4 +499,68 @@ describe('Chat page — checklist panel (JCLAW-1569)', () => {
     expect(rows.map(r => r.text())).toEqual(['Run tests(done)', 'Fix the parser(not finished)'])
     expect(panel.find('.animate-spin').exists()).toBe(false)
   })
+
+  it('spins only a step the running turn put in progress, and stops when the turn ends', async () => {
+    setupChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 99, agentId: 1, agentName: 'vision-agent', channelType: 'web', peerId: null, preview: 'plan',
+        messageCount: 2, createdAt: '2026-10-18T10:00:00Z', updatedAt: '2026-10-18T10:00:01Z',
+        checklist: [
+          { content: 'Run tests', status: 'completed', activeForm: 'Running tests' },
+          { content: 'Fix the parser', status: 'in_progress', activeForm: 'Fixing the parser' },
+        ] },
+    ])
+    registerEndpoint('/api/conversations/99/messages', () => [
+      { id: 7000, role: 'user', content: 'plan it', createdAt: '2026-10-18T10:00:00Z' },
+    ])
+    const encoder = new TextEncoder()
+    let stream!: ReadableStreamDefaultController<Uint8Array>
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      if (!String(input ?? '').includes('/api/chat/stream')) {
+        return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      }
+      const body = new ReadableStream<Uint8Array>({
+        start(c) {
+          stream = c
+        },
+      })
+      return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    })
+    const push = async (frame: object) => {
+      stream.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n`))
+      await flushPromises()
+    }
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    await (component.vm as unknown as { loadConversation: (id: number) => Promise<void> }).loadConversation(99)
+    await flushPromises()
+    const rowTexts = () => component.findAll('[data-testid="chat-checklist-item"]').map(r => r.text())
+    const spinning = () => component.find('[data-testid="chat-checklist"] .animate-spin').exists()
+
+    await component.find<HTMLTextAreaElement>('textarea').setValue('carry on')
+    await component.find('form').trigger('submit.prevent')
+    await push({ type: 'init', conversationId: 99 })
+
+    expect(rowTexts()).toEqual(['Run tests(done)', 'Fix the parser(not finished)'])
+    expect(spinning()).toBe(false)
+
+    await push({
+      type: 'tool_call', id: 'tc1', name: 'checklist',
+      arguments: JSON.stringify({ items: [
+        { content: 'Fix the parser', status: 'completed', activeForm: 'Fixing the parser' },
+        { content: 'Commit', status: 'in_progress', activeForm: 'Committing' },
+      ] }),
+      resultText: 'Checklist updated successfully (2 items).',
+    })
+
+    expect(rowTexts()).toEqual(['Fix the parser(done)', 'Committing(in progress)'])
+    expect(spinning()).toBe(true)
+
+    await push({ type: 'complete', content: 'Parser fixed.' })
+    stream.close()
+    await flushPromises()
+
+    expect(rowTexts()).toEqual(['Fix the parser(done)', 'Commit(not finished)'])
+    expect(spinning()).toBe(false)
+  })
 })
