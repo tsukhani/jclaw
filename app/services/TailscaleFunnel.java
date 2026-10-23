@@ -173,7 +173,7 @@ public final class TailscaleFunnel {
                 return new Status(false, null, "JClaw is stopping");
             }
             // Short transactions: the boot job calls this outside one, and the tailscale calls can take a minute.
-            if (!Tx.run(TailscaleFunnel::isFunnelEnabled)) {
+            if (!Boolean.TRUE.equals(Tx.run(TailscaleFunnel::isFunnelEnabled))) {
                 return new Status(false, null, "Tailscale Funnel is disabled");
             }
             var st = status();

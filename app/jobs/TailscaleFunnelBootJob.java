@@ -40,7 +40,7 @@ public class TailscaleFunnelBootJob extends Job<Void> {
         if (Play.runningInTestMode()) {
             return;
         }
-        if (!Tx.run(TailscaleFunnel::isFunnelEnabled)) {
+        if (!Boolean.TRUE.equals(Tx.run(TailscaleFunnel::isFunnelEnabled))) {
             return;
         }
         int port = Tx.run(TailscaleFunnel::configuredPort);
