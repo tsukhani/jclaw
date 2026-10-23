@@ -63,7 +63,8 @@ public class CheckListTool implements ToolRegistry.Tool {
                 `content` (imperative form, e.g. "Run tests"), \
                 `status` (one of pending, in_progress, completed), and \
                 `activeForm` (present-progressive form, e.g. "Running tests"). \
-                At most one item may be in_progress at a time (zero is also valid, e.g. before starting or after finishing).""";
+                At most one item may be in_progress at a time (zero is also valid, e.g. before starting or after finishing). \
+                Your reply ends the turn and nothing updates the list after it, so mark finished items completed before you write it.""";
     }
 
     @Override
