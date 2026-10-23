@@ -235,7 +235,8 @@ class AotCacheScriptTest extends UnitTest {
         var cmd = Pattern.compile("(?m)^CMD .*$").matcher(dockerfile);
         assertTrue(cmd.find());
         var line = cmd.group();
-        int train = line.indexOf("{ bash ./jclaw.sh aot-cache --https.port=${JCLAW_HTTPS_PORT:-9443} || true; } && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443} ");
+        int train = line.indexOf("{ bash ./jclaw.sh aot-cache --https.port=${JCLAW_HTTPS_PORT:-9443} -Dlog4j2.shutdownHookEnabled=false || true; }"
+                + " && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443} -Dlog4j2.shutdownHookEnabled=false ");
         assertTrue(train > line.indexOf("export JAVA_TOOL_OPTIONS="), "the image trains after JAVA_TOOL_OPTIONS, with the launch's arguments, and never fails the start");
         assertTrue(dockerfile.contains("JCLAW_AOT_DIR=/app/data/aot"));
         assertTrue(Files.readString(repo().resolve("docker-compose.yml")).contains("- ./data:/app/data"),
