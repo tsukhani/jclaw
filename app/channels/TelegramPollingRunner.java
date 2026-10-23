@@ -18,6 +18,7 @@ import services.Tx;
 import utils.ChannelErrorTemplates;
 import utils.ErrorRendering;
 import utils.Strings;
+import utils.VirtualThreads;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -123,12 +124,17 @@ public final class TelegramPollingRunner {
             }
         }
 
-        // Start any desired binding that isn't currently active.
+        // Start any desired binding that isn't currently active, all at once: each registerBot makes a
+        // deleteWebhook round trip. The SDK checks and records a token without a lock between, which is
+        // safe because no two bindings share one: bot_token_lookup is unique and the binding API checks
+        // the lookup under every key.
+        var toStart = new ArrayList<Runnable>();
         for (var target : desired) {
             if (!ACTIVE.containsKey(target.id)) {
-                registerInternal(app, target);
+                toStart.add(() -> registerInternal(app, target));
             }
         }
+        VirtualThreads.runAll("telegram-register", toStart);
 
         // No app.start() here — and there must not be one. JCLAW-431:
         // telegrambots 9.5.0 constructs TelegramBotsLongPollingApplication with

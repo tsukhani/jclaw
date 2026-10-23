@@ -152,6 +152,13 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         return (LongPollingSingleThreadUpdateConsumer) consumer;
     }
 
+    /** Reconciles, capturing binding {@code id}'s registration failure from the worker thread that registers it. */
+    private static List<EventLogger.Captured> registrationFailuresDuringReconcile(Long id) {
+        return EventLogger.captureMatchingForTest(
+                e -> e.message().startsWith("Failed to register binding " + id + ":"),
+                _ -> TelegramPollingRunner.reconcile());
+    }
+
     /** Channel events whose message contains {@code parts} in this order, as the old {@code LIKE '%a%b%'} did. */
     private static long channelEvents(List<EventLogger.Captured> logged, String... parts) {
         return logged.stream().filter(e -> e.category().equals("channel") && containsInOrder(e.message(), parts))
@@ -244,8 +251,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         TelegramPollingRunnerTestHooks.setApp(throwingApp);
         Long id = seedPollingBinding("reg-fail-agent", "703:tokRegFail", "1", true);
 
-        EventLogger.clear();
-        var logged = EventLogger.captureForTest(TelegramPollingRunner::reconcile); // must not throw
+        var logged = registrationFailuresDuringReconcile(id); // must not throw
 
         assertFalse(TelegramPollingRunner.activeBindingIds().contains(id),
                 "a binding whose registration failed must not be marked active");
@@ -274,8 +280,7 @@ class TelegramPollingRunnerDispatchTest extends FunctionalTest {
         TelegramPollingRunnerTestHooks.setApp(throwingApp);
         Long id = seedPollingBinding("reg-401-agent", "704:tokReg401", "1", true);
 
-        EventLogger.clear();
-        var logged = EventLogger.captureForTest(TelegramPollingRunner::reconcile);
+        var logged = registrationFailuresDuringReconcile(id);
 
         assertFalse(TelegramPollingRunner.activeBindingIds().contains(id));
         assertEquals(1L, channelEvents(logged,

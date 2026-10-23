@@ -10,6 +10,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -58,6 +59,12 @@ final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
     // app.start() — the SDK app is already running, so start() can only throw.
     private final java.util.concurrent.atomic.AtomicInteger startInvocations =
             new java.util.concurrent.atomic.AtomicInteger();
+    // Runs with the token before the 4-arg registerBot records it; stands in for the SDK's deleteWebhook round trip.
+    private volatile Consumer<String> beforeRegister = _ -> { };
+
+    void beforeRegister(Consumer<String> hook) {
+        beforeRegister = hook;
+    }
 
     @Override
     public BotSession registerBot(String botToken, LongPollingUpdateConsumer updatesConsumer) {
@@ -71,6 +78,7 @@ final class InMemoryPollingApp extends TelegramBotsLongPollingApplication {
                                   Supplier<TelegramUrl> telegramUrlSupplier,
                                   Function<Integer, GetUpdates> getUpdatesGenerator,
                                   LongPollingUpdateConsumer updatesConsumer) {
+        beforeRegister.accept(botToken);
         registered.add(botToken);
         consumers.put(botToken, updatesConsumer);
         generators.put(botToken, getUpdatesGenerator);

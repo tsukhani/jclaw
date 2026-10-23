@@ -6,11 +6,16 @@ import channels.WhatsAppCobaltRunner;
 import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
+import utils.VirtualThreads;
+
+import java.util.List;
 
 /**
  * Boots the channel polling runners. Invoked once after Play finishes loading
  * plugins and the JPA schema; reconciliation at runtime (after admin config
  * saves) is driven inline from {@link controllers.ApiChannelsController#save}.
+ * The three run at once and the job returns when all have, so in production the
+ * channels are up before the port opens while the boot waits only for the slowest.
  *
  * <p>{@code @NoTransaction} skips the framework's outer JPA tx wrapper for
  * this job. {@link TelegramPollingRunner#reconcile()} manages its own
@@ -26,8 +31,7 @@ public class ChannelRunnerJob extends Job<Void> {
 
     @Override
     public void doJob() {
-        TelegramPollingRunner.reconcile();
-        SlackSocketModeRunner.reconcile();
-        WhatsAppCobaltRunner.reconcile();
+        VirtualThreads.runAll("channel-start", List.of(TelegramPollingRunner::reconcile,
+                SlackSocketModeRunner::reconcile, WhatsAppCobaltRunner::reconcile));
     }
 }

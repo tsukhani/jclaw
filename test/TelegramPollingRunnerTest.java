@@ -23,6 +23,10 @@ import services.Tx;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
+import java.util.Set;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -195,6 +199,43 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         TelegramPollingRunner.reconcile();
         assertTrue(TelegramPollingRunner.activeBindingIds().contains(id),
                 "enabled POLLING binding should be registered");
+    }
+
+    @Test
+    void reconcileRegistersNewBindingsConcurrently() {
+        Long a = seedPollingBinding("agent-par-a", "333:tokA", "3", true);
+        Long b = seedPollingBinding("agent-par-b", "444:tokB", "4", true);
+        // Each registration waits for the other: one at a time, the first times out and the second finds the barrier broken.
+        var bothRegistering = new CyclicBarrier(2);
+        var barrierFailure = new AtomicReference<Exception>();
+        fakeApp.beforeRegister(_ -> {
+            try {
+                bothRegistering.await(5, TimeUnit.SECONDS);
+            } catch (Exception e) {
+                barrierFailure.compareAndSet(null, e);
+                throw new IllegalStateException(e);
+            }
+        });
+
+        TelegramPollingRunner.reconcile();
+
+        assertNull(barrierFailure.get(), "bindings registered one at a time");
+        assertEquals(Set.of("333:tokA", "444:tokB"), fakeApp.registeredTokens());
+        assertEquals(Set.of(a, b), TelegramPollingRunner.activeBindingIds());
+    }
+
+    @Test
+    void aFailedRegistrationLeavesTheOtherBindingsRegistered() {
+        seedPollingBinding("agent-bad", "555:tokBad", "5", true);
+        Long good = seedPollingBinding("agent-good", "666:tokGood", "6", true);
+        fakeApp.beforeRegister(token -> {
+            if (token.equals("555:tokBad")) throw new IllegalStateException("connection reset by peer");
+        });
+
+        TelegramPollingRunner.reconcile();
+
+        assertEquals(Set.of("666:tokGood"), fakeApp.registeredTokens());
+        assertEquals(Set.of(good), TelegramPollingRunner.activeBindingIds());
     }
 
     @Test
