@@ -269,6 +269,19 @@ public final class TelegramPollingRunner {
             EventLogger.error(LOG_CATEGORY, null, LOG_SOURCE,
                     "Failed to register binding %d: %s [%s]".formatted(
                             bindingId, e.getMessage(), TelegramReactionNotifier.describePollingErrorCurve(e)));
+            forgetFailedRegistration(app, token);
+        }
+    }
+
+    /**
+     * The SDK records a session before its {@code deleteWebhook} call, so one that failed there would
+     * refuse every later registration of the token as "Bot is already registered" until a restart.
+     */
+    private static void forgetFailedRegistration(TelegramBotsLongPollingApplication app, String token) {
+        try {
+            app.unregisterBot(token);
+        } catch (Exception _) {
+            // "Bot is not registered": the failure came before the SDK recorded the session.
         }
     }
 

@@ -3,15 +3,23 @@ import channels.TelegramOffsetStore;
 import channels.TelegramPollingRunner;
 import channels.TelegramPollingRunnerTestHooks;
 import channels.TelegramReactionNotifier;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import models.Agent;
 import models.TelegramBinding;
 import models.TelegramTopicBinding;
+import okhttp3.Interceptor;
+import okhttp3.MediaType;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.telegram.telegrambots.longpolling.TelegramBotsLongPollingApplication;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.api.methods.updates.GetUpdates;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -20,12 +28,15 @@ import play.test.FunctionalTest;
 import services.EventLogger;
 import services.Tx;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Set;
 import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -222,6 +233,35 @@ class TelegramPollingRunnerTest extends FunctionalTest {
         assertNull(barrierFailure.get(), "bindings registered one at a time");
         assertEquals(Set.of("333:tokA", "444:tokB"), fakeApp.registeredTokens());
         assertEquals(Set.of(a, b), TelegramPollingRunner.activeBindingIds());
+    }
+
+    @Test
+    void aBindingWhoseDeleteWebhookFailedRegistersOnTheNextReconcile() {
+        Long id = seedPollingBinding("agent-strand", "777:tokStrand", "7", true);
+        // The real SDK records the session before start() calls deleteWebhook, so only it shows the stranded record.
+        var deleteWebhookCalls = new AtomicInteger();
+        Interceptor telegram = chain -> {
+            var path = chain.request().url().encodedPath();
+            if (path.endsWith("/deleteWebhook") && deleteWebhookCalls.incrementAndGet() == 1) {
+                throw new IOException("connection reset by peer");
+            }
+            var body = path.endsWith("/getUpdates") ? "{\"ok\":true,\"result\":[]}" : "{\"ok\":true,\"result\":true}";
+            return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                    .body(ResponseBody.create(body, MediaType.get("application/json"))).build();
+        };
+        TelegramPollingRunnerTestHooks.setApp(new TelegramBotsLongPollingApplication(ObjectMapper::new,
+                () -> new OkHttpClient.Builder().addInterceptor(telegram).build(), Executors::newSingleThreadScheduledExecutor));
+        try {
+            TelegramPollingRunner.reconcile();
+            assertEquals(Set.of(), TelegramPollingRunner.activeBindingIds());
+
+            TelegramPollingRunner.reconcile();
+
+            assertEquals(Set.of(id), TelegramPollingRunner.activeBindingIds());
+            assertEquals(2, deleteWebhookCalls.get());
+        } finally {
+            TelegramPollingRunner.stop();
+        }
     }
 
     @Test
