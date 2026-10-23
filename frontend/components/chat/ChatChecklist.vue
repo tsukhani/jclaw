@@ -4,16 +4,21 @@ import { ChevronDownIcon } from '@heroicons/vue/24/outline'
 import { CheckCircleIcon } from '@heroicons/vue/16/solid'
 import type { ChecklistItem } from '~/types/api'
 
-const props = defineProps<{ items: readonly ChecklistItem[] }>()
+// Once the turn ends, an in_progress step is only the agent's last record, not work under way.
+const props = defineProps<{ items: readonly ChecklistItem[], running: boolean }>()
 
 const open = ref(true)
 const doneCount = computed(() => props.items.filter(item => item.status === 'completed').length)
-const current = computed(() => props.items.find(item => item.status === 'in_progress'))
+const current = computed(() => props.running ? props.items.find(item => item.status === 'in_progress') : undefined)
 
-const STATUS_LABEL: Record<ChecklistItem['status'], string> = {
-  completed: 'done',
-  in_progress: 'in progress',
-  pending: 'to do',
+function isActive(item: ChecklistItem): boolean {
+  return props.running && item.status === 'in_progress'
+}
+
+function statusLabel(item: ChecklistItem): string {
+  if (item.status === 'completed') return 'done'
+  if (item.status === 'pending') return 'to do'
+  return props.running ? 'in progress' : 'not finished'
 }
 </script>
 
@@ -68,7 +73,7 @@ const STATUS_LABEL: Record<ChecklistItem['status'], string> = {
               class="w-4 h-4 text-emerald-700 dark:text-emerald-400"
             />
             <span
-              v-else-if="item.status === 'in_progress'"
+              v-else-if="isActive(item)"
               class="w-3.5 h-3.5 rounded-full border-2 border-current border-t-transparent text-blue-700 dark:text-blue-300
                      animate-spin motion-reduce:animate-none"
             />
@@ -81,11 +86,11 @@ const STATUS_LABEL: Record<ChecklistItem['status'], string> = {
             class="min-w-0"
             :class="{
               'text-fg-muted line-through': item.status === 'completed',
-              'font-medium text-fg-strong': item.status === 'in_progress',
-              'text-fg-primary': item.status === 'pending',
+              'font-medium text-fg-strong': isActive(item),
+              'text-fg-primary': item.status !== 'completed' && !isActive(item),
             }"
-          >{{ item.status === 'in_progress' ? item.activeForm : item.content }}</span>
-          <span class="sr-only">({{ STATUS_LABEL[item.status] }})</span>
+          >{{ isActive(item) ? item.activeForm : item.content }}</span>
+          <span class="sr-only">({{ statusLabel(item) }})</span>
         </li>
       </ul>
     </div>

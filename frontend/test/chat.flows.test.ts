@@ -495,6 +495,8 @@ describe('Chat page — checklist panel (JCLAW-1569)', () => {
 
     const panel = component.get('[data-testid="chat-checklist"]')
     expect(panel.get('[data-testid="chat-checklist-count"]').text()).toBe('1 of 2 done')
-    expect(panel.text()).toContain('Fixing the parser')
+    const rows = panel.findAll('[data-testid="chat-checklist-item"]')
+    expect(rows.map(r => r.text())).toEqual(['Run tests(done)', 'Fix the parser(not finished)'])
+    expect(panel.find('.animate-spin').exists()).toBe(false)
   })
 })

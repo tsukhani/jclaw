@@ -163,7 +163,9 @@ Only the conversation that started the run shows the panel. A coding run that a 
 
 ## The checklist
 
-When the agent works through a task in steps, it can keep a checklist with its `checklist` tool. While a step is still open, a **Checklist** panel docks above the composer. Its header counts the steps done, for example **1 of 3 done**. Done steps are crossed out. The step in progress has a spinner and reads as what the agent is doing, for example "Fixing the parser". Click the header to fold the panel; folded, it still names the step in progress. The panel updates while the agent works.
+When the agent works through a task in steps, it can keep a checklist with its `checklist` tool. While a step is still open, a **Checklist** panel docks above the composer. Its header counts the steps done, for example **1 of 3 done**. Done steps are crossed out. While the agent works, the step in progress has a spinner and reads as what the agent is doing, for example "Fixing the parser". Click the header to fold the panel; folded, it still names the step in progress. The panel updates while the agent works.
+
+The agent does not always tick off its last step before it replies. If the reply ends with a step still open, the spinner stops and the step shows its plain name, for example "Fix the parser". Folded, the panel then shows only the count. The agent ticks the step off the next time it updates the checklist.
 
 The agent keeps seeing its checklist after older turns are summarized or drop out of its context, on every channel, not only in the web chat. A checklist goes away when every step is done, after `/reset`, or once you send more than three messages without the agent updating it.
 
