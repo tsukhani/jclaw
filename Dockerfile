@@ -316,8 +316,6 @@ EXPOSE 9443/udp
 # one an agent starts from another directory, so its paths are absolute. The
 # GC log is passed to ./play run instead, which hands it to the server JVM
 # alone: a JVM that cannot open its -Xlog file refuses to start.
-# -Dlog4j2.shutdownHookEnabled=false goes the same way, and to aot-cache too: without it
-# the shutdown log is lost (see do_start_prod), and it is no business of other JVMs here.
 #
 # JAVA_TOOL_OPTIONS is honored by the JVM and prepended to its argv — we
 # use it to inject GC, heap and prod-only system-property flags without
@@ -368,4 +366,4 @@ EXPOSE 9443/udp
 # is itself replaced by `bash ./play` (exec), which is itself replaced
 # by `java` (exec inside the launcher), so the signal chain is intact
 # end-to-end.
-CMD ["sh", "-c", "started=$(date -u +%Y%m%dT%H%M%SZ) && export JAVA_TOOL_OPTIONS=\"-Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-128m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}} -XX:+UseZGC -XX:SoftMaxHeapSize=${JCLAW_JVM_SOFTMAX:-1g} -XX:ZUncommitDelay=60 -XX:+UseCompactObjectHeaders -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/logs/heap-oom-${started}-%p.hprof -XX:+ExitOnOutOfMemoryError -XX:ErrorFile=/app/logs/hs_err-${started}-%p.log -XX:MaxDirectMemorySize=256m -Dio.netty.leakDetection.level=DISABLED ${JAVA_TOOL_OPTIONS:-}\" && { bash ./jclaw.sh aot-cache --https.port=${JCLAW_HTTPS_PORT:-9443} -Dlog4j2.shutdownHookEnabled=false || true; } && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443} -Dlog4j2.shutdownHookEnabled=false '-Xlog:gc*:file=/app/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M'"]
+CMD ["sh", "-c", "started=$(date -u +%Y%m%dT%H%M%SZ) && export JAVA_TOOL_OPTIONS=\"-Xms${JCLAW_JVM_XMS:-${JCLAW_JVM_HEAP:-128m}} -Xmx${JCLAW_JVM_XMX:-${JCLAW_JVM_HEAP:-2g}} -XX:+UseZGC -XX:SoftMaxHeapSize=${JCLAW_JVM_SOFTMAX:-1g} -XX:ZUncommitDelay=60 -XX:+UseCompactObjectHeaders -XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=/app/logs/heap-oom-${started}-%p.hprof -XX:+ExitOnOutOfMemoryError -XX:ErrorFile=/app/logs/hs_err-${started}-%p.log -XX:MaxDirectMemorySize=256m -Dio.netty.leakDetection.level=DISABLED ${JAVA_TOOL_OPTIONS:-}\" && { bash ./jclaw.sh aot-cache --https.port=${JCLAW_HTTPS_PORT:-9443} || true; } && exec ./play run --%prod --https.port=${JCLAW_HTTPS_PORT:-9443} '-Xlog:gc*:file=/app/logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M'"]

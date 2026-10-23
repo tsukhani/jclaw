@@ -3479,9 +3479,6 @@ do_start_prod() {
     #     releases, prod turns it off. Must be a -D (JVM property): Netty
     #     reads it once in ResourceLeakDetector's static initializer, so
     #     setting it via application.conf is too late.
-    #   - log4j2.shutdownHookEnabled=false: the JUL bridge starts log4j on its default
-    #     configuration before Play loads log4j2-prod.xml, so that file's shutdownHook="disable"
-    #     arrives after the hook is registered, and the hook drops ShutdownJob's whole log.
     #   - GC log: rotated, time-stamped, very low overhead; invaluable for
     #     diagnosing GC-related latency spikes.
     # Play 1.x passes unrecognized args straight to the JVM (see
@@ -3524,7 +3521,6 @@ do_start_prod() {
         "-XX:ErrorFile=logs/hs_err-${started}-%p.log"
         "-XX:MaxDirectMemorySize=256m"
         "-Dio.netty.leakDetection.level=DISABLED"
-        "-Dlog4j2.shutdownHookEnabled=false"
         "-Xlog:gc*:file=logs/gc.log:time,uptime,level,tags:filecount=5,filesize=10M"
     )
 
