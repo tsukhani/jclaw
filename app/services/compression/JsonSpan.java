@@ -21,8 +21,13 @@ import java.util.Optional;
  * valid empty object dwarfed by the code before it) from being misread as JSON,
  * while still accepting "status line + large JSON body".
  *
+ * <p>When that bracket gives no span, the first {@code &#123;} / {@code [} after
+ * it that begins a line is tried once, under the same guards, so a bracketed
+ * prefix ({@code [Rendered Prefab UI]}) does not hide the body.
+ *
  * <p>Not handled: a trailing suffix after the JSON (e.g. a closing code fence),
- * or real JSON that appears only after a brace that belongs to the prefix.
+ * a body that starts mid-line behind a failed bracket, or a second line-start
+ * bracket ahead of the body.
  */
 public record JsonSpan(String prefix, JsonElement json) {
 
@@ -31,7 +36,13 @@ public record JsonSpan(String prefix, JsonElement json) {
 
     public static Optional<JsonSpan> find(String content) {
         if (content == null) return Optional.empty();
-        int start = firstJsonStart(content);
+        int first = firstJsonStart(content);
+        var span = spanAt(content, first);
+        if (span.isPresent() || first < 0) return span;
+        return spanAt(content, lineStartJsonStart(content, first + 1));
+    }
+
+    private static Optional<JsonSpan> spanAt(String content, int start) {
         if (start < 0 || start > MAX_PREFIX_CHARS) return Optional.empty();
 
         var candidate = content.substring(start);
@@ -46,9 +57,17 @@ public record JsonSpan(String prefix, JsonElement json) {
                 return Optional.of(new JsonSpan(content.substring(0, start), el));
             }
         } catch (JsonParseException _) {
-            // Not parseable from the first brace — treat as non-JSON.
+            // Not parseable from this bracket — treat as non-JSON.
         }
         return Optional.empty();
+    }
+
+    private static int lineStartJsonStart(String s, int from) {
+        for (int i = Math.max(from, 1); i <= Math.min(MAX_PREFIX_CHARS, s.length() - 1); i++) {
+            char c = s.charAt(i);
+            if ((c == '{' || c == '[') && s.charAt(i - 1) == '\n') return i;
+        }
+        return -1;
     }
 
     private static int firstJsonStart(String s) {

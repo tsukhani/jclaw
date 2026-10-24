@@ -1,3 +1,5 @@
+import com.google.gson.JsonParser;
+import mcp.CallToolResult;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -118,4 +120,12 @@ class ContentTypeDetectorTest extends UnitTest {
         assertEquals(ContentType.TEXT, ContentTypeDetector.detect(prose));
     }
 
+    @Test
+    void aViewToolsPlaceholderFollowedByItsDataIsJson() {
+        var result = CallToolResult.fromResultObject(JsonParser.parseString(
+                "{\"content\":[{\"type\":\"text\",\"text\":\"[Rendered Prefab UI]\"}],\"structuredContent\":"
+                        + "{\"view\":{\"type\":\"DataTable\",\"rows\":[{\"airline\":\"Vietjet\",\"price\":271},"
+                        + "{\"airline\":\"Scoot\",\"price\":289}]}}}").getAsJsonObject());
+        assertEquals(ContentType.JSON, ContentTypeDetector.detect(result.contentWithViewData()));
+    }
 }
