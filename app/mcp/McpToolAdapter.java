@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.EventLog;
 import models.McpServer;
+import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
 import utils.ApiResponses;
@@ -96,21 +97,9 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
             return ToolRegistry.ToolResult.text(ToolErrorTemplates.render(
                     ToolErrorTemplates.mcpBadArguments(serverName, def.name(), ApiResponses.messageOf(e))));
         }
-        // JCLAW-32: gate + audit in one atomic Tx. The check (isAllowed) and
-        // the audit log (MCP_TOOL_INVOKE) MUST commit together so an attacker
-        // who somehow bypasses the in-memory ToolRegistry can't fabricate a
-        // grant the audit trail wouldn't show. The actual MCP server call
-        // happens AFTER commit — we don't hold a DB tx across the network.
         boolean allowed;
         try {
-            allowed = Tx.run(() -> {
-                var managed = (Agent) (agent == null || agent.id == null ? null
-                        : Agent.findById(agent.id));
-                boolean grant = managed != null
-                        && McpAllowlist.isAllowed(managed, serverName, def.name());
-                writeInvokeAudit(agent, argsJson, grant);
-                return grant;
-            });
+            allowed = allowedAndAudited(agent, argsJson, false);
         } catch (RuntimeException e) {
             return ToolRegistry.ToolResult.text(ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(
                     serverName, def.name(), "allowlist check failed: " + ApiResponses.messageOf(e))));
@@ -139,6 +128,34 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
                 : body;
         return new ToolRegistry.ToolResult(text, resourceUri != null && webChatTurn.getAsBoolean()
                 ? viewPayload(resourceUri, args, result) : null);
+    }
+
+    /**
+     * A call from this tool's view in web chat, behind the grant check and audit a model's call gets.
+     *
+     * @return the server's result, or null when {@code agent} holds no grant for this tool or has its server switched off
+     */
+    public @Nullable CallToolResult callFromView(JsonObject args, Agent agent) throws IOException, McpException {
+        if (!allowedAndAudited(agent, args.toString(), true)) return null;
+        return invoker.invoke(serverName, def.name(), args);
+    }
+
+    /**
+     * JCLAW-32: the grant check (isAllowed) and its MCP_TOOL_INVOKE row commit together, so an attacker
+     * who somehow bypasses the in-memory ToolRegistry can't fabricate a grant the audit trail wouldn't
+     * show. The caller makes the MCP call after the commit — no DB tx is held across the network.
+     */
+    private boolean allowedAndAudited(Agent agent, String argsJson, boolean fromView) {
+        return Tx.run(() -> {
+            var managed = (Agent) (agent == null || agent.id == null ? null
+                    : Agent.findById(agent.id));
+            boolean grant = managed != null
+                    && McpAllowlist.isAllowed(managed, serverName, def.name())
+                    // A turn is offered only the servers switched on for its agent; a view's call is held to that too.
+                    && (!fromView || !ToolRegistry.loadDisabledTools(managed).contains(McpServer.toolName(serverName, "")));
+            writeInvokeAudit(agent, argsJson, grant, fromView);
+            return grant;
+        });
     }
 
     /** The call already ran, so a failure to tell where it ran costs the view, never the result. */
@@ -176,15 +193,15 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
     /** Inline audit-log row save (bypasses {@link services.EventLogger}'s
      *  async queue) so the row commits in the same Tx as the allowlist check.
      *  The AC requires both to land atomically. */
-    private void writeInvokeAudit(Agent agent, String argsJson, boolean allowed) {
+    private void writeInvokeAudit(Agent agent, String argsJson, boolean allowed, boolean fromView) {
         var ev = new EventLog();
         ev.timestamp = AppClock.now();
         ev.level = allowed ? "INFO" : "WARN";
         ev.category = "MCP_TOOL_INVOKE";
         var agentName = agent != null && agent.name != null ? agent.name : "<unknown>";
         ev.agentId = agent != null && agent.id != null ? String.valueOf(agent.id) : null;
-        ev.message = "%s/%s by '%s' [%s]".formatted(
-                serverName, def.name(), agentName, allowed ? "allowed" : "denied");
+        ev.message = "%s/%s by '%s'%s [%s]".formatted(
+                serverName, def.name(), agentName, fromView ? " from its view" : "", allowed ? "allowed" : "denied");
         ev.details = argsJson;
         ev.save();
     }

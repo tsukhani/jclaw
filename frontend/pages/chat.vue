@@ -39,6 +39,7 @@ import { useChatConversation, type ChatConversationLoadHooks } from '~/composabl
 import { useAgentModel } from '~/composables/useAgentModel'
 import { useChatAnnouncePoller } from '~/composables/useChatAnnouncePoller'
 import { SCRAPE_JOB_REPLY_GRACE_MS, scrapeJobEndedKey } from '~/composables/useScrapeJobChat'
+import { mcpAppHostKey } from '~/composables/useMcpAppBridge'
 import { useChatSubagents } from '~/composables/useChatSubagents'
 import { useChatSubagentChips } from '~/composables/useChatSubagentChips'
 import { useMediaGenPolling } from '~/composables/useMediaGenPolling'
@@ -660,6 +661,16 @@ const {
   isEmptyChat,
   addAttachments,
   sendMessage,
+})
+
+// A view's ui/message fills the composer and never sends; a draft already typed stays above a blank line.
+provide(mcpAppHostKey, {
+  conversationId: () => selectedConvoId.value,
+  prefill: (text) => {
+    input.value = input.value.trim() ? `${input.value.trimEnd()}\n\n${text}` : text
+    nextTick(autoResize)
+    focusInput()
+  },
 })
 
 const formatAttachmentSize = formatSize

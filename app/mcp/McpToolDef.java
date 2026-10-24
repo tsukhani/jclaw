@@ -59,6 +59,11 @@ public record McpToolDef(String name, String description, JsonObject inputSchema
         return visibility.contains("model");
     }
 
+    /** Whether the tool's view may call this tool through its host. */
+    public boolean visibleToApp() {
+        return visibility.contains("app");
+    }
+
     /** A page URI must use {@code ui://}; any other value leaves the tool without a view. */
     private static @Nullable String pageUri(@Nullable JsonElement el) {
         if (el == null || !el.isJsonPrimitive()) return null;

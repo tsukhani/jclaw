@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Functional HTTP tests for {@code ApiMcpServersController} (JCLAW-33).
@@ -559,6 +560,36 @@ class ApiMcpServersControllerTest extends FunctionalTest {
 
     /** As {@link #withViewServer(ViewCheck)}, with {@code resources/list} failing when {@code listingFails}. */
     private static void withViewServer(boolean listingFails, ViewCheck check) throws Exception {
+        withViewServer(listingFails, false, new CopyOnWriteArrayList<>(), check);
+    }
+
+    /** A {@code tools/call} the server answered, and the server's MCP_TOOL_INVOKE rows a fresh transaction saw as it arrived. */
+    private record ToolCall(JsonObject params, List<String> auditAtCall) {}
+
+    /**
+     * {@code search_table} draws {@code ui://page.html} for model and view alike, {@code refresh} is for the view
+     * alone, {@code summarize} for the model alone, {@code plain} declares no {@code _meta}, {@code erroring} answers
+     * with {@code isError: true}, and {@code broken} answers every call with a JSON-RPC error.
+     */
+    private static final String VIEW_TOOLS = "{\"tools\":["
+            + "{\"name\":\"search_table\",\"description\":\"Table.\",\"inputSchema\":{\"type\":\"object\"},"
+            + "\"_meta\":{\"ui\":{\"resourceUri\":\"ui://page.html\"}}},"
+            + "{\"name\":\"refresh\",\"description\":\"Refresh.\",\"inputSchema\":{\"type\":\"object\"},"
+            + "\"_meta\":{\"ui\":{\"resourceUri\":\"ui://page.html\",\"visibility\":[\"app\"]}}},"
+            + "{\"name\":\"summarize\",\"description\":\"Summary.\",\"inputSchema\":{\"type\":\"object\"},"
+            + "\"_meta\":{\"ui\":{\"visibility\":[\"model\"]}}},"
+            + "{\"name\":\"plain\",\"description\":\"Plain.\",\"inputSchema\":{\"type\":\"object\"}},"
+            + "{\"name\":\"erroring\",\"description\":\"Errs.\",\"inputSchema\":{\"type\":\"object\"},"
+            + "\"_meta\":{\"ui\":{\"visibility\":[\"app\"]}}},"
+            + "{\"name\":\"broken\",\"description\":\"Fails.\",\"inputSchema\":{\"type\":\"object\"},"
+            + "\"_meta\":{\"ui\":{\"visibility\":[\"app\"]}}}]}";
+
+    /**
+     * As {@link #withViewServer(boolean, ViewCheck)}, the row's {@code requiresApproval} set as given, and every
+     * {@code tools/call} the server answers added to {@code calls}.
+     */
+    private static void withViewServer(boolean listingFails, boolean requiresApproval, List<ToolCall> calls, ViewCheck check)
+            throws Exception {
         ToolRegistrySync.canonicalForTest();
         var name = "views-" + UUID.randomUUID().toString().substring(0, 8);
         try (var http = new MockWebServer()) {
@@ -571,7 +602,20 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                     return switch (r.method()) {
                         case "server/discover" -> rpc(r.id(),
                                 "{\"supportedVersions\":[\"2026-07-28\"],\"capabilities\":{\"tools\":{},\"resources\":{}}}");
-                        case "tools/list" -> rpc(r.id(), "{\"tools\":[]}");
+                        case "tools/list" -> rpc(r.id(), VIEW_TOOLS);
+                        case "tools/call" -> {
+                            var params = (JsonObject) Objects.requireNonNull(r.params());
+                            calls.add(new ToolCall(params, invokeAudit(name)));
+                            yield switch (params.get("name").getAsString()) {
+                                case "broken" -> new MockResponse.Builder().code(200).addHeader("Content-Type", "application/json")
+                                        .body("{\"jsonrpc\":\"2.0\",\"id\":" + r.id() + ",\"error\":{\"code\":-32603,"
+                                                + "\"message\":\"upstream said: token sk-test-123 expired\"}}").build();
+                                case "erroring" -> rpc(r.id(), "{\"content\":[{\"type\":\"text\",\"text\":\"Quota used up\"}],"
+                                        + "\"isError\":true}");
+                                default -> rpc(r.id(), "{\"content\":[{\"type\":\"text\",\"text\":\"Page 2\"}],"
+                                        + "\"structuredContent\":{\"rows\":[4,5]},\"_meta\":{\"k\":\"v\"}}");
+                            };
+                        }
                         case "resources/list" -> listingFails ? rpcError(r.id(), -32603) : rpc(r.id(), "{\"resources\":["
                                 + "{\"uri\":\"ui://listed.html\",\"mimeType\":\"text/html;profile=mcp-app\","
                                 + "\"_meta\":{\"ui\":{\"csp\":{\"connectDomains\":[\"https://api.example.com\"]}}}},"
@@ -590,6 +634,7 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                 var srv = new McpServer();
                 srv.name = name;
                 srv.enabled = true;
+                srv.requiresApproval = requiresApproval;
                 srv.transport = McpServer.Transport.HTTP;
                 srv.configJson = cfg.toString();
                 srv.save();
@@ -793,6 +838,250 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                     });
             assertEquals(List.of("MCP server '" + server + "' view page \"ui://reach.html\" declared origins that were left out"
                     + " of its CSP: {\"connectDomains\":[\"http://localhost:3001\",\"'self'\"]}"), warnings);
+        });
+    }
+
+    // ==================== MCP Apps view tool calls ====================
+
+    /** A web conversation of a new agent, which every connected server grants each of its tools. */
+    private static long webConversation(String agentName) {
+        return webConversation(agentName, null);
+    }
+
+    /** As {@link #webConversation(String)}, with {@code server} switched on for the agent, as a non-main agent needs. */
+    private static long webConversation(String agentName, @org.jspecify.annotations.Nullable String server) {
+        var id = commitInFreshTx(() -> {
+            var agent = services.AgentService.create(agentName, "openrouter", "gpt-4.1");
+            if (server != null) {
+                var on = mcp.McpGrants.newRow(agent, McpServer.toolName(server, ""));
+                on.enabled = true;
+                on.save();
+            }
+            return services.ConversationService.create(agent, "web", null).id;
+        });
+        agents.ToolRegistry.clearDisabledToolsCache();
+        return id;
+    }
+
+    private Http.Response viewCall(Object conversationId, String server, String tool, String arguments) {
+        return viewCall(newRequest(), conversationId, server, tool, arguments);
+    }
+
+    private Http.Response viewCall(Http.Request request, Object conversationId, String server, String tool, String arguments) {
+        var body = new JsonObject();
+        body.add("conversationId", JsonParser.parseString(String.valueOf(conversationId)));
+        body.addProperty("server", server);
+        body.addProperty("tool", tool);
+        body.add("arguments", JsonParser.parseString(arguments));
+        return POST(request, "/api/mcp-servers/view/call", "application/json", body.toString());
+    }
+
+    /** Each MCP_TOOL_INVOKE row for {@code server}, oldest first, as {@code level message details}. */
+    private static List<String> invokeAudit(String server) {
+        return commitInFreshTx(() -> {
+            List<models.EventLog> rows = models.EventLog.find("category = ?1 and message like ?2 order by id",
+                    "MCP_TOOL_INVOKE", server + "/%").fetch();
+            return rows.stream().map(e -> e.level + " " + e.message + " " + e.details).toList();
+        });
+    }
+
+    private static void assertAudit(String server, List<String> expected) {
+        awaitCommitted(() -> invokeAudit(server).equals(expected), () -> "audit rows: " + invokeAudit(server));
+    }
+
+    @Test
+    void aViewCallsAToolOfItsOwnServerAsTheConversationsAgentAndGetsTheResultForTheView() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<ToolCall>();
+        withViewServer(false, false, calls, server -> {
+            var conversation = webConversation("viewer", server);
+            var appOnly = viewCall(conversation, server, "refresh", "{\"page\":2}");
+            assertIsOk(appOnly);
+            assertEquals("{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Page 2\"}],"
+                    + "\"structuredContent\":{\"rows\":[4,5]},\"_meta\":{\"k\":\"v\"},\"isError\":false}}", getContent(appOnly));
+            var both = viewCall(conversation, server, "search_table", "{}");
+            assertEquals(getContent(appOnly), getContent(both));
+            assertEquals(List.of("refresh", "search_table"), calls.stream().map(c -> c.params().get("name").getAsString()).toList());
+            assertEquals("{\"page\":2}", calls.get(0).params().get("arguments").toString());
+            var refreshed = "INFO " + server + "/refresh by 'viewer' from its view [allowed] {\"page\":2}";
+            var searched = "INFO " + server + "/search_table by 'viewer' from its view [allowed] {}";
+            assertEquals(List.of(refreshed), calls.get(0).auditAtCall(), "the grant and its audit row commit before the call goes out");
+            assertEquals(List.of(refreshed, searched), calls.get(1).auditAtCall());
+            assertAudit(server, List.of(refreshed, searched));
+        });
+    }
+
+    @Test
+    void aToolWithNoMetaTakesTheDefaultVisibilityAndAViewMayCallIt() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<ToolCall>();
+        withViewServer(false, false, calls, server -> {
+            var response = viewCall(webConversation("viewer", server), server, "plain", "{}");
+            assertIsOk(response);
+            assertEquals("{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Page 2\"}],"
+                    + "\"structuredContent\":{\"rows\":[4,5]},\"_meta\":{\"k\":\"v\"},\"isError\":false}}", getContent(response));
+            assertEquals(List.of("plain"), calls.stream().map(c -> c.params().get("name").getAsString()).toList());
+        });
+    }
+
+    @Test
+    void aToolThatReportsAnErrorReachesTheViewAsItsResult() throws Exception {
+        login();
+        withViewServer(false, false, new CopyOnWriteArrayList<>(), server -> {
+            var response = viewCall(webConversation("viewer", server), server, "erroring", "{}");
+            assertIsOk(response);
+            assertEquals("{\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"Quota used up\"}],\"isError\":true}}",
+                    getContent(response));
+        });
+    }
+
+    @Test
+    void absentArgumentsReachTheServerAsAnEmptyObject() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<ToolCall>();
+        withViewServer(false, false, calls, server -> {
+            var body = new JsonObject();
+            body.addProperty("conversationId", webConversation("viewer", server));
+            body.addProperty("server", server);
+            body.addProperty("tool", "refresh");
+            assertIsOk(POST("/api/mcp-servers/view/call", "application/json", body.toString()));
+            assertEquals(1, calls.size());
+            assertEquals("{}", calls.get(0).params().get("arguments").toString());
+        });
+    }
+
+    @Test
+    void aViewActsOnlyInAWebChatConversation() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<ToolCall>();
+        withViewServer(false, false, calls, server -> {
+            webConversation("viewer", server);
+            var telegram = commitInFreshTx(() -> services.ConversationService.create(
+                    services.AgentService.findByName("viewer"), "telegram", "12345").id);
+            var response = viewCall(telegram, server, "refresh", "{}");
+            assertIsOk(response);
+            assertEquals("{\"error\":\"Views act only in web chat.\"}", getContent(response));
+            assertEquals(List.of(), calls);
+            assertEquals(List.of(), invokeAudit(server));
+        });
+    }
+
+    @Test
+    void aToolTheViewMayNotCallIsRefusedAndNeverCalled() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<ToolCall>();
+        withViewServer(false, false, calls, server -> {
+            var conversation = webConversation("viewer", server);
+            for (var tool : List.of("summarize", "nope")) {
+                var response = viewCall(conversation, server, tool, "{}");
+                assertIsOk(response);
+                assertEquals("{\"error\":\"This tool cannot be called from its view.\"}", getContent(response), tool);
+            }
+            assertEquals(List.of(), calls);
+            assertEquals(List.of(), invokeAudit(server));
+        });
+    }
+
+    @Test
+    void aServerThatNeedsApprovalForEachCallTakesNoneFromAView() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<ToolCall>();
+        withViewServer(false, true, calls, server -> {
+            var response = viewCall(webConversation("viewer", server), server, "refresh", "{}");
+            assertIsOk(response);
+            assertEquals("{\"error\":\"This server needs approval for each call, which a view cannot give.\"}", getContent(response));
+            assertEquals(List.of(), calls);
+        });
+    }
+
+    @Test
+    void anAgentWithoutTheGrantIsRefusedAndTheRefusalIsAudited() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<ToolCall>();
+        withViewServer(false, false, calls, server -> {
+            var conversation = webConversation("viewer", server);
+            commitInFreshTx(() -> AgentSkillAllowedTool.delete("skillName = ?1 and toolName = ?2", "mcp:" + server, "refresh"));
+            var response = viewCall(conversation, server, "refresh", "{\"page\":2}");
+            assertIsOk(response);
+            assertEquals("{\"error\":\"The conversation's agent is not allowed to call this tool.\"}", getContent(response));
+            assertEquals(List.of(), calls);
+            assertAudit(server, List.of("WARN " + server + "/refresh by 'viewer' from its view [denied] {\"page\":2}"));
+        });
+    }
+
+    @Test
+    void anAgentWithTheServerSwitchedOffIsRefusedAndTheRefusalIsAudited() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<ToolCall>();
+        withViewServer(false, false, calls, server -> {
+            // A non-main agent starts with every MCP server switched off.
+            var response = viewCall(webConversation("viewer"), server, "refresh", "{}");
+            assertIsOk(response);
+            assertEquals("{\"error\":\"The conversation's agent is not allowed to call this tool.\"}", getContent(response));
+            assertEquals(List.of(), calls);
+            assertAudit(server, List.of("WARN " + server + "/refresh by 'viewer' from its view [denied] {}"));
+        });
+    }
+
+    @Test
+    void aServerThatIsNotConnectedIsRefused() {
+        login();
+        var response = viewCall(webConversation("viewer"), "gone", "refresh", "{}");
+        assertIsOk(response);
+        assertEquals("{\"error\":\"The server is not connected.\"}", getContent(response));
+        assertEquals(List.of(), invokeAudit("gone"));
+    }
+
+    @Test
+    void aServersErrorReachesTheEventLogButNeverTheView() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<ToolCall>();
+        withViewServer(false, false, calls, server -> {
+            var conversation = webConversation("viewer", server);
+            var warnings = new java.util.ArrayList<String>();
+            services.EventLogger.captureMatchingForTest(e -> e.category().equals("MCP_APPS") && e.message().contains(server),
+                    seen -> {
+                        var response = viewCall(conversation, server, "broken", "{}");
+                        assertIsOk(response);
+                        assertEquals("{\"error\":\"The tool call failed.\"}", getContent(response));
+                        seen.forEach(e -> warnings.add(e.message()));
+                    });
+            assertEquals(1, calls.size());
+            assertEquals(1, warnings.size(), warnings.toString());
+            assertTrue(warnings.get(0).startsWith("MCP server '" + server + "' tool 'broken' failed for its view: "), warnings.get(0));
+        });
+    }
+
+    @Test
+    void aViewCallNeedsAConversationAndObjectArguments() {
+        login();
+        var conversation = webConversation("viewer");
+        assertEquals(404, viewCall(999_999L, "serpapi", "refresh", "{}").status.intValue());
+        var noConversation = POST("/api/mcp-servers/view/call", "application/json",
+                "{\"server\":\"serpapi\",\"tool\":\"refresh\",\"arguments\":{}}");
+        assertEquals(400, noConversation.status.intValue());
+        assertEquals("Field 'conversationId' is required",
+                JsonParser.parseString(getContent(noConversation)).getAsJsonObject().get("message").getAsString());
+        var listArguments = viewCall(conversation, "serpapi", "refresh", "[1]");
+        assertEquals(400, listArguments.status.intValue());
+        assertEquals("Field 'arguments' must be an object",
+                JsonParser.parseString(getContent(listArguments)).getAsJsonObject().get("message").getAsString());
+        assertEquals(400, viewCall(conversation, "serpapi", "", "{}").status.intValue());
+    }
+
+    @Test
+    void onlyTheOperatorsSessionMayCallAToolForAView() throws Exception {
+        var calls = new CopyOnWriteArrayList<ToolCall>();
+        withViewServer(false, false, calls, server -> {
+            var conversation = webConversation("viewer", server);
+            assertEquals(401, viewCall(conversation, server, "refresh", "{}").status.intValue());
+            var request = newRequest();
+            request.headers.put("authorization", new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+            var agent = viewCall(request, conversation, server, "refresh", "{}");
+            assertEquals(403, agent.status.intValue());
+            assertEquals("This endpoint is operator-only; an agent principal cannot call it.",
+                    JsonParser.parseString(getContent(agent)).getAsJsonObject().get("message").getAsString());
+            assertEquals(List.of(), calls);
         });
     }
 

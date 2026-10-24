@@ -230,7 +230,7 @@ describe('Chat page — tool call rendering', () => {
 })
 
 describe('Chat page — MCP Apps views', () => {
-  it('draws a reloaded web conversation\'s view under its collapsed tool-calls card', async () => {
+  function serveViewConversation() {
     setupBaseChatApi()
     registerEndpoint('/api/conversations', () => [
       { id: 88, agentId: 1, agentName: 'streaming-agent', channelType: 'web', peerId: 'admin', messageCount: 4,
@@ -247,7 +247,10 @@ describe('Chat page — MCP Apps views', () => {
           result: { content: [{ type: 'text', text: '3 results' }], structuredContent: { rows: [1, 2, 3] }, isError: false } } } },
       { id: 303, role: 'assistant', content: 'Here is the table.', createdAt: '2026-10-24T10:00:03Z' },
     ])
+  }
 
+  it('draws a reloaded web conversation\'s view under its collapsed tool-calls card', async () => {
+    serveViewConversation()
     const component = await mountSuspended(Chat)
     await flushPromises()
     await flushPromises()
@@ -259,6 +262,64 @@ describe('Chat page — MCP Apps views', () => {
     const frames = component.findAll('[data-testid="mcp-app-frame"] iframe')
     expect(frames.map(f => f.attributes('src')))
       .toEqual(['/api/mcp-servers/view?server=serpapi&uri=ui%3A%2F%2Fprefab%2Ftool%2F583d325b0e9c%2Frenderer.html'])
+  })
+
+  it('lets a view, on a click, fill the composer below a typed draft and run a tool as the conversation\'s agent', async () => {
+    serveViewConversation()
+    const bodies: unknown[] = []
+    const off = registerEndpoint('/api/mcp-servers/view/call', {
+      method: 'POST',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        bodies.push(await readBody(event))
+        return { result: { content: [], isError: false } }
+      },
+    })
+    const component = await mountSuspended(Chat, { attachTo: document.body })
+    try {
+      await flushPromises()
+      await flushPromises()
+      await (component.vm as unknown as { loadConversation: (id: number) => Promise<void> }).loadConversation(88)
+      await flushPromises()
+      const frame = component.find('[data-testid="mcp-app-frame"] iframe').element as HTMLIFrameElement
+      const view = frame.contentWindow!
+      vi.spyOn(view, 'postMessage').mockImplementation(() => {})
+      // A click in the view focuses its frame; prefilling moves focus to the composer, so each message follows a fresh click.
+      const fromView = (data: unknown) => {
+        frame.focus()
+        window.dispatchEvent(new MessageEvent('message', { data, source: view }))
+      }
+      const message = (id: number) => ({ jsonrpc: '2.0', id, method: 'ui/message',
+        params: { role: 'user', content: { type: 'text', text: 'Show page 2' } } })
+      Object.defineProperty(navigator, 'userActivation', { configurable: true, value: { isActive: true, hasBeenActive: true } })
+      const composer = component.find('#chat-message-input')
+      const el = composer.element as HTMLTextAreaElement
+
+      fromView(message(1))
+      await flushPromises()
+      await new Promise(r => setTimeout(r, 0))
+      expect(el.value).toBe('Show page 2')
+      expect(document.activeElement).toBe(el)
+
+      await composer.setValue('Compare these')
+      fromView(message(2))
+      await flushPromises()
+      expect(el.value).toBe('Compare these\n\nShow page 2')
+
+      await composer.setValue('Compare these\n  \n')
+      fromView(message(3))
+      await flushPromises()
+      expect(el.value).toBe('Compare these\n\nShow page 2')
+
+      fromView({ jsonrpc: '2.0', id: 4, method: 'tools/call', params: { name: 'refresh' } })
+      await vi.waitFor(() => expect(bodies).toHaveLength(1))
+      expect(bodies[0]).toEqual({ conversationId: 88, server: 'serpapi', tool: 'refresh', arguments: {} })
+    }
+    finally {
+      Reflect.deleteProperty(navigator, 'userActivation')
+      off()
+      component.unmount()
+    }
   })
 })
 

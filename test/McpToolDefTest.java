@@ -88,6 +88,7 @@ class McpToolDefTest extends UnitTest {
         assertEquals("ui://prefab/table.html", def.resourceUri());
         assertEquals(List.of("model", "app"), def.visibility());
         assertTrue(def.visibleToModel());
+        assertTrue(def.visibleToApp());
     }
 
     @Test
@@ -110,6 +111,7 @@ class McpToolDefTest extends UnitTest {
                 {"name":"t","_meta":"oops"}"""));
         assertNull(plain.resourceUri());
         assertEquals(List.of("model", "app"), plain.visibility());
+        assertTrue(plain.visibleToApp(), "a tool without a ui visibility takes the default, which includes the app");
     }
 
     @Test
@@ -118,13 +120,16 @@ class McpToolDefTest extends UnitTest {
                 {"name":"refresh","_meta":{"ui":{"resourceUri":"ui://t.html","visibility":["app"]}}}"""));
         assertEquals(List.of("app"), appOnly.visibility());
         assertFalse(appOnly.visibleToModel());
+        assertTrue(appOnly.visibleToApp());
         var none = McpToolDef.fromJson(parse("""
                 {"name":"t","_meta":{"ui":{"visibility":[]}}}"""));
         assertEquals(List.of(), none.visibility(), "an empty list is not the default");
         assertFalse(none.visibleToModel());
+        assertFalse(none.visibleToApp());
         var modelOnly = McpToolDef.fromJson(parse("""
                 {"name":"t","_meta":{"ui":{"visibility":["model"]}}}"""));
         assertTrue(modelOnly.visibleToModel());
+        assertFalse(modelOnly.visibleToApp());
     }
 
     // ==================== parametersAsMap — primitives ====================

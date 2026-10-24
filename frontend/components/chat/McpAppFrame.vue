@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useMcpAppBridge } from '~/composables/useMcpAppBridge'
+import { inject, ref } from 'vue'
+import { mcpAppHostKey, useMcpAppBridge } from '~/composables/useMcpAppBridge'
 import type { McpAppCall } from '~/types/api'
 
 // One MCP Apps view under its tool call. sandbox="allow-scripts" without allow-same-origin gives the page an
@@ -9,7 +9,7 @@ const props = defineProps<{ call: McpAppCall }>()
 
 const frame = ref<HTMLIFrameElement | null>(null)
 const container = ref<HTMLElement | null>(null)
-const { state, height, src, onLoad } = useMcpAppBridge(frame, container, () => props.call)
+const { state, height, src, onLoad } = useMcpAppBridge(frame, container, () => props.call, inject(mcpAppHostKey, null))
 </script>
 
 <template>

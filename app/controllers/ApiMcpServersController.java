@@ -9,16 +9,25 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import mcp.CallToolResult;
 import mcp.McpAppPage;
 import mcp.McpConnectionManager;
+import mcp.McpToolAdapter;
+import mcp.McpViewTools;
+import models.Agent;
+import models.Conversation;
 import models.McpServer;
 import org.jspecify.annotations.Nullable;
+import play.db.jpa.NoTransaction;
 import play.mvc.Controller;
 import play.mvc.With;
+import services.EventLogger;
 import services.McpServerService;
+import services.Tx;
 import utils.ApiResponses;
 import utils.JsonArgs;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -30,7 +39,7 @@ import static utils.GsonHolder.GSON;
 /**
  * Admin CRUD over the {@code mcp_server} table (JCLAW-33).
  *
- * <p>Six endpoints:
+ * <p>Eight endpoints:
  *
  * <ul>
  *   <li>{@code GET /api/mcp-servers} — list with merged DB + runtime state</li>
@@ -44,6 +53,8 @@ import static utils.GsonHolder.GSON;
  *   <li>{@code POST /api/mcp-servers/{id}/test} — synchronous test:
  *       throwaway client tries initialize + tools/list, returns
  *       success+tool count or error message</li>
+ *   <li>{@code GET /api/mcp-servers/view} — an MCP Apps view page, for the web chat's frame</li>
+ *   <li>{@code POST /api/mcp-servers/view/call} — a tool call from that view, on its own server</li>
  * </ul>
  *
  * <p>The {@code mcp_server} table is operator-wide — JClaw is
@@ -59,6 +70,16 @@ public class ApiMcpServersController extends Controller {
                                    String transport, String command, List<String> args,
                                    Map<String, String> env, String url,
                                    Map<String, String> headers, String protocol) {}
+
+    public record ViewCallRequest(Long conversationId, String server, String tool, Map<String, Object> arguments) {}
+
+    // A view's tool call is refused with JClaw's own words; a server's error text never reaches the view.
+    private static final String VIEW_NOT_CONNECTED = "The server is not connected.";
+    private static final String VIEW_NEEDS_APPROVAL = "This server needs approval for each call, which a view cannot give.";
+    private static final String VIEW_NOT_FOR_APP = "This tool cannot be called from its view.";
+    private static final String VIEW_NOT_ALLOWED = "The conversation's agent is not allowed to call this tool.";
+    private static final String VIEW_CALL_FAILED = "The tool call failed.";
+    private static final String VIEW_NOT_WEB_CHAT = "Views act only in web chat.";
 
     // JSON body keys reused across create/update parsers.
     private static final String KEY_ENABLED = "enabled";
@@ -272,6 +293,71 @@ public class ApiMcpServersController extends Controller {
         response.setHeader("Content-Security-Policy", page.contentSecurityPolicy());
         response.contentType = "text/html; charset=utf-8";
         renderText(page.html());
+    }
+
+    /**
+     * POST /api/mcp-servers/view/call — a tool call from an MCP Apps view in web chat, run on the view's own
+     * server under the grants of the conversation's agent and audited as that agent's call. Answers
+     * {@code {"result": <the CallToolResult for the view>}} or {@code {"error": <message>}}; the agent is not told.
+     */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ViewCallRequest.class)))
+    @Operation(summary = "Run a tool for an MCP Apps view in web chat, on the view's own server, under the conversation agent's grants")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "a view acts on the operator's click in their own web chat")
+    @NoTransaction
+    public static void viewCall() {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
+        var conversationId = JsonArgs.optLong(body, "conversationId");
+        if (conversationId == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Field 'conversationId' is required");
+            throw ApiResponses.unreachable();
+        }
+        var server = JsonBodyReader.requiredOr400(body, "server");
+        var tool = JsonBodyReader.requiredOr400(body, "tool");
+        var arguments = body.get("arguments");
+        if (arguments != null && !arguments.isJsonNull() && !arguments.isJsonObject()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Field 'arguments' must be an object");
+        }
+        // No request transaction: the grant check and its audit row commit before the call goes out, as for a model's call.
+        var agent = Tx.run(() -> Conversation.<Conversation>findById(conversationId) instanceof Conversation c ? c.agent : null);
+        if (agent == null) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        if (!McpViewTools.webChatTurn(conversationId)) {
+            renderJSON(gson.toJson(viewError(VIEW_NOT_WEB_CHAT)));
+        }
+        renderJSON(gson.toJson(callForView(agent, server, tool,
+                arguments instanceof JsonObject args ? args : new JsonObject())));
+    }
+
+    private static JsonObject callForView(Agent agent, String server, String tool, JsonObject arguments) {
+        if (McpConnectionManager.status(server) != McpServer.Status.CONNECTED) return viewError(VIEW_NOT_CONNECTED);
+        if (McpConnectionManager.requiresApproval(server)) return viewError(VIEW_NEEDS_APPROVAL);
+        var def = McpConnectionManager.tools(server).stream()
+                .filter(d -> d.name().equals(tool) && d.visibleToApp()).findFirst().orElse(null);
+        if (def == null) return viewError(VIEW_NOT_FOR_APP);
+        CallToolResult result;
+        try {
+            result = new McpToolAdapter(server, def, McpConnectionManager::callTool).callFromView(arguments, agent);
+        } catch (IOException | RuntimeException e) {
+            EventLogger.warn("MCP_APPS", "MCP server '%s' tool '%s' failed for its view: %s"
+                    .formatted(server, tool, ApiResponses.messageOf(e)));
+            return viewError(VIEW_CALL_FAILED);
+        }
+        if (result == null) return viewError(VIEW_NOT_ALLOWED);
+        var out = new JsonObject();
+        out.add("result", result.forView());
+        return out;
+    }
+
+    private static JsonObject viewError(String message) {
+        var out = new JsonObject();
+        out.addProperty("error", message);
+        return out;
     }
 
     /** One plain line under a sandbox, which a frame shows as a view that never initializes. */

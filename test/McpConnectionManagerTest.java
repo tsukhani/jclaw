@@ -459,8 +459,7 @@ class McpConnectionManagerTest extends UnitTest {
             assertFalse(events.isEmpty(),
                     "successful invoke must log an MCP_TOOL_INVOKE row at INFO");
             var ev = events.get(events.size() - 1);
-            assertTrue(ev.message.contains("allowed"), "audit message must say allowed");
-            assertTrue(ev.message.contains("echo"));
+            assertEquals("fixture/echo by 'alpha' [allowed]", ev.message);
             assertTrue(ev.details.contains("world"), "details must carry args JSON");
         });
     }

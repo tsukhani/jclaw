@@ -1,8 +1,10 @@
 import { afterEach, describe, it, expect, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
+import { registerEndpoint } from '@nuxt/test-utils/runtime'
+import { readBody, setResponseStatus, type H3Event } from 'h3'
 import { nextTick } from 'vue'
 import McpAppFrame from '~/components/chat/McpAppFrame.vue'
-import { MCP_APP_INIT_TIMEOUT_MS, MCP_APP_LOAD_CAP_MS } from '~/composables/useMcpAppBridge'
+import { MCP_APP_INIT_TIMEOUT_MS, MCP_APP_LOAD_CAP_MS, mcpAppHostKey, type McpAppHost } from '~/composables/useMcpAppBridge'
 import type { McpAppCall } from '~/types/api'
 
 const CALL: McpAppCall = {
@@ -15,15 +17,24 @@ const CALL: McpAppCall = {
 
 let wrapper: VueWrapper | null = null
 
-function mountFrame() {
-  wrapper = mount(McpAppFrame, { props: { call: CALL }, attachTo: document.body })
+function mountFrame(host?: McpAppHost) {
+  wrapper = mount(McpAppFrame, {
+    props: { call: CALL },
+    attachTo: document.body,
+    global: { provide: host ? { [mcpAppHostKey as symbol]: host } : {} },
+  })
   const iframe = wrapper.find('iframe').element as HTMLIFrameElement
   const view = iframe.contentWindow!
   const post = vi.spyOn(view, 'postMessage').mockImplementation(() => {})
   const fromView = (data: unknown, source: unknown = view) =>
     window.dispatchEvent(new MessageEvent('message', { data, source: source as Window }))
   const load = () => iframe.dispatchEvent(new Event('load'))
-  return { iframe, view, post, fromView, load, sent: () => post.mock.calls.map(([message]) => message) }
+  /** A click in this frame: the page holds user activation and the frame has focus. */
+  const click = () => {
+    clicked(true)
+    iframe.focus()
+  }
+  return { iframe, view, post, fromView, load, click, sent: () => post.mock.calls.map(([message]) => message) }
 }
 
 /** A ResizeObserver whose callback the test fires, as use-chat-scroll.test.ts stubs one. */
@@ -63,11 +74,39 @@ function stubIntersectionObserver() {
 const initialize = { jsonrpc: '2.0', id: 1, method: 'ui/initialize', params: { protocolVersion: '2026-01-26' } }
 const initialized = { jsonrpc: '2.0', method: 'ui/notifications/initialized' }
 
+let unregister: Array<() => void> = []
+
+/** The view-call endpoint answering with {@code handler}; returns the bodies it was sent. */
+function serveViewCall(handler: (event: H3Event) => unknown) {
+  const bodies: unknown[] = []
+  unregister.push(registerEndpoint('/api/mcp-servers/view/call', {
+    method: 'POST',
+    handler: async (event) => {
+      bodies.push(await readBody(event))
+      return handler(event)
+    },
+  }))
+  return bodies
+}
+
+function clicked(isActive: boolean) {
+  Object.defineProperty(navigator, 'userActivation', { configurable: true, value: { isActive, hasBeenActive: isActive } })
+}
+
+const host = (conversationId: number | null = 42) =>
+  ({ conversationId: () => conversationId, prefill: vi.fn((_text: string) => {}) }) satisfies McpAppHost
+
+const toolCall = { jsonrpc: '2.0', id: 'c1', method: 'tools/call', params: { name: 'refresh', arguments: { page: 2 } } }
+
 afterEach(() => {
   wrapper?.unmount()
   wrapper = null
+  unregister.forEach(off => off())
+  unregister = []
+  Reflect.deleteProperty(navigator, 'userActivation')
   vi.useRealTimers()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
   document.documentElement.classList.remove('dark')
 })
 
@@ -273,4 +312,145 @@ describe('McpAppFrame', () => {
     wrapper = null
     expect(second.sent()).toEqual([])
   })
+
+  it('runs a view\'s tool call on the view\'s own server for the chat\'s conversation, and gives the view the result', async () => {
+    const result = { content: [{ type: 'text', text: '4 results' }], structuredContent: { rows: [1, 2, 3, 4] }, isError: false }
+    const bodies = serveViewCall(() => ({ result }))
+    const { fromView, sent, click } = mountFrame(host(42))
+    fromView(initialize)
+    expect((sent()[0] as { result: { hostCapabilities: unknown } }).result.hostCapabilities).toEqual({ serverTools: {}, openLinks: {} })
+    click()
+    fromView(toolCall)
+    await vi.waitFor(() => expect(sent()).toHaveLength(2))
+    expect(bodies).toEqual([{ conversationId: 42, server: 'serpapi', tool: 'refresh', arguments: { page: 2 } }])
+    expect(sent()[1]).toEqual({ jsonrpc: '2.0', id: 'c1', result })
+  })
+
+  it('gives the view JClaw\'s refusal, and its own words for a call that failed in transit', async () => {
+    serveViewCall(() => ({ error: 'This server needs approval for each call, which a view cannot give.' }))
+    const { fromView, sent, click } = mountFrame(host())
+    click()
+    fromView(toolCall)
+    await vi.waitFor(() => expect(sent()).toHaveLength(1))
+    expect(sent()[0]).toEqual({ jsonrpc: '2.0', id: 'c1',
+      error: { code: -32000, message: 'This server needs approval for each call, which a view cannot give.' } })
+    wrapper!.unmount()
+    wrapper = null
+    unregister.forEach(off => off())
+    unregister = []
+
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    serveViewCall((event) => {
+      setResponseStatus(event, 500)
+      return { code: 'internal_error', message: 'upstream said: token sk-live-123 expired' }
+    })
+    const second = mountFrame(host())
+    second.click()
+    second.fromView(toolCall)
+    await vi.waitFor(() => expect(second.sent()).toHaveLength(1))
+    expect(second.sent()[0]).toEqual({ jsonrpc: '2.0', id: 'c1', error: { code: -32000, message: 'The tool call failed.' } })
+  })
+
+  it('sends nothing for a tool call before the conversation exists, or without a click just before', async () => {
+    const bodies = serveViewCall(() => ({ result: {} }))
+    const unsaved = mountFrame(host(null))
+    unsaved.click()
+    unsaved.fromView(toolCall)
+    await vi.waitFor(() => expect(unsaved.sent()).toHaveLength(1))
+    expect(unsaved.sent()[0]).toEqual({ jsonrpc: '2.0', id: 'c1', error: { code: -32000, message: 'The tool call failed.' } })
+    wrapper!.unmount()
+    wrapper = null
+
+    const idle = mountFrame(host())
+    idle.click()
+    clicked(false)
+    idle.fromView(toolCall)
+    await flushMicrotasks()
+    expect(idle.sent()).toEqual([{ jsonrpc: '2.0', id: 'c1', error: { code: -32000, message: 'This view can act only right after a click in it.' } }])
+    expect(bodies).toEqual([])
+  })
+
+  it('hands a view\'s message to the chat to fill the composer', () => {
+    const chat = host()
+    const { fromView, sent, click } = mountFrame(chat)
+    click()
+    fromView({ jsonrpc: '2.0', id: 5, method: 'ui/message', params: { role: 'user', content: { type: 'text', text: 'Show page 2' } } })
+    expect(chat.prefill.mock.calls).toEqual([['Show page 2']])
+    expect(sent()).toEqual([{ jsonrpc: '2.0', id: 5, result: {} }])
+  })
+
+  it('opens a view\'s link in a new tab that cannot reach back to the chat', () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const { fromView, sent, click } = mountFrame()
+    click()
+    fromView({ jsonrpc: '2.0', id: 6, method: 'ui/open-link', params: { url: 'https://serpapi.com/search?q=cats' } })
+    expect(open.mock.calls).toEqual([['https://serpapi.com/search?q=cats', '_blank', 'noopener,noreferrer']])
+    expect(sent()).toEqual([{ jsonrpc: '2.0', id: 6, result: {} }])
+  })
+
+  it('outside the chat page offers only links: tool calls and messages stay -32601', () => {
+    const bodies = serveViewCall(() => ({ result: {} }))
+    const { fromView, sent, click } = mountFrame()
+    fromView(initialize)
+    click()
+    fromView(toolCall)
+    fromView({ jsonrpc: '2.0', id: 7, method: 'ui/message', params: { role: 'user', content: { type: 'text', text: 'hi' } } })
+    expect((sent()[0] as { result: { hostCapabilities: unknown } }).result.hostCapabilities).toEqual({ openLinks: {} })
+    expect(sent().slice(1)).toEqual([
+      { jsonrpc: '2.0', id: 'c1', error: { code: -32601, message: 'Method not found: tools/call' } },
+      { jsonrpc: '2.0', id: 7, error: { code: -32601, message: 'Method not found: ui/message' } },
+    ])
+    expect(bodies).toEqual([])
+  })
+
+  it('lets only the view that was clicked act, not another view on the page', async () => {
+    const bodies = serveViewCall(() => ({ result: {} }))
+    const first = mountFrame(host())
+    const firstWrapper = wrapper!
+    const second = mountFrame(host())
+    try {
+      first.click()
+      second.fromView(toolCall)
+      await flushMicrotasks()
+      expect(second.sent()).toEqual([{ jsonrpc: '2.0', id: 'c1', error: NO_CLICK }])
+      expect(bodies).toEqual([])
+      first.fromView(toolCall)
+      await vi.waitFor(() => expect(first.sent()).toHaveLength(1))
+      expect(first.sent()[0]).toEqual({ jsonrpc: '2.0', id: 'c1', result: {} })
+      expect(bodies).toHaveLength(1)
+    }
+    finally {
+      firstWrapper.unmount()
+    }
+  })
+
+  it('lets no view act on a key pressed in the composer', async () => {
+    const bodies = serveViewCall(() => ({ result: {} }))
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null)
+    const chat = host()
+    const { fromView, sent } = mountFrame(chat)
+    const composer = document.createElement('textarea')
+    document.body.appendChild(composer)
+    try {
+      composer.focus()
+      clicked(true)
+      fromView(toolCall)
+      fromView({ jsonrpc: '2.0', id: 2, method: 'ui/message', params: { role: 'user', content: { type: 'text', text: 'hi' } } })
+      fromView({ jsonrpc: '2.0', id: 3, method: 'ui/open-link', params: { url: 'https://serpapi.com' } })
+      await flushMicrotasks()
+      expect(sent()).toEqual(['c1', 2, 3].map(id => ({ jsonrpc: '2.0', id, error: NO_CLICK })))
+      expect(bodies).toEqual([])
+      expect(chat.prefill).not.toHaveBeenCalled()
+      expect(open).not.toHaveBeenCalled()
+    }
+    finally {
+      composer.remove()
+    }
+  })
 })
+
+const NO_CLICK = { code: -32000, message: 'This view can act only right after a click in it.' }
+
+async function flushMicrotasks() {
+  await new Promise(resolve => setTimeout(resolve, 0))
+}

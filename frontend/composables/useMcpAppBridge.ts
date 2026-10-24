@@ -1,11 +1,13 @@
-import { computed, onBeforeUnmount, onMounted, ref, type Ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, type InjectionKey, type Ref } from 'vue'
+import { useApiMutation } from '~/composables/useApiMutation'
 import type { McpAppCall } from '~/types/api'
 
 /**
- * The host side of MCP Apps (SEP-1865, 2026-01-26) for one view in the web chat. Display only:
- * the host answers ui/initialize, ping and ui/request-display-mode,
- * declares no host capability, and refuses every other request with -32601. It sends nothing before the
- * view's ui/notifications/initialized, then tool-input once, then tool-result.
+ * The host side of MCP Apps (SEP-1865, 2026-01-26) for one view in the web chat. The host answers
+ * ui/initialize, ping and ui/request-display-mode, and the three actions it is given: tools/call on the
+ * view's own server, ui/message and ui/open-link, each only right after a click in the view. It refuses
+ * every other request with -32601. It sends nothing before the view's ui/notifications/initialized, then
+ * tool-input once, then tool-result.
  */
 
 /** A view that sends no ui/initialize this long after its page loads could not be loaded; Prefab's renderer is 1.4 MB. */
@@ -22,8 +24,13 @@ export const MCP_APP_INITIAL_HEIGHT = 150
 
 const PROTOCOL_VERSION = '2026-01-26'
 const METHOD_NOT_FOUND = -32601
+/** The code MCP Apps gives a host's refusal of a view's request. */
+const REFUSED = -32000
+const MCP_APP_NO_CLICK = 'This view can act only right after a click in it.'
+const MCP_APP_CALL_FAILED = 'The tool call failed.'
+const MCP_APP_BUSY = 'This view is still running its last tool call.'
 /** The bridge's own version, raised when what it offers a view changes. */
-const HOST_INFO = { name: 'JClaw', version: '1' }
+const HOST_INFO = { name: 'JClaw', version: '2' }
 
 export type McpAppState = 'loading' | 'ready' | 'unavailable'
 
@@ -38,6 +45,18 @@ export interface McpAppHostContext {
   platform?: 'web'
 }
 
+/** A view's tool call as JClaw answers it: the tool's result for the view, or JClaw's own refusal. */
+export type McpAppToolReply = { result: Record<string, unknown> } | { error: string }
+
+/** Provided by the chat page: the conversation whose agent a view's tool calls run as, and the composer a view's message fills. */
+export interface McpAppHost {
+  conversationId: () => number | null
+  /** Puts the text in the composer, after a draft already typed; never sends it. */
+  prefill: (text: string) => void
+}
+
+export const mcpAppHostKey: InjectionKey<McpAppHost> = Symbol('mcpAppHost')
+
 export interface McpAppBridgeOptions {
   /** The frame's window: the only source a message is accepted from, and where replies go. */
   view: () => Window | null | undefined
@@ -48,6 +67,12 @@ export interface McpAppBridgeOptions {
   /** The view is initialized and has its tool input and result: a change held back meanwhile can go now. */
   onInitialized?: () => void
   onSize: (height: number) => void
+  /** Runs a tool on the view's own server. Without it, tools/call is not offered. */
+  callTool?: (name: string, args: Record<string, unknown>) => Promise<McpAppToolReply>
+  /** Without it, ui/message is not offered. */
+  prefill?: (text: string) => void
+  /** Opens an http(s) URL. Without it, ui/open-link is not offered. */
+  openLink?: (url: string) => void
 }
 
 export interface McpAppBridge {
@@ -64,9 +89,45 @@ interface JsonRpcIn {
   params?: unknown
 }
 
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isTextBlock(value: unknown): value is { type: 'text', text: string } {
+  return isObject(value) && value.type === 'text' && typeof value.text === 'string'
+}
+
+// The 2026-01-26 spec sends one text block; the ext-apps SDK sends an array of blocks.
+function messageText(params: unknown): string | null {
+  if (!isObject(params) || params.role !== 'user') return null
+  const blocks = Array.isArray(params.content) ? params.content : [params.content]
+  if (!blocks.length || !blocks.every(isTextBlock)) return null
+  const text = blocks.map(block => block.text).join('\n\n')
+  return text.trim() ? text : null
+}
+
+function linkUrl(params: unknown): string | null {
+  if (!isObject(params) || typeof params.url !== 'string') return null
+  try {
+    const url = new URL(params.url)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null
+  }
+  catch {
+    return null
+  }
+}
+
+// A click in a view's frame activates the page for a few seconds and focuses that frame; a key or click elsewhere leaves it unfocused.
+function clickedIn(view: Window | null | undefined): boolean {
+  const focused = document.activeElement
+  return navigator.userActivation?.isActive === true
+    && !!view && focused instanceof HTMLIFrameElement && focused.contentWindow === view
+}
+
 export function createMcpAppBridge(opts: McpAppBridgeOptions): McpAppBridge {
   let initializeSeen = false
   let initialized = false
+  let toolCallRunning = false
 
   // A round trip through JSON drops Vue's proxies, which postMessage cannot clone.
   function post(message: object) {
@@ -78,7 +139,62 @@ export function createMcpAppBridge(opts: McpAppBridgeOptions): McpAppBridge {
     return initialized
   }
 
-  function onRequest(id: string | number, method: string) {
+  function refuse(id: string | number, message: string) {
+    post({ jsonrpc: '2.0', id, error: { code: REFUSED, message } })
+  }
+
+  function answerToolCall(id: string | number, params: unknown, callTool: NonNullable<McpAppBridgeOptions['callTool']>) {
+    if (!isObject(params) || typeof params.name !== 'string' || !(params.arguments === undefined || isObject(params.arguments))) {
+      refuse(id, 'Invalid tool call format')
+      return
+    }
+    // One activation would otherwise let a view queue calls for as long as it lasts.
+    if (toolCallRunning) {
+      refuse(id, MCP_APP_BUSY)
+      return
+    }
+    toolCallRunning = true
+    callTool(params.name, params.arguments ?? {}).finally(() => {
+      toolCallRunning = false
+    }).then(
+      (reply: unknown) => {
+        if (isObject(reply) && isObject(reply.result)) post({ jsonrpc: '2.0', id, result: reply.result })
+        else refuse(id, isObject(reply) && typeof reply.error === 'string' ? reply.error : MCP_APP_CALL_FAILED)
+      },
+      () => refuse(id, MCP_APP_CALL_FAILED),
+    )
+  }
+
+  function answerMessage(id: string | number, params: unknown, prefill: (text: string) => void) {
+    const text = messageText(params)
+    if (text === null) {
+      refuse(id, 'Invalid message format')
+      return
+    }
+    prefill(text)
+    post({ jsonrpc: '2.0', id, result: {} })
+  }
+
+  function answerOpenLink(id: string | number, params: unknown, openLink: (url: string) => void) {
+    const url = linkUrl(params)
+    if (url === null) {
+      refuse(id, 'Invalid URL')
+      return
+    }
+    openLink(url)
+    post({ jsonrpc: '2.0', id, result: {} })
+  }
+
+  /** The action a view asked for, when the host was given one for that method. */
+  function action(method: string, id: string | number, params: unknown): (() => void) | null {
+    const { callTool, prefill, openLink } = opts
+    if (method === 'tools/call' && callTool) return () => answerToolCall(id, params, callTool)
+    if (method === 'ui/message' && prefill) return () => answerMessage(id, params, prefill)
+    if (method === 'ui/open-link' && openLink) return () => answerOpenLink(id, params, openLink)
+    return null
+  }
+
+  function onRequest(id: string | number, method: string, params: unknown) {
     switch (method) {
       case 'ui/initialize':
         initializeSeen = true
@@ -86,7 +202,10 @@ export function createMcpAppBridge(opts: McpAppBridgeOptions): McpAppBridge {
         post({ jsonrpc: '2.0', id, result: {
           protocolVersion: PROTOCOL_VERSION,
           hostInfo: HOST_INFO,
-          hostCapabilities: {},
+          hostCapabilities: {
+            ...(opts.callTool ? { serverTools: {} } : {}),
+            ...(opts.openLink ? { openLinks: {} } : {}),
+          },
           hostContext: opts.hostContext(),
         } })
         return
@@ -96,9 +215,11 @@ export function createMcpAppBridge(opts: McpAppBridgeOptions): McpAppBridge {
       case 'ui/request-display-mode':
         post({ jsonrpc: '2.0', id, result: { mode: 'inline' } })
         return
-      default:
-        post({ jsonrpc: '2.0', id, error: { code: METHOD_NOT_FOUND, message: `Method not found: ${method}` } })
     }
+    const act = action(method, id, params)
+    if (!act) post({ jsonrpc: '2.0', id, error: { code: METHOD_NOT_FOUND, message: `Method not found: ${method}` } })
+    else if (!clickedIn(opts.view())) refuse(id, MCP_APP_NO_CLICK)
+    else act()
   }
 
   function onNotification(method: string, params: unknown) {
@@ -121,7 +242,7 @@ export function createMcpAppBridge(opts: McpAppBridgeOptions): McpAppBridge {
     if (!view || event.source !== view) return
     const msg = event.data as JsonRpcIn | null
     if (typeof msg !== 'object' || msg === null || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') return
-    if (typeof msg.id === 'string' || typeof msg.id === 'number') onRequest(msg.id, msg.method)
+    if (typeof msg.id === 'string' || typeof msg.id === 'number') onRequest(msg.id, msg.method, msg.params)
     else onNotification(msg.method, msg.params)
   }
 
@@ -158,10 +279,16 @@ function styleVariables(el: HTMLElement | null): Record<string, string> {
 
 /**
  * Wires {@link createMcpAppBridge} to one frame: the message listener, the load timeouts, theme and width
- * changes, and teardown. A second load of the frame is a new document the page's CSP no longer covers,
- * so the frame is dropped as unavailable.
+ * changes, the view's actions, and teardown. A second load of the frame is a new document the page's CSP
+ * no longer covers, so the frame is dropped as unavailable. Without a {@link McpAppHost} a view can only open links.
  */
-export function useMcpAppBridge(frame: Ref<HTMLIFrameElement | null>, container: Ref<HTMLElement | null>, call: () => McpAppCall) {
+export function useMcpAppBridge(
+  frame: Ref<HTMLIFrameElement | null>,
+  container: Ref<HTMLElement | null>,
+  call: () => McpAppCall,
+  host: McpAppHost | null = null,
+) {
+  const { mutate } = useApiMutation()
   const state = ref<McpAppState>('loading')
   const height = ref(0)
   const src = computed(() => mcpAppViewUrl(call()))
@@ -178,9 +305,25 @@ export function useMcpAppBridge(frame: Ref<HTMLIFrameElement | null>, container:
     return Math.round(container.value?.clientWidth ?? 0)
   }
 
+  // The request names only the tool: the server is always the view's own.
+  async function callTool(name: string, args: Record<string, unknown>): Promise<McpAppToolReply> {
+    const conversationId = host?.conversationId()
+    if (conversationId == null) return { error: MCP_APP_CALL_FAILED }
+    const reply = await mutate<McpAppToolReply>('/api/mcp-servers/view/call', {
+      method: 'POST',
+      body: { conversationId, server: call().server, tool: name, arguments: args },
+    })
+    return reply ?? { error: MCP_APP_CALL_FAILED }
+  }
+
   const bridge = createMcpAppBridge({
     view: () => frame.value?.contentWindow,
     call,
+    callTool: host ? callTool : undefined,
+    prefill: host?.prefill,
+    openLink: (url) => {
+      window.open(url, '_blank', 'noopener,noreferrer')
+    },
     hostContext: () => {
       sentTheme = currentTheme()
       sentWidth = width()
