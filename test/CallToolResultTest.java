@@ -83,6 +83,35 @@ class CallToolResultTest extends UnitTest {
         assertEquals("{\"content\":[],\"isError\":false}", new CallToolResult("ok", false).forView().toString());
     }
 
+    @Test
+    void onlyABooleanTrueMarksAResultAsAnError() {
+        assertTrue(parse("{\"isError\":true,\"content\":[{\"type\":\"text\",\"text\":\"bad\"}]}").isError());
+        assertFalse(parse("{\"isError\":false,\"content\":[{\"type\":\"text\",\"text\":\"ok\"}]}").isError());
+        for (var value : new String[] {"null", "{}", "[]", "\"true\"", "1"}) {
+            var result = parse("{\"isError\":" + value + ",\"content\":[{\"type\":\"text\",\"text\":\"ran\"}]}");
+            assertFalse(result.isError(), "isError " + value);
+            assertEquals("ran", result.content(), "isError " + value);
+        }
+    }
+
+    @Test
+    void aPartWithANullOrNonStringFieldStillFlattensInsteadOfFailingTheCall() {
+        assertEquals("[image: unknown][resource: ?]ok", parse("{\"content\":[{\"type\":\"text\",\"text\":null},"
+                + "{\"type\":\"image\",\"mimeType\":null},{\"type\":\"resource\",\"resource\":{\"uri\":{}}},"
+                + "{\"type\":\"text\",\"text\":\"ok\"}]}").content());
+        assertEquals("{\"type\":null,\"n\":1}", parse("{\"content\":[{\"type\":null,\"n\":1}]}").content(),
+                "a part of no known type is kept as its JSON");
+    }
+
+    @Test
+    void aStructuredOnlyResultReachesTheModelWholeBeyondTheViewDataCap() {
+        // Compression bounds it later and ccr_retrieve returns the original; a cut here would lose the rest.
+        var json = "{\"s\":\"" + "x".repeat(CallToolResult.VIEW_DATA_MAX_CHARS) + "\"}";
+        var result = parse("{\"content\":[],\"structuredContent\":" + json + "}");
+        assertEquals(json, result.content());
+        assertEquals(json, result.contentWithViewData(), "the view-data rule does not add it twice");
+    }
+
     private static final String VIEW_DATA = "\n\nStructured content (the data the tool's view draws):\n";
 
     /** {@code {"s":"…"}} whose JSON is exactly {@code length} characters. */

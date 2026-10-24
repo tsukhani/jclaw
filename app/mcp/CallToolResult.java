@@ -24,7 +24,7 @@ import java.util.Locale;
  *                when those parts flatten to nothing but whitespace
  * @param isError true when the tool ran but reported an error condition
  *                (distinct from a JSON-RPC error that means the tool never
- *                ran)
+ *                ran); only a JSON {@code true} counts, as the schema types it
  * @param raw     the result object as the server sent it
  */
 public record CallToolResult(String content, boolean isError, JsonObject raw) {
@@ -68,7 +68,7 @@ public record CallToolResult(String content, boolean isError, JsonObject raw) {
     }
 
     public static CallToolResult fromResultObject(JsonObject obj) {
-        boolean isError = obj.has(FIELD_IS_ERROR) && obj.get(FIELD_IS_ERROR).getAsBoolean();
+        boolean isError = obj.get(FIELD_IS_ERROR) instanceof JsonPrimitive p && p.isBoolean() && p.getAsBoolean();
         var sb = new StringBuilder();
         if (obj.has(FIELD_CONTENT) && obj.get(FIELD_CONTENT).isJsonArray()) {
             JsonArray parts = obj.getAsJsonArray(FIELD_CONTENT);
@@ -126,12 +126,9 @@ public record CallToolResult(String content, boolean isError, JsonObject raw) {
     }
 
     private static void appendPart(StringBuilder sb, JsonObject p) {
-        var type = p.has("type") ? p.get("type").getAsString() : "";
-        switch (type) {
-            case "text" -> sb.append(p.has("text") ? p.get("text").getAsString() : "");
-            case "image" -> sb.append("[image: ")
-                    .append(p.has("mimeType") ? p.get("mimeType").getAsString() : "unknown")
-                    .append("]");
+        switch (stringOr(p, "type", "")) {
+            case "text" -> sb.append(stringOr(p, "text", ""));
+            case "image" -> sb.append("[image: ").append(stringOr(p, "mimeType", "unknown")).append("]");
             case FIELD_RESOURCE -> appendResource(sb, p);
             default -> sb.append(p.toString());
         }
@@ -141,7 +138,12 @@ public record CallToolResult(String content, boolean isError, JsonObject raw) {
         var res = p.has(FIELD_RESOURCE) && p.get(FIELD_RESOURCE).isJsonObject()
                 ? p.getAsJsonObject(FIELD_RESOURCE) : null;
         sb.append("[resource: ")
-                .append(res != null && res.has("uri") ? res.get("uri").getAsString() : "?")
+                .append(res != null ? stringOr(res, "uri", "?") : "?")
                 .append("]");
+    }
+
+    /** A null or non-string field is the server's malformed part, never a reason to fail a call that ran. */
+    private static String stringOr(JsonObject holder, String key, String fallback) {
+        return holder.get(key) instanceof JsonPrimitive v ? v.getAsString() : fallback;
     }
 }
