@@ -284,4 +284,10 @@ public final class McpAllowlist {
                 "agent = ?1 AND skillName = ?2 AND toolName = ?3",
                 agent, skillName, toolName) > 0;
     }
+
+    /** Does {@code agent} hold any row on {@code serverName}? What a resource read needs, having no tool of its own. */
+    public static boolean holdsAnyGrant(Agent agent, String serverName) {
+        if (agent == null || agent.id == null) return false;
+        return AgentSkillAllowedTool.count("agent.id = ?1 AND skillName = ?2", agent.id, SKILL_PREFIX + serverName) > 0;
+    }
 }

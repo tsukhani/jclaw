@@ -4,6 +4,7 @@ import com.google.gson.JsonParser;
 import mcp.McpClient;
 import mcp.McpEraDetection;
 import mcp.McpException;
+import mcp.McpResources;
 import mcp.McpToolDef;
 import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpTransport;
@@ -11,6 +12,7 @@ import models.McpServer;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.EventLogger;
 import utils.AppClock;
 
 import java.io.IOException;
@@ -947,6 +949,331 @@ class McpClientTest extends UnitTest {
         @Override
         public void close() {
             closed = true;
+        }
+    }
+
+    // ==================== resources ====================
+
+    private static final String RESOURCE_CAPS = "{\"tools\":{},\"resources\":{}}";
+
+    /** A server declaring resources in either era; every resources/* request is answered by {@code onResources}. */
+    private static Script resourceServer(boolean modern, Script onResources) {
+        return (t, r) -> switch (r.method()) {
+            case "server/discover" -> modern
+                    ? ok(r, "{\"supportedVersions\":[\"2026-07-28\"],\"capabilities\":" + RESOURCE_CAPS + "}")
+                    : err(r, -32601, "no such method", null);
+            case "initialize" -> ok(r, "{\"protocolVersion\":\"2025-06-18\",\"capabilities\":" + RESOURCE_CAPS + "}");
+            case "tools/list" -> ok(r, TOOLS);
+            default -> onResources.answer(t, r);
+        };
+    }
+
+    private McpClient resourceClient(boolean modern, List<ScriptedTransport> transports, Script onResources)
+            throws IOException {
+        return McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                clients(transports, () -> resourceServer(modern, onResources), Duration.ofSeconds(5))).client();
+    }
+
+    private static String param(JsonRpc.Request r, String key) {
+        var el = ((JsonObject) Objects.requireNonNull(r.params())).get(key);
+        return el == null ? "" : el.getAsString();
+    }
+
+    /** {@code total} resources {@code r1..r<total>}, {@code perPage} to a page, and one template on one page. */
+    private static Script pagedResources(int total, int perPage) {
+        return (_, r) -> switch (r.method()) {
+            case "resources/list" -> {
+                var cursor = param(r, "cursor");
+                var start = cursor.isEmpty() ? 0 : Integer.parseInt(cursor);
+                var items = new StringBuilder();
+                for (var i = start; i < Math.min(start + perPage, total); i++) {
+                    if (!items.isEmpty()) items.append(',');
+                    items.append("{\"uri\":\"x://r").append(i + 1).append("\",\"name\":\"r").append(i + 1).append("\"}");
+                }
+                var next = start + perPage < total ? ",\"nextCursor\":\"" + (start + perPage) + "\"" : "";
+                yield ok(r, "{\"resources\":[" + items + "]" + next + "}");
+            }
+            case "resources/templates/list" -> ok(r, "{\"resourceTemplates\":[{\"uriTemplate\":\"x://r{n}\",\"name\":\"r\"}]}");
+            default -> ok(r, "{}");
+        };
+    }
+
+    private static long count(ScriptedTransport t, String method) {
+        return t.methods.stream().filter(method::equals).count();
+    }
+
+    @Test
+    void theResourcesCapabilityIsRecordedInEitherEra() throws Exception {
+        for (var modern : new boolean[] {true, false}) {
+            try (var client = resourceClient(modern, new CopyOnWriteArrayList<>(), (_, r) -> ok(r, "{}"))) {
+                assertEquals(modern, client.isModern());
+                assertTrue(client.offersResources(), "modern=" + modern);
+            }
+        }
+        try (var client = McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                clients(new CopyOnWriteArrayList<>(), () -> handshakeEra(-32601), Duration.ofSeconds(5))).client()) {
+            assertFalse(client.isModern());
+            assertFalse(client.offersResources(), "an InitializeResult declaring no resources");
+        }
+        try (var client = modernClient(new CopyOnWriteArrayList<>(), (_, r) -> ok(r, "{}"))) {
+            assertTrue(client.isModern());
+            assertFalse(client.offersResources(), "a DiscoverResult declaring tools only");
+        }
+    }
+
+    @Test
+    void aListingPagesUntilMoreThanFiftyArriveAndShowsFiftyInEitherEra() throws Exception {
+        for (var modern : new boolean[] {true, false}) {
+            var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+            try (var client = resourceClient(modern, transports, pagedResources(120, 10))) {
+                var listing = client.listResources();
+                assertEquals(McpClient.MAX_LISTED_RESOURCES, listing.resources().size(), "modern=" + modern);
+                assertEquals("x://r1", listing.resources().getFirst().uri());
+                assertEquals("x://r50", listing.resources().getLast().uri());
+                assertTrue(listing.more(), "modern=" + modern);
+                assertEquals(6, count(transports.getFirst(), "resources/list"), "the sixth page passed fifty: stop there");
+                assertEquals(List.of(new McpResources.Template("x://r{n}", "r", null)), listing.templates());
+            }
+        }
+    }
+
+    /** One resource, and {@code total} templates {@code t1..t<total>}, ten to a page. */
+    private static Script pagedTemplates(int total) {
+        return (_, r) -> switch (r.method()) {
+            case "resources/list" -> ok(r, "{\"resources\":[{\"uri\":\"x://a\"}]}");
+            case "resources/templates/list" -> {
+                var cursor = param(r, "cursor");
+                var start = cursor.isEmpty() ? 0 : Integer.parseInt(cursor);
+                var items = new StringBuilder();
+                for (var i = start; i < Math.min(start + 10, total); i++) {
+                    if (!items.isEmpty()) items.append(',');
+                    items.append("{\"uriTemplate\":\"x://t").append(i + 1).append("/{id}\"}");
+                }
+                var next = start + 10 < total ? ",\"nextCursor\":\"" + (start + 10) + "\"" : "";
+                yield ok(r, "{\"resourceTemplates\":[" + items + "]" + next + "}");
+            }
+            default -> ok(r, "{}");
+        };
+    }
+
+    @Test
+    void templatesPageUntilMoreThanFiftyArriveAndFiftyAreShown() throws Exception {
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = resourceClient(true, transports, pagedTemplates(120))) {
+            var listing = client.listResources();
+            assertEquals(50, listing.templates().size());
+            assertEquals(new McpResources.Template("x://t1/{id}", null, null), listing.templates().getFirst());
+            assertEquals(new McpResources.Template("x://t50/{id}", null, null), listing.templates().getLast());
+            assertTrue(listing.more(), "more templates exist");
+            assertEquals(6, count(transports.getFirst(), "resources/templates/list"), "the sixth page passed fifty: stop there");
+        }
+        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(), pagedTemplates(50))) {
+            var listing = client.listResources();
+            assertEquals(50, listing.templates().size());
+            assertFalse(listing.more(), "fifty templates are all shown");
+        }
+    }
+
+    @Test
+    void aListingThePageCapCutsOffShowsFiftyAndSaysMoreExist() throws Exception {
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = resourceClient(true, transports, pagedResources(1_000, 1))) {
+            var listing = client.listResources();
+            assertEquals(50, listing.resources().size());
+            assertEquals("x://r50", listing.resources().getLast().uri());
+            assertTrue(listing.more(), "the cap ended a list that still had a next page");
+            assertEquals(50, count(transports.getFirst(), "resources/list"), "one request per page, up to the cap");
+        }
+    }
+
+    @Test
+    void fiftyResourcesAreShownWholeAndFiftyOneSayMoreExist() throws Exception {
+        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(), pagedResources(50, 50))) {
+            var listing = client.listResources();
+            assertEquals(50, listing.resources().size());
+            assertFalse(listing.more());
+        }
+        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(), pagedResources(51, 50))) {
+            var listing = client.listResources();
+            assertEquals(50, listing.resources().size());
+            assertTrue(listing.more());
+        }
+        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(), pagedResources(0, 50))) {
+            var listing = client.listResources();
+            assertEquals(List.of(), listing.resources());
+            assertFalse(listing.more());
+        }
+    }
+
+    @Test
+    void everyTemplatePageIsListedAndAServerWithoutTemplatesListsNone() throws Exception {
+        Script twoPages = (_, r) -> switch (r.method()) {
+            case "resources/list" -> ok(r, "{\"resources\":[{\"uri\":\"x://a\"}]}");
+            case "resources/templates/list" -> param(r, "cursor").isEmpty()
+                    ? ok(r, "{\"resourceTemplates\":[{\"uriTemplate\":\"x://{a}\",\"description\":\"A\"}],\"nextCursor\":\"2\"}")
+                    : ok(r, "{\"resourceTemplates\":[{\"uriTemplate\":\"x://{b}\"},{\"name\":\"no template\"}]}");
+            default -> ok(r, "{}");
+        };
+        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(), twoPages)) {
+            var listing = client.listResources();
+            assertEquals(List.of(new McpResources.Resource("x://a", null, null, null)), listing.resources());
+            assertEquals(List.of(new McpResources.Template("x://{a}", null, "A"), new McpResources.Template("x://{b}", null, null)),
+                    listing.templates(), "an entry with no uriTemplate is dropped");
+        }
+        Script noTemplates = (_, r) -> switch (r.method()) {
+            case "resources/list" -> ok(r, "{\"resources\":[{\"uri\":\"x://a\"}]}");
+            default -> err(r, -32601, "Method not found", null);
+        };
+        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(), noTemplates)) {
+            var listing = client.listResources();
+            assertEquals(1, listing.resources().size());
+            assertEquals(List.of(), listing.templates());
+        }
+        Script brokenTemplates = (_, r) -> switch (r.method()) {
+            case "resources/list" -> ok(r, "{\"resources\":[{\"uri\":\"x://a\"}]}");
+            default -> err(r, -32603, "Internal error", null);
+        };
+        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(), brokenTemplates)) {
+            var ex = assertThrows(McpException.class, client::listResources);
+            assertEquals(-32603, ex.code());
+        }
+    }
+
+    @Test
+    void aReadReturnsItsTextAndABlobsSizeButNeverItsBase64() throws Exception {
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        Script read = (_, r) -> ok(r, "{\"contents\":["
+                + "{\"uri\":\"serpapi://engines/google_flights\",\"mimeType\":\"application/json\",\"text\":\"{\\\"params\\\":32}\"},"
+                + "{\"uri\":\"x://logo\",\"mimeType\":\"image/png\",\"blob\":\"iVBORw0KGgo=\"},"
+                + "{\"blob\":\"QUJD\"}]}");
+        try (var client = resourceClient(false, transports, read)) {
+            var contents = client.readResource("serpapi://engines/google_flights");
+            assertEquals(List.of(
+                    new McpResources.Content("serpapi://engines/google_flights", "application/json", "{\"params\":32}", 0),
+                    new McpResources.Content("x://logo", "image/png", null, 8),
+                    new McpResources.Content("serpapi://engines/google_flights", null, null, 3)), contents);
+            var sent = transports.getFirst().requests.getLast();
+            assertEquals("resources/read", sent.method());
+            assertEquals("serpapi://engines/google_flights", param(sent, "uri"));
+        }
+    }
+
+    @Test
+    void anUnknownUriIsNotFoundUnderEitherCodeAndTheServersOwnTextStaysOut() throws Exception {
+        for (var code : new int[] {-32602, -32002}) {
+            for (var modern : new boolean[] {true, false}) {
+                try (var client = resourceClient(modern, new CopyOnWriteArrayList<>(),
+                        (_, r) -> err(r, code, "SECRET upstream text", "{\"uri\":\"SECRET\"}"))) {
+                    var ex = assertThrows(McpException.ResourceNotFound.class, () -> client.readResource("x://nope"));
+                    assertEquals("x://nope", ex.uri());
+                    assertEquals(code, ex.code());
+                    assertEquals("[code=" + code + "] no resource 'x://nope'", ex.getMessage(), "the server's text stays out");
+                    assertEquals(McpClient.State.READY, client.state(), code + " modern=" + modern);
+                }
+            }
+        }
+    }
+
+    /** Over HTTP a legacy -32002 arrives on a 4xx, which {@code callFailure} would read as the server leaving MCP v2. */
+    @Test
+    void aLegacyNotFoundOnAnHttpErrorStatusLeavesTheModernConnectionUp() throws Exception {
+        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(), (t, r) -> {
+            t.fail(r.id(), McpException.fromHttp(404, -32002, null));
+            return null;
+        })) {
+            var ex = assertThrows(McpException.ResourceNotFound.class, () -> client.readResource("x://gone"));
+            assertEquals("x://gone", ex.uri());
+            assertEquals(McpClient.State.READY, client.state());
+            assertNull(client.lastError());
+        }
+    }
+
+    @Test
+    void anyOtherReadRefusalKeepsTheServersTextForTheOperatorAndOutOfTheMessageAndLastError() throws Exception {
+        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(),
+                (_, r) -> err(r, -32603, "upstream text", null))) {
+            var thrown = new McpException[1];
+            var events = EventLogger.captureForTest(
+                    () -> thrown[0] = assertThrows(McpException.class, () -> client.readResource("x://a")));
+            assertEquals(McpException.class, thrown[0].getClass());
+            assertEquals("[code=-32603] resources/read was refused", thrown[0].getMessage());
+            assertNull(client.lastError());
+            assertEquals(List.of("MCP server 'fake' refused resources/read of \"x://a\": [code=-32603] upstream text"),
+                    events.stream().filter(e -> e.category().equals("MCP_RESOURCES")).map(EventLogger.Captured::message).toList());
+        }
+    }
+
+    private McpException assertReadRefusal(int code, @Nullable String data, boolean needsHandshake) throws Exception {
+        try (var client = modernClient(new CopyOnWriteArrayList<>(), (_, r) -> err(r, code, "refused", data))) {
+            var ex = assertThrows(McpException.class, () -> client.readResource("x://a"));
+            assertEquals(needsHandshake, ex instanceof McpException.NeedsHandshake, code + " " + data + ": " + ex);
+            assertEquals(McpClient.State.READY, client.state(), "the connection stands");
+            return ex;
+        }
+    }
+
+    @Test
+    void aModernReadRefusedForTheProtocolAsksForTheHandshakeAsACallDoes() throws Exception {
+        assertEquals("[code=-32020] a request was refused for a header mismatch (-32020)",
+                assertReadRefusal(-32020, null, true).getMessage());
+        assertEquals("[code=-32022] a request was refused with -32022, offering MCP v1 (2025-11-25)",
+                assertReadRefusal(-32022, "{\"supported\":[\"2025-11-25\"]}", true).getMessage());
+        // Still offering 2026-07-28, the server refused this request, not the protocol.
+        assertEquals("[code=-32022] resources/read was refused",
+                assertReadRefusal(-32022, "{\"supported\":[\"2026-07-28\"]}", false).getMessage());
+    }
+
+    @Test
+    void aReadNeedingAMissingCapabilityFailsAloneNamingIt() throws Exception {
+        var ex = assertReadRefusal(-32021, "{\"requiredCapabilities\":{\"elicitation\":{}}}", false);
+        assertEquals(-32021, ex.code());
+        assertEquals("[code=-32021] the server requires client capability elicitation, which JClaw does not offer",
+                ex.getMessage());
+    }
+
+    @Test
+    void aReadThatAsksForInputGetsTheElicitationRefusalAToolCallGets() throws Exception {
+        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(), (_, r) -> ok(r,
+                "{\"resultType\":\"input_required\",\"inputRequests\":{\"q\":{\"method\":\"elicitation/create\"}}}"))) {
+            var ex = assertThrows(McpException.class, () -> client.readResource("x://a"));
+            assertEquals("the server asked for input mid-request (elicitation/create), which JClaw cannot give: it"
+                    + " offers no elicitation, sampling or roots. Call the tool again with every argument it needs filled"
+                    + " in, or use another tool.", ex.getMessage());
+        }
+    }
+
+    @Test
+    void aModernReadNamesItsUriInMcpNameAndAHandshakeReadSendsNoNameHeader() throws Exception {
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        Script answers = (_, r) -> r.method().equals("resources/read")
+                ? ok(r, "{\"contents\":[]}") : ok(r, "{\"resources\":[]}");
+        try (var client = resourceClient(true, transports, answers)) {
+            var t = transports.getFirst();
+            client.readResource("serpapi://engines/google_flights");
+            assertEquals("resources/read", t.headers.getLast().get("Mcp-Method"));
+            assertEquals("serpapi://engines/google_flights", t.headers.getLast().get("Mcp-Name"));
+            client.readResource("file:///notes/résumé.txt");
+            var encoded = Base64.getEncoder().encodeToString("file:///notes/résumé.txt".getBytes(StandardCharsets.UTF_8));
+            assertEquals("=?base64?" + encoded + "?=", t.headers.getLast().get("Mcp-Name"), "a non-ASCII URI travels base64");
+            client.listResources();
+            assertEquals("resources/templates/list", t.headers.getLast().get("Mcp-Method"));
+            assertNull(t.headers.getLast().get("Mcp-Name"), "a listing names nothing");
+        }
+        var handshake = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = resourceClient(false, handshake, answers)) {
+            client.readResource("serpapi://engines/google_flights");
+            assertNull(handshake.getFirst().headers.getLast().get("Mcp-Name"));
+            assertNull(handshake.getFirst().headers.getLast().get("Mcp-Method"));
+        }
+    }
+
+    @Test
+    void aReadBeforeTheConnectionIsReadyIsRefusedWithoutARequest() {
+        var t = new ScriptedTransport((_, r) -> ok(r, "{}"));
+        try (var client = new McpClient("fake", t, "0")) {
+            var ex = assertThrows(McpException.class, () -> client.readResource("x://a"));
+            assertEquals("readResource requires READY state, was DISCONNECTED", ex.getMessage());
+            assertEquals(List.of(), t.methods);
         }
     }
 

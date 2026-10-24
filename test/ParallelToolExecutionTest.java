@@ -589,6 +589,35 @@ class ParallelToolExecutionTest extends UnitTest {
                 "a freshly generated attachment is present, so the chip shows no deleted marker");
     }
 
+    /** {@code expandMcpCallForLogging}'s display name and args, reached by reflection: the record is private. */
+    private static List<Object> mcpDisplay(String name, String args) throws Exception {
+        var m = agents.ParallelToolExecutor.class.getDeclaredMethod("expandMcpCallForLogging", String.class, String.class);
+        m.setAccessible(true);
+        var display = m.invoke(null, name, args);
+        var displayName = display.getClass().getDeclaredMethod("name");
+        var displayArgs = display.getClass().getDeclaredMethod("args");
+        displayName.setAccessible(true);
+        displayArgs.setAccessible(true);
+        return List.of(displayName.invoke(display), displayArgs.invoke(display));
+    }
+
+    @Test
+    void anMcpReadIsLoggedAsAReadOfItsQuotedUri() throws Exception {
+        assertEquals(List.of("mcp_serpapi read", "\"x://a\""), mcpDisplay("mcp_serpapi", "{\"read\":\"x://a\"}"));
+        assertEquals(List.of("mcp_serpapi read", "\"x://a\""), mcpDisplay("mcp_serpapi", "{\"tool\":\"search\",\"read\":\"x://a\"}"),
+                "the read branch runs first, as it does in the handle");
+        assertEquals(List.of("mcp_serpapi read", "\"x://a\\nINFO forged\""),
+                mcpDisplay("mcp_serpapi", "{\"read\":\"x://a\\nINFO forged\"}"), "a newline stays escaped on one line");
+        assertEquals(List.of("mcp_serpapi_search", "{\"q\":1}"), mcpDisplay("mcp_serpapi", "{\"tool\":\"search\",\"args\":{\"q\":1}}"));
+        assertEquals(List.of("mcp_serpapi_search", "{\"q\":1}"),
+                mcpDisplay("mcp_serpapi", "{\"tool\":\"search\",\"read\":\"\",\"args\":{\"q\":1}}"),
+                "a blank read beside an action is the action");
+        assertEquals(List.of("mcp_serpapi read", "\"\""), mcpDisplay("mcp_serpapi", "{\"read\":\"\"}"),
+                "the handle refuses a blank read alone as a read, so the log names a read");
+        assertEquals(List.of("mcp_serpapi read", "5"), mcpDisplay("mcp_serpapi", "{\"read\":5}"),
+                "and a read that is not a string");
+    }
+
     // --- the turn's stop signal reaches the tool (JCLAW-1274) ---------------------------------
 
     /** Records what {@link ToolContext#cancelled()} reads before and after {@code stop} runs mid-call. */

@@ -391,7 +391,11 @@ public class SystemPromptAssembler {
             // MCP servers "are" if it lives in the section header; the
             // shorter invocation-only blurb below stays narrowly scoped
             // to the practical "how to call" question.
-            b.sb.append("To invoke an action: call `mcp_<server>` with no arguments to list the server's actions. A large server lists names and summaries only: call it with `{\"describe\": [\"<action>\", ...]}` for the input schemas of the actions you will use. Then call with `{\"tool\": \"<action>\", \"args\": {...}}` to execute one.\n\n");
+            b.sb.append("To invoke an action: call `mcp_<server>` with no arguments to list the server's actions. A large server lists names and summaries only: call it with `{\"describe\": [\"<action>\", ...]}` for the input schemas of the actions you will use. Then call with `{\"tool\": \"<action>\", \"args\": {...}}` to execute one.");
+            if (McpServerCatalog.anyOffersResources(mcpDisabled)) {
+                b.sb.append(" A server whose row mentions `read` also lists resources and resource templates; when one documents an action you will call, read it with `{\"read\": \"<uri>\"}` instead of guessing the action's arguments.");
+            }
+            b.sb.append("\n\n");
             b.sb.append(mcpCatalog);
             b.sb.append("\n");
         }

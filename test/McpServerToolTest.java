@@ -1,7 +1,12 @@
+import agents.CompressionPipeline;
 import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.FunctionCall;
+import llm.LlmTypes.ToolCall;
+import mcp.McpResources;
 import mcp.McpServerTool;
 import mcp.McpToolDef;
 import models.Agent;
@@ -13,6 +18,7 @@ import play.test.UnitTest;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * JCLAW-312: server-level handle coverage for {@link McpServerTool}.
@@ -383,6 +389,248 @@ class McpServerToolTest extends UnitTest {
         assertTrue(tool.verbatimResult("{\"describe\":[\"create_issue\"]}"), "the schemas of chosen actions");
         assertFalse(tool.verbatimResult("{\"tool\":\"create_issue\",\"args\":{}}"), "an action's own output");
         assertFalse(tool.verbatimResult("not json"), "unreadable arguments make no claim");
+    }
+
+    // ==================== resources: the listing ====================
+
+    private static McpResources.Listing oneOfEach(boolean more) {
+        return new McpResources.Listing(
+                List.of(new McpResources.Resource("serpapi://engines", "serpapi-engines-index", null, "application/json")),
+                List.of(new McpResources.Template("serpapi://engines/{engine}", "engine", "Parameters of one engine.")),
+                more);
+    }
+
+    private static final String SEARCH_ACTION = "{\"name\":\"search\",\"description\":\"Searches.\","
+            + "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}";
+
+    @Test
+    void aServerWithoutResourcesListsExactlyWhatItListedBefore() {
+        assertEquals("{\"server\":\"serpapi\",\"actions\":[" + SEARCH_ACTION + "]}",
+                McpServerTool.catalog("serpapi", List.of(def("search", "Searches.", 0))).text());
+    }
+
+    @Test
+    void aResourceServerListsItsResourcesAndTemplatesBesideTheActions() {
+        var result = McpServerTool.catalog("serpapi", List.of(def("search", "Searches.", 0)), oneOfEach(false));
+        assertEquals("{\"server\":\"serpapi\",\"actions\":[" + SEARCH_ACTION + "],"
+                + "\"resources\":[{\"uri\":\"serpapi://engines\",\"name\":\"serpapi-engines-index\","
+                + "\"mimeType\":\"application/json\"}],"
+                + "\"resourceTemplates\":[{\"uriTemplate\":\"serpapi://engines/{engine}\",\"name\":\"engine\","
+                + "\"description\":\"Parameters of one engine.\"}]}", result.text());
+        assertEquals(result.text(), result.structuredJson());
+    }
+
+    @Test
+    void aServerWithMoreResourcesOrTemplatesThanListedSaysHowToReadTheRest() {
+        var templates = new ArrayList<McpResources.Template>();
+        for (int i = 0; i < 50; i++) templates.add(new McpResources.Template("x://t" + i + "/{id}", null, null));
+        var payload = JsonParser.parseString(McpServerTool.catalog("serpapi", List.of(def("search", "Searches.", 0)),
+                new McpResources.Listing(List.of(), templates, true)).text()).getAsJsonObject();
+        assertEquals("The server has more resources or resource templates than are listed here. A template filled in,"
+                + " or a URI you already know, reads directly with {\"read\": \"<uri>\"}.",
+                payload.get("resourcesNote").getAsString());
+        assertEquals(50, payload.getAsJsonArray("resourceTemplates").size());
+    }
+
+    @Test
+    void aLongResourceOrTemplateDescriptionIsCutAsAnActionSummaryIs() {
+        var long2000 = "a".repeat(2_000);
+        var listing = new McpResources.Listing(List.of(new McpResources.Resource("x://r", null, long2000, null)),
+                List.of(new McpResources.Template("x://t/{id}", null, long2000)), false);
+        var cut = "a".repeat(159) + "…";
+        assertEquals("{\"server\":\"serpapi\",\"actions\":[" + SEARCH_ACTION + "],"
+                + "\"resources\":[{\"uri\":\"x://r\",\"description\":\"" + cut + "\"}],"
+                + "\"resourceTemplates\":[{\"uriTemplate\":\"x://t/{id}\",\"description\":\"" + cut + "\"}]}",
+                McpServerTool.catalog("serpapi", List.of(def("search", "Searches.", 0)), listing).text());
+        assertEquals(160, cut.length());
+    }
+
+    @Test
+    void aFailedResourceFetchKeepsTheActionsAndAddsOneNote() {
+        assertEquals("{\"server\":\"serpapi\",\"actions\":[" + SEARCH_ACTION + "],"
+                        + "\"resourcesNote\":\"The server's resources and resource templates could not be listed just now.\"}",
+                McpServerTool.catalogWithoutResources("serpapi", List.of(def("search", "Searches.", 0))).text());
+    }
+
+    @Test
+    void resourcesNeverTurnASmallActionListIntoAnIndexNorALargeOneWhole() {
+        var many = new ArrayList<McpResources.Resource>();
+        for (int i = 0; i < 50; i++) {
+            many.add(new McpResources.Resource("x://resource/" + i, "resource " + i, "A resource described at length.", null));
+        }
+        var listing = new McpResources.Listing(many, List.of(), false);
+        var small = JsonParser.parseString(
+                McpServerTool.catalog("tiny", List.of(def("ping", "Pings.", 1)), listing).text()).getAsJsonObject();
+        assertEquals(Set.of("server", "actions", "resources", "resourceTemplates"), small.keySet());
+        assertEquals(Set.of("name", "description", "inputSchema"),
+                small.getAsJsonArray("actions").get(0).getAsJsonObject().keySet(), "a small server keeps its schemas");
+        var large = JsonParser.parseString(McpServerTool.catalog("big", largeServer(), listing).text()).getAsJsonObject();
+        assertEquals(Set.of("server", "inputSchemas", "actions", "resources", "resourceTemplates"), large.keySet(),
+                "a large server is still an index");
+        assertEquals(Set.of("name", "description"), large.getAsJsonArray("actions").get(0).getAsJsonObject().keySet());
+        assertEquals(50, large.getAsJsonArray("resources").size());
+    }
+
+    // ==================== resources: a read's contents ====================
+
+    private static McpResources.Content text(String uri, String mimeType, String text) {
+        return new McpResources.Content(uri, mimeType, text, 0);
+    }
+
+    @Test
+    void oneTextContentIsTheTextAlone() {
+        assertEquals("{\"params\":32}", McpServerTool.renderRead(
+                List.of(text("serpapi://engines/google_flights", "application/json", "{\"params\":32}"))));
+    }
+
+    @Test
+    void aReadOfExactlyTheCapIsWholeWithNoTruncationLine() {
+        var whole = "a".repeat(McpServerTool.READ_MAX_CHARS);
+        assertEquals(64_000, McpServerTool.READ_MAX_CHARS);
+        assertEquals(whole, McpServerTool.renderRead(List.of(text("x://log", "text/plain", whole))));
+    }
+
+    @Test
+    void aReadOneCharacterOverTheCapIsCutAndSaysSo() {
+        assertEquals("a".repeat(64_000) + "\n[resource truncated: showed the first 64,000 of 64,001 characters]",
+                McpServerTool.renderRead(List.of(text("x://log", "text/plain", "a".repeat(64_001)))));
+    }
+
+    @Test
+    void theCapCountsEveryRenderedCharacterHeadersIncluded() {
+        // 14 + 32,000 + 1 + 14 + 31,971 = 64,000 rendered.
+        var exact = "--- x://1 ---\n" + "a".repeat(32_000) + "\n--- x://2 ---\n" + "b".repeat(31_971);
+        assertEquals(exact, McpServerTool.renderRead(List.of(text("x://1", null, "a".repeat(32_000)),
+                text("x://2", null, "b".repeat(31_971)))), "64,000 across two contents is still whole");
+        assertEquals(exact + "\n[resource truncated: showed the first 64,000 of 64,001 characters]",
+                McpServerTool.renderRead(List.of(text("x://1", null, "a".repeat(32_000)),
+                        text("x://2", null, "b".repeat(31_972)))));
+        var over = McpServerTool.renderRead(List.of(text("x://1", null, "a".repeat(30_000)),
+                text("x://2", "text/plain", "b".repeat(30_000)), text("x://3", null, "c".repeat(30_000)),
+                new McpResources.Content("x://4", "image/png", null, 10)));
+        assertEquals("--- x://1 ---\n" + "a".repeat(30_000) + "\n--- x://2 (text/plain) ---\n" + "b".repeat(30_000)
+                + "\n--- x://3 ---\n" + "c".repeat(3_943)
+                + "\n[resource truncated: showed the first 64,000 of 90,112 characters]", over,
+                "the cut ends the read, so nothing after it is shown");
+    }
+
+    @Test
+    void thousandsOfBlobContentsStayWithinTheCap() {
+        var contents = new ArrayList<McpResources.Content>();
+        var whole = new StringBuilder();
+        for (int i = 0; i < 5_000; i++) {
+            contents.add(new McpResources.Content("x://%04d".formatted(i), "image/png", null, 8));
+            if (i > 0) whole.append('\n');
+            whole.append("--- x://%04d (image/png) ---\n[binary image/png, 8 bytes]".formatted(i));
+        }
+        assertEquals(284_999, whole.length());
+        assertEquals(whole.substring(0, 64_000) + "\n[resource truncated: showed the first 64,000 of 284,999 characters]",
+                McpServerTool.renderRead(contents));
+    }
+
+    @Test
+    void theCutNeverSplitsASurrogatePairAndSaysHowMuchItShowed() {
+        var text = "a".repeat(63_999) + "😀" + "b";
+        assertEquals("a".repeat(63_999) + "\n[resource truncated: showed the first 63,999 of 64,002 characters]",
+                McpServerTool.renderRead(List.of(text("x://emoji", "text/plain", text))));
+    }
+
+    @Test
+    void anEmptyReadRendersAsNothing() {
+        assertEquals("", McpServerTool.renderRead(List.of()));
+        assertEquals("", McpServerTool.renderRead(List.of(text("x://e", "text/plain", ""))));
+    }
+
+    @Test
+    void aBlobIsNamedByItsTypeAndSizeAndEachContentOfManyGetsAHeader() {
+        assertEquals("--- x://logo.png (image/png) ---\n[binary image/png, 8 bytes]",
+                McpServerTool.renderRead(List.of(new McpResources.Content("x://logo.png", "image/png", null, 8))));
+        assertEquals("--- dir://a.txt (text/plain) ---\nalpha\n--- dir://b ---\nbeta\n--- dir://c ---\n[binary, 3 bytes]",
+                McpServerTool.renderRead(List.of(text("dir://a.txt", "text/plain", "alpha"),
+                        text("dir://b", null, "beta\n"), new McpResources.Content("dir://c", null, null, 3))));
+    }
+
+    // ==================== resources: the read form ====================
+
+    @Test
+    void aReadWithABlankOrNonStringUriIsRefusedNamingRead() {
+        var tool = new McpServerTool("github");
+        for (var args : List.of("{\"read\":\"\"}", "{\"read\":\"   \"}", "{\"read\":5}", "{\"read\":[\"x://a\"]}",
+                "{\"read\":{}}", "{\"tool\":\"\",\"read\":\"\"}")) {
+            assertEquals("The `read` argument for MCP server 'github' must be a resource URI, as a non-blank string."
+                    + " Call mcp_github with {} to list its resources and templates.", tool.executeRich(args, null).text(), args);
+        }
+    }
+
+    @Test
+    void aBlankReadBesideANamedActionIsIgnoredAndTheActionRuns() {
+        var adapter = recordingAdapter("mcp_github_create_issue");
+        ToolRegistry.publish(List.of(adapter));
+        var tool = new McpServerTool("github");
+        var args = "{\"tool\":\"create_issue\",\"read\":\"\",\"args\":{\"title\":\"Bug\"}}";
+        assertEquals("FAKE-RESULT[create_issue]", tool.executeRich(args, null).text());
+        assertEquals("{\"title\":\"Bug\"}", adapter.lastArgs);
+        assertFalse(tool.verbatimResult(args), "an action's own output, as without the blank read");
+    }
+
+    @Test
+    void aNullReadIsNoReadAtAll() {
+        var name = "ghost-server-" + System.nanoTime();
+        var tool = new McpServerTool(name);
+        assertEquals("MCP server '" + name + "' is not currently connected or advertises no actions.",
+                tool.executeRich("{\"read\":null}", null).text(), "a listing, as {} would be");
+        assertFalse(tool.verbatimResult("{\"tool\":\"create_issue\",\"read\":null}"));
+    }
+
+    @Test
+    void aReadOnADisconnectedServerSaysItIsNotConnected() {
+        var name = "ghost-server-" + System.nanoTime();
+        assertEquals("MCP server '" + name + "' is not currently connected or advertises no actions.",
+                new McpServerTool(name).executeRich("{\"read\":\"x://a\"}", null).text());
+    }
+
+    @Test
+    void aServerThatOffersNoResourcesAdvertisesNoReadForm() {
+        var name = "ghost-server-" + System.nanoTime();
+        var tool = new McpServerTool(name);
+        assertEquals("MCP server `" + name + "`. Call with no arguments (or `{}`) to list the server's actions. A large"
+                + " server lists names and summaries only: call with `{\"describe\": [\"<action>\", ...]}` for the"
+                + " input schemas of the actions you will use. Call with `{\"tool\": \"<action>\", \"args\": {...}}`"
+                + " to execute one action against the server.", tool.description());
+        @SuppressWarnings("unchecked")
+        var props = (Map<String, Object>) tool.parameters().get("properties");
+        assertEquals(Set.of("tool", "args", "describe"), props.keySet());
+    }
+
+    @Test
+    void aReadIsVerbatimEvenBesideAnAction() {
+        var tool = new McpServerTool("serpapi");
+        assertTrue(tool.verbatimResult("{\"read\":\"serpapi://engines/google_flights\"}"));
+        assertTrue(tool.verbatimResult("{\"tool\":\"search\",\"read\":\"serpapi://engines\"}"), "the read branch runs first");
+    }
+
+    @Test
+    void aReadIsLeftWholeByCompressionOnALaterRoundWhileAnActionsOutputIsNot() {
+        ToolRegistry.publish(List.of(new McpServerTool("serpapi")));
+        var json = new StringBuilder("[");
+        for (int i = 0; i < 500; i++) {
+            if (i > 0) json.append(',');
+            json.append("{\"name\":\"param_").append(i).append("\",\"description\":\"An engine parameter, described.\"}");
+        }
+        var big = json.append(']').toString();
+        var read = ChatMessage.toolResult("c1", "mcp_serpapi", big);
+        var action = ChatMessage.toolResult("c2", "mcp_serpapi", big);
+        var messages = List.of(
+                toolCall("c1", "mcp_serpapi", "{\"read\":\"serpapi://engines/google_flights\"}"), read,
+                toolCall("c2", "mcp_serpapi", "{\"tool\":\"search\",\"args\":{}}"), action,
+                ChatMessage.assistant("done"));
+        var out = CompressionPipeline.compressMessages(messages, "gpt-4o", 250, 6_000);
+        assertSame(read, out.get(1), "a read stays whole on every round");
+        assertNotSame(action, out.get(3), "the same server's action output is compressed, so the pipeline ran");
+    }
+
+    private static ChatMessage toolCall(String id, String tool, String args) {
+        return ChatMessage.assistant("", List.of(new ToolCall(id, "function", new FunctionCall(tool, args))));
     }
 
     // ==================== unknown action with no live connection ====================

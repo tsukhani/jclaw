@@ -4,10 +4,12 @@ import com.google.errorprone.annotations.MustBeClosed;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpTransport;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
+import services.EventLogger;
 import utils.AppClock;
 
 import java.io.IOException;
@@ -34,6 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 
 /**
@@ -94,12 +97,20 @@ public class McpClient implements AutoCloseable {
     public static final int HEADER_MISMATCH = -32020;
     public static final int MISSING_CLIENT_CAPABILITY = -32021;
     public static final int UNSUPPORTED_PROTOCOL_VERSION = -32022;
+    private static final int METHOD_NOT_FOUND = -32601;
+    /** What {@code resources/read} answers for a URI that names nothing, and the legacy code for it. */
+    private static final int INVALID_PARAMS = -32602;
+    private static final int LEGACY_RESOURCE_NOT_FOUND = -32002;
     private static final String CLIENT_NAME = "jclaw";
+    private static final String CATEGORY_RESOURCES = "MCP_RESOURCES";
     private static final String META = "_meta";
     private static final String META_PREFIX = "io.modelcontextprotocol/";
     private static final String DISCOVER = "server/discover";
     private static final String TOOLS_CALL = "tools/call";
     private static final String TOOLS_LIST = "tools/list";
+    private static final String RESOURCES_LIST = "resources/list";
+    private static final String RESOURCES_TEMPLATES_LIST = "resources/templates/list";
+    private static final String RESOURCES_READ = "resources/read";
     private static final String INITIALIZE = "initialize";
     private static final String LISTEN = "subscriptions/listen";
     private static final String TOOLS_LIST_CHANGED = "notifications/tools/list_changed";
@@ -108,10 +119,14 @@ public class McpClient implements AutoCloseable {
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
     /** Retries of one request on a state-only {@code input_required}; a server needing more is looping. */
     public static final int MAX_INPUT_RETRIES = 3;
-    /** {@code tools/list} pages read per fetch, so a server that never ends the list cannot hang a connect. */
+    /** Pages read per {@code tools/list} fetch and per resource listing, so a server that never ends a list cannot hang the caller. */
     public static final int MAX_TOOL_PAGES = 50;
     /** A {@code ttlMs} of zero or none is stale at once, so this bounds how often a turn may refetch. */
     public static final Duration MIN_TOOLS_REFRESH_INTERVAL = Duration.ofSeconds(60);
+    /** Resources, and templates, one listing shows; each list is paged until one more than this arrives. */
+    public static final int MAX_LISTED_RESOURCES = 50;
+    /** A listing records nothing on the breaker, so a hung server must not cost each one the request budget. */
+    public static final Duration LISTING_TIMEOUT = Duration.ofSeconds(5);
 
     private final String name;
     private final McpTransport transport;
@@ -133,6 +148,7 @@ public class McpClient implements AutoCloseable {
     private final AtomicBoolean rerun = new AtomicBoolean();
     private final AtomicReference<@Nullable Subscription> subscription = new AtomicReference<>();
     private volatile boolean toolsListChangedOffered;
+    private volatile boolean resourcesOffered;
     private volatile @Nullable String lastError;
     // Reassigned with a stateless Consumer; volatile-on-reference is sufficient.
     @SuppressWarnings("java:S3077")
@@ -191,6 +207,12 @@ public class McpClient implements AutoCloseable {
     /** Whether the server's DiscoverResult advertised {@code capabilities.tools.listChanged}. */
     public boolean toolsListChangedOffered() { return toolsListChangedOffered; }
 
+    /**
+     * Whether the server declared {@code capabilities.resources}, in its InitializeResult or its
+     * DiscoverResult. A connection that reached 2026-07-28 through a -32022 refusal saw neither, so false.
+     */
+    public boolean offersResources() { return resourcesOffered; }
+
     /** True once the connection speaks 2026-07-28. */
     public boolean isModern() { return modern; }
 
@@ -246,30 +268,119 @@ public class McpClient implements AutoCloseable {
      *                                     with -32022 and no 2026-07-28 left to offer
      */
     public CallToolResult callTool(String toolName, JsonObject arguments) throws IOException, McpException {
-        if (state.get() != State.READY) {
-            throw new McpException("callTool requires READY state, was " + state.get());
-        }
+        requireReady("callTool");
         var args = arguments != null ? arguments : new JsonObject();
         var params = new JsonObject();
         params.addProperty("name", toolName);
         params.add("arguments", args);
         var mirrored = mirrorsParams() ? mirroredHeaders(toolName, args) : Map.<String, String>of();
-        return CallToolResult.fromResultObject(untilComplete(TOOLS_CALL, params, p -> {
-            JsonRpc.Response resp;
-            try {
-                resp = sendRequest(TOOLS_CALL, p, requestTimeout, mirrored);
-            } catch (McpException e) {
-                throw callFailure(e);
+        return CallToolResult.fromResultObject(untilComplete(TOOLS_CALL, params,
+                p -> roundTrip(TOOLS_CALL, p, mirrored, requestTimeout, this::callFailure)));
+    }
+
+    /**
+     * Up to {@link #MAX_LISTED_RESOURCES} of the server's resources and as many of its templates, each
+     * list paged until one more arrives. Fetched live on each call: nothing is cached, so a
+     * {@code notifications/resources/list_changed} needs no handling.
+     */
+    public McpResources.Listing listResources() throws IOException, McpException {
+        requireReady("listResources");
+        var resources = new ArrayList<McpResources.Resource>();
+        var ended = pages(RESOURCES_LIST, listPage(RESOURCES_LIST), result -> {
+            for (var obj : objects(result.get("resources"))) {
+                var resource = McpResources.Resource.fromJson(obj);
+                if (resource != null) resources.add(resource);
             }
-            if (resp.isError()) {
-                var err = resp.resolvedError();
-                throw callFailure(McpException.fromRpcError(err.code(), err.message(), err.data()));
-            }
-            if (!(resp.result() instanceof JsonObject result)) {
-                throw new McpException("tools/call returned non-object result");
-            }
-            return result;
-        }));
+            return resources.size() > MAX_LISTED_RESOURCES;
+        });
+        var templates = new ArrayList<McpResources.Template>();
+        var templatesEnded = true;
+        try {
+            templatesEnded = pages(RESOURCES_TEMPLATES_LIST, listPage(RESOURCES_TEMPLATES_LIST), result -> {
+                for (var obj : objects(result.get("resourceTemplates"))) {
+                    var template = McpResources.Template.fromJson(obj);
+                    if (template != null) templates.add(template);
+                }
+                return templates.size() > MAX_LISTED_RESOURCES;
+            });
+        } catch (McpException e) {
+            // A server that serves resources without implementing templates has none.
+            if (!Objects.equals(e.code(), METHOD_NOT_FOUND)) throw e;
+        }
+        var more = !ended || !templatesEnded
+                || resources.size() > MAX_LISTED_RESOURCES || templates.size() > MAX_LISTED_RESOURCES;
+        return new McpResources.Listing(firstListed(resources), firstListed(templates), more);
+    }
+
+    /**
+     * The contents of the resource at {@code uri}, read through the server.
+     *
+     * @throws McpException.ResourceNotFound when the server answers that {@code uri} names nothing
+     */
+    public List<McpResources.Content> readResource(String uri) throws IOException, McpException {
+        requireReady("readResource");
+        var params = new JsonObject();
+        params.addProperty("uri", uri);
+        var result = untilComplete(RESOURCES_READ, params,
+                p -> roundTrip(RESOURCES_READ, p, Map.of(), requestTimeout, e -> readFailure(uri, e)));
+        return McpResources.contents(result.get("contents"), uri);
+    }
+
+    private Round listPage(String method) {
+        return p -> roundTrip(method, p, Map.of(), LISTING_TIMEOUT, this::callFailure);
+    }
+
+    private static <T> List<T> firstListed(List<T> items) {
+        return List.copyOf(items.size() > MAX_LISTED_RESOURCES ? items.subList(0, MAX_LISTED_RESOURCES) : items);
+    }
+
+    /**
+     * Read before {@link #callFailure}, which over HTTP would take a legacy -32002 for a server leaving
+     * MCP v2. A JSON-RPC error's message is the server's own text, and this failure is shown to the
+     * model, so it is replaced there (JCLAW-778) and kept for the operator in the event log.
+     */
+    private McpException readFailure(String uri, McpException e) {
+        if (e.code() instanceof Integer code && (code == INVALID_PARAMS || code == LEGACY_RESOURCE_NOT_FOUND)) {
+            return new McpException.ResourceNotFound(code, uri);
+        }
+        if (e.httpStatus() != null || e.code() == null) return callFailure(e);
+        EventLogger.warn(CATEGORY_RESOURCES, "MCP server '%s' refused %s of %s: %s"
+                .formatted(name, RESOURCES_READ, new JsonPrimitive(uri), e.getMessage()));
+        return callFailure(e.withMessage(RESOURCES_READ + " was refused"));
+    }
+
+    private void requireReady(String operation) {
+        if (state.get() != State.READY) {
+            throw new McpException(operation + " requires READY state, was " + state.get());
+        }
+    }
+
+    /** One request after the handshake, a refusal of it passed through {@code refused}. */
+    private JsonObject roundTrip(String method, JsonObject params, Map<String, String> headers, Duration timeout,
+                                 UnaryOperator<McpException> refused) throws IOException, McpException {
+        JsonRpc.Response resp;
+        try {
+            resp = sendRequest(method, params, timeout, headers);
+        } catch (McpException e) {
+            throw refused.apply(e);
+        }
+        if (resp.isError()) {
+            var err = resp.resolvedError();
+            throw refused.apply(McpException.fromRpcError(err.code(), err.message(), err.data()));
+        }
+        if (!(resp.result() instanceof JsonObject result)) {
+            throw new McpException(method + " returned non-object result");
+        }
+        return result;
+    }
+
+    private static List<JsonObject> objects(@Nullable JsonElement array) {
+        var out = new ArrayList<JsonObject>();
+        if (array == null || !array.isJsonArray()) return out;
+        for (var el : array.getAsJsonArray()) {
+            if (el instanceof JsonObject obj) out.add(obj);
+        }
+        return out;
     }
 
     /** Parameters are mirrored into headers only on 2026-07-28 over a transport that sends headers. */
@@ -355,6 +466,7 @@ public class McpClient implements AutoCloseable {
                 && tools.get("listChanged") instanceof JsonElement listChanged
                 && listChanged.isJsonPrimitive() && listChanged.getAsJsonPrimitive().isBoolean()
                 && listChanged.getAsBoolean();
+        resourcesOffered = declaresResources(result);
         if (!offersModern) {
             throw new McpException.NeedsHandshake(
                     "the server answered discovery offering " + describeVersions(versions), false, null, versions);
@@ -429,6 +541,7 @@ public class McpClient implements AutoCloseable {
         protocolVersion = version != null && version.isJsonPrimitive()
                 && KNOWN_PROTOCOL_VERSIONS.contains(version.getAsString())
                 && !MODERN_PROTOCOL_VERSION.equals(version.getAsString()) ? version.getAsString() : PROTOCOL_VERSION;
+        resourcesOffered = result instanceof JsonObject initialized && declaresResources(initialized);
         sendNotification("notifications/initialized", null);
         storeConnectList(fetchTools(handshakeTimeout));
     }
@@ -465,6 +578,11 @@ public class McpClient implements AutoCloseable {
         info.addProperty("name", CLIENT_NAME);
         info.addProperty("version", clientVersion);
         return info;
+    }
+
+    /** An InitializeResult or a DiscoverResult whose {@code capabilities} carry a {@code resources} object. */
+    private static boolean declaresResources(JsonObject result) {
+        return result.get("capabilities") instanceof JsonObject caps && caps.get("resources") instanceof JsonObject;
     }
 
     private static @Nullable JsonObject discoverResult(JsonRpc.Response resp) {
@@ -703,29 +821,47 @@ public class McpClient implements AutoCloseable {
     /** Every page of {@code tools/list}, following {@code nextCursor} up to {@link #MAX_TOOL_PAGES}. */
     private Fetched fetchTools(Duration timeout, boolean strict) throws IOException, McpException {
         var out = new ArrayList<McpToolDef>();
-        @Nullable String cursor = null;
-        long ttlMs = Long.MAX_VALUE;
-        for (var page = 0; page < MAX_TOOL_PAGES; page++) {
-            var params = new JsonObject();
-            if (cursor != null) params.addProperty("cursor", cursor);
-            var result = untilComplete(TOOLS_LIST, params, p -> toolsListPage(p, timeout, strict));
-            ttlMs = Math.min(ttlMs, ttlMs(result.get("ttlMs")));
+        var ttlMs = new AtomicLong(Long.MAX_VALUE);
+        pages(TOOLS_LIST, p -> toolsListPage(p, timeout, strict), result -> {
+            ttlMs.accumulateAndGet(ttlMs(result.get("ttlMs")), Math::min);
             var tools = result.get("tools");
             if (tools == null || !tools.isJsonArray()) {
                 if (strict) throw new McpException("tools/list returned no tools array");
             } else {
                 out.addAll(toolDefs(tools.getAsJsonArray()));
             }
+            return false;
+        });
+        return new Fetched(publishable(out), Duration.ofMillis(ttlMs.get()));
+    }
+
+    /** One page's result; true stops the paging. */
+    @FunctionalInterface
+    private interface Page {
+        boolean read(JsonObject result) throws McpException;
+    }
+
+    /**
+     * Every page of {@code method}, following {@code nextCursor} until {@code page} stops it, up to
+     * {@link #MAX_TOOL_PAGES} so a server that never ends the list cannot hang the caller.
+     *
+     * @return false when that cap ended it with pages still to come
+     */
+    private boolean pages(String method, Round round, Page page) throws IOException, McpException {
+        @Nullable String cursor = null;
+        for (var n = 0; n < MAX_TOOL_PAGES; n++) {
+            var params = new JsonObject();
+            if (cursor != null) params.addProperty("cursor", cursor);
+            var result = untilComplete(method, params, round);
+            if (page.read(result)) return true;
             var next = result.get("nextCursor");
             // An empty cursor names no next page, so it ends the list as an absent one does.
-            if (next == null || !next.isJsonPrimitive() || next.getAsString().isEmpty()) {
-                return new Fetched(publishable(out), Duration.ofMillis(ttlMs));
-            }
+            if (next == null || !next.isJsonPrimitive() || next.getAsString().isEmpty()) return true;
             cursor = next.getAsString();
         }
-        Logger.warn("[mcp:%s] tools/list was still paging after %d pages; publishing the tools those listed",
-                name, MAX_TOOL_PAGES);
-        return new Fetched(publishable(out), Duration.ofMillis(ttlMs));
+        Logger.warn("[mcp:%s] %s was still paging after %d pages; using what those listed",
+                name, method, MAX_TOOL_PAGES);
+        return false;
     }
 
     /** Absent, non-numeric and negative all mean stale at once. */
@@ -961,10 +1097,12 @@ public class McpClient implements AutoCloseable {
         if (version != null) out.put("MCP-Protocol-Version", version);
         if (asModern) {
             out.put("Mcp-Method", headerValue(method));
-            var toolName = params != null ? params.get("name") : null;
-            if (TOOLS_CALL.equals(method) && toolName != null && toolName.isJsonPrimitive()) {
-                out.put("Mcp-Name", headerValue(toolName.getAsString()));
-            }
+            var named = switch (method) {
+                case TOOLS_CALL -> params != null ? params.get("name") : null;
+                case RESOURCES_READ -> params != null ? params.get("uri") : null;
+                default -> null;
+            };
+            if (named != null && named.isJsonPrimitive()) out.put("Mcp-Name", headerValue(named.getAsString()));
         }
         return out;
     }

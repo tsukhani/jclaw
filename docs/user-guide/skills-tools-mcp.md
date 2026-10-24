@@ -226,12 +226,20 @@ Same flow as tools: open [Agents](/agents), open the agent, scroll to **MCP Serv
 
 Each server has an **enabled** toggle. A disabled server keeps its config saved, but agents cannot use its tools. This is convenient when you want to temporarily silence a noisy server without losing how you set it up.
 
+### Resources
+
+Some MCP servers also publish **resources**: documents an agent can read, such as the list of parameters one of the server's actions takes. When a server offers resources, the agent sees them, and the server's resource templates, next to the server's actions, and can read one through the server. JClaw shows at most 50 resources and 50 templates, and cuts a read that is longer than 64,000 characters.
+
+Reading a resource needs the same permissions as calling one of the server's tools. The agent must have the server switched on under **MCP Servers**. A subagent can read only from the servers it was given when it started. On a server with no tools, having the server switched on is enough to read its resources. A server marked as needing approval asks you before each read, as it does before a tool call. Each read is recorded in [Logs](/logs) under category `MCP_TOOL_INVOKE`, like a tool call.
+
 ### When a server stops answering
 
 Two independent guards keep a misbehaving server from taking a whole turn down with it:
 
 - **The connection watchdog** reacts to a transport that died. JClaw reconnects a STDIO process that exits, or an HTTP server that closes the connection, with a backoff, and the server's row shows the disconnect and the last error.
 - **The circuit breaker** reacts to a server that is still connected but not answering, the case the watchdog cannot see. Every tool call has a 30 s timeout; only the connection handshake, which has to wait for a cold server to install and start, gets two minutes. Three timeouts (or other server-side failures) in a row, or half of the last ten calls, open the server's breaker; for the next 30 s every call to it fails in microseconds with an error the agent can read, `MCP server 'name' is failing fast: too many recent tool-call failures`, instead of costing another 30 s each. Two probe calls then decide whether it closes again. Each server has its own breaker, so one hung server never slows a healthy one.
+
+A resource read counts the same as a tool call: it has the same 30 s timeout and counts toward the same breaker. Listing a server's resources does not count. If the list fails, or the breaker is open, the agent still gets the server's actions, with a note that the resources could not be listed.
 
 A tool that runs and reports its own error (a file that does not exist, a query that fails) does not count against the breaker: the server answered, and that is tool-level semantics. A successful reconnect clears a breaker that opened on its own, since the dead client's failures say nothing about the fresh one.
 

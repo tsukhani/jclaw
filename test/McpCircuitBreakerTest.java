@@ -115,6 +115,90 @@ class McpCircuitBreakerTest extends UnitTest {
     }
 
     @Test
+    void failedListingsLeaveAHalfOpenBreakerHalfOpenAndTakeNoProbePermit() throws Exception {
+        var nanos = new FakeNanos();
+        var breaker = freshBreaker(nanos);
+        driveFailures(breaker, 3, () -> { throw new McpException("hung"); });
+        nanos.advanceMillis(30_000);
+        McpConnectionManager.guardedCall(breaker, "hung", () -> OK);
+        assertEquals(CircuitBreaker.State.HALF_OPEN, breaker.state());
+        var before = breaker.stats();
+
+        for (int i = 0; i < 2; i++) {
+            assertThrows(McpException.class, () -> McpConnectionManager.listingCall(breaker, "hung", () -> {
+                throw new McpException("resources/list failed");
+            }));
+        }
+        assertEquals(CircuitBreaker.State.HALF_OPEN, breaker.state());
+        assertEquals(before, breaker.stats(), "a listing records nothing");
+
+        McpConnectionManager.guardedCall(breaker, "hung", () -> OK);
+        assertEquals(CircuitBreaker.State.CLOSED, breaker.state(), "the second probe permit was still there");
+    }
+
+    @Test
+    void successfulListingsBetweenFailedCallsDoNotResetTheStreak() throws Exception {
+        var breaker = freshBreaker(new FakeNanos());
+        for (int i = 0; i < 3; i++) {
+            driveFailures(breaker, 1, () -> { throw new McpException("hung"); });
+            if (i < 2) assertSame(OK, McpConnectionManager.listingCall(breaker, "hung", () -> OK));
+        }
+        assertEquals(CircuitBreaker.State.OPEN, breaker.state());
+
+        var invocations = new AtomicInteger();
+        var refused = assertThrows(McpException.class, () -> McpConnectionManager.listingCall(breaker, "hung", () -> {
+            invocations.incrementAndGet();
+            return OK;
+        }));
+        assertEquals("MCP server 'hung' is failing fast: too many recent tool-call failures", refused.getMessage());
+        assertEquals(0, invocations.get(), "an open breaker refuses the listing before it is sent");
+    }
+
+    @Test
+    void aListingAfterTheCooldownRunsAndLeavesTheBreakerAsItWas() throws Exception {
+        var nanos = new FakeNanos();
+        var breaker = freshBreaker(nanos);
+        driveFailures(breaker, 3, () -> { throw new McpException("hung"); });
+        nanos.advanceMillis(29_999);
+        assertThrows(McpException.class, () -> McpConnectionManager.listingCall(breaker, "hung", () -> OK));
+
+        nanos.advanceMillis(1);
+        var before = breaker.stats();
+        assertSame(OK, McpConnectionManager.listingCall(breaker, "hung", () -> OK));
+        assertEquals(CircuitBreaker.State.OPEN, breaker.state(), "a listing moves no state, so a call still probes");
+        assertEquals(before, breaker.stats());
+    }
+
+    private static McpConnectionManager.McpCall<CallToolResult> notFound() {
+        return () -> { throw new McpException.ResourceNotFound(-32602, "x://nope"); };
+    }
+
+    @Test
+    void aNotFoundReadRecordsASuccessBetweenFailures() {
+        var breaker = freshBreaker(new FakeNanos());
+        driveFailures(breaker, 2, () -> { throw new McpException("hung"); });
+        // Four, not one: three failures in four calls would open it on the 50% failure rate alone.
+        for (int i = 0; i < 4; i++) {
+            assertThrows(McpException.ResourceNotFound.class, () -> McpConnectionManager.guardedCall(breaker, "srv", notFound()));
+        }
+        driveFailures(breaker, 1, () -> { throw new McpException("hung"); });
+        assertEquals(new CircuitBreaker.Stats(CircuitBreaker.State.CLOSED, 7, 3, 0, null), breaker.stats(),
+                "each not-found is a sample, and none is a failure, so no streak of three formed");
+    }
+
+    @Test
+    void aNotFoundReadAsAHalfOpenProbeCountsTowardClosingTheBreaker() throws Exception {
+        var nanos = new FakeNanos();
+        var breaker = freshBreaker(nanos);
+        driveFailures(breaker, 3, () -> { throw new McpException("hung"); });
+        nanos.advanceMillis(30_000);
+        assertThrows(McpException.ResourceNotFound.class, () -> McpConnectionManager.guardedCall(breaker, "srv", notFound()));
+        assertEquals(CircuitBreaker.State.HALF_OPEN, breaker.state());
+        McpConnectionManager.guardedCall(breaker, "srv", () -> OK);
+        assertEquals(CircuitBreaker.State.CLOSED, breaker.state());
+    }
+
+    @Test
     void aManualTripIsReportedAsTheOperatorsDecision() {
         var breaker = freshBreaker(new FakeNanos());
         breaker.trip();
@@ -193,7 +277,7 @@ class McpCircuitBreakerTest extends UnitTest {
         return new CircuitBreaker(McpConnectionManager.BREAKER_CONFIG, nanos);
     }
 
-    private static void driveFailures(CircuitBreaker breaker, int times, McpConnectionManager.McpCall failing) {
+    private static void driveFailures(CircuitBreaker breaker, int times, McpConnectionManager.McpCall<?> failing) {
         for (int i = 0; i < times; i++) {
             assertThrows(Exception.class, () -> McpConnectionManager.guardedCall(breaker, "hung", failing));
         }

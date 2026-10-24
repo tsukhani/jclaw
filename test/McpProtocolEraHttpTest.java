@@ -16,7 +16,9 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -171,6 +173,31 @@ class McpProtocolEraHttpTest extends UnitTest {
                 assertEquals(s.method(), s.mcpMethod(), s.toString());
             }
             assertNull(seen.getFirst().mcpName(), "only tools/call carries Mcp-Name");
+        }
+    }
+
+    @Test
+    void aModernReadOverHttpCarriesItsUriInMcpNameAndBase64WhenItIsNotAscii() throws Exception {
+        serve((method, id) -> switch (method) {
+            case "server/discover" -> json(200, result(id,
+                    "{\"supportedVersions\":[\"2026-07-28\"],\"capabilities\":{\"tools\":{},\"resources\":{}}}")).build();
+            case "tools/list" -> json(200, result(id, TOOLS)).build();
+            case "resources/read" -> json(200, result(id,
+                    "{\"contents\":[{\"uri\":\"serpapi://engines/google_flights\",\"text\":\"32 params\"}]}")).build();
+            default -> json(200, result(id, "{\"resources\":[]}")).build();
+        });
+        try (var client = McpEraDetection.open("serpapi", McpServer.Protocol.AUTOMATIC, false, clients()).client()) {
+            assertTrue(client.isModern());
+            assertTrue(client.offersResources(), "a DiscoverResult declaring resources");
+            assertEquals("32 params", client.readResource("serpapi://engines/google_flights").getFirst().text());
+            var read = seen.getLast();
+            assertEquals("resources/read", read.mcpMethod());
+            assertEquals("serpapi://engines/google_flights", read.mcpName());
+            client.readResource("serpapi://engines/café");
+            var encoded = Base64.getEncoder().encodeToString("serpapi://engines/café".getBytes(StandardCharsets.UTF_8));
+            assertEquals("=?base64?" + encoded + "?=", seen.getLast().mcpName());
+            client.listResources();
+            assertNull(seen.getLast().mcpName(), "a listing names nothing: " + seen.getLast());
         }
     }
 

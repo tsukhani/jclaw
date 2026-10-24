@@ -67,6 +67,11 @@ public class McpException extends RuntimeException {
 
     public @Nullable Integer code() { return code; }
 
+    /** This failure under {@code message}, with its code and what its data said kept. */
+    McpException withMessage(String message) {
+        return new McpException(code, message, supportedVersions, requiredCapabilities, httpStatus);
+    }
+
     /**
      * The protocol versions an unsupported-version error offered in {@code data.supported},
      * limited to those in {@link McpClient#KNOWN_PROTOCOL_VERSIONS}; empty otherwise.
@@ -114,6 +119,21 @@ public class McpException extends RuntimeException {
         public ManuallyIsolated(String message) {
             super(message);
         }
+    }
+
+    /**
+     * {@code resources/read} was answered with -32602 or the legacy -32002: the URI names nothing.
+     * The server answered, so this is no evidence against it, and its breaker records a success.
+     */
+    public static final class ResourceNotFound extends McpException {
+        private final String uri;
+
+        public ResourceNotFound(int code, String uri) {
+            super(code, "no resource '" + uri + "'");
+            this.uri = uri;
+        }
+
+        public String uri() { return uri; }
     }
 
     /**

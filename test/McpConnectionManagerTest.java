@@ -1,4 +1,5 @@
 import agents.McpServerCatalog;
+import agents.SystemPromptAssembler;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import mcp.McpAllowlist;
@@ -20,10 +21,13 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.AgentService;
 import services.EventLogger;
 import services.Tx;
 import utils.AppClock;
+import utils.CircuitBreaker;
 import utils.CircuitBreakers;
+import utils.ToolErrorTemplates;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -32,6 +36,8 @@ import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -531,6 +537,9 @@ class McpConnectionManagerTest extends UnitTest {
                         + "(this is the name the LLM emits, so the gate fires)");
         assertTrue(ToolRegistry.isDangerous("mcp_flagged_echo"),
                 "per-action adapter of an approval-flagged server must be dangerous too");
+        // DangerousActionGate.guard asks this, with the call's own arguments, before the tool runs.
+        assertTrue(ToolRegistry.isDangerous("mcp_flagged", "{\"read\":\"fixture://doc\"}"),
+                "a read is gated like any call to a whole approval-flagged server");
     }
 
     @Test
@@ -547,6 +556,7 @@ class McpConnectionManagerTest extends UnitTest {
                 "unflagged server's handle must stay non-dangerous (no prompt)");
         assertFalse(ToolRegistry.isDangerous("mcp_plain_echo"),
                 "unflagged server's adapter must stay non-dangerous (no prompt)");
+        assertFalse(ToolRegistry.isDangerous("mcp_plain", "{\"read\":\"fixture://doc\"}"));
     }
 
     @Test
@@ -939,6 +949,433 @@ class McpConnectionManagerTest extends UnitTest {
                 McpConnectionManager.stop(name);
                 CircuitBreakers.remove("mcp:" + name);
             }
+        }
+    }
+
+    // ==================== resources over HTTP ====================
+
+    private static final String RESOURCE_CAPS = "{\"tools\":{},\"resources\":{}}";
+    private static final String FLIGHTS = "serpapi://engines/google_flights";
+    private static final String SEARCH_ACTION =
+            "{\"name\":\"search\",\"description\":\"\",\"inputSchema\":{\"type\":\"object\"}}";
+    private static final String SERPAPI_RESOURCES = "\"resources\":[{\"uri\":\"serpapi://engines\","
+            + "\"name\":\"serpapi-engines-index\",\"mimeType\":\"application/json\"}],"
+            + "\"resourceTemplates\":[{\"uriTemplate\":\"serpapi://engines/{engine}\",\"name\":\"engine\"}]";
+    private static final String NOT_LISTED =
+            "\"resourcesNote\":\"The server's resources and resource templates could not be listed just now.\"";
+
+    /** A handshake-era fixture declaring resources that exits the instant a read arrives. */
+    private static final String DIES_ON_READ_SCRIPT = FIXTURE_SCRIPT
+            .replace("capabilities: { tools: {} }", "capabilities: { tools: {}, resources: {} }")
+            .replace("} else if (m.method === 'tools/call') {",
+                    "} else if (m.method === 'resources/read') { process.exit(0); } else if (m.method === 'tools/call') {");
+
+    @FunctionalInterface
+    private interface Reply {
+        MockResponse reply(JsonRpc.Request request);
+    }
+
+    private static MockWebServer capableHttp(String capabilities, List<JsonRpc.Request> seen, Reply reply)
+            throws IOException {
+        return capableHttp(capabilities, new String[] {"search"}, seen, reply);
+    }
+
+    /** A 2026-07-28 server listing {@code tools}, declaring {@code capabilities}; every other request is {@code reply}'s. */
+    private static MockWebServer capableHttp(String capabilities, String[] tools, List<JsonRpc.Request> seen,
+                                             Reply reply) throws IOException {
+        var http = new MockWebServer();
+        http.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                var msg = JsonRpc.decode(request.getBody().utf8());
+                if (!(msg instanceof JsonRpc.Request r)) return new MockResponse.Builder().code(202).build();
+                seen.add(r);
+                return switch (r.method()) {
+                    case "server/discover" -> rpc(200, r.id(), "{\"supportedVersions\":[\"2026-07-28\"],"
+                            + "\"capabilities\":" + capabilities + "}").build();
+                    case "tools/list" -> toolsListing(r.id(), null, tools);
+                    default -> reply.reply(r);
+                };
+            }
+        });
+        http.start();
+        return http;
+    }
+
+    private static MockResponse rpcError(Object id, int code, String message) {
+        return new MockResponse.Builder().code(200).addHeader("Content-Type", "application/json")
+                .body("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + code + ",\"message\":\"" + message + "\"}}")
+                .build();
+    }
+
+    /**
+     * SerpAPI's shape: an engine index and a template per engine. google_flights reads; the {@code x://}
+     * URIs answer with empty contents; broken is -32603, legacy -32002, and any other URI -32602.
+     */
+    private static Reply serpapiResources() {
+        return r -> switch (r.method()) {
+            case "resources/list" -> rpc(200, r.id(), "{\"resources\":[{\"uri\":\"serpapi://engines\","
+                    + "\"name\":\"serpapi-engines-index\",\"mimeType\":\"application/json\"}]}").build();
+            case "resources/templates/list" -> rpc(200, r.id(), "{\"resourceTemplates\":[{\"uriTemplate\":"
+                    + "\"serpapi://engines/{engine}\",\"name\":\"engine\"}]}").build();
+            case "resources/read" -> {
+                var uri = ((JsonObject) Objects.requireNonNull(r.params())).get("uri").getAsString();
+                yield switch (uri) {
+                    case FLIGHTS -> rpc(200, r.id(), "{\"contents\":[{\"uri\":\"" + FLIGHTS + "\",\"mimeType\":"
+                            + "\"application/json\",\"text\":\"{\\\"departure_id\\\":\\\"airport code\\\"}\"}]}").build();
+                    case "x://empty-text" -> rpc(200, r.id(), "{\"contents\":[{\"uri\":\"x://empty-text\",\"text\":\"\"}]}").build();
+                    case "x://bare" -> rpc(200, r.id(), "{\"contents\":[{\"uri\":\"x://bare\"}]}").build();
+                    case "x://none" -> rpc(200, r.id(), "{\"contents\":[]}").build();
+                    case "serpapi://broken" -> rpcError(r.id(), -32603, "SECRET upstream text");
+                    case "serpapi://legacy" -> rpcError(r.id(), -32002, "SECRET upstream text");
+                    default -> rpcError(r.id(), -32602, "SECRET upstream text");
+                };
+            }
+            default -> rpc(200, r.id(), "{\"content\":[]}").build();
+        };
+    }
+
+    private static void stopHttp(@Nullable String name) {
+        if (name == null) return;
+        McpConnectionManager.stop(name);
+        CircuitBreakers.remove("mcp:" + name);
+    }
+
+    private static String readOf(String uri) {
+        return "{\"read\":\"" + uri + "\"}";
+    }
+
+    private static long sent(List<JsonRpc.Request> seen, String method) {
+        return seen.stream().filter(r -> r.method().equals(method)).count();
+    }
+
+    private static String handleDescription(String name) {
+        return "MCP server `" + name + "`. Call with no arguments (or `{}`) to list the server's actions. A large"
+                + " server lists names and summaries only: call with `{\"describe\": [\"<action>\", ...]}` for the"
+                + " input schemas of the actions you will use. Call with `{\"tool\": \"<action>\", \"args\": {...}}`"
+                + " to execute one action against the server.";
+    }
+
+    @Test
+    void aResourceServerListsItsResourcesBesideItsActionsAndReadsOneWholeWithAnAuditRow() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = capableHttp(RESOURCE_CAPS, seen, serpapiResources())) {
+            name = connectHttp("serpapi", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            assertTrue(McpConnectionManager.offersResources(name));
+            var tool = new McpServerTool(name);
+
+            assertEquals("{\"server\":\"" + name + "\",\"actions\":[" + SEARCH_ACTION + "]," + SERPAPI_RESOURCES + "}",
+                    tool.execute("{}", reader));
+
+            var read = new String[1];
+            var events = EventLogger.captureForTest(() -> read[0] = tool.execute(readOf(FLIGHTS), reader));
+            assertEquals("{\"departure_id\":\"airport code\"}", read[0]);
+            var audit = events.stream().filter(e -> e.category().equals("MCP_TOOL_INVOKE")).toList();
+            assertEquals(1, audit.size(), events.toString());
+            assertEquals("INFO", audit.getFirst().level());
+            assertEquals(name + " read \"" + FLIGHTS + "\" by 'reader' [allowed]", audit.getFirst().message());
+            assertEquals(String.valueOf(reader.id), audit.getFirst().agentId());
+            assertEquals(readOf(FLIGHTS), audit.getFirst().details());
+
+            assertEquals(handleDescription(name) + " The list also shows the server's resources and resource templates:"
+                    + " call with `{\"read\": \"<uri>\"}` to read one, by a listed URI or a template filled in.",
+                    tool.description());
+            @SuppressWarnings("unchecked")
+            var props = (Map<String, Object>) tool.parameters().get("properties");
+            assertEquals(Set.of("tool", "args", "describe", "read"), props.keySet());
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aReadWithoutAGrantIsRefusedAsAnActionIsAndSendsNoRequest() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("granted"));
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = capableHttp(RESOURCE_CAPS, seen, serpapiResources())) {
+            name = connectHttp("grants", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            // Seeded after the connect broadcast, so it holds no row, as a subagent spawned before it would not.
+            var stranger = commitInFreshTx(() -> seedAgent("stranger"));
+            var tool = new McpServerTool(name);
+
+            var refused = new String[1];
+            var events = EventLogger.captureForTest(() -> refused[0] = tool.execute(readOf(FLIGHTS), stranger));
+            assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.mcpNotAllowed(name, "read", "stranger")), refused[0]);
+            assertEquals(0, sent(seen, "resources/read"));
+            var audit = events.stream().filter(e -> e.category().equals("MCP_TOOL_INVOKE")).toList();
+            assertEquals(1, audit.size(), events.toString());
+            assertEquals("WARN", audit.getFirst().level());
+            assertEquals(name + " read \"" + FLIGHTS + "\" by 'stranger' [denied]", audit.getFirst().message());
+
+            assertEquals("{\"departure_id\":\"airport code\"}", tool.execute(readOf(FLIGHTS), reader));
+            assertEquals(1, sent(seen, "resources/read"));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void anUnknownUriNamesItAndPointsAtTheListingWithoutTrippingTheBreaker() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = capableHttp(RESOURCE_CAPS, seen, serpapiResources())) {
+            name = connectHttp("missing", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            // Three failures in a row open the breaker, so four not-founds would.
+            for (var uri : List.of("serpapi://engines/nope", "serpapi://legacy", "serpapi://engines/nope", "serpapi://legacy")) {
+                assertEquals("MCP server '" + name + "' has no resource '" + uri + "'. Call mcp_" + name
+                        + " with {} to list its resources and templates.", tool.execute(readOf(uri), reader));
+            }
+            assertEquals(CircuitBreaker.State.CLOSED, McpConnectionManager.breaker(name).state());
+            assertEquals(McpServer.Status.CONNECTED, McpConnectionManager.status(name));
+            assertNull(McpConnectionManager.lastError(name));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aReadRefusalAndEmptyContentsReachTheModelInJClawsOwnWords() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        String name = null;
+        try (var http = capableHttp(RESOURCE_CAPS, new CopyOnWriteArrayList<>(), serpapiResources())) {
+            name = connectHttp("refusing", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(name, "read",
+                    "[code=-32603] resources/read was refused")), tool.execute(readOf("serpapi://broken"), reader));
+            for (var uri : List.of("x://empty-text", "x://bare", "x://none")) {
+                assertEquals("MCP server '" + name + "' returned no contents for '" + uri + "'.",
+                        tool.execute(readOf(uri), reader), uri);
+            }
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aReadTheServerDiesOnIsAConnectionFailure() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var name = "diesonread-" + UUID.randomUUID().toString().substring(0, 8);
+        try {
+            McpConnectionManager.connect(seedStdioServer(name, DIES_ON_READ_SCRIPT));
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            assertTrue(McpConnectionManager.offersResources(name));
+            assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.mcpConnectionFailed(name, "read", "stdio EOF")),
+                    new McpServerTool(name).execute(readOf("fixture://doc"), reader));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aGrantOnAnotherServerDoesNotLetAnAgentRead() throws Exception {
+        String first = null;
+        String second = null;
+        try (var firstHttp = capableHttp(RESOURCE_CAPS, new CopyOnWriteArrayList<>(), serpapiResources());
+             var secondHttp = capableHttp(RESOURCE_CAPS, new CopyOnWriteArrayList<>(), serpapiResources())) {
+            first = connectHttp("first", firstHttp);
+            awaitState(first, McpServer.Status.CONNECTED, 10);
+            // Seeded between the two connects, so only the second's broadcast grants it a row.
+            var stranger = commitInFreshTx(() -> seedAgent("stranger"));
+            second = connectHttp("second", secondHttp);
+            awaitState(second, McpServer.Status.CONNECTED, 10);
+
+            assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.mcpNotAllowed(first, "read", "stranger")),
+                    new McpServerTool(first).execute(readOf(FLIGHTS), stranger));
+            assertEquals("{\"departure_id\":\"airport code\"}", new McpServerTool(second).execute(readOf(FLIGHTS), stranger));
+        } finally {
+            stopHttp(first);
+            stopHttp(second);
+        }
+    }
+
+    @Test
+    void failingReadsCountAgainstTheBreakerAsCallsDo() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = capableHttp(RESOURCE_CAPS, seen, serpapiResources())) {
+            name = connectHttp("failingreads", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            var refused = ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(name, "read",
+                    "[code=-32603] resources/read was refused"));
+            for (int i = 0; i < 3; i++) assertEquals(refused, tool.execute(readOf("serpapi://broken"), reader));
+            assertEquals(CircuitBreaker.State.OPEN, McpConnectionManager.breaker(name).state());
+
+            assertEquals(ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(name, "read",
+                    "MCP server '" + name + "' is failing fast: too many recent tool-call failures")),
+                    tool.execute(readOf(FLIGHTS), reader));
+            assertEquals(3, sent(seen, "resources/read"), "the fourth read never reached the server");
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aUriWithALineBreakIsAuditedQuotedOnOneLine() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        String name = null;
+        try (var http = capableHttp(RESOURCE_CAPS, new CopyOnWriteArrayList<>(), serpapiResources())) {
+            name = connectHttp("forged", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            var events = EventLogger.captureForTest(() -> tool.execute("{\"read\":\"x://a\\nINFO forged\"}", reader));
+            assertEquals(List.of(name + " read \"x://a\\nINFO forged\" by 'reader' [allowed]"),
+                    events.stream().filter(e -> e.category().equals("MCP_TOOL_INVOKE")).map(EventLogger.Captured::message).toList());
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aToolsOnlyServerListsExactlyWhatItDidAndSendsNoResourceRequest() throws Exception {
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = capableHttp("{\"tools\":{}}", seen, serpapiResources())) {
+            name = connectHttp("toolsonly", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            assertFalse(McpConnectionManager.offersResources(name));
+            var tool = new McpServerTool(name);
+            assertEquals("{\"server\":\"" + name + "\",\"actions\":[" + SEARCH_ACTION + "]}", tool.execute("{}", new Agent()));
+            assertEquals("MCP server '" + name + "' offers no resources.", tool.execute(readOf(FLIGHTS), new Agent()));
+            assertEquals(List.of(), seen.stream().map(JsonRpc.Request::method).filter(m -> m.startsWith("resources/")).toList());
+            assertEquals(handleDescription(name), tool.description());
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aResourceOnlyServerListsItsResourcesWithNoActionsAndItsSwitchAloneLetsAnAgentRead() throws Exception {
+        String name = null;
+        try (var http = capableHttp(RESOURCE_CAPS, new String[0], new CopyOnWriteArrayList<>(), serpapiResources())) {
+            name = connectHttp("resonly", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            assertEquals("{\"server\":\"" + name + "\",\"actions\":[]," + SERPAPI_RESOURCES + "}", tool.execute("{}", new Agent()));
+            // No tools means no grant rows for anyone; the handle being offered is the switch.
+            var switchedOn = commitInFreshTx(() -> seedAgent("switched-on"));
+            assertEquals("{\"departure_id\":\"airport code\"}", tool.execute(readOf(FLIGHTS), switchedOn));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void failedListingsNeverOpenTheBreakerForWorkingActionsAndAnOpenBreakerStillRefusesTheListing() throws Exception {
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = capableHttp(RESOURCE_CAPS, seen, r -> r.method().equals("resources/list")
+                ? new MockResponse.Builder().code(500).body("SECRET upstream body").build()
+                : rpc(200, r.id(), "{\"content\":[]}").build())) {
+            name = connectHttp("failing", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            var withoutResources = "{\"server\":\"" + name + "\",\"actions\":[" + SEARCH_ACTION + "]," + NOT_LISTED + "}";
+
+            var listing = new String[1];
+            var events = EventLogger.captureForTest(() -> listing[0] = tool.execute("{}", new Agent()));
+            assertEquals(withoutResources, listing[0]);
+            var warned = events.stream().filter(e -> e.category().equals("MCP_RESOURCES")).toList();
+            assertEquals(1, warned.size(), events.toString());
+            assertEquals("MCP server '" + name + "' could not list its resources: MCP HTTP 500", warned.getFirst().message());
+            assertEquals(withoutResources, tool.execute("{}", new Agent()));
+            assertEquals(withoutResources, tool.execute("{}", new Agent()));
+
+            var breaker = McpConnectionManager.breaker(name);
+            assertEquals(CircuitBreaker.State.CLOSED, breaker.state());
+            assertEquals(0, breaker.stats().failures());
+            assertFalse(McpConnectionManager.callTool(name, "search", new JsonObject()).isError());
+
+            breaker.trip();
+            var listsBefore = sent(seen, "resources/list");
+            assertEquals(withoutResources, tool.execute("{}", new Agent()));
+            assertEquals(listsBefore, sent(seen, "resources/list"), "an open breaker sends no listing");
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aListingTheServerNeverAnswersEndsAtTheListingTimeoutWithTheActionsListed() throws Exception {
+        String name = null;
+        try (var http = capableHttp(RESOURCE_CAPS, new CopyOnWriteArrayList<>(), r -> r.method().equals("resources/list")
+                ? rpc(200, r.id(), "{\"resources\":[]}").headersDelay(8, TimeUnit.SECONDS).build()
+                : rpc(200, r.id(), "{\"content\":[]}").build())) {
+            name = connectHttp("hunglisting", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            var listing = new String[1];
+            var startedAt = System.nanoTime();
+            var events = EventLogger.captureForTest(() -> listing[0] = tool.execute("{}", new Agent()));
+            var elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+            assertEquals("{\"server\":\"" + name + "\",\"actions\":[" + SEARCH_ACTION + "]," + NOT_LISTED + "}", listing[0]);
+            assertEquals(List.of("MCP server '" + name + "' could not list its resources: Request resources/list timed out after PT5S"),
+                    events.stream().filter(e -> e.category().equals("MCP_RESOURCES")).map(EventLogger.Captured::message).toList());
+            assertTrue(elapsedMs >= 5_000 && elapsedMs < 15_000,
+                    "the 5 s listing timeout, not the 30 s request budget: " + elapsedMs + " ms");
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    /** The {@code ## MCP Servers} section: its usage line, a blank line, then the table's lines in any order. */
+    private static List<String> mcpSection(String prompt) {
+        var heading = "\n## MCP Servers\n";
+        var start = prompt.indexOf(heading) + heading.length();
+        return List.of(prompt.substring(start, prompt.indexOf("\n## ", start)).split("\n"));
+    }
+
+    @Test
+    void theSystemPromptNamesTheReadFormOnlyForAServerDeclaringResources() throws Exception {
+        String capable = null;
+        String plain = null;
+        try (var withResources = capableHttp(RESOURCE_CAPS, new CopyOnWriteArrayList<>(), serpapiResources());
+             var toolsOnly = capableHttp("{\"tools\":{}}", new CopyOnWriteArrayList<>(), serpapiResources())) {
+            capable = connectHttp("capable", withResources);
+            plain = connectHttp("plain", toolsOnly);
+            awaitState(capable, McpServer.Status.CONNECTED, 10);
+            awaitState(plain, McpServer.Status.CONNECTED, 10);
+            var agent = AgentService.create("prompt-resources-" + UUID.randomUUID().toString().substring(0, 8),
+                    "openrouter", "gpt-4.1");
+
+            var usage = "To invoke an action: call `mcp_<server>` with no arguments to list the server's actions. A large"
+                    + " server lists names and summaries only: call it with `{\"describe\": [\"<action>\", ...]}` for the"
+                    + " input schemas of the actions you will use. Then call with `{\"tool\": \"<action>\", \"args\": {...}}`"
+                    + " to execute one.";
+            var shared = " A server whose row mentions `read` also lists resources and resource templates; when one"
+                    + " documents an action you will call, read it with `{\"read\": \"<uri>\"}` instead of guessing the"
+                    + " action's arguments.";
+            var header = "| Server | Actions | Description |";
+            var rule = "|---|---|---|";
+            var plainRow = "| `mcp_" + plain + "` | 1 action | MCP server via http. Call `mcp_" + plain + "` with no arguments"
+                    + " to enumerate available actions; call with `{\"tool\": \"<action>\", \"args\": {...}}` to execute one. |";
+            var capableRow = "| `mcp_" + capable + "` | 1 action | MCP server via http. Call `mcp_" + capable
+                    + "` with no arguments to enumerate available actions; call with `{\"tool\": \"<action>\", \"args\": {...}}`"
+                    + " to execute one. It also lists resources: call with `{\"read\": \"<uri>\"}` to read one. |";
+
+            var section = mcpSection(SystemPromptAssembler.assemble(agent, null, Set.of(), null).systemPrompt());
+            assertEquals(List.of(usage + shared, ""), section.subList(0, 2));
+            assertEquals(Set.of(header, rule, plainRow, capableRow), Set.copyOf(section.subList(2, section.size())));
+            assertEquals(6, section.size(), section.toString());
+
+            stopHttp(capable);
+            capable = null;
+            var without = mcpSection(SystemPromptAssembler.assemble(agent, null, Set.of(), null).systemPrompt());
+            assertEquals(List.of(usage, "", header, rule, plainRow), without, "no server offers resources: today's section");
+        } finally {
+            stopHttp(capable);
+            stopHttp(plain);
         }
     }
 

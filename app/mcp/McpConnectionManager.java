@@ -346,13 +346,51 @@ public final class McpConnectionManager {
      */
     public static CallToolResult callTool(String serverName, String toolName, JsonObject arguments)
             throws IOException, McpException {
+        return call(serverName, client -> client.callTool(toolName, arguments), false);
+    }
+
+    /**
+     * Whether this server declared the {@code resources} capability, read only while it is CONNECTED,
+     * for the same reason {@link #tools(String)} gates on the status.
+     */
+    public static boolean offersResources(String serverName) {
+        var e = connections.get(serverName);
+        return e != null && e.status == McpServer.Status.CONNECTED && e.client instanceof McpClient client
+                && client.offersResources();
+    }
+
+    /** The server's resources and templates, fetched live, beside the breaker as {@link #listingCall} runs it. */
+    public static McpResources.Listing listResources(String serverName) throws IOException, McpException {
+        return call(serverName, McpClient::listResources, true);
+    }
+
+    /**
+     * The contents of one resource, read through the server. Guarded like {@link #callTool}.
+     *
+     * @throws McpException.ResourceNotFound when the server answers that {@code uri} names nothing
+     */
+    public static List<McpResources.Content> readResource(String serverName, String uri)
+            throws IOException, McpException {
+        return call(serverName, client -> client.readResource(uri), false);
+    }
+
+    /** One request on a connected server's client. */
+    @FunctionalInterface
+    private interface ClientCall<T> {
+        T on(McpClient client) throws IOException, McpException;
+    }
+
+    private static <T> T call(String serverName, ClientCall<T> request, boolean listing)
+            throws IOException, McpException {
         var entry = connections.get(serverName);
         var client = entry == null ? null : entry.client;
         if (entry == null || client == null || client.state() != McpClient.State.READY) {
             throw new McpException("MCP server '" + serverName + "' not ready");
         }
         try {
-            return guardedCall(breaker(serverName), serverName, () -> client.callTool(toolName, arguments));
+            McpCall<T> invocation = () -> request.on(client);
+            return listing ? listingCall(breaker(serverName), serverName, invocation)
+                    : guardedCall(breaker(serverName), serverName, invocation);
         } catch (McpException.NeedsHandshake e) {
             throw fallBackToHandshake(entry, client, e);
         } catch (McpException e) {
@@ -447,10 +485,10 @@ public final class McpConnectionManager {
         OperatorAlerts.onMcpProtocolSwitched(server.name, reason);
     }
 
-    /** One MCP tool call, as {@link #guardedCall} sees it. */
+    /** One MCP request, as {@link #guardedCall} sees it. */
     @FunctionalInterface
-    public interface McpCall {
-        CallToolResult invoke() throws IOException, McpException;
+    public interface McpCall<T> {
+        T invoke() throws IOException, McpException;
     }
 
     /**
@@ -458,14 +496,14 @@ public final class McpConnectionManager {
      * the <em>server</em>: an {@link McpException} (JSON-RPC error, protocol violation
      * or request timeout) and an {@link IOException} record a failure. A returned
      * {@link CallToolResult#isError()} does not — the tool ran, and its own failure is
-     * tool-level semantics.
+     * tool-level semantics — and neither does {@link McpException.ResourceNotFound}.
      *
      * <p>Public so a test can drive the gate against a fake clock without a live server.
      *
      * @throws McpException immediately, without invoking {@code call}, while the breaker is open;
      *                      {@link McpException.ManuallyIsolated} when the operator opened it
      */
-    public static CallToolResult guardedCall(CircuitBreaker breaker, String serverName, McpCall call)
+    public static <T> T guardedCall(CircuitBreaker breaker, String serverName, McpCall<T> call)
             throws IOException, McpException {
         var admission = breaker.admit();
         if (!admission.allowed()) throw openBreakerFailure(breaker, serverName);
@@ -475,6 +513,10 @@ public final class McpConnectionManager {
             breaker.recordSuccess(0L, admission.probeWindow());
             reported = true;
             return result;
+        } catch (McpException.ResourceNotFound e) {
+            breaker.recordSuccess(0L, admission.probeWindow());
+            reported = true;
+            throw e;
         } catch (IOException | McpException e) {
             breaker.recordFailure(admission.probeWindow());
             reported = true;
@@ -485,6 +527,18 @@ public final class McpConnectionManager {
             // hand it back, or the breaker can never gather the successes it needs to close.
             if (!reported && admission.probe()) breaker.recordSuccess(0L, admission.probeWindow());
         }
+    }
+
+    /**
+     * Run a resource listing beside {@code breaker} without touching it: refused while it is OPEN within
+     * its cooldown, and otherwise run with nothing recorded and no probe permit taken, so an optional listing can neither
+     * open, close nor mask the breaker of a server whose actions are failing. Public so a test can drive
+     * it against a fake clock.
+     */
+    public static <T> T listingCall(CircuitBreaker breaker, String serverName, McpCall<T> call)
+            throws IOException, McpException {
+        if (breaker.isCoolingDown()) throw openBreakerFailure(breaker, serverName);
+        return call.invoke();
     }
 
     /** JCLAW-1187: an operator's isolation is a different fact from the server failing, and says so. */

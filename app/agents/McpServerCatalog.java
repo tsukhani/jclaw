@@ -119,9 +119,20 @@ public final class McpServerCatalog {
     }
 
     private static String invocationHint(ToolRegistry.Tool handle) {
-        return "Call `" + handle.name()
+        var hint = "Call `" + handle.name()
                 + "` with no arguments to enumerate available actions; "
                 + "call with `{\"tool\": \"<action>\", \"args\": {...}}` to execute one.";
+        var server = handle.group();
+        if (server == null || !McpConnectionManager.offersResources(server)) return hint;
+        return hint + " It also lists resources: call with `{\"read\": \"<uri>\"}` to read one.";
+    }
+
+    /** Whether any server in the catalog for this disabled set declared the {@code resources} capability. */
+    public static boolean anyOffersResources(Set<String> disabledForAgent) {
+        for (var server : serversForAgent(disabledForAgent)) {
+            if (McpConnectionManager.offersResources(server)) return true;
+        }
+        return false;
     }
 
     /**

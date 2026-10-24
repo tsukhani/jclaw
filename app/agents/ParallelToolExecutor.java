@@ -1,9 +1,11 @@
 package agents;
 
 import com.google.gson.Gson;
+import com.google.gson.JsonElement;
 import com.google.gson.JsonParser;
 import llm.LlmTypes.ChatMessage;
 import llm.LlmTypes.ToolCall;
+import mcp.McpServerTool;
 import models.Agent;
 import models.MessageAttachment;
 import org.jspecify.annotations.Nullable;
@@ -130,6 +132,7 @@ public final class ParallelToolExecutor {
      * {@code {tool, args}}, returns the per-action display form
      * ({@code mcp_<server>_<action>}, inner args) so operators can scan
      * the event log without manually unpacking the parameterized envelope.
+     * A {@code {read}} call displays as {@code mcp_<server> read} with the quoted URI as its args.
      */
     private static McpCallDisplay expandMcpCallForLogging(@Nullable String rawName,
                                                           @Nullable String rawArgs) {
@@ -141,6 +144,10 @@ public final class ParallelToolExecutor {
                     rawArgs == null || rawArgs.isBlank() ? "{}" : rawArgs);
             if (!parsed.isJsonObject()) return new McpCallDisplay(rawName, rawArgs == null ? "" : rawArgs);
             var obj = parsed.getAsJsonObject();
+            // JSON-quoted, so a CR or LF in a model-chosen URI cannot forge a log line.
+            if (McpServerTool.readArgument(obj) instanceof JsonElement read) {
+                return new McpCallDisplay(rawName + " read", read.toString());
+            }
             if (!obj.has("tool") || obj.get("tool").isJsonNull()) {
                 // Discovery call (no tool field) — display as-is.
                 return new McpCallDisplay(rawName, rawArgs == null ? "" : rawArgs);
