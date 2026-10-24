@@ -185,6 +185,36 @@ class ApiAgentsControllerTest extends FunctionalTest {
     }
 
     @Test
+    void theEffectiveAllowlistListsSkillCommandsAndNoMcpToolNames() throws InterruptedException {
+        login();
+        var id = Long.valueOf(createAgent("shell-allowlist-mcp-agent"));
+        var err = new java.util.concurrent.atomic.AtomicReference<Throwable>();
+        var t = Thread.ofVirtual().start(() -> {
+            try {
+                services.Tx.run(() -> {
+                    Agent agent = Agent.findById(id);
+                    for (var grant : java.util.List.of(new String[] {"mcp:jf26server", "jf26mcpcmd"},
+                            new String[] {"mcp-builder", "jf26skillcmd"})) {
+                        var row = new models.AgentSkillAllowedTool();
+                        row.agent = agent;
+                        row.skillName = grant[0];
+                        row.toolName = grant[1];
+                        row.save();
+                    }
+                });
+            } catch (Throwable e) {
+                err.set(e);
+            }
+        });
+        t.join();
+        if (err.get() != null) throw new AssertionError("seeding the grant rows failed", err.get());
+        var response = GET("/api/agents/" + id + "/shell/effective-allowlist");
+        assertIsOk(response);
+        assertEquals(JsonParser.parseString("{\"mcp-builder\":[\"jf26skillcmd\"]}"),
+                JsonParser.parseString(getContent(response)).getAsJsonObject().get("bySkill"));
+    }
+
+    @Test
     void createRejectsMissingOrNullRequiredFieldsWith400() {
         // Regression: a create body missing "name" (or modelProvider / modelId),
         // or sending an explicit null, used to NPE → HTTP 500 on

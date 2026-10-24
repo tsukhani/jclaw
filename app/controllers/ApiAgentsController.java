@@ -325,7 +325,7 @@ public class ApiAgentsController extends Controller {
             if (!c.enabled) disabledSkills.add(c.skillName);
         }
         var bySkill = new TreeMap<String, List<String>>();
-        for (var row : AgentSkillAllowedTool.findByAgent(agent)) {
+        for (var row : AgentSkillAllowedTool.findShellGrantsByAgent(agent)) {
             if (disabledSkills.contains(row.skillName)) continue;
             bySkill.computeIfAbsent(row.skillName, _ -> new ArrayList<>()).add(row.toolName);
         }

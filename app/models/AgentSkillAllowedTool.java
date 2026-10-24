@@ -6,6 +6,7 @@ import jakarta.persistence.Index;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import mcp.McpAllowlist;
 import org.hibernate.annotations.Cache;
 import org.hibernate.annotations.CacheConcurrencyStrategy;
 import org.hibernate.annotations.OnDelete;
@@ -29,9 +30,12 @@ import java.util.List;
  * and means registry un-promotion does not retroactively revoke granted
  * commands (rows persist until the agent explicitly removes the skill).
  *
+ * <p>MCP grants share the table: {@link McpAllowlist} writes one row per MCP tool under skill
+ * {@code mcp:<server>}, and those tool names are never shell commands.
+ *
  * <p>Effective allowlist for an agent is:
- * <pre>global shell.allowlist ∪ (AgentSkillAllowedTool rows WHERE agent = :agent
- *                              AND skillName IN enabled AgentSkillConfig.skillName)</pre>
+ * <pre>global shell.allowlist ∪ (rows WHERE agent = :agent AND skillName NOT LIKE 'mcp:%'
+ *                              AND skillName is not disabled in AgentSkillConfig)</pre>
  */
 @Entity
 @Table(name = "agent_skill_allowed_tool", indexes = {
@@ -59,8 +63,9 @@ public class AgentSkillAllowedTool extends Model {
     @Column(name = "tool_name", nullable = false)
     public String toolName;
 
-    public static List<AgentSkillAllowedTool> findByAgent(Agent agent) {
-        return AgentSkillAllowedTool.find("agent = ?1", agent).fetch();
+    /** The agent's shell-command grants: every row except MCP grants. */
+    public static List<AgentSkillAllowedTool> findShellGrantsByAgent(Agent agent) {
+        return AgentSkillAllowedTool.find("agent = ?1 AND skillName NOT LIKE ?2", agent, McpAllowlist.SKILL_PREFIX + "%").fetch();
     }
 
     public static List<AgentSkillAllowedTool> findByAgentAndSkill(Agent agent, String skillName) {

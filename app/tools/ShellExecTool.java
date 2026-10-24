@@ -422,7 +422,7 @@ public class ShellExecTool implements ToolRegistry.Tool {
             }
 
             var union = new HashSet<>(global);
-            for (var row : AgentSkillAllowedTool.findByAgent(managed)) {
+            for (var row : AgentSkillAllowedTool.findShellGrantsByAgent(managed)) {
                 if (!disabledSkills.contains(row.skillName)) union.add(row.toolName);
             }
             return Collections.unmodifiableSet(union);

@@ -1,4 +1,5 @@
 import models.Agent;
+import models.AgentSkillAllowedTool;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,8 +10,10 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import services.Tx;
 import tools.ShellExecTool;
 import tools.TerminalImageRenderer;
+import utils.ToolErrorTemplates;
 
 import javax.imageio.ImageIO;
 
@@ -18,6 +21,8 @@ import java.awt.Color;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import java.util.Set;
 
 class ShellExecToolTest extends UnitTest {
 
@@ -40,6 +45,27 @@ class ShellExecToolTest extends UnitTest {
     @AfterEach
     void releaseSandboxFlag() {
         ShellSandboxSync.release();
+    }
+
+    @Test
+    void anMcpToolsNameIsNeverAnAllowedCommandWhileASkillsCommandIs() {
+        Tx.run(() -> {
+            Agent managed = Agent.findById(agent.id);
+            // "mcp-builder" starts with "mcp" but not "mcp:", so its command still counts.
+            for (var grant : List.of(new String[] {"mcp:jf26server", "jf26mcpcmd"}, new String[] {"mcp-builder", "jf26skillcmd"})) {
+                var row = new AgentSkillAllowedTool();
+                row.agent = managed;
+                row.skillName = grant[0];
+                row.toolName = grant[1];
+                row.save();
+            }
+        });
+        var effective = ShellExecTool.effectiveAllowlistFor(agent);
+        assertEquals(Set.of("echo", "ls", "cat", "git", "head", "sleep", "pwd", "printenv", "exit", "sh", "wc", "grep",
+                "jf26skillcmd"), effective);
+        assertEquals(ToolErrorTemplates.shellNotAllowed("jf26mcpcmd", String.join(", ", effective)),
+                tool.validateAllowlist("jf26mcpcmd --flag", agent));
+        assertNull(tool.validateAllowlist("jf26skillcmd --flag", agent));
     }
 
     @AfterAll
