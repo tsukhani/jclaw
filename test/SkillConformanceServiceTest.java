@@ -1,11 +1,13 @@
 import agents.SkillLoader;
 import org.junit.jupiter.api.Test;
+import org.yaml.snakeyaml.Yaml;
 import play.test.UnitTest;
 import services.SkillConformanceService;
 import services.SkillConformanceService.ConformedSkill;
 import services.SkillConformanceService.ProposedSkill;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 
@@ -183,5 +185,19 @@ class SkillConformanceServiceTest extends UnitTest {
         assertEquals(1, md.lines().filter(l -> l.startsWith("commands:")).count(),
                 "exactly one commands: line may be rendered; got:\n" + md);
         assertFalse(md.contains("\nx: y"), "no injected key may reach the frontmatter:\n" + md);
+    }
+
+    // Upstream descriptions routinely carry ": " and " #", which a plain YAML scalar rejects or truncates.
+    @Test
+    void aDescriptionWithYamlIndicatorsRendersAsValidYaml() {
+        var description = "Works in stages: a written plan, then review #deep. Call it \"thorough\"";
+        var skill = new ConformedSkill("stager", description, "1.0.0", "🎭",
+                List.of("filesystem"), List.of(), "owner/repo", BODY);
+
+        var md = skill.toSkillMd();
+        Map<String, Object> frontmatter = new Yaml().load(md.substring(4, md.indexOf("\n---", 4)));
+
+        assertEquals(description, frontmatter.get("description"), md);
+        assertEquals(description, SkillLoader.parseSkillContent(md, null).description(), md);
     }
 }

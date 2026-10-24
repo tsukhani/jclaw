@@ -1,7 +1,7 @@
 ---
 name: app-creator
-description: Builds a hosted mini-app (index.html + app.json + a generated SVG icon) in your workspace and installs it to public/apps/<slug>/ via the app_install tool — delegates the build to the ACP coding harness (pi/claude/codex via runtime=acp) by default, falling back to a direct build only when no harness is available. The app then appears on the JClaw Apps page.
-version: 1.3.0
+description: Builds a hosted mini-app (index.html + app.json + a generated SVG icon) in your workspace and installs it to public/apps/{slug}/ via the app_install tool — delegates the build to the ACP coding harness (pi/claude/codex via runtime=acp) by default, falling back to a direct build only when no harness is available. The app then appears on the JClaw Apps page.
+version: 1.3.1
 author: Tarun Sukhani
 tools: [exec, subagent_spawn, filesystem, app_install]
 commands: []

@@ -83,12 +83,16 @@ public final class SkillConformanceService {
          * <p>Rendered here rather than left to the write path: only skills written
          * through the filesystem tool get {@code version:} injected there, and
          * {@link #conform} writes this output straight to disk.
+         *
+         * <p>The description is folded ({@code >-}): a plain scalar cannot hold {@code ": "} or
+         * {@code " #"}, and {@link SkillLoader} never unescapes a quoted one.
          */
         public String toSkillMd() {
             return """
                    ---
                    name: %s
-                   description: %s
+                   description: >-
+                     %s
                    version: %s
                    author: %s
                    tools: [%s]
