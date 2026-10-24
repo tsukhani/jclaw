@@ -423,7 +423,8 @@ class ApiMcpServersControllerTest extends FunctionalTest {
             request.headers.put("authorization", new Http.Header("authorization", "Bearer " + bearer));
             return request;
         };
-        var refused = "offerViewToolsEverywhere is operator-only; an agent cannot change which channels see a server's view tools.";
+        var refused = "offerViewToolsEverywhere is operator-only. A server's view tools are already offered in the operator's "
+                + "web chat; this setting only extends them to other channels, tasks and subagents.";
         var update = PUT(agent.get(), "/api/mcp-servers/" + id, "application/json", "{\"offerViewToolsEverywhere\":true}");
         assertEquals(403, update.status.intValue());
         assertEquals(refused, JsonParser.parseString(getContent(update)).getAsJsonObject().get("message").getAsString());

@@ -327,7 +327,8 @@ public class ApiMcpServersController extends Controller {
         if (requested == null || requested == current) return;
         if (RequestPrincipal.isAgentOriginated()) {
             ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
-                    "offerViewToolsEverywhere is operator-only; an agent cannot change which channels see a server's view tools.");
+                    "offerViewToolsEverywhere is operator-only. A server's view tools are already offered in the operator's "
+                            + "web chat; this setting only extends them to other channels, tasks and subagents.");
         }
     }
 
