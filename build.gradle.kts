@@ -307,6 +307,9 @@ repositories {
 }
 
 dependencies {
+    // A library framework/lib ships is never resolved here: the play1 plugin excludes it and
+    // warns on a declaration (PF-192). Running another version takes play1 { appManagedLibraries }.
+
     // JCLAW-1149: the javac plugin host, and the nullness checker that runs inside it.
     // Both are compile-only tool dependencies — nothing here reaches the dist.
     errorprone("com.google.errorprone:error_prone_core:2.50.0")
@@ -339,8 +342,7 @@ dependencies {
     // and attaches through PF-92's javaagent.path instead. Only the instrumentation BOM:
     // it imports the core and -alpha BOMs it was built against, so a core BOM pinned
     // beside it can run ahead of the api-incubator its -alpha one pins (core 1.67 broke
-    // OtelRuntime.init). The OTLP sender's OkHttp is okhttp-jvm 5.x, the same artifact
-    // family pinned below — no exclusion needed, unlike the telegrambots graph.
+    // OtelRuntime.init). The OTLP sender runs on framework/lib's okhttp-jvm.
     implementation(platform("io.opentelemetry.instrumentation:opentelemetry-instrumentation-bom-alpha:2.32.0-alpha"))
     implementation("io.opentelemetry:opentelemetry-api")
     implementation("io.opentelemetry:opentelemetry-sdk")
@@ -365,16 +367,10 @@ dependencies {
     // (test/PropertyBasedTest). `implementation` for the same reason as ArchUnit above:
     // playAutotest builds its classpath from sourceSets.main.runtimeClasspath, so a
     // testImplementation dep is invisible to the fork's runner; never loaded at runtime,
-    // so its presence in the dist is inert. The junit-platform exclusions are
-    // load-bearing: jqwik 1.10 asks for platform 1.14.4, the fork ships 6.1.3, and
-    // Gradle's deps precede framework/lib on the classpath — without these the 1.x
-    // commons would shadow 6.1.3 and break every existing test.
-    implementation("net.jqwik:jqwik-api:1.10.2") {
-        exclude(group = "org.junit.platform")
-    }
-    runtimeOnly("net.jqwik:jqwik-engine:1.10.2") {
-        exclude(group = "org.junit.platform")
-    }
+    // so its presence in the dist is inert. It asks for junit-platform 1.14.4 and runs
+    // on the fork's 6.1.3.
+    implementation("net.jqwik:jqwik-api:1.10.2")
+    runtimeOnly("net.jqwik:jqwik-engine:1.10.2")
 
     // JCLAW-911: printer discovery over mDNS/Bonjour. Pure Java, Apache-2.0, no
     // native deps — which is the whole point of the printer tool: it works on a
@@ -384,9 +380,7 @@ dependencies {
 
     // JCLAW-911: HP JIPP — pure-Java IPP codec for the primary print backend
     // (RFC 8010/8011 over HTTP to port 631). MIT. JIPP is written in Kotlin and
-    // asks for kotlin-stdlib 1.9.10, but readability4j already puts Kotlin on the
-    // classpath, so this resolves UP to the existing 2.2.21 rather than adding a
-    // runtime — verified via `gradlew dependencies --configuration runtimeClasspath`.
+    // runs on framework/lib's kotlin-stdlib.
     implementation("com.hp.jipp:jipp-core:0.7.18")
 
     // jsoup 1.22.2 is one patch ahead of the 1.22.1 that Tika 3.3.0's
@@ -516,8 +510,6 @@ dependencies {
         exclude(group = "org.slf4j", module = "slf4j-simple")
     }
 
-    implementation("org.hdrhistogram:HdrHistogram:2.2.2")
-
     // JCLAW-307: OpenAI/tiktoken-compatible tokenizer used for provider-facing
     // prompt measurement and fallback usage accounting when a provider omits
     // usage blocks. The registry is created lazily in TokenUsageEstimator.
@@ -530,8 +522,8 @@ dependencies {
         exclude(group = "biz.aQute.bnd")
     }
 
-    // Telegram Bot API SDK — exclude OkHttp 4.x graph (we use okhttp-jvm 5.x
-    // directly), logback (log4j path), and test artifacts.
+    // Telegram Bot API SDK — exclude logback (log4j path) and test artifacts. Its
+    // OkHttp 4.x and Okio give way to framework/lib's OkHttp 5.x.
     listOf(
         "telegrambots-client",
         "telegrambots-longpolling",
@@ -539,37 +531,30 @@ dependencies {
         implementation("org.telegram:$module:9.5.0") {
             exclude(group = "ch.qos.logback")
             exclude(group = "org.awaitility")
-            exclude(group = "com.squareup.okhttp3", module = "okhttp")
             exclude(group = "com.squareup.okhttp3", module = "mockwebserver")
-            exclude(group = "com.squareup.okio")
             exclude(group = "org.projectlombok")
             exclude(group = "org.assertj")
             exclude(group = "org.mockito")
         }
     }
 
-    // OkHttp 5.x JVM artifact (the bare `okhttp` artifact is Gradle-Metadata
-    // only and Play 1.x's Ivy didn't understand it; under Gradle Metadata is
-    // native, but we keep the jvm-suffixed coord to mirror the python config).
-    implementation("com.squareup.okhttp3:okhttp-jvm:5.5.1")
-
-    // JCLAW-185: SSE + MockWebServer 5.x (plain POMs, no -jvm suffix).
-    implementation("com.squareup.okhttp3:okhttp-sse:5.5.1")
-    implementation("com.squareup.okhttp3:mockwebserver3:5.5.1")
+    // JCLAW-185: MockWebServer 5.x, the one OkHttp module the fork does not ship. It calls
+    // okhttp3.internal, so it takes the version of framework/lib's okhttp-jvm.
+    val forkOkHttp = file("/opt/play1/framework/lib-coordinates.properties").readLines()
+        .map { it.substringAfter('=').split(':') }
+        .first { it.size >= 3 && it[0] == "com.squareup.okhttp3" && it[1] == "okhttp-jvm" }[2]
+    implementation("com.squareup.okhttp3:mockwebserver3:$forkOkHttp")
 
     // JCLAW-83: Slack SDK (official com.slack.api), a la carte — slack-api-client
     // (Web API + Block Kit) + slack-app-backend (SlackSignature.Verifier + event
-    // parsers). NO Bolt. Exclude its bare OkHttp 4.x + Okio so it runs on
-    // okhttp-jvm 5.x instead of clashing in the shared okhttp3 package
-    // (same treatment as the Telegram SDK above).
+    // parsers). NO Bolt. Its OkHttp 4.x and Okio give way to framework/lib's, as
+    // the Telegram SDK's do.
     listOf(
         "slack-api-client",
         "slack-app-backend",
     ).forEach { module ->
         implementation("com.slack.api:$module:1.49.0") {
-            exclude(group = "com.squareup.okhttp3", module = "okhttp")
             exclude(group = "com.squareup.okhttp3", module = "mockwebserver")
-            exclude(group = "com.squareup.okio")
         }
     }
     // JCLAW-351: Slack Socket Mode backend. The socket-mode client classes ship inside
