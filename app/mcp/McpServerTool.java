@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -63,6 +64,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
     private static final String FIELD_RESOURCES_NOTE = "resourcesNote";
     private static final String CATEGORY_INVOKE = "MCP_TOOL_INVOKE";
     private static final String CATEGORY_RESOURCES = "MCP_RESOURCES";
+    private static final String WEB_CHAT_ONLY = "web chat only, where their views can be shown";
 
     /** google-workspace lists 119 actions in 200 KB, 81% of it schemas: past this size the list is an index. */
     static final int FULL_CATALOG_MAX_CHARS = 8_000;
@@ -202,6 +204,8 @@ public final class McpServerTool implements ToolRegistry.Tool {
 
     @Override
     public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
+        // Asked once per call, and only when a view tool is in question.
+        var webChat = McpViewTools.once(McpViewTools::webChatDispatchOrNot);
         JsonObject args;
         try {
             var parsed = JsonParser.parseString(argsJson == null || argsJson.isBlank() ? "{}" : argsJson);
@@ -215,15 +219,15 @@ public final class McpServerTool implements ToolRegistry.Tool {
         if (read != null) return readResource(read, agent, args);
 
         var described = describedNames(args);
-        if (!described.isEmpty()) return describeActions(described);
+        if (!described.isEmpty()) return describeActions(described, webChat);
 
         // No `tool` → the action list; the model builds its populated calls from the schemas.
         if (!namesAnAction(args)) {
             // A whole envelope wrapped once more also has no outer `tool`, and the catalog
             // does not correct it: the model re-sends the same shape.
-            var nested = nestedEnvelopeHint(args);
+            var nested = nestedEnvelopeHint(args, webChat);
             return nested.isEmpty()
-                    ? enumerateActions()
+                    ? enumerateActions(webChat)
                     : ToolRegistry.ToolResult.text(
                             "MCP server '" + serverName + "' was called with no `tool`. " + nested.strip());
         }
@@ -237,7 +241,9 @@ public final class McpServerTool implements ToolRegistry.Tool {
         // registry. The adapter carries the allowlist gate + audit trail,
         // so server-level invocations get the same JCLAW-32 safety
         // guarantees as legacy direct-action invocations.
+        // An action this turn is not offered, the view's own or a view tool off web chat, does not exist for the model.
         var adapter = ToolRegistry.lookupTool(McpServer.toolName(serverName, actionName));
+        if (adapter != null && !offeredHere(adapter, webChat)) adapter = null;
         if (adapter == null) {
             // Server down, action misspelled, or tool list changed since the model last
             // enumerated. Names only (no schemas) so the model can self-correct next turn
@@ -245,12 +251,13 @@ public final class McpServerTool implements ToolRegistry.Tool {
             // tens of thousands of tokens and time-to-first-token into the minute range.
             return ToolRegistry.ToolResult.text(
                     "MCP server '" + serverName + "' has no action named '" + actionName + "'. "
-                            + envelopeHint(actionName, args)
-                            + "Available actions: " + enumerateActionNames()
+                            + envelopeHint(actionName, args, webChat)
+                            + "Available actions: " + enumerateActionNames(webChat)
                             + ". Call mcp_" + serverName + " with {\"describe\": [\"<action>\"]} "
                             + "for an action's input schema if needed.");
         }
-        return adapter.executeRich(actionArgs, agent);
+        return adapter instanceof McpToolAdapter mcpAdapter
+                ? mcpAdapter.executeRich(actionArgs, agent, webChat) : adapter.executeRich(actionArgs, agent);
     }
 
     /**
@@ -261,8 +268,8 @@ public final class McpServerTool implements ToolRegistry.Tool {
      * @return a corrective sentence ending in a space, empty for a plain
      *         unknown action (typo, stale tool list).
      */
-    private String envelopeHint(String actionName, JsonObject args) {
-        var nested = nestedEnvelopeHint(args);
+    private String envelopeHint(String actionName, JsonObject args, BooleanSupplier webChat) {
+        var nested = nestedEnvelopeHint(args, webChat);
         if (!nested.isEmpty()) return nested;
         if (actionName.equals(serverName) || actionName.equals(name())) {
             return "That is this server's own name, not an action — `tool` takes the action name. ";
@@ -271,12 +278,13 @@ public final class McpServerTool implements ToolRegistry.Tool {
     }
 
     /** The corrective sentence when {@code args.tool} names a registered action, else empty. */
-    private String nestedEnvelopeHint(JsonObject args) {
+    private String nestedEnvelopeHint(JsonObject args, BooleanSupplier webChat) {
         if (args.has("args") && args.get("args").isJsonObject()) {
             var inner = args.getAsJsonObject("args");
             if (inner.has("tool") && inner.get("tool").isJsonPrimitive()) {
                 var nested = inner.get("tool").getAsString();
-                if (ToolRegistry.lookupTool(McpServer.toolName(serverName, nested)) != null) {
+                var tool = ToolRegistry.lookupTool(McpServer.toolName(serverName, nested));
+                if (tool != null && offeredHere(tool, webChat)) {
                     return "The envelope is nested one level too deep — '" + nested
                             + "' is the action. Call {\"tool\": \"" + nested
                             + "\", \"args\": {...}} with the action's own arguments at the top of `args`. ";
@@ -284,6 +292,27 @@ public final class McpServerTool implements ToolRegistry.Tool {
             }
         }
         return "";
+    }
+
+    /** Judged by the adapter's own def, which is registered before the server's tool list reads as connected. */
+    private boolean offeredHere(ToolRegistry.Tool tool, BooleanSupplier webChat) {
+        return !(tool instanceof McpToolAdapter adapter)
+                || !McpViewTools.offered(serverName, List.of(adapter.def()), webChat).isEmpty();
+    }
+
+    /** A connected server whose model-visible actions all link a view is not down: they are kept for web chat. */
+    private boolean actionsKeptForWebChat() {
+        return !forModel(McpConnectionManager.tools(serverName)).isEmpty();
+    }
+
+    /** This server's actions the model may see on the turn dispatching this call. */
+    private List<McpToolDef> offeredActions(BooleanSupplier webChat) {
+        return McpViewTools.offered(serverName, McpConnectionManager.toolsForTurn(serverName), webChat);
+    }
+
+    /** MCP Apps' visibility without {@code "model"} keeps an action for the view alone. */
+    private static List<McpToolDef> forModel(List<McpToolDef> defs) {
+        return defs.stream().filter(McpToolDef::visibleToModel).toList();
     }
 
     private static boolean namesAnAction(JsonObject args) {
@@ -314,18 +343,24 @@ public final class McpServerTool implements ToolRegistry.Tool {
         return blank && namesAnAction(args) ? null : el;
     }
 
-    private ToolRegistry.ToolResult enumerateActions() {
-        var defs = McpConnectionManager.toolsForTurn(serverName);
+    private ToolRegistry.ToolResult enumerateActions(BooleanSupplier webChat) {
+        var defs = offeredActions(webChat);
         var resources = McpConnectionManager.offersResources(serverName);
-        if ((defs == null || defs.isEmpty()) && !resources) return notConnected();
+        if ((defs == null || defs.isEmpty()) && !resources) return noActionsOffered();
         if (!resources) return catalog(serverName, defs);
+        ToolRegistry.ToolResult listed;
         try {
-            return catalog(serverName, defs, McpConnectionManager.listResources(serverName));
+            listed = catalog(serverName, defs, McpConnectionManager.listResources(serverName));
         } catch (IOException | RuntimeException e) {
             EventLogger.warn(CATEGORY_RESOURCES, "MCP server '%s' could not list its resources: %s"
                     .formatted(serverName, ApiResponses.messageOf(e)));
-            return catalogWithoutResources(serverName, defs);
+            listed = catalogWithoutResources(serverName, defs);
         }
+        if (!defs.isEmpty() || !actionsKeptForWebChat()) return listed;
+        var payload = JsonParser.parseString(listed.text()).getAsJsonObject();
+        payload.addProperty("actionsNote", "This server offers its actions in " + WEB_CHAT_ONLY + ".");
+        var json = GSON.toJson(payload);
+        return new ToolRegistry.ToolResult(json, json);
     }
 
     /** Validated, then refused without a request when the server is down, declared no resources, or granted this agent nothing. */
@@ -336,6 +371,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
                     + " with {} to list its resources and templates.");
         }
         var uri = read.getAsString();
+        if (McpResources.isViewPage(uri, null)) return viewPage(uri);
         if (McpConnectionManager.status(serverName) != McpServer.Status.CONNECTED) return notConnected();
         if (!McpConnectionManager.offersResources(serverName)) {
             return ToolRegistry.ToolResult.text("MCP server '" + serverName + "' offers no resources.");
@@ -355,7 +391,9 @@ public final class McpServerTool implements ToolRegistry.Tool {
                     ToolErrorTemplates.mcpNotAllowed(serverName, ARG_READ, agentName(agent))));
         }
         try {
-            var rendered = renderRead(McpConnectionManager.readResource(serverName, uri));
+            var contents = McpConnectionManager.readResource(serverName, uri);
+            if (contents.stream().anyMatch(c -> McpResources.isViewPage(c.uri(), c.mimeType()))) return viewPage(uri);
+            var rendered = renderRead(contents);
             return ToolRegistry.ToolResult.text(rendered.isEmpty()
                     ? "MCP server '" + serverName + "' returned no contents for '" + uri + "'."
                     : rendered);
@@ -371,6 +409,11 @@ public final class McpServerTool implements ToolRegistry.Tool {
         }
     }
 
+    private ToolRegistry.ToolResult viewPage(String uri) {
+        return ToolRegistry.ToolResult.text("'" + uri + "' on MCP server '" + serverName
+                + "' is a view page, which the web chat draws; it is not a resource to read.");
+    }
+
     /** The same audit trail an action call leaves; through {@link EventLogger}, which masks a credential in the URI. */
     private void auditRead(@Nullable Agent agent, String uri, JsonObject args, boolean allowed) {
         var agentId = agent != null && agent.id != null ? String.valueOf(agent.id) : null;
@@ -384,9 +427,19 @@ public final class McpServerTool implements ToolRegistry.Tool {
         return agent != null && agent.name != null ? agent.name : "<unknown>";
     }
 
-    private ToolRegistry.ToolResult describeActions(List<String> names) {
-        var defs = McpConnectionManager.toolsForTurn(serverName);
-        return defs == null || defs.isEmpty() ? notConnected() : describe(serverName, defs, names);
+    private ToolRegistry.ToolResult describeActions(List<String> names, BooleanSupplier webChat) {
+        var defs = offeredActions(webChat);
+        return defs == null || defs.isEmpty() ? noActionsOffered() : describe(serverName, defs, names);
+    }
+
+    private ToolRegistry.ToolResult noActionsOffered() {
+        if (actionsKeptForWebChat()) {
+            return ToolRegistry.ToolResult.text("MCP server '" + serverName + "' offers its actions in " + WEB_CHAT_ONLY + ".");
+        }
+        if (!McpConnectionManager.tools(serverName).isEmpty()) {
+            return ToolRegistry.ToolResult.text("MCP server '" + serverName + "' offers no actions the model may call.");
+        }
+        return notConnected();
     }
 
     private ToolRegistry.ToolResult notConnected() {
@@ -422,21 +475,24 @@ public final class McpServerTool implements ToolRegistry.Tool {
     /** Whole or an index by the actions alone, so resources never change how the actions are shown. */
     private static ToolRegistry.ToolResult catalog(String serverName, List<McpToolDef> defs,
                                                    Consumer<Map<String, Object>> resources) {
-        var payload = payload(serverName, null, entries(defs, true));
+        var shown = forModel(defs);
+        var payload = payload(serverName, null, entries(shown, true));
         if (GSON.toJson(payload).length() > FULL_CATALOG_MAX_CHARS) {
             payload = payload(serverName,
                     "Not listed. Call mcp_" + serverName + " with {\"describe\": [\"<action>\", ...]} for the input "
                             + "schemas of the actions you will use, before calling them.",
-                    entries(defs, false));
+                    entries(shown, false));
         }
         resources.accept(payload);
         var json = GSON.toJson(payload);
         return new ToolRegistry.ToolResult(json, json);
     }
 
+    /** An MCP Apps page is drawn by the web chat, never read by the model. */
     private static List<Map<String, Object>> resourceEntries(List<McpResources.Resource> resources) {
         var out = new ArrayList<Map<String, Object>>(resources.size());
         for (var r : resources) {
+            if (McpResources.isViewPage(r.uri(), r.mimeType())) continue;
             var entry = new LinkedHashMap<String, Object>();
             entry.put("uri", r.uri());
             putIfPresent(entry, "name", r.name());
@@ -450,6 +506,7 @@ public final class McpServerTool implements ToolRegistry.Tool {
     private static List<Map<String, Object>> templateEntries(List<McpResources.Template> templates) {
         var out = new ArrayList<Map<String, Object>>(templates.size());
         for (var t : templates) {
+            if (McpResources.isViewPage(t.uriTemplate(), null)) continue;
             var entry = new LinkedHashMap<String, Object>();
             entry.put("uriTemplate", t.uriTemplate());
             putIfPresent(entry, "name", t.name());
@@ -513,10 +570,11 @@ public final class McpServerTool implements ToolRegistry.Tool {
 
     /** The whole description and input schema of each named action; a name the server lacks is reported as unknown. */
     public static ToolRegistry.ToolResult describe(String serverName, List<McpToolDef> defs, List<String> names) {
+        var visible = forModel(defs);
         var known = new ArrayList<McpToolDef>();
         var unknown = new ArrayList<String>();
         for (var name : names) {
-            var def = defs.stream().filter(d -> d.name().equals(name)).findFirst().orElse(null);
+            var def = visible.stream().filter(d -> d.name().equals(name)).findFirst().orElse(null);
             if (def == null) unknown.add(name);
             else known.add(def);
         }
@@ -567,10 +625,11 @@ public final class McpServerTool implements ToolRegistry.Tool {
      * Names alone let the model spot the right action; if it actually needs
      * a schema it can ask for that one with {@code describe}.
      */
-    private String enumerateActionNames() {
-        var defs = McpConnectionManager.toolsForTurn(serverName);
+    private String enumerateActionNames(BooleanSupplier webChat) {
+        var defs = offeredActions(webChat);
         if (defs == null || defs.isEmpty()) {
-            return "(none — server not connected or advertises no actions)";
+            return actionsKeptForWebChat() ? "(none here: this server offers its actions in " + WEB_CHAT_ONLY + ")"
+                    : "(none — server not connected or advertises no actions)";
         }
         var names = new ArrayList<String>(defs.size());
         for (var def : defs) names.add(def.name());

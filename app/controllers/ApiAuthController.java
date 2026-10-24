@@ -319,6 +319,8 @@ public class ApiAuthController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = LoginResponse.class)))
     @AgentAccess(value = OPERATOR_ONLY, reason = "mints an operator session")
     public static void login() {
+        // Before the throttle, so a sandboxed view cannot spend the operator's failed-login budget.
+        AuthCheck.refuseOpaqueOrCrossSite();
         // JCLAW-741: throttle brute-force / PBKDF2 CPU-exhaustion before any
         // work. Keyed on the socket peer; a source with too many recent
         // failures is rejected with 429 without touching the DB or the
@@ -405,6 +407,7 @@ public class ApiAuthController extends Controller {
         if (AppOriginGate.isBlocked()) {
             ApiResponses.error(403, ApiResponses.APP_SCOPE, "App-originated request may not log the operator out");
         }
+        AuthCheck.refuseOpaqueOrCrossSite();
         // The clear below loses to any in-flight response that re-issues the cookie; the id does not.
         var sid = session.get(SESSION_ID);
         if (sid != null) revokeSession(sid);
@@ -436,6 +439,7 @@ public class ApiAuthController extends Controller {
         if (AppOriginGate.isBlocked()) {
             ApiResponses.error(403, ApiResponses.APP_SCOPE, "App-originated request may not reset the password");
         }
+        AuthCheck.refuseOpaqueOrCrossSite();
         switch (sessionRejection()) {
             case null -> { /* live operator session */ }
             case CREDENTIALS_CHANGED -> {

@@ -229,6 +229,39 @@ describe('Chat page — tool call rendering', () => {
   })
 })
 
+describe('Chat page — MCP Apps views', () => {
+  it('draws a reloaded web conversation\'s view under its collapsed tool-calls card', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 88, agentId: 1, agentName: 'streaming-agent', channelType: 'web', peerId: 'admin', messageCount: 4,
+        preview: 'table demo', createdAt: '2026-10-24T10:00:00Z', updatedAt: '2026-10-24T10:00:00Z' },
+    ])
+    serveConversation(88, [
+      { id: 300, role: 'user', content: 'a search table please', createdAt: '2026-10-24T10:00:00Z' },
+      { id: 301, role: 'assistant', content: '', createdAt: '2026-10-24T10:00:01Z',
+        toolCalls: [{ id: 'call_t', type: 'function', icon: 'plug',
+          function: { name: 'mcp_serpapi', arguments: '{"tool":"search_table","args":{}}' } }] },
+      { id: 302, role: 'tool', content: '3 results', toolResults: 'call_t', createdAt: '2026-10-24T10:00:02Z',
+        toolResultStructured: { mcpApp: { server: 'serpapi', tool: 'search_table',
+          resourceUri: 'ui://prefab/tool/583d325b0e9c/renderer.html', arguments: {},
+          result: { content: [{ type: 'text', text: '3 results' }], structuredContent: { rows: [1, 2, 3] }, isError: false } } } },
+      { id: 303, role: 'assistant', content: 'Here is the table.', createdAt: '2026-10-24T10:00:03Z' },
+    ])
+
+    const component = await mountSuspended(Chat)
+    await flushPromises()
+    await flushPromises()
+    const vm = component.vm as unknown as { loadConversation: (id: number) => Promise<void> }
+    await vm.loadConversation(88)
+    await flushPromises()
+
+    expect(component.find('button[title="Expand tool calls"]').exists()).toBe(true)
+    const frames = component.findAll('[data-testid="mcp-app-frame"] iframe')
+    expect(frames.map(f => f.attributes('src')))
+      .toEqual(['/api/mcp-servers/view?server=serpapi&uri=ui%3A%2F%2Fprefab%2Ftool%2F583d325b0e9c%2Frenderer.html'])
+  })
+})
+
 describe('Chat page — empty conversation state', () => {
   it('renders the chat shell when no agent is configured', async () => {
     registerEndpoint('/api/agents', () => [])

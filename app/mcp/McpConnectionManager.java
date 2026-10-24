@@ -237,6 +237,7 @@ public final class McpConnectionManager {
         // (McpServerService.syncRuntime → connect replaces the entry), so the
         // captured value tracks the persisted flag across edits.
         entry.requiresApproval = server.requiresApproval;
+        entry.offerViewToolsEverywhere = server.offerViewToolsEverywhere;
         entry.protocol = server.protocolSetting();
         entry.skipProbe = server.probeTimedOutAt != null;
         entry.server = server;
@@ -310,6 +311,12 @@ public final class McpConnectionManager {
     public static boolean requiresApproval(String serverName) {
         var e = connections.get(serverName);
         return e != null && e.requiresApproval;
+    }
+
+    /** Whether the operator offers this server's view tools on every turn, read like {@link #requiresApproval}. */
+    public static boolean offersViewToolsEverywhere(String serverName) {
+        var e = connections.get(serverName);
+        return e != null && e.offerViewToolsEverywhere;
     }
 
     /**
@@ -1119,6 +1126,8 @@ public final class McpConnectionManager {
          *  path via {@link #requiresApproval(String)}; volatile so a
          *  reconnect that replaces the entry publishes a fresh value. */
         volatile boolean requiresApproval;
+        /** The server's view tools are offered on every turn; captured like {@link #requiresApproval}. */
+        volatile boolean offerViewToolsEverywhere;
         /** JCLAW-1443: the server's protocol setting, captured at connect; an automatic switch updates it. */
         volatile McpServer.Protocol protocol = McpServer.Protocol.AUTOMATIC;
         /** JCLAW-1443: the last probe ran out its budget, so connects open with initialize. */

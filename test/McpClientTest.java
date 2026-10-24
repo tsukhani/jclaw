@@ -76,6 +76,20 @@ class McpClientTest extends UnitTest {
         }
     }
 
+    private static final String UI_CAPABILITIES =
+            "{\"extensions\":{\"io.modelcontextprotocol/ui\":{\"mimeTypes\":[\"text/html;profile=mcp-app\"]}}}";
+
+    @Test
+    void theHandshakeDeclaresTheUiExtension() throws Exception {
+        var t = new ScriptedTransport(handshakeEra(null));
+        try (var client = new McpClient("test", t, "0.0.1")) {
+            client.connect();
+            var init = t.requests.stream().filter(r -> r.method().equals("initialize")).findFirst().orElseThrow();
+            assertEquals(UI_CAPABILITIES,
+                    ((JsonObject) Objects.requireNonNull(init.params())).get("capabilities").toString());
+        }
+    }
+
     @Test
     void connectRejectsServerErrorOnInitialize() {
         transport = new FakeTransport();
@@ -507,7 +521,7 @@ class McpClientTest extends UnitTest {
             var call = t.requests.getLast();
             var meta = ((JsonObject) Objects.requireNonNull(call.params())).getAsJsonObject("_meta");
             assertEquals("2026-07-28", meta.get("io.modelcontextprotocol/protocolVersion").getAsString());
-            assertEquals(new JsonObject(), meta.get("io.modelcontextprotocol/clientCapabilities"));
+            assertEquals(UI_CAPABILITIES, meta.get("io.modelcontextprotocol/clientCapabilities").toString());
             assertEquals("jclaw", meta.getAsJsonObject("io.modelcontextprotocol/clientInfo").get("name").getAsString());
             var headers = t.headers.getLast();
             assertEquals("2026-07-28", headers.get("MCP-Protocol-Version"));
@@ -1155,6 +1169,34 @@ class McpClientTest extends UnitTest {
             var sent = transports.getFirst().requests.getLast();
             assertEquals("resources/read", sent.method());
             assertEquals("serpapi://engines/google_flights", param(sent, "uri"));
+        }
+    }
+
+    @Test
+    void aViewPageKeepsItsUiMetaInTheListingAndTheReadAndABlobPageReadsAsItsHtml() throws Exception {
+        var csp = "{\"csp\":{\"resourceDomains\":[\"https://cdn.jsdelivr.net\"]}}";
+        var html = "<!doctype html><p>é</p>";
+        var blob = Base64.getEncoder().encodeToString(html.getBytes(StandardCharsets.UTF_8));
+        Script server = (_, r) -> switch (r.method()) {
+            case "resources/list" -> ok(r, "{\"resources\":[{\"uri\":\"ui://t.html\",\"mimeType\":\"text/html;profile=mcp-app\","
+                    + "\"_meta\":{\"ui\":" + csp + ",\"fastmcp\":{}}},{\"uri\":\"x://a\",\"_meta\":{\"fastmcp\":{}}}]}");
+            case "resources/templates/list" -> ok(r, "{\"resourceTemplates\":[]}");
+            default -> ok(r, "{\"contents\":["
+                    + "{\"uri\":\"ui://t.html\",\"mimeType\":\"text/html;profile=mcp-app\",\"text\":\"<p>\",\"_meta\":{\"ui\":" + csp + "}},"
+                    + "{\"uri\":\"ui://b.html\",\"mimeType\":\"text/html; profile=mcp-app\",\"blob\":\"" + blob + "\"},"
+                    + "{\"uri\":\"ui://bad.html\",\"mimeType\":\"text/html;profile=mcp-app\",\"blob\":\"!!\"},"
+                    + "{\"uri\":\"x://h.html\",\"mimeType\":\"text/html\",\"blob\":\"" + blob + "\"}]}");
+        };
+        try (var client = resourceClient(false, new CopyOnWriteArrayList<>(), server)) {
+            var ui = JsonParser.parseString(csp).getAsJsonObject();
+            assertEquals(List.of(new McpResources.Resource("ui://t.html", null, null, "text/html;profile=mcp-app", ui),
+                    new McpResources.Resource("x://a", null, null, null, null)), client.listResources().resources());
+            assertEquals(List.of(
+                    new McpResources.Content("ui://t.html", "text/html;profile=mcp-app", "<p>", 0, ui),
+                    new McpResources.Content("ui://b.html", "text/html; profile=mcp-app", html, 0, null),
+                    new McpResources.Content("ui://bad.html", "text/html;profile=mcp-app", null, 1, null),
+                    new McpResources.Content("x://h.html", "text/html", null, html.getBytes(StandardCharsets.UTF_8).length, null)),
+                    client.readResource("ui://t.html"));
         }
     }
 

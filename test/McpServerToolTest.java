@@ -452,6 +452,80 @@ class McpServerToolTest extends UnitTest {
                 McpServerTool.catalogWithoutResources("serpapi", List.of(def("search", "Searches.", 0))).text());
     }
 
+    // ==================== MCP Apps: what the model is kept from ====================
+
+    private static McpToolDef viewTool(String name, List<String> visibility) {
+        var schema = new JsonObject();
+        schema.addProperty("type", "object");
+        schema.add("properties", new JsonObject());
+        return new McpToolDef(name, "Searches.", schema, "ui://serpapi/table.html", visibility);
+    }
+
+    @Test
+    void aViewToolTheModelMayCallIsListedAsAPlainActionIsAndAnAppOnlyOneIsNot() {
+        assertEquals("{\"server\":\"serpapi\",\"actions\":[" + SEARCH_ACTION + "]}",
+                McpServerTool.catalog("serpapi", List.of(viewTool("search", List.of("model", "app")),
+                        viewTool("refresh", List.of("app")), viewTool("hidden", List.of()))).text());
+        assertEquals("{\"server\":\"serpapi\",\"actions\":[" + SEARCH_ACTION + "]}",
+                McpServerTool.catalog("serpapi", List.of(viewTool("search", List.of("model")))).text());
+    }
+
+    @Test
+    void describeReportsAnAppOnlyActionAsUnknown() {
+        assertEquals("{\"server\":\"serpapi\",\"actions\":[" + SEARCH_ACTION + "],\"unknown\":[\"refresh\"]}",
+                McpServerTool.describe("serpapi", List.of(viewTool("search", List.of("model", "app")),
+                        viewTool("refresh", List.of("app"))), List.of("refresh", "search")).text());
+    }
+
+    @Test
+    void theModelsTemplateListingLeavesOutViewPageTemplates() {
+        var listing = new McpResources.Listing(List.of(), List.of(
+                new McpResources.Template("ui://serpapi/{engine}.html", "views", null),
+                new McpResources.Template("serpapi://engines/{engine}", "engine", null)), false);
+        assertEquals("{\"server\":\"serpapi\",\"actions\":[" + SEARCH_ACTION + "],\"resources\":[],"
+                + "\"resourceTemplates\":[{\"uriTemplate\":\"serpapi://engines/{engine}\",\"name\":\"engine\"}]}",
+                McpServerTool.catalog("serpapi", List.of(def("search", "Searches.", 0)), listing).text());
+    }
+
+    @Test
+    void anUpperCaseUiSchemeIsAViewPageInTheListingAndTheTemplates() {
+        var listing = new McpResources.Listing(List.of(new McpResources.Resource("UI://prefab/x.html", null, null, "text/html")),
+                List.of(new McpResources.Template("Ui://prefab/{id}.html", null, null)), false);
+        assertEquals("{\"server\":\"serpapi\",\"actions\":[" + SEARCH_ACTION + "],\"resources\":[],\"resourceTemplates\":[]}",
+                McpServerTool.catalog("serpapi", List.of(def("search", "Searches.", 0)), listing).text());
+    }
+
+    @Test
+    void aViewToolIsRefusedOffWebChatFromItsAdaptersOwnDefWhileTheServerStillConnects() {
+        var called = new java.util.concurrent.atomic.AtomicInteger();
+        var server = "connecting-" + System.nanoTime();
+        var adapter = new mcp.McpToolAdapter(server, viewTool("search_table", List.of("model", "app")), (s, t, a) -> {
+            called.incrementAndGet();
+            return new mcp.CallToolResult("ran", false);
+        });
+        ToolRegistry.publish(List.of(adapter));
+        var result = new McpServerTool(server).executeRich("{\"tool\":\"search_table\",\"args\":{}}", null);
+        assertEquals("MCP server '" + server + "' has no action named 'search_table'. Available actions: (none — server not"
+                + " connected or advertises no actions). Call mcp_" + server + " with {\"describe\": [\"<action>\"]} for an"
+                + " action's input schema if needed.", result.text());
+        assertEquals(0, called.get());
+    }
+
+    @Test
+    void theModelsResourceListingLeavesOutViewPagesHoweverTheirTypeIsWritten() {
+        var listing = new McpResources.Listing(List.of(
+                new McpResources.Resource("serpapi://engines", "serpapi-engines-index", null, "application/json"),
+                new McpResources.Resource("ui://prefab/table.html", "Prefab Renderer (search_table)", null,
+                        "text/html;profile=mcp-app"),
+                new McpResources.Resource("ui://prefab/other.html", null, null, "Text/HTML; profile=MCP-App"),
+                new McpResources.Resource("x://page.html", null, null, "text/html")), List.of(), false);
+        assertEquals("{\"server\":\"serpapi\",\"actions\":[" + SEARCH_ACTION + "],"
+                + "\"resources\":[{\"uri\":\"serpapi://engines\",\"name\":\"serpapi-engines-index\","
+                + "\"mimeType\":\"application/json\"},{\"uri\":\"x://page.html\",\"mimeType\":\"text/html\"}],"
+                + "\"resourceTemplates\":[]}",
+                McpServerTool.catalog("serpapi", List.of(def("search", "Searches.", 0)), listing).text());
+    }
+
     @Test
     void resourcesNeverTurnASmallActionListIntoAnIndexNorALargeOneWhole() {
         var many = new ArrayList<McpResources.Resource>();

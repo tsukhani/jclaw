@@ -4,6 +4,7 @@ import channels.SlackInbound;
 import channels.WhatsAppInbound;
 import com.google.gson.Gson;
 import llm.TokenUsageEstimator;
+import mcp.McpViewTools;
 import memory.MemoryAutoCapture;
 import memory.MemoryDecay;
 import memory.MemoryStore;
@@ -19,6 +20,7 @@ import services.EventLogger;
 import services.LoadTestRunner;
 import services.WorkspaceFiles;
 import utils.AppClock;
+import utils.ChannelOriginTrust;
 import utils.GsonHolder;
 import utils.LatencyTrace;
 
@@ -378,7 +380,10 @@ public class SystemPromptAssembler {
         // references one. Filtered per-agent so an operator who's
         // disabled a server for this agent doesn't see it advertised.
         var mcpDisabled = disabledTools != null ? disabledTools : ToolRegistry.loadDisabledTools(agent);
-        var mcpCatalog = McpServerCatalog.formatCatalogForPrompt(mcpDisabled);
+        // The breakdown has no conversation, so its channel alone says whether views draw.
+        var mcpCatalog = McpServerCatalog.formatCatalogForPrompt(mcpDisabled, conversation == null
+                ? () -> ChannelOriginTrust.WEB.equals(channelType)
+                : () -> McpViewTools.webChatTurn(conversation.id));
         if (!mcpCatalog.isEmpty()) {
             b.startSection("MCP Servers");
             b.sb.append("\n## MCP Servers\n");

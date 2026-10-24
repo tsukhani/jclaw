@@ -79,6 +79,54 @@ class McpToolDefTest extends UnitTest {
         assertTrue(def.inputSchema().entrySet().isEmpty());
     }
 
+    // ==================== MCP Apps: _meta.ui ====================
+
+    @Test
+    void aViewToolKeepsItsPageAndIsVisibleToModelAndAppByDefault() {
+        var def = McpToolDef.fromJson(parse("""
+                {"name":"search_table","_meta":{"ui":{"resourceUri":"ui://prefab/table.html"},"fastmcp":{"tags":[]}}}"""));
+        assertEquals("ui://prefab/table.html", def.resourceUri());
+        assertEquals(List.of("model", "app"), def.visibility());
+        assertTrue(def.visibleToModel());
+    }
+
+    @Test
+    void theDeprecatedFlatKeyStillNamesThePageAndTheNestedKeyWins() {
+        assertEquals("ui://flat.html", McpToolDef.fromJson(parse("""
+                {"name":"t","_meta":{"ui/resourceUri":"ui://flat.html"}}""")).resourceUri());
+        assertEquals("UI://Upper.html", McpToolDef.fromJson(parse("""
+                {"name":"t","_meta":{"ui":{"resourceUri":"UI://Upper.html"}}}""")).resourceUri(), "the scheme is case-insensitive");
+        assertEquals("ui://nested.html", McpToolDef.fromJson(parse("""
+                {"name":"t","_meta":{"ui":{"resourceUri":"ui://nested.html"},"ui/resourceUri":"ui://flat.html"}}""")).resourceUri());
+    }
+
+    @Test
+    void aPageOutsideTheUiSchemeOrNoMetaLeavesTheToolWithoutAView() {
+        assertNull(McpToolDef.fromJson(parse("""
+                {"name":"t","_meta":{"ui":{"resourceUri":"https://example.com/page.html"}}}""")).resourceUri());
+        assertNull(McpToolDef.fromJson(parse("""
+                {"name":"t","_meta":{"ui":{"resourceUri":7}}}""")).resourceUri());
+        var plain = McpToolDef.fromJson(parse("""
+                {"name":"t","_meta":"oops"}"""));
+        assertNull(plain.resourceUri());
+        assertEquals(List.of("model", "app"), plain.visibility());
+    }
+
+    @Test
+    void aToolWithoutModelInItsVisibilityIsHiddenFromTheModel() {
+        var appOnly = McpToolDef.fromJson(parse("""
+                {"name":"refresh","_meta":{"ui":{"resourceUri":"ui://t.html","visibility":["app"]}}}"""));
+        assertEquals(List.of("app"), appOnly.visibility());
+        assertFalse(appOnly.visibleToModel());
+        var none = McpToolDef.fromJson(parse("""
+                {"name":"t","_meta":{"ui":{"visibility":[]}}}"""));
+        assertEquals(List.of(), none.visibility(), "an empty list is not the default");
+        assertFalse(none.visibleToModel());
+        var modelOnly = McpToolDef.fromJson(parse("""
+                {"name":"t","_meta":{"ui":{"visibility":["model"]}}}"""));
+        assertTrue(modelOnly.visibleToModel());
+    }
+
     // ==================== parametersAsMap — primitives ====================
 
     @Test

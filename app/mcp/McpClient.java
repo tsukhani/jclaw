@@ -105,6 +105,7 @@ public class McpClient implements AutoCloseable {
     private static final String CATEGORY_RESOURCES = "MCP_RESOURCES";
     private static final String META = "_meta";
     private static final String META_PREFIX = "io.modelcontextprotocol/";
+    private static final String UI_EXTENSION = META_PREFIX + "ui";
     private static final String DISCOVER = "server/discover";
     private static final String TOOLS_CALL = "tools/call";
     private static final String TOOLS_LIST = "tools/list";
@@ -568,9 +569,22 @@ public class McpClient implements AutoCloseable {
     private JsonObject initializeParams() {
         var params = new JsonObject();
         params.addProperty("protocolVersion", PROTOCOL_VERSION);
-        params.add("capabilities", new JsonObject());
+        params.add("capabilities", clientCapabilities());
         params.add("clientInfo", clientInfo());
         return params;
+    }
+
+    /** MCP Apps (SEP-1865): JClaw's web chat renders a tool's {@code ui://} page. */
+    private static JsonObject clientCapabilities() {
+        var mimeTypes = new JsonArray();
+        mimeTypes.add(McpResources.APP_MIME_TYPE);
+        var ui = new JsonObject();
+        ui.add("mimeTypes", mimeTypes);
+        var extensions = new JsonObject();
+        extensions.add(UI_EXTENSION, ui);
+        var capabilities = new JsonObject();
+        capabilities.add("extensions", extensions);
+        return capabilities;
     }
 
     private JsonObject clientInfo() {
@@ -1084,7 +1098,7 @@ public class McpClient implements AutoCloseable {
         var out = params.deepCopy();
         var meta = out.get(META) instanceof JsonObject existing ? existing : new JsonObject();
         meta.addProperty(META_PREFIX + "protocolVersion", MODERN_PROTOCOL_VERSION);
-        meta.add(META_PREFIX + "clientCapabilities", new JsonObject());
+        meta.add(META_PREFIX + "clientCapabilities", clientCapabilities());
         meta.add(META_PREFIX + "clientInfo", clientInfo());
         out.add(META, meta);
         return out;
@@ -1162,7 +1176,7 @@ public class McpClient implements AutoCloseable {
     }
 
     private void handleServerRequest(JsonRpc.Request r) {
-        // We declared no client capabilities; reply method-not-found per JSON-RPC spec.
+        // We declared no capability a server calls back on; reply method-not-found per JSON-RPC spec.
         try {
             transport.send(new JsonRpc.Response(r.id(), null,
                     new JsonRpc.Error(-32601, "Method not found: " + r.method())));

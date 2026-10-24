@@ -92,6 +92,16 @@ public class McpServer extends TimestampedModel {
     @ColumnDefault("false")
     public boolean requiresApproval = false;
 
+    /**
+     * Offer this server's tools that link an MCP Apps view on every turn. Off, they reach the model only
+     * on a web-chat turn of a top-level conversation, the one place a view draws; on, everywhere, for a
+     * server such as n8n-mcp whose view tools also return data.
+     */
+    @Column(name = "offer_view_tools_everywhere", nullable = false)
+    // True for the rows the ALTER backfills, so no channel loses a tool at the upgrade; a new server starts off.
+    @ColumnDefault("true")
+    public boolean offerViewToolsEverywhere = false;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 10)
     public Transport transport;

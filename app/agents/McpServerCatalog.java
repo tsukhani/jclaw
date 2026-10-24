@@ -2,6 +2,7 @@ package agents;
 
 import mcp.McpConnectionManager;
 import mcp.McpServerTool;
+import mcp.McpViewTools;
 import models.Agent;
 import models.McpServer;
 import org.jspecify.annotations.Nullable;
@@ -12,6 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 /**
  * JCLAW-281: builds the {@code ## MCP Servers} system-prompt manifest — the
@@ -47,6 +49,16 @@ public final class McpServerCatalog {
      * function-calling defs to avoid a redundant DB query per turn.
      */
     public static String formatCatalogForPrompt(Set<String> disabledForAgent) {
+        return formatCatalogForPrompt(disabledForAgent, () -> false);
+    }
+
+    /**
+     * {@link #formatCatalogForPrompt(Set)} for a turn that is ({@code webChatTurn}) or is not a web-chat
+     * turn of a top-level conversation, where a server's tools that link a view are counted. The turn is
+     * asked once, and only when a server has view tools.
+     */
+    public static String formatCatalogForPrompt(Set<String> disabledForAgent, BooleanSupplier webChatTurn) {
+        var once = McpViewTools.once(webChatTurn);
         // Walk the registry directly. Each connected MCP server publishes
         // exactly one server-level handle (isServerLevel() == true) via
         // McpConnectionManager.republishTools, so iterating the registry
@@ -71,7 +83,7 @@ public final class McpServerCatalog {
         for (var entry : serverHandles.entrySet()) {
             var serverName = entry.getKey();
             var handle = entry.getValue();
-            var actionCount = countActions(serverName);
+            var actionCount = countActions(serverName, once);
             sb.append("| `").append(handle.name()).append("` | ")
               .append(actionCountLabel(actionCount)).append(" | ")
               .append(describeServer(serverRows.get(serverName), handle))
@@ -91,9 +103,9 @@ public final class McpServerCatalog {
 
     /** {@code <0} means "not yet enumerated"; the server is connected but
      *  the registry doesn't have a tools-list response cached yet. */
-    private static int countActions(String serverName) {
+    private static int countActions(String serverName, BooleanSupplier webChatTurn) {
         var defs = McpConnectionManager.toolsForTurn(serverName);
-        return defs == null ? -1 : defs.size();
+        return defs == null ? -1 : McpViewTools.offered(serverName, defs, webChatTurn).size();
     }
 
     private static String actionCountLabel(int count) {

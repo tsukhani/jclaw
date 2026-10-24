@@ -6,6 +6,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -21,11 +22,24 @@ import java.util.Map;
  *                    guarantees this is always an object with
  *                    {@code type: "object"} (or empty for parameter-less
  *                    tools).
+ * @param resourceUri the {@code ui://} page an MCP Apps host renders the result in, or null
+ * @param visibility  who may call the tool, {@code "model"} and {@code "app"}; MCP Apps' default is both
  */
-public record McpToolDef(String name, String description, JsonObject inputSchema) {
+public record McpToolDef(String name, String description, JsonObject inputSchema,
+                         @Nullable String resourceUri, List<String> visibility) {
 
     private static final String FIELD_DESCRIPTION = "description";
     private static final String FIELD_INPUT_SCHEMA = "inputSchema";
+    public static final List<String> DEFAULT_VISIBILITY = List.of("model", "app");
+
+    public McpToolDef {
+        visibility = List.copyOf(visibility);
+    }
+
+    /** A tool with no view, visible to the model and the app alike. */
+    public McpToolDef(String name, String description, JsonObject inputSchema) {
+        this(name, description, inputSchema, null, DEFAULT_VISIBILITY);
+    }
 
     public static McpToolDef fromJson(JsonObject obj) {
         var name = obj.get("name").getAsString();
@@ -33,7 +47,33 @@ public record McpToolDef(String name, String description, JsonObject inputSchema
                 ? obj.get(FIELD_DESCRIPTION).getAsString() : "";
         JsonObject schema = obj.has(FIELD_INPUT_SCHEMA) && obj.get(FIELD_INPUT_SCHEMA).isJsonObject()
                 ? obj.getAsJsonObject(FIELD_INPUT_SCHEMA) : new JsonObject();
-        return new McpToolDef(name, description, schema);
+        var meta = obj.get("_meta") instanceof JsonObject m ? m : new JsonObject();
+        var ui = meta.get("ui") instanceof JsonObject u ? u : new JsonObject();
+        var resourceUri = pageUri(ui.get("resourceUri"));
+        if (resourceUri == null) resourceUri = pageUri(meta.get("ui/resourceUri"));
+        return new McpToolDef(name, description, schema, resourceUri, visibility(ui.get("visibility")));
+    }
+
+    /** Whether the model may list, describe and call this tool. */
+    public boolean visibleToModel() {
+        return visibility.contains("model");
+    }
+
+    /** A page URI must use {@code ui://}; any other value leaves the tool without a view. */
+    private static @Nullable String pageUri(@Nullable JsonElement el) {
+        if (el == null || !el.isJsonPrimitive()) return null;
+        var uri = el.getAsString();
+        return McpResources.isUiUri(uri) ? uri : null;
+    }
+
+    /** The default applies only when the field is absent; an empty list hides the tool from both. */
+    private static List<String> visibility(@Nullable JsonElement el) {
+        if (el == null || !el.isJsonArray()) return DEFAULT_VISIBILITY;
+        var out = new ArrayList<String>();
+        for (var item : el.getAsJsonArray()) {
+            if (item.isJsonPrimitive()) out.add(item.getAsString());
+        }
+        return out;
     }
 
     public Map<String, Object> parametersAsMap() {

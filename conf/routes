@@ -161,6 +161,7 @@ DELETE  /api/memories/{memoryId}                ApiMemoryController.delete
 # MCP Servers API
 GET     /api/mcp-servers                        ApiMcpServersController.list
 POST    /api/mcp-servers                        ApiMcpServersController.create
+GET     /api/mcp-servers/view                   ApiMcpServersController.view
 GET     /api/mcp-servers/{id}                   ApiMcpServersController.get
 PUT     /api/mcp-servers/{id}                   ApiMcpServersController.update
 DELETE  /api/mcp-servers/{id}                   ApiMcpServersController.delete

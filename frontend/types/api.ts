@@ -240,6 +240,20 @@ export interface ToolCallResultStructured {
   results?: ToolCallResultChip[]
   /** JCLAW-1272: the background job a {@code web_scrape} call with {@code background: true} queued. */
   scrapeJob?: ScrapeJobRef | null
+  /** A call to an MCP tool with a view (MCP Apps), which the web chat draws in a frame. */
+  mcpApp?: McpAppCall | null
+}
+
+/**
+ * One MCP Apps tool call as its result carries it: the server, the tool, the {@code ui://} page that
+ * draws it, and the arguments and whole {@code CallToolResult} the page receives.
+ */
+export interface McpAppCall {
+  server: string
+  tool: string
+  resourceUri: string
+  arguments: Record<string, unknown>
+  result: Record<string, unknown>
 }
 
 /** The job a background {@code web_scrape} call started, as its tool result names it. */
@@ -1071,6 +1085,8 @@ export interface McpServer {
   id: number
   name: string
   enabled: boolean
+  /** Offer the server's tools that link a view on every turn, not only a top-level web-chat one. */
+  offerViewToolsEverywhere?: boolean
   transport: 'STDIO' | 'HTTP'
   /** STDIO only: subprocess executable. Empty for HTTP rows. */
   command: string | null

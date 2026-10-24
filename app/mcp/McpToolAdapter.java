@@ -7,6 +7,7 @@ import com.google.gson.JsonParser;
 import models.Agent;
 import models.EventLog;
 import models.McpServer;
+import services.EventLogger;
 import services.Tx;
 import utils.ApiResponses;
 import utils.AppClock;
@@ -15,6 +16,7 @@ import utils.ToolErrorTemplates;
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 /**
  * Wraps one MCP tool as a {@link ToolRegistry.Tool} so the agent loop sees
@@ -36,6 +38,7 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
     private final String serverName;
     private final McpToolDef def;
     private final ToolInvoker invoker;
+    private final BooleanSupplier webChatTurn;
 
     /** Functional indirection so the adapter doesn't need a back-pointer to
      *  the connection manager — the manager supplies a Lambda at registration. */
@@ -46,9 +49,15 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
     }
 
     public McpToolAdapter(String serverName, McpToolDef def, ToolInvoker invoker) {
+        this(serverName, def, invoker, McpViewTools::webChatDispatch);
+    }
+
+    /** {@code webChatTurn} says whether the dispatching turn draws views: a top-level web-chat turn. */
+    public McpToolAdapter(String serverName, McpToolDef def, ToolInvoker invoker, BooleanSupplier webChatTurn) {
         this.serverName = serverName;
         this.def = def;
         this.invoker = invoker;
+        this.webChatTurn = webChatTurn;
     }
 
     @Override
@@ -68,13 +77,24 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
 
     @Override
     public String execute(String argsJson, Agent agent) {
+        return executeRich(argsJson, agent).text();
+    }
+
+    /** A tool with a {@code ui://} page also returns the call for the web chat's view to draw. */
+    @Override
+    public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent) {
+        return executeRich(argsJson, agent, this::webChatTurn);
+    }
+
+    /** {@link #executeRich(String, Agent)} with the turn already judged by the caller, asked only for a view tool. */
+    public ToolRegistry.ToolResult executeRich(String argsJson, Agent agent, BooleanSupplier webChatTurn) {
         JsonObject args;
         try {
             var parsed = JsonParser.parseString(argsJson);
             args = parsed.isJsonObject() ? parsed.getAsJsonObject() : new JsonObject();
         } catch (RuntimeException e) {
-            return ToolErrorTemplates.render(
-                    ToolErrorTemplates.mcpBadArguments(serverName, def.name(), ApiResponses.messageOf(e)));
+            return ToolRegistry.ToolResult.text(ToolErrorTemplates.render(
+                    ToolErrorTemplates.mcpBadArguments(serverName, def.name(), ApiResponses.messageOf(e))));
         }
         // JCLAW-32: gate + audit in one atomic Tx. The check (isAllowed) and
         // the audit log (MCP_TOOL_INVOKE) MUST commit together so an attacker
@@ -92,30 +112,65 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
                 return grant;
             });
         } catch (RuntimeException e) {
-            return ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(
-                    serverName, def.name(), "allowlist check failed: " + ApiResponses.messageOf(e)));
+            return ToolRegistry.ToolResult.text(ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(
+                    serverName, def.name(), "allowlist check failed: " + ApiResponses.messageOf(e))));
         }
         if (!allowed) {
-            return ToolErrorTemplates.render(ToolErrorTemplates.mcpNotAllowed(
-                    serverName, def.name(), agent != null ? agent.name : "<unknown>"));
+            return ToolRegistry.ToolResult.text(ToolErrorTemplates.render(ToolErrorTemplates.mcpNotAllowed(
+                    serverName, def.name(), agent != null ? agent.name : "<unknown>")));
         }
+        CallToolResult result;
         try {
-            var result = invoker.invoke(serverName, def.name(), args);
-            if (result.isError()) {
-                return ToolErrorTemplates.render(ToolErrorTemplates.mcpToolReportedError(
-                        serverName, def.name(), result.content()));
-            }
-            return result.content();
+            result = invoker.invoke(serverName, def.name(), args);
         } catch (IOException e) {
             // Transport: the server never answered. Kept apart from McpException, which the
             // RuntimeException catch below takes, because the remedies differ — reconnect the
             // server versus read what it replied.
-            return ToolErrorTemplates.render(ToolErrorTemplates.mcpConnectionFailed(
-                    serverName, def.name(), ApiResponses.messageOf(e)));
+            return ToolRegistry.ToolResult.text(ToolErrorTemplates.render(ToolErrorTemplates.mcpConnectionFailed(
+                    serverName, def.name(), ApiResponses.messageOf(e))));
         } catch (RuntimeException e) {
-            return ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(
-                    serverName, def.name(), ApiResponses.messageOf(e)));
+            return ToolRegistry.ToolResult.text(ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(
+                    serverName, def.name(), ApiResponses.messageOf(e))));
         }
+        var text = result.isError()
+                ? ToolErrorTemplates.render(ToolErrorTemplates.mcpToolReportedError(
+                        serverName, def.name(), result.content()))
+                : result.content();
+        var resourceUri = def.resourceUri();
+        return new ToolRegistry.ToolResult(text, resourceUri != null && webChatTurn.getAsBoolean()
+                ? viewPayload(resourceUri, args, result) : null);
+    }
+
+    /** The call already ran, so a failure to tell where it ran costs the view, never the result. */
+    private boolean webChatTurn() {
+        try {
+            return webChatTurn.getAsBoolean();
+        } catch (RuntimeException e) {
+            EventLogger.warn("MCP_APPS", "MCP server '%s' tool '%s' returned no view: %s"
+                    .formatted(serverName, def.name(), ApiResponses.messageOf(e)));
+            return false;
+        }
+    }
+
+    /** The tool this adapter calls. */
+    public McpToolDef def() {
+        return def;
+    }
+
+    /**
+     * {@code {"mcpApp": {server, tool, resourceUri, arguments, result}}}, persisted so a reloaded chat draws it again;
+     * built on a top-level web-chat turn only, the one place a view draws.
+     */
+    private String viewPayload(String resourceUri, JsonObject args, CallToolResult result) {
+        var app = new JsonObject();
+        app.addProperty("server", serverName);
+        app.addProperty("tool", def.name());
+        app.addProperty("resourceUri", resourceUri);
+        app.add("arguments", args);
+        app.add("result", result.forView());
+        var payload = new JsonObject();
+        payload.add("mcpApp", app);
+        return payload.toString();
     }
 
     /** Inline audit-log row save (bypasses {@link services.EventLogger}'s

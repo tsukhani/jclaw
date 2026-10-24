@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ChevronDownIcon, GlobeAltIcon, WrenchScrewdriverIcon } from '@heroicons/vue/24/outline'
-import type { ToolCall, ToolCallResultChip } from '~/types/api'
+import McpAppFrame from '~/components/chat/McpAppFrame.vue'
+import type { McpAppCall, ToolCall, ToolCallResultChip } from '~/types/api'
 
 // JCLAW-170: the tool-calls accordion for an assistant turn. Card-level collapse
 // is parent-owned (set on reload / stream-completion), so `collapsed` is a value
@@ -9,7 +10,8 @@ import type { ToolCall, ToolCallResultChip } from '~/types/api'
 // emits up too. The parent passes a fresh `[...msg.toolCalls]` each render so this
 // card re-renders in lockstep with the (shallowRef + triggerRef) message store —
 // matching the behaviour of the old inline block.
-defineProps<{ toolCalls: ToolCall[], collapsed: boolean }>()
+// `mcpApps` draws MCP Apps views; only the web chat's own turns pass it, so subagent transcripts keep the text.
+const props = defineProps<{ toolCalls: ToolCall[], collapsed: boolean, mcpApps?: boolean }>()
 const emit = defineEmits<{
   (e: 'toggle-collapse'): void
   (e: 'toggle-call', tc: ToolCall): void
@@ -97,6 +99,26 @@ function readableResultText(text: string): string {
 function toolCallHasExpandableBody(tc: ToolCall): boolean {
   return chipsForToolCall(tc).length > 0 || !!tc.resultText?.trim()
 }
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** A call's view, when its stored result is a whole payload naming a {@code ui://} page on a server. */
+function mcpAppOf(tc: ToolCall): McpAppCall | null {
+  const app = tc.resultStructured?.mcpApp
+  if (!app || typeof app.server !== 'string' || typeof app.tool !== 'string' || typeof app.resourceUri !== 'string'
+    || !/^ui:\/\//i.test(app.resourceUri) || !isObject(app.arguments) || !isObject(app.result)) return null
+  return app
+}
+
+// Outside the collapsible list, so a reloaded turn, whose card starts collapsed, still shows its views.
+const appCalls = computed(() => props.mcpApps
+  ? props.toolCalls.flatMap((tc) => {
+      const call = mcpAppOf(tc)
+      return call ? [{ id: tc.id, call }] : []
+    })
+  : [])
 
 function chipTitle(chip: ToolCallResultChip): string {
   if (chip.title && chip.title.trim()) return chip.title.trim()
@@ -211,5 +233,10 @@ function onFaviconError(ev: Event) {
         >{{ truncatedToolResultText(tc) }}</pre>
       </div>
     </div>
+    <McpAppFrame
+      v-for="app in appCalls"
+      :key="app.id"
+      :call="app.call"
+    />
   </div>
 </template>

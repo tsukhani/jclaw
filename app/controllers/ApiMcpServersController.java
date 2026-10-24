@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.parameters.RequestBody;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import mcp.McpAppPage;
 import mcp.McpConnectionManager;
 import models.McpServer;
 import org.jspecify.annotations.Nullable;
@@ -20,8 +21,10 @@ import utils.JsonArgs;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static controllers.AgentAccess.Level.OPEN;
+import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
@@ -52,6 +55,7 @@ public class ApiMcpServersController extends Controller {
     private static final Gson gson = GSON;
 
     public record McpServerRequest(String name, Boolean enabled, Boolean requiresApproval,
+                                   Boolean offerViewToolsEverywhere,
                                    String transport, String command, List<String> args,
                                    Map<String, String> env, String url,
                                    Map<String, String> headers, String protocol) {}
@@ -60,6 +64,7 @@ public class ApiMcpServersController extends Controller {
     private static final String KEY_ENABLED = "enabled";
     private static final String KEY_TRANSPORT = "transport";
     private static final String KEY_REQUIRES_APPROVAL = "requiresApproval";
+    private static final String KEY_VIEW_TOOLS_EVERYWHERE = "offerViewToolsEverywhere";
     private static final String KEY_PROTOCOL = "protocol";
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.View.class))))
@@ -83,7 +88,7 @@ public class ApiMcpServersController extends Controller {
     @Operation(summary = "Add an MCP server (STDIO or HTTP)")
     @AgentAccess(value = OPEN,
             reason = "HTTP transports are agent-reachable and DangerousActionGate bounds the verb; "
-                    + "a STDIO command is main-only (JCLAW-1270)")
+                    + "a STDIO command is main-only (JCLAW-1270); offerViewToolsEverywhere is operator-only")
     public static void create() {
         var body = JsonBodyReader.readJsonBody();
         if (body == null) {
@@ -108,6 +113,9 @@ public class ApiMcpServersController extends Controller {
         row.requiresApproval = body.has(KEY_REQUIRES_APPROVAL)
                 && !body.get(KEY_REQUIRES_APPROVAL).isJsonNull()
                 && body.get(KEY_REQUIRES_APPROVAL).getAsBoolean();
+        var viewToolsEverywhere = readViewToolsEverywhere(body);
+        requireOperatorForViewToolsChange(false, viewToolsEverywhere);
+        row.offerViewToolsEverywhere = Boolean.TRUE.equals(viewToolsEverywhere);
         row.transport = transport;
         var protocol = readProtocol(body);
         if (protocol != null) row.protocol = protocol;
@@ -129,7 +137,7 @@ public class ApiMcpServersController extends Controller {
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServerRequest.class)))
     @Operation(summary = "Update an MCP server by id; it reconnects automatically")
     @AgentAccess(value = OPEN,
-            reason = "same seam as create; a STDIO command is main-only (JCLAW-1270)")
+            reason = "same seam as create; a STDIO command is main-only (JCLAW-1270); offerViewToolsEverywhere is operator-only")
     public static void update(Long id) {
         var row = requireServer(id);
         var body = JsonBodyReader.readJsonBody();
@@ -152,6 +160,9 @@ public class ApiMcpServersController extends Controller {
         if (body.has(KEY_REQUIRES_APPROVAL) && !body.get(KEY_REQUIRES_APPROVAL).isJsonNull()) {
             row.requiresApproval = body.get(KEY_REQUIRES_APPROVAL).getAsBoolean();
         }
+        var viewToolsEverywhere = readViewToolsEverywhere(body);
+        requireOperatorForViewToolsChange(row.offerViewToolsEverywhere, viewToolsEverywhere);
+        if (viewToolsEverywhere != null) row.offerViewToolsEverywhere = viewToolsEverywhere;
         if (body.has(KEY_TRANSPORT) && !body.get(KEY_TRANSPORT).isJsonNull()) {
             row.transport = readTransport(body);
         }
@@ -229,6 +240,48 @@ public class ApiMcpServersController extends Controller {
         renderJSON(gson.toJson(result));
     }
 
+    /**
+     * GET /api/mcp-servers/view — an MCP Apps view page, read from its server for the web chat's frame.
+     * A page that cannot be served gets a short plain body under a sandbox, which the frame shows as
+     * a view that never initializes.
+     *
+     * @param server the MCP server's name, as a tool call's {@code mcpApp} payload names it
+     * @param uri    the page's {@code ui://} URI
+     */
+    @ApiResponse(responseCode = "200", content = @Content(mediaType = "text/html",
+            schema = @Schema(implementation = String.class)))
+    @Operation(summary = "Serve an MCP Apps view page (a ui:// resource) for the web chat, under its own sandboxing CSP")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "renders server-supplied HTML for the operator's browser")
+    public static void view(@Nullable String server, @Nullable String uri) {
+        response.setHeader("X-Frame-Options", "SAMEORIGIN");
+        response.setHeader("Cache-Control", "no-store");
+        response.setHeader("Referrer-Policy", "no-referrer");
+        // Opened as a tab, the page would sit under JClaw's own address.
+        var dest = request.headers.get("sec-fetch-dest");
+        if (dest == null || !"iframe".equalsIgnoreCase(dest.value().strip())) {
+            renderUnavailable(403, "A view page opens only inside the chat.");
+        }
+        McpAppPage.Page page;
+        try {
+            page = McpAppPage.load(server == null ? "" : server, uri == null ? "" : uri,
+                    new McpAppPage.Host(request.domain));
+        } catch (McpAppPage.Unavailable e) {
+            renderUnavailable(e.status(), Objects.requireNonNullElse(e.getMessage(), "The view could not be loaded."));
+            throw ApiResponses.unreachable();
+        }
+        response.setHeader("Content-Security-Policy", page.contentSecurityPolicy());
+        response.contentType = "text/html; charset=utf-8";
+        renderText(page.html());
+    }
+
+    /** One plain line under a sandbox, which a frame shows as a view that never initializes. */
+    private static void renderUnavailable(int status, String message) {
+        response.status = status;
+        response.setHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+        response.contentType = "text/plain; charset=utf-8";
+        renderText(message);
+    }
+
     // ==================== helpers ====================
 
     @SuppressWarnings("java:S2259")
@@ -267,6 +320,25 @@ public class ApiMcpServersController extends Controller {
             ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Unknown transport '%s' (expected STDIO or HTTP)".formatted(raw));
             throw ApiResponses.unreachable();
         }
+    }
+
+    /** Which channels see a server's view tools is the operator's to change; an unchanged echo is no change. */
+    private static void requireOperatorForViewToolsChange(boolean current, @Nullable Boolean requested) {
+        if (requested == null || requested == current) return;
+        if (RequestPrincipal.isAgentOriginated()) {
+            ApiResponses.error(403, ApiResponses.OPERATOR_ONLY,
+                    "offerViewToolsEverywhere is operator-only; an agent cannot change which channels see a server's view tools.");
+        }
+    }
+
+    /** The body's view-tools setting, or null when it carries none; anything but a JSON boolean is a 400. */
+    private static @Nullable Boolean readViewToolsEverywhere(JsonObject body) {
+        var el = body.get(KEY_VIEW_TOOLS_EVERYWHERE);
+        if (el == null || el.isJsonNull()) return null;
+        if (!el.isJsonPrimitive() || !el.getAsJsonPrimitive().isBoolean()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, KEY_VIEW_TOOLS_EVERYWHERE + " must be true or false");
+        }
+        return el.getAsBoolean();
     }
 
     /** The body's protocol setting, or null when it carries none. */

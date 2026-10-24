@@ -1,14 +1,29 @@
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import mcp.McpConnectionManager;
+import mcp.jsonrpc.JsonRpc;
+import mockwebserver3.Dispatcher;
+import mockwebserver3.MockResponse;
+import mockwebserver3.MockWebServer;
+import mockwebserver3.RecordedRequest;
 import models.AgentSkillAllowedTool;
+import models.McpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import play.mvc.Http;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import utils.CircuitBreakers;
+
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Functional HTTP tests for {@code ApiMcpServersController} (JCLAW-33).
@@ -350,6 +365,110 @@ class ApiMcpServersControllerTest extends FunctionalTest {
                 "a PUT that omits requiresApproval must not reset it: " + getContent(put));
     }
 
+    // ==================== Offer view tools on every channel ====================
+
+    private static boolean viewToolsEverywhere(com.google.gson.JsonElement view) {
+        return view.getAsJsonObject().get("offerViewToolsEverywhere").getAsBoolean();
+    }
+
+    @Test
+    void theViewToolsSettingDefaultsOffAndRoundTripsThroughTheApiAndTheColumn() {
+        login();
+        var off = created("""
+                {"name":"plainviews","enabled":false,"transport":"HTTP","url":"http://127.0.0.1:1/mcp"}
+                """);
+        assertFalse(viewToolsEverywhere(off), off.toString());
+        var on = created("""
+                {"name":"n8n","enabled":false,"offerViewToolsEverywhere":true,"transport":"HTTP","url":"http://127.0.0.1:1/mcp"}
+                """);
+        assertTrue(viewToolsEverywhere(on), on.toString());
+        var id = on.get("id").getAsLong();
+        assertTrue(viewToolsEverywhere(JsonParser.parseString(getContent(GET("/api/mcp-servers/" + id)))));
+        assertTrue(commitInFreshTx(() -> McpServer.<McpServer>findById(id).offerViewToolsEverywhere), "the column holds it");
+
+        var listed = new java.util.HashMap<String, Boolean>();
+        JsonParser.parseString(getContent(GET("/api/mcp-servers"))).getAsJsonArray().forEach(row ->
+                listed.put(row.getAsJsonObject().get("name").getAsString(), viewToolsEverywhere(row)));
+        assertEquals(Boolean.TRUE, listed.get("n8n"));
+        assertEquals(Boolean.FALSE, listed.get("plainviews"));
+
+        var renamed = PUT("/api/mcp-servers/" + id, "application/json", "{\"name\":\"n8n-mcp\"}");
+        assertIsOk(renamed);
+        assertTrue(viewToolsEverywhere(JsonParser.parseString(getContent(renamed))), "a PUT that omits it keeps it");
+        var cleared = PUT("/api/mcp-servers/" + id, "application/json", "{\"offerViewToolsEverywhere\":false}");
+        assertIsOk(cleared);
+        assertFalse(viewToolsEverywhere(JsonParser.parseString(getContent(cleared))));
+        awaitCommitted(() -> !McpServer.<McpServer>findById(id).offerViewToolsEverywhere, "the column never cleared");
+    }
+
+    @Test
+    void savingTheSettingReachesTheLiveConnection() throws Exception {
+        login();
+        withViewServer(server -> {
+            assertFalse(McpConnectionManager.offersViewToolsEverywhere(server));
+            var id = commitInFreshTx(() -> McpServer.findByName(server).id);
+            assertIsOk(PUT("/api/mcp-servers/" + id, "application/json", "{\"offerViewToolsEverywhere\":true}"));
+            assertTrue(McpConnectionManager.offersViewToolsEverywhere(server));
+        });
+    }
+
+    @Test
+    void onlyTheOperatorChangesWhichChannelsSeeAServersViewTools() {
+        login();
+        var id = createHttpServer("agentflag", "http://127.0.0.1:1/mcp", false);
+        clearCookies();
+        var bearer = AuthFixture.seedBearerToken();
+        java.util.function.Supplier<Http.Request> agent = () -> {
+            var request = newRequest();
+            request.headers.put("authorization", new Http.Header("authorization", "Bearer " + bearer));
+            return request;
+        };
+        var refused = "offerViewToolsEverywhere is operator-only; an agent cannot change which channels see a server's view tools.";
+        var update = PUT(agent.get(), "/api/mcp-servers/" + id, "application/json", "{\"offerViewToolsEverywhere\":true}");
+        assertEquals(403, update.status.intValue());
+        assertEquals(refused, JsonParser.parseString(getContent(update)).getAsJsonObject().get("message").getAsString());
+        var create = POST(agent.get(), "/api/mcp-servers", "application/json", "{\"name\":\"agentmade\",\"enabled\":false,"
+                + "\"offerViewToolsEverywhere\":true,\"transport\":\"HTTP\",\"url\":\"http://127.0.0.1:1/mcp\"}");
+        assertEquals(403, create.status.intValue());
+        assertIsOk(PUT(agent.get(), "/api/mcp-servers/" + id, "application/json", "{\"offerViewToolsEverywhere\":false}"));
+        clearCookies();
+        assertFalse(commitInFreshTx(() -> McpServer.<McpServer>findById(Long.valueOf(id)).offerViewToolsEverywhere));
+        assertNull(commitInFreshTx(() -> McpServer.findByName("agentmade")));
+
+        login();
+        assertIsOk(PUT("/api/mcp-servers/" + id, "application/json", "{\"offerViewToolsEverywhere\":true}"));
+        awaitCommitted(() -> McpServer.<McpServer>findById(Long.valueOf(id)).offerViewToolsEverywhere, "the operator's change never saved");
+    }
+
+    @Test
+    void aViewToolsSettingThatIsNotABooleanIsRefused() {
+        login();
+        var refused = "offerViewToolsEverywhere must be true or false";
+        for (var value : List.of("\"yes\"", "1", "{}", "[]")) {
+            var create = POST("/api/mcp-servers", "application/json", "{\"name\":\"bad\",\"enabled\":false,"
+                    + "\"offerViewToolsEverywhere\":" + value + ",\"transport\":\"HTTP\",\"url\":\"http://127.0.0.1:1/mcp\"}");
+            assertEquals(400, create.status.intValue(), value);
+            assertEquals(refused, JsonParser.parseString(getContent(create)).getAsJsonObject().get("message").getAsString());
+        }
+        var id = createHttpServer("viewflag", "http://127.0.0.1:1/mcp", false);
+        var update = PUT("/api/mcp-servers/" + id, "application/json", "{\"offerViewToolsEverywhere\":\"true\"}");
+        assertEquals(400, update.status.intValue());
+        assertEquals(refused, JsonParser.parseString(getContent(update)).getAsJsonObject().get("message").getAsString());
+    }
+
+    @Test
+    void aServerThatExistedAtTheUpgradeReadsOnAndANewOneOff() {
+        // The column's DDL default is what the ALTER backfills onto every row already in mcp_server.
+        var columnDefault = commitInFreshTx(() -> String.valueOf(play.db.jpa.JPA.em().createNativeQuery(
+                "SELECT COLUMN_DEFAULT FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'MCP_SERVER'"
+                        + " AND COLUMN_NAME = 'OFFER_VIEW_TOOLS_EVERYWHERE'").getSingleResult()));
+        assertEquals("TRUE", columnDefault);
+        login();
+        assertFalse(viewToolsEverywhere(created("""
+                {"name":"added-later","enabled":false,"transport":"HTTP","url":"http://127.0.0.1:1/mcp"}
+                """)));
+    }
+
     // ==================== JCLAW-1443: protocol setting ====================
 
     @Test
@@ -419,6 +538,267 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         assertTrue(content.contains("\"success\":false"),
                 "unreachable server must report success=false: " + content);
         assertTrue(content.contains("\"message\""));
+    }
+
+    // ==================== MCP Apps view pages ====================
+
+    private static final String PAGE = "<!doctype html><html><body><div id=\"root\"></div></body></html>";
+    private static final String HOST_DIRECTIVES =
+            "; object-src 'none'; form-action 'none'; frame-ancestors 'self'; sandbox allow-scripts";
+
+    @FunctionalInterface
+    private interface ViewCheck {
+        void run(String server) throws Exception;
+    }
+
+    /** A 2026-07-28 server with view pages; {@code check} runs against it while it is connected. */
+    private static void withViewServer(ViewCheck check) throws Exception {
+        withViewServer(false, check);
+    }
+
+    /** As {@link #withViewServer(ViewCheck)}, with {@code resources/list} failing when {@code listingFails}. */
+    private static void withViewServer(boolean listingFails, ViewCheck check) throws Exception {
+        ToolRegistrySync.canonicalForTest();
+        var name = "views-" + UUID.randomUUID().toString().substring(0, 8);
+        try (var http = new MockWebServer()) {
+            http.setDispatcher(new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    if (!(JsonRpc.decode(request.getBody().utf8()) instanceof JsonRpc.Request r)) {
+                        return new MockResponse.Builder().code(202).build();
+                    }
+                    return switch (r.method()) {
+                        case "server/discover" -> rpc(r.id(),
+                                "{\"supportedVersions\":[\"2026-07-28\"],\"capabilities\":{\"tools\":{},\"resources\":{}}}");
+                        case "tools/list" -> rpc(r.id(), "{\"tools\":[]}");
+                        case "resources/list" -> listingFails ? rpcError(r.id(), -32603) : rpc(r.id(), "{\"resources\":["
+                                + "{\"uri\":\"ui://listed.html\",\"mimeType\":\"text/html;profile=mcp-app\","
+                                + "\"_meta\":{\"ui\":{\"csp\":{\"connectDomains\":[\"https://api.example.com\"]}}}},"
+                                + "{\"uri\":\"ui://nocsp.html\",\"mimeType\":\"text/html;profile=mcp-app\","
+                                + "\"_meta\":{\"ui\":{\"csp\":{\"frameDomains\":[\"https://www.youtube.com\"]}}}}]}");
+                        case "resources/templates/list" -> rpc(r.id(), "{\"resourceTemplates\":[]}");
+                        case "resources/read" -> read(r.id(), ((JsonObject) Objects.requireNonNull(r.params())).get("uri").getAsString());
+                        default -> rpc(r.id(), "{}");
+                    };
+                }
+            });
+            http.start();
+            var cfg = new JsonObject();
+            cfg.addProperty("url", http.url("/mcp").toString());
+            var row = commitInFreshTx(() -> {
+                var srv = new McpServer();
+                srv.name = name;
+                srv.enabled = true;
+                srv.transport = McpServer.Transport.HTTP;
+                srv.configJson = cfg.toString();
+                srv.save();
+                return srv;
+            });
+            McpConnectionManager.connect(row);
+            var deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+            while (McpConnectionManager.status(name) != McpServer.Status.CONNECTED) {
+                if (System.nanoTime() > deadline) fail("never connected: " + McpConnectionManager.lastError(name));
+                Thread.sleep(20);
+            }
+            check.run(name);
+        } finally {
+            McpConnectionManager.stop(name);
+            CircuitBreakers.remove("mcp:" + name);
+            ToolRegistrySync.release();
+        }
+    }
+
+    /**
+     * {@code ui://page.html} declares its CSP in the read; {@code ui://listed.html} only in its listing entry;
+     * {@code ui://nocsp.html} declares a {@code _meta.ui} without {@code csp}; {@code ui://bare.html} names no type.
+     */
+    private static MockResponse read(Object id, String uri) {
+        var page = new JsonPrimitive(PAGE);
+        var app = "\"mimeType\":\"text/html;profile=mcp-app\",\"text\":" + page;
+        return switch (uri) {
+            case "ui://page.html" -> rpc(id, "{\"contents\":[{\"uri\":\"ui://page.html\"," + app
+                    + ",\"_meta\":{\"ui\":{\"csp\":{\"resourceDomains\":[\"https://cdn.jsdelivr.net\"]}}}}]}");
+            case "ui://listed.html" -> rpc(id, "{\"contents\":[{\"uri\":\"ui://listed.html\"," + app + "}]}");
+            case "ui://nocsp.html" -> rpc(id, "{\"contents\":[{\"uri\":\"ui://nocsp.html\"," + app
+                    + ",\"_meta\":{\"ui\":{\"prefersBorder\":true}}}]}");
+            case "ui://bare.html" -> rpc(id, "{\"contents\":[{\"uri\":\"ui://bare.html\",\"text\":" + page + "}]}");
+            case "UI://Upper.html" -> rpc(id, "{\"contents\":[{\"uri\":\"UI://Upper.html\"," + app + "}]}");
+            case "ui://plain.html" -> rpc(id, "{\"contents\":[{\"uri\":\"ui://plain.html\",\"mimeType\":\"text/html\",\"text\":"
+                    + page + "}]}");
+            case "ui://broken.html" -> rpcError(id, -32603);
+            case "ui://empty.html" -> rpc(id, "{\"contents\":[{\"uri\":\"ui://empty.html\",\"mimeType\":\"text/html;profile=mcp-app\","
+                    + "\"text\":\" \"}]}");
+            case "ui://reach.html" -> rpc(id, "{\"contents\":[{\"uri\":\"ui://reach.html\"," + app + ",\"_meta\":{\"ui\":{\"csp\":"
+                    + "{\"connectDomains\":[\"http://192.168.1.10:3001\",\"http://localhost:3001\",\"'self'\"]}}}}]}");
+            default -> rpcError(id, -32602);
+        };
+    }
+
+    private static MockResponse rpc(Object id, String result) {
+        return new MockResponse.Builder().code(200).addHeader("Content-Type", "application/json")
+                .body("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":" + result + "}").build();
+    }
+
+    private static MockResponse rpcError(Object id, int code) {
+        return new MockResponse.Builder().code(200).addHeader("Content-Type", "application/json")
+                .body("{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"error\":{\"code\":" + code + ",\"message\":\"no\"}}").build();
+    }
+
+    /** The policy of a page that declares no {@code csp}. */
+    private static final String DEFAULT_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';"
+            + " img-src data:; media-src data:; connect-src 'none'; base-uri 'none'" + HOST_DIRECTIVES;
+
+    /** The page as the chat's frame asks for it. */
+    private Http.Response view(String server, String uri) {
+        return view(server, uri, "iframe");
+    }
+
+    private Http.Response view(String server, String uri, @org.jspecify.annotations.Nullable String dest) {
+        var request = newRequest();
+        if (dest != null) request.headers.put("sec-fetch-dest", new Http.Header("sec-fetch-dest", dest));
+        return GET(request, "/api/mcp-servers/view?server=" + URLEncoder.encode(server, StandardCharsets.UTF_8)
+                + "&uri=" + URLEncoder.encode(uri, StandardCharsets.UTF_8));
+    }
+
+    private static void assertFrameHeaders(Http.Response response) {
+        assertEquals("SAMEORIGIN", response.getHeader("X-Frame-Options"));
+        assertEquals("no-store", response.getHeader("Cache-Control"));
+        assertEquals("no-referrer", response.getHeader("Referrer-Policy"));
+    }
+
+    private void assertUnavailable(Http.Response response, int status, String body) {
+        assertEquals(status, response.status.intValue());
+        assertEquals("text/plain; charset=utf-8", response.contentType);
+        assertEquals("default-src 'none'; sandbox", response.getHeader("Content-Security-Policy"));
+        assertFrameHeaders(response);
+        assertEquals(body, getContent(response));
+    }
+
+    @Test
+    void aViewPageIsServedUnderTheCspItsReadDeclaresAndOnlyJclawMayFrameIt() throws Exception {
+        login();
+        withViewServer(server -> {
+            var response = view(server, "ui://page.html");
+            assertIsOk(response);
+            assertEquals("text/html; charset=utf-8", response.contentType);
+            var cdn = " https://cdn.jsdelivr.net";
+            assertEquals("default-src 'none'; script-src 'unsafe-inline'" + cdn + "; style-src 'unsafe-inline'" + cdn
+                            + "; img-src data:" + cdn + "; font-src" + cdn + "; media-src data:" + cdn
+                            + "; connect-src 'none'; frame-src 'none'; base-uri 'none'" + HOST_DIRECTIVES,
+                    response.getHeader("Content-Security-Policy"));
+            assertFrameHeaders(response);
+            assertEquals(PAGE, getContent(response));
+        });
+    }
+
+    @Test
+    void aPageWhoseReadCarriesNoUiMetaTakesItFromItsListingEntry() throws Exception {
+        login();
+        withViewServer(server -> {
+            var response = view(server, "ui://listed.html");
+            assertIsOk(response);
+            assertEquals("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;"
+                            + " font-src 'none'; media-src data:; connect-src https://api.example.com; frame-src 'none';"
+                            + " base-uri 'none'" + HOST_DIRECTIVES,
+                    response.getHeader("Content-Security-Policy"));
+            assertEquals(PAGE, getContent(response));
+        });
+    }
+
+    @Test
+    void aReadUiMetaWithoutCspTakesTheListingsCsp() throws Exception {
+        login();
+        withViewServer(server -> {
+            var response = view(server, "ui://nocsp.html");
+            assertIsOk(response);
+            assertEquals("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;"
+                            + " font-src 'none'; media-src data:; connect-src 'none'; frame-src https://www.youtube.com;"
+                            + " base-uri 'none'" + HOST_DIRECTIVES,
+                    response.getHeader("Content-Security-Policy"));
+        });
+    }
+
+    @Test
+    void anUpperCaseUiSchemeIsAPageUri() throws Exception {
+        login();
+        withViewServer(server -> {
+            var response = view(server, "UI://Upper.html");
+            assertIsOk(response);
+            assertEquals(PAGE, getContent(response));
+        });
+    }
+
+    @Test
+    void aReadContentNamingNoTypeIsTheRequestedPage() throws Exception {
+        login();
+        withViewServer(server -> {
+            var response = view(server, "ui://bare.html");
+            assertIsOk(response);
+            assertEquals(DEFAULT_CSP, response.getHeader("Content-Security-Policy"));
+            assertEquals(PAGE, getContent(response));
+        });
+    }
+
+    @Test
+    void aListingThatFailsLeavesThePageOnTheDefaultPolicy() throws Exception {
+        login();
+        withViewServer(true, server -> {
+            var response = view(server, "ui://listed.html");
+            assertIsOk(response);
+            assertEquals(DEFAULT_CSP, response.getHeader("Content-Security-Policy"));
+            assertEquals(PAGE, getContent(response));
+        });
+    }
+
+    @Test
+    void aPageThatCannotBeServedGetsOneLineUnderASandbox() throws Exception {
+        login();
+        withViewServer(server -> {
+            assertUnavailable(view(server, "ui://missing.html"), 404,
+                    "MCP server '" + server + "' has no page ui://missing.html.");
+            assertUnavailable(view(server, "ui://plain.html"), 502,
+                    "MCP server '" + server + "' did not return an MCP Apps page.");
+            assertUnavailable(view(server, "serpapi://engines"), 400, "Not an MCP Apps page URI.");
+            assertUnavailable(view(server, "ui://broken.html"), 502, "MCP server '" + server + "' could not read the page.");
+            assertUnavailable(view(server, "ui://empty.html"), 502, "MCP server '" + server + "' did not return an MCP Apps page.");
+        });
+        assertUnavailable(view("gone", "ui://page.html"), 503, "MCP server 'gone' is not connected.");
+    }
+
+    @Test
+    void theViewPageIsServedOnlyToAFrame() throws Exception {
+        login();
+        withViewServer(server -> {
+            assertIsOk(view(server, "ui://page.html", "iframe"));
+            assertUnavailable(view(server, "ui://page.html", "document"), 403, "A view page opens only inside the chat.");
+            assertUnavailable(view(server, "ui://page.html", null), 403, "A view page opens only inside the chat.");
+        });
+    }
+
+    @Test
+    void aLocalServersPageKeepsTheLanButNeverJclawsHostAndOneWarningSaysSo() throws Exception {
+        login();
+        withViewServer(server -> {
+            var warnings = new java.util.ArrayList<String>();
+            services.EventLogger.captureMatchingForTest(e -> e.category().equals("MCP_APPS") && e.message().contains(server),
+                    seen -> {
+                        var response = view(server, "ui://reach.html");
+                        assertIsOk(response);
+                        assertEquals("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:;"
+                                        + " font-src 'none'; media-src data:; connect-src http://192.168.1.10:3001; frame-src 'none';"
+                                        + " base-uri 'none'" + HOST_DIRECTIVES,
+                                response.getHeader("Content-Security-Policy"));
+                        seen.forEach(e -> warnings.add(e.message()));
+                    });
+            assertEquals(List.of("MCP server '" + server + "' view page \"ui://reach.html\" declared origins that were left out"
+                    + " of its CSP: {\"connectDomains\":[\"http://localhost:3001\",\"'self'\"]}"), warnings);
+        });
+    }
+
+    @Test
+    void aViewPageNeedsTheOperatorsSession() {
+        var response = view("any", "ui://page.html");
+        assertEquals(401, response.status.intValue());
     }
 
     // ==================== helpers ====================

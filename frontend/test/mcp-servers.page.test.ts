@@ -254,6 +254,45 @@ describe('MCP Servers page', () => {
     expect(putBody!.headers).toEqual({ 'Authorization': 'Bearer new', 'X-Plan': '' })
   })
 
+  it('offers view tools on every channel only when the add form\'s box is ticked', async () => {
+    setupApi([])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    await clickText(c, 'Add server')
+
+    const box = c.find('input[data-testid="mcp-view-tools-everywhere"]')
+    expect(box.element.closest('label')!.textContent!.trim()).toBe('Offer view tools on every channel')
+    expect((box.element as HTMLInputElement).checked).toBe(false)
+    await c.find('input[placeholder="github"]').setValue('n8n')
+    await c.find('input[placeholder="npx"]').setValue('npx')
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(posted).toBeTruthy())
+    expect(posted!.offerViewToolsEverywhere).toBe(false)
+
+    posted = null
+    await clickText(c, 'Add server')
+    await c.find('input[placeholder="github"]').setValue('n8n')
+    await c.find('input[placeholder="npx"]').setValue('npx')
+    await c.find('input[data-testid="mcp-view-tools-everywhere"]').setValue(true)
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(posted).toBeTruthy())
+    expect(posted!.offerViewToolsEverywhere).toBe(true)
+  })
+
+  it('shows a server\'s stored view-tools setting in its edit form and sends it changed', async () => {
+    setupApi([server({ offerViewToolsEverywhere: true })])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    await clickText(c, 'Edit')
+
+    const box = c.find('#edit-1-view-tools')
+    expect((box.element as HTMLInputElement).checked).toBe(true)
+    await box.setValue(false)
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(putBody).toBeTruthy())
+    expect(putBody!.offerViewToolsEverywhere).toBe(false)
+  })
+
   it('flips a server\'s enabled flag without sending the rest of the form', async () => {
     setupApi([server()])
     const c = await mountSuspended(McpServers)

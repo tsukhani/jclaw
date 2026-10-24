@@ -74,6 +74,8 @@ const props = defineProps<{
   runLabel: string
   runStatus: string
   showModelSwitch: boolean
+  /** Draw MCP Apps views under tool calls: the web chat's own turns only, not a subagent's. */
+  mcpApps?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -375,6 +377,7 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
           v-if="msg.toolCalls?.length"
           :tool-calls="[...msg.toolCalls]"
           :collapsed="!!(msg as Message & { toolCallsCollapsed?: boolean }).toolCallsCollapsed"
+          :mcp-apps="mcpApps && !runSlice"
           @toggle-collapse="emit('toggle-tool-calls', msg)"
           @toggle-call="emit('toggle-tool-call-expansion', $event)"
         />

@@ -76,7 +76,9 @@ public final class McpServerService {
      * fields are exploded out of {@code configJson} so forms can bind
      * directly without re-parsing.
      */
-    public record View(Long id, String name, boolean enabled, boolean requiresApproval, String transport,
+    public record View(Long id, String name, boolean enabled, boolean requiresApproval,
+                       /** Offer the server's view tools on every turn, not only a top-level web-chat one. */
+                       boolean offerViewToolsEverywhere, String transport,
                        @Nullable String command, List<String> args, Map<String, String> env,
                        @Nullable String url, Map<String, String> headers,
                        String status, String lastError,
@@ -127,7 +129,8 @@ public final class McpServerService {
             var liveLastError = McpConnectionManager.lastError(row.name);
             var effectiveLastError = liveLastError != null ? liveLastError : row.lastError;
             return new View(
-                    row.id, row.name, row.enabled, row.requiresApproval, row.transport.name(),
+                    row.id, row.name, row.enabled, row.requiresApproval, row.offerViewToolsEverywhere,
+                    row.transport.name(),
                     cfg.command, cfg.args, maskedEnv,
                     cfg.url, maskedHeaders,
                     liveStatus,
@@ -148,7 +151,7 @@ public final class McpServerService {
 
         /** {@link #of} sees one row; only the caller holding the whole list can spot a twin. */
         public View withDuplicateOf(@Nullable String original) {
-            return new View(id, name, enabled, requiresApproval, transport, command, args, env,
+            return new View(id, name, enabled, requiresApproval, offerViewToolsEverywhere, transport, command, args, env,
                     url, headers, status, lastError, lastConnectedAt, lastDisconnectedAt,
                     toolCount, tools, createdAt, updatedAt, original, protocol, protocolVersion,
                     protocolGeneration, protocolSwitchedAt, protocolSwitchReason);

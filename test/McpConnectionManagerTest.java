@@ -1236,6 +1236,441 @@ class McpConnectionManagerTest extends UnitTest {
         }
     }
 
+    // ==================== MCP Apps (SEP-1865) ====================
+
+    private static final String PAGE_URI = "ui://prefab/tool/583d325b0e9c/renderer.html";
+
+    /**
+     * SerpAPI's view shape: {@code search_table} draws {@code PAGE_URI}, {@code refresh} is for the view
+     * alone, and {@code search} is plain and answers with {@code structuredContent} only.
+     */
+    private static final String VIEW_TOOLS = "{\"tools\":["
+            + "{\"name\":\"search_table\",\"description\":\"Table.\",\"inputSchema\":{\"type\":\"object\"},"
+            + "\"_meta\":{\"ui\":{\"resourceUri\":\"" + PAGE_URI + "\"}}},"
+            + "{\"name\":\"refresh\",\"description\":\"Refresh.\",\"inputSchema\":{\"type\":\"object\"},"
+            + "\"_meta\":{\"ui\":{\"resourceUri\":\"" + PAGE_URI + "\",\"visibility\":[\"app\"]}}},"
+            + "{\"name\":\"search\",\"description\":\"\",\"inputSchema\":{\"type\":\"object\"}}]}";
+
+    private static MockWebServer viewHttp(List<JsonRpc.Request> seen) throws IOException {
+        return viewHttp(seen, RESOURCE_CAPS, VIEW_TOOLS);
+    }
+
+    private static MockWebServer viewHttp(List<JsonRpc.Request> seen, String capabilities, String tools) throws IOException {
+        var http = new MockWebServer();
+        http.setDispatcher(new Dispatcher() {
+            @Override
+            public MockResponse dispatch(RecordedRequest request) {
+                var msg = JsonRpc.decode(request.getBody().utf8());
+                if (!(msg instanceof JsonRpc.Request r)) return new MockResponse.Builder().code(202).build();
+                seen.add(r);
+                return switch (r.method()) {
+                    case "server/discover" -> rpc(200, r.id(), "{\"supportedVersions\":[\"2026-07-28\"],"
+                            + "\"capabilities\":" + capabilities + "}").build();
+                    case "tools/list" -> rpc(200, r.id(), tools).build();
+                    case "tools/call" -> {
+                        var tool = ((JsonObject) Objects.requireNonNull(r.params())).get("name").getAsString();
+                        yield rpc(200, r.id(), "search_table".equals(tool)
+                                ? "{\"resultType\":\"complete\",\"content\":[{\"type\":\"text\",\"text\":\"3 results\"}],"
+                                        + "\"structuredContent\":{\"rows\":[1,2,3]},\"_meta\":{\"k\":\"v\"}}"
+                                : "{\"content\":[],\"structuredContent\":{\"organic\":[{\"title\":\"Cats\"}]}}").build();
+                    }
+                    case "resources/list" -> rpc(200, r.id(), "{\"resources\":[{\"uri\":\"serpapi://engines\","
+                            + "\"name\":\"serpapi-engines-index\",\"mimeType\":\"application/json\"},"
+                            + "{\"uri\":\"" + PAGE_URI + "\",\"name\":\"Prefab Renderer (search_table)\","
+                            + "\"mimeType\":\"text/html;profile=mcp-app\"}]}").build();
+                    case "resources/templates/list" -> rpc(200, r.id(), "{\"resourceTemplates\":[]}").build();
+                    case "resources/read" -> rpc(200, r.id(), "{\"contents\":[{\"uri\":\"x://disguised\","
+                            + "\"mimeType\":\"text/html; charset=utf-8; profile=mcp-app\",\"text\":\"<p>view</p>\"}]}").build();
+                    default -> rpc(200, r.id(), "{\"content\":[]}").build();
+                };
+            }
+        });
+        http.start();
+        return http;
+    }
+
+    @Test
+    void connectingDeclaresTheUiExtensionOnEveryRequest() throws Exception {
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = viewHttp(seen)) {
+            name = connectHttp("declares", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            assertFalse(seen.isEmpty());
+            for (var r : seen) {
+                var meta = ((JsonObject) Objects.requireNonNull(r.params())).getAsJsonObject("_meta");
+                assertEquals("{\"extensions\":{\"io.modelcontextprotocol/ui\":{\"mimeTypes\":[\"text/html;profile=mcp-app\"]}}}",
+                        meta.get("io.modelcontextprotocol/clientCapabilities").toString(), r.method());
+            }
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    private static final String TABLE_ACTION =
+            "{\"name\":\"search_table\",\"description\":\"Table.\",\"inputSchema\":{\"type\":\"object\"}}";
+
+    /** A view server connected with its setting {@code everywhere}, seen by agents seeded before it. */
+    private String connectViews(String prefix, MockWebServer http, boolean everywhere) {
+        var name = prefix + "-" + UUID.randomUUID().toString().substring(0, 8);
+        var cfg = new JsonObject();
+        cfg.addProperty("url", http.url("/mcp").toString());
+        var row = seedServer(name, McpServer.Transport.HTTP, cfg.toString());
+        row.offerViewToolsEverywhere = everywhere;
+        McpConnectionManager.connect(row);
+        return name;
+    }
+
+    private static Long conversation(Agent agent, String channel, @Nullable Long parentId) {
+        return commitInFreshTx(() -> {
+            var c = services.ConversationService.create(Agent.findById(agent.id), channel, null);
+            if (parentId != null) {
+                c.parentConversation = models.Conversation.findById(parentId);
+                c.save();
+            }
+            return c.id;
+        });
+    }
+
+    /** {@code body} as the tool dispatch of a turn on conversation {@code conversationId}. */
+    private static <T> T onConversation(Long conversationId, java.util.function.Supplier<T> body) {
+        return agents.ToolContext.withConversation(conversationId, body);
+    }
+
+    /** {@code body} as a subagent run's own thread, as SubagentSyncRunner and SubagentAsyncRunner run one. */
+    private static <T> T asSubagentRun(java.util.function.Supplier<T> body) {
+        var runId = -System.nanoTime();
+        services.SubagentRegistry.register(runId, new java.util.concurrent.CompletableFuture<Void>());
+        try {
+            return services.SubagentRegistry.callAsRun(runId, body::get);
+        } finally {
+            services.SubagentRegistry.unregister(runId);
+        }
+    }
+
+    private static String catalogOf(String name, String actions) {
+        return "{\"server\":\"" + name + "\",\"actions\":[" + actions + "],\"resources\":[{\"uri\":\"serpapi://engines\","
+                + "\"name\":\"serpapi-engines-index\",\"mimeType\":\"application/json\"}],\"resourceTemplates\":[]}";
+    }
+
+    private static final String PROMPT_HEADER = "| Server | Actions | Description |\n|---|---|---|\n";
+
+    /** The server's row in the prompt's {@code ## MCP Servers} table, counting {@code actions}. */
+    private static String promptRow(String name, int actions) {
+        return "| `mcp_" + name + "` | " + actions + " action" + (actions == 1 ? "" : "s") + " | MCP server via http. Call `mcp_"
+                + name + "` with no arguments to enumerate available actions; call with `{\"tool\": \"<action>\", \"args\":"
+                + " {...}}` to execute one. It also lists resources: call with `{\"read\": \"<uri>\"}` to read one. |";
+    }
+
+    /** The {@code ## MCP Servers} table row the prompt of a turn on {@code conversationId} gives the server. */
+    private static String promptRowOn(Agent agent, Long conversationId, String name) {
+        var prompt = Tx.run(() -> {
+            models.Conversation c = models.Conversation.findById(conversationId);
+            return SystemPromptAssembler.assemble(Agent.findById(agent.id), null, Set.of(), c.channelType, null, c).systemPrompt();
+        });
+        return mcpSection(prompt).stream().filter(line -> line.contains("`mcp_" + name + "`")).findFirst().orElseThrow();
+    }
+
+    @Test
+    void onATopLevelWebChatTurnAViewToolIsOfferedAndItsCallCarriesTheView() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var web = conversation(reader, "web", null);
+        String name = null;
+        try (var http = viewHttp(new CopyOnWriteArrayList<>())) {
+            name = connectViews("views", http, false);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            final var server = name;
+            assertEquals(catalogOf(server, TABLE_ACTION + "," + SEARCH_ACTION), onConversation(web, () -> tool.execute("{}", reader)));
+            assertEquals("{\"server\":\"" + server + "\",\"actions\":[" + TABLE_ACTION + "]}",
+                    onConversation(web, () -> tool.execute("{\"describe\":[\"search_table\"]}", reader)));
+            var result = onConversation(web,
+                    () -> tool.executeRich("{\"tool\":\"search_table\",\"args\":{\"params\":{\"q\":\"cats\"}}}", reader));
+            assertEquals("3 results", result.text());
+            assertEquals("{\"mcpApp\":{\"server\":\"" + server + "\",\"tool\":\"search_table\",\"resourceUri\":\"" + PAGE_URI
+                    + "\",\"arguments\":{\"params\":{\"q\":\"cats\"}},\"result\":{\"content\":[{\"type\":\"text\","
+                    + "\"text\":\"3 results\"}],\"structuredContent\":{\"rows\":[1,2,3]},\"_meta\":{\"k\":\"v\"},"
+                    + "\"isError\":false}}}", result.structuredJson());
+            assertEquals(promptRow(server, 2), promptRowOn(reader, web, server));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void offAWebChatTurnAViewToolIsAbsentAndItsCallRefusedWithoutARequest() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var web = conversation(reader, "web", null);
+        var telegram = conversation(reader, "telegram", null);
+        var child = conversation(reader, "web", web);
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = viewHttp(seen)) {
+            name = connectViews("offweb", http, false);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            final var server = name;
+            var refused = "MCP server '" + server + "' has no action named 'search_table'. Available actions: search."
+                    + " Call mcp_" + server + " with {\"describe\": [\"<action>\"]} for an action's input schema if needed.";
+            Map<String, java.util.function.Function<java.util.function.Supplier<String>, String>> turns = Map.of(
+                    "telegram", body -> onConversation(telegram, body),
+                    "task run", body -> agents.ToolContext.withScope(null, 7L, body),
+                    "session subagent", body -> onConversation(child, body),
+                    "inline subagent", body -> asSubagentRun(() -> onConversation(web, body)),
+                    "no turn at all", java.util.function.Supplier::get);
+            for (var turn : turns.entrySet()) {
+                var on = turn.getValue();
+                assertEquals(catalogOf(server, SEARCH_ACTION), on.apply(() -> tool.execute("{}", reader)), turn.getKey());
+                assertEquals("{\"server\":\"" + server + "\",\"actions\":[],\"unknown\":[\"search_table\"]}",
+                        on.apply(() -> tool.execute("{\"describe\":[\"search_table\"]}", reader)), turn.getKey());
+                assertEquals(refused, on.apply(() -> tool.execute("{\"tool\":\"search_table\",\"args\":{}}", reader)), turn.getKey());
+                assertEquals(catalogOf(server, SEARCH_ACTION),
+                        on.apply(() -> tool.execute("{\"args\":{\"tool\":\"search_table\",\"args\":{}}}", reader)),
+                        turn.getKey() + ": a nested call to a hidden action gets the list, not the nesting hint");
+            }
+            assertEquals(0, sent(seen, "tools/call"), "a refused call reached the server");
+            assertEquals(promptRow(server, 1), promptRowOn(reader, telegram, server));
+            assertEquals(promptRow(server, 1), promptRowOn(reader, child, server));
+            assertEquals(PROMPT_HEADER + promptRow(server, 1) + "\n", Tx.run(() -> McpServerCatalog.formatCatalogForPrompt(Set.of())));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void withViewToolsOfferedOnEveryChannelAViewToolIsOfferedOnEveryTurn() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var telegram = conversation(reader, "telegram", null);
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = viewHttp(seen)) {
+            name = connectViews("everywhere", http, true);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            assertTrue(McpConnectionManager.offersViewToolsEverywhere(name));
+            var tool = new McpServerTool(name);
+            final var server = name;
+            Map<String, java.util.function.Function<java.util.function.Supplier<String>, String>> turns = Map.of(
+                    "telegram", body -> onConversation(telegram, body),
+                    "task run", body -> agents.ToolContext.withScope(null, 7L, body),
+                    "subagent", body -> asSubagentRun(() -> onConversation(telegram, body)));
+            for (var turn : turns.entrySet()) {
+                var on = turn.getValue();
+                assertEquals(catalogOf(server, TABLE_ACTION + "," + SEARCH_ACTION), on.apply(() -> tool.execute("{}", reader)), turn.getKey());
+                assertEquals("3 results", on.apply(() -> tool.execute("{\"tool\":\"search_table\",\"args\":{}}", reader)), turn.getKey());
+            }
+            assertEquals(3, sent(seen, "tools/call"));
+            var rich = onConversation(telegram, () -> tool.executeRich("{\"tool\":\"search_table\",\"args\":{}}", reader));
+            assertEquals("3 results", rich.text());
+            assertNull(rich.structuredJson(), "no view payload is built where no view draws");
+            assertEquals(promptRow(server, 2), promptRowOn(reader, telegram, server));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aServerWhoseActionsAllLinkAViewSaysTheyAreForWebChatOffIt() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var telegram = conversation(reader, "telegram", null);
+        var web = conversation(reader, "web", null);
+        String name = null;
+        try (var http = viewHttp(new CopyOnWriteArrayList<>(), "{\"tools\":{}}", "{\"tools\":[{\"name\":\"search_table\","
+                + "\"description\":\"Table.\",\"inputSchema\":{\"type\":\"object\"},\"_meta\":{\"ui\":{\"resourceUri\":\""
+                + PAGE_URI + "\"}}}]}")) {
+            name = connectViews("viewsonly", http, false);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            var webOnly = "MCP server '" + name + "' offers its actions in web chat only, where their views can be shown.";
+            assertEquals(webOnly, onConversation(telegram, () -> tool.execute("{}", reader)));
+            assertEquals(webOnly, onConversation(telegram, () -> tool.execute("{\"describe\":[\"search_table\"]}", reader)));
+            assertEquals("MCP server '" + name + "' has no action named 'search_table'. Available actions: (none here: this"
+                    + " server offers its actions in web chat only, where their views can be shown). Call mcp_" + name
+                    + " with {\"describe\": [\"<action>\"]} for an action's input schema if needed.",
+                    onConversation(telegram, () -> tool.execute("{\"tool\":\"search_table\",\"args\":{}}", reader)));
+            assertEquals("{\"server\":\"" + name + "\",\"actions\":[" + TABLE_ACTION + "]}",
+                    onConversation(web, () -> tool.execute("{}", reader)));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void theModelCannotReadAViewPageByItsUriOrUnderAnyOther() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var web = conversation(reader, "web", null);
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = viewHttp(seen)) {
+            name = connectViews("pageread", http, true);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            assertEquals("'" + PAGE_URI + "' on MCP server '" + name + "' is a view page, which the web chat draws; it is not"
+                    + " a resource to read.", onConversation(web, () -> tool.execute(readOf(PAGE_URI), reader)));
+            assertEquals(0, sent(seen, "resources/read"), "a ui:// read reached the server");
+            assertEquals("'x://disguised' on MCP server '" + name + "' is a view page, which the web chat draws; it is not"
+                    + " a resource to read.", onConversation(web, () -> tool.execute(readOf("x://disguised"), reader)));
+            var reads = sent(seen, "resources/read");
+            assertEquals("'UI://prefab/x.html' on MCP server '" + name + "' is a view page, which the web chat draws; it is"
+                    + " not a resource to read.", onConversation(web, () -> tool.execute(readOf("UI://prefab/x.html"), reader)));
+            assertEquals(reads, sent(seen, "resources/read"), "an upper-case ui:// read reached the server");
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aServerWhoseActionsAreAllForItsViewSaysItOffersTheModelNone() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var web = conversation(reader, "web", null);
+        String name = null;
+        try (var http = viewHttp(new CopyOnWriteArrayList<>(), "{\"tools\":{}}", "{\"tools\":[{\"name\":\"refresh\","
+                + "\"inputSchema\":{\"type\":\"object\"},\"_meta\":{\"ui\":{\"resourceUri\":\"" + PAGE_URI
+                + "\",\"visibility\":[\"app\"]}}}]}")) {
+            name = connectViews("apponlyserver", http, true);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            assertEquals("MCP server '" + name + "' offers no actions the model may call.",
+                    onConversation(web, () -> tool.execute("{}", reader)));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void anUpperCaseUiSchemeLinksAViewEndToEnd() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var web = conversation(reader, "web", null);
+        var telegram = conversation(reader, "telegram", null);
+        String name = null;
+        try (var http = viewHttp(new CopyOnWriteArrayList<>(), "{\"tools\":{}}", "{\"tools\":[{\"name\":\"search_table\","
+                + "\"description\":\"Table.\",\"inputSchema\":{\"type\":\"object\"},\"_meta\":{\"ui\":{\"resourceUri\":"
+                + "\"UI://Prefab/Upper.html\"}}},{\"name\":\"search\",\"description\":\"\",\"inputSchema\":{\"type\":\"object\"}}]}")) {
+            name = connectViews("upper", http, false);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            assertEquals("{\"server\":\"" + name + "\",\"actions\":[" + SEARCH_ACTION + "]}",
+                    onConversation(telegram, () -> tool.execute("{}", reader)), "a view tool off web chat");
+            var result = onConversation(web, () -> tool.executeRich("{\"tool\":\"search_table\",\"args\":{}}", reader));
+            assertEquals("{\"mcpApp\":{\"server\":\"" + name + "\",\"tool\":\"search_table\",\"resourceUri\":"
+                    + "\"UI://Prefab/Upper.html\",\"arguments\":{},\"result\":{\"content\":[{\"type\":\"text\","
+                    + "\"text\":\"3 results\"}],\"structuredContent\":{\"rows\":[1,2,3]},\"_meta\":{\"k\":\"v\"},"
+                    + "\"isError\":false}}}", result.structuredJson());
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void anEmptyActionListBesideResourcesSaysTheViewToolsAreForWebChat() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var telegram = conversation(reader, "telegram", null);
+        String name = null;
+        try (var http = viewHttp(new CopyOnWriteArrayList<>(), RESOURCE_CAPS, "{\"tools\":[{\"name\":\"search_table\","
+                + "\"description\":\"Table.\",\"inputSchema\":{\"type\":\"object\"},\"_meta\":{\"ui\":{\"resourceUri\":\""
+                + PAGE_URI + "\"}}}]}")) {
+            name = connectViews("viewsbeside", http, false);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            assertEquals("{\"server\":\"" + name + "\",\"actions\":[],\"resources\":[{\"uri\":\"serpapi://engines\","
+                    + "\"name\":\"serpapi-engines-index\",\"mimeType\":\"application/json\"}],\"resourceTemplates\":[],"
+                    + "\"actionsNote\":\"This server offers its actions in web chat only, where their views can be shown.\"}",
+                    onConversation(telegram, () -> tool.execute("{}", reader)));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aViewToolsResultStandsWhenTellingTheTurnFails() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = viewHttp(seen)) {
+            name = connectViews("turnfails", http, false);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var def = McpConnectionManager.tools(name).stream().filter(d -> d.name().equals("search_table")).findFirst().orElseThrow();
+            var adapter = new mcp.McpToolAdapter(name, def, McpConnectionManager::callTool, () -> {
+                throw new IllegalStateException("database closed");
+            });
+            var result = adapter.executeRich("{}", reader);
+            assertEquals("3 results", result.text());
+            assertNull(result.structuredJson());
+            assertEquals(1, sent(seen, "tools/call"), "the call ran once and nothing asks the model to retry it");
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void thePromptBreakdownForWebCountsViewTools() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        String name = null;
+        try (var http = viewHttp(new CopyOnWriteArrayList<>())) {
+            name = connectViews("breakdown", http, false);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            final var server = name;
+            // The breakdown reads the agent's own tool switches, and a non-main agent starts with MCP off.
+            commitInFreshTx(() -> {
+                var granted = mcp.McpGrants.newRow(Agent.findById(reader.id), McpServer.toolName(server, ""));
+                granted.enabled = true;
+                granted.save();
+                return null;
+            });
+            ToolRegistry.clearDisabledToolsCache();
+            var row = (java.util.function.Function<String, String>) channel -> mcpSection(Tx.run(() ->
+                    SystemPromptAssembler.assemble(Agent.findById(reader.id), null, Set.of(), channel).systemPrompt()))
+                    .stream().filter(line -> line.contains("`mcp_" + server + "`")).findFirst().orElseThrow();
+            assertEquals(promptRow(server, 2), row.apply("web"));
+            assertEquals(promptRow(server, 1), row.apply("telegram"));
+            var section = (java.util.function.Function<String, Integer>) channel -> Tx.run(() ->
+                    SystemPromptAssembler.breakdown(Agent.findById(reader.id), null, channel)).sections().stream()
+                    .filter(e -> e.name().equals("MCP Servers")).findFirst().orElseThrow().chars();
+            assertEquals(section.apply("telegram") + 1, (int) section.apply("web"), "\"2 actions\" is one character longer");
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void aPlainToolAnsweringOnlyStructuredContentGivesTheModelThatJsonOnEveryChannelAndTheChatNoView() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var telegram = conversation(reader, "telegram", null);
+        String name = null;
+        try (var http = viewHttp(new CopyOnWriteArrayList<>())) {
+            name = connectViews("plain", http, false);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            var result = onConversation(telegram, () -> tool.executeRich("{\"tool\":\"search\",\"args\":{}}", reader));
+            assertEquals("{\"organic\":[{\"title\":\"Cats\"}]}", result.text());
+            assertNull(result.structuredJson());
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
+    void anAppOnlyToolAndAViewPageNeverReachTheModelWhereverViewToolsAreOffered() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var web = conversation(reader, "web", null);
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = viewHttp(seen)) {
+            name = connectViews("apponly", http, true);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            final var server = name;
+            assertEquals(catalogOf(server, TABLE_ACTION + "," + SEARCH_ACTION), onConversation(web, () -> tool.execute("{}", reader)));
+            assertEquals("{\"server\":\"" + server + "\",\"actions\":[" + TABLE_ACTION + "],\"unknown\":[\"refresh\"]}",
+                    onConversation(web, () -> tool.execute("{\"describe\":[\"refresh\",\"search_table\"]}", reader)));
+            assertEquals("MCP server '" + server + "' has no action named 'refresh'. Available actions: search_table, search."
+                    + " Call mcp_" + server + " with {\"describe\": [\"<action>\"]} for an action's input schema if needed.",
+                    onConversation(web, () -> tool.execute("{\"tool\":\"refresh\",\"args\":{}}", reader)));
+            assertEquals(0, sent(seen, "tools/call"), "the refused call reached the server");
+        } finally {
+            stopHttp(name);
+        }
+    }
+
     @Test
     void aToolsOnlyServerListsExactlyWhatItDidAndSendsNoResourceRequest() throws Exception {
         var seen = new CopyOnWriteArrayList<JsonRpc.Request>();

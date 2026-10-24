@@ -232,6 +232,25 @@ Some MCP servers also publish **resources**: documents an agent can read, such a
 
 Reading a resource needs the same permissions as calling one of the server's tools. The agent must have the server switched on under **MCP Servers**. A subagent can read only from the servers it was given when it started. On a server with no tools, having the server switched on is enough to read its resources. A server marked as needing approval asks you before each read, as it does before a tool call. Each read is recorded in [Logs](/logs) under category `MCP_TOOL_INVOKE`, like a tool call.
 
+### Views
+
+Some MCP tools come with a **view**: a small page, such as a table or a chart, that shows the tool's result. JClaw tells every server that it can show views. In web chat, a call to such a tool shows its text result as usual, and its view at the bottom of the tool calls card. The view stays when the card is collapsed and when you reload the conversation. While it loads, the chat shows `Loading view…`. A view out of sight loads when you scroll to it. The chat shows `The view could not be loaded.`, and the text result stays, if the server is not connected, if the view does not start within 20 seconds of its page arriving, or if it has not started a minute after it came into view.
+
+A view only shows things. It cannot call tools, send chat messages, open links or change what the agent knows. It runs in its own locked-down frame, so it cannot read the chat page, your login or anything JClaw stores, and it cannot use your login to call JClaw. It can load files only from the sites its server names. A view's page opens only inside the chat, never in a tab of its own.
+
+Views have limits worth knowing:
+
+- A view from a server on another machine cannot reach your computer or your local network by an address that plainly names them, such as `localhost`, `192.168.1.10` or `nas.local`. JClaw judges an address by how it is written and does not look names up, so a public name that leads into your network is not caught. Only a server running on your own computer or network can give its view that reach on purpose.
+- A view can still send its own frame to another address. JClaw closes the view when it notices, and the chat shows `The view could not be loaded.` in its place, but it cannot stop that first request.
+- The agent never sees a server's view pages among its resources and cannot read one. It cannot call a tool that the server marks as for its view only, though it may still see that tool's name.
+- Views need a browser that sends Fetch Metadata headers: current Chrome, Edge and Firefox, or Safari 16.4 or later. In an older browser every view shows `The view could not be loaded.`
+
+Views show in web chat only, so a tool that comes with a view is offered only to the agent's own turns in web chat. On Telegram, Slack, WhatsApp, voice and Apps, in a task and in a subagent, the agent does not see the tool, and a call to it is refused as an unknown action. Many such tools exist only to draw their view, and there they would return data that nothing shows.
+
+Some servers' view tools also return useful data, such as n8n-mcp's workflow tools. For a server like that, open its edit form on the [MCP Servers](/mcp-servers) page and turn on **Offer view tools on every channel**. Its view tools are then offered everywhere. Outside web chat the agent gets their text result, and no view is drawn. A server you add starts with the setting off. A server that already existed when JClaw gained views starts with it on, so no channel lost a tool; turn it off for a server whose view tools are only for showing.
+
+If a tool returns its result only in the form a view reads, with no text, the agent gets that result as JSON text instead, on every channel.
+
 ### When a server stops answering
 
 Two independent guards keep a misbehaving server from taking a whole turn down with it:

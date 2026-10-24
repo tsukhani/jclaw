@@ -980,6 +980,7 @@ function exportConversation() {
               :run-label="subagentRunSlices[msgIdx] ? subagentBlockLabel(subagentRunSlices[msgIdx]!.runId, displayMessages) : ''"
               :run-status="subagentRunSlices[msgIdx] ? subagentBlockStatus(subagentRunSlices[msgIdx]!.runId, displayMessages) : ''"
               :show-model-switch="shouldShowModelSwitchIndicator(msgIdx)"
+              :mcp-apps="!subagentTranscript"
               @toggle-subagent-run="toggleSubagentRun"
               @delete-attachment="deleteAttachment"
               @toggle-tool-calls="toggleToolCalls"

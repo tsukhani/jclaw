@@ -438,14 +438,20 @@ public final class DangerousActionGate {
      * judge a fire of that task by.
      */
     public static @Nullable String effectiveOrigin(@Nullable Long conversationId) {
+        return effectiveOrigin(conversationId, () -> conversationChannel(conversationId));
+    }
+
+    /** {@link #effectiveOrigin(Long)} for a caller that has read the conversation's {@code channelType} already. */
+    public static @Nullable String effectiveOrigin(@Nullable Long conversationId,
+                                                   Supplier<@Nullable String> conversationChannel) {
         var fire = FIRE.get();
         if (fire == null) {
-            return conversationChannel(conversationId);
+            return conversationChannel.get();
         }
         if (!ChannelOriginTrust.isOperatorOrigin(fire.channel())) {
             return fire.channel();
         }
-        return conversationId == null ? fire.channel() : conversationChannel(conversationId);
+        return conversationId == null ? fire.channel() : conversationChannel.get();
     }
 
     /** The conversation's {@code channelType}, or {@code null} when it has none / is gone. */

@@ -17,6 +17,7 @@ interface FormState {
   id: number | null
   name: string
   enabled: boolean
+  offerViewToolsEverywhere: boolean
   transport: TransportKind
   command: string
   argsRaw: string
@@ -89,6 +90,7 @@ function blankForm(): FormState {
     id: null,
     name: '',
     enabled: true,
+    offerViewToolsEverywhere: false,
     transport: 'STDIO',
     command: '',
     argsRaw: '',
@@ -118,6 +120,7 @@ function formFromServer(s: McpServer): FormState {
     id: s.id,
     name: s.name,
     enabled: s.enabled,
+    offerViewToolsEverywhere: s.offerViewToolsEverywhere ?? false,
     transport: s.transport,
     command: s.command || '',
     argsRaw: (s.args || []).join('\n'),
@@ -162,6 +165,7 @@ function buildPayload(form: FormState) {
   const base: Record<string, unknown> = {
     name: form.name.trim(),
     enabled: form.enabled,
+    offerViewToolsEverywhere: form.offerViewToolsEverywhere,
     transport: form.transport,
     protocol: form.protocol,
   }
@@ -396,6 +400,19 @@ function removeHeaderRow(i: number) {
             <span class="text-xs text-fg-muted">Enabled</span>
           </label>
         </div>
+
+        <label
+          :for="`${formId}-view-tools`"
+          class="flex items-center gap-2"
+        >
+          <input
+            :id="`${formId}-view-tools`"
+            v-model="editing.offerViewToolsEverywhere"
+            type="checkbox"
+            data-testid="mcp-view-tools-everywhere"
+          >
+          <span class="text-xs text-fg-muted">Offer view tools on every channel</span>
+        </label>
 
         <fieldset class="min-w-0">
           <legend class="block text-xs text-fg-muted mb-1">
@@ -880,6 +897,19 @@ function removeHeaderRow(i: number) {
                       <span class="text-xs text-fg-muted">Enabled</span>
                     </label>
                   </div>
+
+                  <label
+                    :for="`edit-${server.id}-view-tools`"
+                    class="flex items-center gap-2"
+                  >
+                    <input
+                      :id="`edit-${server.id}-view-tools`"
+                      v-model="editing.offerViewToolsEverywhere"
+                      type="checkbox"
+                      data-testid="mcp-view-tools-everywhere"
+                    >
+                    <span class="text-xs text-fg-muted">Offer view tools on every channel</span>
+                  </label>
 
                   <fieldset class="min-w-0">
                     <legend class="block text-xs text-fg-muted mb-1">

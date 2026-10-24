@@ -52,6 +52,17 @@ describe('ChatMessage (JCLAW-690)', () => {
     expect(c.text()).toContain('Searched "cats"')
   })
 
+  it('draws an MCP Apps view on the chat\'s own turn but not on a subagent run\'s', async () => {
+    const view = { server: 'serpapi', tool: 'search_table', resourceUri: 'ui://prefab/table.html', arguments: {}, result: { content: [] } }
+    const withView = msg({ role: 'assistant', content: 'done', toolCalls: [{ id: 't1', name: 'mcp_serpapi', icon: 'plug', arguments: '{}', resultStructured: { mcpApp: view } }] })
+    const own = await mountSuspended(ChatMessage, { props: props(withView, { mcpApps: true }) })
+    expect(own.findAll('[data-testid="mcp-app-frame"]')).toHaveLength(1)
+    const inRun = await mountSuspended(ChatMessage, { props: props(withView, { mcpApps: true, runSlice: { runId: 1, position: 'middle', collapsed: false } }) })
+    expect(inRun.find('[data-testid="mcp-app-frame"]').exists()).toBe(false)
+    const transcript = await mountSuspended(ChatMessage, { props: props(withView) })
+    expect(transcript.find('[data-testid="mcp-app-frame"]').exists()).toBe(false)
+  })
+
   it('renders a ChatThinkingCard when the message carries reasoning', async () => {
     const c = await mountSuspended(ChatMessage, { props: props(msg({ role: 'assistant', content: 'answer', reasoning: 'let me think' })) })
     const reasoningBody = c.find('[data-reasoning-body]')

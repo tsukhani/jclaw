@@ -85,11 +85,31 @@ public class AuthCheck extends Controller {
                 case NOT_AUTHENTICATED ->
                         ApiResponses.error(401, ApiResponses.AUTHENTICATION_REQUIRED, AUTH_REQUIRED);
             }
+            refuseOpaqueOrCrossSite();
         }
 
         // JCLAW-1270: both branches reach the gate — an early bearer return would skip the widest
         // principal, and a session carrying the system owner's name is the agent too.
         AgentAccessGate.enforce();
+    }
+
+    /**
+     * Refuse a request sent with {@code Origin: null} or {@code Sec-Fetch-Site: cross-site}: an MCP Apps view's
+     * opaque-origin frame, or another site's page, in a browser that still attaches the Strict cookie. Called by
+     * {@link AuthCheck} for every session request on any path, and by {@code ApiAuthController}'s {@code login},
+     * {@code logout} and {@code resetPassword}, which sit outside it.
+     */
+    static void refuseOpaqueOrCrossSite() {
+        var request = Http.Request.current();
+        var origin = request.headers.get("origin");
+        var site = request.headers.get("sec-fetch-site");
+        // The SPA must never send Referrer-Policy: no-referrer, which serializes its own Origin as null;
+        // it sends strict-origin-when-cross-origin today.
+        if ((origin != null && "null".equals(origin.value().strip()))
+                || (site != null && "cross-site".equalsIgnoreCase(site.value().strip()))) {
+            ApiResponses.error(403, ApiResponses.FORBIDDEN,
+                    "A request from another site or a sandboxed frame cannot use the operator's session");
+        }
     }
 
     /**

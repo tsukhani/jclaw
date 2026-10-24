@@ -4,6 +4,7 @@ import { flushPromises } from '@vue/test-utils'
 import { defineComponent, h, ref, shallowRef } from 'vue'
 import type { ChecklistItem, Message } from '~/types/api'
 import { useChatStream, type UseChatStream, type UseChatStreamDeps } from '~/composables/useChatStream'
+import ChatToolCalls from '~/components/chat/ChatToolCalls.vue'
 
 // The stream endpoint uses native globalThis.fetch (ReadableStream body), so
 // stub it with an SSE frame list; everything else returns empty JSON.
@@ -259,6 +260,28 @@ describe('useChatStream', () => {
     const assistant = deps.messages.value[1]
     expect(assistant!.toolCalls).toHaveLength(1)
     expect(assistant!.toolCalls![0]!.name).toBe('generate_image')
+  })
+
+  it('draws the view a live tool_call frame carries', async () => {
+    const deps = makeDeps({ input: ref('a search table please') })
+    const frame = (o: object) => `data: ${JSON.stringify(o)}\n`
+    const mcpApp = { server: 'serpapi', tool: 'search_table', resourceUri: 'ui://prefab/tool/583d325b0e9c/renderer.html',
+      arguments: { params: { q: 'cats' } }, result: { content: [{ type: 'text', text: '3 results' }], isError: false } }
+    streamWith([
+      frame({ type: 'init', conversationId: 42 }),
+      frame({ type: 'tool_call', id: 'tc1', name: 'mcp_serpapi', icon: 'plug', arguments: '{"tool":"search_table"}',
+        resultText: '3 results', resultStructured: { mcpApp } }),
+      frame({ type: 'complete', content: 'Here is the table.' }),
+    ])
+    const { api } = await mountStream(deps)
+    await api.sendMessage()
+    await flushPromises()
+
+    const calls = deps.messages.value[1]!.toolCalls!
+    expect(calls[0]!.resultStructured).toEqual({ mcpApp })
+    const card = await mountSuspended(ChatToolCalls, { props: { toolCalls: calls, collapsed: false, mcpApps: true } })
+    expect(card.findAll('[data-testid="mcp-app-frame"] iframe').map(f => f.attributes('src')))
+      .toEqual(['/api/mcp-servers/view?server=serpapi&uri=ui%3A%2F%2Fprefab%2Ftool%2F583d325b0e9c%2Frenderer.html'])
   })
 
   it('takes the live checklist from a successful checklist call and drops it when the next send starts', async () => {
