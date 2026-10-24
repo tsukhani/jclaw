@@ -247,9 +247,9 @@ Views have limits worth knowing:
 
 Views show in web chat only, so a tool that comes with a view is offered only to the agent's own turns in web chat. On Telegram, Slack, WhatsApp, voice and Apps, in a task and in a subagent, the agent does not see the tool, and a call to it is refused as an unknown action. Many such tools exist only to draw their view, and there they would return data that nothing shows.
 
-Some servers' view tools also return useful data, such as n8n-mcp's workflow tools. For a server like that, open its edit form on the [MCP Servers](/mcp-servers) page and turn on **Offer view tools on every channel**. Its view tools are then offered everywhere. Outside web chat the agent gets their text result, and no view is drawn. A server you add starts with the setting off. A server that already existed when JClaw gained views starts with it on, so no channel lost a tool; turn it off for a server whose view tools are only for showing.
+Some servers' view tools also return useful data, such as n8n-mcp's workflow tools. For a server like that, open its edit form on the [MCP Servers](/mcp-servers) page and turn on **Offer view tools on every channel**. Its view tools are then offered everywhere. Outside web chat the agent gets their result as text, as described below, and no view is drawn. A server you add starts with the setting off. A server that already existed when JClaw gained views starts with it on, so no channel lost a tool; turn it off for a server whose view tools are only for showing.
 
-If a tool returns its result only in the form a view reads, with no text, the agent gets that result as JSON text instead, on every channel.
+If a tool returns its result only in the form a view reads, with no text, the agent gets that result as JSON text instead, on every channel. A tool that comes with a view often sends only a short placeholder as text; SerpAPI sends `[Rendered Prefab UI]`. When a view tool's text is 500 characters or less, the agent also gets the data the view draws, as JSON after the text, up to 16,000 characters. A longer result is cut there, with a note saying how much was shown. A tool whose text is longer, or is that same data, gets nothing added.
 
 ### When a server stops answering
 

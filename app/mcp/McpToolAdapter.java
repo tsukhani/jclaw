@@ -132,11 +132,11 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
             return ToolRegistry.ToolResult.text(ToolErrorTemplates.render(ToolErrorTemplates.mcpProtocolFailed(
                     serverName, def.name(), ApiResponses.messageOf(e))));
         }
-        var text = result.isError()
-                ? ToolErrorTemplates.render(ToolErrorTemplates.mcpToolReportedError(
-                        serverName, def.name(), result.content()))
-                : result.content();
         var resourceUri = def.resourceUri();
+        var body = resourceUri != null ? result.contentWithViewData() : result.content();
+        var text = result.isError()
+                ? ToolErrorTemplates.render(ToolErrorTemplates.mcpToolReportedError(serverName, def.name(), body))
+                : body;
         return new ToolRegistry.ToolResult(text, resourceUri != null && webChatTurn.getAsBoolean()
                 ? viewPayload(resourceUri, args, result) : null);
     }

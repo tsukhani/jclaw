@@ -82,4 +82,73 @@ class CallToolResultTest extends UnitTest {
         assertEquals("{\"content\":[],\"isError\":false}", parse("{\"structuredContent\":null}").forView().toString());
         assertEquals("{\"content\":[],\"isError\":false}", new CallToolResult("ok", false).forView().toString());
     }
+
+    private static final String VIEW_DATA = "\n\nStructured content (the data the tool's view draws):\n";
+
+    /** {@code {"s":"…"}} whose JSON is exactly {@code length} characters. */
+    private static CallToolResult viewResult(String text, int length) {
+        return parse("{\"content\":[{\"type\":\"text\",\"text\":\"" + text + "\"}],\"structuredContent\":{\"s\":\""
+                + "x".repeat(length - 8) + "\"}}");
+    }
+
+    @Test
+    void aViewToolsPlaceholderTextIsFollowedByTheDataItsViewDraws() {
+        assertEquals("[Rendered Prefab UI]" + VIEW_DATA + "{\"flights\":[{\"price\":271}]}",
+                parse("{\"content\":[{\"type\":\"text\",\"text\":\"[Rendered Prefab UI]\"}],"
+                        + "\"structuredContent\":{\"flights\":[{\"price\":271}]}}").contentWithViewData());
+    }
+
+    @Test
+    void structuredContentTheSafetyNetAlreadyMadeTheTextIsNotRepeated() {
+        assertEquals("{\"rows\":[1]}", parse("{\"content\":[],\"structuredContent\":{\"rows\":[1]}}").contentWithViewData());
+    }
+
+    @Test
+    void withoutStructuredContentAViewToolKeepsItsText() {
+        assertEquals("3 results", parse("{\"content\":[{\"type\":\"text\",\"text\":\"3 results\"}]}").contentWithViewData());
+        assertEquals("3 results", parse("{\"content\":[{\"type\":\"text\",\"text\":\"3 results\"}],\"structuredContent\":null}")
+                .contentWithViewData());
+    }
+
+    @Test
+    void structuredContentOfExactlyTheCapIsWholeAndOneMoreIsCutAndSaysSo() {
+        var whole = viewResult("ok", CallToolResult.VIEW_DATA_MAX_CHARS);
+        assertEquals("ok" + VIEW_DATA + "{\"s\":\"" + "x".repeat(15_992) + "\"}", whole.contentWithViewData());
+        var over = viewResult("ok", CallToolResult.VIEW_DATA_MAX_CHARS + 1);
+        assertEquals("ok" + VIEW_DATA + "{\"s\":\"" + "x".repeat(15_993) + "\""
+                + "\n[structuredContent truncated: showed the first 16,000 of 16,001 characters]", over.contentWithViewData());
+    }
+
+    @Test
+    void textOfAtMostTheShortLimitGetsTheDataAndLongerTextDoesNot() {
+        var limit = CallToolResult.VIEW_SHORT_TEXT_MAX_CHARS;
+        var shortText = "y".repeat(limit);
+        assertEquals(shortText + VIEW_DATA + "{\"n\":1}",
+                parse("{\"content\":[{\"type\":\"text\",\"text\":\"" + shortText + "\"}],\"structuredContent\":{\"n\":1}}")
+                        .contentWithViewData());
+        var longText = "y".repeat(limit + 1);
+        assertEquals(longText,
+                parse("{\"content\":[{\"type\":\"text\",\"text\":\"" + longText + "\"}],\"structuredContent\":{\"n\":1}}")
+                        .contentWithViewData(), "a server that sends full text pays nothing extra");
+    }
+
+    @Test
+    void textThatIsTheSameJsonIsNotRepeatedHoweverItIsFormatted() {
+        // The MCP tools spec asks a tool with structuredContent to send the same JSON as text too.
+        assertEquals("{\n  \"rows\": [1, 2]\n}",
+                parse("{\"content\":[{\"type\":\"text\",\"text\":\"{\\n  \\\"rows\\\": [1, 2]\\n}\"}],"
+                        + "\"structuredContent\":{\"rows\":[1,2]}}").contentWithViewData());
+        assertEquals("{\"rows\":[9]}" + VIEW_DATA + "{\"rows\":[1,2]}",
+                parse("{\"content\":[{\"type\":\"text\",\"text\":\"{\\\"rows\\\":[9]}\"}],\"structuredContent\":{\"rows\":[1,2]}}")
+                        .contentWithViewData(), "JSON text with other data still gets the view's data");
+    }
+
+    @Test
+    void theCutNeverSplitsASurrogatePair() {
+        // The emoji's high surrogate sits at index 15,999, the last one the cap would keep.
+        var result = parse("{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"structuredContent\":{\"s\":\""
+                + "x".repeat(15_993) + "😀" + "x".repeat(10) + "\"}}");
+        assertEquals("ok" + VIEW_DATA + "{\"s\":\"" + "x".repeat(15_993)
+                + "\n[structuredContent truncated: showed the first 15,999 of 16,013 characters]", result.contentWithViewData());
+    }
 }

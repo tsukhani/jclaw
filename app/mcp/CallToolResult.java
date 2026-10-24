@@ -3,7 +3,11 @@ package mcp;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParseException;
+import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
+
+import java.util.Locale;
 
 /**
  * Result of a single MCP {@code tools/call} (JCLAW-31).
@@ -30,9 +34,37 @@ public record CallToolResult(String content, boolean isError, JsonObject raw) {
     private static final String FIELD_STRUCTURED = "structuredContent";
     private static final String FIELD_META = "_meta";
     private static final String FIELD_IS_ERROR = "isError";
+    /** The most of a view tool's {@code structuredContent} the model reads: about 4K tokens of typical JSON, under the default first-view bound. */
+    public static final int VIEW_DATA_MAX_CHARS = 16_000;
+    /** Longer text is taken to carry the data itself, so the view's data is not added beside it. */
+    public static final int VIEW_SHORT_TEXT_MAX_CHARS = 500;
 
     public CallToolResult(String content, boolean isError) {
         this(content, isError, new JsonObject());
+    }
+
+    /**
+     * The model's text for a tool that links a view: its text, then the {@code structuredContent} its view draws,
+     * since such a tool may send only a placeholder as text (SerpAPI sends {@code [Rendered Prefab UI]}). Added only
+     * beside short text that is not already that JSON, which the MCP tools spec asks a tool to send as text too.
+     */
+    public String contentWithViewData() {
+        if (!(raw.get(FIELD_STRUCTURED) instanceof JsonElement structured) || structured.isJsonNull()) return content;
+        if (content.length() > VIEW_SHORT_TEXT_MAX_CHARS || isJson(content, structured)) return content;
+        var json = structured.toString();
+        var label = "\n\nStructured content (the data the tool's view draws):\n";
+        if (json.length() <= VIEW_DATA_MAX_CHARS) return content + label + json;
+        var cut = Character.isHighSurrogate(json.charAt(VIEW_DATA_MAX_CHARS - 1)) ? VIEW_DATA_MAX_CHARS - 1 : VIEW_DATA_MAX_CHARS;
+        return content + label + json.substring(0, cut) + String.format(Locale.ROOT,
+                "\n[structuredContent truncated: showed the first %,d of %,d characters]", cut, json.length());
+    }
+
+    private static boolean isJson(String text, JsonElement expected) {
+        try {
+            return expected.equals(JsonParser.parseString(text));
+        } catch (JsonParseException _) {
+            return false;
+        }
     }
 
     public static CallToolResult fromResultObject(JsonObject obj) {

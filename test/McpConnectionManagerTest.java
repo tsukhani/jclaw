@@ -1239,6 +1239,8 @@ class McpConnectionManagerTest extends UnitTest {
     // ==================== MCP Apps (SEP-1865) ====================
 
     private static final String PAGE_URI = "ui://prefab/tool/583d325b0e9c/renderer.html";
+    /** What the model reads from {@code search_table}: its text, then the data its view draws. */
+    private static final String VIEW_TEXT = "3 results\n\nStructured content (the data the tool's view draws):\n{\"rows\":[1,2,3]}";
 
     /**
      * SerpAPI's view shape: {@code search_table} draws {@code PAGE_URI}, {@code refresh} is for the view
@@ -1386,7 +1388,7 @@ class McpConnectionManagerTest extends UnitTest {
                     onConversation(web, () -> tool.execute("{\"describe\":[\"search_table\"]}", reader)));
             var result = onConversation(web,
                     () -> tool.executeRich("{\"tool\":\"search_table\",\"args\":{\"params\":{\"q\":\"cats\"}}}", reader));
-            assertEquals("3 results", result.text());
+            assertEquals(VIEW_TEXT, result.text());
             assertEquals("{\"mcpApp\":{\"server\":\"" + server + "\",\"tool\":\"search_table\",\"resourceUri\":\"" + PAGE_URI
                     + "\",\"arguments\":{\"params\":{\"q\":\"cats\"}},\"result\":{\"content\":[{\"type\":\"text\","
                     + "\"text\":\"3 results\"}],\"structuredContent\":{\"rows\":[1,2,3]},\"_meta\":{\"k\":\"v\"},"
@@ -1456,11 +1458,11 @@ class McpConnectionManagerTest extends UnitTest {
             for (var turn : turns.entrySet()) {
                 var on = turn.getValue();
                 assertEquals(catalogOf(server, TABLE_ACTION + "," + SEARCH_ACTION), on.apply(() -> tool.execute("{}", reader)), turn.getKey());
-                assertEquals("3 results", on.apply(() -> tool.execute("{\"tool\":\"search_table\",\"args\":{}}", reader)), turn.getKey());
+                assertEquals(VIEW_TEXT, on.apply(() -> tool.execute("{\"tool\":\"search_table\",\"args\":{}}", reader)), turn.getKey());
             }
             assertEquals(3, sent(seen, "tools/call"));
             var rich = onConversation(telegram, () -> tool.executeRich("{\"tool\":\"search_table\",\"args\":{}}", reader));
-            assertEquals("3 results", rich.text());
+            assertEquals(VIEW_TEXT, rich.text());
             assertNull(rich.structuredJson(), "no view payload is built where no view draws");
             assertEquals(promptRow(server, 2), promptRowOn(reader, telegram, server));
         } finally {
@@ -1593,7 +1595,7 @@ class McpConnectionManagerTest extends UnitTest {
                 throw new IllegalStateException("database closed");
             });
             var result = adapter.executeRich("{}", reader);
-            assertEquals("3 results", result.text());
+            assertEquals(VIEW_TEXT, result.text());
             assertNull(result.structuredJson());
             assertEquals(1, sent(seen, "tools/call"), "the call ran once and nothing asks the model to retry it");
         } finally {
