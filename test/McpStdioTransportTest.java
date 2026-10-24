@@ -5,6 +5,7 @@ import mcp.McpClient;
 import mcp.McpException;
 import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpStdioTransport;
+import mcp.transport.McpTransport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,6 +60,11 @@ class McpStdioTransportTest extends UnitTest {
               } else if (msg.method === 'tools/call' && msg.params.name === 'cancelled') {
                 send({ jsonrpc: '2.0', id: msg.id,
                   result: { content: [{ type: 'text', text: JSON.stringify(cancelled) }] } });
+              } else if (msg.method === 'tools/call' && msg.params.name.startsWith('sized')) {
+                // Pads the reply so its serialized line, before the line ending, is exactly arguments.bytes long.
+                const reply = { jsonrpc: '2.0', id: msg.id, result: { content: [{ type: 'text', text: '' }] } };
+                reply.result.content[0].text = 'x'.repeat(msg.params.arguments.bytes - JSON.stringify(reply).length);
+                process.stdout.write(JSON.stringify(reply) + (msg.params.name === 'sized-crlf' ? '\\r\\n' : '\\n'));
               } else if (msg.method === 'tools/call') {
                 const text = (msg.params && msg.params.arguments && msg.params.arguments.text) || '';
                 send({ jsonrpc: '2.0', id: msg.id,
@@ -226,6 +232,60 @@ class McpStdioTransportTest extends UnitTest {
             assertEquals(3, cancel.get("requestId").getAsInt());
             assertTrue(cancel.get("reason").getAsString().contains("timed out"), cancel.toString());
             assertEquals(McpClient.State.READY, client.state());
+        }
+    }
+
+    private static JsonObject sizedArgs(int bytes) {
+        var args = new JsonObject();
+        args.addProperty("bytes", bytes);
+        return args;
+    }
+
+    @Test
+    void aMessageOfExactlyTheLimitIsReadWhole() throws Exception {
+        try (var transport = newTransport();
+             var client = new McpClient("fixture", transport, "0", Duration.ofSeconds(10), Duration.ofSeconds(30))) {
+            client.connect();
+            var result = client.callTool("sized", sizedArgs(McpTransport.MAX_MESSAGE_BYTES));
+            // initialize is 1 and tools/list 2, so this call is 3.
+            var overhead = "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"\"}]}}".length();
+            assertEquals("x".repeat(McpTransport.MAX_MESSAGE_BYTES - overhead), result.content());
+            assertEquals(McpClient.State.READY, client.state());
+        }
+    }
+
+    @Test
+    void aMessageOfExactlyTheLimitEndedByCrlfIsReadWhole() throws Exception {
+        try (var transport = newTransport();
+             var client = new McpClient("fixture", transport, "0", Duration.ofSeconds(10), Duration.ofSeconds(30))) {
+            client.connect();
+            var result = client.callTool("sized-crlf", sizedArgs(McpTransport.MAX_MESSAGE_BYTES));
+            var overhead = "{\"jsonrpc\":\"2.0\",\"id\":3,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"\"}]}}".length();
+            assertEquals("x".repeat(McpTransport.MAX_MESSAGE_BYTES - overhead), result.content());
+        }
+    }
+
+    @Test
+    void multiByteTextSpanningManyReadsArrivesIntact() throws Exception {
+        try (var transport = newTransport();
+             var client = new McpClient("fixture", transport, "0", Duration.ofSeconds(10), Duration.ofSeconds(30))) {
+            client.connect();
+            var text = "é😀".repeat(30_000);
+            var args = new JsonObject();
+            args.addProperty("text", text);
+            assertEquals("echo:" + text, client.callTool("echo", args).content());
+        }
+    }
+
+    @Test
+    void aMessageOneByteOverTheLimitDropsTheConnectionNamingTheServerAndTheLimit() throws Exception {
+        try (var transport = newTransport();
+             var client = new McpClient("fixture", transport, "0", Duration.ofSeconds(10), Duration.ofSeconds(30))) {
+            client.connect();
+            var ex = assertThrows(IOException.class,
+                    () -> client.callTool("sized", sizedArgs(McpTransport.MAX_MESSAGE_BYTES + 1)));
+            assertEquals("MCP server 'fixture' sent a message over the 16 MiB limit", ex.getMessage());
+            assertEquals(McpClient.State.DISCONNECTED, client.state());
         }
     }
 

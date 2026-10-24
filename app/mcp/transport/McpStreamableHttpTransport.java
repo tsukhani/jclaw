@@ -11,6 +11,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
 import okio.BufferedSource;
+import okio.Utf8;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
 import utils.HttpFactories;
@@ -73,6 +74,8 @@ public final class McpStreamableHttpTransport implements McpTransport {
     private static final String MCP_SESSION_ID = "Mcp-Session-Id";
     /** Enough for any JSON-RPC error object; a larger error body is not one we parse. */
     private static final long ERROR_BODY_LIMIT = 64 * 1024L;
+    /** Room for a whole message on one {@code data: } line ended by {@code \r\n}. */
+    private static final long SSE_LINE_MAX_BYTES = McpTransport.MAX_MESSAGE_BYTES + "data: \r".length();
     private static final String LISTEN = "subscriptions/listen";
 
     private final String name;
@@ -276,19 +279,36 @@ public final class McpStreamableHttpTransport implements McpTransport {
         var rb = resp.body();
         var contentType = resp.header(HttpKeys.CONTENT_TYPE, "");
         if (contentType.contains("text/event-stream")) {
-            consumeSseStream(rb.source());
+            if (!consumeSseStream(rb.source())) {
+                refuseOversize(requestId);
+                return;
+            }
             if (requestId != null && tracksRequests && !closed) {
                 // Ignored by the client when the stream already carried the response.
                 onRequestFailed.accept(requestId, new McpException("stream ended without a response"));
             }
             return;
         }
-        var bodyStr = rb.string();
+        var source = rb.source();
+        if (rb.contentLength() > McpTransport.MAX_MESSAGE_BYTES || source.request(McpTransport.MAX_MESSAGE_BYTES + 1L)) {
+            refuseOversize(requestId);
+            return;
+        }
+        var bodyStr = source.readUtf8();
         if (bodyStr.isBlank()) return;
         try {
             onMessage.accept(JsonRpc.decode(bodyStr));
         } catch (RuntimeException e) {
             Logger.warn("[mcp:%s] failed to parse HTTP body: %s", name, e.getMessage());
+        }
+    }
+
+    /** Fails the request the oversized message answers, as a non-2xx answer does; a reply-less one is logged. */
+    private void refuseOversize(@Nullable Object requestId) {
+        if (requestId == null) {
+            Logger.warn("[mcp:%s] %s", name, McpTransport.oversizeMessage(name));
+        } else if (!closed) {
+            onRequestFailed.accept(requestId, new McpException(McpTransport.oversizeMessage(name)));
         }
     }
 
@@ -315,25 +335,55 @@ public final class McpStreamableHttpTransport implements McpTransport {
      * lines terminated by an empty line. We care only about the {@code data:}
      * field (concatenated with {@code \n} when it spans multiple lines per
      * the SSE spec). All other fields are ignored.
+     *
+     * @return false when a line or an event's data, in UTF-8 bytes, would pass
+     *         {@link McpTransport#MAX_MESSAGE_BYTES}; reading stops there
      */
-    private void consumeSseStream(BufferedSource source) throws IOException {
+    private boolean consumeSseStream(BufferedSource source) throws IOException {
         var data = new StringBuilder();
+        long dataBytes = 0;
         String line;
-        // Loop on readUtf8Line alone — it returns null on EOF, which is the
+        // Loop on nextSseLine alone — it returns null on EOF, which is the
         // clean teardown signal. Calling source.exhausted() here would block
         // until the next byte (or EOF) arrives, defeating the close() path's
         // call.cancel(): cancellation surfaces as an IOException out of the
         // blocked read, which is what tears the loop down.
-        while ((line = source.readUtf8Line()) != null) {
-            if (line.isEmpty()) {
-                flushSseEvent(data);
-            } else if (line.startsWith("data:")) {
-                appendSseDataLine(data, line);
+        try {
+            while ((line = nextSseLine(source)) != null) {
+                if (line.isEmpty()) {
+                    flushSseEvent(data);
+                    dataBytes = 0;
+                } else if (line.startsWith("data:")) {
+                    var value = sseDataValue(line);
+                    long added = (data.isEmpty() ? 0 : 1) + Utf8.size(value);
+                    if (dataBytes + added > McpTransport.MAX_MESSAGE_BYTES) return false;
+                    if (!data.isEmpty()) data.append('\n');
+                    data.append(value);
+                    dataBytes += added;
+                }
+                // event:, id:, retry: are ignored for MCP; comment lines (':...') are keep-alives
             }
-            // event:, id:, retry: are ignored for MCP; comment lines (':...') are keep-alives
+        } catch (SseLineTooLong _) {
+            return false;
         }
         // EOF without trailing blank line: dispatch any buffered event.
         if (!data.isEmpty()) dispatchSseEvent(data.toString());
+        return true;
+    }
+
+    /** A line longer than a {@code data:} line carrying a whole message, found without reading the rest. */
+    private static final class SseLineTooLong extends IOException {}
+
+    /** The next line without its line ending, or null at EOF. */
+    private static @Nullable String nextSseLine(BufferedSource source) throws IOException {
+        long newline = source.indexOf((byte) '\n', 0, SSE_LINE_MAX_BYTES + 1);
+        if (newline < 0) {
+            if (source.getBuffer().size() > SSE_LINE_MAX_BYTES) throw new SseLineTooLong();
+            if (source.getBuffer().size() == 0) return null;
+        }
+        var line = newline < 0 ? source.readUtf8() : source.readUtf8(newline);
+        if (newline >= 0) source.skip(1);
+        return line.endsWith("\r") ? line.substring(0, line.length() - 1) : line;
     }
 
     private void flushSseEvent(StringBuilder data) {
@@ -343,11 +393,9 @@ public final class McpStreamableHttpTransport implements McpTransport {
         }
     }
 
-    private static void appendSseDataLine(StringBuilder data, String line) {
+    private static String sseDataValue(String line) {
         var value = line.substring(5);
-        if (value.startsWith(" ")) value = value.substring(1);
-        if (!data.isEmpty()) data.append('\n');
-        data.append(value);
+        return value.startsWith(" ") ? value.substring(1) : value;
     }
 
     private void dispatchSseEvent(String payload) {

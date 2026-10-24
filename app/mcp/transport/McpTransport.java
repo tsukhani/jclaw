@@ -31,6 +31,18 @@ import java.util.function.Consumer;
  */
 public interface McpTransport extends AutoCloseable {
 
+    /**
+     * The most of one inbound message a transport holds, fixed by the operator's choice (JF-29) with no
+     * override. A larger one is refused before the rest is read: stdio, which cannot tell which call a
+     * line answers before parsing it, drops the connection; HTTP fails the one request it answers.
+     */
+    int MAX_MESSAGE_BYTES = 16 * 1024 * 1024;
+
+    /** The refusal for a message over {@link #MAX_MESSAGE_BYTES}; never quotes the message. */
+    static String oversizeMessage(String server) {
+        return "MCP server '%s' sent a message over the %d MiB limit".formatted(server, MAX_MESSAGE_BYTES / (1024 * 1024));
+    }
+
     void start(Consumer<JsonRpc.Message> onMessage, Consumer<Throwable> onError) throws IOException;
 
     /**

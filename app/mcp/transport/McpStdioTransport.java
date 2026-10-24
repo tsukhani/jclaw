@@ -6,10 +6,10 @@ import org.jspecify.annotations.Nullable;
 import play.Logger;
 import utils.SubprocessEnv;
 
-import java.io.BufferedReader;
 import java.io.BufferedWriter;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.InputStream;
 import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -35,13 +35,16 @@ import java.util.function.Consumer;
  */
 public final class McpStdioTransport implements McpTransport {
 
+    /** A stderr line is cut here, so a server writing without newlines cannot grow the drain's buffer. */
+    private static final int STDERR_LINE_MAX_BYTES = 16 * 1024;
+
     private final List<String> command;
     private final Map<String, String> env;
     private final String name;
 
     private @Nullable Process process;
     private @Nullable BufferedWriter stdin;
-    private @Nullable BufferedReader stdout;
+    private @Nullable InputStream stdout;
     private Consumer<JsonRpc.Message> onMessage = _ -> {};
     private Consumer<Throwable> onError = _ -> {};
     private volatile boolean closed;
@@ -68,9 +71,10 @@ public final class McpStdioTransport implements McpTransport {
         SubprocessEnv.apply(pb, env);
         process = pb.start();
         stdin = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), StandardCharsets.UTF_8));
-        var reader = new BufferedReader(new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
-        stdout = reader;
-        var stderr = new BufferedReader(new InputStreamReader(process.getErrorStream(), StandardCharsets.UTF_8));
+        var out = process.getInputStream();
+        stdout = out;
+        var reader = new MessageReader(out);
+        var stderr = process.getErrorStream();
         Thread.ofVirtual().name("mcp-stdio-" + name).start(() -> readLoop(reader));
         Thread.ofVirtual().name("mcp-stderr-" + name).start(() -> drainStderr(stderr));
     }
@@ -104,14 +108,10 @@ public final class McpStdioTransport implements McpTransport {
         closed = true;
         // Close stdin first so the subprocess sees EOF on its input and a
         // well-behaved server can exit cleanly. Then destroy the process BEFORE
-        // closing stdout (JCLAW-439): the readLoop holds the stdout BufferedReader's
-        // monitor while blocked in a non-interruptible readLine(), so stdout.close()
-        // — synchronized on that same monitor — cannot acquire it until the read
-        // returns. Destroying the process closes the subprocess's stdout, which
-        // makes the blocked readLine() return EOF and release the monitor; only
-        // then is stdout.close() lock-free. Closing stdout first deadlocked
-        // graceful shutdown for ShutdownJob's full 15s on any MCP server that
-        // doesn't exit on stdin EOF.
+        // closing stdout (JCLAW-439): the readLoop is blocked in a
+        // non-interruptible read that only the subprocess's end of the pipe
+        // closing returns; closing stdout first stalled ShutdownJob's full 15s
+        // on any MCP server that doesn't exit on stdin EOF.
         try { if (stdin != null) stdin.close(); } catch (IOException _) { /* best effort */ }
         if (process != null) {
             process.destroy();
@@ -129,10 +129,10 @@ public final class McpStdioTransport implements McpTransport {
     // catches RuntimeException (per-line parse failure, loop continues). They
     // are not collapsible — one bad line shouldn't kill the stdio reader.
     @SuppressWarnings("java:S1141")
-    private void readLoop(BufferedReader in) {
+    private void readLoop(MessageReader in) {
         try {
             String line;
-            while (!closed && (line = in.readLine()) != null) {
+            while (!closed && (line = in.next(McpTransport.MAX_MESSAGE_BYTES, McpTransport.oversizeMessage(name))) != null) {
                 if (line.isBlank()) continue;
                 try {
                     onMessage.accept(JsonRpc.decode(line));
@@ -146,10 +146,11 @@ public final class McpStdioTransport implements McpTransport {
         }
     }
 
-    private void drainStderr(BufferedReader stderr) {
+    private void drainStderr(InputStream stderr) {
         try (stderr) {
+            var reader = new MessageReader(stderr);
             String line;
-            while ((line = stderr.readLine()) != null) {
+            while ((line = reader.next(STDERR_LINE_MAX_BYTES, null)) != null) {
                 // DEBUG (not INFO): MCP servers commonly use stderr for boot
                 // banners, framework copy, and operational chatter (FastMCP
                 // prints a 16-line ASCII art on every connect). Default
@@ -158,5 +159,62 @@ public final class McpStdioTransport implements McpTransport {
                 Logger.debug("[mcp:%s:stderr] %s", name, line);
             }
         } catch (IOException _) { /* process closed */ }
+    }
+
+    /**
+     * Splits a stream into {@code \n}-framed lines over its bytes, so a line past a limit is found
+     * before the rest of it is read. A {@code \r} before the {@code \n} is dropped and not counted.
+     */
+    private static final class MessageReader {
+        private final InputStream in;
+        private final byte[] buf = new byte[64 * 1024];
+        private int pos;
+        private int end;
+
+        MessageReader(InputStream in) {
+            this.in = in;
+        }
+
+        /**
+         * The next line, or null at end of stream. A line over {@code max} bytes throws
+         * {@code refusal} as an {@link IOException}, or, when {@code refusal} is null, is cut at {@code max}.
+         */
+        @Nullable String next(int max, @Nullable String refusal) throws IOException {
+            var line = new LineBuffer();
+            while (true) {
+                if (pos == end) {
+                    int n = in.read(buf);
+                    if (n < 0) return line.size() == 0 ? null : line.text(max, refusal);
+                    pos = 0;
+                    end = n;
+                }
+                int newline = pos;
+                while (newline < end && buf[newline] != '\n') newline++;
+                int take = newline - pos;
+                int room = max + 1 - line.size();
+                if (take > room) {
+                    if (refusal != null) throw new IOException(refusal);
+                    take = Math.max(room, 0);
+                }
+                line.write(buf, pos, take);
+                if (newline < end) {
+                    pos = newline + 1;
+                    return line.text(max, refusal);
+                }
+                pos = end;
+            }
+        }
+    }
+
+    /** Holds one line's bytes; reads them in place rather than copying a line of up to 16 MiB. */
+    private static final class LineBuffer extends ByteArrayOutputStream {
+        String text(int max, @Nullable String refusal) throws IOException {
+            int length = count > 0 && buf[count - 1] == '\r' ? count - 1 : count;
+            if (length > max) {
+                if (refusal != null) throw new IOException(refusal);
+                length = max;
+            }
+            return new String(buf, 0, length, StandardCharsets.UTF_8);
+        }
     }
 }

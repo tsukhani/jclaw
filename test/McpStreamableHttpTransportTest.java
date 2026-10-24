@@ -5,6 +5,7 @@ import mcp.McpConnectionManager;
 import mcp.McpException;
 import mcp.jsonrpc.JsonRpc;
 import mcp.transport.McpStreamableHttpTransport;
+import mcp.transport.McpTransport;
 import mockwebserver3.Dispatcher;
 import mockwebserver3.MockResponse;
 import mockwebserver3.MockWebServer;
@@ -322,6 +323,116 @@ class McpStreamableHttpTransportTest extends UnitTest {
             assertTrue(latch.await(3, TimeUnit.SECONDS), "onError should fire on HTTP 500");
             assertTrue(error.get().getMessage().contains("500"), "error must mention status: " + error.get());
         }
+    }
+
+    // ==================== message size limit (JF-29) ====================
+
+    private static final String OVERSIZE = "MCP server 'test' sent a message over the 16 MiB limit";
+    private static final int CHUNK = 1024 * 1024;
+
+    private static String responseShell(long id) {
+        return "{\"jsonrpc\":\"2.0\",\"id\":" + id + ",\"result\":{\"s\":\"\"}}";
+    }
+
+    /** A JSON-RPC response to {@code id} whose serialized form is exactly {@code bytes} long. */
+    private static String responseOfBytes(long id, int bytes) {
+        return responseShell(id).replace("\"s\":\"\"", "\"s\":\"" + "x".repeat(bytes - responseShell(id).length()) + "\"");
+    }
+
+    private static MockResponse.Builder ok(String contentType) {
+        return new MockResponse.Builder().code(200).addHeader("Content-Type", contentType);
+    }
+
+    private void assertDispatchedWhole(MockResponse response) throws Exception {
+        try (var transport = newTransport()) {
+            server.enqueue(response);
+            var latch = new CountDownLatch(1);
+            transport.start(msg -> { received.add(msg); latch.countDown(); }, (_, _) -> {}, error::set);
+            transport.send(new JsonRpc.Request(1L, "tools/call", null));
+            assertTrue(latch.await(10, TimeUnit.SECONDS), "the response arrives");
+            var s = ((JsonRpc.Response) received.get(0)).result().getAsJsonObject().get("s").getAsString();
+            assertEquals("x".repeat(McpTransport.MAX_MESSAGE_BYTES - responseShell(1).length()), s);
+            assertNull(error.get());
+        }
+    }
+
+    private void assertOnlyItsRequestIsRefused(MockResponse response) throws Exception {
+        try (var transport = newTransport()) {
+            server.enqueue(response);
+            var failure = new CompletableFuture<Map.Entry<Object, McpException>>();
+            var next = new CountDownLatch(1);
+            transport.start(msg -> { received.add(msg); next.countDown(); },
+                    (id, e) -> failure.complete(Map.entry(id, e)), error::set);
+            transport.send(new JsonRpc.Request(7L, "tools/call", null));
+            var failed = failure.get(10, TimeUnit.SECONDS);
+            assertEquals(7L, failed.getKey());
+            assertEquals(OVERSIZE, failed.getValue().getMessage());
+            assertTrue(received.isEmpty(), "nothing over the limit is dispatched");
+
+            server.enqueue(ok("application/json").body(responseOfBytes(8, 100)).build());
+            transport.send(new JsonRpc.Request(8L, "tools/call", null));
+            assertTrue(next.await(10, TimeUnit.SECONDS), "the next request is answered");
+            assertEquals(8L, ((JsonRpc.Response) received.get(0)).id());
+            assertNull(error.get(), "the connection stands");
+        }
+    }
+
+    @Test
+    void aJsonBodyOfExactlyTheLimitIsDispatched() throws Exception {
+        assertDispatchedWhole(ok("application/json")
+                .chunkedBody(responseOfBytes(1, McpTransport.MAX_MESSAGE_BYTES), CHUNK).build());
+    }
+
+    @Test
+    void aJsonBodyOneByteOverTheLimitFailsOnlyItsRequest() throws Exception {
+        assertOnlyItsRequestIsRefused(ok("application/json")
+                .body(responseOfBytes(7, McpTransport.MAX_MESSAGE_BYTES + 1)).build());
+    }
+
+    @Test
+    void aChunkedJsonBodyOneByteOverTheLimitFailsOnlyItsRequest() throws Exception {
+        assertOnlyItsRequestIsRefused(ok("application/json")
+                .chunkedBody(responseOfBytes(7, McpTransport.MAX_MESSAGE_BYTES + 1), CHUNK).build());
+    }
+
+    @Test
+    void anSseEventOfExactlyTheLimitIsDispatched() throws Exception {
+        assertDispatchedWhole(ok("text/event-stream")
+                .chunkedBody("data: " + responseOfBytes(1, McpTransport.MAX_MESSAGE_BYTES) + "\n\n", CHUNK).build());
+    }
+
+    @Test
+    void anSseLineOneByteOverTheLimitFailsOnlyItsRequest() throws Exception {
+        assertOnlyItsRequestIsRefused(ok("text/event-stream")
+                .chunkedBody("data: " + responseOfBytes(7, McpTransport.MAX_MESSAGE_BYTES + 1) + "\n\n", CHUNK).build());
+    }
+
+    @Test
+    void anSseEventOfExactlyTheLimitEndedByCrlfIsDispatched() throws Exception {
+        assertDispatchedWhole(ok("text/event-stream")
+                .chunkedBody("data: " + responseOfBytes(1, McpTransport.MAX_MESSAGE_BYTES) + "\r\n\r\n", CHUNK).build());
+    }
+
+    @Test
+    void anSseLineOneByteOverTheLimitEndedByCrlfFailsOnlyItsRequest() throws Exception {
+        assertOnlyItsRequestIsRefused(ok("text/event-stream")
+                .chunkedBody("data: " + responseOfBytes(7, McpTransport.MAX_MESSAGE_BYTES + 1) + "\r\n\r\n", CHUNK).build());
+    }
+
+    @Test
+    void anSseEventIsMeasuredInUtf8BytesNotCharacters() throws Exception {
+        // Two-byte characters: MAX / 2 + 1 characters, MAX + 1 bytes with the joining newline.
+        var quarter = "é".repeat(McpTransport.MAX_MESSAGE_BYTES / 4);
+        assertOnlyItsRequestIsRefused(ok("text/event-stream")
+                .chunkedBody("data: " + quarter + "\ndata: " + quarter + "\n\n", CHUNK).build());
+    }
+
+    @Test
+    void anSseEventWhoseDataLinesTogetherPassTheLimitFailsOnlyItsRequest() throws Exception {
+        // Two data lines joined by the newline SSE puts between them: one character over in all.
+        var half = McpTransport.MAX_MESSAGE_BYTES / 2;
+        assertOnlyItsRequestIsRefused(ok("text/event-stream")
+                .chunkedBody("data: " + "x".repeat(half) + "\ndata: " + "x".repeat(half) + "\n\n", CHUNK).build());
     }
 
     // ==================== per-request failure through McpClient (JCLAW-1442) ====================
