@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { CheckIcon, ClipboardDocumentIcon } from '@heroicons/vue/24/outline'
 import type { SlackBindingSummary, TelegramBindingSummary, WhatsAppBindingSummary } from '~/types/api'
 
 const [
@@ -31,6 +32,24 @@ async function toggleTailscale() {
   const result = await mutate('/api/tailscale', { method: 'POST', body: { enabled: next } })
   tailscaleToggling.value = false
   if (result !== null) refreshTailscale()
+}
+
+const publicUrlCopied = ref(false)
+let publicUrlCopiedTimer: ReturnType<typeof setTimeout> | null = null
+async function copyPublicUrl() {
+  const url = tailscale.value?.publicUrl
+  if (!url) return
+  try {
+    await navigator.clipboard.writeText(url)
+    publicUrlCopied.value = true
+    if (publicUrlCopiedTimer) clearTimeout(publicUrlCopiedTimer)
+    publicUrlCopiedTimer = setTimeout(() => {
+      publicUrlCopied.value = false
+    }, 1500)
+  }
+  catch {
+    // Clipboard unavailable (insecure context or denied) — no-op.
+  }
 }
 
 const telegramActiveCount = computed(() =>
@@ -139,13 +158,33 @@ onActivated(() => {
         Request URL with no manual tunnel. One switch covers every channel — Funnel
         publishes the whole port.
       </p>
-      <p
+      <div
         v-if="tailscale?.publicUrl"
-        class="text-xs text-fg-muted mb-3"
+        class="flex items-start gap-2 text-xs text-fg-muted mb-3"
       >
-        Public URL:
-        <code class="font-mono break-all text-fg-strong">{{ tailscale?.publicUrl }}</code>
-      </p>
+        <span class="shrink-0">Public URL:</span>
+        <a
+          :href="tailscale.publicUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+          class="font-mono break-all text-fg-strong underline hover:text-emerald-700 dark:hover:text-emerald-400"
+        >{{ tailscale.publicUrl }}</a>
+        <button
+          type="button"
+          class="shrink-0 text-fg-muted transition-colors hover:text-emerald-700 dark:hover:text-emerald-400"
+          :aria-label="publicUrlCopied ? 'Copied' : 'Copy public URL'"
+          @click="copyPublicUrl"
+        >
+          <CheckIcon
+            v-if="publicUrlCopied"
+            class="h-4 w-4 text-emerald-700 dark:text-emerald-400"
+          />
+          <ClipboardDocumentIcon
+            v-else
+            class="h-4 w-4"
+          />
+        </button>
+      </div>
       <p
         v-if="tailscale?.error"
         class="text-xs text-amber-700 dark:text-amber-400 mb-3"

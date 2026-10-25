@@ -14,6 +14,8 @@ registerEndpoint('/api/channels/slack/bindings', () => slackBindingsResponse)
 registerEndpoint('/api/channels/whatsapp/bindings', () => whatsappBindingsResponse)
 registerEndpoint('/api/tailscale', () => tailscaleResponse)
 
+const writeTextMock = vi.fn(async (_text: string) => {})
+
 beforeEach(() => {
   // useFetch caches by URL across mounts; clear it so each test re-fetches the
   // (possibly different) responses below.
@@ -21,6 +23,13 @@ beforeEach(() => {
   tailscaleResponse = { enabled: false, available: false, publicUrl: null, error: null }
   slackBindingsResponse = []
   whatsappBindingsResponse = []
+  writeTextMock.mockReset()
+  writeTextMock.mockImplementation(async () => {})
+  // jsdom ships no navigator.clipboard — install a capture stub.
+  Object.defineProperty(navigator, 'clipboard', {
+    value: { writeText: writeTextMock },
+    configurable: true,
+  })
 })
 
 describe('channels page — binding-link cards (JCLAW-441/444) + Tailscale Funnel (JCLAW-84)', () => {
@@ -106,5 +115,49 @@ describe('channels page — a failed Funnel toggle (JCLAW-1221)', () => {
     finally {
       off()
     }
+  })
+})
+
+describe('channels page — the Funnel public URL', () => {
+  const url = 'https://macbook-pro.tailnet.ts.net'
+
+  it('links to the public URL in a new tab', async () => {
+    tailscaleResponse = { enabled: true, available: true, publicUrl: url, error: null }
+    const component = await mountSuspended(Channels)
+    await flushPromises()
+    const link = component.findAll('a').find(a => a.text() === url)!
+    expect(link.attributes('href')).toBe(url)
+    expect(link.attributes('target')).toBe('_blank')
+    expect(link.attributes('rel')).toBe('noopener noreferrer')
+  })
+
+  it('copies the public URL and shows Copied', async () => {
+    tailscaleResponse = { enabled: true, available: true, publicUrl: url, error: null }
+    const component = await mountSuspended(Channels)
+    await flushPromises()
+    const copy = component.findAll('button').find(b => b.attributes('aria-label') === 'Copy public URL')!
+    await copy.trigger('click')
+    await flushPromises()
+    expect(writeTextMock).toHaveBeenCalledWith(url)
+    expect(copy.attributes('aria-label')).toBe('Copied')
+  })
+
+  it('a denied clipboard leaves the button as it was', async () => {
+    writeTextMock.mockRejectedValueOnce(new Error('denied'))
+    tailscaleResponse = { enabled: true, available: true, publicUrl: url, error: null }
+    const component = await mountSuspended(Channels)
+    await flushPromises()
+    const copy = component.findAll('button').find(b => b.attributes('aria-label') === 'Copy public URL')!
+    await copy.trigger('click')
+    await flushPromises()
+    expect(copy.attributes('aria-label')).toBe('Copy public URL')
+  })
+
+  it('shows neither link nor copy button without a public URL', async () => {
+    tailscaleResponse = { enabled: false, available: true, publicUrl: null, error: null }
+    const component = await mountSuspended(Channels)
+    await flushPromises()
+    expect(component.text()).not.toContain('Public URL')
+    expect(component.findAll('button').find(b => b.attributes('aria-label') === 'Copy public URL')).toBeUndefined()
   })
 })
