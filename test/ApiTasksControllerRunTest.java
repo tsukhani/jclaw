@@ -137,6 +137,20 @@ class ApiTasksControllerRunTest extends FunctionalTest {
         assertNull(committed(() -> ((Task) Task.findById(taskId)).reportConversationId));
     }
 
+    @Test
+    void anotherAgentRunningTheTaskIsNotToldHowItEnds() {
+        var ownerId = seedAgent();
+        var otherId = seedAgent("task-run-other-agent");
+        var taskId = seedTask(ownerId, "someone-elses", "every 1h");
+        var otherChat = committed(() -> ConversationService.create(Agent.findById(otherId), "web", null).id);
+
+        var resp = asAgent(() -> POST(agentRequest(otherId, otherChat), "/api/tasks/" + taskId + "/run", "application/json", "{}"));
+
+        assertIsOk(resp);
+        assertNull(resp.getHeader(RequestPrincipal.AGENT_NOTE_HEADER));
+        assertNull(committed(() -> ((Task) Task.findById(taskId)).reportConversationId));
+    }
+
     private static Http.Request agentRequest(Long agentId, Long conversationId) {
         var request = newRequest();
         request.headers.put("authorization", new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));

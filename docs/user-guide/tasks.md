@@ -57,6 +57,8 @@ When an agent runs a task from a chat, with `runNow` or through its `jclaw_api` 
 
 The output itself goes only where the task's delivery sends it, never into the chat that started the run. A task with no delivery keeps its output on the Tasks page; select **Open tasks** on the notice to go there. The notice asks the agent not to fetch or repeat the output in the chat. That is a request to the agent, not a block.
 
+An error message can hold private details, so the notice shows one only in a chat that just you read, with any key in it hidden. In a group chat, the notice says the reason is on the Tasks page. Only the agent that owns the task, or `main`, is told how its run ended. If two chats ask about the same run, the first one to ask is told.
+
 If you cancel the run, or JClaw stops it for running too long, the notice says it was cancelled. If a restart cuts the run short, or it fails and will be retried, the notice comes when the task's next run ends.
 
 ### Cancel vs delete

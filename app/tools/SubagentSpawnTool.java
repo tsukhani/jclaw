@@ -1,6 +1,7 @@
 package tools;
 
 import agents.AgentRunner;
+import agents.DangerousActionGate;
 import agents.ToolAction;
 import agents.ToolContext;
 import agents.ToolRegistry;
@@ -508,7 +509,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                         parentAgent.name, parsed, runIdStr);
             }
             // JCLAW-1604: an announce reaches the chat unedited, so only a chat the owner reads alone gets one.
-            if (SubagentResponses.ownerReadsAlone(parentConv.id, parentConv.channelType, parentConv.peerId)) {
+            if (DangerousActionGate.ownerReadsAlone(parentConv.id, parentConv.channelType, parentConv.peerId)) {
                 return SubagentAsyncRunner.launchAsyncSpawn(runId, childAgentId, childConvId, parentConv.id,
                         parentAgent.name, parsed, runIdStr);
             }

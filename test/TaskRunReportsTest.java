@@ -172,6 +172,39 @@ class TaskRunReportsTest extends UnitTest {
     }
 
     @Test
+    void anErrorIsShownMaskedWhereTheOwnerReadsAloneAndOnlyPointedToInAGroup() {
+        var agent = agent("errors");
+        var web = new TaskRunReports.Link(webChat(agent), true);
+        var group = new TaskRunReports.Link(
+                fresh(() -> ConversationService.create(Agent.findById(agent.id), "telegram", "-1001234567890").id), false);
+        var task = task(agent, "keyed-call", "slack:C0123");
+        var error = "HTTP 400 from https://generativelanguage.googleapis.com/v1beta/models?key=AIzaSyA1b2C3d4E5f6G7h8I9j0KlMnOpQrStUv";
+        Consumer<TaskRun> failed = r -> {
+            r.status = TaskRun.Status.FAILED;
+            r.error = error;
+        };
+        Consumer<TaskRun> undelivered = r -> {
+            notRequested(r, "slack:C0123");
+            r.deliveryStatus = TaskRun.DeliveryStatus.NOT_DELIVERED;
+            r.deliveryError = error;
+        };
+        var failedInWeb = run(task, web, failed);
+        var failedInGroup = run(task, group, failed);
+        var undeliveredInGroup = run(task, group, undelivered);
+
+        for (var run : List.of(failedInWeb, failedInGroup, undeliveredInGroup)) reportOnItsOwnThread(run, recorder);
+
+        assertEquals(List.of(("[task result] Task 'keyed-call' (run %d) failed. The error was: HTTP 400 from "
+                        + "https://generativelanguage.googleapis.com/v1beta/models?key=[redacted].%s").formatted(failedInWeb, DO_NOT_REPEAT)),
+                messages(web.conversationId()).stream().map(m -> m.content).toList());
+        assertEquals(List.of(
+                "[task result] Task 'keyed-call' (run %d) failed. The reason is on the Tasks page.%s".formatted(failedInGroup, DO_NOT_REPEAT),
+                ("[task result] Task 'keyed-call' (run %d) completed in 1.0 s. Its output was not delivered to slack; "
+                        + "the reason is on the Tasks page.%s").formatted(undeliveredInGroup, DO_NOT_REPEAT)),
+                messages(group.conversationId()).stream().map(m -> m.content).toList());
+    }
+
+    @Test
     void aRunReportsOnce() {
         var agent = agent("once");
         var chat = webChat(agent);
@@ -212,6 +245,25 @@ class TaskRunReportsTest extends UnitTest {
 
         assertEquals(chat, fresh(() -> ((TaskRun) TaskRun.findById(running)).reportConversationId));
         assertNull(fresh(() -> ((Task) Task.findById(task)).reportConversationId));
+    }
+
+    @Test
+    void theFirstChatToAskKeepsTheReport() {
+        var agent = agent("first");
+        var first = webChat(agent);
+        var second = webChat(agent);
+        var queued = task(agent, "queued", null);
+        var busy = task(agent, "in-flight", null);
+        var running = run(busy, null, r -> r.status = TaskRun.Status.RUNNING);
+
+        assertTrue(fresh(() -> TaskRunReports.request(queued, first, true)));
+        assertFalse(fresh(() -> TaskRunReports.request(queued, second, true)));
+        assertTrue(fresh(() -> TaskRunReports.request(queued, first, true)), "asking again from the same chat");
+        assertTrue(fresh(() -> TaskRunReports.request(busy, first, true)));
+        assertFalse(fresh(() -> TaskRunReports.request(busy, second, true)));
+
+        assertEquals(first, fresh(() -> ((Task) Task.findById(queued)).reportConversationId));
+        assertEquals(first, fresh(() -> ((TaskRun) TaskRun.findById(running)).reportConversationId));
     }
 
     @Test

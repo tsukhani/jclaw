@@ -712,9 +712,10 @@ public class ApiTasksController extends Controller {
         }
 
         // Recorded before the fire, so the run the executor opens finds it. The request carries no
-        // channel sender, so the report's turn is never owner-initiated.
+        // channel sender, so the report's turn is never owner-initiated. The run is open to any agent;
+        // hearing how it ended is not, since a report names the run's errors.
         var chat = RequestPrincipal.callerConversationId();
-        if (chat != null && TaskRunReports.request(task.id, chat, false)) {
+        if (chat != null && RequestPrincipal.mayReachAgentScopedRow(task.agent) && TaskRunReports.request(task.id, chat, false)) {
             response.setHeader(RequestPrincipal.AGENT_NOTE_HEADER, TaskRunReports.AGENT_NOTE);
         }
         TaskSchedulingService.runNow(task.id);

@@ -9,6 +9,7 @@ import models.TaskRun;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import utils.GsonHolder;
+import utils.SecretRedactor;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -58,7 +59,7 @@ public final class TaskRunReports {
 
     /**
      * Ask for a report of this task's run: the one in flight, else the next one the executor opens.
-     * False, recording nothing, when the conversation is gone.
+     * False, recording nothing, when the conversation is gone or another chat is already waiting.
      */
     public static boolean request(Long taskId, Long conversationId, boolean ownerInitiated) {
         return Tx.run(() -> {
@@ -71,11 +72,14 @@ public final class TaskRunReports {
                     .setMaxResults(1)
                     .getResultList();
             // Bulk updates, as the executor writes the task: a full-row save could write back an older copy.
+            // The first chat to ask keeps the report: taking it would leave that chat waiting for nothing.
             var update = running.isEmpty()
-                    ? em.createQuery("UPDATE Task t SET t.reportConversationId = :conversation, "
-                            + "t.reportOwnerInitiated = :owner WHERE t.id = :id").setParameter("id", taskId)
-                    : em.createQuery("UPDATE TaskRun r SET r.reportConversationId = :conversation, "
-                            + "r.reportOwnerInitiated = :owner WHERE r.id = :id").setParameter("id", running.getFirst());
+                    ? em.createQuery("UPDATE Task t SET t.reportConversationId = :conversation, t.reportOwnerInitiated = :owner "
+                            + "WHERE t.id = :id AND (t.reportConversationId IS NULL OR t.reportConversationId = :conversation)")
+                            .setParameter("id", taskId)
+                    : em.createQuery("UPDATE TaskRun r SET r.reportConversationId = :conversation, r.reportOwnerInitiated = :owner "
+                            + "WHERE r.id = :id AND (r.reportConversationId IS NULL OR r.reportConversationId = :conversation)")
+                            .setParameter("id", running.getFirst());
             return update.setParameter("conversation", conversationId)
                     .setParameter("owner", ownerInitiated)
                     .executeUpdate() == 1;
@@ -150,12 +154,16 @@ public final class TaskRunReports {
                 TaskRun run = TaskRun.findById(runId);
                 Conversation conversation = Conversation.findById(link.getFirst()[0]);
                 if (claimed != 1 || run == null || conversation == null) return null;
-                var message = ConversationService.appendMessage(conversation, MessageRole.USER, resultText(run),
-                        null, null, null);
+                boolean ownerInitiated = Boolean.TRUE.equals(link.getFirst()[1]);
+                // Error text can carry ids, URLs or a key, so only a chat the owner reads alone is shown it.
+                boolean ownerReadsAlone = DangerousActionGate.withOwnerInitiated(ownerInitiated,
+                        () -> DangerousActionGate.ownerReadsAlone(conversation.id, conversation.channelType, conversation.peerId));
+                var message = ConversationService.appendMessage(conversation, MessageRole.USER,
+                        resultText(run, ownerReadsAlone), null, null, null);
                 message.messageKind = MESSAGE_KIND_RESULT;
-                message.metadata = GsonHolder.GSON.toJson(resultMetadata(run));
+                message.metadata = GsonHolder.GSON.toJson(resultMetadata(run, ownerReadsAlone));
                 message.save();
-                return new Posted(conversation.agent, conversation, Boolean.TRUE.equals(link.getFirst()[1]));
+                return new Posted(conversation.agent, conversation, ownerInitiated);
             });
         } catch (RuntimeException e) {
             EventLogger.warn(EVENT_CATEGORY, "Task run %d: could not post its result to the chat that ran it: %s"
@@ -173,8 +181,8 @@ public final class TaskRunReports {
         return true;
     }
 
-    private static String resultText(TaskRun run) {
-        var outcome = outcome(run);
+    private static String resultText(TaskRun run, boolean ownerReadsAlone) {
+        var outcome = outcome(run, ownerReadsAlone);
         return LABEL + " " + headline(run) + (outcome.isEmpty() ? "" : " " + outcome) + " " + DO_NOT_REPEAT;
     }
 
@@ -188,12 +196,12 @@ public final class TaskRunReports {
         };
     }
 
-    private static String outcome(TaskRun run) {
+    private static String outcome(TaskRun run, boolean ownerReadsAlone) {
         return switch (run.status) {
-            case COMPLETED -> whereTheOutputWent(run);
-            case FAILED -> run.error == null || run.error.isBlank()
-                    ? "No reason was recorded."
-                    : sentence("The error was: " + run.error.strip());
+            case COMPLETED -> whereTheOutputWent(run, ownerReadsAlone);
+            case FAILED -> run.error == null || run.error.isBlank() ? "No reason was recorded."
+                    : ownerReadsAlone ? sentence("The error was: " + SecretRedactor.redact(run.error.strip()))
+                    : "The reason is on the Tasks page.";
             // The executor writes who cancelled it, or the time limit it hit, as the run's summary.
             case CANCELLED -> run.outputSummary == null || run.outputSummary.isBlank() ? "" : sentence(run.outputSummary.strip());
             case RUNNING -> "";
@@ -205,12 +213,15 @@ public final class TaskRunReports {
     }
 
     // The executor stamps a target with NOT_REQUESTED only when the run sent its output itself.
-    private static String whereTheOutputWent(TaskRun run) {
+    private static String whereTheOutputWent(TaskRun run, boolean ownerReadsAlone) {
         var status = run.deliveryStatus == null ? TaskRun.DeliveryStatus.UNKNOWN : run.deliveryStatus;
         return switch (status) {
             case DELIVERED -> "Its output was delivered to %s.".formatted(channelOf(run.deliveryTarget));
-            case NOT_DELIVERED -> sentence("Its output was not delivered to %s: %s".formatted(channelOf(run.deliveryTarget),
-                    run.deliveryError == null || run.deliveryError.isBlank() ? "no reason was recorded" : run.deliveryError.strip()));
+            case NOT_DELIVERED -> run.deliveryError == null || run.deliveryError.isBlank()
+                    ? "Its output was not delivered to %s: no reason was recorded.".formatted(channelOf(run.deliveryTarget))
+                    : ownerReadsAlone ? sentence("Its output was not delivered to %s: %s".formatted(channelOf(run.deliveryTarget),
+                            SecretRedactor.redact(run.deliveryError.strip())))
+                    : "Its output was not delivered to %s; the reason is on the Tasks page.".formatted(channelOf(run.deliveryTarget));
             case NOT_REQUESTED -> {
                 if (run.deliveryTarget != null) yield "The run sent its output itself with the 'message' tool.";
                 var spec = DeliverySpec.parse(run.task.delivery);
@@ -228,7 +239,7 @@ public final class TaskRunReports {
         return spec.kind() == DeliverySpec.Kind.CHANNEL ? spec.resolvedChannel() : "its delivery channel";
     }
 
-    private static Map<String, Object> resultMetadata(TaskRun run) {
+    private static Map<String, Object> resultMetadata(TaskRun run, boolean ownerReadsAlone) {
         var metadata = new LinkedHashMap<String, Object>();
         metadata.put("taskId", run.task.id);
         metadata.put("taskName", run.task.name);
@@ -237,7 +248,7 @@ public final class TaskRunReports {
         if (run.durationMs != null) metadata.put("durationMs", run.durationMs);
         if (run.deliveryStatus != null) metadata.put("deliveryStatus", run.deliveryStatus.name());
         metadata.put("headline", headline(run));
-        var outcome = outcome(run);
+        var outcome = outcome(run, ownerReadsAlone);
         if (!outcome.isEmpty()) metadata.put("outcome", outcome);
         return metadata;
     }

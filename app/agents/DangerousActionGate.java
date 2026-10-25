@@ -196,6 +196,16 @@ public final class DangerousActionGate {
         return operatorTurn(ownerInitiated(), effectiveOrigin(conversationId));
     }
 
+    /**
+     * Whether only the owner reads what this turn sends to the conversation: an operator turn (the
+     * channel's owner, or web chat) in a chat that is not a group, where the owner asks but every
+     * member reads. The spawn-time and send-time checks both read this one (JCLAW-1604, JCLAW-1603).
+     */
+    public static boolean ownerReadsAlone(Long conversationId, String channelType, @Nullable String peerId) {
+        return operatorTurn(conversationId)
+                && (peerId == null || !Boolean.TRUE.equals(SystemPromptAssembler.isGroupChat(channelType, peerId)));
+    }
+
     private static boolean operatorTurn(boolean ownerInitiated, @Nullable String origin) {
         return ownerInitiated || ChannelOriginTrust.classify(origin) == ChannelOriginTrust.Trust.OPERATOR;
     }
