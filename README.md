@@ -122,12 +122,12 @@ The implementation is entirely original — no code is shared with any of them. 
 
 ---
 
-## Screenshot
+## Demo
 
 <p align="center">
-  <img src="jclaw-screenshot.png" width="900" alt="JClaw Chat Interface">
+  <a href="https://youtu.be/9XxW7HWfC7o"><img src="https://img.youtube.com/vi/9XxW7HWfC7o/maxresdefault.jpg" width="900" alt="Watch the JClaw demo on YouTube"></a>
 </p>
-<p align="center"><em>Web chat with memory-aware agents, tool execution, and markdown rendering.</em></p>
+<p align="center"><em>A 2-minute demo of three JClaw features: tasks, the prompt library, and deep research.</em></p>
 
 ---
 
