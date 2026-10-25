@@ -1,4 +1,5 @@
 import agents.SkillLoader;
+import agents.SkillSpec;
 import models.Agent;
 import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
@@ -14,10 +15,13 @@ import play.test.FunctionalTest;
 import services.AgentService;
 import services.SkillPromotionService;
 
+import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Set;
+import java.util.zip.ZipInputStream;
 
 /**
  * Functional HTTP tests for {@code ApiSkillsController} covering the
@@ -1333,5 +1337,125 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"name\":\"real\""), "valid skill listed: " + body);
         assertFalse(body.contains("stray-no-skillmd"),
                 "a directory without SKILL.md must not appear as a skill: " + body);
+    }
+
+    // ==================== GET /api/skills/{name}/export ====================
+
+    @Test
+    void anExportedSkillIsAZipThatClaudeAccepts() throws Exception {
+        login();
+        var dir = globalSkillsDir.resolve("wa-notifier");
+        Files.createDirectories(dir.resolve("tools"));
+        Files.createDirectories(dir.resolve("credentials"));
+        Files.writeString(dir.resolve("SKILL.md"), """
+                ---
+                name: wa-notifier
+                description: Sends WhatsApp messages. Use when the operator asks to message someone.
+                version: 1.2.0
+                author: main
+                tools: [exec, filesystem]
+                commands: [wacli]
+                icon: 💬
+                ---
+                # WA Notifier
+
+                Run `tools/wacli` with the `exec` tool.
+                """);
+        var binary = new byte[]{0x7F, 'E', 'L', 'F', 2, 0, 9};
+        Files.write(dir.resolve("tools/wacli"), binary);
+        Files.writeString(dir.resolve("tools/README.md"), "# wacli\n");
+        Files.writeString(dir.resolve("credentials/api.json"), "{\"token\": \"sk-live-123\"}");
+        Files.writeString(dir.resolve("credentials/notes.env"), "TOKEN=abc\n");
+        var outside = Files.createTempFile("skill-export-outside", ".txt");
+        Files.createSymbolicLink(dir.resolve("tools/link"), outside);
+        SkillLoader.clearCache();
+
+        try {
+            var response = GET("/api/skills/wa-notifier/export");
+
+            assertIsOk(response);
+            assertEquals("application/zip", response.contentType);
+            assertEquals("attachment; filename=\"wa-notifier.zip\"", response.getHeader("Content-Disposition"));
+            var entries = unzip(response.out.toByteArray());
+            assertEquals(java.util.List.of("wa-notifier/SKILL.md", "wa-notifier/credentials/api.json",
+                    "wa-notifier/tools/README.md", "wa-notifier/tools/wacli"), java.util.List.copyOf(entries.keySet()));
+            var skillMd = new String(entries.get("wa-notifier/SKILL.md"), StandardCharsets.UTF_8);
+            assertEquals("""
+                    ---
+                    name: wa-notifier
+                    description: >-
+                      Sends WhatsApp messages. Use when the operator asks to message someone.
+                    compatibility: "Written for JClaw; its instructions call these JClaw tools: exec"
+                    metadata:
+                      version: "1.2.0"
+                      author: main
+                      jclaw-icon: "💬"
+                      jclaw-tools: exec filesystem
+                      jclaw-commands: wacli
+                    ---
+                    # WA Notifier
+
+                    Run `tools/wacli` with the `exec` tool.
+                    """, skillMd);
+            assertEquals(java.util.List.of(), SkillSpec.problems(skillMd, "wa-notifier"));
+            assertEquals("{\n  \"token\": \"[CREDENTIAL]\"\n}",
+                    new String(entries.get("wa-notifier/credentials/api.json"), StandardCharsets.UTF_8),
+                    "a credential value never leaves; its key does");
+            assertArrayEquals(binary, entries.get("wa-notifier/tools/wacli"));
+        } finally {
+            Files.deleteIfExists(outside);
+        }
+    }
+
+    @Test
+    void aSkillClaudeWouldRejectIsNotExported() throws Exception {
+        login();
+        seedGlobalSkill("app-maker", "app-maker", "Installs apps to public/apps/<slug>/");
+
+        var response = GET("/api/skills/app-maker/export");
+
+        assertStatus(422, response);
+        var body = com.google.gson.JsonParser.parseString(getContent(response)).getAsJsonObject();
+        assertEquals("not_exportable", body.get("code").getAsString());
+        assertEquals("Claude would not accept this skill: Description cannot contain angle brackets (< or >)",
+                body.get("message").getAsString());
+        assertEquals("[\"Description cannot contain angle brackets (< or >)\"]", body.get("problems").toString());
+    }
+
+    @Test
+    void exportingAnUnknownSkillIs404() {
+        login();
+        assertStatus(404, GET("/api/skills/no-such-skill/export"));
+    }
+
+    @Test
+    void exportRequiresAuth() {
+        assertEquals(401, GET("/api/skills/some-skill/export").status.intValue());
+    }
+
+    @Test
+    void anAgentCannotExportASkill() throws Exception {
+        seedGlobalSkill("probe", "probe", "A probe");
+        var request = newRequest();
+        request.headers.put("authorization",
+                new play.mvc.Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+        try {
+            var response = GET(request, "/api/skills/probe/export");
+
+            assertStatus(403, response);
+            assertTrue(getContent(response).contains("operator_only"), "got: " + getContent(response));
+        } finally {
+            clearCookies();
+        }
+    }
+
+    private static java.util.Map<String, byte[]> unzip(byte[] archive) throws java.io.IOException {
+        var entries = new java.util.LinkedHashMap<String, byte[]>();
+        try (var zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
+            for (var entry = zip.getNextEntry(); entry != null; entry = zip.getNextEntry()) {
+                entries.put(entry.getName(), zip.readAllBytes());
+            }
+        }
+        return entries;
     }
 }

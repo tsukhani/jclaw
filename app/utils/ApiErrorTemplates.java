@@ -228,6 +228,9 @@ public final class ApiErrorTemplates {
             e(ApiResponses.RESERVED_KEY, "That configuration key is reserved and cannot be set here.",
                     "Reserved namespaces are enforced by the server; a stored row could not take effect anyway.",
                     null),
+            e(ApiResponses.NOT_EXPORTABLE, "Claude would not accept this skill as it stands.",
+                    "The response lists each problem Anthropic's skill validator finds in the SKILL.md frontmatter.",
+                    "Fix the skill with the skill-creator skill, promote it again, then export it."),
 
             // --- upstream and capacity ---
             e(ApiResponses.RATE_LIMITED, "An upstream service is rate-limiting these requests.",

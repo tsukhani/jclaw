@@ -102,6 +102,7 @@ class CredentialReadGateConformanceTest extends UnitTest {
             "GET /api/notifications",
             "GET /api/prompts/export",
             "GET /api/skills/catalogs",
+            "GET /api/skills/{name}/export",
             "GET /api/system/database/backups/{id}/download",
             "GET /api/tailscale",
             "GET /api/tasks/{id}/delivery-advisory",

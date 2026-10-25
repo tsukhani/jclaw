@@ -18,6 +18,7 @@ import play.mvc.With;
 import services.AgentService;
 import services.RegistrySkillImporter;
 import services.SkillBinaryScanner;
+import services.SkillExporter;
 import services.SkillPromotionService;
 import services.Tx;
 import services.catalog.CatalogPage;
@@ -71,6 +72,8 @@ public class ApiSkillsController extends Controller {
     private static final String KEY_DESCRIPTION = "description";
     private static final String KEY_SKILL_NAME = "skillName";
     private static final String KEY_CATALOG = "catalog";
+    /** The validator's problems on a 422 from {@code export}. */
+    private static final String KEY_PROBLEMS = "problems";
     private static final String KEY_PROVIDER = "provider";
     private static final String KEY_OWNER = "owner";
 
@@ -264,6 +267,31 @@ public class ApiSkillsController extends Controller {
         var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
         if (!Files.isDirectory(dir)) notFound();
         listSkillFilesFrom(dir);
+    }
+
+    /**
+     * GET /api/skills/{name}/export — the global skill as a zip in the Agent Skills format Claude
+     * accepts, or 422 with the validator's problems when Claude would refuse it.
+     */
+    @Operation(summary = "Download a global skill as a zip in the Agent Skills format Claude accepts")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "packs a skill's files, binaries included, for use outside JClaw")
+    public static void export(String name) {
+        var dir = resolveSkillName(SkillLoader.globalSkillsPath(), name);
+        if (!Files.isRegularFile(dir.resolve(SKILL_MD))) notFound();
+        SkillExporter.Export export;
+        try {
+            export = SkillExporter.export(dir);
+        } catch (SkillExporter.NotExportable e) {
+            ApiResponses.error(422, ApiResponses.NOT_EXPORTABLE, e.getMessage(), KEY_PROBLEMS, e.problems());
+            throw ApiResponses.unreachable();
+        } catch (IOException e) {
+            ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Could not export the skill: " + e.getMessage());
+            throw ApiResponses.unreachable();
+        }
+        // One chunk, as the workspace zip is written: renderBinary hands its stream to the server, out of a test's sight.
+        response.contentType = "application/zip";
+        response.setHeader("Content-Disposition", "attachment; filename=\"%s.zip\"".formatted(export.name()));
+        response.writeChunk(export.zip());
     }
 
     /** GET /api/skills/{name}/files/{&lt;path&gt;filePath} — Read a text file from a skill folder. */

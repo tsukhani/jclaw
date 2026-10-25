@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import {
+  ArrowDownTrayIcon,
   ArrowPathIcon,
   ChevronRightIcon,
   CodeBracketIcon,
@@ -817,6 +818,40 @@ async function deleteSkill(skill: Skill | AgentSkill) {
   loadAllAgentSkills()
 }
 
+// Fetched rather than linked: a skill Claude would refuse comes back as a 422 whose
+// problems belong in the banner, not in a saved file.
+async function exportSkill(skill: Skill) {
+  const folderName = (skill.folderName as string) || skill.name
+  let zip: Blob
+  try {
+    zip = await $fetch<Blob>(`/api/skills/${folderName}/export`, { responseType: 'blob' })
+  }
+  catch (e: unknown) {
+    showDragError(await exportRefusal(e))
+    return
+  }
+  const url = URL.createObjectURL(zip)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `${skill.name}.zip`
+  link.click()
+  URL.revokeObjectURL(url)
+}
+
+// Asked for a blob, $fetch hands back the JSON error body as a blob too.
+async function exportRefusal(e: unknown): Promise<string> {
+  const data = (e as { data?: unknown } | undefined)?.data
+  if (data instanceof Blob) {
+    try {
+      return apiErrorDetails({ data: JSON.parse(await data.text()) }).message
+    }
+    catch {
+      // not a JSON body: fall through to the transport's own message
+    }
+  }
+  return apiErrorDetails(e).message
+}
+
 async function editAgentSkill(agentId: number, skill: AgentSkill) {
   const request = viewerLoads.begin()
   try {
@@ -1120,6 +1155,17 @@ function totalSkillCount(agentId: number) {
                     @click.stop="openSkill(skill)"
                   >
                     <EyeIcon
+                      class="w-3.5 h-3.5"
+                      aria-hidden="true"
+                    />
+                  </button>
+                  <button
+                    class="p-1 text-fg-muted hover:text-fg-strong transition-colors"
+                    title="Export for Claude"
+                    :aria-label="`Export skill ${skill.name} for Claude`"
+                    @click.stop="exportSkill(skill)"
+                  >
+                    <ArrowDownTrayIcon
                       class="w-3.5 h-3.5"
                       aria-hidden="true"
                     />

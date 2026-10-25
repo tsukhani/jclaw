@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
+import { setResponseStatus } from 'h3'
 import { defineComponent, h } from 'vue'
 import Skills from '~/pages/skills/[[name]].vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
@@ -611,5 +612,71 @@ describe('Skills page — a failed re-enable on drop (JCLAW-1221)', () => {
     finally {
       off()
     }
+  })
+})
+
+describe('Skills page — export a global skill for Claude', () => {
+  let saved: { href: string, download: string }[]
+  let clickSpy: MockInstance<() => void>
+
+  beforeEach(() => {
+    saved = []
+    // jsdom has no createObjectURL; the anchor's click is the save.
+    URL.createObjectURL = vi.fn(() => 'blob:jclaw-export') as typeof URL.createObjectURL
+    URL.revokeObjectURL = vi.fn() as typeof URL.revokeObjectURL
+    clickSpy = vi.spyOn(HTMLElement.prototype, 'click')
+      .mockImplementation(function (this: HTMLElement) {
+        const link = this as HTMLAnchorElement
+        saved.push({ href: link.href, download: link.download })
+      })
+  })
+
+  afterEach(() => {
+    clickSpy.mockRestore()
+    delete (URL as Partial<typeof URL>).createObjectURL
+    delete (URL as Partial<typeof URL>).revokeObjectURL
+  })
+
+  async function clickExport(skill: string) {
+    setupApi()
+    const component = await mountSuspended(Skills)
+    await flushPromises()
+    const row = component.findAll('.group').find(r => r.text().includes(skill))
+    const button = row!.find('button[title="Export for Claude"]')
+    expect(button.exists()).toBe(true)
+    await button.trigger('click')
+    return component
+  }
+
+  it('saves the zip the server returns, named after the skill', async () => {
+    let requested = false
+    registerEndpoint('/api/skills/code-review/export', () => {
+      requested = true
+      return 'zip bytes'
+    })
+
+    await clickExport('code-review')
+
+    await vi.waitFor(() => expect(saved).toHaveLength(1))
+    expect(requested).toBe(true)
+    expect(saved[0]).toEqual({ href: 'blob:jclaw-export', download: 'code-review.zip' })
+  })
+
+  it('shows why when Claude would not accept the skill, and saves nothing', async () => {
+    registerEndpoint('/api/skills/code-review/export', (event) => {
+      setResponseStatus(event, 422)
+      return {
+        type: 'error',
+        code: 'not_exportable',
+        message: 'Claude would not accept this skill: Description cannot contain angle brackets (< or >)',
+        problems: ['Description cannot contain angle brackets (< or >)'],
+      }
+    })
+
+    const component = await clickExport('code-review')
+
+    await vi.waitFor(() => expect(component.text())
+      .toContain('Claude would not accept this skill: Description cannot contain angle brackets (< or >)'))
+    expect(saved).toEqual([])
   })
 })

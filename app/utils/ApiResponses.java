@@ -97,6 +97,8 @@ public final class ApiResponses {
     public static final String NO_INPUT = "no_input";
     public static final String PAYLOAD_TOO_LARGE = "payload_too_large";
     public static final String RESERVED_KEY = "reserved_key";
+    /** 422 — the skill would fail Anthropic's skill validator, so it is not exported. */
+    public static final String NOT_EXPORTABLE = "not_exportable";
 
     // Upstream, capacity and I/O.
     public static final String RATE_LIMITED = "rate_limited";

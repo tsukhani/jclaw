@@ -30,7 +30,7 @@ The [Skills](/skills) page splits into two columns:
 - **Global Skills** (left): the library you have built. Drag any global skill onto an agent on the right to assign it.
 - **Agent Skills** (right): every agent, with the skills currently attached to each.
 
-Assigning a skill runs two checks before anything is copied, and a failure shows as a banner on the page. First, every tool the skill's `tools:` frontmatter lists must exist and be enabled for that agent. Otherwise you get *Cannot add skill '…' to agent '…': missing tools — disabled: […]; unknown: […]. Enable the required tools for this agent and try again.* Second, JClaw malware-scans every binary file in the skill by SHA-256 hash, with the scanners configured in [Settings → Malware and Virus Scanners](/guide#settings-malware-and-virus-scanners), and a hit refuses with *malware detected*. With no scanner enabled, the scan is skipped. A scanner that errors or times out fails open. In both cases the skill is added. Verdicts are logged under category `scanner` in [Logs](/logs). Dragging a skill the agent already holds at the same or a newer version only re-enables it, and neither check runs.
+Assigning a skill runs two checks before anything is copied, and a failure shows as a banner on the page. First, every tool the skill lists in `jclaw-tools` (under `metadata` in its frontmatter) must exist and be enabled for that agent. Otherwise you get *Cannot add skill '…' to agent '…': missing tools — disabled: […]; unknown: […]. Enable the required tools for this agent and try again.* Second, JClaw malware-scans every binary file in the skill by SHA-256 hash, with the scanners configured in [Settings → Malware and Virus Scanners](/guide#settings-malware-and-virus-scanners), and a hit refuses with *malware detected*. With no scanner enabled, the scan is skipped. A scanner that errors or times out fails open. In both cases the skill is added. Verdicts are logged under category `scanner` in [Logs](/logs). Dragging a skill the agent already holds at the same or a newer version only re-enables it, and neither check runs.
 
 You can also **promote** an agent-specific skill back into the global library by dragging it from the right column to the left. This is the workflow for refining a skill on one agent first, then making it reusable everywhere. Promotion routes the skill through an LLM sanitization pass; see [Settings → Skills Promotion](/guide#settings) for the provider/model/timeout knobs.
 
@@ -38,12 +38,20 @@ You can also **promote** an agent-specific skill back into the global library by
 
 Skills are not written on this page. Two ways to get one:
 
-- **Browse catalog**: the button above the Global Skills column opens the importable-skills catalogs: static ones (the GitHub/Mastra index, with search, sort and category facets) and the dynamic ClawHub registry (search plus paging). **Import** pulls a skill straight into **Global Skills** in one click.
+- **Browse catalog**: the button above the Global Skills column opens the importable-skills catalogs: static ones (the GitHub/Mastra index, with search, sort and category facets) and the dynamic ClawHub registry (search plus paging). **Import** pulls a skill straight into **Global Skills** in one click. The skill keeps its own name, description, license and files; JClaw adds the tools it needs.
 - **Author it** with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill, and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body the agent reads when it uses the skill). Once it is good, drag it from the agent's column to **Global Skills** to promote it for reuse.
 
 ### Viewing
 
 Click any skill row to open a **read-only** viewer of its files. A global skill can be **renamed** inline (double-click its name in the Global Skills column) and **deleted** from its row; to change its content, edit it via the skill-creator skill in an agent's workspace (then re-promote if it is a global skill). Each agent runs its own copy of a skill, made when the skill was assigned. So a re-promoted global skill reaches an agent only once you assign it to that agent again; past conversations keep the prompt they were created with.
+
+### Exporting to Claude
+
+JClaw skills use the same format as Claude's skills. **Export for Claude** (the download icon on a Global Skills row) saves the skill as a zip. Unzip it into `~/.claude/skills/` for Claude Code, or upload the zip as a skill in the Claude app.
+
+The zip never carries a credential value. A JSON file in `credentials/` keeps only its keys, and other files in `credentials/` are left out. If the skill's instructions call JClaw tools by name, its `compatibility` field says so, because Claude has no tools with those names.
+
+If Claude would refuse the skill, nothing is saved and the page says why, for example *Claude would not accept this skill: Description cannot contain angle brackets (< or >)*.
 
 :::tip Start broad, then split
 A skill that is too narrow gets duplicated. A skill that is too broad gets attached to agents that do not need most of it. When in doubt, start broad and split when you notice an agent ignoring half the skill's content.

@@ -216,6 +216,7 @@ GET     /api/skills/{name}                      ApiSkillsController.get
 PUT     /api/skills/{name}/rename               ApiSkillsController.rename
 GET     /api/skills/{name}/files/{<.+>filePath} ApiSkillsController.readFile
 GET     /api/skills/{name}/files                 ApiSkillsController.listFiles
+GET     /api/skills/{name}/export               ApiSkillsController.export
 DELETE  /api/skills/{name}                      ApiSkillsController.delete
 GET     /api/agents/{id}/skills                 ApiSkillsController.listForAgent
 PUT     /api/agents/{id}/skills/{name}          ApiSkillsController.updateForAgent
