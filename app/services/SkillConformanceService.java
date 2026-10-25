@@ -44,7 +44,7 @@ import java.util.regex.Pattern;
  *   <li><b>Validation (code):</b> {@link #applyHardGates} is a pure, deterministic
  *       function that accepts or rejects the proposal against the real
  *       {@link ToolCatalog}/{@link agents.ToolRegistry}: every declared tool MUST
- *       exist or the import is rejected, and {@code commands:} is derived strictly
+ *       exist or the import is rejected, and {@code jclaw-commands} is derived strictly
  *       from the binaries actually on disk — never from the model.</li>
  * </ul>
  * {@link SkillPromotionService#publishToGlobal} then scans and publishes the skill
@@ -115,7 +115,7 @@ public final class SkillConformanceService {
 
         /** A frontmatter scalar occupies exactly one line. The description reaches here from the
          *  conformance LLM, and a newline in it would otherwise close the value and land the rest
-         *  as a frontmatter key of its own -- {@code commands:} being the one that grants shell
+         *  as a frontmatter key of its own -- the command list being the one that grants shell
          *  binaries (JCLAW-1227). */
         private static String scalar(@Nullable String value) {
             return value == null ? "" : value.replaceAll("[\\r\\n]+", " ").strip();

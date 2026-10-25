@@ -143,7 +143,7 @@ public final class SkillVersionManager {
 
     /**
      * Return the version the LLM wrote in the new content's frontmatter, or {@code null}
-     * if no {@code version:} line is present.
+     * if it declares none.
      */
     static @Nullable String extractExplicitVersion(@Nullable String content) {
         if (content == null) return null;

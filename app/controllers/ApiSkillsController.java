@@ -304,7 +304,7 @@ public class ApiSkillsController extends Controller {
     }
 
     /**
-     * Resolve the tools a skill needs. Prefers the explicit {@code tools:} frontmatter
+     * Resolve the tools a skill needs. Prefers the explicit {@code jclaw-tools} frontmatter
      * (the authoritative declaration) whenever the skill has one — even if the declared
      * list is empty, which is the correct answer for pure-reasoning skills. Falls back
      * to the body-text heuristic only for legacy skills that predate the declaration.

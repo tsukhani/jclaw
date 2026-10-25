@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * Blessed shell-command contributions declared by a promoted global skill.
  * One row per (skill, command) pair. Rows are rewritten on every promotion
- * (old set cleared, new set from the skill's {@code commands:} frontmatter
+ * (old set cleared, new set from the skill's {@code jclaw-commands} frontmatter
  * inserted) and deleted on explicit un-promotion from the registry.
  *
  * <p>Per the skill-allowlist design: this table is the <em>registry</em>

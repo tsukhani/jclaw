@@ -39,11 +39,11 @@ public class SkillLoader {
      * @param tools         JClaw tool names this skill consumes (exec, filesystem,
      *                      browser, …). See {@code commands} below for the
      *                      shell-allowlist counterpart.
-     * @param toolsDeclared true when the SKILL.md frontmatter contained a {@code tools:} key
-     *                      (even if the list was empty). false means the skill predates the
+     * @param toolsDeclared true when the frontmatter declares its tools ({@code jclaw-tools}, or
+     *                      the earlier layout's {@code tools:}), even as none. false means the skill predates the
      *                      declaration system and callers should fall back to heuristics.
-     * @param version       semver string from frontmatter ({@code version:}), or {@code "0.0.0"}
-     *                      if the key was absent.
+     * @param version       semver string from the frontmatter's {@code version}, or {@code "0.0.0"}
+     *                      if it declares none.
      * @param commands      shell-allowlist contributions declared by this skill — typically the
      *                      basenames of executables bundled under the skill's {@code tools/}
      *                      directory. Distinct from {@code tools}: {@code tools} names the
@@ -52,15 +52,15 @@ public class SkillLoader {
      *                      Blessed at promotion time and snapshotted per-agent at install time;
      *                      feeds the ShellExecTool allowlist union. Empty/null when the skill
      *                      declares no executables.
-     * @param author        name of the agent that authored the skill, from the {@code author:}
-     *                      frontmatter key. Empty string when the skill predates the field
+     * @param author        name of the agent that authored the skill, from the frontmatter's
+     *                      {@code author}. Empty string when the skill predates the field
      *                      (caller should render no attribution rather than guessing).
-     * @param icon           icon identifier from the {@code icon:} frontmatter key (rendered
+     * @param icon           icon identifier from the frontmatter's {@code jclaw-icon} (rendered
      *                      next to the skill in the UI). Empty string when unset.
-     * @param mcpServers    JCLAW-281: MCP server dependencies declared via the
-     *                      {@code mcp_servers:} frontmatter key. A skill that uses Jira via
+     * @param mcpServers    JCLAW-281: MCP server dependencies declared in the frontmatter's
+     *                      {@code jclaw-mcp-servers}. A skill that uses Jira via
      *                      the {@code jira-confluence} MCP server declares
-     *                      {@code mcp_servers: [jira-confluence]} once instead of listing
+     *                      {@code jclaw-mcp-servers: jira-confluence} once instead of listing
      *                      every Jira action by name in {@code tools}. Empty when the skill
      *                      predates the field or doesn't need any MCP server.
      */
@@ -79,12 +79,12 @@ public class SkillLoader {
         }
     }
 
-    /** Emoji substituted in user-visible skill listings when a SKILL.md omits the {@code icon:} frontmatter key. */
+    /** Emoji substituted in user-visible skill listings when a SKILL.md declares no icon. */
     public static final String DEFAULT_SKILL_ICON = "🎯";
 
     /** Per-skill markdown manifest filename — the metadata + instructions file at the root of each skill directory. */
     private static final String SKILL_MD_FILENAME = "SKILL.md";
-    /** Default semver returned for a skill that omits the {@code version:} frontmatter key. */
+    /** Default semver returned for a skill that declares no version. */
     private static final String DEFAULT_SKILL_VERSION = "0.0.0";
     /** Shared value for the skills cache name, the EventLogger category, the workspace/global subdirectory name, and the config-property default. */
     private static final String SKILLS = "skills";
