@@ -228,6 +228,17 @@ public class Task extends TimestampedModel {
     public String payloadType;
 
     /**
+     * The chat an agent ran this task from, waiting on its next run's result; {@code TaskRunReports}
+     * moves it onto the run the executor opens. Null when nobody is waiting.
+     */
+    @Column(name = "report_conversation_id")
+    public Long reportConversationId;
+
+    /** Whether the turn that asked for the report was owner-initiated; the report's turn is bound to it. */
+    @Column(name = "report_owner_initiated")
+    public Boolean reportOwnerInitiated;
+
+    /**
      * With {@link #modelId}, the model this task's fires run on instead of the agent's
      * (applied by {@code AgentRunner.runForTask}); null inherits the agent's current model.
      */

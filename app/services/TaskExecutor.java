@@ -229,6 +229,11 @@ public final class TaskExecutor {
             r.task = resolvedTask;
             r.startedAt = AppClock.now();
             r.status = TaskRun.Status.RUNNING;
+            var report = TaskRunReports.claimForNewRun(resolvedTask.id);
+            if (report != null) {
+                r.reportConversationId = report.conversationId();
+                r.reportOwnerInitiated = report.ownerInitiated();
+            }
             r.save();
             return Optional.of(r);
         });
@@ -377,7 +382,8 @@ public final class TaskExecutor {
             // cancellation, not a failure for JClawFailureHandler to classify.
             var timeoutNote = TaskFireDeadline.timeoutNote(sink.taskRunId());
             boolean timedOut = timeoutNote != null;
-            sink.onCancelled(timeoutNote != null ? timeoutNote : "Cancelled by operator");
+            // The operator's cancel endpoint announces its own cancel; a shutdown's goes unannounced.
+            sink.onCancelled(timeoutNote != null ? timeoutNote : "Cancelled by operator", timedOut);
             // The fire ended without completing; return the task from RUNNING to
             // its alive state (ACTIVE for recurring, PENDING for one-shot) so it
             // isn't stranded showing RUNNING. Only this fire was canceled — the
@@ -443,7 +449,11 @@ public final class TaskExecutor {
             }
             TaskLifecycleEvents.recordCompleted(task, closed,
                     closed.durationMs != null ? closed.durationMs : 0L);
-            dispatchDelivery(task, closed, resolved.deliveredViaMessageTool());
+            try {
+                dispatchDelivery(task, closed, resolved.deliveredViaMessageTool());
+            } finally {
+                TaskLifecycleEvents.publishDeliverySettled(task, closed);
+            }
             // Auto-delete a one-shot reminder that opted in — the fire delivered,
             // so the reminder has served its purpose. Runs after delivery so the
             // nudge is sent first; the Notification row survives (not a FK).

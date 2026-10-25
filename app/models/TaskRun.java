@@ -87,6 +87,18 @@ public class TaskRun extends Model {
     @Column(name = "trace_json", columnDefinition = "TEXT")
     public String traceJson;
 
+    /**
+     * The chat waiting on this run's result, cleared when {@code TaskRunReports} posts it there, so a
+     * run reports once. A run that ends without reporting (a restart or a shutdown cut it short, a retry
+     * follows) hands it to the task's next run.
+     */
+    @Column(name = "report_conversation_id")
+    public Long reportConversationId;
+
+    /** Whether the turn that asked for the report was owner-initiated. */
+    @Column(name = "report_owner_initiated")
+    public Boolean reportOwnerInitiated;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     public Instant createdAt;
 

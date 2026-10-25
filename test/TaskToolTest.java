@@ -1,3 +1,4 @@
+import agents.ToolContext;
 import com.github.kagkarlsson.scheduler.SchedulerClient;
 import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
@@ -7,9 +8,12 @@ import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.ConversationService;
 import services.EventLogger;
+import services.TaskRunReports;
 import services.Tx;
 import tools.TaskTool;
 
@@ -381,6 +385,39 @@ class TaskToolTest extends UnitTest {
     }
 
     // === runNow ===
+
+    @Test
+    void runNowFromAChatAsksForTheRunsResultThereAndTellsTheAgentToEndItsTurn() {
+        execute("""
+                {"action":"createTask","name":"chat-run","schedule":"every 1h"}""");
+        var taskId = findTaskByName("chat-run").id;
+        var chat = Tx.run(() -> ConversationService.create(agent, "web", null).id);
+
+        var reply = ToolContext.withConversation(chat, () -> execute("""
+                {"action":"runNow","name":"chat-run"}"""));
+        commitAndReopen();
+        JPA.em().clear();
+
+        assertEquals("Task 'chat-run' run-now triggered. " + TaskRunReports.AGENT_NOTE, reply);
+        var task = (Task) Tx.run(() -> Task.findById(taskId));
+        assertEquals(chat, task.reportConversationId);
+        assertEquals(Boolean.FALSE, task.reportOwnerInitiated, "an unbound sender is a guest");
+    }
+
+    @Test
+    void runNowOutsideAChatAsksForNoReport() {
+        execute("""
+                {"action":"createTask","name":"headless-run","schedule":"every 1h"}""");
+        var taskId = findTaskByName("headless-run").id;
+
+        var reply = execute("""
+                {"action":"runNow","name":"headless-run"}""");
+        commitAndReopen();
+        JPA.em().clear();
+
+        assertEquals("Task 'headless-run' run-now triggered.", reply);
+        assertNull(((Task) Tx.run(() -> Task.findById(taskId))).reportConversationId);
+    }
 
     @Test
     void runNowReschedulesExistingPendingTask() {

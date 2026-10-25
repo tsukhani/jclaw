@@ -104,6 +104,10 @@ public final class TaskLifecycleEvents {
     public static final String BUS_DELIVERED = "task.delivered";
     public static final String BUS_DELIVERY_FAILED = "task.delivery_failed";
     public static final String BUS_LOST = "task.lost";
+    /** A completed run's delivery step is over, whatever its outcome, so its delivery columns are final. */
+    public static final String BUS_DELIVERY_SETTLED = "task.delivery_settled";
+    /** An operator or the fire's time limit cancelled a run; a shutdown's cancel is not announced. */
+    public static final String BUS_RUN_CANCELLED = "task.run_cancelled";
 
     private TaskLifecycleEvents() {}
 
@@ -172,6 +176,16 @@ public final class TaskLifecycleEvents {
                 "error_message", errorMessage);
         EventLogger.record("ERROR", FAILED, agentName, null, message, details);
         publishBus(BUS_FAILED, task.id, run != null ? run.id : null);
+    }
+
+    /** Announce {@link #BUS_DELIVERY_SETTLED}; it records nothing, since the delivery outcome already has its event. */
+    public static void publishDeliverySettled(Task task, TaskRun run) {
+        publishBus(BUS_DELIVERY_SETTLED, task.id, run.id);
+    }
+
+    /** Announce {@link #BUS_RUN_CANCELLED} once the cancel commits, so a reader finds the run CANCELLED. */
+    public static void publishRunCancelled(Long taskId, Long runId) {
+        NotificationBus.publishAfterCommit(BUS_RUN_CANCELLED, Map.of("taskId", taskId, "runId", runId));
     }
 
     /** Mark a successful post-completion delivery via {@link DeliveryDispatcher#dispatchSpec}. */

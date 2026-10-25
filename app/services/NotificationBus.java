@@ -12,6 +12,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
 import static utils.GsonHolder.GSON;
@@ -50,9 +51,14 @@ public class NotificationBus {
     /** JCLAW-1206: a SubagentRun terminal status committed; same payload as
      *  {@link #BUS_SUBAGENT_RUN_STARTED}. */
     public static final String BUS_SUBAGENT_RUN_ENDED = "subagentrun.ended";
+    /** A message was added to a conversation outside a turn the open chat page is streaming, so it
+     *  reloads its messages. Payload carries {@code conversationId}. */
+    public static final String BUS_CONVERSATION_UPDATED = "conversation.updated";
 
     private static final Gson gson = GSON;
     private static final CopyOnWriteArrayList<Consumer<String>> listeners = new CopyOnWriteArrayList<>();
+    private static final CopyOnWriteArrayList<BiConsumer<String, Map<String, Object>>> eventListeners =
+            new CopyOnWriteArrayList<>();
 
     /** Per-listener dispatch timeout. SSE writes hanging longer indicate a dead client. */
     public static final long LISTENER_TIMEOUT_MS = 3_000L;
@@ -70,8 +76,25 @@ public class NotificationBus {
         return () -> listeners.remove(listener);
     }
 
+    /**
+     * Subscribe a server-side listener to each event's type and data. It runs on the publisher's
+     * thread, so it must return at once, handing any work to a thread of its own; one that throws
+     * is logged and kept. Returns an unsubscribe handle.
+     */
+    public static Runnable subscribeEvents(BiConsumer<String, Map<String, Object>> listener) {
+        eventListeners.add(listener);
+        return () -> eventListeners.remove(listener);
+    }
+
     /** Publish an event to all connected listeners. */
     public static void publish(String type, Map<String, Object> data) {
+        for (var listener : eventListeners) {
+            try {
+                listener.accept(type, data);
+            } catch (RuntimeException e) {
+                Logger.warn(e, "NotificationBus: a listener failed on %s", type);
+            }
+        }
         var event = gson.toJson(Map.of("type", type, "data", data));
         var ssePayload = "data: %s\n\n".formatted(event);
         if (listeners.isEmpty()) return;

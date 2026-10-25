@@ -267,6 +267,10 @@ public class JClawApiTool implements ToolRegistry.Tool {
         if (origin != null) {
             requestBuilder.header(RequestPrincipal.CALLER_ORIGIN_HEADER, origin);
         }
+        var conversationId = ToolContext.conversationId();
+        if (conversationId != null) {
+            requestBuilder.header(RequestPrincipal.CALLER_CONVERSATION_HEADER, String.valueOf(conversationId));
+        }
 
         RequestBody body = requestBodyFor(method, args);
         requestBuilder.method(method, body);
@@ -279,7 +283,10 @@ public class JClawApiTool implements ToolRegistry.Tool {
                         + "\n\n[Truncated: response exceeds %d characters]"
                                 .formatted(MAX_RESPONSE_CHARS);
             }
-            return "HTTP %d\n%s".formatted(status, text);
+            var note = response.header(RequestPrincipal.AGENT_NOTE_HEADER);
+            return note == null || note.isBlank()
+                    ? "HTTP %d\n%s".formatted(status, text)
+                    : "HTTP %d\nNote: %s\n%s".formatted(status, note.strip(), text);
         } catch (IOException e) {
             return "Error: HTTP request failed: " + e.getMessage();
         }

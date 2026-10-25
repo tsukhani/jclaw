@@ -41,7 +41,7 @@ For something that should happen **once** on a given day, use the absolute date-
 | `updateTask`          | Partial update by name. Fields you do not provide stay as-is.                                               |
 | `pause`               | Stop a task from firing while keeping its schedule. Resume later without re-typing it.                      |
 | `resume`              | Re-enable a paused task, re-arming a one-off fire that lapsed during the pause.                              |
-| `runNow`              | Fire a task immediately by name. Revives `CANCELLED` rows on the way through.                               |
+| `runNow`              | Fire a task immediately by name. Revives `CANCELLED` rows on the way through. Run from a chat, it tells that chat how the run ended (see below). |
 | `cancelTask`          | Set status to `CANCELLED`, which stops fires but keeps the row so `runNow` can revive it later. |
 | `deleteTask`          | Permanently delete the task and its run history. Irreversible.                                              |
 | `listRecurringTasks`  | List every recurring task currently configured for this agent.                                              |
@@ -50,6 +50,14 @@ For something that should happen **once** on a given day, use the absolute date-
 `createTask` and `updateTask` also take `enabledToolNames`, a JSON array of the tools a fire may use. The agent's other tools are withheld from that task, and leaving it unset gives the task all of them. The fire is also told only about the tools on its list, so it does not try the others. A subagent that a fire starts is held to the same list, and so is any subagent that one starts. A [coding harness](/guide#subagents-acp-harness) is an external program with its own tools, so the list does not bind it. Leave `subagent_spawn` out of the list if the task must not start one. They also take `modelProvider` and `modelId`, which pin the task to that model (see **Model** under *Editing a task's instructions*). Set both, because a pin with only one is ignored.
 
 For the agent to be able to use any of these actions, **Tools → task_manager** must be switched on for that agent on the [Agents](/agents) page.
+
+### Running a task from chat
+
+When an agent runs a task from a chat, with `runNow` or through its `jclaw_api` tool, JClaw tells that chat how the run ended. The agent does not wait or keep checking. When the run is over, a short notice appears in the chat. It says whether the run completed or failed, how long it took, and where its output went. Then the agent tells you.
+
+The output itself goes only where the task's delivery sends it, never into the chat that started the run. A task with no delivery keeps its output on the Tasks page; select **Open tasks** on the notice to go there. The notice asks the agent not to fetch or repeat the output in the chat. That is a request to the agent, not a block.
+
+If you cancel the run, or JClaw stops it for running too long, the notice says it was cancelled. If a restart cuts the run short, or it fails and will be retried, the notice comes when the task's next run ends.
 
 ### Cancel vs delete
 
@@ -143,7 +151,7 @@ The transitions, one by one:
 
 | Icon             | Appears when                                              | Effect                                                                                |
 |------------------|-----------------------------------------------------------|---------------------------------------------------------------------------------------|
-| ▶ Run once       | Recurring and live (`PENDING` or `ACTIVE`), no fire in flight | Fires immediately; the next scheduled run is unchanged. Greyed out while paused. A paused task's fire body is skipped, so running it would do nothing. |
+| ▶ Run once       | Recurring and live (`PENDING` or `ACTIVE`), no fire in flight | Fires immediately; the next scheduled run is unchanged. If the last fire is still sending its output, the new one starts as soon as it finishes. Greyed out while paused. A paused task's fire body is skipped, so running it would do nothing. |
 | ⏹ Cancel running fire | Recurring with a fire in flight                      | Stops that fire at the next safe point; the schedule is untouched.                    |
 | ⏸ Pause          | Any live task (`PENDING` or `ACTIVE`), recurring or one-off   | A toggle, not a one-way action: click to suspend the schedule, click again to resume. It stays a pause icon and lights amber while engaged, and the row's status reads `PAUSED`. On a one-off it is the reversible alternative to **Cancel**. |
 | 🚫 Cancel        | One-off with status `PENDING`                             | Stops it firing. The row is kept; **Re-enable** or `runNow` revives it.               |

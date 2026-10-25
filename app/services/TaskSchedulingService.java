@@ -7,14 +7,19 @@ import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import jobs.DbSchedulerBootstrapJob;
 import models.Task;
+import models.TaskRun;
 import org.jspecify.annotations.Nullable;
 import play.db.DB;
 import play.db.jpa.JPA;
 import utils.AppClock;
 
 import java.sql.SQLException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /**
@@ -73,6 +78,14 @@ import java.util.function.Supplier;
 public final class TaskSchedulingService {
 
     private static final String PARAM_TASK_ID = "taskId";
+    private static final Duration RUN_NOW_RETRY_DELAY = Duration.ofSeconds(1);
+    private static final int RUN_NOW_RETRY_ATTEMPTS = 120;
+    // A platform thread, so a burst of retries parks no virtual thread on a timed wait (JDK-8373224).
+    private static final ScheduledExecutorService RUN_NOW_RETRY = Executors.newSingleThreadScheduledExecutor(r -> {
+        var t = new Thread(r, "task-run-now-retry");
+        t.setDaemon(true);
+        return t;
+    });
 
     /**
      * Indirection over {@code DbSchedulerBootstrapJob.scheduler()} so
@@ -161,9 +174,11 @@ public final class TaskSchedulingService {
      *       next-fire time to now.</li>
      *   <li>The row exists but is currently being executed (db-scheduler
      *       holds a row lock for the duration of the fire). Reschedule
-     *       throws {@code TaskInstanceCurrentlyExecutingException}; we
-     *       log and no-op, because the fire the operator wanted is
-     *       already in flight.</li>
+     *       throws {@code TaskInstanceCurrentlyExecutingException}. While a
+     *       run is in flight, or one has started since the request, we log
+     *       and no-op: that is the fire the operator wanted. When the last
+     *       run has already closed and its execution is only delivering, we
+     *       retry each second, for up to two minutes, until it ends.</li>
      *   <li>The row is gone — common after a one-shot Task COMPLETED
      *       (OnCompleteRemove dropped it) or a Task was CANCELED.
      *       Reschedule throws {@code TaskInstanceNotFoundException};
@@ -188,17 +203,31 @@ public final class TaskSchedulingService {
     private static void fireNow(Long taskId, @Nullable Task task) {
         SchedulerClient client = client();
         if (client == null) return;
+        fireNow(client, taskId, task, AppClock.now(), 0);
+    }
+
+    private static void fireNow(SchedulerClient client, Long taskId, @Nullable Task task, Instant requestedAt, int attempt) {
         var instanceId = TaskInstanceId.of(TaskExecutionHandler.TASK_NAME, taskId.toString());
         boolean rescheduled = false;
         try {
             rescheduled = client.reschedule(instanceId, AppClock.now());
         } catch (TaskInstanceCurrentlyExecutingException _) {
-            // Fire is already in progress — that IS the outcome the
-            // operator wanted. Log and no-op rather than racing with
-            // the executor.
-            EventLogger.info("task", null, null,
-                    "Task id %d run-now: fire already in progress; not rescheduling"
-                            .formatted(taskId));
+            if (aRunAnswers(taskId, requestedAt)) {
+                // A run in flight, or one that started since, is the fire the operator wanted.
+                EventLogger.info("task", null, null,
+                        "Task id %d run-now: fire already in progress; not rescheduling"
+                                .formatted(taskId));
+                return;
+            }
+            // The last fire's run has closed but its execution is still delivering: fire when it ends.
+            if (attempt >= RUN_NOW_RETRY_ATTEMPTS) {
+                EventLogger.warn("task", null, null,
+                        "Task id %d run-now: its last fire was still finishing after %d s; not rescheduling"
+                                .formatted(taskId, RUN_NOW_RETRY_ATTEMPTS * RUN_NOW_RETRY_DELAY.toSeconds()));
+                return;
+            }
+            RUN_NOW_RETRY.schedule(() -> retryFireNow(client, taskId, task, requestedAt, attempt + 1),
+                    RUN_NOW_RETRY_DELAY.toMillis(), TimeUnit.MILLISECONDS);
             return;
         } catch (TaskInstanceNotFoundException _) {
             // Row was removed (terminal one-shot completion, cancel, etc.)
@@ -218,6 +247,23 @@ public final class TaskSchedulingService {
             return;
         }
         scheduleFire(task, AppClock.now());
+    }
+
+    private static void retryFireNow(SchedulerClient client, Long taskId, @Nullable Task task, Instant requestedAt,
+                                     int attempt) {
+        try {
+            // Checked first: a run the finishing execution opened answers the request, and firing again would double it.
+            if (aRunAnswers(taskId, requestedAt)) return;
+            fireNow(client, taskId, task, requestedAt, attempt);
+        } catch (RuntimeException e) {
+            EventLogger.warn("task", null, null,
+                    "Task id %d run-now: retry failed: %s".formatted(taskId, e.getMessage()));
+        }
+    }
+
+    private static boolean aRunAnswers(Long taskId, Instant requestedAt) {
+        return Tx.run(() -> TaskRun.count("task.id = ?1 AND (status = ?2 OR startedAt >= ?3)",
+                taskId, TaskRun.Status.RUNNING, requestedAt)) > 0;
     }
 
     /**

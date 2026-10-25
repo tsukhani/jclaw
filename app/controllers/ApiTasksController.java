@@ -22,6 +22,7 @@ import services.JClawCronUtils;
 import services.ScheduleShorthandParser;
 import services.TaskListQueryService;
 import services.TaskRunQueryService;
+import services.TaskRunReports;
 import services.TaskSchedulingService;
 import services.TaskService;
 import services.TaskWriteService;
@@ -692,7 +693,8 @@ public class ApiTasksController extends Controller {
      */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TaskView.class)))
-    @Operation(summary = "Fire a task immediately by id, reviving a CANCELLED task first so the run isn't skipped")
+    @Operation(summary = "Fire a task immediately by id, reviving a CANCELLED task first so the run isn't skipped; "
+            + "an agent calling from a chat is told there how the run ended")
     @AgentAccess(value = OPEN, reason = "fires a task the agent can equally create")
     public static void run(Long id) {
         Task task = TaskService.findById(id);
@@ -709,6 +711,12 @@ public class ApiTasksController extends Controller {
             revivedFromCancel = true;
         }
 
+        // Recorded before the fire, so the run the executor opens finds it. The request carries no
+        // channel sender, so the report's turn is never owner-initiated.
+        var chat = RequestPrincipal.callerConversationId();
+        if (chat != null && TaskRunReports.request(task.id, chat, false)) {
+            response.setHeader(RequestPrincipal.AGENT_NOTE_HEADER, TaskRunReports.AGENT_NOTE);
+        }
         TaskSchedulingService.runNow(task.id);
 
         EventLogger.info("TASK_MGMT_MANUAL_RUN",

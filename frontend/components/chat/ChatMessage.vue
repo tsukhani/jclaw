@@ -28,6 +28,7 @@ import ChatGeneratedImage from '~/components/chat/ChatGeneratedImage.vue'
 import ChatGeneratedVideo from '~/components/chat/ChatGeneratedVideo.vue'
 import ChatScrapeJobCard from '~/components/chat/ChatScrapeJobCard.vue'
 import ChatScrapeJobNotice from '~/components/chat/ChatScrapeJobNotice.vue'
+import ChatTaskRunResult from '~/components/chat/ChatTaskRunResult.vue'
 import ChatSubagentRow from '~/components/chat/ChatSubagentRow.vue'
 import ChatThinkingCard from '~/components/chat/ChatThinkingCard.vue'
 import ChatToolCalls from '~/components/chat/ChatToolCalls.vue'
@@ -190,6 +191,11 @@ const { playingKey: readAloudPlayingKey, loadingKey: readAloudLoadingKey,
   />
   <ChatScrapeJobNotice
     v-else-if="msg.messageKind === 'scrape_job_complete'"
+    v-show="!runSlice || !runSlice?.collapsed"
+    :msg="msg"
+  />
+  <ChatTaskRunResult
+    v-else-if="msg.messageKind === 'task_run_result'"
     v-show="!runSlice || !runSlice?.collapsed"
     :msg="msg"
   />

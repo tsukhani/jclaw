@@ -7,6 +7,7 @@ import org.jspecify.annotations.Nullable;
 import play.Logger;
 import services.AttachmentService;
 import services.EventLogger;
+import services.TaskLifecycleEvents;
 import services.Tx;
 import utils.AppClock;
 
@@ -174,9 +175,11 @@ public class TaskRunSink implements AgentExecutionSink {
      * Idempotent on the terminal status: only a still-RUNNING row is transitioned,
      * so this never clobbers the CANCELED stamp the cancel endpoint already wrote
      * (it sets the row CANCELED immediately for instant UI feedback). Whichever
-     * writer reaches a RUNNING row first sets the timing.
+     * writer reaches a RUNNING row first sets the timing. {@code announce} publishes
+     * {@link TaskLifecycleEvents#BUS_RUN_CANCELLED} when this call is the one that closes the run;
+     * a shutdown's cancel passes false.
      */
-    public void onCancelled(String note) {
+    public void onCancelled(String note, boolean announce) {
         persistTerminalStatus("cancellation", () -> Tx.run(() -> {
             var fresh = (TaskRun) TaskRun.findById(taskRunId);
             if (fresh == null || fresh.status != TaskRun.Status.RUNNING) return null;
@@ -185,6 +188,7 @@ public class TaskRunSink implements AgentExecutionSink {
             fresh.status = TaskRun.Status.CANCELLED;
             fresh.outputSummary = note;
             fresh.save();
+            if (announce) TaskLifecycleEvents.publishRunCancelled(fresh.task.id, taskRunId);
             return null;
         }));
     }

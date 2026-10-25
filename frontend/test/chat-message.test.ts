@@ -33,6 +33,25 @@ function props(m: Message, o: Record<string, unknown> = {}) {
 }
 
 describe('ChatMessage (JCLAW-690)', () => {
+  it('shows a task run\'s result as a notice with its facts, and no bubble for the user row behind it', async () => {
+    const c = await mountSuspended(ChatMessage, {
+      props: props(msg({
+        role: 'user',
+        messageKind: 'task_run_result',
+        content: '[task result] Task \'daily-briefing\' (run 7) completed in 67.5 s. Its output was delivered to telegram. Tell the user how the run ended, without fetching or repeating its output here.',
+        metadata: {
+          taskId: 3, taskName: 'daily-briefing', runId: 7, status: 'COMPLETED', durationMs: 67540, deliveryStatus: 'DELIVERED',
+          headline: 'Task \'daily-briefing\' (run 7) completed in 67.5 s.', outcome: 'Its output was delivered to telegram.',
+        },
+      } as Partial<Message>)),
+    })
+
+    const card = c.find('[data-testid="chat-task-run-result"]')
+    expect(card.find('p').text()).toBe('Task \'daily-briefing\' (run 7) completed in 67.5 s. Its output was delivered to telegram.')
+    expect(card.find('a').attributes('href')).toBe('/tasks')
+    expect(c.text()).not.toContain('Tell the user')
+  })
+
   it('renders a user message\'s plain-text content', async () => {
     const c = await mountSuspended(ChatMessage, { props: props(msg({ role: 'user', content: 'howdy there' })) })
     expect(c.text()).toContain('howdy there')

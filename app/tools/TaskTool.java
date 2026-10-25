@@ -16,6 +16,7 @@ import services.DeliverySpec;
 import services.EventLogger;
 import services.ScheduleShorthandParser;
 import services.SubagentRegistry;
+import services.TaskRunReports;
 import services.TaskSchedulingService;
 import services.TaskWriteService;
 import services.Tx;
@@ -710,6 +711,14 @@ public class TaskTool implements ToolRegistry.Tool {
         // Any-state lookup — runNow can target COMPLETED/FAILED/CANCELED too.
         var scan = Tx.run(() -> collectRunNowTargets(name, agent));
         if (scan.ranIds().isEmpty()) return MSG_NO_TASK_FOUND.formatted(name);
+        // Recorded before the fire, so the run the executor opens finds it.
+        var chat = ToolContext.conversationId();
+        boolean reported = false;
+        if (chat != null) {
+            for (var id : scan.ranIds()) {
+                reported |= TaskRunReports.request(id, chat, DangerousActionGate.ownerInitiated());
+            }
+        }
         for (var id : scan.lostIds()) {
             TaskSchedulingService.forceRemoveStaleRow(id);
             var fresh = Tx.run(() -> (Task) Task.findById(id));
@@ -727,9 +736,10 @@ public class TaskTool implements ToolRegistry.Tool {
                         .formatted(name, scan.ranIds().size(), scan.ranIds().size() == 1 ? "" : "es",
                                 revived > 0 ? revived : 0));
         String revivedSuffix = revived > 0 ? " (revived %d from CANCELLED)".formatted(revived) : "";
-        return scan.ranIds().size() == 1
+        var triggered = scan.ranIds().size() == 1
                 ? "Task '%s' run-now triggered%s.".formatted(name, revivedSuffix)
                 : "%d tasks named '%s' run-now triggered%s.".formatted(scan.ranIds().size(), name, revivedSuffix);
+        return reported ? triggered + " " + TaskRunReports.AGENT_NOTE : triggered;
     }
 
     /**

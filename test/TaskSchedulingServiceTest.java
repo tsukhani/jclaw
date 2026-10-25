@@ -5,6 +5,7 @@ import com.github.kagkarlsson.scheduler.task.TaskInstance;
 import com.github.kagkarlsson.scheduler.task.TaskInstanceId;
 import models.Agent;
 import models.Task;
+import models.TaskRun;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -185,7 +188,65 @@ class TaskSchedulingServiceTest extends UnitTest {
         assertTrue(stub.schedules.isEmpty(), "no fallback schedule when Task missing");
     }
 
+    @Test
+    void runNowWhileTheLastFireIsStillDeliveringFiresOnceItsExecutionEnds() throws Exception {
+        stub.rescheduleExecutingTimes.set(2);
+        var task = persistTask(Task.Type.CRON, null, "0 0 9 * * *");
+        persistRun(task, TaskRun.Status.COMPLETED, Instant.now().minusSeconds(60));
+
+        outsideTx(() -> TaskSchedulingService.runNow(task.id));
+        awaitReschedules(3);
+        Thread.sleep(1_500);
+
+        assertEquals(List.of(task.id.toString(), task.id.toString(), task.id.toString()),
+                stub.reschedules.stream().map(r -> r.instanceId.getId()).toList(),
+                "retried each second until the execution ended, then no more");
+    }
+
+    @Test
+    void runNowWhileARunIsInFlightLeavesThatRunToAnswerIt() throws Exception {
+        stub.rescheduleExecutingTimes.set(5);
+        var task = persistTask(Task.Type.CRON, null, "0 0 9 * * *");
+        persistRun(task, TaskRun.Status.RUNNING, Instant.now().minusSeconds(60));
+
+        outsideTx(() -> TaskSchedulingService.runNow(task.id));
+        Thread.sleep(1_500);
+
+        assertEquals(1, stub.reschedules.size());
+    }
+
+    @Test
+    void runNowStopsRetryingOnceARunHasStartedSinceTheRequest() throws Exception {
+        stub.rescheduleExecutingTimes.set(100);
+        var task = persistTask(Task.Type.CRON, null, "0 0 9 * * *");
+        persistRun(task, TaskRun.Status.COMPLETED, Instant.now().minusSeconds(60));
+
+        outsideTx(() -> TaskSchedulingService.runNow(task.id));
+        persistRun(Task.findById(task.id), TaskRun.Status.RUNNING, Instant.now());
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        Thread.sleep(2_500);
+
+        assertEquals(1, stub.reschedules.size(), "the run the finishing execution opened answers the request");
+    }
+
     // === Helpers ===
+
+    private static void persistRun(Task task, TaskRun.Status status, Instant startedAt) {
+        var run = new TaskRun();
+        run.task = task;
+        run.startedAt = startedAt;
+        run.status = status;
+        run.save();
+    }
+
+    private void awaitReschedules(int count) throws InterruptedException {
+        var deadline = Instant.now().plusSeconds(10);
+        while (stub.reschedules.size() < count) {
+            if (Instant.now().isAfter(deadline)) fail("saw " + stub.reschedules.size() + " reschedules, wanted " + count);
+            Thread.sleep(50);
+        }
+    }
 
     /**
      * Run {@code call} with no transaction, as TaskTool does: the fixture rows commit first, and the
@@ -303,7 +364,10 @@ class TaskSchedulingServiceTest extends UnitTest {
         /** What scheduleIfNotExists reports: true models an absent row, false a surviving one. */
         boolean scheduleIfNotExistsReturns = true;
         final List<TaskInstanceId> cancels = new ArrayList<>();
-        final List<RescheduleCall> reschedules = new ArrayList<>();
+        // Written by the run-now retry thread too.
+        final List<RescheduleCall> reschedules = new CopyOnWriteArrayList<>();
+        /** How many reschedules throw as if the task's last fire were still executing. */
+        final AtomicInteger rescheduleExecutingTimes = new AtomicInteger();
         boolean throwNotFoundOnCancel = false;
         boolean throwCurrentlyExecutingOnCancel = false;
         boolean rescheduleReturns = true;
@@ -346,6 +410,9 @@ class TaskSchedulingServiceTest extends UnitTest {
                     && args[0] instanceof TaskInstanceId id
                     && args[1] instanceof Instant when) {
                 reschedules.add(new RescheduleCall(id, when));
+                if (rescheduleExecutingTimes.getAndUpdate(n -> Math.max(0, n - 1)) > 0) {
+                    throw new TaskInstanceCurrentlyExecutingException(id.getTaskName(), id.getId());
+                }
                 return rescheduleReturns;
             }
             // Defaults for unhandled methods so the proxy never NPEs the caller.

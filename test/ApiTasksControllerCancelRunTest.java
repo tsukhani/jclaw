@@ -6,8 +6,12 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.EventLogger;
+import services.NotificationBus;
+import services.TaskLifecycleEvents;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
 
@@ -114,6 +118,39 @@ class ApiTasksControllerCancelRunTest extends FunctionalTest {
         var runId = seedRun(taskId, TaskRun.Status.COMPLETED);
         // A run that isn't RUNNING has nothing to stop.
         assertStatus(400, POST("/api/task-runs/" + runId + "/cancel", "application/json", ""));
+    }
+
+    @Test
+    void cancellingARunAnnouncesItOnceTheCancelHasCommitted() throws Exception {
+        var agent = seedAgent();
+        var taskId = seedTask(agent, "announced-cancel-task");
+        var runId = seedRun(taskId, TaskRun.Status.RUNNING);
+        var heard = new CopyOnWriteArrayList<String>();
+        var unsubscribe = NotificationBus.subscribeEvents((type, data) -> {
+            if (!runId.equals(data.get("runId"))) return;
+            heard.add(type + " task=" + data.get("taskId") + " status=" + statusInAFreshTx(runId));
+        });
+        try {
+            assertIsOk(POST("/api/task-runs/" + runId + "/cancel", "application/json", ""));
+            var deadline = Instant.now().plusSeconds(10);
+            while (heard.isEmpty() && Instant.now().isBefore(deadline)) Thread.sleep(50);
+
+            assertEquals(List.of(TaskLifecycleEvents.BUS_RUN_CANCELLED + " task=" + taskId + " status=CANCELLED"), heard);
+        } finally {
+            unsubscribe.run();
+        }
+    }
+
+    private static TaskRun.Status statusInAFreshTx(Long runId) {
+        var status = new AtomicReference<TaskRun.Status>();
+        var t = Thread.ofPlatform().start(() -> status.set(services.Tx.run(() -> ((TaskRun) TaskRun.findById(runId)).status)));
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+        return status.get();
     }
 
     @Test

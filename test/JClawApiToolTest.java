@@ -1,11 +1,21 @@
+import agents.ToolContext;
+import controllers.RequestPrincipal;
+import okhttp3.Interceptor;
+import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Request;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import tools.JClawApiTool;
+import utils.HttpFactories;
 
 import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Unit coverage for {@link JClawApiTool}'s argument parsing, its refusal of unnormalized
@@ -213,6 +223,47 @@ class JClawApiToolTest extends UnitTest {
                 "{\"method\":\"GET\",\"path\":\"/api/config?url=https://example.com/..\"}", null);
         assertFalse(result.contains("cannot be invoked through jclaw_api -- pass the resolved path"),
                 "the query string is not part of the path; got: " + result);
+    }
+
+    // ==================== the request and the reply ====================
+
+    @Test
+    void aCallFromAChatNamesTheChatAndShowsTheRoutesNoteToTheModel() {
+        var sent = new AtomicReference<Request>();
+        var client = canned(sent, "End your turn now.");
+
+        var result = HttpFactories.callWith(client, () -> ToolContext.withConversation(42L,
+                () -> tool.execute("{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\"}", null)));
+
+        assertEquals("HTTP 200\nNote: End your turn now.\n{\"id\":5}", result);
+        assertEquals("42", sent.get().header(RequestPrincipal.CALLER_CONVERSATION_HEADER));
+    }
+
+    @Test
+    void aCallOutsideAChatNamesNoChatAndAReplyWithoutANoteIsShownAsSent() {
+        var sent = new AtomicReference<Request>();
+        var client = canned(sent, null);
+
+        var result = HttpFactories.callWith(client,
+                () -> tool.execute("{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\"}", null));
+
+        assertEquals("HTTP 200\n{\"id\":5}", result);
+        assertNull(sent.get().header(RequestPrincipal.CALLER_CONVERSATION_HEADER));
+    }
+
+    private static OkHttpClient canned(AtomicReference<Request> sent, String note) {
+        Interceptor reply = chain -> {
+            sent.set(chain.request());
+            var response = new Response.Builder()
+                    .request(chain.request())
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("OK")
+                    .body(ResponseBody.create("{\"id\":5}", null));
+            if (note != null) response.header(RequestPrincipal.AGENT_NOTE_HEADER, note);
+            return response.build();
+        };
+        return new OkHttpClient.Builder().addInterceptor(reply).build();
     }
 
     // ==================== call gate ====================

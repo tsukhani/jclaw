@@ -3,6 +3,7 @@ import { fetchMessagesAfter, newRowsCursor } from '~/utils/conversation-messages
 import { hydrateToolCalls } from '~/utils/tool-calls'
 import { initCollapsedState } from '~/utils/thinking'
 import { backfillServerIds } from '~/utils/message-reconcile'
+import { useEventBus } from '~/composables/useEventBus'
 import type { Message } from '~/types/api'
 
 /**
@@ -58,6 +59,9 @@ const POST_ANNOUNCE_GRACE_MS = 180_000
  * many deliveries over time.
  */
 const TASK_DELIVERY_POLL_GRACE_MS = 30 * 60_000
+
+/** How long to keep polling after a {@code conversation.updated} event that arrived mid-stream. */
+const CONVERSATION_UPDATED_GRACE_MS = 60_000
 
 /**
  * Tool name that schedules background tasks; matches
@@ -302,6 +306,16 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
   function keepPollingFor(ms: number) {
     pollUntil = Math.max(pollUntil, Date.now() + ms)
   }
+
+  // A row the server added outside this tab's stream, such as a task run's report; mid-stream, the tick
+  // picks it up once the stream ends.
+  const { onEvent } = useEventBus()
+  onEvent('conversation.updated', (data) => {
+    const id = (data as { conversationId?: unknown } | null)?.conversationId
+    if (id == null || id !== selectedConvoId.value) return
+    if (streaming.value) keepPollingFor(CONVERSATION_UPDATED_GRACE_MS)
+    else void pollForAnnounce()
+  })
 
   onMounted(() => {
     announcePollTimer = setInterval(announcePollTick, ANNOUNCE_POLL_INTERVAL_MS)

@@ -1,11 +1,18 @@
+import controllers.RequestPrincipal;
+import models.Agent;
 import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import play.mvc.Http;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.ConversationService;
 import services.EventLogger;
+import services.TaskRunReports;
 
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
@@ -43,9 +50,13 @@ class ApiTasksControllerRunTest extends FunctionalTest {
     }
 
     private Long seedAgent() {
+        return seedAgent(AGENT_NAME);
+    }
+
+    private Long seedAgent(String name) {
         var resp = POST("/api/agents", "application/json", """
                 {"name": "%s", "modelProvider": "openrouter", "modelId": "gpt-4.1"}
-                """.formatted(AGENT_NAME));
+                """.formatted(name));
         assertIsOk(resp);
         return Long.parseLong(extractId(getContent(resp)));
     }
@@ -92,6 +103,79 @@ class ApiTasksControllerRunTest extends FunctionalTest {
             throw new RuntimeException(e);
         }
         if (err.get() != null) throw new RuntimeException(err.get());
+    }
+
+    @Test
+    void anAgentRunningATaskFromItsOwnChatIsToldThereHowTheRunEnds() {
+        var agentId = seedAgent();
+        var taskId = seedTask(agentId, "report-me", "every 1h");
+        var chat = committed(() -> ConversationService.create(Agent.findById(agentId), "web", null).id);
+
+        var resp = asAgent(() -> POST(agentRequest(agentId, chat), "/api/tasks/" + taskId + "/run", "application/json", "{}"));
+
+        assertIsOk(resp);
+        assertEquals(TaskRunReports.AGENT_NOTE, resp.getHeader(RequestPrincipal.AGENT_NOTE_HEADER));
+        var task = committed(() -> (Task) Task.findById(taskId));
+        assertEquals(chat, task.reportConversationId);
+        assertEquals(Boolean.FALSE, task.reportOwnerInitiated, "the request carries no channel sender");
+    }
+
+    @Test
+    void aChatThatIsNotTheCallingAgentsOrNoChatAtAllAsksForNoReport() {
+        var agentId = seedAgent();
+        var otherId = seedAgent("task-run-other-agent");
+        var taskId = seedTask(agentId, "not-yours", "every 1h");
+        var othersChat = committed(() -> ConversationService.create(Agent.findById(otherId), "web", null).id);
+
+        var naming = asAgent(() -> POST(agentRequest(agentId, othersChat), "/api/tasks/" + taskId + "/run", "application/json", "{}"));
+        var unnamed = asAgent(() -> POST(agentRequest(agentId, null), "/api/tasks/" + taskId + "/run", "application/json", "{}"));
+
+        assertIsOk(naming);
+        assertIsOk(unnamed);
+        assertNull(naming.getHeader(RequestPrincipal.AGENT_NOTE_HEADER));
+        assertNull(unnamed.getHeader(RequestPrincipal.AGENT_NOTE_HEADER));
+        assertNull(committed(() -> ((Task) Task.findById(taskId)).reportConversationId));
+    }
+
+    private static Http.Request agentRequest(Long agentId, Long conversationId) {
+        var request = newRequest();
+        request.headers.put("authorization", new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+        request.headers.put(RequestPrincipal.AGENT_ID_HEADER,
+                new Http.Header(RequestPrincipal.AGENT_ID_HEADER, String.valueOf(agentId)));
+        if (conversationId != null) {
+            request.headers.put(RequestPrincipal.CALLER_CONVERSATION_HEADER,
+                    new Http.Header(RequestPrincipal.CALLER_CONVERSATION_HEADER, String.valueOf(conversationId)));
+        }
+        return request;
+    }
+
+    /** A bearer call leaves an agent-principal cookie in the JVM-global jar; clear it so no sibling inherits it. */
+    private Http.Response asAgent(Supplier<Http.Response> call) {
+        try {
+            return call.get();
+        } finally {
+            clearCookies();
+        }
+    }
+
+    private static <T> T committed(Supplier<T> block) {
+        var ref = new AtomicReference<T>();
+        var err = new AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(services.Tx.run(block::get));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
+        }
+        if (err.get() != null) throw new IllegalStateException(err.get());
+        return ref.get();
     }
 
     @Test

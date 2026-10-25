@@ -1,6 +1,7 @@
 package controllers;
 
 import models.Agent;
+import models.Conversation;
 import org.jspecify.annotations.Nullable;
 import play.mvc.Http;
 import play.mvc.Scope;
@@ -46,6 +47,15 @@ public final class RequestPrincipal {
      * turn has no origin, and honored only on an agent-originated request.
      */
     public static final String CALLER_ORIGIN_HEADER = "x-jclaw-caller-origin";
+
+    /**
+     * Header {@code JClawApiTool} stamps with the conversation the calling turn runs in, so a route
+     * can answer there later. Built by the tool like {@link #AGENT_ID_HEADER}, absent outside a chat.
+     */
+    public static final String CALLER_CONVERSATION_HEADER = "x-jclaw-caller-conversation";
+
+    /** Response header a route sets to tell the calling agent what to do next; {@code JClawApiTool} shows it to the model. */
+    public static final String AGENT_NOTE_HEADER = "x-jclaw-agent-note";
 
     private RequestPrincipal() {}
 
@@ -95,6 +105,26 @@ public final class RequestPrincipal {
         if (raw == null || raw.isBlank()) return null;
         try {
             return Agent.findById(Long.valueOf(raw.trim()));
+        } catch (NumberFormatException _) {
+            return null;
+        }
+    }
+
+    /**
+     * The conversation the calling agent's turn runs in, or null when the request is not
+     * agent-originated, names none, or names a conversation that is not the calling agent's.
+     */
+    public static @Nullable Long callerConversationId() {
+        var caller = callingAgent();
+        var request = Http.Request.current();
+        if (caller == null || request == null) return null;
+        var header = request.headers.get(CALLER_CONVERSATION_HEADER);
+        var raw = header == null ? null : header.value();
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            Conversation conversation = Conversation.findById(Long.valueOf(raw.trim()));
+            return conversation != null && conversation.agent != null && caller.id.equals(conversation.agent.id)
+                    ? conversation.id : null;
         } catch (NumberFormatException _) {
             return null;
         }

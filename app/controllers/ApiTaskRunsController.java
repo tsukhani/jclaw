@@ -13,6 +13,7 @@ import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.EventLogger;
+import services.TaskLifecycleEvents;
 import services.TaskRunQueryService;
 import services.TaskRunRegistry;
 import services.TaskService;
@@ -255,6 +256,7 @@ public class ApiTaskRunsController extends Controller {
         run.status = TaskRun.Status.CANCELLED;
         run.outputSummary = "Cancelled by operator";
         run.save();
+        TaskLifecycleEvents.publishRunCancelled(run.task.id, run.id);
 
         EventLogger.info("TASK_MGMT_RUN_CANCEL",
                 run.task != null && run.task.agent != null ? run.task.agent.name : null, null,

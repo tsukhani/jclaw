@@ -30,6 +30,44 @@ class NotificationBusTest extends UnitTest {
         return unsub;
     }
 
+    // --- typed event listeners ---
+
+    @Test
+    void anEventListenerHearsEachEventsTypeAndDataAndOneThatThrowsStaysSubscribed() {
+        var type = "test.typed-" + System.nanoTime();
+        var thrown = new java.util.concurrent.atomic.AtomicInteger();
+        var seen = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        unsubscribers.add(NotificationBus.subscribeEvents((t, d) -> {
+            if (!t.equals(type)) return;
+            thrown.incrementAndGet();
+            throw new IllegalStateException("listener failure");
+        }));
+        unsubscribers.add(NotificationBus.subscribeEvents((t, d) -> {
+            if (t.equals(type)) seen.add(d.get("runId").toString());
+        }));
+
+        NotificationBus.publish(type, Map.of("runId", 7));
+        NotificationBus.publish(type, Map.of("runId", 8));
+
+        Assertions.assertEquals(java.util.List.of("7", "8"), seen);
+        Assertions.assertEquals(2, thrown.get(), "a listener that throws is kept");
+    }
+
+    @Test
+    void anUnsubscribedEventListenerHearsNothingMore() {
+        var type = "test.typed-" + System.nanoTime();
+        var heard = new java.util.concurrent.atomic.AtomicInteger();
+        var unsubscribe = NotificationBus.subscribeEvents((t, d) -> {
+            if (t.equals(type)) heard.incrementAndGet();
+        });
+
+        NotificationBus.publish(type, Map.of());
+        unsubscribe.run();
+        NotificationBus.publish(type, Map.of());
+
+        Assertions.assertEquals(1, heard.get());
+    }
+
     // --- subscribe / unsubscribe lifecycle ---
 
     @Test
