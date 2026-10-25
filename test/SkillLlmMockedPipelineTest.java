@@ -1,7 +1,9 @@
+import agents.SkillFrontmatter;
 import agents.SkillLoader;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.sun.net.httpserver.HttpServer;
+import models.SkillRegistryTool;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -10,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.RegistrySkillImporter;
 import services.SkillConformanceService;
 import services.SkillPromotionService;
 
@@ -20,6 +23,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 /**
  * Exercises the LLM-dependent halves of the skills pipeline against a local
@@ -343,6 +348,45 @@ class SkillLlmMockedPipelineTest extends UnitTest {
         assertEquals(List.of("helper", "wacli"),
                 SkillLoader.parseSkillContent(Files.readString(stagedDir.resolve("SKILL.md")), null).commands(),
                 "a binary is a command when it sits in tools/ or is an executable");
+    }
+
+    @Test
+    void aSkillBuiltForClaudeImportsFromAZipWithItsFilesIntact() throws Exception {
+        var zip = stagedDir.resolve("claude-skill.zip");
+        try (var out = new ZipOutputStream(Files.newOutputStream(zip))) {
+            for (var entry : new String[][]{
+                    {"claude-built-probe/SKILL.md", "---\nname: claude-built-probe\n"
+                            + "description: Fills PDF forms. Use when the user has a PDF form.\n"
+                            + "license: Complete terms in LICENSE.txt\n---\n# PDF forms\n\nRun `python scripts/fill.py`.\n"},
+                    {"claude-built-probe/LICENSE.txt", "Apache License, Version 2.0\n"},
+                    {"claude-built-probe/scripts/requirements.txt", "pypdf==5.1.0\n"}}) {
+                out.putNextEntry(new ZipEntry(entry[0]));
+                out.write(entry[1].getBytes(StandardCharsets.UTF_8));
+                out.closeEntry();
+            }
+        }
+        nextAssistantContent = "{\"name\": \"pdf-forms\", \"description\": \"x\", \"icon\": \"📄\", \"tools\": [\"exec\"]}";
+        var global = SkillLoader.globalSkillsPath().resolve("claude-built-probe");
+
+        try {
+            var result = RegistrySkillImporter.importZip(zip, "claude-skill.zip", false);
+
+            assertTrue(result.ok(), result.message());
+            assertEquals("claude-built-probe", result.skillName(), "the skill's own name, not the model's");
+            assertEquals(List.of(), result.flaggedFiles());
+            assertEquals(List.of(), result.warnings(), "no binary went unscanned and no file looks like a key");
+            assertEquals("Apache License, Version 2.0\n", Files.readString(global.resolve("LICENSE.txt")));
+            assertEquals("pypdf==5.1.0\n", Files.readString(global.resolve("scripts/requirements.txt")));
+            var skillMd = Files.readString(global.resolve("SKILL.md"));
+            var info = SkillLoader.parseSkillContent(skillMd, null);
+            assertEquals("Fills PDF forms. Use when the user has a PDF form.", info.description());
+            assertEquals(List.of("exec"), info.tools(), "the model mapped the tools the skill needs");
+            assertEquals("Complete terms in LICENSE.txt", SkillFrontmatter.of(skillMd).get("license"));
+        } finally {
+            if (Files.exists(global)) SkillPromotionService.deleteRecursive(global);
+            SkillRegistryTool.deleteBySkill("claude-built-probe");
+            SkillLoader.clearCache();
+        }
     }
 
     // ==================== sanitizeWithLlm ====================

@@ -39,11 +39,14 @@ You can also **promote** an agent-specific skill back into the global library by
 Skills are not written on this page. Two ways to get one:
 
 - **Browse catalog**: the button above the Global Skills column opens the importable-skills catalogs: static ones (the GitHub/Mastra index, with search, sort and category facets) and the dynamic ClawHub registry (search plus paging). **Import** pulls a skill straight into **Global Skills** in one click. The skill keeps its own name, description, license and files; JClaw adds the tools it needs.
+- **Import zip**: the button beside **Browse catalog** takes a skill zip, either one exported from JClaw or a skill built for Claude. It runs the same checks as a catalog import, and the skill keeps its files where they are. If **Global Skills** already has a skill of that name, the page asks before replacing it. An upload older than the version in the library is refused.
 - **Author it** with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill, and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body the agent reads when it uses the skill). Once it is good, drag it from the agent's column to **Global Skills** to promote it for reuse.
 
 ### Viewing
 
 Click any skill row to open a **read-only** viewer of its files. Files in a skill's `credentials/` folder show masked: a JSON file shows its keys with `[CREDENTIAL]` for each value, and any other file shows only `[CREDENTIAL]`. A global skill can be **renamed** inline (double-click its name in the Global Skills column) and **deleted** from its row; to change its content, edit it via the skill-creator skill in an agent's workspace (then re-promote if it is a global skill). Each agent runs its own copy of a skill, made when the skill was assigned. So a re-promoted global skill reaches an agent only once you assign it to that agent again; past conversations keep the prompt they were created with.
+
+After an import the page warns you about two things. If no malware scanner is set up, the skill's binary files were not scanned, and the warning names them. If a zip holds a file outside `credentials/` that looks like it holds a key, the warning names that file too: every agent can read it, so move the key into `credentials/`.
 
 ### Exporting to Claude
 

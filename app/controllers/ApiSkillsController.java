@@ -13,6 +13,7 @@ import models.Agent;
 import models.AgentSkillConfig;
 import org.jspecify.annotations.Nullable;
 import play.Logger;
+import play.data.Upload;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.AgentService;
@@ -112,7 +113,13 @@ public class ApiSkillsController extends Controller {
 
     public record SkillImportRequest(String source, String skillId, String provider, String owner) {}
 
-    public record SkillImportResponse(String status, @Nullable String skillName, @Nullable String message) {}
+    /** {@code flaggedFiles}: an uploaded skill's files outside {@code credentials/} that look like they hold a key. */
+    public record SkillImportResponse(String status, @Nullable String skillName, @Nullable String message,
+                                      List<String> flaggedFiles, List<String> warnings) {
+        public SkillImportResponse(String status, @Nullable String skillName, @Nullable String message) {
+            this(status, skillName, message, List.of(), List.of());
+        }
+    }
 
     public record CatalogRefreshResponse(String catalog, String type, boolean refreshed) {}
 
@@ -223,7 +230,34 @@ public class ApiSkillsController extends Controller {
         if (!result.ok()) {
             renderJSON(gson.toJson(new SkillImportResponse("failed", null, result.message())));
         }
-        renderJSON(gson.toJson(new SkillImportResponse("imported", result.skillName(), null)));
+        renderJSON(gson.toJson(new SkillImportResponse("imported", result.skillName(), null,
+                result.flaggedFiles(), result.warnings())));
+    }
+
+    /**
+     * POST /api/skills/import — import an uploaded skill zip ({@code file}, multipart): JClaw's own
+     * export or a skill built for Claude. It runs the catalog import's checks, keeps the skill's file
+     * layout, and names any file outside {@code credentials/} that looks like it holds a key. One that
+     * would replace a library skill answers {@code exists} until it is sent again with {@code replace}.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = SkillImportResponse.class)))
+    @Operation(summary = "Import an uploaded skill zip into the global registry")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "installs an uploaded skill whose shell allowlist the registry then carries")
+    public static void importZip(Upload file, boolean replace) {
+        if (file == null || file.asFile() == null || !file.asFile().isFile()) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Attach the skill zip as the file field.");
+            throw ApiResponses.unreachable();
+        }
+        var result = RegistrySkillImporter.importZip(file.asFile().toPath(), file.getFileName(), replace);
+        if (result.outcome() == RegistrySkillImporter.Outcome.EXISTS) {
+            renderJSON(gson.toJson(new SkillImportResponse("exists", result.skillName(), result.message())));
+        }
+        if (!result.ok()) {
+            renderJSON(gson.toJson(new SkillImportResponse("failed", null, result.message())));
+        }
+        renderJSON(gson.toJson(new SkillImportResponse("imported", result.skillName(), null,
+                result.flaggedFiles(), result.warnings())));
     }
 
     /** GET /api/skills/{name} — Get a global skill with full content. */

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from 'vitest'
 import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
-import { setResponseStatus } from 'h3'
+import { readMultipartFormData, setResponseStatus } from 'h3'
 import { defineComponent, h } from 'vue'
 import Skills from '~/pages/skills/[[name]].vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
@@ -678,5 +678,143 @@ describe('Skills page — export a global skill for Claude', () => {
     await vi.waitFor(() => expect(component.text())
       .toContain('Claude would not accept this skill: Description cannot contain angle brackets (< or >)'))
     expect(saved).toEqual([])
+  })
+})
+
+describe('Skills page — import a skill zip', () => {
+  async function chooseZip(name: string) {
+    setupApi()
+    const component = await mountSuspended(SkillsHarness)
+    await flushPromises()
+    const input = component.find('[data-testid="skill-zip-input"]')
+    expect(input.exists()).toBe(true)
+    const file = new File(['zip bytes'], name, { type: 'application/zip' })
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    return component
+  }
+
+  it('uploads the chosen zip, then names the skill and every warning', async () => {
+    let uploaded: { name?: string, filename?: string } | null = null
+    registerEndpoint('/api/skills/import', {
+      method: 'POST',
+      handler: async (event) => {
+        const part = (await readMultipartFormData(event))?.[0]
+        uploaded = { name: part?.name, filename: part?.filename }
+        return {
+          status: 'imported',
+          skillName: 'pdf',
+          flaggedFiles: ['config.json'],
+          warnings: [
+            'No malware scanner is set up, so this skill\'s binary files were not scanned: tools/wacli. '
+            + 'Set one up in Settings → Malware and Virus Scanners.',
+            'These files look like they hold a key and stay readable to your agents: config.json. '
+            + 'Move the keys into credentials/.',
+          ],
+        }
+      },
+    })
+
+    const component = await chooseZip('pdf.zip')
+
+    await vi.waitFor(() => expect(component.text()).toContain('Imported \'pdf\''))
+    expect(uploaded).toEqual({ name: 'file', filename: 'pdf.zip' })
+    expect(component.text()).toContain('this skill\'s binary files were not scanned: tools/wacli.')
+    expect(component.text()).toContain('stay readable to your agents: config.json.')
+  })
+
+  const dialogButton = (label: string) => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+    .find(b => (b.textContent ?? '').trim() === label)
+
+  function existingSkillEndpoint() {
+    const uploads: (string | undefined)[] = []
+    registerEndpoint('/api/skills/import', {
+      method: 'POST',
+      handler: async (event) => {
+        const parts = await readMultipartFormData(event)
+        const replace = parts?.find(p => p.name === 'replace')?.data.toString()
+        uploads.push(replace)
+        return replace === 'true'
+          ? { status: 'imported', skillName: 'notes', flaggedFiles: [], warnings: [] }
+          : { status: 'exists', skillName: 'notes',
+              message: '\'notes\' is already in the library at version 1.0.0. Replace it with this upload?' }
+      },
+    })
+    return uploads
+  }
+
+  it('asks before replacing a library skill, and replaces it on confirm', async () => {
+    const uploads = existingSkillEndpoint()
+
+    const component = await chooseZip('notes.zip')
+    await vi.waitFor(() => expect(dialogButton('Replace')).toBeTruthy())
+    expect(document.body.textContent).toContain('\'notes\' is already in the library at version 1.0.0. Replace it with this upload?')
+    dialogButton('Replace')!.click()
+
+    await vi.waitFor(() => expect(component.text()).toContain('Imported \'notes\''))
+    expect(uploads).toEqual([undefined, 'true'])
+  })
+
+  it('leaves the library skill alone when the replacement is cancelled', async () => {
+    const uploads = existingSkillEndpoint()
+
+    const component = await chooseZip('notes.zip')
+    await vi.waitFor(() => expect(dialogButton('Cancel')).toBeTruthy())
+    dialogButton('Cancel')!.click()
+    await flushPromises()
+    await flushPromises()
+
+    expect(uploads).toEqual([undefined])
+    expect(component.text()).not.toContain('Imported')
+  })
+
+  it('shows why a zip was refused', async () => {
+    registerEndpoint('/api/skills/import', {
+      method: 'POST',
+      handler: () => ({ status: 'failed', message: 'the zip holds a path outside its folder: ../evil.txt' }),
+    })
+
+    const component = await chooseZip('evil.zip')
+
+    await vi.waitFor(() => expect(component.text())
+      .toContain('evil.zip: the zip holds a path outside its folder: ../evil.txt'))
+    expect(component.text()).not.toContain('Imported')
+  })
+})
+
+describe('Skills page — catalog import warnings', () => {
+  const importButton = () => Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+    .find(b => (b.textContent ?? '').trim() === 'Import')
+
+  it('shows what an imported catalog skill still needs', async () => {
+    registerEndpoint('/api/skills/catalogs', () => [{ id: 'mastra', displayName: 'Mastra (GitHub)', type: 'static' }])
+    registerEndpoint('/api/skills/catalog/search', () => ({
+      ready: true,
+      results: [{
+        skillId: 'canvas-design', displayName: 'canvas-design', source: 'anthropics/skills', owner: 'anthropics',
+        repo: 'skills', url: 'https://github.com/anthropics/skills', installs: 10, category: 'Design', provider: 'mastra',
+      }],
+      total: 1, page: 0, pageSize: 20, nextCursor: null, facets: [], catalogSize: 1, scrapedAt: null,
+    }))
+    registerEndpoint('/api/skills/catalog/import', {
+      method: 'POST',
+      handler: () => ({
+        status: 'imported',
+        skillName: 'canvas-design',
+        flaggedFiles: [],
+        warnings: ['No malware scanner is set up, so this skill\'s binary files were not scanned: '
+          + 'canvas-fonts/Arsenal-Regular.ttf. Set one up in Settings → Malware and Virus Scanners.'],
+      }),
+    })
+    setupApi()
+    const component = await mountSuspended(Skills)
+    await flushPromises()
+
+    await component.findAll('button').find(b => b.text().includes('Browse catalog'))!.trigger('click')
+    await vi.waitFor(() => expect(importButton()).toBeTruthy())
+    importButton()!.click()
+
+    await vi.waitFor(() => expect(document.body.textContent)
+      .toContain('canvas-design: No malware scanner is set up, so this skill\'s binary files were not scanned'))
   })
 })

@@ -158,7 +158,9 @@ public final class SkillConformanceService {
             return ConformanceResult.fail("could not read SKILL.md: " + e.getMessage());
         }
 
-        var stagedCommands = listStagedCommands(stagedDir);
+        var commandFiles = stagedCommandFiles(stagedDir);
+        var stagedCommands = new TreeSet<String>();
+        commandFiles.forEach(p -> stagedCommands.add(p.getFileName().toString()));
         // Preserve the original body verbatim; the LLM only normalizes frontmatter.
         var split = SkillLoader.splitFrontmatter(raw);
         String originalBody;
@@ -196,6 +198,12 @@ public final class SkillConformanceService {
                 upstreamAuthor != null ? upstreamAuthor : provenance, originalBody, declaredVersion);
         if (!gate.ok()) return ConformanceResult.fail(gate.reason());
 
+        // A download or an unzipped file has no mode bits, and a command must run.
+        for (var command : commandFiles) {
+            if (!command.toFile().setExecutable(true, true)) {
+                EventLogger.warn(CATEGORY, "Conformance: could not mark '%s' executable".formatted(command.getFileName()));
+            }
+        }
         try {
             Files.writeString(skillFile, gate.resolvedSkill().onto(upstream).toSkillMd());
         } catch (IOException e) {
@@ -214,7 +222,7 @@ public final class SkillConformanceService {
      *       {@link agents.ToolRegistry} (via {@link ToolCatalog#validateSkillTools});
      *       any {@code unknown} name → REJECT (the LLM failed to map it).</li>
      *   <li><b>commands</b> — derived ONLY from {@code stagedBinaries} (the files
-     *       actually on disk, see {@link #listStagedCommands}), never from the model. This satisfies both contract
+     *       actually on disk, see {@link #stagedCommandFiles}), never from the model. This satisfies both contract
      *       directions by construction: every tools/ binary is declared, and every
      *       declared command exists. A binary whose name is not one word is REJECTED:
      *       the list is stored space-separated, so it would read back as several.</li>
@@ -368,21 +376,20 @@ public final class SkillConformanceService {
     // --- helpers ---
 
     /**
-     * Basenames of the staged binaries that are commands: every non-text file in {@code tools/},
-     * JClaw's folder for them, and an executable anywhere else. A font, image or archive in an
-     * imported skill's own folders is an asset, not a command; the malware scan still vets it.
+     * The staged binaries that are commands: every non-text file in {@code tools/}, JClaw's folder
+     * for them, and an executable anywhere else. A font, image or archive in an imported skill's own
+     * folders is an asset, not a command; the malware scan still vets it.
      */
-    private static Set<String> listStagedCommands(Path stagedDir) {
-        var commands = new TreeSet<String>();
+    private static List<Path> stagedCommandFiles(Path stagedDir) {
         try (var walk = Files.walk(stagedDir)) {
-            walk.filter(Files::isRegularFile)
-                .filter(p -> !SkillLoader.isTextFile(p.getFileName().toString()))
-                .filter(p -> stagedDir.relativize(p).startsWith("tools") || isExecutable(p))
-                .forEach(p -> commands.add(p.getFileName().toString()));
+            return walk.filter(Files::isRegularFile)
+                    .filter(p -> !SkillLoader.isTextFile(p.getFileName().toString()))
+                    .filter(p -> stagedDir.relativize(p).startsWith("tools") || isExecutable(p))
+                    .toList();
         } catch (IOException e) {
             EventLogger.warn(CATEGORY, "Conformance: could not list staged binaries: " + e.getMessage());
+            return List.of();
         }
-        return commands;
     }
 
     /** ELF, Mach-O (thin or fat), PE, or a script with a shebang line. */

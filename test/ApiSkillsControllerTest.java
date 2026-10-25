@@ -1530,6 +1530,190 @@ class ApiSkillsControllerTest extends FunctionalTest {
         assertEquals(MASKED_JSON, fileContent(asAgentGet("/api/skills/probe/files/CREDENTIALS/api.json")));
     }
 
+    // ==================== POST /api/skills/import ====================
+
+    private static java.io.File zipFile(String... namesAndTexts) throws Exception {
+        var file = Files.createTempFile("skill-upload-", ".zip");
+        try (var out = new java.util.zip.ZipOutputStream(Files.newOutputStream(file))) {
+            for (int i = 0; i < namesAndTexts.length; i += 2) {
+                out.putNextEntry(new java.util.zip.ZipEntry(namesAndTexts[i]));
+                out.write(namesAndTexts[i + 1].getBytes(StandardCharsets.UTF_8));
+                out.closeEntry();
+            }
+        }
+        return file.toFile();
+    }
+
+    private static java.util.List<String> warnings(com.google.gson.JsonObject body) {
+        var out = new java.util.ArrayList<String>();
+        body.getAsJsonArray("warnings").forEach(w -> out.add(w.getAsString()));
+        return out;
+    }
+
+    private static com.google.gson.JsonObject jsonBody(play.mvc.Http.Response response) {
+        return com.google.gson.JsonParser.parseString(getContent(response)).getAsJsonObject();
+    }
+
+    @Test
+    void aJclawExportImportsBackAsTheSameSkill() throws Exception {
+        login();
+        var dir = globalSkillsDir.resolve("wa-notifier");
+        Files.createDirectories(dir.resolve("tools"));
+        Files.createDirectories(dir.resolve("credentials"));
+        Files.writeString(dir.resolve("SKILL.md"), """
+                ---
+                name: wa-notifier
+                description: Sends WhatsApp messages. Use when the operator asks to message someone.
+                version: 1.2.0
+                author: main
+                tools: [exec, filesystem]
+                commands: [wacli]
+                icon: 💬
+                ---
+                # WA Notifier
+
+                Run `tools/wacli` with the `exec` tool.
+                """);
+        Files.write(dir.resolve("tools/wacli"), new byte[]{0x7F, 'E', 'L', 'F', 2, 0, 9});
+        Files.writeString(dir.resolve("credentials/api.json"), API_JSON);
+        SkillLoader.clearCache();
+        var before = SkillLoader.parseSkillFile(dir.resolve("SKILL.md"));
+
+        var exported = GET("/api/skills/wa-notifier/export");
+        assertIsOk(exported);
+        var upload = Files.createTempFile("wa-notifier", ".zip");
+        Files.write(upload, exported.out.toByteArray());
+        SkillPromotionService.deleteRecursive(dir);
+        SkillLoader.clearCache();
+
+        var response = POST("/api/skills/import", java.util.Map.of(), java.util.Map.of("file", upload.toFile()));
+
+        assertIsOk(response);
+        var body = jsonBody(response);
+        assertEquals("imported", body.get("status").getAsString(), body.toString());
+        assertEquals("wa-notifier", body.get("skillName").getAsString());
+        assertEquals("[]", body.get("flaggedFiles").toString());
+        assertEquals(java.util.List.of("No malware scanner is set up, so this skill's binary files were not scanned: "
+                        + "tools/wacli. Set one up in Settings → Malware and Virus Scanners."),
+                warnings(body), "no scanner is set up in tests, so the binary is imported with a warning");
+        assertEquals(before, SkillLoader.parseSkillFile(dir.resolve("SKILL.md")), "the round trip changes no field");
+        assertTrue(Files.isExecutable(dir.resolve("tools/wacli")), "the command still runs after the round trip");
+        assertEquals(MASKED_JSON, Files.readString(dir.resolve("credentials/api.json")));
+        assertEquals(java.util.List.of("wacli"),
+                SkillRegistryTool.findBySkill("wa-notifier").stream().map(r -> r.toolName).toList());
+    }
+
+    @Test
+    void anUploadFlagsAFileOutsideCredentialsThatLooksLikeItHoldsAKey() throws Exception {
+        login();
+        var upload = zipFile(
+                "notes/SKILL.md", "---\nname: notes\ndescription: Takes notes.\nmetadata:\n  jclaw-tools: \"\"\n---\n# Notes\n",
+                "notes/config.json", "{\"apiKey\": \"sk-live-4f3c2a1b9e8d7c6b5a4f\"}",
+                "notes/credentials/api.json", API_JSON,
+                "notes/README.md", "Keep keys in credentials/.");
+
+        var response = POST("/api/skills/import", java.util.Map.of(), java.util.Map.of("file", upload));
+
+        assertIsOk(response);
+        var body = jsonBody(response);
+        assertEquals("imported", body.get("status").getAsString(), body.toString());
+        assertEquals("[\"config.json\"]", body.get("flaggedFiles").toString(),
+                "a key outside credentials/ is named; the one inside it and the README are not");
+        assertEquals(java.util.List.of("These files look like they hold a key and stay readable to your agents: "
+                + "config.json. Move the keys into credentials/."), warnings(body));
+        assertEquals("{\"apiKey\": \"sk-live-4f3c2a1b9e8d7c6b5a4f\"}",
+                Files.readString(globalSkillsDir.resolve("notes/config.json")), "the upload keeps its layout");
+    }
+
+    @Test
+    void anUnsafeZipIsRefusedAndNothingIsWritten() throws Exception {
+        login();
+        var upload = zipFile("SKILL.md", "---\nname: x\n---\n", "../evil.txt", "x");
+
+        var response = POST("/api/skills/import", java.util.Map.of(), java.util.Map.of("file", upload));
+
+        assertIsOk(response);
+        var body = jsonBody(response);
+        assertEquals("failed", body.get("status").getAsString());
+        assertEquals("the zip holds a path outside its folder: ../evil.txt", body.get("message").getAsString());
+        try (var listing = Files.list(globalSkillsDir)) {
+            assertEquals(java.util.List.of(), listing.toList(), "nothing reached the registry");
+        }
+    }
+
+    private static final String NEW_NOTES =
+            "---\nname: notes\ndescription: Takes better notes.\nmetadata:\n  jclaw-tools: \"\"\n---\n# Notes\n";
+
+    @Test
+    void anUploadThatWouldReplaceALibrarySkillWaitsForConfirmation() throws Exception {
+        login();
+        var dir = seedGlobalSkill("notes", "notes", "Takes notes.");
+        var original = Files.readString(dir.resolve("SKILL.md"));
+        var upload = zipFile("notes/SKILL.md", NEW_NOTES);
+
+        var asked = jsonBody(POST("/api/skills/import", java.util.Map.of(), java.util.Map.of("file", upload)));
+
+        assertEquals("exists", asked.get("status").getAsString(), asked.toString());
+        assertEquals("notes", asked.get("skillName").getAsString());
+        assertEquals("'notes' is already in the library at version 1.0.0. Replace it with this upload?",
+                asked.get("message").getAsString());
+        assertEquals(original, Files.readString(dir.resolve("SKILL.md")), "nothing is replaced before the operator says so");
+
+        var replaced = jsonBody(POST("/api/skills/import", java.util.Map.of("replace", "true"),
+                java.util.Map.of("file", upload)));
+
+        assertEquals("imported", replaced.get("status").getAsString(), replaced.toString());
+        assertEquals("Takes better notes.", SkillLoader.parseSkillFile(dir.resolve("SKILL.md")).description());
+    }
+
+    @Test
+    void anUploadOlderThanTheLibrarysSkillIsRefusedEvenWhenConfirmed() throws Exception {
+        login();
+        var dir = globalSkillsDir.resolve("notes");
+        Files.createDirectories(dir);
+        Files.writeString(dir.resolve("SKILL.md"),
+                "---\nname: notes\ndescription: Takes notes.\nmetadata:\n  version: \"1.3.0\"\n---\n# Notes\n");
+        var original = Files.readString(dir.resolve("SKILL.md"));
+        SkillLoader.clearCache();
+        var upload = zipFile("notes/SKILL.md", NEW_NOTES.replace("metadata:\n", "metadata:\n  version: \"1.2.0\"\n"));
+
+        var body = jsonBody(POST("/api/skills/import", java.util.Map.of("replace", "true"), java.util.Map.of("file", upload)));
+
+        assertEquals("failed", body.get("status").getAsString(), body.toString());
+        assertEquals("'notes' is in the library at version 1.3.0, and this upload is the older 1.2.0.",
+                body.get("message").getAsString());
+        assertEquals(original, Files.readString(dir.resolve("SKILL.md")));
+    }
+
+    @Test
+    void anImportWithNoFileIsABadRequest() {
+        login();
+        assertStatus(400, POST("/api/skills/import", java.util.Map.of(), java.util.Map.of()));
+    }
+
+    @Test
+    void importRequiresAuth() throws Exception {
+        assertEquals(401, POST("/api/skills/import", java.util.Map.of(),
+                java.util.Map.of("file", zipFile("SKILL.md", "x"))).status.intValue());
+    }
+
+    @Test
+    void anAgentCannotImportAZip() throws Exception {
+        clearCookies();
+        var request = newRequest();
+        request.headers.put("authorization",
+                new play.mvc.Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+        try {
+            var response = POST(request, "/api/skills/import", java.util.Map.of(),
+                    java.util.Map.of("file", zipFile("SKILL.md", "x")));
+
+            assertStatus(403, response);
+            assertTrue(getContent(response).contains("operator_only"), "got: " + getContent(response));
+        } finally {
+            clearCookies();
+        }
+    }
+
     private static java.util.Map<String, byte[]> unzip(byte[] archive) throws java.io.IOException {
         var entries = new java.util.LinkedHashMap<String, byte[]>();
         try (var zip = new ZipInputStream(new ByteArrayInputStream(archive))) {

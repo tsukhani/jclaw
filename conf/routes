@@ -199,9 +199,10 @@ DELETE  /api/agents/{id}/tool-approvals/{toolName}  ApiToolApprovalsController.r
 
 # Skills API
 # Skill authoring is read-only from the HTTP API: skills are created/updated only
-# via the skill-creator skill (which uses the filesystem tool directly) or via
-# promotion from an agent workspace. Manual file edits through the API are
-# forbidden — no POST /api/skills, no PUT .../files, no PUT .../{name}.
+# via the skill-creator skill (which uses the filesystem tool directly), via
+# promotion from an agent workspace, or by import (a catalog skill or an uploaded
+# zip, both through conformance, the malware scan and the sanitizer). Manual file
+# edits through the API are forbidden — no PUT .../files, no PUT .../{name}.
 GET     /api/skills                             ApiSkillsController.list
 # One response for every agent, so the skills page can draw its rows at full height.
 GET     /api/skills/by-agent                    ApiSkillsController.listByAgent
@@ -211,6 +212,7 @@ GET     /api/skills/catalogs                    ApiSkillsController.catalogs
 GET     /api/skills/catalog/search              ApiSkillsController.catalogSearch
 POST    /api/skills/catalog/refresh             ApiSkillsController.catalogRefresh
 POST    /api/skills/catalog/import              ApiSkillsController.catalogImport
+POST    /api/skills/import                      ApiSkillsController.importZip
 POST    /api/skills/promote                     ApiSkillsController.promote
 GET     /api/skills/{name}                      ApiSkillsController.get
 PUT     /api/skills/{name}/rename               ApiSkillsController.rename

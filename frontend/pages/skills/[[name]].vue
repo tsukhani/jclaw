@@ -2,6 +2,7 @@
 import {
   ArrowDownTrayIcon,
   ArrowPathIcon,
+  ArrowUpTrayIcon,
   ChevronRightIcon,
   CodeBracketIcon,
   Cog6ToothIcon,
@@ -248,22 +249,63 @@ const importingKey = ref<string | null>(null)
 const importedKeys = ref<Set<string>>(new Set())
 const importMessage = ref<string | null>(null)
 
+type SkillImportResult = { status: string, message?: string, skillName?: string, warnings?: string[] }
+
 async function importSkill(s: CatalogSkill) {
   const key = catalogKey(s)
   importingKey.value = key
   importMessage.value = null
-  const res = await mutateSkill<{ status: string, message?: string, skillName?: string }>(
+  const res = await mutateSkill<SkillImportResult>(
     '/api/skills/catalog/import',
     { method: 'POST', body: { source: s.source, skillId: s.skillId, provider: s.provider, owner: s.owner } },
   )
   if (res?.status === 'imported') {
     importedKeys.value.add(key)
+    if (res.warnings?.length) importMessage.value = `${s.displayName || s.skillId}: ${res.warnings.join(' ')}`
     await refreshSkills() // the new skill appears in the Global Skills panel
   }
   else {
     importMessage.value = `${s.displayName || s.skillId}: ${res?.message || 'import failed'}`
   }
   importingKey.value = null
+}
+
+// A skill zip: JClaw's own export, or a skill built for Claude.
+const zipInput = ref<HTMLInputElement | null>(null)
+const importingZip = ref(false)
+
+function uploadSkillZip(file: File, replace: boolean) {
+  const body = new FormData()
+  body.append('file', file)
+  if (replace) body.append('replace', 'true')
+  return mutateSkill<SkillImportResult>('/api/skills/import', { method: 'POST', body })
+}
+
+async function importZip(event: Event) {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = ''
+  if (!file) return
+  importingZip.value = true
+  let res = await uploadSkillZip(file, false)
+  // A library skill of the same name is replaced only once the operator says so.
+  if (res?.status === 'exists') {
+    const ok = await confirm({
+      title: 'Replace skill',
+      message: res.message || `Replace '${res.skillName}' with this upload?`,
+      confirmText: 'Replace',
+    })
+    res = ok ? await uploadSkillZip(file, true) : null
+  }
+  importingZip.value = false
+  if (res?.status === 'imported') {
+    await refreshSkills()
+    showInfo(`Imported '${res.skillName}'`)
+    if (res.warnings?.length) showDragError(res.warnings.join(' '))
+  }
+  else if (res) {
+    showDragError(`${file.name}: ${res.message || 'import failed'}`)
+  }
 }
 
 // Panel filters — case-insensitive substring match against the displayed name.
@@ -967,13 +1009,35 @@ function totalSkillCount(agentId: number) {
       <h1 class="text-lg font-semibold text-fg-strong">
         Skills
       </h1>
-      <button
-        class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border bg-surface-elevated text-fg-strong hover:bg-muted transition-colors"
-        @click="openCatalog"
-      >
-        <MagnifyingGlassIcon class="w-4 h-4" />
-        Browse catalog
-      </button>
+      <div class="flex items-center gap-2">
+        <button
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border bg-surface-elevated text-fg-strong hover:bg-muted transition-colors disabled:opacity-50"
+          :disabled="importingZip"
+          @click="zipInput?.click()"
+        >
+          <ArrowUpTrayIcon
+            class="w-4 h-4"
+            aria-hidden="true"
+          />
+          {{ importingZip ? 'Importing…' : 'Import zip' }}
+        </button>
+        <input
+          ref="zipInput"
+          type="file"
+          accept=".zip,.skill"
+          class="hidden"
+          aria-label="Skill zip to import"
+          data-testid="skill-zip-input"
+          @change="importZip"
+        >
+        <button
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium border border-border bg-surface-elevated text-fg-strong hover:bg-muted transition-colors"
+          @click="openCatalog"
+        >
+          <MagnifyingGlassIcon class="w-4 h-4" />
+          Browse catalog
+        </button>
+      </div>
     </div>
 
     <div
