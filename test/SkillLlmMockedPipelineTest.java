@@ -19,6 +19,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 
 /**
  * Exercises the LLM-dependent halves of the skills pipeline against a local
@@ -144,8 +145,8 @@ class SkillLlmMockedPipelineTest extends UnitTest {
     @Test
     void conformRewritesSkillMdFromLlmProposal() throws Exception {
         stageForeignSkill();
-        // A binary next to SKILL.md: commands must derive from it, not the LLM.
-        Files.write(stagedDir.resolve("helper.bin"), new byte[]{1, 2, 3});
+        // An executable next to SKILL.md: commands must derive from it, not the LLM.
+        Files.write(stagedDir.resolve("helper.bin"), new byte[]{0x7F, 'E', 'L', 'F', 2});
         nextAssistantContent =
                 "{\"name\": \"cool-skill\", \"description\": \"Does cool things\", "
                         + "\"icon\": \"🧪\", \"tools\": [\"exec\"]}";
@@ -243,6 +244,105 @@ class SkillLlmMockedPipelineTest extends UnitTest {
         assertFalse(result.ok(), "an unmappable tool must reject the import");
         assertTrue(result.message().contains("made_up_tool_zzz"),
                 "rejection names the offending tool: " + result.message());
+    }
+
+    // ==================== conform — an Agent Skills skill imports as is ====================
+
+    @Test
+    void anAnthropicSkillKeepsItsFrontmatterAndGainsJclawsKeys() throws Exception {
+        Files.writeString(stagedDir.resolve("SKILL.md"), """
+                ---
+                name: pdf
+                description: Extract text and tables from PDFs, fill forms, merge files. Use when handling PDFs.
+                license: Complete terms in LICENSE.txt
+                allowed-tools: Bash(python:*) Read
+                metadata:
+                  author: example-org
+                  version: "2.1"
+                ---
+                # PDF
+
+                Run scripts/extract.py.
+                """);
+        nextAssistantContent = "{\"name\": \"pdf-tools\", \"description\": \"Works with PDFs\", "
+                + "\"icon\": \"📄\", \"tools\": [\"exec\", \"filesystem\"]}";
+
+        var result = SkillConformanceService.conform(stagedDir, "pdf", "anthropics/skills");
+
+        assertTrue(result.ok(), "conform must succeed: " + result.message());
+        assertEquals("pdf", result.skillName(), "the upstream name is kept, not the model's");
+        assertEquals("""
+                ---
+                name: pdf
+                description: >-
+                  Extract text and tables from PDFs, fill forms, merge files. Use when handling PDFs.
+                license: Complete terms in LICENSE.txt
+                allowed-tools: "Bash(python:*) Read"
+                metadata:
+                  author: example-org
+                  version: "2.1.0"
+                  jclaw-icon: "📄"
+                  jclaw-tools: exec filesystem
+                  jclaw-commands: ""
+                ---
+
+                # PDF
+
+                Run scripts/extract.py.
+                """, Files.readString(stagedDir.resolve("SKILL.md")));
+    }
+
+    @Test
+    void aReimportedJclawExportKeepsItsToolsWithoutAskingTheModel() throws Exception {
+        Files.writeString(stagedDir.resolve("SKILL.md"), """
+                ---
+                name: wa-notifier
+                description: >-
+                  Sends WhatsApp messages.
+                metadata:
+                  version: "1.4.2"
+                  author: main
+                  jclaw-icon: "💬"
+                  jclaw-tools: exec filesystem
+                  jclaw-commands: wacli
+                ---
+                # WA
+                """);
+        Files.createDirectories(stagedDir.resolve("tools"));
+        Files.write(stagedDir.resolve("tools/wacli"), new byte[]{0x7F, 'E', 'L', 'F', 2});
+        nextAssistantContent = "not json: the model must not be asked";
+
+        var result = SkillConformanceService.conform(stagedDir, "wa-notifier", "owner/repo");
+
+        assertTrue(result.ok(), "conform must not need the model: " + result.message());
+        var info = SkillLoader.parseSkillContent(Files.readString(stagedDir.resolve("SKILL.md")), null);
+        assertEquals("wa-notifier", info.name());
+        assertEquals("Sends WhatsApp messages.", info.description());
+        assertEquals("1.4.2", info.version());
+        assertEquals("main", info.author());
+        assertEquals("💬", info.icon());
+        assertEquals(List.of("exec", "filesystem"), info.tools());
+        assertEquals(List.of("wacli"), info.commands());
+    }
+
+    @Test
+    void onlyExecutablesBecomeCommandsNotFontsOrDocuments() throws Exception {
+        stageForeignSkill();
+        Files.createDirectories(stagedDir.resolve("canvas-fonts"));
+        Files.write(stagedDir.resolve("canvas-fonts/Arsenal-Regular.ttf"), new byte[]{0, 1, 0, 0, 0});
+        Files.write(stagedDir.resolve("theme-showcase.pdf"), "%PDF-1.7".getBytes(StandardCharsets.US_ASCII));
+        Files.createDirectories(stagedDir.resolve("bin"));
+        Files.write(stagedDir.resolve("bin/helper"), new byte[]{0x7F, 'E', 'L', 'F', 2});
+        Files.createDirectories(stagedDir.resolve("tools"));
+        Files.write(stagedDir.resolve("tools/wacli"), new byte[]{1, 2, 3});
+        nextAssistantContent = "{\"name\": \"cool-skill\", \"description\": \"d\", \"icon\": \"🧪\", \"tools\": [\"exec\"]}";
+
+        var result = SkillConformanceService.conform(stagedDir, "fallback-id", "owner/repo");
+
+        assertTrue(result.ok(), result.message());
+        assertEquals(List.of("helper", "wacli"),
+                SkillLoader.parseSkillContent(Files.readString(stagedDir.resolve("SKILL.md")), null).commands(),
+                "a binary is a command when it sits in tools/ or is an executable");
     }
 
     // ==================== sanitizeWithLlm ====================

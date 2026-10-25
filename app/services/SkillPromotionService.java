@@ -237,14 +237,24 @@ public class SkillPromotionService {
      * the refusal is already logged + notified.
      */
     public static boolean publishToGlobal(Path skillDir, @Nullable String skillName) {
+        return publishToGlobal(skillDir, skillName, false);
+    }
+
+    /**
+     * @param keepLayout true for a skill imported from a public catalog, whose files stay where
+     *                   their author put them; false for an agent's workspace skill, which is sorted
+     *                   into {@code credentials/} (blanked) and {@code tools/} so an agent's secrets
+     *                   never reach the shared registry
+     */
+    public static boolean publishToGlobal(Path skillDir, @Nullable String skillName, boolean keepLayout) {
         if (!checkMalwareScan(skillDir, skillName)) return false;
 
         var sourceTextFiles = new LinkedHashMap<String, String>();
         var sourceBinaryFiles = new ArrayList<String>();
         if (!readSourceFiles(skillDir, sourceTextFiles, sourceBinaryFiles)) return false;
 
-        var textFiles = enforceTextFileStructure(sourceTextFiles);
-        var binaryFiles = enforceBinaryFileStructure(sourceBinaryFiles);
+        var textFiles = keepLayout ? sourceTextFiles : enforceTextFileStructure(sourceTextFiles);
+        var binaryFiles = keepLayout ? sourceBinaryFiles : enforceBinaryFileStructure(sourceBinaryFiles);
 
         stripCredentialFiles(textFiles);
 

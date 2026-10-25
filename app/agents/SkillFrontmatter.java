@@ -10,6 +10,7 @@ import org.yaml.snakeyaml.representer.Representer;
 import org.yaml.snakeyaml.resolver.Resolver;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -56,14 +57,22 @@ public final class SkillFrontmatter {
 
     private final LinkedHashMap<String, Object> top;
     private final LinkedHashMap<String, Object> metadata;
+    /** Metadata keys {@link #parse} moved up from the earlier layout's top level. */
+    private final Set<String> fromEarlierLayout;
 
-    private SkillFrontmatter(LinkedHashMap<String, Object> top, LinkedHashMap<String, Object> metadata) {
+    private SkillFrontmatter(LinkedHashMap<String, Object> top, LinkedHashMap<String, Object> metadata,
+                             Set<String> fromEarlierLayout) {
         this.top = top;
         this.metadata = metadata;
+        this.fromEarlierLayout = fromEarlierLayout;
     }
 
     public static SkillFrontmatter empty() {
-        return new SkillFrontmatter(new LinkedHashMap<>(), new LinkedHashMap<>());
+        return new SkillFrontmatter(new LinkedHashMap<>(), new LinkedHashMap<>(), new HashSet<>());
+    }
+
+    public SkillFrontmatter copy() {
+        return new SkillFrontmatter(new LinkedHashMap<>(top), new LinkedHashMap<>(metadata), new HashSet<>(fromEarlierLayout));
     }
 
     /** The frontmatter opening a whole SKILL.md, or null when it has none or it is not a YAML mapping. */
@@ -98,13 +107,15 @@ public final class SkillFrontmatter {
         } else if (declared != null && !"".equals(declared)) {
             return null;
         }
+        var moved = new HashSet<String>();
         for (var legacy : LEGACY_KEYS) {
             var key = legacy.getValue();
             var value = top.remove(legacy.getKey());
             if (value == null || metadata.containsKey(key)) continue;
             metadata.put(key, LIST_KEYS.contains(key) ? joinWords(value) : value);
+            moved.add(key);
         }
-        return new SkillFrontmatter(top, metadata);
+        return new SkillFrontmatter(top, metadata, moved);
     }
 
     // --- reading ---
@@ -127,6 +138,13 @@ public final class SkillFrontmatter {
     public List<String> commands() { return words(metadata.get(COMMANDS)); }
 
     public List<String> mcpServers() { return words(metadata.get(MCP_SERVERS)); }
+
+    /**
+     * True when {@code key} came from the earlier layout's top level rather than from
+     * {@code metadata}. On an import that is a foreign skill's own key, not JClaw's: another
+     * runtime's {@code tools: Bash, Read} is not a JClaw tool list.
+     */
+    public boolean fromEarlierLayout(String key) { return fromEarlierLayout.contains(key); }
 
     /** One top-level value as written, or null when absent. */
     public @Nullable Object get(String key) { return top.get(key); }

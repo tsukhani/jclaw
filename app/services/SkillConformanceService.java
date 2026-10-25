@@ -15,6 +15,7 @@ import models.Agent;
 import org.jspecify.annotations.Nullable;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -36,18 +37,18 @@ import java.util.regex.Pattern;
  * <h2>Generation vs. validation</h2>
  * The transformation is split deliberately:
  * <ul>
- *   <li><b>Generation (LLM):</b> {@link #proposeWithLlm} rewrites the skill to
- *       the contract — maps foreign tool names onto JClaw's live Tool Catalog,
- *       derives a kebab-case name + icon, rewrites the body. The model is good
- *       at the fuzzy mapping but is never trusted as the gate.</li>
+ *   <li><b>Generation (LLM):</b> {@link #proposeWithLlm} maps foreign tool names
+ *       onto JClaw's live Tool Catalog and supplies a name, description or icon the
+ *       skill lacks. The model is good at the fuzzy mapping but is never trusted as
+ *       the gate.</li>
  *   <li><b>Validation (code):</b> {@link #applyHardGates} is a pure, deterministic
  *       function that accepts or rejects the proposal against the real
  *       {@link ToolCatalog}/{@link agents.ToolRegistry}: every declared tool MUST
  *       exist or the import is rejected, and {@code commands:} is derived strictly
  *       from the binaries actually on disk — never from the model.</li>
  * </ul>
- * Binary/credential directory structure is enforced downstream by
- * {@link SkillPromotionService#publishToGlobal} (binaries → {@code tools/}, etc.).
+ * {@link SkillPromotionService#publishToGlobal} then scans and publishes the skill
+ * with its file layout unchanged.
  */
 public final class SkillConformanceService {
 
@@ -72,19 +73,36 @@ public final class SkillConformanceService {
      *  the body is preserved verbatim, so the model never re-emits it. */
     public record ProposedSkill(@Nullable String name, @Nullable String description, @Nullable String icon, List<String> tools) {}
 
-    /** A skill that passed the deterministic gate, ready to render as SKILL.md. */
+    /**
+     * A skill that passed the deterministic gate, ready to render as SKILL.md.
+     *
+     * @param base the frontmatter the skill arrived with, whose other keys the render keeps, or null
+     */
     public record ConformedSkill(String name, String description, String version, String icon,
-                                 List<String> tools, List<String> commands, String author, String body) {
+                                 List<String> tools, List<String> commands, String author, String body,
+                                 @Nullable SkillFrontmatter base) {
+
+        public ConformedSkill(String name, String description, String version, String icon,
+                              List<String> tools, List<String> commands, String author, String body) {
+            this(name, description, version, icon, tools, commands, author, body, null);
+        }
+
+        /** This skill rendered over {@code upstream}, keeping the keys JClaw does not set. */
+        public ConformedSkill onto(@Nullable SkillFrontmatter upstream) {
+            return new ConformedSkill(name, description, version, icon, tools, commands, author, body, upstream);
+        }
+
         /**
-         * Render the conforming SKILL.md (frontmatter + body) in the Agent Skills layout,
-         * JClaw's fields under {@code metadata} with the version first.
+         * Render the conforming SKILL.md (frontmatter + body) in the Agent Skills layout, JClaw's
+         * fields under {@code metadata}. Every other key of {@link #base} — {@code license},
+         * {@code allowed-tools}, the upstream's own metadata — is kept where it was.
          *
          * <p>Rendered here rather than left to the write path: only skills written
          * through the filesystem tool get a version injected there, and
          * {@link #conform} writes this output straight to disk.
          */
         public String toSkillMd() {
-            var frontmatter = SkillFrontmatter.empty()
+            var frontmatter = (base != null ? base.copy() : SkillFrontmatter.empty())
                     .put(SkillFrontmatter.NAME, scalar(name))
                     .put(SkillFrontmatter.DESCRIPTION, scalar(description))
                     .setVersion(scalar(version))
@@ -118,12 +136,15 @@ public final class SkillConformanceService {
     }
 
     /**
-     * Conform the staged skill IN PLACE: rewrite {@code stagedDir/SKILL.md} with
-     * normalized frontmatter + body. Returns the conformed skill name on success.
+     * Conform the staged skill IN PLACE: rewrite {@code stagedDir/SKILL.md} with JClaw's keys
+     * added under {@code metadata} and the body unchanged. The skill keeps its own name,
+     * description, icon, author and every other key it arrived with; the model fills only what
+     * is missing, and is not asked at all for a skill already in JClaw's layout. Returns the
+     * conformed skill name on success.
      *
      * @param stagedDir    the downloaded skill folder (SKILL.md at its root)
      * @param fallbackName kebab-able fallback name (the catalog skillId)
-     * @param provenance   recorded as the skill's {@code author:} (e.g. "owner/repo")
+     * @param provenance   recorded as the skill's {@code author} when it names none (e.g. "owner/repo")
      */
     public static ConformanceResult conform(Path stagedDir, String fallbackName, String provenance) {
         var skillFile = stagedDir.resolve(SKILL_MD);
@@ -137,7 +158,7 @@ public final class SkillConformanceService {
             return ConformanceResult.fail("could not read SKILL.md: " + e.getMessage());
         }
 
-        var stagedBinaries = listStagedBinaries(stagedDir);
+        var stagedCommands = listStagedCommands(stagedDir);
         // Preserve the original body verbatim; the LLM only normalizes frontmatter.
         var split = SkillLoader.splitFrontmatter(raw);
         String originalBody;
@@ -147,15 +168,23 @@ public final class SkillConformanceService {
             originalBody = raw;  // no frontmatter to strip — the whole file is the body
         }
 
-        var proposedOpt = proposeWithLlm(raw, fallbackName);
-        if (proposedOpt.isEmpty()) {
-            return ConformanceResult.fail("conformance pass failed (LLM unavailable or returned an invalid response)");
+        var upstream = SkillFrontmatter.of(raw);
+        ProposedSkill proposed;
+        if (upstream != null && upstream.toolsDeclared() && !upstream.fromEarlierLayout(SkillFrontmatter.TOOLS)) {
+            // Already in JClaw's layout, a JClaw skill exported: its tools are JClaw names, which the gate still checks.
+            proposed = new ProposedSkill(null, null, null, upstream.tools());
+        } else {
+            var proposedOpt = proposeWithLlm(raw, fallbackName);
+            if (proposedOpt.isEmpty()) {
+                return ConformanceResult.fail("conformance pass failed (LLM unavailable or returned an invalid response)");
+            }
+            proposed = proposedOpt.get();
         }
-        var proposed = proposedOpt.get();
+        proposed = keepUpstream(proposed, upstream);
+        var upstreamAuthor = upstream != null ? upstream.author() : null;
 
         // The incoming version, if any — preserved so re-conforming an already-promoted
         // skill keeps its history instead of dropping back to 1.0.0.
-        var upstream = SkillFrontmatter.of(raw);
         String declaredVersion = null;
         if (upstream != null) {
             declaredVersion = upstream.version();
@@ -163,12 +192,12 @@ public final class SkillConformanceService {
             declaredVersion = SkillLoader.extractYamlValue(split.frontmatter(), "version");
         }
 
-        var gate = applyHardGates(proposed, fallbackName, stagedBinaries, provenance,
-                originalBody, declaredVersion);
+        var gate = applyHardGates(proposed, fallbackName, stagedCommands,
+                upstreamAuthor != null ? upstreamAuthor : provenance, originalBody, declaredVersion);
         if (!gate.ok()) return ConformanceResult.fail(gate.reason());
 
         try {
-            Files.writeString(skillFile, gate.resolvedSkill().toSkillMd());
+            Files.writeString(skillFile, gate.resolvedSkill().onto(upstream).toSkillMd());
         } catch (IOException e) {
             return ConformanceResult.fail("could not write conformed SKILL.md: " + e.getMessage());
         }
@@ -185,7 +214,7 @@ public final class SkillConformanceService {
      *       {@link agents.ToolRegistry} (via {@link ToolCatalog#validateSkillTools});
      *       any {@code unknown} name → REJECT (the LLM failed to map it).</li>
      *   <li><b>commands</b> — derived ONLY from {@code stagedBinaries} (the files
-     *       actually on disk), never from the model. This satisfies both contract
+     *       actually on disk, see {@link #listStagedCommands}), never from the model. This satisfies both contract
      *       directions by construction: every tools/ binary is declared, and every
      *       declared command exists. A binary whose name is not one word is REJECTED:
      *       the list is stored space-separated, so it would read back as several.</li>
@@ -241,6 +270,18 @@ public final class SkillConformanceService {
         var safeAuthor = author != null && !author.isBlank() ? author.strip() : "imported";
         return GateOutcome.accept(new ConformedSkill(name, description,
                 resolveVersion(declaredVersion), icon, tools, commands, safeAuthor, safeBody));
+    }
+
+    /** The skill's own name (when it is valid kebab-case), description and icon win over the model's. */
+    static ProposedSkill keepUpstream(ProposedSkill proposed, @Nullable SkillFrontmatter upstream) {
+        if (upstream == null) return proposed;
+        var name = kebabOrNull(upstream.name());
+        var description = upstream.description();
+        var icon = upstream.icon();
+        return new ProposedSkill(name != null ? name : proposed.name(),
+                description != null ? description : proposed.description(),
+                icon != null ? icon : proposed.icon(),
+                proposed.tools());
     }
 
     // --- generation (LLM) ---
@@ -326,18 +367,38 @@ public final class SkillConformanceService {
 
     // --- helpers ---
 
-    /** Basenames of non-text files anywhere under the staged skill — the binaries
-     *  that {@code commands:} must declare (and that the malware scan will vet). */
-    private static Set<String> listStagedBinaries(Path stagedDir) {
-        var bins = new TreeSet<String>();
+    /**
+     * Basenames of the staged binaries that are commands: every non-text file in {@code tools/},
+     * JClaw's folder for them, and an executable anywhere else. A font, image or archive in an
+     * imported skill's own folders is an asset, not a command; the malware scan still vets it.
+     */
+    private static Set<String> listStagedCommands(Path stagedDir) {
+        var commands = new TreeSet<String>();
         try (var walk = Files.walk(stagedDir)) {
             walk.filter(Files::isRegularFile)
                 .filter(p -> !SkillLoader.isTextFile(p.getFileName().toString()))
-                .forEach(p -> bins.add(p.getFileName().toString()));
+                .filter(p -> stagedDir.relativize(p).startsWith("tools") || isExecutable(p))
+                .forEach(p -> commands.add(p.getFileName().toString()));
         } catch (IOException e) {
             EventLogger.warn(CATEGORY, "Conformance: could not list staged binaries: " + e.getMessage());
         }
-        return bins;
+        return commands;
+    }
+
+    /** ELF, Mach-O (thin or fat), PE, or a script with a shebang line. */
+    private static boolean isExecutable(Path file) {
+        var head = new byte[4];
+        int read;
+        try (var in = Files.newInputStream(file)) {
+            read = in.readNBytes(head, 0, head.length);
+        } catch (IOException _) {
+            return false;
+        }
+        if (read >= 2 && ((head[0] == 'M' && head[1] == 'Z') || (head[0] == '#' && head[1] == '!'))) return true;
+        if (read < 4) return false;
+        var magic = ByteBuffer.wrap(head).getInt();
+        return magic == 0x7F454C46 || magic == 0xFEEDFACE || magic == 0xFEEDFACF
+                || magic == 0xCEFAEDFE || magic == 0xCFFAEDFE || magic == 0xCAFEBABE;
     }
 
     /**

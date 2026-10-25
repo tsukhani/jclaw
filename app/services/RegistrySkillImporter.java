@@ -18,7 +18,8 @@ import java.util.Set;
  *       still can't conform;</li>
  *   <li>{@link SkillPromotionService#publishToGlobal} runs the shared malware
  *       scan + secret sanitization + atomic write to the global registry — the
- *       exact path agent-workspace promotion uses.</li>
+ *       path agent-workspace promotion uses, except that an import keeps its file
+ *       layout: its files are public, so there is no agent secret to sort out.</li>
  * </ol>
  * The fetch is the only provider-specific stage; conform → scan → sanitize →
  * publish is shared. The operator chose direct-to-global, so a successful import
@@ -85,7 +86,7 @@ public final class RegistrySkillImporter {
                 return ImportResult.fail("'%s' is a reserved built-in skill and cannot be imported".formatted(name));
             }
 
-            if (!SkillPromotionService.publishToGlobal(staged, name)) {
+            if (!SkillPromotionService.publishToGlobal(staged, name, true)) {
                 return ImportResult.fail("skill failed the malware scan or could not be written to the registry");
             }
 

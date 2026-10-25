@@ -683,6 +683,65 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         assertEquals("no frontmatter here", payload.get("notes.md"), "other files untouched");
     }
 
+    // A catalog import's files are public, so they keep the layout their author gave them: Anthropic's skills
+    // ship LICENSE.txt, requirements.txt and fonts, which promotion's sorting would blank or move.
+    @Test
+    void anImportedSkillKeepsItsFileLayout() throws Exception {
+        var staged = Files.createTempDirectory("skill-import-layout-");
+        try {
+            Files.writeString(staged.resolve("SKILL.md"),
+                    "---\nname: layout-probe\ndescription: d\nmetadata:\n  jclaw-tools: \"\"\n  jclaw-commands: wacli\n---\n# Body\n");
+            Files.writeString(staged.resolve("LICENSE.txt"), "Apache License, Version 2.0\n");
+            Files.createDirectories(staged.resolve("scripts"));
+            Files.writeString(staged.resolve("scripts/requirements.txt"), "pypdf==5.1.0\n");
+            Files.createDirectories(staged.resolve("canvas-fonts"));
+            Files.write(staged.resolve("canvas-fonts/Arsenal-Regular.ttf"), new byte[]{0, 1, 0, 0, 9});
+            Files.createDirectories(staged.resolve("tools"));
+            Files.write(staged.resolve("tools/wacli"), new byte[]{0x7F, 'E', 'L', 'F', 2});
+
+            assertTrue(SkillPromotionService.publishToGlobal(staged, "layout-probe", true));
+
+            var global = globalSkillsDir.resolve("layout-probe");
+            assertEquals(java.util.List.of("LICENSE.txt", "SKILL.md", "canvas-fonts/Arsenal-Regular.ttf",
+                    "scripts/requirements.txt", "tools/wacli"), relativeFiles(global));
+            assertEquals("Apache License, Version 2.0\n", Files.readString(global.resolve("LICENSE.txt")));
+            assertEquals("pypdf==5.1.0\n", Files.readString(global.resolve("scripts/requirements.txt")));
+            assertArrayEquals(new byte[]{0, 1, 0, 0, 9}, Files.readAllBytes(global.resolve("canvas-fonts/Arsenal-Regular.ttf")));
+            assertEquals(java.util.List.of("wacli"),
+                    SkillRegistryTool.findBySkill("layout-probe").stream().map(r -> r.toolName).toList());
+        } finally {
+            SkillPromotionService.deleteRecursive(staged);
+            SkillRegistryTool.deleteBySkill("layout-probe");
+        }
+    }
+
+    @Test
+    void anAgentsSkillIsStillSortedIntoCredentialsAndTools() throws Exception {
+        var staged = Files.createTempDirectory("skill-promote-layout-");
+        try {
+            Files.writeString(staged.resolve("SKILL.md"), "---\nname: sorted-probe\ndescription: d\n---\n# Body\n");
+            Files.writeString(staged.resolve("config.json"), "{\"apiKey\": \"sk-live-123\"}");
+            Files.createDirectories(staged.resolve("bin"));
+            Files.write(staged.resolve("bin/helper"), new byte[]{0x7F, 'E', 'L', 'F', 2});
+
+            assertTrue(SkillPromotionService.publishToGlobal(staged, "sorted-probe", false));
+
+            var global = globalSkillsDir.resolve("sorted-probe");
+            assertEquals(java.util.List.of("SKILL.md", "credentials/config.json", "tools/helper"), relativeFiles(global));
+            assertFalse(Files.readString(global.resolve("credentials/config.json")).contains("sk-live-123"),
+                    "an agent's credential file is blanked on its way to the registry");
+        } finally {
+            SkillPromotionService.deleteRecursive(staged);
+            SkillRegistryTool.deleteBySkill("sorted-probe");
+        }
+    }
+
+    private static java.util.List<String> relativeFiles(Path dir) throws Exception {
+        try (var walk = Files.walk(dir)) {
+            return walk.filter(Files::isRegularFile).map(f -> dir.relativize(f).toString().replace('\\', '/')).sorted().toList();
+        }
+    }
+
     private static String skillVersion(String skillMd) {
         return SkillLoader.parseSkillContent(skillMd, null).version();
     }
