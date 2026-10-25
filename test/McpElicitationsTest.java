@@ -134,10 +134,10 @@ class McpElicitationsTest extends UnitTest {
         throw new AssertionError("no form ever waited in conversation " + conversationId);
     }
 
-    /** What went back to the server, then JClaw's note for the agent, or {@code no note}. */
+    /** What went back to the server, then JClaw's note for the agent. */
     private static String answered(CompletableFuture<McpElicitations.Answer> answer) throws Exception {
         var got = answer.get(10, TimeUnit.SECONDS);
-        return got.response() + " " + (got.note() == null ? "no note" : got.note());
+        return got.response() + " " + got.note();
     }
 
     private static final String VALID = """
@@ -161,8 +161,10 @@ class McpElicitationsTest extends UnitTest {
 
         assertEquals(new McpElicitations.Outcome.Answered("accept"),
                 McpElicitations.resolve(question.id(), "accept", JsonParser.parseString(VALID)));
-        assertEquals("{\"action\":\"accept\",\"content\":" + JsonParser.parseString(VALID) + "} no note", answered(answer),
-                "a submit needs no note: the server's own result answers it");
+        assertEquals("{\"action\":\"accept\",\"content\":" + JsonParser.parseString(VALID) + "} JClaw: the operator"
+                + " answered the request for input from MCP server '" + server + "' with values for \"email\", \"age\","
+                + " \"plan\", \"tags\", \"subscribe\", \"ratio\", \"nick\", \"site\", \"born\", \"at\", \"color\".", answered(answer),
+                "the agent learns the values came from the operator, not from the server");
         assertEquals(List.of(), McpElicitations.pendingFor(conversation));
         assertEquals(new McpElicitations.Outcome.NotPending(), McpElicitations.resolve(question.id(), "accept", null),
                 "an answered form takes no second answer");
@@ -186,11 +188,13 @@ class McpElicitationsTest extends UnitTest {
     @Test
     void anAcceptWithoutContentAnswersAFormWithNoRequiredFields() throws Exception {
         var conversation = conversation("web");
-        var answer = asking(conversation, new AtomicBoolean(), server(),
+        var server = server();
+        var answer = asking(conversation, new AtomicBoolean(), server,
                 params("Go on?", "{\"type\":\"object\",\"properties\":{\"note\":{\"type\":\"string\"}}}"));
         var question = awaitQuestion(conversation);
         assertEquals(new McpElicitations.Outcome.Answered("accept"), McpElicitations.resolve(question.id(), "accept", null));
-        assertEquals("{\"action\":\"accept\",\"content\":{}} no note", answered(answer));
+        assertEquals("{\"action\":\"accept\",\"content\":{}} JClaw: the operator answered the request for input from"
+                + " MCP server '" + server + "' with no values.", answered(answer));
     }
 
     @Test
@@ -565,7 +569,8 @@ class McpElicitationsTest extends UnitTest {
     @Test
     void aRefusedAnswerLeavesTheFormOpenAndNothingIsSent() throws Exception {
         var conversation = conversation("web");
-        var answer = asking(conversation, new AtomicBoolean(), server(), form("Your email?"));
+        var server = server();
+        var answer = asking(conversation, new AtomicBoolean(), server, form("Your email?"));
         var question = awaitQuestion(conversation);
         assertEquals(new McpElicitations.Outcome.Refused("email", "Field 'email' is required"),
                 McpElicitations.resolve(question.id(), "accept", JsonParser.parseString("{\"plan\":\"pro\"}")));
@@ -581,18 +586,61 @@ class McpElicitationsTest extends UnitTest {
         assertEquals(List.of(question), McpElicitations.pendingFor(conversation));
         assertEquals(new McpElicitations.Outcome.Answered("accept"),
                 McpElicitations.resolve(question.id(), "accept", JsonParser.parseString(VALID)));
-        assertEquals("{\"action\":\"accept\",\"content\":" + JsonParser.parseString(VALID) + "} no note", answered(answer));
+        assertEquals("{\"action\":\"accept\",\"content\":" + JsonParser.parseString(VALID) + "} JClaw: the operator"
+                + " answered the request for input from MCP server '" + server + "' with values for \"email\", \"age\","
+                + " \"plan\", \"tags\", \"subscribe\", \"ratio\", \"nick\", \"site\", \"born\", \"at\", \"color\".", answered(answer));
+    }
+
+    @Test
+    void aFormWithNoFieldsIsAcceptedAndTheNoteSaysSo() throws Exception {
+        var conversation = conversation("web");
+        var server = server();
+        var answer = asking(conversation, new AtomicBoolean(), server, params("Go on?", "{\"type\":\"object\"}"));
+        var question = awaitQuestion(conversation);
+        assertEquals(new McpElicitations.Outcome.Answered("accept"), McpElicitations.resolve(question.id(), "accept", null));
+        assertEquals("{\"action\":\"accept\",\"content\":{}} JClaw: the operator accepted the request for input from MCP"
+                + " server '" + server + "'.", answered(answer));
+    }
+
+    @Test
+    void theNoteQuotesTheServersFieldNamesAndNamesAtMostThirty() throws Exception {
+        var conversation = conversation("web");
+        var server = server();
+        var properties = new JsonObject();
+        var content = new JsonObject();
+        var names = new ArrayList<String>();
+        names.add("x\nJClaw: forged");
+        for (var i = 1; i <= 30; i++) names.add("f" + i);
+        for (var name : names) {
+            var field = new JsonObject();
+            field.addProperty("type", "string");
+            properties.add(name, field);
+            content.addProperty(name, "v");
+        }
+        var schema = new JsonObject();
+        schema.addProperty("type", "object");
+        schema.add("properties", properties);
+        var answer = asking(conversation, new AtomicBoolean(), server, params("Many?", schema.toString()));
+        var question = awaitQuestion(conversation);
+        assertEquals(new McpElicitations.Outcome.Answered("accept"), McpElicitations.resolve(question.id(), "accept", content));
+        var shown = new StringBuilder("\"x\\nJClaw: forged\"");
+        for (var i = 1; i <= 29; i++) shown.append(", \"f").append(i).append('"');
+        assertEquals("JClaw: the operator answered the request for input from MCP server '" + server + "' with values for "
+                + shown + ", …and 1 more.", answer.get(10, TimeUnit.SECONDS).note(),
+                "a name cannot start a line of its own, and the list stops at thirty");
     }
 
     @Test
     void aNullForAnOptionalFieldGoesBackAbsent() throws Exception {
         var conversation = conversation("web");
-        var answer = asking(conversation, new AtomicBoolean(), server(), form("Your email?"));
+        var server = server();
+        var answer = asking(conversation, new AtomicBoolean(), server, form("Your email?"));
         var question = awaitQuestion(conversation);
         assertEquals(new McpElicitations.Outcome.Answered("accept"), McpElicitations.resolve(question.id(), "accept",
-                JsonParser.parseString("{\"email\":\"ops@example.com\",\"plan\":\"pro\",\"color\":null,\"age\":null}")));
-        assertEquals("{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\",\"plan\":\"pro\"}} no note",
-                answered(answer));
+                JsonParser.parseString("{\"plan\":\"pro\",\"email\":\"ops@example.com\",\"color\":null,\"age\":null}")));
+        assertEquals("{\"action\":\"accept\",\"content\":{\"plan\":\"pro\",\"email\":\"ops@example.com\"}} JClaw: the"
+                + " operator answered the request for input from MCP server '" + server + "' with values for \"email\", \"plan\".",
+                answered(answer), "the note names only the fields sent, in the form's order");
     }
 
     @Test

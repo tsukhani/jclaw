@@ -39,9 +39,10 @@ import java.util.regex.Pattern;
 
 /**
  * Form-mode elicitation (2026-07-28): an {@code elicitation/create} a server puts in an {@code input_required}
- * result, put to the operator on a top-level web-chat turn. Their answer goes back as given, and anything but a
- * submit adds JClaw's {@link Answer#note()} to the tool's result. When a question cannot be put to the operator
- * (off web chat, url mode, a form JClaw cannot show) nothing goes back: the agent gets the server's questions.
+ * result, put to the operator on a top-level web-chat turn. Their answer goes back as given, and JClaw's
+ * {@link Answer#note()} tells the agent what the operator did; a submit's names the fields filled in, never their
+ * values. When a question cannot be put to the operator (off web chat, url mode, a form JClaw cannot show) nothing
+ * goes back: the agent gets the server's questions.
  * One call's forms share one {@link #WAIT} from the first; Stop or the chat stream closing cancels them at once.
  *
  * <p>The values the operator enters are never logged or stored: they exist only in the answer handed back to
@@ -102,9 +103,9 @@ public final class McpElicitations {
 
     /**
      * What goes back to the server for one form, {@code {action}} or {@code {action, content}}, and the line JClaw
-     * adds to the tool's result for the agent: null for a submit, which the server's own result answers.
+     * adds to the tool's result for the agent.
      */
-    public record Answer(JsonObject response, @Nullable String note) {}
+    public record Answer(JsonObject response, String note) {}
 
     private record Waiting(Question question, long order, CompletableFuture<Answer> answer) {}
 
@@ -302,6 +303,8 @@ public final class McpElicitations {
             return new Outcome.Refused("action", "Field 'action' must be accept, decline or cancel");
         }
         var response = action(action);
+        var server = waiting.question().server();
+        var sentFor = "";
         if (ACCEPT.equals(action)) {
             var given = content == null || content.isJsonNull() ? new JsonObject() : content;
             var invalid = invalid(waiting.question().requestedSchema(), given);
@@ -312,10 +315,13 @@ public final class McpElicitations {
                 if (!e.getValue().isJsonNull()) sent.add(e.getKey(), e.getValue().deepCopy());
             }
             response.add("content", sent);
+            sentFor = sentFor(waiting.question().requestedSchema(), sent);
         }
-        var server = waiting.question().server();
         var answer = switch (action) {
-            case ACCEPT -> new Answer(response, null);
+            // Names, never values: without this line the agent takes the operator's answers for the server's defaults.
+            case ACCEPT -> new Answer(response,
+                    "JClaw: the operator %s the request for input from MCP server '%s'%s.".formatted(
+                            sentFor.isEmpty() ? "accepted" : "answered", server, sentFor));
             case DECLINE -> new Answer(response,
                     "JClaw: the operator declined the request for input from MCP server '%s'.".formatted(server));
             default -> new Answer(response,
@@ -391,6 +397,25 @@ public final class McpElicitations {
         var more = properties.size() - fields.size();
         if (more > 0) fields.add("…and " + more + " more");
         return " Fields: " + String.join(", ", fields) + ".";
+    }
+
+    // The names are the server's text, so quoted and capped as described() does; empty for a form with no fields.
+    private static String sentFor(JsonObject schema, JsonObject sent) {
+        var properties = properties(schema);
+        if (properties.isEmpty()) return "";
+        var keys = properties.keySet().stream().filter(sent::has).toList();
+        if (keys.isEmpty()) return " with no values";
+        var shown = new ArrayList<String>();
+        var length = 0;
+        for (var key : keys) {
+            var text = quoted(key);
+            if (shown.size() == DESCRIBED_FIELDS || length + text.length() > DESCRIBED_CHARS) break;
+            shown.add(text);
+            length += text.length() + 2;
+        }
+        var more = keys.size() - shown.size();
+        if (more > 0) shown.add("…and " + more + " more");
+        return " with values for " + String.join(", ", shown);
     }
 
     private static String typeOf(JsonObject field) {

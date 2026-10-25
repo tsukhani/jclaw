@@ -1233,8 +1233,10 @@ class ApiMcpServersControllerTest extends FunctionalTest {
             var accepted = answer(id, "{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}");
             assertIsOk(accepted);
             assertEquals("{\"status\":\"ok\",\"action\":\"accept\"}", getContent(accepted));
-            assertEquals("{\"email\":{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}}",
-                    result.get(10, java.util.concurrent.TimeUnit.SECONDS), "the tool's result reaches the agent");
+            assertEquals("{\"email\":{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}}\n\n"
+                    + "JClaw: the operator answered the request for input from MCP server '" + server + "' with values for \"email\".",
+                    result.get(10, java.util.concurrent.TimeUnit.SECONDS),
+                    "the tool's result reaches the agent, with the line saying the operator answered");
             assertEquals(2, calls.size());
             assertEquals(ELICITING, calls.get(0).getAsJsonObject("_meta").get("io.modelcontextprotocol/clientCapabilities").toString());
             assertEquals("st/1", calls.get(1).get("requestState").getAsString());

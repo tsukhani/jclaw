@@ -810,7 +810,8 @@ class McpClientTest extends UnitTest {
             var got = result.get(10, TimeUnit.SECONDS);
             assertEquals("{\"email\":{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}}",
                     got.content(), "the tool's result reaches the agent");
-            assertEquals("", got.note(), "the server's own result answers a submit");
+            assertEquals("JClaw: the operator answered the request for input from MCP server 'fake' with values for \"email\".",
+                    got.note(), "the agent learns the values came from the operator, not from the server");
             assertFalse(got.isError());
             var sent = calls(transports.getFirst());
             assertEquals(2, sent.size());
@@ -897,8 +898,12 @@ class McpClientTest extends UnitTest {
             McpElicitations.resolve(first.id(), "accept", JsonParser.parseString("{\"email\":\"ops@example.com\"}"));
             var second = awaitQuestion(web, "Which plan?");
             McpElicitations.resolve(second.id(), "accept", JsonParser.parseString("{\"plan\":\"pro\"}"));
+            var got = result.get(10, TimeUnit.SECONDS);
             assertEquals("{\"email\":{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}},"
-                    + "\"plan\":{\"action\":\"accept\",\"content\":{\"plan\":\"pro\"}}}", result.get(10, TimeUnit.SECONDS).content());
+                    + "\"plan\":{\"action\":\"accept\",\"content\":{\"plan\":\"pro\"}}}", got.content());
+            assertEquals("JClaw: the operator answered the request for input from MCP server 'fake' with values for \"email\".\n"
+                    + "JClaw: the operator answered the request for input from MCP server 'fake' with values for \"plan\".",
+                    got.note(), "each answered form adds its own line");
             assertEquals(2, calls(transports.getFirst()).size(), "one retry carries both answers");
         }
     }
@@ -947,6 +952,28 @@ class McpClientTest extends UnitTest {
                     + " server asked:\n- \"Sign in\" (a link to open)\nYou can fill the values in as arguments and call"
                     + " again, ask in chat, or use another tool.\nJClaw: the operator declined the request for input from MCP"
                     + " server 'fake'.", result.get(10, TimeUnit.SECONDS).content());
+            assertEquals(2, calls(transports.getFirst()).size());
+        }
+    }
+
+    @Test
+    void aQuestionHandedToTheAgentAfterASubmitKeepsTheLineSayingTheOperatorAnswered() throws Exception {
+        var web = conversation("web");
+        var url = "{\"method\":\"elicitation/create\",\"params\":{\"mode\":\"url\",\"message\":\"Sign in\","
+                + "\"url\":\"https://example.com/login\",\"elicitationId\":\"e1\"}}";
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        Script twoRounds = (_, r) -> ((JsonObject) Objects.requireNonNull(r.params())).get("inputResponses") == null
+                ? ok(r, "{\"resultType\":\"input_required\",\"inputRequests\":{\"email\":" + EMAIL_FORM + "}}")
+                : ok(r, "{\"resultType\":\"input_required\",\"inputRequests\":{\"login\":" + url + "}}");
+        try (var client = modernClient(transports, twoRounds)) {
+            var result = onTurn(web, () -> client.callTool("echo", new JsonObject()));
+            McpElicitations.resolve(awaitQuestion(web, "Your email?").id(), "accept",
+                    JsonParser.parseString("{\"email\":\"ops@example.com\"}"));
+            assertEquals("MCP server 'fake' asked for input that JClaw did not put to the operator, because a question asks"
+                    + " the operator to open a link, which JClaw does not do, so the call ended with nothing sent back. The"
+                    + " server asked:\n- \"Sign in\" (a link to open)\nYou can fill the values in as arguments and call"
+                    + " again, ask in chat, or use another tool.\nJClaw: the operator answered the request for input from MCP"
+                    + " server 'fake' with values for \"email\".", result.get(10, TimeUnit.SECONDS).content());
             assertEquals(2, calls(transports.getFirst()).size());
         }
     }

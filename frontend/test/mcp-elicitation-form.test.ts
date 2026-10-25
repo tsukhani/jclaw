@@ -224,6 +224,38 @@ describe('McpElicitationForm — answering', () => {
     expect(bodies).toHaveLength(1)
   })
 
+  it('clears a field\'s problem once its value changes, leaves the others, and Submit checks again', async () => {
+    const bodies = serveAnswer('q3b')
+    const component = await mountForm(question('q3b'))
+    for (const box of component.findAll('[data-testid="mcp-elicitation-field-tags"] input')) await box.setValue(true)
+    await component.find('[data-testid="mcp-elicitation-field-nick"] input').setValue('t')
+    await component.find('form').trigger('submit')
+    await flushPromises()
+
+    const problem = (key: string) => component.find(`[data-testid="mcp-elicitation-field-${key}"] [data-testid="mcp-elicitation-problem"]`)
+    const email = () => component.find('[data-testid="mcp-elicitation-field-email"] input')
+    expect(problem('email').text()).toBe('Required.')
+    expect(problem('tags').text()).toBe('Choose at most 1.')
+    expect(problem('nick').text()).toBe('Must be at least 2 characters.')
+
+    await email().setValue('ops@example')
+    expect(problem('email').exists()).toBe(false)
+    expect(email().attributes('aria-invalid')).toBeUndefined()
+    expect(email().attributes('aria-describedby')).toBe(`${email().attributes('id')}-help`)
+    const tags = component.find('[data-testid="mcp-elicitation-field-tags"] fieldset')
+    expect(tags.attributes('aria-invalid')).toBe('true')
+    await component.findAll('[data-testid="mcp-elicitation-field-tags"] input')[0]!.setValue(false)
+    expect(problem('tags').exists()).toBe(false)
+    expect(tags.attributes('aria-invalid')).toBeUndefined()
+    expect(problem('nick').text()).toBe('Must be at least 2 characters.')
+
+    await component.find('form').trigger('submit')
+    await flushPromises()
+    expect(problem('email').text()).toBe('Must be an email address.')
+    expect(problem('nick').text()).toBe('Must be at least 2 characters.')
+    expect(bodies).toEqual([])
+  })
+
   it('declines or cancels with the action alone, whatever the fields hold', async () => {
     for (const action of ['decline', 'cancel'] as const) {
       const bodies = serveAnswer(`q-${action}`)
@@ -248,6 +280,9 @@ describe('McpElicitationForm — answering', () => {
     await vi.waitFor(() => expect(component.find('[data-testid="mcp-elicitation-field-email"] [data-testid="mcp-elicitation-problem"]')
       .text()).toBe('Field \'email\' must be an email address'))
     expect(component.emitted('done')).toBeUndefined()
+
+    await component.find('[data-testid="mcp-elicitation-field-email"] input').setValue('billing@example.com')
+    expect(component.find('[data-testid="mcp-elicitation-field-email"] [data-testid="mcp-elicitation-problem"]').exists()).toBe(false)
   })
 
   it('shows a refusal that names no field of the form above the buttons', async () => {

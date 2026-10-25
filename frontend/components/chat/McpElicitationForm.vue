@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // A form an MCP server asked the operator to fill in mid-call. The server's text is shown as plain text, so a link
 // in it never becomes clickable.
-import { computed, onMounted, reactive, ref, useId } from 'vue'
+import { computed, onMounted, reactive, ref, useId, watch } from 'vue'
 import { ChatBubbleLeftEllipsisIcon } from '@heroicons/vue/24/outline'
 import { useApiMutation } from '~/composables/useApiMutation'
 import type { McpElicitation } from '~/types/api'
@@ -26,6 +26,11 @@ onMounted(() => {
   announcement.value = `MCP server ${props.elicitation.server} is asking a question.`
 })
 const problems = ref<Record<string, string>>({})
+// A problem goes once its field changes, since it described the old value; Submit checks again.
+watch(() => fields.value.map(f => JSON.stringify(values[f.key] ?? null)), (now, before) => {
+  const changed = new Set(fields.value.filter((_, i) => now[i] !== before[i]).map(f => f.key))
+  problems.value = Object.fromEntries(Object.entries(problems.value).filter(([key]) => !changed.has(key)))
+})
 const formError = ref<string | null>(null)
 const { mutate, loading, errorDetails } = useApiMutation()
 const uid = useId()

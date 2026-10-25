@@ -993,7 +993,7 @@ public class McpClient implements AutoCloseable {
                 for (var form : input.forms().entrySet()) {
                     var answer = McpElicitations.ask(name, form.getValue(), wait);
                     responses.add(form.getKey(), answer.response());
-                    if (answer.note() != null) notes.add(answer.note());
+                    notes.add(answer.note());
                 }
                 p.add("inputResponses", responses);
             }
