@@ -1,6 +1,7 @@
 import mcp.McpConnectionManager;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.RestartService;
 
 import java.time.Duration;
 import java.util.List;
@@ -51,5 +52,32 @@ class McpStartupReadinessTest extends UnitTest {
     void noOpsWhenNoServersConfigured() {
         assertTrue(McpConnectionManager.awaitFirstConnects(List.of(), Duration.ofSeconds(1)),
                 "an empty server set is trivially ready");
+    }
+
+    // The Restart panel waits on the same first connects before it reloads.
+
+    @Test
+    void theRestartPanelWaitsWhileServersAreStillConnecting() {
+        assertFalse(settled(2, 4, List.of(pending(), pending(), pending(), pending())), "2 of 4 connected, none resolved");
+        assertFalse(settled(1, 4, List.of(resolved(), pending(), pending(), pending())), "1 of 4 resolved");
+    }
+
+    @Test
+    void theRestartPanelStopsWaitingOnceEveryFirstConnectHasResolvedOrAllAreConnected() {
+        assertTrue(settled(2, 4, List.of(resolved(), resolved(), resolved(), resolved())), "2 of 4 connected, the other two failed");
+        assertTrue(settled(4, 4, List.of(pending(), pending(), pending(), pending())), "4 of 4 connected");
+        assertTrue(settled(0, 0, List.of()), "no server configured");
+    }
+
+    private static boolean settled(int connected, int configured, List<CompletableFuture<Void>> firstConnects) {
+        return RestartService.servicesSettled(connected, configured, McpConnectionManager.firstConnectsSettled(firstConnects));
+    }
+
+    private static CompletableFuture<Void> resolved() {
+        return CompletableFuture.completedFuture(null);
+    }
+
+    private static CompletableFuture<Void> pending() {
+        return new CompletableFuture<>();
     }
 }

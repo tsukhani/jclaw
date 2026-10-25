@@ -1,6 +1,7 @@
 /**
  * The restart-and-reconnect sequence the Restart and Java runtime panels share: hand off to
- * `jclaw.sh restart` via POST /api/system/restart, then watch the backend go down and come back.
+ * `jclaw.sh restart` via POST /api/system/restart, then watch the backend go down and come back,
+ * narrating jclaw.sh's phases from GET /api/system/restart/progress while it does.
  */
 
 export interface RestartPreflight {
@@ -29,7 +30,37 @@ export function interruptionSummary(p: RestartPreflight): string {
   return `${parts.join(' and ')} currently running will be interrupted.`
 }
 
+/** One line of the narration; `seconds` is null on a line with no duration to show. */
+export interface RestartStep {
+  id: string
+  label: string
+  state: 'done' | 'running' | 'failed'
+  seconds: number | null
+}
+
+/** GET /api/system/restart/progress, from JClaw or from the narrator that stands in while it is down. */
+interface RestartProgress {
+  source: 'narrator' | 'jclaw'
+  state: 'running' | 'done' | 'failed' | 'none'
+  failure: string | null
+  steps: Array<{ id: string, label: string, state: RestartStep['state'], seconds: number }>
+  services: { channels: string[], mcpConnected: number, mcpConfigured: number, settled: boolean } | null
+}
+
 type Phase = 'idle' | 'requesting' | 'stopping' | 'starting'
+
+// jclaw.sh writes the same label as it launches the JVM, after the narrator has stepped aside.
+const STARTING_LABEL = 'Starting JClaw (connecting channels)'
+// The narrator binds within a second or two of the old JVM letting go; past this the panel counts instead.
+const NARRATOR_GRACE = 5
+// McpConnectionManager gives every server 20 s to connect at boot.
+const SERVICES_BUDGET = 30
+
+const CHANNEL_NAMES: Record<string, string> = { telegram: 'Telegram', slack: 'Slack', whatsapp: 'WhatsApp' }
+
+function channelName(type: string): string {
+  return CHANNEL_NAMES[type] ?? type.charAt(0).toUpperCase() + type.slice(1)
+}
 
 export function useRestartAndReconnect() {
   const { mutate, error: mutationError } = useApiMutation()
@@ -37,6 +68,7 @@ export function useRestartAndReconnect() {
   const phase = ref<Phase>('idle')
   const elapsed = ref(0)
   const failure = ref<string | null>(null)
+  const steps = ref<RestartStep[]>([])
 
   let poller: ReturnType<typeof setInterval> | null = null
 
@@ -50,7 +82,8 @@ export function useRestartAndReconnect() {
   }
 
   /** True when /api/status answers at all. Any throw — connection refused mid-restart
-   *  included — is a "down", which is exactly the signal the phases key off. */
+   *  included — is a "down", which is exactly the signal the phases key off. The narrator
+   *  answers it 503, so it reads as down too. */
   async function backendUp(): Promise<boolean> {
     try {
       await $fetch('/api/status', { retry: 0, timeout: 4000 })
@@ -61,8 +94,18 @@ export function useRestartAndReconnect() {
     }
   }
 
+  async function fetchProgress(): Promise<RestartProgress | null> {
+    try {
+      return await $fetch<RestartProgress>('/api/system/restart/progress', { retry: 0, timeout: 4000 })
+    }
+    catch {
+      return null
+    }
+  }
+
   /** POST the restart, then follow it; the caller has already confirmed against `p`. */
   async function restart(p: Pick<RestartPreflight, 'rebuildExpected'>) {
+    steps.value = []
     phase.value = 'requesting'
     const res = await mutate('/api/system/restart', { method: 'POST' })
     if (!res) {
@@ -93,43 +136,141 @@ export function useRestartAndReconnect() {
     const startupBudget = p.rebuildExpected ? 900 : 180
     const shutdownBudget = 90
     let consecutiveUp = 0
+    let sawNarrator = false
+    let ticking = false
+    // Times, not tick counts: a tick waits on two fetches of up to 4 s each, and the ticks it skips meanwhile are lost.
+    let phaseStartedAt = Date.now()
+    let servicesSince: number | null = null
+    let shown: RestartStep[] = []
+    let shownAt = Date.now()
+    const secondsSince = (at: number) => Math.floor((Date.now() - at) / 1000)
+
+    function serviceSteps(services: RestartProgress['services'], waited: number): RestartStep[] {
+      if (!services) return []
+      const out: RestartStep[] = []
+      if (services.channels.length > 0) {
+        out.push({ id: 'channels', label: `Channels running: ${services.channels.map(channelName).join(', ')}`, state: 'done', seconds: null })
+      }
+      if (services.mcpConfigured > 0) {
+        out.push({
+          id: 'mcp',
+          label: `MCP servers: ${services.mcpConnected} of ${services.mcpConfigured} connected`,
+          state: services.settled ? 'done' : 'running',
+          seconds: services.settled ? null : waited,
+        })
+      }
+      return out
+    }
+
+    function setSteps(next: RestartStep[]) {
+      shown = next
+      shownAt = Date.now()
+      steps.value = next
+    }
+
+    function show(progress: RestartProgress, waited = 0) {
+      const phases = progress.state === 'none' ? [] : progress.steps.map(s => ({ ...s }))
+      setSteps([...phases, ...serviceSteps(progress.services, waited)])
+    }
+
+    /** Between answers, a running step keeps counting from its last answer. */
+    function count() {
+      const since = secondsSince(shownAt)
+      steps.value = shown.map(s => s.state === 'running' && s.seconds !== null ? { ...s, seconds: s.seconds + since } : s)
+    }
+
+    /** The narrator steps aside just before the JVM launches, so its going quiet is that launch. */
+    function launching() {
+      if (shown.some(s => s.id === 'start')) {
+        count()
+        return
+      }
+      setSteps([
+        ...steps.value.map(s => s.state === 'running' ? { ...s, state: 'done' as const } : s),
+        { id: 'start', label: STARTING_LABEL, state: 'running', seconds: 0 },
+      ])
+    }
+
+    function giveUp(message: string) {
+      stopPolling()
+      phase.value = 'idle'
+      failure.value = message
+    }
+
+    async function tick() {
+      const [up, progress] = await Promise.all([backendUp(), fetchProgress()])
+      elapsed.value = secondsSince(phaseStartedAt)
+      if (progress?.source === 'narrator') sawNarrator = true
+
+      if (phase.value === 'stopping') {
+        if (up) {
+          // The JVM about to stop still has the previous restart's file, which has finished:
+          // only a running one is this restart. Its services are the ones going away.
+          if (progress?.state === 'running') show({ ...progress, services: null })
+          else count()
+          if (elapsed.value >= shutdownBudget) {
+            giveUp(`The backend was still responding ${shutdownBudget}s after the restart `
+              + 'was accepted. Check logs/restart.log.')
+          }
+          return
+        }
+        phase.value = 'starting'
+        phaseStartedAt = Date.now()
+        elapsed.value = 0
+      }
+
+      if (progress?.state === 'failed' && !up) {
+        show(progress)
+        giveUp(`The restart failed: ${progress.failure ?? 'jclaw.sh stopped'}. See logs/restart.log.`)
+        return
+      }
+
+      // Two consecutive answers, so a half-initialised Play answering one request
+      // mid-boot doesn't trigger a premature reload. Then its services get until they
+      // settle, or the budget runs out, before the reload.
+      consecutiveUp = up ? consecutiveUp + 1 : 0
+      const back = consecutiveUp >= 2
+      const services = progress?.source === 'jclaw' ? progress.services : null
+      const unsettled = back && !!services && !services.settled
+      if (unsettled && servicesSince === null) servicesSince = Date.now()
+      const waited = servicesSince === null ? 0 : secondsSince(servicesSince)
+      const waiting = unsettled && waited < SERVICES_BUDGET
+
+      if (progress) {
+        show(progress, waited)
+      }
+      else if (sawNarrator) {
+        launching()
+      }
+      else if (elapsed.value >= NARRATOR_GRACE) {
+        // Nothing narrates this restart (no narrator could start): count, as before narration.
+        setSteps([])
+      }
+      else {
+        count()
+      }
+
+      if (back && !waiting) {
+        stopPolling()
+        reloadNuxtApp({ persistState: false })
+        return
+      }
+      if (!up && elapsed.value >= startupBudget) {
+        giveUp(`The backend did not come back within ${startupBudget}s. `
+          + 'Check logs/restart.log.')
+      }
+    }
 
     stopPolling()
     poller = setInterval(async () => {
-      elapsed.value += 1
-      const up = await backendUp()
-
-      if (phase.value === 'stopping') {
-        if (!up) {
-          phase.value = 'starting'
-          elapsed.value = 0
-        }
-        else if (elapsed.value >= shutdownBudget) {
-          stopPolling()
-          phase.value = 'idle'
-          failure.value = `The backend was still responding ${shutdownBudget}s after the restart `
-            + 'was accepted. Check logs/restart.log.'
-        }
-        return
+      // A slow answer must not let two ticks interleave their phase changes.
+      if (ticking) return
+      ticking = true
+      try {
+        await tick()
       }
-
-      // starting — require two consecutive successes so a half-initialised Play
-      // answering one request mid-boot doesn't trigger a premature reload.
-      if (up) {
-        consecutiveUp += 1
-        if (consecutiveUp >= 2) {
-          stopPolling()
-          reloadNuxtApp({ persistState: false })
-        }
-        return
-      }
-      consecutiveUp = 0
-
-      if (elapsed.value >= startupBudget) {
-        stopPolling()
-        phase.value = 'idle'
-        failure.value = `The backend did not come back within ${startupBudget}s. `
-          + 'Check logs/restart.log.'
+      finally {
+        ticking = false
       }
     }, 1000)
   }
@@ -145,5 +286,5 @@ export function useRestartAndReconnect() {
     }
   })
 
-  return { phase, elapsed, failure, busy, statusLine, restart }
+  return { phase, elapsed, failure, busy, statusLine, steps, restart }
 }

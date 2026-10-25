@@ -13,8 +13,10 @@ import services.RestartService;
 import services.SubagentRegistry;
 import services.UpgradeService;
 import utils.ApiResponses;
+import utils.RestartNarrator;
 
 import java.io.IOException;
+import java.util.List;
 
 import static controllers.AgentAccess.Level.OPEN;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
@@ -136,6 +138,31 @@ public class ApiSystemController extends Controller {
         ApiResponses.ok("mode", plan.mode(),
                 "backendOnly", plan.backendOnly(),
                 "rebuildExpected", plan.rebuildExpected());
+    }
+
+    /**
+     * The body of {@code GET /api/system/restart/progress}, whichever process answers: {@code utils.RestartNarrator}
+     * writes the same shape by hand while JClaw is down.
+     *
+     * @param source   {@code jclaw}, or {@code narrator} for the stand-in that serves the gap
+     * @param state    {@code running}, {@code done}, {@code failed}, or {@code none} when no restart brought this JVM up
+     * @param failure  why the restart failed, or null
+     * @param steps    jclaw.sh's phases so far, in order
+     * @param services what this JVM is still bringing up; null from the narrator
+     */
+    public record RestartProgress(String source, String state, @Nullable String failure,
+                                  List<RestartNarrator.Step> steps, RestartService.@Nullable Services services) {}
+
+    /**
+     * GET /api/system/restart/progress — the phases of the restart that brought this JVM up, and the services it
+     * is still connecting. The Restart and Java runtime panels poll it until they reload.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = RestartProgress.class)))
+    @AgentAccess(value = OPERATOR_ONLY, reason = "the operator's restart panel; the narrator answers it only to the operator's session")
+    public static void restartProgress() {
+        var progress = RestartService.progress();
+        renderJSON(GSON.toJson(new RestartProgress("jclaw", progress.state(),
+                progress.failure().isEmpty() ? null : progress.failure(), progress.steps(), RestartService.services())));
     }
 
     /**

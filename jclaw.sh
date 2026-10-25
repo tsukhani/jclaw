@@ -3187,6 +3187,7 @@ aot_prepare() {
         esac
     done
     [[ "$named_http" == true ]] || train_args+=("--http.port=$http_spare")
+    restart_phase aot "Rebuilding the startup cache" "rebuilding the startup cache failed"
     echo "==> Training the AOT cache (${reason}): one full start and stop on port ${http_spare}..."
     if play aot-gen --%prod "${train_args[@]}" > "$SCRIPT_DIR/logs/aot-gen.log" 2>&1; then
         if [[ -n "${JCLAW_AOT_DIR:-}" ]]; then
@@ -3338,7 +3339,7 @@ jre_install_staged() {
 # here because no JVM of this install runs yet. A staged runtime that fails is dropped and the start carries
 # on with the current one; either way the outcome goes to data/java-runtime.status.
 apply_staged_jre() {
-    local home outcome
+    local home outcome version version_re='^[0-9]+(\.[0-9]+)*$'
     home="$(cd "$SCRIPT_DIR/.." && pwd)"
     # The JVM writes the manifest last, so a download it never finished is never picked up. The status
     # line describes only the start that installed or refused a runtime, so a start with none clears it.
@@ -3347,6 +3348,9 @@ apply_staged_jre() {
         return 0
     fi
     echo "==> Installing the Java runtime downloaded in Settings..."
+    version=$(sed -n 's/^version=//p' "$home/jre.staged/manifest" | head -1)
+    [[ "$version" =~ $version_re ]] || version=""
+    restart_phase java "Installing Java${version:+ $version}" "installing Java failed"
     if outcome=$(jre_install_staged "$home"); then
         rm -rf "$home/jre.staged" || true
         jre_status "$outcome"
@@ -3356,6 +3360,219 @@ apply_staged_jre() {
         jre_status "$outcome"
     fi
     return 0
+}
+
+# ─── Restart progress (Settings > Maintenance) ───
+# A production `restart` records its phases in logs/restart-status.json, and while no JVM serves the
+# browser utils.RestartNarrator answers the panels' progress route from it on the instance's ports.
+# Outside a restart RESTART_STATUS_FILE is empty and every function here does nothing.
+RESTART_STATUS_FILE=""
+RESTART_STARTED=0
+RESTART_DONE=""
+RESTART_PHASE_ID=""
+RESTART_PHASE_LABEL=""
+RESTART_PHASE_START=0
+RESTART_PHASE_FAILS=""
+RESTART_FAIL_REASON=""
+NARRATOR_JOB=""
+NARRATOR_PID_FILE="$SCRIPT_DIR/logs/restart-narrator.pid"
+
+# Rewrites the status file whole through a temp file, as upgrade_status does, so a reader never sees half of one.
+restart_status() {
+    local state="$1" reason="${2:-}" finished=0 phases="${RESTART_DONE:-}" dq='"' sq="'" bs='\' sl='/'
+    [[ -n "${RESTART_STATUS_FILE:-}" ]] || return 0
+    [[ "$state" == running ]] || finished=$(date +%s)
+    # Through variables: bash 3.2 keeps the backslash of an escaped replacement, which JSON refuses.
+    reason="${reason//"$bs"/$sl}"
+    reason="${reason//"$dq"/$sq}"
+    if [[ -n "${RESTART_PHASE_ID:-}" ]]; then
+        phases="${phases:+$phases,}{\"id\":\"$RESTART_PHASE_ID\",\"label\":\"$RESTART_PHASE_LABEL\",\"start\":$RESTART_PHASE_START,\"end\":0}"
+    fi
+    printf '{"startedAt":%s,"state":"%s","reason":"%s","finishedAt":%s,"phases":[%s]}\n' \
+        "$RESTART_STARTED" "$state" "$reason" "$finished" "$phases" \
+        >"$RESTART_STATUS_FILE.tmp" 2>/dev/null || return 0
+    mv -f "$RESTART_STATUS_FILE.tmp" "$RESTART_STATUS_FILE" 2>/dev/null || true
+}
+
+# Ends the phase under way, at $1 (epoch seconds).
+restart_phase_end() {
+    [[ -n "${RESTART_PHASE_ID:-}" ]] || return 0
+    RESTART_DONE="${RESTART_DONE:+$RESTART_DONE,}{\"id\":\"$RESTART_PHASE_ID\",\"label\":\"$RESTART_PHASE_LABEL\",\"start\":$RESTART_PHASE_START,\"end\":$1}"
+    RESTART_PHASE_ID=""
+}
+
+# restart_phase ID LABEL FAILS: the panels show LABEL until the next phase begins, and FAILS completes
+# "The restart failed: ..." should the restart stop inside it.
+restart_phase() {
+    local now
+    [[ -n "${RESTART_STATUS_FILE:-}" ]] || return 0
+    now=$(date +%s)
+    restart_phase_end "$now"
+    RESTART_PHASE_ID="$1"
+    RESTART_PHASE_LABEL="$2"
+    RESTART_PHASE_FAILS="$3"
+    RESTART_PHASE_START="$now"
+    restart_status running
+}
+
+restart_begin() {
+    mkdir -p "$SCRIPT_DIR/logs"
+    RESTART_STATUS_FILE="$SCRIPT_DIR/logs/restart-status.json"
+    RESTART_STARTED=$(date +%s)
+    RESTART_DONE=""
+    trap restart_on_exit EXIT
+    narrator_reap_stale
+    restart_phase stop "Stopping JClaw" "JClaw did not stop"
+}
+
+restart_finish() {
+    restart_phase_end "$(date +%s)"
+    restart_status done
+}
+
+# A restart that dies leaves its failure for the panels, with a narrator to serve it while no JVM does.
+restart_on_exit() {
+    local code=$?
+    [[ -n "${RESTART_STATUS_FILE:-}" ]] || return 0
+    if [[ "$code" != 0 ]]; then
+        restart_status failed "${RESTART_FAIL_REASON:-${RESTART_PHASE_FAILS:-the restart stopped early}}"
+        narrator_start || true
+    else
+        narrator_stop || true
+    fi
+}
+
+narrator_running() {
+    [[ -n "${NARRATOR_JOB:-}" ]] && kill -0 "$NARRATOR_JOB" 2>/dev/null
+}
+
+# True once the narrator holds the HTTP port: it writes "bound" under its pid when it does.
+narrator_bound() {
+    narrator_running && grep -qx bound "$NARRATOR_PID_FILE" 2>/dev/null
+}
+
+# What the narrator outlives only to serve a failure. Under Git Bash $$ is an MSYS pid, which a native java cannot see.
+restart_shell_pid() {
+    if [[ "$IS_WINDOWS" == 1 && -r "/proc/$$/winpid" ]]; then
+        cat "/proc/$$/winpid"
+    else
+        echo "$$"
+    fi
+}
+
+# Serves the panels' progress route while no JVM does. It never holds the restart up: with no java, no
+# compiled narrator or no secret it does not start, and the panels count instead.
+narrator_start() {
+    local classes var secret
+    local https_args=()
+    [[ -n "${RESTART_STATUS_FILE:-}" ]] || return 0
+    if narrator_running; then return 0; fi
+    command -v java >/dev/null 2>&1 || return 0
+    classes=$(installed_classes)
+    if [[ ! -e "$classes" ]] || [[ -d "$classes" && ! -f "$classes/utils/RestartNarrator.class" ]]; then
+        return 0
+    fi
+    var=$(secret_var_name)
+    secret="${!var:-}"
+    if [[ -z "$secret" && -f "$SCRIPT_DIR/certs/.env" ]]; then
+        secret=$(env_file_value "$SCRIPT_DIR/certs/.env" "$var")
+    fi
+    [[ -n "$secret" ]] || return 0
+    # The port and the PEM files do_start_prod gives the JVM.
+    if certs_valid; then
+        https_args=(--https 9443 --cert "$(native_path "$SCRIPT_DIR/certs/host.cert")" --key "$(native_path "$SCRIPT_DIR/certs/host.key")")
+    fi
+    rm -f "$NARRATOR_PID_FILE"
+    # To the log rather than this shell's stdout: a narrator serving a failure outlives the shell, and would hold its pipe open.
+    JCLAW_NARRATOR_SECRET="$secret" java -cp "$(native_path "$classes")" utils.RestartNarrator \
+        --status "$(native_path "$RESTART_STATUS_FILE")" --pid-file "$(native_path "$NARRATOR_PID_FILE")" \
+        --parent "$(restart_shell_pid)" --now "$(date +%s)" --http "$BACKEND_PORT" \
+        ${https_args[@]+"${https_args[@]}"} </dev/null >>"$SCRIPT_DIR/logs/restart.log" 2>&1 &
+    NARRATOR_JOB=$!
+    # Out of the job table, so stopping it prints no "Terminated" line with the command that started it.
+    disown "$NARRATOR_JOB" 2>/dev/null || true
+}
+
+# Before the JVM binds. A narrator that has exited holds no port, so this fails only when something else
+# answers on the HTTP port.
+narrator_stop() {
+    local pid waited=0
+    [[ -n "${NARRATOR_JOB:-}" ]] || return 0
+    if kill -0 "$NARRATOR_JOB" 2>/dev/null; then
+        # taskkill needs the Windows pid, which the narrator writes as it starts.
+        while [[ "$IS_WINDOWS" == 1 && ! -s "$NARRATOR_PID_FILE" ]] && kill -0 "$NARRATOR_JOB" 2>/dev/null && (( waited < 50 )); do
+            sleep 0.1
+            waited=$((waited + 1))
+        done
+        waited=0
+        pid=$(sed -n 1p "$NARRATOR_PID_FILE" 2>/dev/null || true)
+        if [[ "$IS_WINDOWS" == 1 && -n "$pid" ]] && command -v taskkill >/dev/null 2>&1; then
+            # At once, as the JVM is ended there. The doubled slashes stop MSYS rewriting /PID and /F into paths.
+            taskkill //PID "$pid" //F >/dev/null 2>&1 || true
+        else
+            kill "$NARRATOR_JOB" 2>/dev/null || true
+        fi
+        while kill -0 "$NARRATOR_JOB" 2>/dev/null && (( waited < 50 )); do
+            sleep 0.1
+            waited=$((waited + 1))
+        done
+        if kill -0 "$NARRATOR_JOB" 2>/dev/null; then kill -9 "$NARRATOR_JOB" 2>/dev/null || true; fi
+    fi
+    NARRATOR_JOB=""
+    rm -f "$NARRATOR_PID_FILE"
+    wait_for_port_free "$BACKEND_PORT" 10
+}
+
+# True when pid $1 is a narrator, by its command line, so a reused pid is never killed.
+narrator_is() {
+    if [[ "$IS_WINDOWS" == 1 ]]; then
+        powershell.exe -NoProfile -NonInteractive -Command \
+            "(Get-CimInstance Win32_Process -Filter 'ProcessId=$1').CommandLine" 2>/dev/null | grep -q 'utils\.RestartNarrator'
+    else
+        ps -o command= -p "$1" 2>/dev/null | grep -q 'utils\.RestartNarrator'
+    fi
+}
+
+# A failed restart leaves its narrator serving for a few minutes; a start that follows takes the port back.
+narrator_reap_stale() {
+    local pid waited=0
+    [[ -z "${NARRATOR_JOB:-}" && -f "$NARRATOR_PID_FILE" ]] || return 0
+    pid=$(sed -n 1p "$NARRATOR_PID_FILE" 2>/dev/null || true)
+    if [[ -n "$pid" && -z "${pid//[0-9]/}" ]] && narrator_is "$pid"; then
+        echo "==> Stopping the restart progress server a failed restart left running (pid: $pid)"
+        if [[ "$IS_WINDOWS" == 1 ]]; then
+            taskkill //PID "$pid" //F >/dev/null 2>&1 || true
+        else
+            kill "$pid" 2>/dev/null || true
+        fi
+        while narrator_is "$pid" && (( waited < 50 )); do
+            sleep 0.1
+            waited=$((waited + 1))
+        done
+    fi
+    rm -f "$NARRATOR_PID_FILE"
+}
+
+# Started before the old JVM stops, the narrator binds the moment that JVM lets go of the port. On Windows a
+# staged Java holds it back until the Java is installed, since a running java.exe keeps jre/ from being renamed.
+restart_narrate() {
+    [[ -n "${RESTART_STATUS_FILE:-}" && -z "${NARRATOR_JOB:-}" ]] || return 0
+    if [[ "$IS_WINDOWS" == 1 && -f "$SCRIPT_DIR/../jre.staged/manifest" ]]; then return 0; fi
+    narrator_start
+}
+
+do_restart_prod() {
+    restart_begin
+    restart_narrate
+    # JCLAW-190: do_stop_prod waits for server.pid's JVM to exit, so the new one only boots once the old one has gone.
+    do_stop_prod
+    # The old JVM has gone: what fails from here, before the next phase, is the start.
+    restart_phase_end "$(date +%s)"
+    RESTART_PHASE_FAILS="JClaw did not start"
+    restart_status running
+    mkdir -p "$SCRIPT_DIR/logs"
+    do_start_prod
+    restart_finish
 }
 
 do_start_prod() {
@@ -3385,14 +3602,20 @@ do_start_prod() {
     # check above only catches OUR own server.pid. Nothing here names the holder:
     # that took lsof, which walks every descriptor of every process (20-80 s
     # beside a VM holding 47k), and the operator finds it faster than we can.
+    narrator_reap_stale
     if port_answers "$BACKEND_PORT"; then
-        echo "Error: something already answers on port $BACKEND_PORT."
-        echo "       Stop it first ('$0 stop' if it is JClaw), then start again."
-        exit 1
+        # During a restart that is the narrator, which steps aside before the JVM binds.
+        if ! narrator_bound; then
+            echo "Error: something already answers on port $BACKEND_PORT."
+            echo "       Stop it first ('$0 stop' if it is JClaw), then start again."
+            RESTART_FAIL_REASON="something else answers on port $BACKEND_PORT"
+            exit 1
+        fi
     fi
 
     # After the two checks above, so no JVM of this install holds the runtime being replaced.
     apply_staged_jre
+    restart_narrate
 
     # Reap any stale H2 lock from a prior ungraceful shutdown (Docker rm
     # without compose down, JVM kill -9, host crash). Without this, the
@@ -3463,6 +3686,7 @@ do_start_prod() {
             fi
         fi
         if [[ -n "$precompile_trigger" ]]; then
+            restart_phase precompile "Precompiling" "precompiling failed"
             echo "==> Precompiling backend (${precompile_trigger})..."
             play precompile
         else
@@ -3538,6 +3762,7 @@ do_start_prod() {
         fi
 
         if [[ -n "$spa_rebuild_reason" ]]; then
+            restart_phase spa "Building the web app" "building the web app failed"
             # Only the build needs pnpm (about 2 s to resolve the pin and check the install); the
             # staleness check above already covers package.json and the lockfile.
             validate_pnpm_pin
@@ -3718,6 +3943,13 @@ do_start_prod() {
     fi
     [[ -n "${JCLAW_JVM_OPTS:-}" ]] && echo "    Extra JVM opts: ${JCLAW_JVM_OPTS}"
     aot_prepare --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
+    restart_phase start "Starting JClaw (connecting channels)" "JClaw did not start"
+    if ! narrator_stop; then
+        echo "Error: something already answers on port $BACKEND_PORT."
+        echo "       Stop it first ('$0 stop' if it is JClaw), then start again."
+        RESTART_FAIL_REASON="something else answers on port $BACKEND_PORT"
+        exit 1
+    fi
     play start --%prod --http.port="$BACKEND_PORT" "${jvm_opts[@]}"
 
     # `play start` forks, so this banner used to announce a server that was not
@@ -3773,6 +4005,7 @@ kill_orphan_jvms() {
 
 do_stop_prod() {
     cd "$SCRIPT_DIR"
+    narrator_reap_stale
 
     if [[ ! -f "server.pid" ]]; then
         # No pidfile — but sweep for signature-matched orphans before
@@ -3870,6 +4103,7 @@ do_start_dev() {
     # check above only catches OUR own server.pid. Nothing here names the holder:
     # that took lsof, which walks every descriptor of every process (20-80 s
     # beside a VM holding 47k), and the operator finds it faster than we can.
+    narrator_reap_stale
     if port_answers "$BACKEND_PORT"; then
         echo "Error: something already answers on port $BACKEND_PORT."
         echo "       Stop it first ('$0 --dev stop' if it is JClaw), then start again."
@@ -5068,6 +5302,7 @@ wait_for_backend_ready() {
         pid=$(cat "$SCRIPT_DIR/server.pid" 2>/dev/null || true)
         if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
             echo "Error: Play backend exited during startup (pid $pid no longer alive)." >&2
+            RESTART_FAIL_REASON="JClaw exited while it was starting"
             print_startup_error_block "$SCRIPT_DIR/logs/system.out"
             echo "       Last lines of logs/system.out:" >&2
             tail -20 "$SCRIPT_DIR/logs/system.out" 2>/dev/null | sed 's/^/         /' >&2
@@ -5081,6 +5316,7 @@ wait_for_backend_ready() {
         sleep 0.2
         if (( SECONDS >= deadline )); then
             echo "Error: backend did not answer on port ${BACKEND_PORT} within 120 seconds." >&2
+            RESTART_FAIL_REASON="JClaw did not answer within 120 seconds"
             echo "       Check logs/system.out for details." >&2
             [[ -n "$pid" ]] && kill_tree "$pid"
             rm -f "$SCRIPT_DIR/server.pid"
@@ -6787,12 +7023,7 @@ case "$COMMAND" in
             mkdir -p "$SCRIPT_DIR/logs"
             do_start_dev
         else
-            # JCLAW-190: do_stop_prod now waits for server.pid removal
-            # before returning, so we don't need a separate sleep here.
-            # The new JVM only boots once the old one has fully exited.
-            do_stop_prod
-            mkdir -p "$SCRIPT_DIR/logs"
-            do_start_prod
+            do_restart_prod
         fi
         ;;
     status)

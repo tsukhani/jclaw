@@ -26,7 +26,7 @@ const POLL_MS = 1000
 
 const { confirm } = useConfirm()
 const { mutate, error: mutationError } = useApiMutation()
-const { failure: restartFailure, busy: restarting, statusLine: restartLine, restart } = useRestartAndReconnect()
+const { failure: restartFailure, busy: restarting, statusLine: restartLine, steps: restartSteps, restart } = useRestartAndReconnect()
 
 // useLazyFetch, not useFetch: a top-level `await` here suspends the whole
 // settings panel behind a request that may be waiting on Azul.
@@ -283,17 +283,21 @@ const errorLine = computed(() =>
       </div>
 
       <div
-        v-if="errorLine || restartLine"
+        v-if="errorLine || restartLine || restartSteps.length"
         class="px-4 py-2.5 border-t border-border text-xs"
         role="status"
         aria-live="polite"
       >
+        <SettingsRestartSteps
+          v-if="restartSteps.length"
+          :steps="restartSteps"
+        />
         <span
           v-if="errorLine"
-          class="text-red-600 dark:text-red-400"
+          :class="['text-red-600 dark:text-red-400', restartSteps.length ? 'block mt-1' : '']"
         >{{ errorLine }}</span>
         <span
-          v-else
+          v-else-if="!restartSteps.length"
           class="text-fg-muted"
         >{{ restartLine }}</span>
       </div>

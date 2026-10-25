@@ -19,7 +19,8 @@ import java.util.regex.Pattern;
 class AotCacheScriptTest extends UnitTest {
 
     private static final List<String> FUNCTIONS = List.of("port_answers", "upgrade_install_kind", "aot_cache_file",
-            "aot_store_dir", "aot_java_version", "aot_jdk_has_fix", "aot_spare_port", "aot_status", "aot_fingerprint", "aot_prepare", "aot_check_used");
+            "aot_store_dir", "aot_java_version", "aot_jdk_has_fix", "aot_spare_port", "aot_status", "aot_fingerprint", "aot_prepare", "aot_check_used",
+            "restart_status", "restart_phase_end", "restart_phase");
 
     private static final String JAVA_STUB = """
             #!/bin/sh

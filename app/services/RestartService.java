@@ -1,8 +1,12 @@
 package services;
 
+import mcp.McpConnectionManager;
+import models.McpServer;
 import org.jspecify.annotations.Nullable;
 import play.Play;
+import utils.AppClock;
 import utils.HandoffShell;
+import utils.RestartNarrator;
 
 import java.io.File;
 import java.io.IOException;
@@ -11,6 +15,7 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -232,6 +237,51 @@ public final class RestartService {
                 .redirectOutput(ProcessBuilder.Redirect.appendTo(log))
                 .redirectErrorStream(true)
                 .start();
+    }
+
+    /** Where {@code jclaw.sh restart} records its phases, under the application root. */
+    static final String STATUS_FILE = "logs/restart-status.json";
+
+    /** {@link #STATUS_FILE}; the autotest server, which shares the checkout, reads its own. */
+    public static Path statusFile() {
+        var root = Play.applicationPath.toPath();
+        return Play.runningInTestMode() ? root.resolve("logs/restart-test/restart-status.json") : root.resolve(STATUS_FILE);
+    }
+
+    private static final RestartNarrator.Progress NO_RESTART = new RestartNarrator.Progress("none", "", List.of(), 0);
+
+    /**
+     * The restart in progress, or the one that brought this JVM up: what the narrator served before it, read from
+     * the same file. A restart that ended before this JVM started is an earlier one, and reads as {@code none}.
+     */
+    public static RestartNarrator.Progress progress() {
+        var read = RestartNarrator.readProgress(statusFile(), AppClock.now().getEpochSecond());
+        if (read.isEmpty()) return NO_RESTART;
+        var progress = read.get();
+        if (!"running".equals(progress.state()) && progress.finishedAt() < Play.startedAt / 1000) return NO_RESTART;
+        return progress;
+    }
+
+    /**
+     * What a fresh JVM is still bringing up when it first answers.
+     *
+     * @param channels      the channel types running, as the dashboard counts them
+     * @param mcpConnected  MCP servers whose handshake has completed
+     * @param mcpConfigured MCP servers enabled
+     * @param settled       true once every server's first connect since boot has resolved, connected or not
+     */
+    public record Services(Set<String> channels, int mcpConnected, int mcpConfigured, boolean settled) {}
+
+    public static Services services() {
+        int configured = Tx.run(() -> (int) McpServer.count("enabled = true"));
+        int connected = McpConnectionManager.connectedCount();
+        return new Services(ChannelStatusService.activeChannelTypes(), connected, configured,
+                servicesSettled(connected, configured, McpConnectionManager.startupConnectsSettled()));
+    }
+
+    /** Settled once every enabled server is connected, or every first connect since boot has resolved. */
+    public static boolean servicesSettled(int connected, int configured, boolean firstConnectsSettled) {
+        return connected >= configured || firstConnectsSettled;
     }
 
     /** While this file exists, jclaw.sh starts the JVM without the JDK's AOT cache. */

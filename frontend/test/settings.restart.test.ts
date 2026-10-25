@@ -1,21 +1,27 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mockNuxtImport, mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { flushPromises, type DOMWrapper } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { clearNuxtData } from '#app'
+import { setResponseStatus } from 'h3'
 import SettingsRestartPanel from '~/components/settings/SettingsRestartPanel.vue'
 import ConfirmDialog from '~/components/ConfirmDialog.vue'
 
 /**
  * Settings → Restart panel. The reboot is irreversible from the operator's
- * seat, so what's covered here is the gate around it: the button is dead when
+ * seat, so what's covered first is the gate around it: the button is dead when
  * the install can't restart, the confirmation states what is about to be
  * interrupted, and a cancelled dialog issues no POST.
  *
- * The reconnect poll is not driven here — it's a wall-clock interval against a
- * backend that is genuinely down, which a mocked-timer test would assert about
- * itself rather than about the restart.
+ * The narration block then drives the reconnect poll one fake second at a time
+ * against stubbed /api/status and progress answers: what each process serves at
+ * each point of a restart is the input, and the lines the panel shows are the outcome.
  */
+
+const { reloads } = vi.hoisted(() => ({ reloads: { count: 0 } }))
+mockNuxtImport('reloadNuxtApp', () => () => {
+  reloads.count += 1
+})
 
 /** Mount alongside ConfirmDialog so confirm() actually renders — the dialog
  *  reads useConfirm()'s module singleton, which lives at app root in prod. */
@@ -38,6 +44,39 @@ registerEndpoint('/api/system/restart', {
   handler: () => {
     restartPosts += 1
     return { status: 'ok', mode: 'PROD', backendOnly: false, rebuildExpected: false }
+  },
+})
+
+// Down is the narrator's 503; until a test says otherwise the old JVM is up and serves no progress.
+let backendUp = true
+let progress: Record<string, unknown> | null = null
+
+// A stalled answer waits for release(): the old JVM accepts and takes its time.
+let stall = false
+let stalled: Array<() => void> = []
+function release() {
+  const waiting = stalled
+  stalled = []
+  waiting.forEach(resolve => resolve())
+}
+const stalling = () => stall ? new Promise<void>(resolve => stalled.push(resolve)) : Promise.resolve()
+
+registerEndpoint('/api/status', {
+  method: 'GET',
+  handler: async (event) => {
+    await stalling()
+    if (backendUp) return { status: 'ok' }
+    setResponseStatus(event, 503)
+    return { type: 'error', code: 'restarting', message: 'JClaw is restarting' }
+  },
+})
+registerEndpoint('/api/system/restart/progress', {
+  method: 'GET',
+  handler: async (event) => {
+    await stalling()
+    if (progress) return progress
+    setResponseStatus(event, 503)
+    return { type: 'error', code: 'restarting', message: 'JClaw is restarting' }
   },
 })
 
@@ -82,6 +121,15 @@ beforeEach(() => {
   aotPosts = []
   preflight = available()
   document.body.innerHTML = ''
+  backendUp = true
+  progress = null
+  reloads.count = 0
+  stall = false
+  stalled = []
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('SettingsRestartPanel — availability', () => {
@@ -268,5 +316,206 @@ describe('SettingsRestartPanel — AOT cache', () => {
     expect(c.find('[data-testid="aot-cache-toggle"]').attributes('aria-checked')).toBe('false')
     await c.find('[data-testid="aot-cache-toggle"]').trigger('click')
     await vi.waitFor(() => expect(aotPosts).toEqual([{ enabled: true }]))
+  })
+})
+
+type Step = { id: string, label: string, state: 'done' | 'running' | 'failed', seconds: number }
+
+function served(source: 'narrator' | 'jclaw', state: string, steps: Step[], extra: Record<string, unknown> = {}) {
+  return { source, state, failure: null, steps, services: null, ...extra }
+}
+
+const step = (id: string, label: string, state: Step['state'], seconds: number): Step => ({ id, label, state, seconds })
+
+/** Each line the panel narrates, as `label | seconds`. */
+function lines(c: Awaited<ReturnType<typeof mountSuspended>>): string[] {
+  return c.findAll('[data-testid="restart-steps"] li').map((li: DOMWrapper<Element>) => {
+    const spans = li.findAll('span')
+    return `${spans[0]!.text()} | ${spans[1]?.text() ?? ''}`
+  })
+}
+
+/** One poll of the panel: a fake second, then the two answers it waits for. */
+async function tick(times = 1) {
+  for (let i = 0; i < times; i++) {
+    await vi.advanceTimersByTimeAsync(1000)
+    for (let j = 0; j < 6; j++) await flushPromises()
+  }
+}
+
+async function restartConfirmed() {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+  const c = await mountSuspended(Harness)
+  await flushPromises()
+  await c.find('button').trigger('click')
+  await flushPromises()
+  dialogButton('Restart')?.click()
+  await vi.waitFor(() => expect(restartPosts).toBe(1))
+  await flushPromises()
+  return c
+}
+
+describe('SettingsRestartPanel — narration', () => {
+  it('narrates each phase with its time, then the services, and reloads once they settle', async () => {
+    const c = await restartConfirmed()
+
+    // The JVM about to stop serves this restart's first phase, beside the services it is about to stop.
+    progress = served('jclaw', 'running', [step('stop', 'Stopping JClaw', 'running', 1)],
+      { services: { channels: ['telegram'], mcpConnected: 1, mcpConfigured: 1, settled: true } })
+    await tick()
+    expect(lines(c)).toEqual(['Stopping JClaw… | 1s'])
+
+    // It has gone: the narrator answers, and /api/status gets its 503.
+    backendUp = false
+    progress = served('narrator', 'running', [step('stop', 'Stopping JClaw', 'running', 5)])
+    await tick()
+    expect(lines(c)).toEqual(['Stopping JClaw… | 5s'])
+
+    // The narrator steps aside for the JVM's launch.
+    progress = null
+    await tick()
+    expect(lines(c)).toEqual(['Stopping JClaw | 5s', 'Starting JClaw (connecting channels)… | 0s'])
+    await tick()
+    expect(lines(c)).toEqual(['Stopping JClaw | 5s', 'Starting JClaw (connecting channels)… | 1s'])
+
+    // JClaw answers with jclaw.sh's times and what it is still connecting.
+    backendUp = true
+    progress = served('jclaw', 'done', [step('stop', 'Stopping JClaw', 'done', 6), step('start', 'Starting JClaw (connecting channels)', 'done', 9)],
+      { services: { channels: ['telegram', 'slack'], mcpConnected: 2, mcpConfigured: 4, settled: false } })
+    await tick(2)
+    expect(lines(c)).toEqual([
+      'Stopping JClaw | 6s',
+      'Starting JClaw (connecting channels) | 9s',
+      'Channels running: Telegram, Slack | ',
+      'MCP servers: 2 of 4 connected… | 0s',
+    ])
+    expect(reloads.count).toBe(0)
+
+    progress = served('jclaw', 'done', [step('stop', 'Stopping JClaw', 'done', 6), step('start', 'Starting JClaw (connecting channels)', 'done', 9)],
+      { services: { channels: ['telegram', 'slack'], mcpConnected: 4, mcpConfigured: 4, settled: true } })
+    await tick()
+    expect(reloads.count).toBe(1)
+    expect(lines(c).at(-1)).toBe('MCP servers: 4 of 4 connected | ')
+    c.unmount()
+  })
+
+  it('reloads without the services once their budget runs out', async () => {
+    const c = await restartConfirmed()
+    backendUp = false
+    await tick()
+    backendUp = true
+    progress = served('jclaw', 'done', [step('stop', 'Stopping JClaw', 'done', 4)],
+      { services: { channels: [], mcpConnected: 2, mcpConfigured: 4, settled: false } })
+
+    // The second answer calls JClaw back, and the servers get 30 s from that answer on.
+    await tick(1 + 30)
+    expect(reloads.count).toBe(0)
+    expect(lines(c)).toEqual(['Stopping JClaw | 4s', 'MCP servers: 2 of 4 connected… | 29s'])
+    await tick()
+    expect(reloads.count).toBe(1)
+    c.unmount()
+  })
+
+  it('reloads at once when JClaw has nothing still connecting', async () => {
+    const c = await restartConfirmed()
+    backendUp = false
+    await tick()
+    backendUp = true
+    progress = served('jclaw', 'done', [step('stop', 'Stopping JClaw', 'done', 4)],
+      { services: { channels: [], mcpConnected: 0, mcpConfigured: 0, settled: true } })
+    await tick(2)
+    expect(reloads.count).toBe(1)
+    c.unmount()
+  })
+
+  it('says the restart failed, with the reason the narrator serves, and stops waiting', async () => {
+    const c = await restartConfirmed()
+    backendUp = false
+    progress = served('narrator', 'failed', [step('stop', 'Stopping JClaw', 'done', 5), step('start', 'Starting JClaw (connecting channels)', 'failed', 12)],
+      { failure: 'JClaw did not start' })
+    await tick()
+
+    expect(c.find('[role="status"] > span').text()).toBe('The restart failed: JClaw did not start. See logs/restart.log.')
+    expect(lines(c)).toEqual(['Stopping JClaw | 5s', 'Starting JClaw (connecting channels) | 12s'])
+    expect(c.find('[data-state="failed"]').exists()).toBe(true)
+    // The button is offered again, and nothing polls on.
+    expect(c.find('button').attributes('disabled')).toBeUndefined()
+    progress = null
+    backendUp = true
+    await tick(3)
+    expect(reloads.count).toBe(0)
+    c.unmount()
+  })
+
+  it('counts as it did before narration when nothing narrates the restart', async () => {
+    const c = await restartConfirmed()
+    // The JVM about to stop serves the previous restart's finished file, which is not this restart.
+    progress = served('jclaw', 'done', [step('stop', 'Stopping JClaw', 'done', 3)])
+    await tick()
+    expect(c.find('[data-testid="restart-steps"]').exists()).toBe(false)
+    expect(c.find('[role="status"]').text()).toBe('Waiting for the backend to stop… (1s)')
+
+    backendUp = false
+    progress = null
+    await tick(6)
+    expect(c.find('[data-testid="restart-steps"]').exists()).toBe(false)
+    expect(c.find('[role="status"]').text()).toBe('Waiting for the backend to come back… (5s)')
+
+    // No progress route from the JVM that comes back either: reload, as before.
+    backendUp = true
+    await tick(2)
+    expect(reloads.count).toBe(1)
+    c.unmount()
+  })
+
+  it('gives up once the old JVM has answered for 90 s', async () => {
+    const c = await restartConfirmed()
+    await tick(89)
+    expect(c.find('[role="status"]').text()).toBe('Waiting for the backend to stop… (89s)')
+    await tick()
+    expect(c.find('[role="status"]').text())
+      .toBe('The backend was still responding 90s after the restart was accepted. Check logs/restart.log.')
+    expect(reloads.count).toBe(0)
+    c.unmount()
+  })
+
+  it('gives up 180 s after the backend went down when it never comes back', async () => {
+    const c = await restartConfirmed()
+    backendUp = false
+    progress = served('narrator', 'running', [step('stop', 'Stopping JClaw', 'done', 4), step('start', 'Starting JClaw (connecting channels)', 'running', 1)])
+    await tick()
+    await tick(179)
+    expect(c.find('[role="status"] > span').exists()).toBe(false)
+    await tick()
+    expect(c.find('[role="status"] > span').text()).toBe('The backend did not come back within 180s. Check logs/restart.log.')
+    expect(reloads.count).toBe(0)
+    c.unmount()
+  })
+
+  it('counts its budgets in time, not in polls, when every answer takes 4 s', async () => {
+    const c = await restartConfirmed()
+    stall = true
+    // Each poll waits on answers that take 4 s; the seconds between are skipped polls, not lost time.
+    async function slowPoll() {
+      await vi.advanceTimersByTimeAsync(4000)
+      release()
+      for (let j = 0; j < 6; j++) await flushPromises()
+    }
+    for (let i = 0; i < 22; i++) await slowPoll()
+    expect(c.find('[role="status"]').text()).toBe('Waiting for the backend to stop… (88s)')
+    await slowPoll()
+    expect(c.find('[role="status"]').text())
+      .toBe('The backend was still responding 90s after the restart was accepted. Check logs/restart.log.')
+    c.unmount()
+  })
+
+  it('keeps waiting while the narrator answers /api/status with 503', async () => {
+    const c = await restartConfirmed()
+    backendUp = false
+    progress = served('narrator', 'running', [step('stop', 'Stopping JClaw', 'done', 4), step('aot', 'Rebuilding the startup cache', 'running', 2)])
+    await tick(10)
+    expect(reloads.count).toBe(0)
+    expect(lines(c)).toEqual(['Stopping JClaw | 4s', 'Rebuilding the startup cache… | 2s'])
+    c.unmount()
   })
 })

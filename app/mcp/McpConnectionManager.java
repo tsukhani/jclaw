@@ -172,6 +172,16 @@ public final class McpConnectionManager {
         return awaitFirstConnects(startupConnectFutures, STARTUP_CONNECT_BUDGET);
     }
 
+    /** True once every first-connect attempt from boot has resolved, connected or not; the Restart panel waits on it. */
+    public static boolean startupConnectsSettled() {
+        return firstConnectsSettled(startupConnectFutures);
+    }
+
+    /** True when every one of {@code futures} has resolved, whatever its outcome; true for none. */
+    public static boolean firstConnectsSettled(List<CompletableFuture<Void>> futures) {
+        return futures.stream().allMatch(CompletableFuture::isDone);
+    }
+
     /**
      * JCLAW-496: await every first-connect future, bounded by {@code budget}.
      * Each resolves on success OR failure (see {@link #signalFirstAttemptResolved}),

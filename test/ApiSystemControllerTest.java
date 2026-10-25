@@ -8,14 +8,20 @@ import play.Play;
 import play.mvc.Http;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
+import services.InternalApiTokenService;
 import services.JavaRuntimeService;
 import services.RestartService;
 import services.UpgradeService;
+import utils.RestartNarrator;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -55,6 +61,11 @@ class ApiSystemControllerTest extends FunctionalTest {
         } catch (java.io.IOException e) {
             throw new IllegalStateException(e);
         }
+    }
+
+    @AfterEach
+    void clearRestartStatus() throws IOException {
+        Files.deleteIfExists(RestartService.statusFile());
     }
 
     @AfterEach
@@ -237,6 +248,132 @@ class ApiSystemControllerTest extends FunctionalTest {
         // The repo has no logs/upgrade-status.json, so the panel must be able to
         // tell "never upgraded" from "upgrade reported nothing".
         assertEquals(204, GET("/api/system/upgrade/status").status.intValue());
+    }
+
+    // --- Restart progress ---
+
+    @Test
+    void theNarratorAcceptsTheSessionJClawsLoginSetsAndRefusesTheOneABearerGets() {
+        clearCookies();
+        var login = POST("/api/auth/login", "application/json", """
+                {"username": "admin", "password": "changeme"}
+                """);
+        assertIsOk(login);
+        var secret = Play.secretKey.getBytes(StandardCharsets.UTF_8);
+        long now = Instant.now().toEpochMilli();
+        var operator = login.cookies.get("PLAY_SESSION").value;
+        assertTrue(RestartNarrator.operatorSession(List.of("PLAY_SESSION=" + operator), secret, now));
+
+        clearCookies();
+        var request = newRequest();
+        request.headers.put("authorization", new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+        var agent = GET(request, "/api/system/restart");
+        assertIsOk(agent);
+        try {
+            var cookie = agent.cookies.get("PLAY_SESSION");
+            assertNotNull(cookie, "a bearer request is given the agent principal's session");
+            assertFalse(RestartNarrator.operatorSession(List.of("PLAY_SESSION=" + cookie.value), secret, now));
+        } finally {
+            clearCookies();
+        }
+    }
+
+    @Test
+    void theNarratorReadsTheSessionKeysJClawWrites() throws Exception {
+        assertEquals(constant("controllers.ApiAuthController", "SESSION_ID"), RestartNarrator.SESSION_ID_KEY);
+        assertEquals(constant("controllers.RequestPrincipal", "PRINCIPAL_KEY"), RestartNarrator.PRINCIPAL_KEY);
+        assertEquals(constant("controllers.RequestPrincipal", "AGENT"), RestartNarrator.AGENT_PRINCIPAL);
+        assertEquals(InternalApiTokenService.SYSTEM_OWNER, RestartNarrator.SYSTEM_OWNER);
+        assertEquals(constant("play.mvc.Scope$Session", "TS_KEY"), RestartNarrator.EXPIRY_KEY);
+    }
+
+    @Test
+    void restartProgressRequiresTheOperator() {
+        assertEquals(401, GET("/api/system/restart/progress").status.intValue());
+    }
+
+    @Test
+    void restartProgressReportsTheRestartThatBroughtThisJvmUpAndWhatItStillConnects() throws IOException {
+        long started = Play.startedAt / 1000;
+        writeRestartStatus("""
+                {"startedAt":%d,"state":"done","reason":"","finishedAt":%d,"phases":[
+                 {"id":"stop","label":"Stopping JClaw","start":%d,"end":%d},
+                 {"id":"java","label":"Installing Java 25.0.5","start":%d,"end":%d},
+                 {"id":"start","label":"Starting JClaw (connecting channels)","start":%d,"end":%d}]}
+                """.formatted(started - 30, started + 2, started - 30, started - 25, started - 25, started - 18, started - 18, started + 2));
+        login();
+        var body = json(GET("/api/system/restart/progress"));
+
+        assertEquals("jclaw", body.get("source").getAsString());
+        assertEquals("done", body.get("state").getAsString());
+        assertTrue(body.get("failure").isJsonNull());
+        assertEquals(JsonParser.parseString("""
+                [{"id":"stop","label":"Stopping JClaw","state":"done","seconds":5},
+                 {"id":"java","label":"Installing Java 25.0.5","state":"done","seconds":7},
+                 {"id":"start","label":"Starting JClaw (connecting channels)","state":"done","seconds":20}]"""), body.get("steps"));
+        // Other classes share the database, so its counts are theirs too; the shape is this route's.
+        var services = body.getAsJsonObject("services");
+        assertEquals(Set.of("channels", "mcpConnected", "mcpConfigured", "settled"), services.keySet());
+        assertTrue(services.get("channels").isJsonArray());
+        assertTrue(services.get("mcpConnected").getAsInt() >= 0 && services.get("mcpConfigured").getAsInt() >= 0);
+        assertTrue(services.get("settled").getAsJsonPrimitive().isBoolean());
+    }
+
+    @Test
+    void aRestartUnderWayIsReportedWithThePhaseItIsIn() throws IOException {
+        long now = Instant.now().getEpochSecond();
+        writeRestartStatus("""
+                {"startedAt":%d,"state":"running","reason":"","finishedAt":0,"phases":[
+                 {"id":"stop","label":"Stopping JClaw","start":%d,"end":0}]}""".formatted(now - 3, now - 3));
+        login();
+        var body = json(GET("/api/system/restart/progress"));
+
+        assertEquals("running", body.get("state").getAsString());
+        var phase = body.getAsJsonArray("steps").get(0).getAsJsonObject();
+        assertEquals("Stopping JClaw", phase.get("label").getAsString());
+        assertEquals("running", phase.get("state").getAsString());
+        long seconds = phase.get("seconds").getAsLong();
+        assertTrue(seconds >= 3 && seconds < 60, () -> "seconds=" + seconds);
+    }
+
+    @Test
+    void aRestartThatEndedBeforeThisJvmStartedIsAnEarlierOne() throws IOException {
+        long started = Play.startedAt / 1000;
+        writeRestartStatus("""
+                {"startedAt":%d,"state":"failed","reason":"JClaw did not start","finishedAt":%d,"phases":[
+                 {"id":"stop","label":"Stopping JClaw","start":%d,"end":0}]}""".formatted(started - 600, started - 590, started - 600));
+        login();
+        var body = json(GET("/api/system/restart/progress"));
+
+        assertEquals("none", body.get("state").getAsString());
+        assertTrue(body.get("failure").isJsonNull());
+        assertEquals(0, body.getAsJsonArray("steps").size());
+    }
+
+    @Test
+    void aFailureAfterThisJvmStartedCarriesItsReason() throws IOException {
+        long started = Play.startedAt / 1000;
+        writeRestartStatus("""
+                {"startedAt":%d,"state":"failed","reason":"JClaw did not answer within 120 seconds","finishedAt":%d,"phases":[
+                 {"id":"start","label":"Starting JClaw (connecting channels)","start":%d,"end":0}]}""".formatted(started - 10, started + 1, started - 10));
+        login();
+        var body = json(GET("/api/system/restart/progress"));
+
+        assertEquals("failed", body.get("state").getAsString());
+        assertEquals("JClaw did not answer within 120 seconds", body.get("failure").getAsString());
+        assertEquals(JsonParser.parseString("[{\"id\":\"start\",\"label\":\"Starting JClaw (connecting channels)\",\"state\":\"failed\",\"seconds\":11}]"),
+                body.get("steps"));
+    }
+
+    @Test
+    void noStatusFileOrATornOneReadsAsNoRestart() throws IOException {
+        // The autotest server shares the checkout's logs/, where the live instance's jclaw.sh writes.
+        assertEquals(Path.of("logs", "restart-test", "restart-status.json"),
+                Play.applicationPath.toPath().relativize(RestartService.statusFile()));
+        login();
+        assertEquals("none", json(GET("/api/system/restart/progress")).get("state").getAsString());
+        writeRestartStatus("{\"startedAt\":1,\"state\":\"done\",\"phases\":[{\"id\":");
+        assertEquals("none", json(GET("/api/system/restart/progress")).get("state").getAsString());
     }
 
     // --- Java runtime ---
@@ -431,6 +568,17 @@ class ApiSystemControllerTest extends FunctionalTest {
         Files.writeString(dir.resolve("zulu-jre" + version + ".tar.gz"), "bytes");
         Files.writeString(dir.resolve("manifest"), "version=" + version + "\nsha256=" + "c3".repeat(32)
                 + "\narchive=zulu-jre" + version + ".tar.gz\n");
+    }
+
+    private static Object constant(String type, String field) throws ReflectiveOperationException {
+        var f = Class.forName(type, true, Play.classloader).getDeclaredField(field);
+        f.setAccessible(true);
+        return f.get(null);
+    }
+
+    private static void writeRestartStatus(String json) throws IOException {
+        Files.createDirectories(RestartService.statusFile().getParent());
+        Files.writeString(RestartService.statusFile(), json);
     }
 
     private static JsonObject json(Http.Response response) {

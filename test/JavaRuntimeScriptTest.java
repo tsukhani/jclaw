@@ -35,7 +35,7 @@ class JavaRuntimeScriptTest extends UnitTest {
 
     private static final List<String> FUNCTIONS = List.of("native_path", "jre_javas_in", "use_bundled_jre",
             "sha256_file", "conf_jvm_modules", "jre_status", "jre_version_norm", "jre_reported_version",
-            "jre_zip_tool", "jre_install_staged", "apply_staged_jre");
+            "jre_zip_tool", "jre_install_staged", "apply_staged_jre", "restart_status", "restart_phase_end", "restart_phase");
 
     private static final String OLD_TOP = "zulu25.36.15-ca-jre25.0.4-macosx_aarch64";
     private static final String NEW_TOP = "zulu25.38.107-ca-jre25.0.5-macosx_aarch64";

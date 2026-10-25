@@ -1,7 +1,8 @@
 <script setup lang="ts">
 // Instance restart panel. Hands off to `jclaw.sh restart` via
-// POST /api/system/restart, then watches the backend go down and come back
-// (useRestartAndReconnect, which the Java runtime panel shares).
+// POST /api/system/restart, then watches the backend go down and come back,
+// narrating the restart's phases (useRestartAndReconnect, which the Java
+// runtime panel shares).
 //
 // The preflight is deliberately re-fetched on click rather than trusted from
 // mount: the in-flight counts it reports are what the operator confirms
@@ -12,7 +13,7 @@ import { interruptionSummary } from '~/composables/useRestartAndReconnect'
 
 const { confirm } = useConfirm()
 const { mutate, error: mutationError } = useApiMutation()
-const { failure, busy, statusLine, restart } = useRestartAndReconnect()
+const { failure, busy, statusLine, steps, restart } = useRestartAndReconnect()
 
 // useLazyFetch, not useFetch: a top-level `await` here suspends the whole
 // settings panel behind this request on a cold boot.
@@ -169,17 +170,21 @@ async function toggleAotCache() {
       </div>
 
       <div
-        v-if="statusLine || failure"
+        v-if="statusLine || failure || steps.length"
         class="px-4 py-2.5 border-t border-border text-xs"
         role="status"
         aria-live="polite"
       >
+        <SettingsRestartSteps
+          v-if="steps.length"
+          :steps="steps"
+        />
         <span
           v-if="failure"
-          class="text-red-600 dark:text-red-400"
+          :class="['text-red-600 dark:text-red-400', steps.length ? 'block mt-1' : '']"
         >{{ failure }}</span>
         <span
-          v-else
+          v-else-if="!steps.length"
           class="text-fg-muted"
         >{{ statusLine }}</span>
       </div>

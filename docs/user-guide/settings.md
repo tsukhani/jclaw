@@ -296,7 +296,19 @@ Reboots this JClaw instance without a shell. The **Restart** button hands off to
 
 Before it acts, the panel shows what the reboot will interrupt: task runs and subagent runs currently in flight. Restart is deliberately **not** blocked when work is running, because the moment you most want to reboot is usually the moment something is stuck. So the counts are there to inform the confirmation, not to veto it. In-flight chat streams are cut as well.
 
-The page reconnects on its own: it waits for the backend to go down, then polls until it answers again, then reloads. Two details worth knowing:
+The page reconnects on its own: it waits for the backend to go down, then polls until it answers again, then reloads. While it waits, the panel lists each step of the restart as it happens, with the seconds each one took:
+
+- **Stopping JClaw**
+- **Installing Java** followed by the version being installed, for example **Installing Java 25.0.5**, only when a downloaded Java is waiting (see **Java runtime**)
+- **Precompiling** and **Building the web app**, only in a source checkout, and only when something changed
+- **Rebuilding the startup cache**, only when the AOT cache has to be built again. This never appears on Windows, where there is no cache.
+- **Starting JClaw (connecting channels)…**, until JClaw answers
+
+Once JClaw answers, the panel shows the channels it runs, for example **Channels running: Telegram, Slack**, and **MCP servers: 2 of 4 connected…** until every MCP server has connected or given up. It waits at most 30 seconds for them, then reloads. If the restart fails, the panel says so instead of waiting, for example **The restart failed: JClaw did not start. See logs/restart.log.** After a failed restart JClaw is not running, so start it again from the shell with `jclaw.sh start`, which also takes the port back from the stand-in (otherwise the stand-in keeps the port for up to 5 minutes to show the failure). The **Restart now** button under **Java runtime** shows the same steps.
+
+While no JClaw is running, `jclaw.sh` runs a small stand-in on JClaw's own port (and on 9443 when HTTPS is on). It answers only this list of steps, and only to your signed-in session. Every other request gets an error until JClaw is back. When the stand-in cannot run, for example in Docker or when Java cannot start it, the panel shows **Waiting for the backend to come back… (12s)** instead, and the restart itself is not affected.
+
+Two details worth knowing:
 
 - **In dev mode** only the Play backend is restarted. The Nuxt dev server on port 3000 keeps running; bouncing it would kill the very server that rendered the page you clicked from.
 - **In a source checkout** a production restart may recompile Java sources and rebuild the SPA. Both steps are gated on staleness and skipped when nothing changed, so this is usually quick. Two timed restarts on a developer clone: **48 s** with both steps skipped, **58 s** with a full SPA rebuild; the SPA is worth about ten seconds, not minutes. A cold Java recompile is the step that can take substantially longer, and it was not exercised in either measurement. The panel errs long when sizing how long it waits for the backend to return (15 minutes for a source checkout), so a genuinely slow restart is still survivable.

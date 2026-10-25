@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
-import { flushPromises } from '@vue/test-utils'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { mockNuxtImport, mountSuspended, registerEndpoint } from '@nuxt/test-utils/runtime'
+import { flushPromises, type DOMWrapper } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { clearNuxtData } from '#app'
 import { setResponseStatus } from 'h3'
@@ -13,8 +13,13 @@ import ConfirmDialog from '~/components/ConfirmDialog.vue'
  * dialog sends nothing, and that a staged runtime offers the restart and the cancel.
  *
  * The restart's reconnect poll is the Restart panel's, shared through useRestartAndReconnect and
- * not driven here.
+ * covered there; here it is driven once, for the phases a staged runtime adds.
  */
+
+const { reloads } = vi.hoisted(() => ({ reloads: { count: 0 } }))
+mockNuxtImport('reloadNuxtApp', () => () => {
+  reloads.count += 1
+})
 
 const Harness = defineComponent({
   setup() {
@@ -67,6 +72,26 @@ registerEndpoint('/api/system/restart', {
   handler: () => {
     restartPosts += 1
     return { status: 'ok', mode: 'PROD', backendOnly: false, rebuildExpected: false }
+  },
+})
+
+let backendUp = true
+let progress: Record<string, unknown> | null = null
+
+registerEndpoint('/api/status', {
+  method: 'GET',
+  handler: (event) => {
+    if (backendUp) return { status: 'ok' }
+    setResponseStatus(event, 503)
+    return { type: 'error', code: 'restarting', message: 'JClaw is restarting' }
+  },
+})
+registerEndpoint('/api/system/restart/progress', {
+  method: 'GET',
+  handler: (event) => {
+    if (progress) return progress
+    setResponseStatus(event, 503)
+    return { type: 'error', code: 'restarting', message: 'JClaw is restarting' }
   },
 })
 
@@ -132,6 +157,13 @@ beforeEach(() => {
     runningTasks: 0, activeSubagentRuns: 0, aotCacheEnabled: true, aotCacheStatus: null, aotCacheStatusAt: null,
   }
   document.body.innerHTML = ''
+  backendUp = true
+  progress = null
+  reloads.count = 0
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('SettingsJavaRuntimePanel — what it reports', () => {
@@ -327,5 +359,65 @@ describe('SettingsJavaRuntimePanel — a runtime waiting for the next start', ()
     expect(document.querySelector('[role="dialog"]')).toBeNull()
     expect(c.find('[role="status"]').text()).toBe('jclaw.sh not found at /srv/jclaw/jclaw.sh.')
     expect(restartPosts).toBe(0)
+  })
+})
+
+describe('SettingsJavaRuntimePanel — the restart that installs it', () => {
+  type Step = { id: string, label: string, state: string, seconds: number }
+  const served = (source: string, state: string, steps: Step[], services: unknown = null) =>
+    ({ source, state, failure: null, steps, services })
+  const step = (id: string, label: string, state: string, seconds: number): Step => ({ id, label, state, seconds })
+
+  function lines(c: Mounted): string[] {
+    return c.findAll('[data-testid="restart-steps"] li').map((li: DOMWrapper<Element>) => {
+      const spans = li.findAll('span')
+      return `${spans[0]!.text()} | ${spans[1]?.text() ?? ''}`
+    })
+  }
+
+  async function tick() {
+    await vi.advanceTimersByTimeAsync(1000)
+    for (let j = 0; j < 6; j++) await flushPromises()
+  }
+
+  it('narrates the stop, the Java install, the cache rebuild and the start in order, then reloads', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] })
+    runtime = builtIn({ stagedVersion: '25.0.5' })
+    const c = await mounted()
+    await panelButton(c, 'Restart now')!.trigger('click')
+    await flushPromises()
+    dialogButton('Restart')!.click()
+    await vi.waitFor(() => expect(restartPosts).toBe(1))
+    await flushPromises()
+
+    backendUp = false
+    progress = served('narrator', 'running', [
+      step('stop', 'Stopping JClaw', 'done', 5), step('java', 'Installing Java 25.0.5', 'running', 2)])
+    await tick()
+    expect(lines(c)).toEqual(['Stopping JClaw | 5s', 'Installing Java 25.0.5… | 2s'])
+
+    progress = served('narrator', 'running', [
+      step('stop', 'Stopping JClaw', 'done', 5), step('java', 'Installing Java 25.0.5', 'done', 7),
+      step('aot', 'Rebuilding the startup cache', 'running', 3)])
+    await tick()
+    expect(lines(c)).toEqual(['Stopping JClaw | 5s', 'Installing Java 25.0.5 | 7s', 'Rebuilding the startup cache… | 3s'])
+
+    progress = null
+    await tick()
+    expect(lines(c)).toEqual(['Stopping JClaw | 5s', 'Installing Java 25.0.5 | 7s', 'Rebuilding the startup cache | 3s',
+      'Starting JClaw (connecting channels)… | 0s'])
+
+    backendUp = true
+    progress = served('jclaw', 'done', [
+      step('stop', 'Stopping JClaw', 'done', 5), step('java', 'Installing Java 25.0.5', 'done', 7),
+      step('aot', 'Rebuilding the startup cache', 'done', 31), step('start', 'Starting JClaw (connecting channels)', 'done', 6)],
+    { channels: ['whatsapp'], mcpConnected: 1, mcpConfigured: 1, settled: true })
+    await tick()
+    expect(lines(c)).toEqual(['Stopping JClaw | 5s', 'Installing Java 25.0.5 | 7s', 'Rebuilding the startup cache | 31s',
+      'Starting JClaw (connecting channels) | 6s', 'Channels running: WhatsApp | ', 'MCP servers: 1 of 1 connected | '])
+    expect(reloads.count).toBe(0)
+    await tick()
+    expect(reloads.count).toBe(1)
+    c.unmount()
   })
 })
