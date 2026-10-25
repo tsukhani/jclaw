@@ -5,6 +5,8 @@
 #   "soundfile>=0.12",
 #   "mlx-audio; sys_platform == 'darwin' and platform_machine == 'arm64'",
 #   "misaki[en]; sys_platform == 'darwin' and platform_machine == 'arm64'",
+#   # preshed 3.0.14 breaks spaCy 3.8.16's tokenizer load (OverflowError in _flush_specials), so Kokoro's G2P fails.
+#   "preshed!=3.0.14",
 #   "chatterbox-tts",
 # ]
 # ///
