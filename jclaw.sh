@@ -105,22 +105,27 @@ if [[ -x "$SCRIPT_DIR/play" ]]; then
     export PATH="$SCRIPT_DIR:$PATH"
 fi
 
+# Every bin/java under $1, one per line. Matches both `java` (Unix) and `java.exe`
+# (Windows, run via Git Bash) and handles the macOS Contents/Home nesting.
+jre_javas_in() {
+    find "$1" -type f \( -name java -o -name java.exe \) 2>/dev/null | grep -E '/bin/java(\.exe)?$' || true
+}
+
 # Co-located managed JRE. The one-line installers (install.sh / install.ps1) drop a
 # self-contained Zulu JRE 25 at <home>/jre — a sibling of this script's dir — when the
 # host has no system Java 25. Prefer it on PATH so `jclaw start/restart/...` run without
 # a system-wide Java. No-op in a dev clone (no ../jre) and whenever JCLAW_JRE_SKIP is set.
-# Matches both `java` (Unix) and `java.exe` (Windows, run via Git Bash) and handles the
-# macOS Contents/Home nesting.
-if [[ -z "${JCLAW_JRE_SKIP:-}" && -d "$SCRIPT_DIR/../jre" ]]; then
-    _jre_java=$(find "$SCRIPT_DIR/../jre" -type f \( -name java -o -name java.exe \) 2>/dev/null \
-        | grep -E '/bin/java(\.exe)?$' | head -1)
-    if [[ -n "$_jre_java" ]]; then
-        JAVA_HOME="$(cd "$(dirname "$(dirname "$_jre_java")")" && pwd)"
-        export JAVA_HOME
-        export PATH="$JAVA_HOME/bin:$PATH"
-    fi
-    unset _jre_java
-fi
+# apply_staged_jre runs it again after it swaps the folder.
+use_bundled_jre() {
+    [[ -z "${JCLAW_JRE_SKIP:-}" && -d "$SCRIPT_DIR/../jre" ]] || return 0
+    local java_bin
+    java_bin=$(jre_javas_in "$SCRIPT_DIR/../jre" | head -1)
+    [[ -n "$java_bin" ]] || return 0
+    JAVA_HOME="$(cd "$(dirname "$(dirname "$java_bin")")" && pwd)"
+    export JAVA_HOME
+    export PATH="$JAVA_HOME/bin:$PATH"
+}
+use_bundled_jre
 
 # Audience detection: developers run from a `git clone`, end users run
 # from an unzipped `play dist` tarball with no .git/ in tow. Used by
@@ -3213,6 +3218,146 @@ aot_check_used() {
     fi
 }
 
+# Settings > Maintenance > Java runtime reads this line back as what the last start did with a staged runtime.
+jre_status() {
+    mkdir -p "$SCRIPT_DIR/data" 2>/dev/null || true
+    printf '%s\n' "$1" > "$SCRIPT_DIR/data/java-runtime.status" 2>/dev/null || true
+    echo "    Java runtime: $1"
+}
+
+# Drops trailing .0 parts, so the catalog's 25.0.0 matches the "25" that Java reports for it.
+jre_version_norm() {
+    local v="$1"
+    while [[ "$v" == *.0 ]]; do v="${v%.0}"; done
+    printf '%s\n' "$v"
+}
+
+# The version "$@" -version reports, normalised; empty when it does not run.
+jre_reported_version() {
+    local v
+    v=$("$@" -version 2>&1 | sed -n 's/.*version "\([^"]*\)".*/\1/p' | head -1 || true)
+    jre_version_norm "$v"
+}
+
+# What unpacks a zip here: unzip, else Windows' own tar.exe (bsdtar reads zip; the GNU tar Git Bash ships does not).
+jre_zip_tool() {
+    local tar_exe
+    if command -v unzip >/dev/null 2>&1; then
+        echo unzip
+    elif [[ "$IS_WINDOWS" == 1 && -n "${SYSTEMROOT:-}" ]]; then
+        tar_exe="$(cygpath -u "$SYSTEMROOT" 2>/dev/null || true)/System32/tar.exe"
+        if [[ -x "$tar_exe" ]]; then echo "$tar_exe"; fi
+    fi
+    return 0
+}
+
+# Installs $1/jre.staged into $1/jre and prints what it did, or prints why not and returns 1 having
+# touched nothing but $1/jre.new. Every check runs before the first rename.
+jre_install_staged() {
+    local home="$1" staged="$1/jre.staged" version sha archive old_java current kept got tool javas new_java mods
+    local version_re='^[0-9]+(\.[0-9]+)*$' sha_re='^[0-9a-f]{64}$' archive_re='^[A-Za-z0-9][A-Za-z0-9._-]*\.(tar\.gz|zip)$'
+    old_java=$(jre_javas_in "$home/jre" | head -1)
+    current=""
+    if [[ -n "$old_java" ]]; then current=$(jre_reported_version "$old_java"); fi
+    kept="kept the current Java"
+    if [[ -n "$current" ]]; then kept="kept Java ${current}"; fi
+
+    version=$(sed -n 's/^version=//p' "$staged/manifest" | head -1)
+    sha=$(sed -n 's/^sha256=//p' "$staged/manifest" | head -1)
+    archive=$(sed -n 's/^archive=//p' "$staged/manifest" | head -1)
+    if [[ ! "$version" =~ $version_re || ! "$sha" =~ $sha_re || ! "$archive" =~ $archive_re ]]; then
+        echo "${kept}: the staged runtime's manifest is malformed"; return 1
+    fi
+    if [[ -z "$old_java" ]]; then
+        echo "${kept}: there is no built-in Java at $home/jre to replace"; return 1
+    fi
+    if [[ -z "$current" ]]; then
+        echo "${kept}: $old_java does not report its version"; return 1
+    fi
+    if [[ "${version%%.*}" != "${current%%.*}" ]]; then
+        echo "${kept}: Java ${version} is not a patch of the Java it runs on"; return 1
+    fi
+    got=$(sha256_file "$staged/$archive" || true)
+    if [[ -z "$got" ]]; then
+        echo "${kept}: there is no shasum or sha256sum to verify Java ${version} with"; return 1
+    fi
+    if [[ "$got" != "$sha" ]]; then
+        echo "${kept}: Java ${version} failed its SHA-256 check"; return 1
+    fi
+
+    rm -rf "$home/jre.new"
+    if ! mkdir -p "$home/jre.new"; then
+        echo "${kept}: could not create $home/jre.new"; return 1
+    fi
+    case "$archive" in
+        *.zip)
+            tool=$(jre_zip_tool)
+            if [[ -z "$tool" ]]; then
+                echo "${kept}: there is no unzip or tar.exe to unpack Java ${version} with"; return 1
+            elif [[ "$tool" == unzip ]]; then
+                unzip -q "$staged/$archive" -d "$home/jre.new" >/dev/null 2>&1 || tool=""
+            else
+                "$tool" -xf "$(native_path "$staged/$archive")" -C "$(native_path "$home/jre.new")" >/dev/null 2>&1 || tool=""
+            fi
+            ;;
+        *)
+            tool=tar
+            tar -xzf "$staged/$archive" -C "$home/jre.new" >/dev/null 2>&1 || tool=""
+            ;;
+    esac
+    if [[ -z "$tool" ]]; then
+        echo "${kept}: Java ${version} could not be unpacked"; return 1
+    fi
+    # Exactly one: jre_javas_in's first match is the java every later start runs.
+    javas=$(jre_javas_in "$home/jre.new")
+    new_java=$(printf '%s\n' "$javas" | head -1)
+    if [[ -z "$new_java" || "$(printf '%s\n' "$javas" | grep -c . || true)" != 1 ]]; then
+        echo "${kept}: Java ${version} did not unpack to exactly one bin/java"; return 1
+    fi
+    # With the modules the start passes, as check_java_modules would.
+    mods=$(conf_jvm_modules)
+    # shellcheck disable=SC2086
+    got=$(jre_reported_version "$new_java" $mods)
+    if [[ "$got" != "$(jre_version_norm "$version")" ]]; then
+        echo "${kept}: Java ${version} reported ${got:-no version} when it ran"; return 1
+    fi
+
+    rm -rf "$home/jre.previous"
+    # mv into an existing directory would nest the runtime inside it.
+    if [[ -e "$home/jre.previous" ]] || ! mv "$home/jre" "$home/jre.previous"; then
+        echo "${kept}: could not move $home/jre aside to jre.previous"; return 1
+    fi
+    if ! mv "$home/jre.new" "$home/jre"; then
+        mv "$home/jre.previous" "$home/jre" 2>/dev/null || true
+        echo "${kept}: could not move Java ${version} into $home/jre"; return 1
+    fi
+    echo "upgraded ${current} → ${version}"
+}
+
+# The runtime Settings > Maintenance > Java runtime downloaded into <home>/jre.staged/ replaces <home>/jre/,
+# here because no JVM of this install runs yet. A staged runtime that fails is dropped and the start carries
+# on with the current one; either way the outcome goes to data/java-runtime.status.
+apply_staged_jre() {
+    local home outcome
+    home="$(cd "$SCRIPT_DIR/.." && pwd)"
+    # The JVM writes the manifest last, so a download it never finished is never picked up. The status
+    # line describes only the start that installed or refused a runtime, so a start with none clears it.
+    if [[ ! -f "$home/jre.staged/manifest" ]]; then
+        rm -f "$SCRIPT_DIR/data/java-runtime.status" || true
+        return 0
+    fi
+    echo "==> Installing the Java runtime downloaded in Settings..."
+    if outcome=$(jre_install_staged "$home"); then
+        rm -rf "$home/jre.staged" || true
+        jre_status "$outcome"
+        use_bundled_jre
+    else
+        rm -rf "$home/jre.new" "$home/jre.staged" || true
+        jre_status "$outcome"
+    fi
+    return 0
+}
+
 do_start_prod() {
     cd "$SCRIPT_DIR"
 
@@ -3245,6 +3390,9 @@ do_start_prod() {
         echo "       Stop it first ('$0 stop' if it is JClaw), then start again."
         exit 1
     fi
+
+    # After the two checks above, so no JVM of this install holds the runtime being replaced.
+    apply_staged_jre
 
     # Reap any stale H2 lock from a prior ungraceful shutdown (Docker rm
     # without compose down, JVM kill -9, host crash). Without this, the

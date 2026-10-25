@@ -384,6 +384,12 @@ GET     /api/system/upgrade                     ApiSystemController.upgradePrefl
 POST    /api/system/upgrade                     ApiSystemController.upgrade
 GET     /api/system/upgrade/status              ApiSystemController.upgradeStatus
 
+# Java runtime: GET reports the running Java and the newest patch of its major; POST downloads that
+# patch for the next start to install, and DELETE drops one still waiting.
+GET     /api/system/java-runtime                ApiSystemController.javaRuntime
+POST    /api/system/java-runtime                ApiSystemController.stageJavaRuntime
+DELETE  /api/system/java-runtime                ApiSystemController.cancelJavaRuntime
+
 # Printers (JCLAW-911). GET /api/printers is a live mDNS browse, never a cache.
 # The /default pair is the operator's saved choice, consulted by the printer tool
 # when a call names no target.

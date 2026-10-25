@@ -8,6 +8,7 @@ import org.jspecify.annotations.Nullable;
 import play.mvc.Controller;
 import play.mvc.With;
 import services.GitCheckout;
+import services.JavaRuntimeService;
 import services.RestartService;
 import services.SubagentRegistry;
 import services.UpgradeService;
@@ -20,14 +21,15 @@ import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
- * Instance-level maintenance operations — restart and upgrade
- * (Settings → Restart / Upgrade).
+ * Instance-level maintenance operations — restart, upgrade and the Java runtime
+ * (Settings → Maintenance).
  *
- * <p>Neither is gated on in-flight work. The moment an operator most wants to
- * reboot is usually the moment something is wedged, so a 409 while a stuck task
- * "runs" would lock them out of the one control that clears it. Instead the
- * preflights report what is in flight and the UI makes the operator confirm
- * against it.
+ * <p>None is gated on in-flight task or subagent runs. The moment an operator
+ * most wants to reboot is usually the moment something is wedged, so a 409 while
+ * a stuck task "runs" would lock them out of the one control that clears it.
+ * Instead the restart and upgrade preflights report what is in flight and the UI
+ * makes the operator confirm against it. The Java runtime download stops nothing,
+ * so its only 409 for work in flight is its own download.
  */
 @With(AuthCheck.class)
 public class ApiSystemController extends Controller {
@@ -242,5 +244,102 @@ public class ApiSystemController extends Controller {
             return;
         }
         renderJSON(GSON.toJson(status));
+    }
+
+    /**
+     * @param kind                 {@code "built-in"} for the Java the installer put beside this install,
+     *                             the only one JClaw updates; {@code "external"} or {@code "container"}
+     *                             otherwise
+     * @param currentVersion       the running Java, {@code java.version}
+     * @param vendor               {@code java.vendor}, or null when the JVM names none
+     * @param latestVersion        the newest patch of the running major in Azul's catalog, or null when
+     *                             the catalog could not be reached
+     * @param updateAvailable      true when {@code latestVersion} is newer than {@code currentVersion}
+     * @param stagedVersion        a downloaded runtime waiting for the next start, or null
+     * @param downloading          true while a download runs
+     * @param downloadPercent      how far it is, or null when no download runs
+     * @param downloadError        why the last download failed, or null
+     * @param lastStart            jclaw.sh's line about what the last start did with a staged runtime,
+     *                             or null when the last start had none to install
+     * @param lastStartAt          when that line was written (ISO-8601), or null
+     * @param rebuildsStartupCache true when the first start on a new runtime rebuilds the AOT cache:
+     *                             false on Windows, which has none, and while it is switched off in
+     *                             Settings or by {@code JCLAW_AOT=off}
+     */
+    public record JavaRuntimePreflight(String kind, String currentVersion, @Nullable String vendor,
+                                       @Nullable String latestVersion, boolean updateAvailable,
+                                       @Nullable String stagedVersion, boolean downloading,
+                                       @Nullable Integer downloadPercent, @Nullable String downloadError,
+                                       @Nullable String lastStart, @Nullable String lastStartAt,
+                                       boolean rebuildsStartupCache) {}
+
+    /**
+     * GET /api/system/java-runtime — the running Java, the newest patch of its major and any download
+     * staged for the next start. Performs nothing.
+     *
+     * @param refresh bypass the cached catalog check (the "Check again" control)
+     */
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = JavaRuntimePreflight.class)))
+    @AgentAccess(OPEN)
+    public static void javaRuntime(Boolean refresh) {
+        var env = JavaRuntimeService.environment();
+        var latest = JavaRuntimeService.latest(Boolean.TRUE.equals(refresh));
+        var latestVersion = latest == null ? null : latest.version();
+        var staged = JavaRuntimeService.staged(env.home());
+        var progress = JavaRuntimeService.CURRENT;
+        boolean downloading = progress.active();
+        var last = JavaRuntimeService.lastStart(env.app());
+
+        renderJSON(GSON.toJson(new JavaRuntimePreflight(
+                JavaRuntimeService.kind(env).label, env.javaVersion(), env.vendor(), latestVersion,
+                JavaRuntimeService.isNewer(latestVersion, env.javaVersion()),
+                staged == null ? null : staged.version(),
+                downloading, downloading ? progress.currentPercent() : null, progress.lastError(),
+                last == null ? null : last.line(), last == null ? null : last.at().toString(),
+                !env.windows() && RestartService.aotCacheState().enabled()
+                        && !"off".equals(System.getenv("JCLAW_AOT")))));
+    }
+
+    /**
+     * POST /api/system/java-runtime — download the newest patch for the next start to install, and ack.
+     * Returns 202 while the download runs in this JVM; the GET reports its progress. 409 when there is
+     * nothing this install may download: another vendor's Java, a container, a download already running
+     * or staged, or no newer patch.
+     */
+    @AgentAccess(value = OPERATOR_ONLY, reason = "downloads a Java runtime that the next start installs")
+    public static void stageJavaRuntime() {
+        JavaRuntimeService.Release release;
+        try {
+            release = JavaRuntimeService.requestStage();
+        } catch (IllegalStateException e) {
+            ApiResponses.error(409, ApiResponses.CONFLICT, ApiResponses.messageOf(e));
+            return;
+        }
+        response.status = 202;
+        ApiResponses.ok("version", release.version());
+    }
+
+    /**
+     * DELETE /api/system/java-runtime — drop the downloaded runtime before a start installs it. 404 when
+     * none is waiting, 409 while a download is still running.
+     */
+    @AgentAccess(value = OPERATOR_ONLY, reason = "drops a Java runtime waiting for the next start")
+    public static void cancelJavaRuntime() {
+        boolean removed;
+        try {
+            removed = JavaRuntimeService.cancel();
+        } catch (IllegalStateException e) {
+            ApiResponses.error(409, ApiResponses.CONFLICT, ApiResponses.messageOf(e));
+            return;
+        } catch (IOException e) {
+            ApiResponses.errorAndLog(e, 500, ApiResponses.INTERNAL_ERROR,
+                    "Could not remove the downloaded Java runtime: " + e.getMessage());
+            return;
+        }
+        if (!removed) {
+            ApiResponses.error(404, ApiResponses.NOT_FOUND, "No Java runtime is waiting for the next restart.");
+            return;
+        }
+        ApiResponses.ok();
     }
 }

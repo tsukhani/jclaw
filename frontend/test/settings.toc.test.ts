@@ -128,7 +128,7 @@ describe('Settings page — TOC navigation + section swap', () => {
     }
   })
 
-  it('shows all three maintenance controls on the section', async () => {
+  it('shows all four maintenance controls on the section', async () => {
     baseEndpoints()
     registerEndpoint('/api/auth/status', () => ({ authenticated: true, passwordSet: true }))
     registerEndpoint('/api/system/upgrade', () => ({
@@ -141,6 +141,11 @@ describe('Settings page — TOC navigation + section swap', () => {
       available: true, unavailableReason: null, mode: 'PROD', backendOnly: false,
       rebuildExpected: false, runningTasks: 0, activeSubagentRuns: 0,
     }))
+    registerEndpoint('/api/system/java-runtime', () => ({
+      kind: 'built-in', currentVersion: '25.0.5', vendor: 'Azul Systems, Inc.', latestVersion: '25.0.5',
+      updateAvailable: false, stagedVersion: null, downloading: false, downloadPercent: null,
+      downloadError: null, lastStart: null, lastStartAt: null, rebuildsStartupCache: true,
+    }))
 
     const component = await mountSuspended(Settings, { route: '/settings?section=maintenance' })
     await flushPromises()
@@ -150,6 +155,7 @@ describe('Settings page — TOC navigation + section swap', () => {
     // upgrade needs to know it takes the instance down at the end.
     expect(component.text()).toContain('Upgrade and restart')
     expect(component.text()).toContain('Stops this instance and starts it again')
+    expect(component.find('[data-testid="java-runtime-summary"]').text()).toBe('Up to date.')
     // Password moved here from its own section; without this the merge could drop it
     // and every other assertion would still pass.
     expect(component.text()).toContain('Password')
