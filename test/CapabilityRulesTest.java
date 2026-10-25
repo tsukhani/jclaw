@@ -611,6 +611,7 @@ class CapabilityRulesTest extends UnitTest {
     private static final Map<String, Set<String>> TEST_SEAMS = Map.of(
             "utils.SsrfGuard", Set.of("permitOriginForTest", "callWithHostsForTest"),
             "tools.jev.JevPage", Set.of("callWithCallLimitForTest"),
+            "mcp.McpElicitations", Set.of("callWithWaitForTest"),
             "utils.HttpFactories", Set.of("runWith", "callWith"),
             "utils.AppClock", Set.of("runWith", "callWith"),
             "tools.PlaywrightBrowserTool", Set.of("callWithFailingScreenForTest"),

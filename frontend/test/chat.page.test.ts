@@ -323,6 +323,51 @@ describe('Chat page — MCP Apps views', () => {
   })
 })
 
+describe('Chat page — an MCP server\'s question', () => {
+  it('shows a form still waiting when the conversation is reloaded, and drops it once answered', async () => {
+    setupBaseChatApi()
+    registerEndpoint('/api/conversations', () => [
+      { id: 77, agentId: 1, agentName: 'streaming-agent', channelType: 'web', peerId: 'admin', messageCount: 0,
+        preview: '', createdAt: '2026-10-25T10:00:00Z', updatedAt: '2026-10-25T10:00:00Z' },
+    ])
+    registerEndpoint('/api/conversations/77/messages', () => [])
+    const asked: string[] = []
+    registerEndpoint('/api/mcp-servers/elicitations', (event) => {
+      asked.push(new URL(String(event.node?.req?.url ?? event.path ?? ''), 'http://localhost').search)
+      return [{ id: 'waiting-1', conversationId: 77, server: 'crm', message: 'Which contact?',
+        requestedSchema: { type: 'object', properties: { email: { type: 'string', format: 'email' } } },
+        expiresAt: '2026-10-25T12:05:00Z' }]
+    })
+    const bodies: unknown[] = []
+    const off = registerEndpoint('/api/mcp-servers/elicitations/waiting-1', {
+      method: 'POST',
+      handler: async (event) => {
+        const { readBody } = await import('h3')
+        bodies.push(await readBody(event))
+        return { status: 'ok', action: 'decline' }
+      },
+    })
+    const component = await mountSuspended(Chat)
+    try {
+      await flushPromises()
+      expect(component.find('[data-testid="mcp-elicitation"]').exists()).toBe(false)
+      await (component.vm as unknown as { loadConversation: (id: number) => Promise<void> }).loadConversation(77)
+      await vi.waitFor(() => expect(component.find('[data-testid="mcp-elicitation"]').exists()).toBe(true))
+      expect(asked).toEqual(['?conversationId=77'])
+      expect(component.find('[data-testid="mcp-elicitation-server"]').text()).toBe('crm')
+      expect(component.find('[data-testid="mcp-elicitation-message"]').text()).toBe('Which contact?')
+
+      await component.find('[data-testid="mcp-elicitation-decline"]').trigger('click')
+      await vi.waitFor(() => expect(component.find('[data-testid="mcp-elicitation"]').exists()).toBe(false))
+      expect(bodies).toEqual([{ action: 'decline' }])
+    }
+    finally {
+      off()
+      component.unmount()
+    }
+  })
+})
+
 describe('Chat page — empty conversation state', () => {
   it('renders the chat shell when no agent is configured', async () => {
     registerEndpoint('/api/agents', () => [])

@@ -520,7 +520,7 @@ public final class McpConnectionManager {
             breaker.recordSuccess(0L, admission.probeWindow());
             reported = true;
             return result;
-        } catch (McpException.ResourceNotFound e) {
+        } catch (McpException.ResourceNotFound | McpException.InputRequired e) {
             breaker.recordSuccess(0L, admission.probeWindow());
             reported = true;
             throw e;

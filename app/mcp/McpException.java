@@ -137,6 +137,17 @@ public class McpException extends RuntimeException {
     }
 
     /**
+     * The server asked for input mid-request that JClaw did not put to the operator, so the request ended with
+     * nothing sent back; the message gives the agent the server's questions. The server answered, so this is no
+     * evidence against it, and its breaker records a success.
+     */
+    public static final class InputRequired extends McpException {
+        public InputRequired(String questions) {
+            super(questions);
+        }
+    }
+
+    /**
      * The server must be reached again through the {@code initialize} handshake on a fresh
      * connection (JCLAW-1443). {@link #switchOnSuccess()} is true when the server answered
      * discovery and then failed on 2026-07-28, so a handshake that works moves it to Handshake;

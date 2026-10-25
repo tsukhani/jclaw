@@ -19,8 +19,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -108,6 +110,7 @@ public class McpClient implements AutoCloseable {
     private static final String UI_EXTENSION = META_PREFIX + "ui";
     private static final String DISCOVER = "server/discover";
     private static final String TOOLS_CALL = "tools/call";
+    private static final String ELICITATION_CREATE = "elicitation/create";
     private static final String TOOLS_LIST = "tools/list";
     private static final String RESOURCES_LIST = "resources/list";
     private static final String RESOURCES_TEMPLATES_LIST = "resources/templates/list";
@@ -118,7 +121,7 @@ public class McpClient implements AutoCloseable {
     private static final String SUBSCRIPTION_ACKNOWLEDGED = "notifications/subscriptions/acknowledged";
     private static final String SUBSCRIPTION_ID = META_PREFIX + "subscriptionId";
     private static final Duration DEFAULT_REQUEST_TIMEOUT = Duration.ofSeconds(30);
-    /** Retries of one request on a state-only {@code input_required}; a server needing more is looping. */
+    /** Retries of one request on {@code input_required}; a server needing more is looping. */
     public static final int MAX_INPUT_RETRIES = 3;
     /** Pages read per {@code tools/list} fetch and per resource listing, so a server that never ends a list cannot hang the caller. */
     public static final int MAX_TOOL_PAGES = 50;
@@ -275,8 +278,25 @@ public class McpClient implements AutoCloseable {
         params.addProperty("name", toolName);
         params.add("arguments", args);
         var mirrored = mirrorsParams() ? mirroredHeaders(toolName, args) : Map.<String, String>of();
-        return CallToolResult.fromResultObject(untilComplete(TOOLS_CALL, params,
-                p -> roundTrip(TOOLS_CALL, p, mirrored, requestTimeout, this::callFailure)));
+        Completed done;
+        try {
+            done = untilComplete(TOOLS_CALL, params, true,
+                    (p, elicit) -> roundTrip(TOOLS_CALL, p, mirrored, requestTimeout, this::callFailure, elicit));
+        } catch (McpException.InputRequired questions) {
+            // The tool ran and asked; returned as its failure, so the agent (or a view) reads the questions as its own.
+            var part = new JsonObject();
+            part.addProperty("type", "text");
+            part.addProperty("text", Objects.requireNonNullElse(questions.getMessage(), ""));
+            var content = new JsonArray();
+            content.add(part);
+            var raw = new JsonObject();
+            raw.add("content", content);
+            raw.addProperty("isError", true);
+            return CallToolResult.fromResultObject(raw);
+        }
+        var result = CallToolResult.fromResultObject(done.result());
+        for (var note : done.notes()) result = result.withNote(note);
+        return result;
     }
 
     /**
@@ -322,13 +342,13 @@ public class McpClient implements AutoCloseable {
         requireReady("readResource");
         var params = new JsonObject();
         params.addProperty("uri", uri);
-        var result = untilComplete(RESOURCES_READ, params,
-                p -> roundTrip(RESOURCES_READ, p, Map.of(), requestTimeout, e -> readFailure(uri, e)));
+        Round read = (p, elicit) -> roundTrip(RESOURCES_READ, p, Map.of(), requestTimeout, e -> readFailure(uri, e), elicit);
+        var result = untilComplete(RESOURCES_READ, params, false, read).result();
         return McpResources.contents(result.get("contents"), uri);
     }
 
     private Round listPage(String method) {
-        return p -> roundTrip(method, p, Map.of(), LISTING_TIMEOUT, this::callFailure);
+        return (p, elicit) -> roundTrip(method, p, Map.of(), LISTING_TIMEOUT, this::callFailure, elicit);
     }
 
     private static <T> List<T> firstListed(List<T> items) {
@@ -356,12 +376,12 @@ public class McpClient implements AutoCloseable {
         }
     }
 
-    /** One request after the handshake, a refusal of it passed through {@code refused}. */
+    /** One request after the handshake, a refusal of it passed through {@code refused}; {@code elicit} declares elicitation. */
     private JsonObject roundTrip(String method, JsonObject params, Map<String, String> headers, Duration timeout,
-                                 UnaryOperator<McpException> refused) throws IOException, McpException {
+                                 UnaryOperator<McpException> refused, boolean elicit) throws IOException, McpException {
         JsonRpc.Response resp;
         try {
-            resp = sendRequest(method, params, timeout, headers);
+            resp = sendRequest(method, params, timeout, headers, elicit);
         } catch (McpException e) {
             throw refused.apply(e);
         }
@@ -569,13 +589,16 @@ public class McpClient implements AutoCloseable {
     private JsonObject initializeParams() {
         var params = new JsonObject();
         params.addProperty("protocolVersion", PROTOCOL_VERSION);
-        params.add("capabilities", clientCapabilities());
+        params.add("capabilities", clientCapabilities(false));
         params.add("clientInfo", clientInfo());
         return params;
     }
 
-    /** MCP Apps (SEP-1865): JClaw's web chat renders a tool's {@code ui://} page. */
-    private static JsonObject clientCapabilities() {
+    /**
+     * MCP Apps (SEP-1865): JClaw's web chat renders a tool's {@code ui://} page. With {@code elicitation}, form-mode
+     * elicitation too, which only a 2026-07-28 tool call from a top-level web-chat turn declares.
+     */
+    private static JsonObject clientCapabilities(boolean elicitation) {
         var mimeTypes = new JsonArray();
         mimeTypes.add(McpResources.APP_MIME_TYPE);
         var ui = new JsonObject();
@@ -584,6 +607,11 @@ public class McpClient implements AutoCloseable {
         extensions.add(UI_EXTENSION, ui);
         var capabilities = new JsonObject();
         capabilities.add("extensions", extensions);
+        if (elicitation) {
+            var elicit = new JsonObject();
+            elicit.add("form", new JsonObject());
+            capabilities.add("elicitation", elicit);
+        }
         return capabilities;
     }
 
@@ -836,7 +864,7 @@ public class McpClient implements AutoCloseable {
     private Fetched fetchTools(Duration timeout, boolean strict) throws IOException, McpException {
         var out = new ArrayList<McpToolDef>();
         var ttlMs = new AtomicLong(Long.MAX_VALUE);
-        pages(TOOLS_LIST, p -> toolsListPage(p, timeout, strict), result -> {
+        pages(TOOLS_LIST, (p, _) -> toolsListPage(p, timeout, strict), result -> {
             ttlMs.accumulateAndGet(ttlMs(result.get("ttlMs")), Math::min);
             var tools = result.get("tools");
             if (tools == null || !tools.isJsonArray()) {
@@ -866,7 +894,7 @@ public class McpClient implements AutoCloseable {
         for (var n = 0; n < MAX_TOOL_PAGES; n++) {
             var params = new JsonObject();
             if (cursor != null) params.addProperty("cursor", cursor);
-            var result = untilComplete(method, params, round);
+            var result = untilComplete(method, params, false, round).result();
             if (page.read(result)) return true;
             var next = result.get("nextCursor");
             // An empty cursor names no next page, so it ends the list as an absent one does.
@@ -920,38 +948,71 @@ public class McpClient implements AutoCloseable {
         return out;
     }
 
-    /** One request and its answer; {@link #untilComplete} repeats it with new params. */
+    /** One request and its answer, declaring elicitation when {@code elicit}; {@link #untilComplete} repeats it with new params. */
     @FunctionalInterface
     private interface Round {
-        JsonObject send(JsonObject params) throws IOException, McpException;
+        JsonObject send(JsonObject params, boolean elicit) throws IOException, McpException;
     }
 
+    /** A complete result, and JClaw's lines on how the operator answered the server's forms along the way. */
+    private record Completed(JsonObject result, List<String> notes) {}
+
     /**
-     * Send {@code params} until the result is complete, retrying a state-only {@code input_required}
-     * (2026-07-28 Multi Round-Trip Requests) with its {@code requestState} echoed unchanged. Each
-     * retry is a new request, so it gets a new id.
+     * Send {@code params} until the result is complete (2026-07-28 Multi Round-Trip Requests). An
+     * {@code input_required} result is retried with its {@code requestState} echoed unchanged and, when it holds
+     * {@code inputRequests}, {@code inputResponses} answering each under its key. Each retry is a new request, so
+     * it gets a new id. With {@code mayAsk}, a request from a top-level web-chat turn declares elicitation and its
+     * forms go to the operator, one after another on this thread.
+     *
+     * @throws McpException.InputRequired when a form cannot be put to the operator: none is asked, and nothing goes back
      */
-    private static JsonObject untilComplete(String method, JsonObject params, Round round)
+    private Completed untilComplete(String method, JsonObject params, boolean mayAsk, Round round)
             throws IOException, McpException {
+        var unasked = McpElicitations.unaskedHere(mayAsk, modern);
+        var offered = unasked == null;
+        McpElicitations.@Nullable Wait wait = null;
+        var notes = new LinkedHashSet<String>();
         var p = params;
         for (var retries = 0; ; retries++) {
-            var result = round.send(p);
-            var state = inputRequiredState(method, result);
-            if (state == null) return result;
+            var result = round.send(p, offered);
+            var input = inputRequired(method, result);
+            if (input == null) return new Completed(result, List.copyOf(notes));
             if (retries == MAX_INPUT_RETRIES) {
-                throw new McpException(method + " still asked for another round after " + MAX_INPUT_RETRIES
-                        + " retries, so JClaw stopped: the server never completed the request");
+                throw new McpException(withNotes(method + " still asked for another round after " + MAX_INPUT_RETRIES
+                        + " retries, so JClaw stopped: the server never completed the request", notes));
             }
             p = params.deepCopy();
-            p.add("requestState", state);
+            var state = input.state();
+            if (state != null) p.add("requestState", state);
+            if (!input.forms().isEmpty()) {
+                var questions = McpElicitations.questionsForAgent(name, input.forms().values(), unasked);
+                if (questions != null) throw new McpException.InputRequired(withNotes(questions, notes));
+                // One wait for the whole call, from its first form, so its forms cannot add up past the chat's own limit.
+                if (wait == null) wait = McpElicitations.newWait();
+                var responses = new JsonObject();
+                for (var form : input.forms().entrySet()) {
+                    var answer = McpElicitations.ask(name, form.getValue(), wait);
+                    responses.add(form.getKey(), answer.response());
+                    if (answer.note() != null) notes.add(answer.note());
+                }
+                p.add("inputResponses", responses);
+            }
         }
     }
 
+    /** {@code message}, then JClaw's lines on the forms the operator already answered in this call. */
+    private static String withNotes(String message, Collection<String> notes) {
+        return notes.isEmpty() ? message : message + "\n" + String.join("\n", notes);
+    }
+
+    /** An {@code input_required} result: the {@code requestState} to echo, and each form's params by its key. */
+    private record InputRequired(@Nullable JsonElement state, Map<String, JsonObject> forms) {}
+
     /**
-     * Null for a complete result, which is also what an absent {@code resultType} means; the
-     * {@code requestState} to echo for a state-only {@code input_required}; otherwise a failure.
+     * Null for a complete result, which is also what an absent {@code resultType} means; otherwise what to answer
+     * an {@code input_required} with, or a failure for any other result and for a request JClaw cannot answer.
      */
-    private static @Nullable JsonElement inputRequiredState(String method, JsonObject result) {
+    private static @Nullable InputRequired inputRequired(String method, JsonObject result) {
         var type = result.get("resultType");
         if (type == null || type.isJsonNull()) return null;
         var kind = type.isJsonPrimitive() ? type.getAsString() : "";
@@ -961,17 +1022,41 @@ public class McpClient implements AutoCloseable {
             throw new McpException(method + " returned a result " + shown
                     + ", which JClaw cannot handle: it knows complete and input_required");
         }
-        if (isPresent(result.get("inputRequests"))) {
-            // JClaw declares no elicitation, sampling or roots, so a conforming server never asks.
-            throw new McpException("the server asked for input mid-request (" + inputKinds(result.get("inputRequests"))
-                    + "), which JClaw cannot give: it offers no elicitation, sampling or roots. Call the tool"
-                    + " again with every argument it needs filled in, or use another tool.");
-        }
+        var forms = forms(result.get("inputRequests"));
         var state = result.get("requestState");
-        if (state == null || state.isJsonNull()) {
+        if (state != null && state.isJsonNull()) state = null;
+        if (forms.isEmpty() && state == null) {
             throw new McpException(method + " returned input_required with neither inputRequests nor requestState");
         }
-        return state;
+        return new InputRequired(state, forms);
+    }
+
+    /** Each {@code elicitation/create}'s params by its key; a request of any other kind fails the call. */
+    private static Map<String, JsonObject> forms(@Nullable JsonElement requests) {
+        var forms = new LinkedHashMap<String, JsonObject>();
+        if (!isPresent(requests)) return forms;
+        if (!(requests instanceof JsonObject byKey)) {
+            // Answers go back under each request's key, so anything but an object of them cannot be answered.
+            throw new McpException("the server asked for input mid-request in a shape JClaw cannot answer: its"
+                    + " inputRequests is not an object of requests by key. Call the tool again with every argument it"
+                    + " needs filled in, or use another tool.");
+        }
+        var refused = new JsonArray();
+        for (var e : byKey.entrySet()) {
+            if (e.getValue() instanceof JsonObject req && req.get("method") instanceof JsonPrimitive m
+                    && ELICITATION_CREATE.equals(m.getAsString())) {
+                forms.put(e.getKey(), req.get("params") instanceof JsonObject params ? params : new JsonObject());
+            } else {
+                refused.add(e.getValue());
+            }
+        }
+        if (!refused.isEmpty()) {
+            // JClaw declares no sampling or roots, so a conforming server never asks for them.
+            throw new McpException("the server asked for input mid-request (" + inputKinds(refused)
+                    + "), which JClaw cannot give: it offers no sampling or roots. Call the tool"
+                    + " again with every argument it needs filled in, or use another tool.");
+        }
+        return forms;
     }
 
     private static boolean isPresent(@Nullable JsonElement el) {
@@ -1038,26 +1123,26 @@ public class McpClient implements AutoCloseable {
 
     private JsonRpc.Response sendRequest(String method, JsonObject params, Duration timeout)
             throws IOException, McpException {
-        return sendRequest(method, params, timeout, Map.of());
+        return sendRequest(method, params, timeout, Map.of(), false);
     }
 
     private JsonRpc.Response sendRequest(String method, JsonObject params, Duration timeout,
-                                         Map<String, String> extraHeaders) throws IOException, McpException {
+                                         Map<String, String> extraHeaders, boolean elicit) throws IOException, McpException {
         var id = nextId.getAndIncrement();
-        return await(id, method, dispatch(id, method, params, modern, extraHeaders), timeout);
+        return await(id, method, dispatch(id, method, params, modern, extraHeaders, elicit), timeout);
     }
 
     /** Register {@code id} and put the request on the wire; a modern request carries {@code _meta} and its headers. */
     private CompletableFuture<JsonRpc.Response> dispatch(long id, String method, JsonObject params, boolean asModern)
             throws IOException {
-        return dispatch(id, method, params, asModern, Map.of());
+        return dispatch(id, method, params, asModern, Map.of(), false);
     }
 
     private CompletableFuture<JsonRpc.Response> dispatch(long id, String method, JsonObject params, boolean asModern,
-                                                         Map<String, String> extraHeaders) throws IOException {
+                                                         Map<String, String> extraHeaders, boolean elicit) throws IOException {
         var future = new CompletableFuture<JsonRpc.Response>();
         pending.put(id, future);
-        var req = new JsonRpc.Request(id, method, asModern ? withMeta(params) : params);
+        var req = new JsonRpc.Request(id, method, asModern ? withMeta(params, elicit) : params);
         var headers = headers(method, params, asModern);
         headers.putAll(extraHeaders);
         try {
@@ -1094,11 +1179,11 @@ public class McpClient implements AutoCloseable {
         }
     }
 
-    private JsonObject withMeta(JsonObject params) {
+    private JsonObject withMeta(JsonObject params, boolean elicit) {
         var out = params.deepCopy();
         var meta = out.get(META) instanceof JsonObject existing ? existing : new JsonObject();
         meta.addProperty(META_PREFIX + "protocolVersion", MODERN_PROTOCOL_VERSION);
-        meta.add(META_PREFIX + "clientCapabilities", clientCapabilities());
+        meta.add(META_PREFIX + "clientCapabilities", clientCapabilities(elicit));
         meta.add(META_PREFIX + "clientInfo", clientInfo());
         out.add(META, meta);
         return out;

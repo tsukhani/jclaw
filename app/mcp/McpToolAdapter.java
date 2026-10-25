@@ -122,7 +122,7 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
                     serverName, def.name(), ApiResponses.messageOf(e))));
         }
         var resourceUri = def.resourceUri();
-        var body = resourceUri != null ? result.contentWithViewData() : result.content();
+        var body = result.noted(resourceUri != null ? result.contentWithViewData() : result.content());
         var text = result.isError()
                 ? ToolErrorTemplates.render(ToolErrorTemplates.mcpToolReportedError(serverName, def.name(), body))
                 : body;
@@ -137,7 +137,7 @@ public final class McpToolAdapter implements ToolRegistry.Tool {
      */
     public @Nullable CallToolResult callFromView(JsonObject args, Agent agent) throws IOException, McpException {
         if (!allowedAndAudited(agent, args.toString(), true)) return null;
-        return invoker.invoke(serverName, def.name(), args);
+        return McpElicitations.callFromView(() -> invoker.invoke(serverName, def.name(), args));
     }
 
     /**

@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -400,6 +401,8 @@ public final class McpServerTool implements ToolRegistry.Tool {
         } catch (McpException.ResourceNotFound _) {
             return ToolRegistry.ToolResult.text("MCP server '" + serverName + "' has no resource '" + uri
                     + "'. Call " + name() + " with {} to list its resources and templates.");
+        } catch (McpException.InputRequired questions) {
+            return ToolRegistry.ToolResult.text(Objects.requireNonNullElse(questions.getMessage(), ""));
         } catch (IOException e) {
             return ToolRegistry.ToolResult.text(ToolErrorTemplates.render(
                     ToolErrorTemplates.mcpConnectionFailed(serverName, ARG_READ, ApiResponses.messageOf(e))));

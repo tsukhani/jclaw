@@ -257,6 +257,24 @@ Some servers' view tools also return useful data, such as n8n-mcp's workflow too
 
 If a tool returns its result only in the form a view reads, with no text, the agent gets that result as JSON text instead, on every channel. A tool that comes with a view often sends only a short placeholder as text; SerpAPI sends `[Rendered Prefab UI]`. When a view tool's text is 500 characters or less, the agent also gets the data the view draws, as JSON after the text, up to 16,000 characters. A longer result is cut there, with a note saying how much was shown. A tool whose text is longer, or is that same data, gets nothing added.
 
+### Questions from a server
+
+Some MCP servers stop partway through a tool call to ask a person something, such as which account to use. In web chat, JClaw puts the question to you. A form appears above the message box with the heading `Question from` and the server's name, the server's message, and the fields it asks for. The message is shown as plain text, so a link in it cannot be clicked. A field the server gives a value for starts with that value. Check and change the values, then choose:
+
+- **Submit** sends your answers to the server, and the tool call goes on. JClaw first checks each field, for example a required field left empty, a number out of range or an email address that is not one, and shows what to fix under that field. The agent gets what the tool returns after your answer.
+- **Decline** tells the server you will not answer.
+- **Cancel** tells the server you closed the question without choosing.
+
+A server can ask more than one question in one tool call. JClaw shows them one after another and sends all the answers together. You have 5 minutes for all the questions of one tool call, counted from the first; the form shows the time. When the time runs out, JClaw cancels the request, and a later question in the same call is cancelled without being shown. After **Decline**, **Cancel** or no answer, the tool's result ends with a line from JClaw saying what you did, so the agent does not ask again.
+
+Pressing **Stop** cancels the request at once. So does closing or reloading the page you sent the message from, because that stops the turn. If the conversation is also open in another tab, that tab shows the same form, and you can answer it there; reloading that other tab shows the form again.
+
+The agent never sees what you enter, only what the tool returns. JClaw records each question and what you did in [Logs](/logs) under category `MCP_ELICITATION`. The values you enter are never recorded.
+
+JClaw asks you only in web chat, in the agent's own tool calls. On Telegram, Slack, WhatsApp, voice and Apps, in a task and in a subagent, JClaw does not tell the server it can ask, so the server answers as it would anywhere. If a server asks anyway, JClaw sends it nothing back, and the agent gets the question instead: the server's message and each field's name, type and whether it is required. The agent can then fill the values in and call the tool again, ask you in chat, or use another tool. The same happens in web chat when JClaw cannot show a question: one that asks you to open a link, or a form with a field that is not text, a number, yes or no, or a choice. If any question in a call cannot be shown, none is shown, and the agent gets them all. A question asked while the agent reads a resource goes to the agent too, and so does one asked during a tool call a view makes; the view gets the question as text. A server that asks a question while JClaw lists its resources gets no answer, and the agent sees the server's actions without its resources.
+
+A server that speaks MCP v1 (see [Protocol versions](#skills-tools-mcp-protocol-versions)) cannot ask you anything: JClaw answers its question with `Method not found`.
+
 ### When a server stops answering
 
 Two independent guards keep a misbehaving server from taking a whole turn down with it:

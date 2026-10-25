@@ -26,8 +26,9 @@ import java.util.Locale;
  *                (distinct from a JSON-RPC error that means the tool never
  *                ran); only a JSON {@code true} counts, as the schema types it
  * @param raw     the result object as the server sent it
+ * @param note    JClaw's own lines on how the call went, for the agent after the server's result; empty for none
  */
-public record CallToolResult(String content, boolean isError, JsonObject raw) {
+public record CallToolResult(String content, boolean isError, JsonObject raw, String note) {
 
     private static final String FIELD_CONTENT = "content";
     private static final String FIELD_RESOURCE = "resource";
@@ -39,8 +40,23 @@ public record CallToolResult(String content, boolean isError, JsonObject raw) {
     /** Longer text is taken to carry the data itself, so the view's data is not added beside it. */
     public static final int VIEW_SHORT_TEXT_MAX_CHARS = 500;
 
+    public CallToolResult(String content, boolean isError, JsonObject raw) {
+        this(content, isError, raw, "");
+    }
+
     public CallToolResult(String content, boolean isError) {
         this(content, isError, new JsonObject());
+    }
+
+    /** This result with JClaw's {@code line} after any note it already carries. */
+    public CallToolResult withNote(String line) {
+        return new CallToolResult(content, isError, raw, note.isEmpty() ? line : note + "\n" + line);
+    }
+
+    /** {@code body}, the model's text for this result, with JClaw's note after it. */
+    public String noted(String body) {
+        if (note.isEmpty()) return body;
+        return body.isEmpty() ? note : body + "\n\n" + note;
     }
 
     /**

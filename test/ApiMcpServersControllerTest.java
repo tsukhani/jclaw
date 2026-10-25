@@ -1,3 +1,4 @@
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.JsonPrimitive;
@@ -1089,6 +1090,291 @@ class ApiMcpServersControllerTest extends FunctionalTest {
     void aViewPageNeedsTheOperatorsSession() {
         var response = view("any", "ui://page.html");
         assertEquals(401, response.status.intValue());
+    }
+
+    // ==================== MCP elicitation (a server's form) ====================
+
+    private static final String EMAIL_FORM = "{\"method\":\"elicitation/create\",\"params\":{\"mode\":\"form\","
+            + "\"message\":\"Your email?\",\"requestedSchema\":{\"type\":\"object\","
+            + "\"properties\":{\"email\":{\"type\":\"string\",\"format\":\"email\"}},\"required\":[\"email\"]}}}";
+
+    private static final String ELICITING = "{\"extensions\":{\"io.modelcontextprotocol/ui\":"
+            + "{\"mimeTypes\":[\"text/html;profile=mcp-app\"]}},\"elicitation\":{\"form\":{}}}";
+
+    private static final String NOT_ELICITING = "{\"extensions\":{\"io.modelcontextprotocol/ui\":"
+            + "{\"mimeTypes\":[\"text/html;profile=mcp-app\"]}}}";
+
+    /**
+     * A 2026-07-28 server whose tool {@code ask} answers {@code input_required} with an email form under the state
+     * {@code st/1} until a retry carries {@code inputResponses}, then completes with those responses as its text.
+     * Every {@code tools/call} it receives is added to {@code calls}.
+     */
+    private static void withAskingServer(List<JsonObject> calls, ViewCheck check) throws Exception {
+        ToolRegistrySync.canonicalForTest();
+        var name = "asks-" + UUID.randomUUID().toString().substring(0, 8);
+        try (var http = new MockWebServer()) {
+            http.setDispatcher(new Dispatcher() {
+                @Override
+                public MockResponse dispatch(RecordedRequest request) {
+                    if (!(JsonRpc.decode(request.getBody().utf8()) instanceof JsonRpc.Request r)) {
+                        return new MockResponse.Builder().code(202).build();
+                    }
+                    return switch (r.method()) {
+                        case "server/discover" -> rpc(r.id(), "{\"supportedVersions\":[\"2026-07-28\"],\"capabilities\":{\"tools\":{}}}");
+                        case "tools/list" -> rpc(r.id(), "{\"tools\":[{\"name\":\"ask\",\"description\":\"Asks.\","
+                                + "\"inputSchema\":{\"type\":\"object\"}}]}");
+                        case "tools/call" -> {
+                            var params = (JsonObject) Objects.requireNonNull(r.params());
+                            calls.add(params);
+                            var responses = params.get("inputResponses");
+                            yield responses == null
+                                    ? rpc(r.id(), "{\"resultType\":\"input_required\",\"requestState\":\"st/1\","
+                                            + "\"inputRequests\":{\"email\":" + EMAIL_FORM + "}}")
+                                    : rpc(r.id(), "{\"content\":[{\"type\":\"text\",\"text\":"
+                                            + new JsonPrimitive(responses.toString()) + "}]}");
+                        }
+                        default -> rpc(r.id(), "{}");
+                    };
+                }
+            });
+            http.start();
+            var cfg = new JsonObject();
+            cfg.addProperty("url", http.url("/mcp").toString());
+            var row = commitInFreshTx(() -> {
+                var srv = new McpServer();
+                srv.name = name;
+                srv.enabled = true;
+                srv.transport = McpServer.Transport.HTTP;
+                srv.configJson = cfg.toString();
+                srv.save();
+                return srv;
+            });
+            McpConnectionManager.connect(row);
+            var deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+            while (McpConnectionManager.status(name) != McpServer.Status.CONNECTED) {
+                if (System.nanoTime() > deadline) fail("never connected: " + McpConnectionManager.lastError(name));
+                Thread.sleep(20);
+            }
+            check.run(name);
+        } finally {
+            McpConnectionManager.stop(name);
+            CircuitBreakers.remove("mcp:" + name);
+            ToolRegistrySync.release();
+        }
+    }
+
+    /**
+     * {@code agentName}'s call of {@code server}'s {@code ask} on a turn of {@code conversationId}, at 12:00Z, through the
+     * tool the model calls: the text the agent reads.
+     */
+    private static java.util.concurrent.CompletableFuture<String> askOnTurn(long conversationId, String agentName, String server) {
+        var out = new java.util.concurrent.CompletableFuture<String>();
+        Thread.ofVirtual().start(() -> {
+            try {
+                var agent = services.Tx.run(() -> services.AgentService.findByName(agentName));
+                var tool = new mcp.McpToolAdapter(server, McpConnectionManager.tools(server).getFirst(), McpConnectionManager::callTool);
+                out.complete(utils.AppClock.callWith(java.time.Clock.fixed(java.time.Instant.parse("2026-10-25T12:00:00Z"),
+                        java.time.ZoneOffset.UTC), () -> agents.ToolContext.withScope(conversationId, null, null,
+                        new java.util.concurrent.atomic.AtomicBoolean(), () -> tool.executeRich("{}", agent).text())));
+            } catch (Throwable t) {
+                out.completeExceptionally(t);
+            }
+        });
+        return out;
+    }
+
+    private Http.Response pendingIn(Object conversationId) {
+        return GET("/api/mcp-servers/elicitations?conversationId=" + conversationId);
+    }
+
+    private JsonArray awaitPending(long conversationId) throws InterruptedException {
+        var deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+        while (System.nanoTime() < deadline) {
+            var pending = JsonParser.parseString(getContent(pendingIn(conversationId))).getAsJsonArray();
+            if (!pending.isEmpty()) return pending;
+            Thread.sleep(20);
+        }
+        throw new AssertionError("no form ever waited in conversation " + conversationId);
+    }
+
+    private Http.Response answer(String id, String body) {
+        return POST("/api/mcp-servers/elicitations/" + id, "application/json", body);
+    }
+
+    private static JsonObject body(Http.Response response) {
+        return JsonParser.parseString(getContent(response)).getAsJsonObject();
+    }
+
+    @Test
+    void theOperatorAnswersAServersFormInWebChatAndTheRetryCarriesTheValue() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<JsonObject>();
+        withAskingServer(calls, server -> {
+            var conversation = webConversation("asker", server);
+            var result = askOnTurn(conversation, "asker", server);
+            var pending = awaitPending(conversation);
+            var id = pending.get(0).getAsJsonObject().get("id").getAsString();
+            assertEquals("[{\"id\":\"" + id + "\",\"conversationId\":" + conversation + ",\"server\":\"" + server + "\","
+                    + "\"message\":\"Your email?\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{\"email\":"
+                    + "{\"type\":\"string\",\"format\":\"email\"}},\"required\":[\"email\"]},"
+                    + "\"expiresAt\":\"2026-10-25T12:05:00Z\"}]", getContent(pendingIn(conversation)));
+
+            var invalid = answer(id, "{\"action\":\"accept\",\"content\":{\"email\":\"not-an-email\"}}");
+            assertEquals(400, invalid.status.intValue());
+            assertEquals("invalid_request", body(invalid).get("code").getAsString());
+            assertEquals("Field 'email' must be an email address", body(invalid).get("message").getAsString());
+            assertEquals("email", body(invalid).get("field").getAsString());
+            var missing = answer(id, "{\"action\":\"accept\",\"content\":{}}");
+            assertEquals(400, missing.status.intValue());
+            assertEquals("Field 'email' is required", body(missing).get("message").getAsString());
+            assertEquals(1, calls.size(), "nothing went back to the server");
+            assertEquals(pending.toString(), getContent(pendingIn(conversation)), "the form stays open");
+
+            var accepted = answer(id, "{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}");
+            assertIsOk(accepted);
+            assertEquals("{\"status\":\"ok\",\"action\":\"accept\"}", getContent(accepted));
+            assertEquals("{\"email\":{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}}",
+                    result.get(10, java.util.concurrent.TimeUnit.SECONDS), "the tool's result reaches the agent");
+            assertEquals(2, calls.size());
+            assertEquals(ELICITING, calls.get(0).getAsJsonObject("_meta").get("io.modelcontextprotocol/clientCapabilities").toString());
+            assertEquals("st/1", calls.get(1).get("requestState").getAsString());
+            assertEquals("{\"email\":{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}}",
+                    calls.get(1).get("inputResponses").toString());
+            assertEquals("[]", getContent(pendingIn(conversation)));
+            assertEquals(404, answer(id, "{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}").status.intValue(),
+                    "an answered form takes no second answer");
+        });
+    }
+
+    @Test
+    void declineAndCancelGoBackToTheServerAndTheAgentIsToldWhatTheOperatorDid() throws Exception {
+        login();
+        for (var action : List.of("decline", "cancel")) {
+            var calls = new CopyOnWriteArrayList<JsonObject>();
+            withAskingServer(calls, server -> {
+                var conversation = webConversation("asker-" + action, server);
+                var result = askOnTurn(conversation, "asker-" + action, server);
+                var id = awaitPending(conversation).get(0).getAsJsonObject().get("id").getAsString();
+                var answered = answer(id, "{\"action\":\"" + action + "\"}");
+                assertEquals("{\"status\":\"ok\",\"action\":\"" + action + "\"}", getContent(answered));
+                assertEquals("{\"email\":{\"action\":\"" + action + "\"}}\n\nJClaw: the operator "
+                        + (action.equals("decline") ? "declined" : "cancelled") + " the request for input from MCP server '"
+                        + server + "'.", result.get(10, java.util.concurrent.TimeUnit.SECONDS),
+                        "the server's result, then JClaw's line, so the agent does not ask again");
+                assertEquals(2, calls.size(), "the operator's answer went back as given");
+                assertEquals("{\"email\":{\"action\":\"" + action + "\"}}", calls.get(1).get("inputResponses").toString());
+                assertEquals("[]", getContent(pendingIn(conversation)));
+            });
+        }
+    }
+
+    @Test
+    void onTelegramTheRequestDeclaresNoElicitationAndTheAgentGetsTheQuestionWithNoRetry() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<JsonObject>();
+        withAskingServer(calls, server -> {
+            webConversation("asker", server);
+            var telegram = commitInFreshTx(() -> services.ConversationService.create(
+                    services.AgentService.findByName("asker"), "telegram", "12345").id);
+            var asked = new CopyOnWriteArrayList<String>();
+            var unsubscribe = services.NotificationBus.subscribe(e -> {
+                if (e.contains("\"" + server + "\"")) asked.add(e);
+            });
+            String text;
+            try {
+                text = askOnTurn(telegram, "asker", server).get(10, java.util.concurrent.TimeUnit.SECONDS);
+            } finally {
+                unsubscribe.run();
+            }
+            assertEquals(utils.ToolErrorTemplates.render(utils.ToolErrorTemplates.mcpToolReportedError(server, "ask",
+                    "MCP server '" + server + "' asked for input that JClaw did not put to the operator, because JClaw asks"
+                            + " the operator only on a top-level web-chat turn that can be stopped, so the call ended with"
+                            + " nothing sent back. The server asked:\n- \"Your email?\" Fields: \"email\" (string, email,"
+                            + " required).\nYou can fill the values in as arguments and call again, ask in chat, or use another"
+                            + " tool.")), text);
+            assertEquals(1, calls.size(), "no answer and no retry");
+            assertEquals(NOT_ELICITING,
+                    calls.get(0).getAsJsonObject("_meta").get("io.modelcontextprotocol/clientCapabilities").toString());
+            assertEquals(List.of(), asked, "no form was announced anywhere");
+            assertEquals("[]", getContent(pendingIn(telegram)));
+            assertEquals(McpServer.Status.CONNECTED, McpConnectionManager.status(server));
+            assertEquals(utils.CircuitBreaker.State.CLOSED, McpConnectionManager.breaker(server).stats().state(),
+                    "a server asking a question is not failing");
+        });
+    }
+
+    @Test
+    void aViewsToolCallThatAsksForInputGivesTheViewTheQuestionAsText() throws Exception {
+        login();
+        var calls = new CopyOnWriteArrayList<JsonObject>();
+        withAskingServer(calls, server -> {
+            var conversation = webConversation("viewer", server);
+            var response = viewCall(conversation, server, "ask", "{}");
+            assertIsOk(response);
+            var part = new JsonObject();
+            part.addProperty("type", "text");
+            part.addProperty("text", "MCP server '" + server + "' asked for input that JClaw did not put to the operator,"
+                    + " because the call came from a view, which cannot ask the operator, so the call ended with nothing sent"
+                    + " back. The server asked:\n- \"Your email?\" Fields: \"email\" (string, email, required).\nYou can fill"
+                    + " the values in as arguments and call again, ask in chat, or use another tool.");
+            var content = new com.google.gson.JsonArray();
+            content.add(part);
+            var result = new JsonObject();
+            result.add("content", content);
+            result.addProperty("isError", true);
+            var expected = new JsonObject();
+            expected.add("result", result);
+            assertEquals(expected, JsonParser.parseString(getContent(response)));
+            assertEquals(1, calls.size(), "no answer and no retry");
+            assertEquals(NOT_ELICITING,
+                    calls.get(0).getAsJsonObject("_meta").get("io.modelcontextprotocol/clientCapabilities").toString());
+            assertEquals("[]", getContent(pendingIn(conversation)), "a view never shows a form");
+        });
+    }
+
+    @Test
+    void anAnswerToAFormNoLongerWaitingIsNotFoundAndARequestMissingItsFieldsIsRefused() {
+        login();
+        var gone = answer("no-such-form", "{\"action\":\"decline\"}");
+        assertEquals(404, gone.status.intValue());
+        assertEquals("This question is no longer waiting for an answer.", body(gone).get("message").getAsString());
+        var noConversation = GET("/api/mcp-servers/elicitations");
+        assertEquals(400, noConversation.status.intValue());
+        assertEquals("Field 'conversationId' is required", body(noConversation).get("message").getAsString());
+        assertEquals("conversationId", body(noConversation).get("field").getAsString());
+        assertEquals("[]", getContent(pendingIn(webConversation("idle"))));
+    }
+
+    @Test
+    void anUnknownActionIsRefusedNamingTheField() throws Exception {
+        login();
+        withAskingServer(new CopyOnWriteArrayList<>(), server -> {
+            var conversation = webConversation("asker", server);
+            var result = askOnTurn(conversation, "asker", server);
+            var id = awaitPending(conversation).get(0).getAsJsonObject().get("id").getAsString();
+            var refused = answer(id, "{\"action\":\"approve\"}");
+            assertEquals(400, refused.status.intValue());
+            assertEquals("Field 'action' must be accept, decline or cancel", body(refused).get("message").getAsString());
+            assertEquals("action", body(refused).get("field").getAsString());
+            assertFalse(result.isDone());
+            answer(id, "{\"action\":\"cancel\"}");
+            assertEquals("{\"email\":{\"action\":\"cancel\"}}\n\nJClaw: the operator cancelled the request for input from"
+                    + " MCP server '" + server + "'.", result.get(10, java.util.concurrent.TimeUnit.SECONDS));
+        });
+    }
+
+    @Test
+    void onlyTheOperatorsSessionSeesOrAnswersAForm() {
+        assertEquals(401, pendingIn(1).status.intValue());
+        assertEquals(401, answer("any", "{\"action\":\"decline\"}").status.intValue());
+        for (var agent : List.of(true, false)) {
+            var request = newRequest();
+            request.headers.put("authorization", new Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+            var refused = agent ? GET(request, "/api/mcp-servers/elicitations?conversationId=1")
+                    : POST(request, "/api/mcp-servers/elicitations/any", "application/json", "{\"action\":\"decline\"}");
+            assertEquals(403, refused.status.intValue());
+            assertEquals("This endpoint is operator-only; an agent principal cannot call it.", body(refused).get("message").getAsString());
+        }
     }
 
     // ==================== helpers ====================

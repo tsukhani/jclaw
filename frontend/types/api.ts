@@ -256,6 +256,41 @@ export interface McpAppCall {
   result: Record<string, unknown>
 }
 
+/** A titled choice of an MCP form field: {@code oneOf} for a single select, {@code anyOf} for a multi-select's items. */
+export interface McpElicitationOption {
+  const?: unknown
+  title?: unknown
+}
+
+/** One field of an MCP server's form, as its {@code requestedSchema} declares it; the form is flat. */
+export interface McpElicitationField {
+  type?: string
+  title?: string
+  description?: string
+  format?: string
+  enum?: unknown[]
+  oneOf?: McpElicitationOption[]
+  items?: { type?: string, enum?: unknown[], anyOf?: McpElicitationOption[] }
+  minimum?: number
+  maximum?: number
+  minLength?: number
+  maxLength?: number
+  minItems?: number
+  maxItems?: number
+  default?: unknown
+}
+
+/** A form an MCP server is waiting on the operator to answer in a web-chat conversation (MCP elicitation). */
+export interface McpElicitation {
+  id: string
+  conversationId: number
+  server: string
+  message: string
+  requestedSchema: { type?: string, properties?: Record<string, McpElicitationField>, required?: string[] }
+  /** ISO instant after which JClaw cancels the request. */
+  expiresAt: string
+}
+
 /** The job a background {@code web_scrape} call started, as its tool result names it. */
 export interface ScrapeJobRef {
   id: number

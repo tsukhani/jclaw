@@ -3,6 +3,7 @@ package controllers;
 import agents.ToolRegistry;
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
+import com.google.gson.JsonPrimitive;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -12,6 +13,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import mcp.CallToolResult;
 import mcp.McpAppPage;
 import mcp.McpConnectionManager;
+import mcp.McpElicitations;
 import mcp.McpToolAdapter;
 import mcp.McpViewTools;
 import models.Agent;
@@ -39,7 +41,7 @@ import static utils.GsonHolder.GSON;
 /**
  * Admin CRUD over the {@code mcp_server} table (JCLAW-33).
  *
- * <p>Eight endpoints:
+ * <p>Ten endpoints:
  *
  * <ul>
  *   <li>{@code GET /api/mcp-servers} — list with merged DB + runtime state</li>
@@ -55,6 +57,8 @@ import static utils.GsonHolder.GSON;
  *       success+tool count or error message</li>
  *   <li>{@code GET /api/mcp-servers/view} — an MCP Apps view page, for the web chat's frame</li>
  *   <li>{@code POST /api/mcp-servers/view/call} — a tool call from that view, on its own server</li>
+ *   <li>{@code GET /api/mcp-servers/elicitations} — the servers' forms waiting in a web-chat conversation</li>
+ *   <li>{@code POST /api/mcp-servers/elicitations/{id}} — the operator's answer to one of them</li>
  * </ul>
  *
  * <p>The {@code mcp_server} table is operator-wide — JClaw is
@@ -73,6 +77,8 @@ public class ApiMcpServersController extends Controller {
 
     public record ViewCallRequest(Long conversationId, String server, String tool, Map<String, Object> arguments) {}
 
+    public record ElicitationAnswer(String action, Map<String, Object> content) {}
+
     // A view's tool call is refused with JClaw's own words; a server's error text never reaches the view.
     private static final String VIEW_NOT_CONNECTED = "The server is not connected.";
     private static final String VIEW_NEEDS_APPROVAL = "This server needs approval for each call, which a view cannot give.";
@@ -87,6 +93,8 @@ public class ApiMcpServersController extends Controller {
     private static final String KEY_REQUIRES_APPROVAL = "requiresApproval";
     private static final String KEY_VIEW_TOOLS_EVERYWHERE = "offerViewToolsEverywhere";
     private static final String KEY_PROTOCOL = "protocol";
+    /** The extra key on a 400 that names the form field it is about. */
+    private static final String KEY_FIELD = "field";
 
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.View.class))))
     @Operation(summary = "List MCP servers with status and tool count")
@@ -332,6 +340,45 @@ public class ApiMcpServersController extends Controller {
         }
         renderJSON(gson.toJson(callForView(agent, server, tool,
                 arguments instanceof JsonObject args ? args : new JsonObject())));
+    }
+
+    /**
+     * GET /api/mcp-servers/elicitations — the forms MCP servers are waiting on the operator to answer in a web-chat
+     * conversation, oldest first.
+     */
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpElicitations.Question.class))))
+    @Operation(summary = "List the MCP servers' forms waiting for the operator in a web-chat conversation")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "a server's question is the operator's to answer")
+    public static void elicitations(@Nullable Long conversationId) {
+        if (conversationId == null) {
+            ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Field 'conversationId' is required", KEY_FIELD, "conversationId");
+            throw ApiResponses.unreachable();
+        }
+        renderJSON(gson.toJson(McpElicitations.pendingFor(conversationId)));
+    }
+
+    /**
+     * POST /api/mcp-servers/elicitations/{id} — the operator's answer to a server's form: {@code accept} with its
+     * values, {@code decline} or {@code cancel}. An accept that fails the form's schema is a 400 naming the field,
+     * and the form stays open; a form no longer waiting is a 404.
+     */
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = ElicitationAnswer.class)))
+    @Operation(summary = "Answer an MCP server's form: accept with its values, decline or cancel")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "only the operator answers a server's question")
+    public static void answerElicitation(String id) {
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
+        var action = body.get("action") instanceof JsonPrimitive p && p.isString() ? p.getAsString() : null;
+        switch (McpElicitations.resolve(id, action, body.get("content"))) {
+            case McpElicitations.Outcome.Answered answered -> ApiResponses.ok("action", answered.action());
+            case McpElicitations.Outcome.NotPending _ ->
+                    ApiResponses.error(404, ApiResponses.NOT_FOUND, "This question is no longer waiting for an answer.");
+            case McpElicitations.Outcome.Refused refused ->
+                    ApiResponses.error(400, ApiResponses.INVALID_REQUEST, refused.message(), KEY_FIELD, refused.field());
+        }
     }
 
     private static JsonObject callForView(Agent agent, String server, String tool, JsonObject arguments) {

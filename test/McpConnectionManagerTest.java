@@ -1141,6 +1141,35 @@ class McpConnectionManagerTest extends UnitTest {
     }
 
     @Test
+    void aReadThatAsksForInputGivesTheModelTheQuestionAndLeavesTheBreakerClosed() throws Exception {
+        var reader = commitInFreshTx(() -> seedAgent("reader"));
+        var seen = new CopyOnWriteArrayList<JsonRpc.Request>();
+        String name = null;
+        try (var http = capableHttp(RESOURCE_CAPS, seen, r -> r.method().equals("resources/read")
+                ? rpc(200, r.id(), "{\"resultType\":\"input_required\",\"inputRequests\":{\"q\":{\"method\":"
+                        + "\"elicitation/create\",\"params\":{\"message\":\"Which file?\",\"requestedSchema\":"
+                        + "{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}}}}}").build()
+                : serpapiResources().reply(r))) {
+            name = connectHttp("asking", http);
+            awaitState(name, McpServer.Status.CONNECTED, 10);
+            var tool = new McpServerTool(name);
+            // Three failures in a row open the breaker; a server asking a question has not failed.
+            for (var i = 0; i < 3; i++) {
+                assertEquals("MCP server '" + name + "' asked for input that JClaw did not put to the operator, because"
+                        + " JClaw does not ask the operator during a resource read or a listing, so the call ended with"
+                        + " nothing sent back. The server asked:\n- \"Which file?\" Fields: \"path\" (string).\nYou can"
+                        + " fill the values in as arguments and call again, ask in chat, or use another tool.",
+                        tool.execute(readOf("x://a"), reader), "read " + i);
+            }
+            assertEquals(3, sent(seen, "resources/read"), "each read is sent once, never retried");
+            assertEquals(CircuitBreaker.State.CLOSED, McpConnectionManager.breaker(name).state());
+            assertEquals(McpServer.Status.CONNECTED, McpConnectionManager.status(name));
+        } finally {
+            stopHttp(name);
+        }
+    }
+
+    @Test
     void aReadRefusalAndEmptyContentsReachTheModelInJClawsOwnWords() throws Exception {
         var reader = commitInFreshTx(() -> seedAgent("reader"));
         String name = null;

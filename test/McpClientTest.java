@@ -1,7 +1,10 @@
+import agents.ToolContext;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import mcp.McpClient;
+import mcp.McpElicitations;
 import mcp.McpEraDetection;
 import mcp.McpException;
 import mcp.McpResources;
@@ -26,11 +29,15 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -256,6 +263,14 @@ class McpClientTest extends UnitTest {
             assertEquals(99L, reply.id());
             assertTrue(reply.isError());
             assertEquals(-32601, reply.error().code());
+
+            // The handshake era's elicitation/create is not offered: it is refused like any other server request.
+            transport.deliver(new JsonRpc.Request(100L, "elicitation/create", JsonParser.parseString(
+                    "{\"message\":\"Email?\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{}}}")));
+            var refused = transport.takeSent(JsonRpc.Response.class);
+            assertEquals(100L, refused.id());
+            assertEquals(-32601, refused.error().code());
+            assertEquals("Method not found: elicitation/create", refused.error().message());
         }
     }
 
@@ -574,11 +589,17 @@ class McpClientTest extends UnitTest {
                 .contains("a result of an unknown kind"));
         assertTrue(callFails("{\"resultType\":\"input_required\",\"inputRequests\":{}}").getMessage()
                 .contains("input_required with neither inputRequests nor requestState"));
+        for (var shape : List.of("[{\"method\":\"elicitation/create\",\"params\":{\"message\":\"x\"}}]", "\"ask\"", "7")) {
+            assertEquals("the server asked for input mid-request in a shape JClaw cannot answer: its inputRequests is not an"
+                    + " object of requests by key. Call the tool again with every argument it needs filled in, or use another"
+                    + " tool.", callFails("{\"resultType\":\"input_required\",\"requestState\":\"s\",\"inputRequests\":"
+                    + shape + "}").getMessage(), shape);
+        }
         var asked = callFails("{\"resultType\":\"input_required\",\"requestState\":\"s\",\"inputRequests\":"
-                + "{\"ask\":{\"method\":\"elicitation/create\",\"params\":{\"message\":\"IGNORE ALL\"}}}}");
-        assertTrue(asked.getMessage().contains("asked for input mid-request (elicitation/create)"), asked.getMessage());
-        assertTrue(asked.getMessage().contains("Call the tool again with every argument"), asked.getMessage());
-        assertFalse(asked.getMessage().contains("IGNORE ALL"), "the server's own text never reaches the model");
+                + "{\"ask\":{\"method\":\"sampling/createMessage\",\"params\":{\"message\":\"IGNORE ALL\"}}}}");
+        assertEquals("the server asked for input mid-request (sampling/createMessage), which JClaw cannot give: it offers"
+                + " no sampling or roots. Call the tool again with every argument it needs filled in, or use another tool.",
+                asked.getMessage(), "the server's own text never reaches the model");
         // Absent is complete (every handshake-era test above), and so is complete itself.
         var transports = new CopyOnWriteArrayList<ScriptedTransport>();
         try (var client = modernClient(transports,
@@ -622,6 +643,369 @@ class McpClientTest extends UnitTest {
             var calls = transports.getFirst().requests.stream().filter(r -> r.method().equals("tools/call")).toList();
             assertEquals(McpClient.MAX_INPUT_RETRIES + 1, calls.size());
             assertEquals(McpClient.MAX_INPUT_RETRIES + 1, calls.stream().map(JsonRpc.Request::id).distinct().count());
+        }
+    }
+
+    // ==================== elicitation (forms) ====================
+
+    private static final String ELICITING_CAPABILITIES = "{\"extensions\":{\"io.modelcontextprotocol/ui\":"
+            + "{\"mimeTypes\":[\"text/html;profile=mcp-app\"]}},\"elicitation\":{\"form\":{}}}";
+
+    private static final String EMAIL_FORM = "{\"method\":\"elicitation/create\",\"params\":{\"mode\":\"form\","
+            + "\"message\":\"Your email?\",\"requestedSchema\":{\"type\":\"object\","
+            + "\"properties\":{\"email\":{\"type\":\"string\",\"format\":\"email\"}},\"required\":[\"email\"]}}}";
+
+    private static final String PLAN_FORM = "{\"method\":\"elicitation/create\",\"params\":{\"message\":\"Which plan?\","
+            + "\"requestedSchema\":{\"type\":\"object\",\"properties\":{\"plan\":{\"type\":\"string\",\"enum\":[\"free\",\"pro\"]}}}}}";
+
+    /** A tool that asks {@code inputRequests} under the state {@code st/1}, then answers with the responses it got. */
+    private static Script asking(String inputRequests) {
+        return (_, r) -> {
+            var responses = ((JsonObject) Objects.requireNonNull(r.params())).get("inputResponses");
+            if (responses == null) {
+                return ok(r, "{\"resultType\":\"input_required\",\"requestState\":\"st/1\",\"inputRequests\":"
+                        + inputRequests + "}");
+            }
+            return ok(r, "{\"resultType\":\"complete\",\"content\":[{\"type\":\"text\",\"text\":"
+                    + new JsonPrimitive(responses.toString()) + "}]}");
+        };
+    }
+
+    private static <T> T commitInFreshTx(Callable<T> block) {
+        var holder = new AtomicReference<T>();
+        var err = new AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                holder.set(services.Tx.run(() -> {
+                    try { return block.call(); }
+                    catch (Exception e) { throw new RuntimeException(e); }
+                }));
+            } catch (Throwable e) {
+                err.set(e);
+            }
+        });
+        try { t.join(); } catch (InterruptedException _) { Thread.currentThread().interrupt(); }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return holder.get();
+    }
+
+    /** A top-level conversation on {@code channel} of a new agent. */
+    private static long conversation(String channel) {
+        return commitInFreshTx(() -> {
+            var agent = services.AgentService.create("mcp-elicit-" + UUID.randomUUID().toString().substring(0, 8),
+                    "openrouter", "gpt-4.1");
+            return services.ConversationService.create(agent, channel, "web".equals(channel) ? "admin" : "peer-1").id;
+        });
+    }
+
+    @FunctionalInterface
+    private interface TurnBody<T> {
+        T run() throws Exception;
+    }
+
+    /** {@code body} on a virtual thread, as a tool dispatched on {@code conversationId}'s turn runs. */
+    private static <T> CompletableFuture<T> onTurn(long conversationId, TurnBody<T> body) {
+        var out = new CompletableFuture<T>();
+        Thread.ofVirtual().start(() -> {
+            try {
+                out.complete(ToolContext.withScope(conversationId, null, null, new AtomicBoolean(), () -> {
+                    try {
+                        return body.run();
+                    } catch (RuntimeException e) {
+                        throw e;
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                }));
+            } catch (Throwable t) {
+                out.completeExceptionally(t);
+            }
+        });
+        return out;
+    }
+
+    private static McpElicitations.Question awaitQuestion(long conversationId, String message) throws InterruptedException {
+        var deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (System.nanoTime() < deadline) {
+            for (var q : McpElicitations.pendingFor(conversationId)) {
+                if (q.message().equals(message)) return q;
+            }
+            Thread.sleep(10);
+        }
+        throw new AssertionError("no form '" + message + "' ever waited in conversation " + conversationId);
+    }
+
+    private static String capabilities(JsonRpc.Request request) {
+        return ((JsonObject) Objects.requireNonNull(request.params())).getAsJsonObject("_meta")
+                .get("io.modelcontextprotocol/clientCapabilities").toString();
+    }
+
+    private static List<JsonRpc.Request> calls(ScriptedTransport t) {
+        return t.requests.stream().filter(r -> r.method().equals("tools/call")).toList();
+    }
+
+    @Test
+    void onlyAToolCallFromAWebChatTurnDeclaresFormElicitation() throws Exception {
+        // A read or a listing is not the agent's tool call, so nothing it asks is put to the operator.
+        var web = conversation("web");
+        var telegram = conversation("telegram");
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        Script server = (_, r) -> switch (r.method()) {
+            case "server/discover" -> ok(r, "{\"supportedVersions\":[\"2026-07-28\"],\"capabilities\":" + RESOURCE_CAPS + "}");
+            case "tools/list" -> ok(r, TOOLS);
+            case "resources/list" -> ok(r, "{\"resources\":[]}");
+            case "resources/templates/list" -> ok(r, "{\"resourceTemplates\":[]}");
+            case "resources/read" -> ok(r, "{\"contents\":[{\"uri\":\"x://a\",\"text\":\"a\"}]}");
+            default -> ok(r, "{\"content\":[]}");
+        };
+        // Connected on the web-chat turn, so even its tools/list is a request made from one.
+        try (var client = onTurn(web, () -> McpEraDetection.open("fake", McpServer.Protocol.AUTOMATIC, false,
+                clients(transports, () -> server, Duration.ofSeconds(5))).client()).get(10, TimeUnit.SECONDS)) {
+            onTurn(web, () -> client.callTool("echo", new JsonObject())).get(10, TimeUnit.SECONDS);
+            onTurn(web, () -> client.readResource("x://a")).get(10, TimeUnit.SECONDS);
+            onTurn(web, client::listResources).get(10, TimeUnit.SECONDS);
+            onTurn(telegram, () -> client.callTool("echo", new JsonObject())).get(10, TimeUnit.SECONDS);
+            client.callTool("echo", new JsonObject());
+            var sent = transports.getFirst().requests.stream()
+                    .map(r -> r.method() + " " + (capabilities(r).equals(ELICITING_CAPABILITIES) ? "forms"
+                            : capabilities(r).equals(UI_CAPABILITIES) ? "no forms" : capabilities(r)))
+                    .toList();
+            assertEquals(List.of("server/discover no forms", "tools/list no forms", "tools/call forms", "resources/read no forms",
+                    "resources/list no forms", "resources/templates/list no forms", "tools/call no forms", "tools/call no forms"),
+                    sent);
+        }
+    }
+
+    @Test
+    void theHandshakeEraDeclaresNoElicitationEvenOnAWebChatTurn() throws Exception {
+        var web = conversation("web");
+        var t = new ScriptedTransport(handshakeEra(null));
+        try (var client = new McpClient("test", t, "0.0.1")) {
+            onTurn(web, () -> {
+                client.connect();
+                return client.callTool("echo", new JsonObject());
+            }).get(10, TimeUnit.SECONDS);
+            var init = t.requests.stream().filter(r -> r.method().equals("initialize")).findFirst().orElseThrow();
+            assertEquals(UI_CAPABILITIES, ((JsonObject) Objects.requireNonNull(init.params())).get("capabilities").toString());
+            var call = calls(t).getFirst();
+            assertNull(((JsonObject) Objects.requireNonNull(call.params())).get("_meta"), "a handshake-era call carries no _meta");
+        }
+    }
+
+    @Test
+    void aSubmittedFormGoesBackInInputResponsesWithTheEchoedStateAndTheResultReachesTheCaller() throws Exception {
+        var web = conversation("web");
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = modernClient(transports, asking("{\"email\":" + EMAIL_FORM + "}"))) {
+            var args = new JsonObject();
+            args.addProperty("q", "x");
+            var result = onTurn(web, () -> client.callTool("echo", args));
+            var question = awaitQuestion(web, "Your email?");
+            assertEquals("fake", question.server());
+            assertEquals(JsonParser.parseString("{\"type\":\"object\",\"properties\":{\"email\":{\"type\":\"string\","
+                    + "\"format\":\"email\"}},\"required\":[\"email\"]}"), question.requestedSchema());
+            assertEquals(new McpElicitations.Outcome.Answered("accept"), McpElicitations.resolve(question.id(), "accept",
+                    JsonParser.parseString("{\"email\":\"ops@example.com\"}")));
+
+            var got = result.get(10, TimeUnit.SECONDS);
+            assertEquals("{\"email\":{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}}",
+                    got.content(), "the tool's result reaches the agent");
+            assertEquals("", got.note(), "the server's own result answers a submit");
+            assertFalse(got.isError());
+            var sent = calls(transports.getFirst());
+            assertEquals(2, sent.size());
+            assertNotEquals(sent.get(0).id(), sent.get(1).id());
+            var retry = (JsonObject) Objects.requireNonNull(sent.get(1).params());
+            assertEquals("st/1", retry.get("requestState").getAsString());
+            assertEquals("{\"email\":{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}}",
+                    retry.get("inputResponses").toString());
+            assertEquals(args, retry.get("arguments"));
+            assertEquals("echo", retry.get("name").getAsString());
+            assertEquals(ELICITING_CAPABILITIES, capabilities(sent.get(1)), "the retry declares what the first request did");
+            assertEquals(List.of(), McpElicitations.pendingFor(web));
+        }
+    }
+
+    @Test
+    void declineAndCancelGoBackAsTheirActionAndTheResultSaysWhatTheOperatorDid() throws Exception {
+        for (var action : List.of("decline", "cancel")) {
+            var web = conversation("web");
+            var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+            try (var client = modernClient(transports, asking("{\"email\":" + EMAIL_FORM + "}"))) {
+                var result = onTurn(web, () -> client.callTool("echo", new JsonObject()));
+                McpElicitations.resolve(awaitQuestion(web, "Your email?").id(), action, null);
+                var got = result.get(10, TimeUnit.SECONDS);
+                assertEquals("{\"email\":{\"action\":\"" + action + "\"}}", got.content(), action);
+                assertEquals("JClaw: the operator " + (action.equals("decline") ? "declined" : "cancelled")
+                        + " the request for input from MCP server 'fake'.", got.note(), action);
+                assertEquals(2, calls(transports.getFirst()).size(), "the answer went back as given");
+            }
+        }
+    }
+
+    private static final String EMAIL_QUESTION_FOR_AGENT = "MCP server 'fake' asked for input that JClaw did not put to"
+            + " the operator, because JClaw asks the operator only on a top-level web-chat turn that can be stopped, so the"
+            + " call ended with nothing sent back. The server asked:\n- \"Your email?\" Fields: \"email\" (string, email,"
+            + " required).\nYou can fill the values in as arguments and call again, ask in chat, or use another tool.";
+
+    @Test
+    void offAWebChatTurnTheAgentGetsTheQuestionAndTheServerNoRetry() throws Exception {
+        var telegram = conversation("telegram");
+        for (var turn : List.of("telegram", "no turn")) {
+            var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+            try (var client = modernClient(transports, asking("{\"email\":" + EMAIL_FORM + "}"))) {
+                var result = turn.equals("no turn") ? client.callTool("echo", new JsonObject())
+                        : onTurn(telegram, () -> client.callTool("echo", new JsonObject())).get(10, TimeUnit.SECONDS);
+                assertEquals(EMAIL_QUESTION_FOR_AGENT, result.content(), turn);
+                assertTrue(result.isError(), turn + ": the call ended unfinished");
+                var sent = calls(transports.getFirst());
+                assertEquals(1, sent.size(), turn + ": no answer and no retry");
+                assertEquals(UI_CAPABILITIES, capabilities(sent.get(0)), turn + ": the request declared no elicitation");
+                assertEquals(List.of(), McpElicitations.pendingFor(telegram), turn);
+                assertEquals(McpClient.State.READY, client.state(), "the connection stands");
+            }
+        }
+    }
+
+    @Test
+    void whenOneFormCannotBeShownNeitherIsAskedAndTheAgentGetsBoth() throws Exception {
+        var web = conversation("web");
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        var url = "{\"method\":\"elicitation/create\",\"params\":{\"mode\":\"url\",\"message\":\"Sign in\","
+                + "\"url\":\"https://example.com/login\",\"elicitationId\":\"e1\"}}";
+        try (var client = modernClient(transports, asking("{\"email\":" + EMAIL_FORM + ",\"login\":" + url + "}"))) {
+            var result = onTurn(web, () -> client.callTool("echo", new JsonObject())).get(10, TimeUnit.SECONDS);
+            assertEquals("MCP server 'fake' asked for input that JClaw did not put to the operator, because a question asks"
+                    + " the operator to open a link, which JClaw does not do, so the call ended with nothing sent back. The"
+                    + " server asked:\n- \"Your email?\" Fields: \"email\" (string, email, required).\n- \"Sign in\" (a link"
+                    + " to open)\nYou can fill the values in as arguments and call again, ask in chat, or use another tool.",
+                    result.content());
+            assertEquals(List.of(), McpElicitations.pendingFor(web), "no form was shown");
+            assertEquals(1, calls(transports.getFirst()).size());
+        }
+    }
+
+    @Test
+    void twoFormsAreAskedInTurnAndAnsweredInOneRetry() throws Exception {
+        var web = conversation("web");
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = modernClient(transports,
+                asking("{\"email\":" + EMAIL_FORM + ",\"plan\":" + PLAN_FORM + "}"))) {
+            var result = onTurn(web, () -> client.callTool("echo", new JsonObject()));
+            var first = awaitQuestion(web, "Your email?");
+            assertEquals(List.of(first), McpElicitations.pendingFor(web), "one form at a time");
+            McpElicitations.resolve(first.id(), "accept", JsonParser.parseString("{\"email\":\"ops@example.com\"}"));
+            var second = awaitQuestion(web, "Which plan?");
+            McpElicitations.resolve(second.id(), "accept", JsonParser.parseString("{\"plan\":\"pro\"}"));
+            assertEquals("{\"email\":{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}},"
+                    + "\"plan\":{\"action\":\"accept\",\"content\":{\"plan\":\"pro\"}}}", result.get(10, TimeUnit.SECONDS).content());
+            assertEquals(2, calls(transports.getFirst()).size(), "one retry carries both answers");
+        }
+    }
+
+    @Test
+    void oneWaitCoversTheCallSoAFormAfterOneThatTimedOutIsNeverShownAndBothCancel() throws Exception {
+        var web = conversation("web");
+        var announced = new CopyOnWriteArrayList<String>();
+        var unsubscribe = services.NotificationBus.subscribe(e -> {
+            if (e.contains("\"type\":\"mcp.elicitation\"") && e.contains("\"conversationId\":" + web + ",")) announced.add(e);
+        });
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = modernClient(transports, asking("{\"email\":" + EMAIL_FORM + ",\"plan\":" + PLAN_FORM + "}"))) {
+            var result = onTurn(web, () -> McpElicitations.callWithWaitForTest(Duration.ofMillis(300), () -> {
+                try {
+                    return client.callTool("echo", new JsonObject());
+                } catch (IOException e) {
+                    throw new java.io.UncheckedIOException(e);
+                }
+            })).get(10, TimeUnit.SECONDS);
+            assertEquals("{\"email\":{\"action\":\"cancel\"},\"plan\":{\"action\":\"cancel\"}}", result.content());
+            assertEquals("JClaw: the operator did not answer the request for input from MCP server 'fake' within 0.3 seconds.",
+                    result.note());
+            assertEquals(1, announced.size(), "the second form was never shown: " + announced);
+            assertTrue(announced.getFirst().contains("\"message\":\"Your email?\""), announced.getFirst());
+            assertEquals(2, calls(transports.getFirst()).size(), "one retry carries both cancels");
+        } finally {
+            unsubscribe.run();
+        }
+    }
+
+    @Test
+    void aQuestionHandedToTheAgentAfterAnAnsweredOneKeepsWhatTheOperatorDid() throws Exception {
+        var web = conversation("web");
+        var url = "{\"method\":\"elicitation/create\",\"params\":{\"mode\":\"url\",\"message\":\"Sign in\","
+                + "\"url\":\"https://example.com/login\",\"elicitationId\":\"e1\"}}";
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        Script twoRounds = (_, r) -> ((JsonObject) Objects.requireNonNull(r.params())).get("inputResponses") == null
+                ? ok(r, "{\"resultType\":\"input_required\",\"inputRequests\":{\"email\":" + EMAIL_FORM + "}}")
+                : ok(r, "{\"resultType\":\"input_required\",\"inputRequests\":{\"login\":" + url + "}}");
+        try (var client = modernClient(transports, twoRounds)) {
+            var result = onTurn(web, () -> client.callTool("echo", new JsonObject()));
+            McpElicitations.resolve(awaitQuestion(web, "Your email?").id(), "decline", null);
+            assertEquals("MCP server 'fake' asked for input that JClaw did not put to the operator, because a question asks"
+                    + " the operator to open a link, which JClaw does not do, so the call ended with nothing sent back. The"
+                    + " server asked:\n- \"Sign in\" (a link to open)\nYou can fill the values in as arguments and call"
+                    + " again, ask in chat, or use another tool.\nJClaw: the operator declined the request for input from MCP"
+                    + " server 'fake'.", result.get(10, TimeUnit.SECONDS).content());
+            assertEquals(2, calls(transports.getFirst()).size());
+        }
+    }
+
+    @Test
+    void noRequestTimeoutRunsWhileTheOperatorAnswers() throws Exception {
+        var web = conversation("web");
+        var t = new ScriptedTransport(modernOnly(asking("{\"email\":" + EMAIL_FORM + "}")));
+        try (var client = new McpClient("fake", t, "0.0.1", Duration.ofSeconds(5), Duration.ofMillis(300),
+                McpClient.Opening.PROBE)) {
+            client.connect();
+            var result = onTurn(web, () -> client.callTool("echo", new JsonObject()));
+            var question = awaitQuestion(web, "Your email?");
+            Thread.sleep(900);
+            assertFalse(result.isDone(), "three request budgets later the call still waits for the operator");
+            McpElicitations.resolve(question.id(), "accept", JsonParser.parseString("{\"email\":\"ops@example.com\"}"));
+            assertEquals("{\"email\":{\"action\":\"accept\",\"content\":{\"email\":\"ops@example.com\"}}}",
+                    result.get(10, TimeUnit.SECONDS).content());
+            assertEquals(List.of(), t.cancelled, "nothing timed out");
+        }
+    }
+
+    @Test
+    void aFormBesideARequestOfAnotherKindFailsTheCallWithNoFormShown() throws Exception {
+        var web = conversation("web");
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = modernClient(transports, asking("{\"email\":" + EMAIL_FORM
+                + ",\"roots\":{\"method\":\"roots/list\"}}"))) {
+            var ex = assertThrows(java.util.concurrent.ExecutionException.class,
+                    () -> onTurn(web, () -> client.callTool("echo", new JsonObject())).get(10, TimeUnit.SECONDS));
+            assertEquals("the server asked for input mid-request (roots/list), which JClaw cannot give: it offers no sampling"
+                    + " or roots. Call the tool again with every argument it needs filled in, or use another tool.",
+                    ex.getCause().getMessage());
+            assertEquals(List.of(), McpElicitations.pendingFor(web));
+            assertEquals(1, calls(transports.getFirst()).size());
+        }
+    }
+
+    @Test
+    void aServerThatKeepsAskingStopsAtTheBoundWithoutShowingAnotherForm() throws Exception {
+        var web = conversation("web");
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = modernClient(transports, (_, r) -> ok(r,
+                "{\"resultType\":\"input_required\",\"inputRequests\":{\"email\":" + EMAIL_FORM + "}}"))) {
+            var result = onTurn(web, () -> client.callTool("echo", new JsonObject()));
+            var answered = 0;
+            var deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+            while (!result.isDone() && System.nanoTime() < deadline) {
+                for (var q : McpElicitations.pendingFor(web)) {
+                    if (McpElicitations.resolve(q.id(), "decline", null) instanceof McpElicitations.Outcome.Answered) answered++;
+                }
+                Thread.sleep(10);
+            }
+            var ex = assertThrows(java.util.concurrent.ExecutionException.class, () -> result.get(1, TimeUnit.SECONDS));
+            assertEquals("tools/call still asked for another round after " + McpClient.MAX_INPUT_RETRIES
+                    + " retries, so JClaw stopped: the server never completed the request\nJClaw: the operator declined the"
+                    + " request for input from MCP server 'fake'.", ex.getCause().getMessage(), "the operator's answers stay told");
+            assertEquals(McpClient.MAX_INPUT_RETRIES, answered, "a form is shown only for a retry JClaw will make");
+            assertEquals(McpClient.MAX_INPUT_RETRIES + 1, calls(transports.getFirst()).size());
         }
     }
 
@@ -1274,13 +1658,17 @@ class McpClientTest extends UnitTest {
     }
 
     @Test
-    void aReadThatAsksForInputGetsTheElicitationRefusalAToolCallGets() throws Exception {
-        try (var client = resourceClient(true, new CopyOnWriteArrayList<>(), (_, r) -> ok(r,
-                "{\"resultType\":\"input_required\",\"inputRequests\":{\"q\":{\"method\":\"elicitation/create\"}}}"))) {
-            var ex = assertThrows(McpException.class, () -> client.readResource("x://a"));
-            assertEquals("the server asked for input mid-request (elicitation/create), which JClaw cannot give: it"
-                    + " offers no elicitation, sampling or roots. Call the tool again with every argument it needs filled"
-                    + " in, or use another tool.", ex.getMessage());
+    void aReadThatAsksForInputGivesTheAgentTheQuestionAndIsNotRetried() throws Exception {
+        var transports = new CopyOnWriteArrayList<ScriptedTransport>();
+        try (var client = resourceClient(true, transports, (_, r) -> ok(r,
+                "{\"resultType\":\"input_required\",\"inputRequests\":{\"q\":{\"method\":\"elicitation/create\","
+                        + "\"params\":{\"message\":\"Which file?\",\"requestedSchema\":{\"type\":\"object\"}}}}}"))) {
+            var ex = assertThrows(McpException.InputRequired.class, () -> client.readResource("x://a"));
+            assertEquals("MCP server 'fake' asked for input that JClaw did not put to the operator, because JClaw does not"
+                    + " ask the operator during a resource read or a listing, so the call ended with nothing sent back. The"
+                    + " server asked:\n- \"Which file?\" (no fields)\nYou can fill the values in as arguments and call"
+                    + " again, ask in chat, or use another tool.", ex.getMessage());
+            assertEquals(1, transports.getFirst().requests.stream().filter(r -> r.method().equals("resources/read")).count());
         }
     }
 

@@ -54,6 +54,8 @@ import ChatAgentSelector from '~/components/chat/ChatAgentSelector.vue'
 import ChatSubagentStack from '~/components/chat/ChatSubagentStack.vue'
 import ChatSubagentTranscriptPanel from '~/components/chat/ChatSubagentTranscriptPanel.vue'
 import ChatChecklist from '~/components/chat/ChatChecklist.vue'
+import McpElicitationForm from '~/components/chat/McpElicitationForm.vue'
+import { useMcpElicitations } from '~/composables/useMcpElicitations'
 import { hasOpenItem } from '~/utils/checklist'
 
 // Issued before either await so the two round trips overlap — in an SPA Nuxt
@@ -319,6 +321,9 @@ const {
   expandedId: expandedSubagentChipId,
   toggleExpanded: toggleSubagentChip,
 } = useChatSubagentChips(selectedConvoId, streaming)
+
+// An MCP server's form waiting on the operator in this conversation, one at a time.
+const { current: mcpElicitation, remove: dropMcpElicitation } = useMcpElicitations(selectedConvoId)
 
 // Token-usage + cost meter (latest-turn usage, cumulative tokens, running cost
 // recomputed only when idle, and the JCLAW-108 model-switch divider predicate)
@@ -1056,6 +1061,13 @@ function exportConversation() {
           v-if="openChecklist"
           :items="openChecklist"
           :running="streaming && liveChecklist !== null"
+        />
+
+        <McpElicitationForm
+          v-if="mcpElicitation"
+          :key="mcpElicitation.id"
+          :elicitation="mcpElicitation"
+          @done="dropMcpElicitation"
         />
 
         <!-- Input -->

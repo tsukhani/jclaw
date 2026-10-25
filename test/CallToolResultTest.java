@@ -180,4 +180,16 @@ class CallToolResultTest extends UnitTest {
         assertEquals("ok" + VIEW_DATA + "{\"s\":\"" + "x".repeat(15_993)
                 + "\n[structuredContent truncated: showed the first 15,999 of 16,013 characters]", result.contentWithViewData());
     }
+
+    @Test
+    void jclawsNoteComesAfterTheServersTextAndAfterAViewsData() {
+        var result = CallToolResult.fromResultObject(JsonParser.parseString(
+                "{\"content\":[{\"type\":\"text\",\"text\":\"ok\"}],\"structuredContent\":{\"rows\":[1]}}").getAsJsonObject());
+        assertEquals("ok", result.noted(result.content()), "no note, nothing added");
+        var noted = result.withNote("JClaw: one.").withNote("JClaw: two.");
+        assertEquals("ok\n\nJClaw: one.\nJClaw: two.", noted.noted(noted.content()));
+        assertEquals("ok" + VIEW_DATA + "{\"rows\":[1]}\n\nJClaw: one.\nJClaw: two.", noted.noted(noted.contentWithViewData()));
+        assertEquals("JClaw: one.", new CallToolResult("", false).withNote("JClaw: one.").noted(""), "an empty result is the note alone");
+        assertEquals(result.forView(), noted.forView(), "a view gets the server's result, never JClaw's note");
+    }
 }
