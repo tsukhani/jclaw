@@ -1,11 +1,13 @@
 ---
 name: writing-standards
-description: Apply ASD-STE100 (Simplified Technical English) and ISO 24495-1 (plain language) by content type. Use when writing or editing technical and maintenance procedures, contracts and legal text, training and onboarding material, or general documentation.
-author: main
-tools: []
-commands: []
-icon: 📝
-version: 1.0.0
+description: >-
+  Apply ASD-STE100 (Simplified Technical English) and ISO 24495-1 (plain language) by content type. Use when writing or editing technical and maintenance procedures, contracts and legal text, training and onboarding material, or general documentation.
+metadata:
+  version: "1.0.0"
+  author: main
+  jclaw-icon: "📝"
+  jclaw-tools: ""
+  jclaw-commands: ""
 ---
 # Writing standards
 
