@@ -468,6 +468,27 @@ describe('SettingsRestartPanel — narration', () => {
     c.unmount()
   })
 
+  it('keeps the steps the old JVM served and reads the silence after them as the launch', async () => {
+    const c = await restartConfirmed()
+    progress = served('jclaw', 'running', [step('stop', 'Stopping JClaw', 'running', 1)])
+    await tick()
+    expect(lines(c)).toEqual(['Stopping JClaw… | 1s'])
+
+    // A quick restart: no narrator answer reaches the page before the new JVM launches.
+    backendUp = false
+    progress = null
+    await tick(6)
+    expect(lines(c)).toEqual(['Stopping JClaw | 1s', 'Starting JClaw (connecting channels)… | 5s'])
+
+    backendUp = true
+    progress = served('jclaw', 'done', [step('stop', 'Stopping JClaw', 'done', 3), step('start', 'Starting JClaw (connecting channels)', 'done', 7)],
+      { services: { channels: [], mcpConnected: 0, mcpConfigured: 0, settled: true } })
+    await tick(2)
+    expect(lines(c)).toEqual(['Stopping JClaw | 3s', 'Starting JClaw (connecting channels) | 7s'])
+    expect(reloads.count).toBe(1)
+    c.unmount()
+  })
+
   it('gives up once the old JVM has answered for 90 s', async () => {
     const c = await restartConfirmed()
     await tick(89)

@@ -136,7 +136,8 @@ export function useRestartAndReconnect() {
     const startupBudget = p.rebuildExpected ? 900 : 180
     const shutdownBudget = 90
     let consecutiveUp = 0
-    let sawNarrator = false
+    // This restart's steps reached the page, from the old JVM or the narrator.
+    let narrated = false
     let ticking = false
     // Times, not tick counts: a tick waits on two fetches of up to 4 s each, and the ticks it skips meanwhile are lost.
     let phaseStartedAt = Date.now()
@@ -179,7 +180,10 @@ export function useRestartAndReconnect() {
       steps.value = shown.map(s => s.state === 'running' && s.seconds !== null ? { ...s, seconds: s.seconds + since } : s)
     }
 
-    /** The narrator steps aside just before the JVM launches, so its going quiet is that launch. */
+    /**
+     * The narrator steps aside just before the JVM launches, so a silence after this restart's steps is that
+     * launch. In a quick restart the page may never reach the narrator in its few seconds at all.
+     */
     function launching() {
       if (shown.some(s => s.id === 'start')) {
         count()
@@ -200,13 +204,16 @@ export function useRestartAndReconnect() {
     async function tick() {
       const [up, progress] = await Promise.all([backendUp(), fetchProgress()])
       elapsed.value = secondsSince(phaseStartedAt)
-      if (progress?.source === 'narrator') sawNarrator = true
+      if (progress?.source === 'narrator') narrated = true
 
       if (phase.value === 'stopping') {
         if (up) {
           // The JVM about to stop still has the previous restart's file, which has finished:
           // only a running one is this restart. Its services are the ones going away.
-          if (progress?.state === 'running') show({ ...progress, services: null })
+          if (progress?.state === 'running') {
+            show({ ...progress, services: null })
+            narrated = true
+          }
           else count()
           if (elapsed.value >= shutdownBudget) {
             giveUp(`The backend was still responding ${shutdownBudget}s after the restart `
@@ -239,11 +246,11 @@ export function useRestartAndReconnect() {
       if (progress) {
         show(progress, waited)
       }
-      else if (sawNarrator) {
+      else if (narrated) {
         launching()
       }
       else if (elapsed.value >= NARRATOR_GRACE) {
-        // Nothing narrates this restart (no narrator could start): count, as before narration.
+        // Nothing narrates this restart: count, as before narration.
         setSteps([])
       }
       else {
