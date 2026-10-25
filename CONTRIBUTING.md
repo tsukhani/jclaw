@@ -51,8 +51,8 @@ language: names in code match the names in the ticket and in `app/models/`.
 ### Setup
 
 Use the dev container — see
-[Dev Container (Recommended)](README.md#dev-container-recommended) in the
-README. Clone from the canonical origin
+[Dev Container (Recommended)](DEVELOPMENT.md#dev-container-recommended) in
+DEVELOPMENT.md. Clone from the canonical origin
 (`bitbucket.abundent.com/scm/jclaw/jclaw.git`); GitHub is the public mirror
 and release channel.
 

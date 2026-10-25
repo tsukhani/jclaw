@@ -1,6 +1,6 @@
 services:
   jclaw:
-    # JCLAW_IMAGE pins a release by digest (README, "Verifying the image"): a tag can be
+    # JCLAW_IMAGE pins a release by digest (INSTALL.md, "Verifying the image"): a tag can be
     # repointed by whoever can push to the registry, a digest cannot.
     image: ${JCLAW_IMAGE:-ghcr.io/tsukhani/jclaw:latest}
     pull_policy: always

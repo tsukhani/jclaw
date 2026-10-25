@@ -320,7 +320,7 @@ EXPOSE 9443/udp
 # JAVA_TOOL_OPTIONS is honored by the JVM and prepended to its argv — we
 # use it to inject GC, heap and prod-only system-property flags without
 # forking the bundle's `play` launcher. An operator's own
-# `-e JAVA_TOOL_OPTIONS=...` (the README's OpenTelemetry agent recipe) is
+# `-e JAVA_TOOL_OPTIONS=...` (INSTALL.md's OpenTelemetry agent recipe) is
 # appended after ours rather than replaced by the export, so it reaches the
 # JVM and wins any value flag it repeats. The launcher itself sets
 # -javaagent (framework jar), -Dprecompiled=true, -Dapplication.path,

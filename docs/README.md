@@ -14,7 +14,9 @@ Everything that explains the code is documentation: the Markdown, the comments a
 
 | Kind | Where | Read by | Must agree with | Handling |
 |---|---|---|---|---|
-| Product README | `README.md` | the public, operators | the installers, `jclaw.sh`, the Docker files, what ships | fix |
+| Product README | `README.md` | the public, newcomers | the installers, the UI strings it quotes, what ships; plain English (`skills/writing-standards`) | fix |
+| Install guide | `INSTALL.md` | operators | the installers, `jclaw.sh`, the Docker files, what ships | fix |
+| Development guide | `DEVELOPMENT.md` | the internal team | `.devcontainer/`, `jclaw.sh`, `.githooks/`, the build, the tree | fix |
 | Agent conventions | `AGENTS.md` (`CLAUDE.md` imports it) | coding agents | the code it names, though it is fallible itself | fix |
 | Documentation catalog | `docs/README.md` (this page) | maintainers, docs sweeps | the tree: every tracked doc file matches a row | fix |
 | Contribution guide | `CONTRIBUTING.md` | contributors | the workflow and hooks; its policy lines are rules, not claims | fix facts, report policy |
