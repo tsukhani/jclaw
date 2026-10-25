@@ -149,8 +149,13 @@ public final class SkillVersionManager {
         if (content == null) return null;
         var matcher = FRONTMATTER_PATTERN.matcher(content);
         if (!matcher.find() || matcher.start() != 0) return null;
-        var frontmatter = matcher.group(1);
-        return SkillLoader.extractYamlValue(frontmatter, "version");
+        return declaredVersion(matcher.group(1));
+    }
+
+    /** The version a frontmatter declares: under {@code metadata} in the spec layout, at the top level in the earlier one. */
+    private static @Nullable String declaredVersion(String frontmatter) {
+        var parsed = SkillFrontmatter.parse(frontmatter);
+        return parsed != null ? parsed.version() : SkillLoader.extractYamlValue(frontmatter, "version");
     }
 
     /**
@@ -166,36 +171,51 @@ public final class SkillVersionManager {
         if (content == null) return new String[]{DEFAULT_VERSION};
         var matcher = FRONTMATTER_PATTERN.matcher(content);
         if (matcher.find() && matcher.start() == 0) {
-            var frontmatter = matcher.group(1);
-            var version = SkillLoader.extractYamlValue(frontmatter, "version");
+            var version = declaredVersion(matcher.group(1));
             return new String[]{version != null ? version : DEFAULT_VERSION};
         }
         return new String[]{DEFAULT_VERSION};
     }
 
     /**
-     * True if the two SKILL.md strings differ in any way other than the {@code version:}
-     * frontmatter line.
+     * True if the two SKILL.md strings differ in any way other than their version. A YAML
+     * frontmatter is compared in the spec layout, so a rewrite that only moves keys under
+     * {@code metadata} is not a material change.
      */
     public static boolean contentDiffersIgnoringVersion(String a, String b) {
-        return !stripVersionLine(a).equals(stripVersionLine(b));
+        return !withoutVersion(a).equals(withoutVersion(b));
     }
 
-    private static String stripVersionLine(String content) {
+    private static String withoutVersion(@Nullable String content) {
         if (content == null) return "";
-        return VERSION_LINE.matcher(content).replaceAll("").replaceAll("\\n\\n+", "\n\n");
+        var matcher = FRONTMATTER_PATTERN.matcher(content);
+        var parsed = matcher.find() && matcher.start() == 0 ? SkillFrontmatter.parse(matcher.group(1)) : null;
+        var normalized = parsed != null
+                ? parsed.setVersion(null).render() + content.substring(matcher.end())
+                : VERSION_LINE.matcher(content).replaceAll("");
+        return normalized.replaceAll("\\n\\n+", "\n\n");
     }
 
     /**
-     * Ensure the frontmatter of {@code content} has a {@code version:} line with the given
-     * value. Inserts or overwrites as needed.
+     * Ensure the frontmatter of {@code content} declares the given version, inserting or
+     * overwriting as needed. A YAML frontmatter is rewritten in the spec layout, with the
+     * version under {@code metadata}; one that is not YAML gets a top-level line, as before.
      */
     static String ensureVersionInFrontmatter(String content, String targetVersion) {
         if (content == null) content = "";
         var matcher = FRONTMATTER_PATTERN.matcher(content);
         if (!matcher.find() || matcher.start() != 0) {
             var v = targetVersion != null ? targetVersion : INITIAL_VERSION;
-            return "---\nversion: %s\n---\n\n%s".formatted(v, content);
+            return SkillFrontmatter.empty().setVersion(v).render() + "\n" + content;
+        }
+        var parsed = SkillFrontmatter.parse(matcher.group(1));
+        if (parsed != null) {
+            if (targetVersion != null || parsed.version() == null) {
+                parsed.setVersion(targetVersion != null ? targetVersion : INITIAL_VERSION);
+            }
+            var end = matcher.end();
+            if (end < content.length() && content.charAt(end) == '\n') end++;
+            return parsed.render() + content.substring(end);
         }
         var frontmatter = matcher.group(1);
         var before = content.substring(0, matcher.start(1));

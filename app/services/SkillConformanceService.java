@@ -1,5 +1,6 @@
 package services;
 
+import agents.SkillFrontmatter;
 import agents.SkillLoader;
 import agents.SkillVersionManager;
 import agents.ToolCatalog;
@@ -22,7 +23,6 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 /**
  * Conforms an externally-authored skill (downloaded from GitHub via the
@@ -76,34 +76,23 @@ public final class SkillConformanceService {
     public record ConformedSkill(String name, String description, String version, String icon,
                                  List<String> tools, List<String> commands, String author, String body) {
         /**
-         * Render the conforming SKILL.md (frontmatter + body) in the skill-creator field
-         * order, with {@code version:} directly after {@code description:} — the slot
-         * skill-creator reserves for the system-managed field.
+         * Render the conforming SKILL.md (frontmatter + body) in the Agent Skills layout,
+         * JClaw's fields under {@code metadata} with the version first.
          *
          * <p>Rendered here rather than left to the write path: only skills written
-         * through the filesystem tool get {@code version:} injected there, and
+         * through the filesystem tool get a version injected there, and
          * {@link #conform} writes this output straight to disk.
-         *
-         * <p>The description is folded ({@code >-}): a plain scalar cannot hold {@code ": "} or
-         * {@code " #"}, and {@link SkillLoader} never unescapes a quoted one.
          */
         public String toSkillMd() {
-            return """
-                   ---
-                   name: %s
-                   description: >-
-                     %s
-                   version: %s
-                   author: %s
-                   tools: [%s]
-                   commands: [%s]
-                   icon: %s
-                   ---
-
-                   %s
-                   """.formatted(scalar(name), scalar(description), scalar(version), scalar(author),
-                    joinScalars(tools), joinScalars(commands), scalar(icon),
-                    body == null ? "" : body.strip());
+            var frontmatter = SkillFrontmatter.empty()
+                    .put(SkillFrontmatter.NAME, scalar(name))
+                    .put(SkillFrontmatter.DESCRIPTION, scalar(description))
+                    .setVersion(scalar(version))
+                    .putMetadata(SkillFrontmatter.AUTHOR, scalar(author))
+                    .putMetadata(SkillFrontmatter.ICON, scalar(icon))
+                    .setTools(tools)
+                    .setCommands(commands);
+            return frontmatter.render() + "\n" + (body == null ? "" : body.strip()) + "\n";
         }
 
         /** A frontmatter scalar occupies exactly one line. The description reaches here from the
@@ -114,10 +103,6 @@ public final class SkillConformanceService {
             return value == null ? "" : value.replaceAll("[\\r\\n]+", " ").strip();
         }
 
-        private static String joinScalars(@Nullable List<String> values) {
-            if (values == null) return "";
-            return values.stream().map(ConformedSkill::scalar).collect(Collectors.joining(", "));
-        }
     }
 
     /** Accept ({@code skill} set) or reject ({@code reason} set) decision from the gate. */
@@ -170,9 +155,13 @@ public final class SkillConformanceService {
 
         // The incoming version, if any — preserved so re-conforming an already-promoted
         // skill keeps its history instead of dropping back to 1.0.0.
-        var declaredVersion = split != null && split.frontmatter() != null
-                ? SkillLoader.extractYamlValue(split.frontmatter(), "version")
-                : null;
+        var upstream = SkillFrontmatter.of(raw);
+        String declaredVersion = null;
+        if (upstream != null) {
+            declaredVersion = upstream.version();
+        } else if (split != null && split.frontmatter() != null) {
+            declaredVersion = SkillLoader.extractYamlValue(split.frontmatter(), "version");
+        }
 
         var gate = applyHardGates(proposed, fallbackName, stagedBinaries, provenance,
                 originalBody, declaredVersion);
@@ -198,7 +187,8 @@ public final class SkillConformanceService {
      *   <li><b>commands</b> — derived ONLY from {@code stagedBinaries} (the files
      *       actually on disk), never from the model. This satisfies both contract
      *       directions by construction: every tools/ binary is declared, and every
-     *       declared command exists.</li>
+     *       declared command exists. A binary whose name is not one word is REJECTED:
+     *       the list is stored space-separated, so it would read back as several.</li>
      *   <li><b>icon</b> — non-blank; defaults to 🛠️.</li>
      * </ul>
      */
@@ -237,6 +227,12 @@ public final class SkillConformanceService {
         }
 
         var commands = new ArrayList<>(stagedBinaries != null ? stagedBinaries : Set.<String>of());
+        for (var command : commands) {
+            if (!SkillFrontmatter.isWord(command)) {
+                return GateOutcome.reject("imported skill ships a binary whose name cannot be a shell command: \"%s\""
+                        .formatted(command));
+            }
+        }
 
         var icon = proposed.icon() != null ? proposed.icon().strip() : "";
         if (icon.isBlank()) icon = DEFAULT_ICON;

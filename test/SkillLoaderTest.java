@@ -206,7 +206,7 @@ class SkillLoaderTest extends UnitTest {
                 "---\nname: deck\ndescription: >-\n  Create decks whose document\n  is plain JSON.\n---\n# body",
                 LOC);
         assertNotNull(info);
-        assertEquals("Create decks whose document\nis plain JSON.", info.description(),
+        assertEquals("Create decks whose document is plain JSON.", info.description(),
                 "a folded description must reach the model, not \">-\"");
     }
 

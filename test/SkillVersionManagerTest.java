@@ -142,64 +142,81 @@ class SkillVersionManagerTest extends UnitTest {
     @Test
     void ensureVersionWrapsContentWhenNoFrontmatter() {
         var result = callEnsureVersion("# body only", "2.1.0");
-        assertTrue(result.startsWith("---\nversion: 2.1.0\n---"));
-        assertTrue(result.contains("# body only"));
+        assertEquals("---\nmetadata:\n  version: \"2.1.0\"\n---\n\n# body only", result);
     }
 
     @Test
     void ensureVersionDefaultsTo1_0_0WhenNullAndNoFrontmatter() {
         var result = callEnsureVersion("body only", null);
-        assertTrue(result.startsWith("---\nversion: 1.0.0\n---"));
+        assertEquals("---\nmetadata:\n  version: \"1.0.0\"\n---\n\nbody only", result);
     }
 
     @Test
     void ensureVersionAcceptsNullContent() {
         var result = callEnsureVersion(null, "3.0.0");
-        assertTrue(result.startsWith("---\nversion: 3.0.0\n---"));
+        assertEquals("---\nmetadata:\n  version: \"3.0.0\"\n---\n\n", result);
     }
 
     @Test
     void ensureVersionReplacesExistingWhenTargetSet() {
         var input = "---\nname: x\nversion: 0.1.0\n---\n# body";
         var result = callEnsureVersion(input, "1.5.0");
-        assertTrue(result.contains("version: 1.5.0"), "got: " + result);
-        assertFalse(result.contains("version: 0.1.0"));
+        assertEquals("---\nname: x\nmetadata:\n  version: \"1.5.0\"\n---\n# body", result);
     }
 
     @Test
     void ensureVersionKeepsExistingWhenTargetNull() {
         var input = "---\nname: x\nversion: 0.7.7\n---\n# body";
         var result = callEnsureVersion(input, null);
-        assertTrue(result.contains("version: 0.7.7"),
-                "existing version preserved when target null: " + result);
+        assertEquals("---\nname: x\nmetadata:\n  version: \"0.7.7\"\n---\n# body", result,
+                "existing version preserved when target null");
     }
 
     @Test
     void ensureVersionInsertsAfterDescriptionWhenVersionMissing() {
         var input = "---\nname: x\ndescription: hello\n---\n# body";
         var result = callEnsureVersion(input, "1.2.3");
-        int descIdx = result.indexOf("description:");
-        int verIdx = result.indexOf("version: 1.2.3");
-        assertTrue(descIdx >= 0 && verIdx > descIdx,
-                "version must follow description: " + result);
+        assertEquals("---\nname: x\ndescription: >-\n  hello\nmetadata:\n  version: \"1.2.3\"\n---\n# body", result);
     }
 
     @Test
     void ensureVersionNeverLandsInsideABlockScalarDescription() {
         var input = "---\nname: x\ndescription: >-\n  line one\n  line two\nicon: z\n---\n# body";
         var result = callEnsureVersion(input, "1.2.3");
-        assertTrue(result.contains("  line one\n  line two"),
-                "the block body must stay contiguous under its header: " + result);
-        assertEquals("line one\nline two",
-                agents.SkillLoader.extractYamlValue(result, "description"),
-                "the stamped frontmatter must still parse its description: " + result);
+        assertEquals("---\nname: x\ndescription: >-\n  line one line two\nmetadata:\n  jclaw-icon: z\n"
+                + "  version: \"1.2.3\"\n---\n# body", result);
+        assertEquals("line one line two", agents.SkillLoader.parseSkillContent(result, null).description(),
+                "the stamped frontmatter must still parse its description");
+    }
+
+    @Test
+    void aRewriteThatOnlyChangesTheLayoutIsNotAMaterialChange() {
+        var earlier = "---\nname: x\ndescription: d\nversion: 1.0.0\ntools: [exec]\nicon: z\n---\n# body\n";
+        var spec = "---\nname: x\ndescription: >-\n  d\nmetadata:\n  version: \"1.0.1\"\n  jclaw-icon: z\n"
+                + "  jclaw-tools: exec\n---\n# body\n";
+
+        assertFalse(SkillVersionManager.contentDiffersIgnoringVersion(earlier, spec));
+        assertTrue(SkillVersionManager.contentDiffersIgnoringVersion(earlier, spec.replace("# body", "# changed")));
+        assertTrue(SkillVersionManager.contentDiffersIgnoringVersion(earlier, spec.replace("jclaw-tools: exec", "jclaw-tools: filesystem")));
+    }
+
+    @Test
+    void aSkillAnAgentWritesInTheEarlierLayoutIsStoredInOneAnthropicAccepts() {
+        var target = java.nio.file.Path.of("/tmp/never-existed-skill-" + System.nanoTime() + ".md");
+        var written = "---\nname: notes\ndescription: Takes notes\nauthor: main\ntools: [filesystem]\ncommands: []\nicon: 📝\n---\n# Notes\n";
+
+        var stored = SkillVersionManager.finalizeSkillMdWrite(target, written);
+
+        assertEquals("---\nname: notes\ndescription: >-\n  Takes notes\nmetadata:\n  author: main\n  jclaw-icon: \"📝\"\n"
+                + "  jclaw-tools: filesystem\n  version: \"1.0.0\"\n---\n# Notes\n", stored);
+        assertEquals(java.util.List.of(), agents.SkillSpec.problems(stored, "notes"));
     }
 
     @Test
     void ensureVersionAppendsAtEndOfFrontmatterWhenNoDescription() {
         var input = "---\nname: x\n---\n# body";
         var result = callEnsureVersion(input, "4.0.0");
-        assertTrue(result.contains("version: 4.0.0"));
+        assertEquals("---\nname: x\nmetadata:\n  version: \"4.0.0\"\n---\n# body", result);
     }
 
     // --- extractExplicitVersion + parseFrontmatterStringForVersion + resolveVersion ---
@@ -280,9 +297,8 @@ class SkillVersionManagerTest extends UnitTest {
         // "1.0.0" when content doesn't carry one).
         var target = java.nio.file.Path.of("/tmp/never-existed-skill-" + System.nanoTime() + ".md");
         var result = SkillVersionManager.finalizeSkillMdWrite(target, "# Body only");
-        assertTrue(result.startsWith("---\nversion: 1.0.0"),
-                "missing-target path injects 1.0.0 default: " + result);
-        assertTrue(result.contains("# Body only"));
+        assertEquals("---\nmetadata:\n  version: \"1.0.0\"\n---\n\n# Body only", result,
+                "missing-target path injects 1.0.0 default");
     }
 
     @Test
@@ -291,7 +307,7 @@ class SkillVersionManagerTest extends UnitTest {
         var target = java.nio.file.Path.of("/tmp/never-existed-skill-" + System.nanoTime() + ".md");
         var content = "---\nname: x\nversion: 2.5.0\n---\n# body";
         var result = SkillVersionManager.finalizeSkillMdWrite(target, content);
-        assertTrue(result.contains("version: 2.5.0"), "LLM version honored: " + result);
+        assertEquals("---\nname: x\nmetadata:\n  version: \"2.5.0\"\n---\n# body", result, "LLM version honored");
     }
 
     @Test
@@ -299,8 +315,7 @@ class SkillVersionManagerTest extends UnitTest {
         // Null content → coerced to "" then wrapped with default version.
         var target = java.nio.file.Path.of("/tmp/null-content-skill-" + System.nanoTime() + ".md");
         var result = SkillVersionManager.finalizeSkillMdWrite(target, null);
-        assertNotNull(result);
-        assertTrue(result.contains("version: 1.0.0"));
+        assertEquals("---\nmetadata:\n  version: \"1.0.0\"\n---\n\n", result);
     }
 
     @Test

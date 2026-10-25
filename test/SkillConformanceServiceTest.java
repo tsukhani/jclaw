@@ -1,4 +1,5 @@
 import agents.SkillLoader;
+import agents.SkillSpec;
 import org.junit.jupiter.api.Test;
 import org.yaml.snakeyaml.Yaml;
 import play.test.UnitTest;
@@ -53,7 +54,7 @@ class SkillConformanceServiceTest extends UnitTest {
 
         assertTrue(gate.ok(), gate.reason());
         assertEquals("1.0.0", gate.skill().version());
-        assertTrue(gate.skill().toSkillMd().contains("version: 1.0.0"));
+        assertEquals("1.0.0", SkillLoader.parseSkillContent(gate.skill().toSkillMd(), null).version());
     }
 
     @Test
@@ -136,6 +137,17 @@ class SkillConformanceServiceTest extends UnitTest {
         assertEquals(List.of("helper", "wacli"), gate.skill().commands());
     }
 
+    // Commands are written as one space-separated string, so a file named "rm, curl" would read back as rm and curl.
+    @Test
+    void aStagedBinaryWhoseNameIsNotOneWordIsRefused() {
+        var gate = SkillConformanceService.applyHardGates(
+                proposed("notes", "Take notes", "📝", List.of()),
+                "notes", new TreeSet<>(Set.of("noteclip", "rm, curl")), "owner/repo", BODY);
+
+        assertFalse(gate.ok(), "accepted: " + gate.skill());
+        assertEquals("imported skill ships a binary whose name cannot be a shell command: \"rm, curl\"", gate.reason());
+    }
+
     @Test
     void defaultsMissingIconAndDescription() {
         var gate = SkillConformanceService.applyHardGates(
@@ -164,6 +176,14 @@ class SkillConformanceServiceTest extends UnitTest {
         assertEquals(List.of("wacli"), info.commands());
     }
 
+    @Test
+    void aConformedSkillPassesAnthropicsValidator() {
+        var md = new ConformedSkill("wa-notifier", "Send WhatsApp messages", "1.2.0", "💬",
+                List.of("exec", "filesystem"), List.of("wacli"), "vercel-labs/agent-skills", BODY).toSkillMd();
+
+        assertEquals(List.of(), SkillSpec.problems(md, "wa-notifier"), md);
+    }
+
     /**
      * JCLAW-1227: the description arrives from the conformance LLM and is interpolated into
      * the frontmatter, so a newline in it used to close the {@code description:} value and land
@@ -182,8 +202,8 @@ class SkillConformanceServiceTest extends UnitTest {
         assertNotNull(info, "rendered SKILL.md must still parse");
         assertEquals(List.of("noteclip"), info.commands(),
                 "the injected commands: line must not have replaced the derived list; rendered:\n" + md);
-        assertEquals(1, md.lines().filter(l -> l.startsWith("commands:")).count(),
-                "exactly one commands: line may be rendered; got:\n" + md);
+        assertEquals(1, md.lines().filter(l -> l.strip().startsWith("jclaw-commands:")).count(),
+                "exactly one jclaw-commands: line may be rendered; got:\n" + md);
         assertFalse(md.contains("\nx: y"), "no injected key may reach the frontmatter:\n" + md);
     }
 

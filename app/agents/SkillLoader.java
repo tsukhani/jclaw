@@ -436,6 +436,26 @@ public class SkillLoader {
         var matcher = FRONTMATTER_PATTERN.matcher(content);
         if (!matcher.find()) return null;
         var frontmatter = matcher.group(1);
+        var parsed = SkillFrontmatter.parse(frontmatter);
+        if (parsed != null) {
+            var parsedName = parsed.name();
+            if (parsedName == null) return null;
+            var parsedDescription = parsed.description();
+            var parsedVersion = parsed.version();
+            var parsedAuthor = parsed.author();
+            var parsedIcon = parsed.icon();
+            return new SkillInfo(parsedName,
+                    parsedDescription != null ? parsedDescription : "",
+                    locationHint,
+                    parsed.tools(),
+                    parsed.toolsDeclared(),
+                    parsedVersion != null ? parsedVersion : DEFAULT_SKILL_VERSION,
+                    parsed.commands(),
+                    parsedAuthor != null ? parsedAuthor : "",
+                    parsedIcon != null ? parsedIcon : "",
+                    parsed.mcpServers());
+        }
+        // Not YAML (": " in a plain scalar, say): the line reader below still reads the earlier layout.
         var name = extractYamlValue(frontmatter, "name");
         if (name == null) return null;
         var description = extractYamlValue(frontmatter, KEY_DESCRIPTION);

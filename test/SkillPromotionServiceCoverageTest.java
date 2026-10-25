@@ -191,7 +191,7 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         writeSkillMd(skillDir, "demo", "2.0.0");
         SkillPromotionService.copyToAgentWorkspace(agent, "demo");
 
-        assertTrue(Files.readString(workspaceMd).contains("version: 2.0.0"),
+        assertEquals("2.0.0", skillVersion(Files.readString(workspaceMd)),
                 "second copy must overwrite the workspace copy with the new version");
     }
 
@@ -287,7 +287,7 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         assertTrue(payload.contains("older than the global version"),
                 "downgrade reason surfaced: " + payload);
         // Global must not be replaced — verify the version is still 2.0.0
-        assertTrue(Files.readString(globalAlpha.resolve("SKILL.md")).contains("version: 2.0.0"),
+        assertEquals("2.0.0", skillVersion(Files.readString(globalAlpha.resolve("SKILL.md"))),
                 "global skill must remain at the higher version after refused downgrade");
     }
 
@@ -442,7 +442,7 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         assertTrue(payload.contains("\"replaced\":true"), "second promotion replaces: " + payload);
 
         // New version landed in global
-        assertTrue(Files.readString(globalWidget.resolve("SKILL.md")).contains("version: 2.0.0"),
+        assertEquals("2.0.0", skillVersion(Files.readString(globalWidget.resolve("SKILL.md"))),
                 "global must carry the new version after replace");
 
         // Cleanup
@@ -655,7 +655,7 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
 
         SkillPromotionService.stampSkillVersion(payload, target);
 
-        assertTrue(payload.get("SKILL.md").contains("version: 1.0.0"),
+        assertEquals("1.0.0", skillVersion(payload.get("SKILL.md")),
                 "new skill without version: must be stamped 1.0.0, got:\n" + payload.get("SKILL.md"));
     }
 
@@ -668,7 +668,7 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         payload.put("SKILL.md", "---\nname: humanizer\ndescription: changed\n---\n# New body");
         SkillPromotionService.stampSkillVersion(payload, target);
 
-        assertTrue(payload.get("SKILL.md").contains("version: 1.4.3"),
+        assertEquals("1.4.3", skillVersion(payload.get("SKILL.md")),
                 "material re-publish must auto patch-bump 1.4.2 -> 1.4.3, got:\n" + payload.get("SKILL.md"));
     }
 
@@ -683,4 +683,7 @@ class SkillPromotionServiceCoverageTest extends UnitTest {
         assertEquals("no frontmatter here", payload.get("notes.md"), "other files untouched");
     }
 
+    private static String skillVersion(String skillMd) {
+        return SkillLoader.parseSkillContent(skillMd, null).version();
+    }
 }

@@ -1,3 +1,4 @@
+import agents.SkillLoader;
 import agents.ToolRegistry;
 import models.Agent;
 import models.Task;
@@ -832,7 +833,7 @@ class ToolSystemTest extends UnitTest {
                  "content": "---\\nname: bump-test\\ndescription: x\\n---\\n# Title\\nOld body"}
                 """, agent);
         var v1 = Files.readString(skillDir.resolve("SKILL.md"));
-        assertTrue(v1.contains("version: 1.0.0"), "initial version: " + v1);
+        assertEquals("1.0.0", skillVersion(v1), "initial version: " + v1);
 
         var result = ToolRegistry.execute("filesystem",
                 """
@@ -843,7 +844,7 @@ class ToolSystemTest extends UnitTest {
         assertTrue(result.contains("1.0.0 → 1.0.1"), "exactly one patch bump: " + result);
 
         var v2 = Files.readString(skillDir.resolve("SKILL.md"));
-        assertTrue(v2.contains("version: 1.0.1"));
+        assertEquals("1.0.1", skillVersion(v2));
         assertTrue(v2.contains("New body"));
     }
 
@@ -861,13 +862,13 @@ class ToolSystemTest extends UnitTest {
                  "content": "---\\nname: promote-major\\ndescription: x\\n---\\n# Title\\nOld body"}
                 """, agent);
         var v1 = Files.readString(skillDir.resolve("SKILL.md"));
-        assertTrue(v1.contains("version: 1.0.0"));
+        assertEquals("1.0.0", skillVersion(v1));
 
         var result = ToolRegistry.execute("filesystem",
                 """
                 {"action": "editFile", "path": "skills/promote-major/SKILL.md",
                  "edits": [
-                    {"oldText": "version: 1.0.0", "newText": "version: 2.0.0"},
+                    {"oldText": "version: \\"1.0.0\\"", "newText": "version: \\"2.0.0\\""},
                     {"oldText": "Old body", "newText": "New body"}
                  ]}
                 """, agent);
@@ -875,7 +876,7 @@ class ToolSystemTest extends UnitTest {
         assertTrue(result.contains("1.0.0 → 2.0.0"), "should show explicit promotion: " + result);
 
         var v2 = Files.readString(skillDir.resolve("SKILL.md"));
-        assertTrue(v2.contains("version: 2.0.0"), "on-disk: " + v2);
+        assertEquals("2.0.0", skillVersion(v2), "on-disk: " + v2);
         assertTrue(v2.contains("New body"));
     }
 
@@ -891,17 +892,17 @@ class ToolSystemTest extends UnitTest {
                 {"action": "writeFile", "path": "skills/version-only/SKILL.md",
                  "content": "---\\nname: version-only\\ndescription: x\\n---\\n# Title\\nBody"}
                 """, agent);
-        assertTrue(Files.readString(skillDir.resolve("SKILL.md")).contains("version: 1.0.0"));
+        assertEquals("1.0.0", skillVersion(Files.readString(skillDir.resolve("SKILL.md"))));
 
         var result = ToolRegistry.execute("filesystem",
                 """
                 {"action": "editFile", "path": "skills/version-only/SKILL.md",
-                 "edits": [{"oldText": "version: 1.0.0", "newText": "version: 1.5.0"}]}
+                 "edits": [{"oldText": "version: \\"1.0.0\\"", "newText": "version: \\"1.5.0\\""}]}
                 """, agent);
         assertTrue(result.startsWith("File written"), "got: " + result);
 
         var v = Files.readString(skillDir.resolve("SKILL.md"));
-        assertTrue(v.contains("version: 1.5.0"), "version-only promotion must land: " + v);
+        assertEquals("1.5.0", skillVersion(v), "version-only promotion must land: " + v);
         assertTrue(v.contains("Body"), "body content preserved");
     }
 
@@ -920,7 +921,7 @@ class ToolSystemTest extends UnitTest {
                 """
                 {"action": "editFile", "path": "skills/no-downgrade/SKILL.md",
                  "edits": [
-                    {"oldText": "version: 1.0.0", "newText": "version: 0.5.0"},
+                    {"oldText": "version: \\"1.0.0\\"", "newText": "version: \\"0.5.0\\""},
                     {"oldText": "Original", "newText": "Updated"}
                  ]}
                 """, agent);
@@ -928,7 +929,7 @@ class ToolSystemTest extends UnitTest {
         assertTrue(result.contains("1.0.0 → 1.0.1"), "downgrade must fall back to auto-bump: " + result);
 
         var v = Files.readString(skillDir.resolve("SKILL.md"));
-        assertTrue(v.contains("version: 1.0.1"), "on-disk must be auto-bumped: " + v);
+        assertEquals("1.0.1", skillVersion(v), "on-disk must be auto-bumped: " + v);
         assertFalse(v.contains("0.5.0"), "downgrade must not land");
     }
 
@@ -950,13 +951,13 @@ class ToolSystemTest extends UnitTest {
                 """
                 {"action": "editFile", "path": "skills/equal-version/SKILL.md",
                  "edits": [
-                    {"oldText": "version: 1.0.0", "newText": "version: 1.0.1"},
+                    {"oldText": "version: \\"1.0.0\\"", "newText": "version: \\"1.0.1\\""},
                     {"oldText": "Original", "newText": "Updated"}
                  ]}
                 """, agent);
         assertTrue(result.startsWith("File written"), "got: " + result);
         assertTrue(result.contains("1.0.0 → 1.0.1"));
-        assertTrue(Files.readString(skillDir.resolve("SKILL.md")).contains("version: 1.0.1"));
+        assertEquals("1.0.1", skillVersion(Files.readString(skillDir.resolve("SKILL.md"))));
     }
 
     @Test
@@ -975,13 +976,13 @@ class ToolSystemTest extends UnitTest {
                 """
                 {"action": "editFile", "path": "skills/malformed-version/SKILL.md",
                  "edits": [
-                    {"oldText": "version: 1.0.0", "newText": "version: stable"},
+                    {"oldText": "version: \\"1.0.0\\"", "newText": "version: stable"},
                     {"oldText": "Original", "newText": "Updated"}
                  ]}
                 """, agent);
         assertTrue(result.startsWith("File written"), "got: " + result);
         assertTrue(result.contains("1.0.0 → 1.0.1"), "malformed must fall back to auto-bump: " + result);
-        assertTrue(Files.readString(skillDir.resolve("SKILL.md")).contains("version: 1.0.1"));
+        assertEquals("1.0.1", skillVersion(Files.readString(skillDir.resolve("SKILL.md"))));
     }
 
     @Test
@@ -997,7 +998,7 @@ class ToolSystemTest extends UnitTest {
                 """, agent);
         assertTrue(result.startsWith("File written"), "got: " + result);
         var v = Files.readString(skillDir.resolve("SKILL.md"));
-        assertTrue(v.contains("version: 2.0.0"), "explicit high version on fresh skill: " + v);
+        assertEquals("2.0.0", skillVersion(v), "explicit high version on fresh skill: " + v);
     }
 
     @Test
@@ -1012,7 +1013,7 @@ class ToolSystemTest extends UnitTest {
                 """, agent);
         assertTrue(result.startsWith("File written"), "got: " + result);
         var v = Files.readString(skillDir.resolve("SKILL.md"));
-        assertTrue(v.contains("version: 1.0.0"), "fresh floor must pin to 1.0.0: " + v);
+        assertEquals("1.0.0", skillVersion(v), "fresh floor must pin to 1.0.0: " + v);
         assertFalse(v.contains("0.5.0"));
     }
 
@@ -1630,5 +1631,9 @@ class ToolSystemTest extends UnitTest {
         } finally {
             try { toolsAgent.delete(); } catch (Exception _) { /* best-effort */ }
         }
+    }
+
+    private static String skillVersion(String skillMd) {
+        return SkillLoader.parseSkillContent(skillMd, null).version();
     }
 }
