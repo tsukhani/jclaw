@@ -60,6 +60,27 @@ It can be a cloud service, such as OpenAI or OpenRouter, or a model that runs on
 - 🗂️ **Get small apps built for you.** An agent can turn a request you repeat into a small web app.
 - 🛡️ **Stay in control.** Agents ask for your approval before risky actions, such as running commands on your computer.
 
+## Fast, even with smaller models
+
+In our own tests, we gave JClaw, Claude Cowork, Hermes and OpenClaw the same tasks and prompts.
+JClaw was often 5 to 10 times faster. Its answers were also better, even on less powerful models.
+
+Most of this comes from **context engineering**. This means that JClaw is careful about what it
+puts in front of the AI model at each step:
+
+- **Only what the task needs.** JClaw lists each skill and each large connected service by its name
+  and a short summary. The agent loads the full details only when it uses them.
+- **Shorter tool output.** A long tool result reaches the model whole once. After that, JClaw can
+  send a shorter version. The agent can fetch the full text again if it needs it.
+- **Long chats stay in budget.** When a conversation nears the model's limit, JClaw summarizes the
+  older parts. It keeps the recent turns word for word.
+
+A smaller prompt is faster to read, costs less and gives the model less to get wrong.
+
+To measure JClaw's agents yourself, use the test sets in [`evals/`](evals/README.md). They check
+that an agent picks the right tools, returns valid structured answers and answers only from its
+sources. [DEVELOPMENT.md](DEVELOPMENT.md#running-evals) shows you how to run them.
+
 ## Get started
 
 ### 1. Install JClaw

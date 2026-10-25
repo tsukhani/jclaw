@@ -16,6 +16,7 @@ development machine, run JClaw from source, test it, and find your way around th
 - [Development](#development)
 - [Building a release bundle](#building-a-release-bundle)
 - [Testing](#testing)
+- [Running evals](#running-evals)
 - [Directory structure](#directory-structure)
 - [Architecture](#architecture)
 - [Key principles](#key-principles)
@@ -196,20 +197,7 @@ A few more developer commands sit beside it:
 ./jclaw.sh grapheval run           # certify local Ollama decision models for graph extraction (needs the backend)
 ```
 
-`grapheval run` stores each case in `evals/graph/cases.json` as a memory of `--agent`, scores it and deletes it afterwards, `--set heldout` measures `data/graph-eval/heldout.json` instead, and `--set sequences` replays `evals/graph/sequences.json` with no agent; every run spends model calls. `--decision-model` (repeatable, default the models selected in Settings), `--runs 1-3`, `--recall-floor`, `--concurrency 1-4`, `--timeout` and `--out FILE` tune it. `grapheval blind-sheet` and `grapheval heldout-sample --agent NAME --count N` write labelling inputs under `data/graph-eval/`. See [evals/graph/README.md](evals/graph/README.md).
-
-### Evals
-
-Agent behaviour is measured against datasets in `evals/suites/` — tool selection, structured output, and grounding, each a set of cases with deterministic pass criteria:
-
-```bash
-./jclaw.sh evals                                              # validate the dataset
-./jclaw.sh evals --responses run.json --out reports/now.json  # score a recorded run
-./jclaw.sh evals --responses run.json --baseline reports/last.json  # catch regressions
-./jclaw.sh evals --capture run.json --agent __evaltest__ --suite tool-selection  # drive a live agent
-```
-
-Validating and scoring are offline — no backend, no model call, no database — and `play autotest` validates the dataset on every run, so a malformed suite fails the build. `--capture` is the exception: it drives real agent turns, so it needs the backend running and spends model calls. See [evals/README.md](evals/README.md) for the format and for why a suite is edited in place, with a content fingerprint guarding comparability between runs.
+`grapheval` is one of the evals: see [Running evals](#running-evals).
 
 ### Git hooks
 
@@ -220,6 +208,71 @@ git config core.hooksPath .githooks
 ```
 
 A human can bypass it for a one-off push (e.g. urgent hotfix) with `JCLAW_SKIP_TESTS=1 git push origin HEAD`; an agent never does.
+
+---
+
+## Running evals
+
+Evals measure how well JClaw's agents behave. Tests check that the code works; evals check that an
+agent, on a real model, does the right thing. The datasets live in [`evals/`](evals/README.md).
+
+Agent behaviour is measured against datasets in `evals/suites/` — tool selection, structured output, and grounding, each a set of cases with deterministic pass criteria:
+
+| Suite | What it checks |
+| --- | --- |
+| `tool-selection` | The agent picks the right tool, and only the tools the job needs. |
+| `structured-output` | Asked for JSON, the agent returns JSON that validates: no prose around it, no invented fields, no numbers as strings. |
+| `grounding` | The agent answers from the supplied source only, cites the right part of it, and says so when the source does not hold the answer. |
+
+```bash
+./jclaw.sh evals                                              # validate the dataset
+./jclaw.sh evals --responses run.json --out reports/now.json  # score a recorded run
+./jclaw.sh evals --responses run.json --baseline reports/last.json  # catch regressions
+./jclaw.sh evals --capture run.json --agent __evaltest__ --suite tool-selection  # drive a live agent
+```
+
+Validating and scoring are offline — no backend, no model call, no database — and `play autotest` validates the dataset on every run, so a malformed suite fails the build. `--capture` is the exception: it drives real agent turns, so it needs the backend running and spends model calls. See [evals/README.md](evals/README.md) for the format and for why a suite is edited in place, with a content fingerprint guarding comparability between runs.
+
+### Measuring an agent
+
+Capture and scoring are two steps, so you can score one recorded run many times without paying for
+the model again.
+
+> **Caution:** Tools run for real during a capture. A case that makes the agent call `task_manager`
+> creates a real scheduled task. Capture against `__evaltest__`, never against an agent you work with.
+
+1. Start JClaw with a configured provider. Capture needs the backend.
+2. Capture a run:
+
+   ```bash
+   ./jclaw.sh evals --capture run.json --agent __evaltest__ --suite tool-selection
+   ```
+
+   The first capture creates `__evaltest__`, with the provider and model of `main`. Each suite names
+   the tools it needs, and capture grants the agent exactly those.
+3. Score the run:
+
+   ```bash
+   ./jclaw.sh evals --responses run.json --out reports/now.json
+   ```
+
+4. To catch a regression, score the run against an earlier report:
+
+   ```bash
+   ./jclaw.sh evals --responses run.json --baseline reports/last.json
+   ```
+
+A **failed** case was measured and counts against the pass rate. An **errored** case was not
+measured, so it is left out of the pass rate, but it still fails the run.
+
+### Other evals
+
+- **Memory graph** — `./jclaw.sh grapheval run` certifies local Ollama decision models for graph extraction.
+- **Scraping** — `./jclaw.sh scrapetest` measures the scrape ladder's access rates over the CF-100 corpus in `evals/scrape/`.
+
+Both need the backend running.
+
+`grapheval run` stores each case in `evals/graph/cases.json` as a memory of `--agent`, scores it and deletes it afterwards, `--set heldout` measures `data/graph-eval/heldout.json` instead, and `--set sequences` replays `evals/graph/sequences.json` with no agent; every run spends model calls. `--decision-model` (repeatable, default the models selected in Settings), `--runs 1-3`, `--recall-floor`, `--concurrency 1-4`, `--timeout` and `--out FILE` tune it. `grapheval blind-sheet` and `grapheval heldout-sample --agent NAME --count N` write labelling inputs under `data/graph-eval/`. See [evals/graph/README.md](evals/graph/README.md).
 
 ---
 
