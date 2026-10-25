@@ -81,6 +81,25 @@ To measure JClaw's agents yourself, use the test sets in [`evals/`](evals/README
 that an agent picks the right tools, returns valid structured answers and answers only from its
 sources. [DEVELOPMENT.md](DEVELOPMENT.md#running-evals) shows you how to run them.
 
+## Easy to set up and run
+
+We also compared how you set up and run JClaw, Hermes and OpenClaw. JClaw was the easiest of the three:
+
+- **One command installs it.** The installer downloads JClaw and starts it. If you need Java, it
+  offers to download it for you.
+- **The rest happens in your browser.** You choose your password, connect an AI model, set up
+  agents and connect channels in the JClaw web app. There is no setup wizard to run in a terminal.
+- **Chat apps in a few clicks.** On the **Channels** page, fill in the bot's details, choose the
+  agent, then save and switch it on. There is no gateway to restart: a Telegram or Slack bot answers
+  at once. Each bot can run a different agent, and a **Test** button checks its token. For WhatsApp,
+  you can also link a phone by scanning a QR code in your browser. If a chat app needs a public web
+  address, one switch can make one for you with Tailscale.
+- **No files to edit.** For everyday use, you change settings on pages in the app, not in
+  configuration files.
+- **Your own password protects it.** You sign in to the web app with the password you chose.
+- **Safe updates.** Update from the app or with one command. JClaw backs up your database first.
+  If the new version does not start, JClaw goes back to the old one.
+
 ## Get started
 
 ### 1. Install JClaw
