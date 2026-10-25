@@ -36,6 +36,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
@@ -72,6 +73,7 @@ public class ApiSkillsController extends Controller {
     private static final String KEY_DESCRIPTION = "description";
     private static final String KEY_SKILL_NAME = "skillName";
     private static final String KEY_CATALOG = "catalog";
+    private static final String CREDENTIALS_DIR = "credentials";
     /** The validator's problems on a 422 from {@code export}. */
     private static final String KEY_PROBLEMS = "problems";
     private static final String KEY_PROVIDER = "provider";
@@ -826,11 +828,32 @@ public class ApiSkillsController extends Controller {
         }
         if (!Files.exists(target)) notFound();
 
+        String content;
         try {
-            renderJSON(gson.toJson(new SkillFileContentResponse(filePath, Files.readString(target))));
+            content = Files.readString(target);
+            if (isCredentialFile(dir, target)) content = maskCredential(target, content);
         } catch (IOException e) {
             ApiResponses.error(500, ApiResponses.INTERNAL_ERROR, "Failed to read file: " + e.getMessage());
+            throw ApiResponses.unreachable();
         }
+        renderJSON(gson.toJson(new SkillFileContentResponse(filePath, content)));
+    }
+
+    /**
+     * True for a file under the skill's {@code credentials/}, by its canonical path, so a symlink or a
+     * case variant of the folder (macOS) reaches the same answer. A workspace skill keeps real values
+     * there, and both file reads are open to every agent.
+     */
+    private static boolean isCredentialFile(Path dir, Path canonicalTarget) throws IOException {
+        var relative = dir.toRealPath().relativize(canonicalTarget);
+        return relative.getNameCount() > 1 && relative.getName(0).toString().equalsIgnoreCase(CREDENTIALS_DIR);
+    }
+
+    /** A JSON credential keeps its keys, as promotion and export keep them; anything else shows no content. */
+    private static String maskCredential(Path file, String content) {
+        return file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".json")
+                ? SkillPromotionService.stripCredentialsJson(content)
+                : "[CREDENTIAL]";
     }
 
     /** Recursively delete a skill directory and clear the loader cache. */

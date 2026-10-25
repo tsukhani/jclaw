@@ -43,7 +43,7 @@ Skills are not written on this page. Two ways to get one:
 
 ### Viewing
 
-Click any skill row to open a **read-only** viewer of its files. A global skill can be **renamed** inline (double-click its name in the Global Skills column) and **deleted** from its row; to change its content, edit it via the skill-creator skill in an agent's workspace (then re-promote if it is a global skill). Each agent runs its own copy of a skill, made when the skill was assigned. So a re-promoted global skill reaches an agent only once you assign it to that agent again; past conversations keep the prompt they were created with.
+Click any skill row to open a **read-only** viewer of its files. Files in a skill's `credentials/` folder show masked: a JSON file shows its keys with `[CREDENTIAL]` for each value, and any other file shows only `[CREDENTIAL]`. A global skill can be **renamed** inline (double-click its name in the Global Skills column) and **deleted** from its row; to change its content, edit it via the skill-creator skill in an agent's workspace (then re-promote if it is a global skill). Each agent runs its own copy of a skill, made when the skill was assigned. So a re-promoted global skill reaches an agent only once you assign it to that agent again; past conversations keep the prompt they were created with.
 
 ### Exporting to Claude
 

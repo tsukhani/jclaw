@@ -1449,6 +1449,87 @@ class ApiSkillsControllerTest extends FunctionalTest {
         }
     }
 
+    // ==================== credential files read masked ====================
+
+    private static final String API_JSON = "{\"token\": \"sk-live-123\"}";
+    private static final String MASKED_JSON = "{\n  \"token\": \"[CREDENTIAL]\"\n}";
+
+    private play.mvc.Http.Response asAgentGet(String url) {
+        clearCookies();
+        var request = newRequest();
+        request.headers.put("authorization",
+                new play.mvc.Http.Header("authorization", "Bearer " + AuthFixture.seedBearerToken()));
+        try {
+            return GET(request, url);
+        } finally {
+            clearCookies();
+        }
+    }
+
+    private static String fileContent(play.mvc.Http.Response response) {
+        return com.google.gson.JsonParser.parseString(getContent(response)).getAsJsonObject().get("content").getAsString();
+    }
+
+    private Path seedCredentialProbe() throws Exception {
+        var dir = seedGlobalSkill("probe", "probe", "A probe");
+        Files.createDirectories(dir.resolve("credentials"));
+        Files.writeString(dir.resolve("credentials/api.json"), API_JSON);
+        return dir;
+    }
+
+    @Test
+    void anAgentReadsAGlobalSkillsCredentialFilesMasked() throws Exception {
+        var dir = seedCredentialProbe();
+        Files.writeString(dir.resolve("credentials/gamma-api-key.txt"), "sk-live-456\n");
+
+        var json = asAgentGet("/api/skills/probe/files/credentials/api.json");
+        var text = asAgentGet("/api/skills/probe/files/credentials/gamma-api-key.txt");
+        var skillMd = asAgentGet("/api/skills/probe/files/SKILL.md");
+
+        assertIsOk(json);
+        assertEquals(MASKED_JSON, fileContent(json), "a JSON credential keeps its keys, never its values");
+        assertEquals("[CREDENTIAL]", fileContent(text));
+        assertEquals(Files.readString(dir.resolve("SKILL.md")), fileContent(skillMd), "only credentials/ is masked");
+    }
+
+    @Test
+    void anAgentReadsAnotherAgentsWorkspaceCredentialFileMasked() throws Exception {
+        login();
+        var ownerId = createAgent("cred-owner");
+        var dir = seedAgentWorkspaceSkill("cred-owner", "wa", "wa");
+        Files.createDirectories(dir.resolve("credentials"));
+        Files.writeString(dir.resolve("credentials/api.json"), API_JSON);
+
+        var response = asAgentGet("/api/agents/" + ownerId + "/skills/wa/files/credentials/api.json");
+
+        assertIsOk(response);
+        assertEquals(MASKED_JSON, fileContent(response));
+    }
+
+    @Test
+    void theOperatorsViewerReadsCredentialFilesMaskedToo() throws Exception {
+        seedCredentialProbe();
+        login();
+
+        assertEquals(MASKED_JSON, fileContent(GET("/api/skills/probe/files/credentials/api.json")));
+    }
+
+    @Test
+    void aSymlinkIntoCredentialsIsReadMasked() throws Exception {
+        var dir = seedCredentialProbe();
+        Files.createSymbolicLink(dir.resolve("notes.json"), dir.resolve("credentials/api.json"));
+
+        assertEquals(MASKED_JSON, fileContent(asAgentGet("/api/skills/probe/files/notes.json")));
+    }
+
+    @Test
+    void aCaseVariantOfTheCredentialsFolderIsReadMasked() throws Exception {
+        var dir = seedCredentialProbe();
+        Assumptions.assumeTrue(Files.exists(dir.resolve("CREDENTIALS/api.json")), "needs a case-insensitive file system");
+
+        assertEquals(MASKED_JSON, fileContent(asAgentGet("/api/skills/probe/files/CREDENTIALS/api.json")));
+    }
+
     private static java.util.Map<String, byte[]> unzip(byte[] archive) throws java.io.IOException {
         var entries = new java.util.LinkedHashMap<String, byte[]>();
         try (var zip = new ZipInputStream(new ByteArrayInputStream(archive))) {
