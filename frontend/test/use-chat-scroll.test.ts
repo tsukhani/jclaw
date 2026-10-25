@@ -154,6 +154,29 @@ describe('useChatScroll', () => {
     expect(bodies[0]!.scrollTop).toBe(0)
   })
 
+  it('follows rows appended for a reader at the bottom, and leaves one reading above them alone', async () => {
+    const resize = stubResizeObserver()
+    const { api } = mountScroll()
+    const { el, content, layout } = viewportWithContent()
+    api.messagesEl.value = el
+    await nextTick()
+
+    layout({ scrollTop: 800, scrollHeight: 1000, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    api.appendFollowing(() => layout({ scrollTop: 800, scrollHeight: 1300, clientHeight: 200 }))
+    // The browser reports the content's growth before the frame runs; growth alone must not scroll.
+    resize.fire([content])
+    flushRaf()
+    expect(el.scrollTop).toBe(1300)
+
+    layout({ scrollTop: 400, scrollHeight: 1300, clientHeight: 200 })
+    el.dispatchEvent(new Event('scroll'))
+    api.appendFollowing(() => layout({ scrollTop: 400, scrollHeight: 1600, clientHeight: 200 }))
+    resize.fire([content])
+    flushRaf()
+    expect(el.scrollTop).toBe(400)
+  })
+
   it('keeps a reader at the bottom when the viewport shrinks, and leaves one reading above it alone', async () => {
     const resize = stubResizeObserver()
     const { api } = mountScroll()

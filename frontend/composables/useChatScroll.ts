@@ -21,6 +21,8 @@ export interface UseChatScroll {
   scrollToBottom: () => void
   /** Prepends older rows without moving what the reader sees. */
   keepViewport: PrependOlder
+  /** Appends rows outside a stream, following them down only when the reader was at the bottom. */
+  appendFollowing: (append: () => void) => void
 }
 
 export function useChatScroll(
@@ -127,6 +129,13 @@ export function useChatScroll(
     }
   })
 
+  // Read before the append: the content observer re-reads it as false once the new rows grow the content.
+  function appendFollowing(append: () => void) {
+    const follow = pinnedToBottom
+    append()
+    if (follow) scrollToBottom()
+  }
+
   onUnmounted(() => {
     if (scrollRaf) cancelAnimationFrame(scrollRaf)
     if (reasoningScrollRaf) cancelAnimationFrame(reasoningScrollRaf)
@@ -134,5 +143,5 @@ export function useChatScroll(
     if (messagesEl.value instanceof HTMLElement) messagesEl.value.removeEventListener('scroll', trackPinned)
   })
 
-  return { messagesEl, scrollToBottom, keepViewport }
+  return { messagesEl, scrollToBottom, keepViewport, appendFollowing }
 }

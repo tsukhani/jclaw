@@ -217,7 +217,7 @@ const chatInput = ref<HTMLTextAreaElement | null>(null)
 const streamReasoning = ref('')
 // Autoscroll coordination (viewport el + scrollToBottom + reasoning-body pin)
 // lives in useChatScroll; it reads the stream state it reacts to as args.
-const { messagesEl, scrollToBottom, keepViewport } = useChatScroll(streaming, streamReasoning, loadOlderMessages)
+const { messagesEl, scrollToBottom, keepViewport, appendFollowing } = useChatScroll(streaming, streamReasoning, loadOlderMessages)
 
 // Older turns without scrolling, for a keyboard or screen-reader user; focus moves to the list once none remain.
 const loadOlderButton = ref<HTMLButtonElement | null>(null)
@@ -312,7 +312,7 @@ const {
   hasRecentTaskCreate,
   pollForAnnounce,
   keepPollingFor,
-} = useChatAnnouncePoller({ messages, selectedConvoId, streaming, initSubagentCollapsedState })
+} = useChatAnnouncePoller({ messages, selectedConvoId, streaming, initSubagentCollapsedState, appendRows: appendFollowing })
 provide(scrapeJobEndedKey, () => keepPollingFor(SCRAPE_JOB_REPLY_GRACE_MS))
 
 const {

@@ -122,6 +122,23 @@ describe('useChatAnnouncePoller', () => {
     expect(initSubagentCollapsedState).toHaveBeenCalled()
   })
 
+  it('hands each merge of new rows to appendRows, so the page can follow them down', async () => {
+    const messages = shallowRef<Message[]>([msg({ id: 1, role: 'user', content: 'hi' })])
+    const seen: number[][] = []
+    const appendRows = vi.fn((append: () => void) => {
+      seen.push(messages.value.map(m => m.id as number))
+      append()
+      seen.push(messages.value.map(m => m.id as number))
+    })
+    const { api } = await mountPoller({ messages, selectedConvoId: ref(5), appendRows })
+
+    await api.pollForAnnounce()
+    await api.pollForAnnounce()
+
+    expect(seen).toEqual([[1], [1, 2]])
+    expect(appendRows).toHaveBeenCalledTimes(1)
+  })
+
   it('pollForAnnounce is a no-op with no open conversation', async () => {
     const messages = shallowRef<Message[]>([msg({ role: 'user', content: 'hi' })])
     const { api } = await mountPoller({ messages, selectedConvoId: ref(null) })

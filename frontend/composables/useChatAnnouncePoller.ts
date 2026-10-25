@@ -139,6 +139,8 @@ export interface UseChatAnnouncePollerDeps {
   streaming: Ref<boolean>
   /** From useChatSubagents — re-run after merging newly-arrived rows. */
   initSubagentCollapsedState: (msgs: Message[]) => void
+  /** Runs the merge of newly-arrived rows; the chat page's follows them down (useChatScroll.appendFollowing). */
+  appendRows?: (append: () => void) => void
 }
 
 export interface UseChatAnnouncePoller {
@@ -155,6 +157,7 @@ export interface UseChatAnnouncePoller {
 
 export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatAnnouncePoller {
   const { messages, selectedConvoId, streaming, initSubagentCollapsedState } = deps
+  const appendRows = deps.appendRows ?? ((append: () => void) => append())
 
   let announcePollTimer: ReturnType<typeof setInterval> | undefined
   let pollUntil = 0
@@ -274,10 +277,12 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
         m.toolCalls[i]!._expanded = i === m.toolCalls.length - 1
       }
     }
-    messages.value = [...messages.value, ...additions]
-    initCollapsedState(messages.value)
-    initSubagentCollapsedState(messages.value)
-    triggerRef(messages)
+    appendRows(() => {
+      messages.value = [...messages.value, ...additions]
+      initCollapsedState(messages.value)
+      initSubagentCollapsedState(messages.value)
+      triggerRef(messages)
+    })
   }
 
   function announcePollTick() {
