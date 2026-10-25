@@ -1,11 +1,13 @@
 ---
 name: oreilly-books
-description: Download a book from O'Reilly Learning as an EPUB using the operator's own subscription cookies. Use when asked to "download an O'Reilly book", "get this book as EPUB", "grab a book from learning.oreilly.com", or "download from Safari Books".
-version: 1.0.0
-author: Tarun Sukhani
-tools: [exec, filesystem]
-commands: [safaribooks.py]
-icon: 📚
+description: >-
+  Download a book from O'Reilly Learning as an EPUB using the operator's own subscription cookies. Use when asked to "download an O'Reilly book", "get this book as EPUB", "grab a book from learning.oreilly.com", or "download from Safari Books".
+metadata:
+  version: "1.0.0"
+  author: Tarun Sukhani
+  jclaw-icon: "📚"
+  jclaw-tools: exec filesystem
+  jclaw-commands: safaribooks.py
 ---
 
 # O'Reilly Book Downloader

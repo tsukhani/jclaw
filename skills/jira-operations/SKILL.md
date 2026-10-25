@@ -1,11 +1,13 @@
 ---
 name: jira-operations
-description: Perform JIRA operations using the MCP server as primary, with automatic fallback to REST API for operations that don't work via MCP (e.g., story points via Agile estimation endpoint, epic linking via parent field). Includes sprint workflow helpers.
-version: 1.0.4
-author: Tarun Sukhani
-tools: [mcp_jira-confluence, exec, filesystem]
-commands: []
-icon: 🎯
+description: >-
+  Perform JIRA operations using the MCP server as primary, with automatic fallback to REST API for operations that don't work via MCP (e.g., story points via Agile estimation endpoint, epic linking via parent field). Includes sprint workflow helpers.
+metadata:
+  version: "1.0.4"
+  author: Tarun Sukhani
+  jclaw-icon: "🎯"
+  jclaw-tools: mcp_jira-confluence exec filesystem
+  jclaw-commands: ""
 ---
 # Jira Operations
 

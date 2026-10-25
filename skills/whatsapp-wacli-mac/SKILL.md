@@ -1,11 +1,13 @@
 ---
 name: whatsapp-wacli-mac
-description: Use wacli (WhatsApp CLI) to sync, search, send messages, manage contacts/groups, and backfill chat history. REQUIRES AUTHENTICATION FIRST. macOS ARM64 binary.
-version: 1.2.0
-author: Tarun Sukhani
-tools: [exec]
-commands: [wacli]
-icon: 🍎
+description: >-
+  Use wacli (WhatsApp CLI) to sync, search, send messages, manage contacts/groups, and backfill chat history. REQUIRES AUTHENTICATION FIRST. macOS ARM64 binary.
+metadata:
+  version: "1.2.0"
+  author: Tarun Sukhani
+  jclaw-icon: "🍎"
+  jclaw-tools: exec
+  jclaw-commands: wacli
 ---
 # Commands
 

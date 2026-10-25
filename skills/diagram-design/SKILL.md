@@ -1,11 +1,13 @@
 ---
 name: diagram-design
-description: Create technical and product diagrams — architecture, flowchart, sequence, state machine, ER / data model, timeline, swimlane, quadrant, nested, tree, layer stack, venn, pyramid — as standalone HTML files with inline SVG. Supports customizing colors and fonts to match your brand.
-version: 1.0.2
-author: Tarun Sukhani
-tools: [filesystem, web_fetch, documents]
-commands: []
-icon: 📐
+description: >-
+  Create technical and product diagrams — architecture, flowchart, sequence, state machine, ER / data model, timeline, swimlane, quadrant, nested, tree, layer stack, venn, pyramid — as standalone HTML files with inline SVG. Supports customizing colors and fonts to match your brand.
+metadata:
+  version: "1.0.2"
+  author: Tarun Sukhani
+  jclaw-icon: "📐"
+  jclaw-tools: filesystem web_fetch documents
+  jclaw-commands: ""
 ---
 # Diagram Design
 

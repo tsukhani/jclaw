@@ -1,11 +1,13 @@
 ---
 name: radarr
-icon: 📺
-description: Download movies via Radarr API with automated download monitoring and import handling.
-author: Tarun Sukhani
-tools: [exec, subagent_spawn, subagent_yield, message, filesystem]
-commands: []
-version: 1.3.0
+description: >-
+  Download movies via Radarr API with automated download monitoring and import handling.
+metadata:
+  version: "1.3.0"
+  author: Tarun Sukhani
+  jclaw-icon: "📺"
+  jclaw-tools: exec subagent_spawn subagent_yield message filesystem
+  jclaw-commands: ""
 ---
 # Radarr Movie Download (API-Only)
 

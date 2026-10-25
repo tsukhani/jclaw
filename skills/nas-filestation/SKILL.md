@@ -1,11 +1,13 @@
 ---
 name: nas-filestation
-description: Access a Synology NAS over the FileStation HTTP API via the bundled nas.sh script — list shares, browse folders, upload files, create folders, delete, and stat files. Use for any task that needs to store or retrieve files on the operator's Synology NAS.
-author: main
-tools: [exec, filesystem]
-commands: [nas.sh]
-icon: 🗄️
-version: 1.0.0
+description: >-
+  Access a Synology NAS over the FileStation HTTP API via the bundled nas.sh script — list shares, browse folders, upload files, create folders, delete, and stat files. Use for any task that needs to store or retrieve files on the operator's Synology NAS.
+metadata:
+  version: "1.0.0"
+  author: main
+  jclaw-icon: "🗄️"
+  jclaw-tools: exec filesystem
+  jclaw-commands: nas.sh
 ---
 # Synology NAS FileStation Access
 

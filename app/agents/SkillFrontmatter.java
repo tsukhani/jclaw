@@ -102,9 +102,7 @@ public final class SkillFrontmatter {
             var key = legacy.getValue();
             var value = top.remove(legacy.getKey());
             if (value == null || metadata.containsKey(key)) continue;
-            var converted = LIST_KEYS.contains(key) ? joinWords(value) : value;
-            // Only the tool list means something when empty: declared as none.
-            if (!"".equals(converted) || key.equals(TOOLS)) metadata.put(key, converted);
+            metadata.put(key, LIST_KEYS.contains(key) ? joinWords(value) : value);
         }
         return new SkillFrontmatter(top, metadata);
     }
@@ -158,17 +156,13 @@ public final class SkillFrontmatter {
 
     public SkillFrontmatter setVersion(@Nullable String version) { return putMetadata(VERSION, version); }
 
-    /** Declare the tools; an empty list still declares them, as none. */
+    // The three list setters declare the key even for an empty list: declared as none is not undeclared.
+
     public SkillFrontmatter setTools(List<String> tools) { return putMetadata(TOOLS, requireWords(TOOLS, tools)); }
 
-    /** An empty list removes the key: no commands and an absent key mean the same. */
-    public SkillFrontmatter setCommands(List<String> commands) {
-        return putMetadata(COMMANDS, commands.isEmpty() ? null : requireWords(COMMANDS, commands));
-    }
+    public SkillFrontmatter setCommands(List<String> commands) { return putMetadata(COMMANDS, requireWords(COMMANDS, commands)); }
 
-    public SkillFrontmatter setMcpServers(List<String> servers) {
-        return putMetadata(MCP_SERVERS, servers.isEmpty() ? null : requireWords(MCP_SERVERS, servers));
-    }
+    public SkillFrontmatter setMcpServers(List<String> servers) { return putMetadata(MCP_SERVERS, requireWords(MCP_SERVERS, servers)); }
 
     /** True when {@code s} survives a round trip through a word list as exactly one element. */
     public static boolean isWord(@Nullable String s) {

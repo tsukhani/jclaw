@@ -208,7 +208,7 @@ class SkillVersionManagerTest extends UnitTest {
         var stored = SkillVersionManager.finalizeSkillMdWrite(target, written);
 
         assertEquals("---\nname: notes\ndescription: >-\n  Takes notes\nmetadata:\n  author: main\n  jclaw-icon: \"📝\"\n"
-                + "  jclaw-tools: filesystem\n  version: \"1.0.0\"\n---\n# Notes\n", stored);
+                + "  jclaw-tools: filesystem\n  jclaw-commands: \"\"\n  version: \"1.0.0\"\n---\n# Notes\n", stored);
         assertEquals(java.util.List.of(), agents.SkillSpec.problems(stored, "notes"));
     }
 

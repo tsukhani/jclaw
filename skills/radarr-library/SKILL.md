@@ -1,11 +1,13 @@
 ---
 name: radarr-library
-icon: 📺
-description: Check and clean the Radarr movie library. Find duplicates, search library, get stats. Delete only after user approval.
-version: 1.0.3
-author: Tarun Sukhani
-tools: [exec]
-commands: []
+description: >-
+  Check and clean the Radarr movie library. Find duplicates, search library, get stats. Delete only after user approval.
+metadata:
+  version: "1.0.3"
+  author: Tarun Sukhani
+  jclaw-icon: "📺"
+  jclaw-tools: exec
+  jclaw-commands: ""
 ---
 # Radarr Library Checker & Cleaner
 

@@ -1,11 +1,13 @@
 ---
 name: business-card-reader
-description: Read a business card image, extract contact details (name, phone, email, company, etc.), append them to a Google Sheet, then send a welcome email and WhatsApp message to the contact.
-version: 1.0.6
-author: Tarun Sukhani
-tools: [documents, exec, datetime]
-commands: []
-icon: 📇
+description: >-
+  Read a business card image, extract contact details (name, phone, email, company, etc.), append them to a Google Sheet, then send a welcome email and WhatsApp message to the contact.
+metadata:
+  version: "1.0.6"
+  author: Tarun Sukhani
+  jclaw-icon: "📇"
+  jclaw-tools: documents exec datetime
+  jclaw-commands: ""
 ---
 # Business Card Reader Skill
 

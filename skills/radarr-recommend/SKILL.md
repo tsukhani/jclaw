@@ -1,11 +1,13 @@
 ---
 name: radarr-recommend
-icon: 📺
-description: Get personalized movie recommendations based on user's preferences. Checks library to avoid duplicates.
-version: 1.0.3
-author: Tarun Sukhani
-tools: [exec, filesystem]
-commands: []
+description: >-
+  Get personalized movie recommendations based on user's preferences. Checks library to avoid duplicates.
+metadata:
+  version: "1.0.3"
+  author: Tarun Sukhani
+  jclaw-icon: "📺"
+  jclaw-tools: exec filesystem
+  jclaw-commands: ""
 ---
 # Movie Recommendations
 

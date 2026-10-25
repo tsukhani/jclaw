@@ -180,12 +180,15 @@ class SkillFrontmatterTest extends UnitTest {
         assertEquals(List.of("wacli"), info.commands());
     }
 
+    // skill-creator has new skills declare "no binaries" explicitly, so a reviewer can tell it from a missing declaration.
     @Test
-    void anEmptyCommandListWritesNoKey() {
+    void anEmptyListStillDeclaresTheKey() {
         var md = SkillFrontmatter.empty().put("name", "x").put("description", "d")
-                .setCommands(List.of()).setTools(List.of()).render();
+                .setTools(List.of()).setCommands(List.of()).render();
+        var converted = SkillFrontmatter.of("---\nname: x\ndescription: d\ntools: []\ncommands: []\n---\n").render();
 
-        assertEquals("---\nname: x\ndescription: >-\n  d\nmetadata:\n  jclaw-tools: \"\"\n---\n", md);
+        assertEquals("---\nname: x\ndescription: >-\n  d\nmetadata:\n  jclaw-tools: \"\"\n  jclaw-commands: \"\"\n---\n", md);
+        assertEquals(md, converted);
     }
 
     // ==================== Anthropic's validator ====================

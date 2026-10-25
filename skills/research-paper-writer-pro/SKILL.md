@@ -1,11 +1,13 @@
 ---
 name: research-paper-writer-pro
-description: Drafts research papers and typesets them in one house style — A4 single-column LaTeX article in Palatino with author–year APA references, numbered propositions and equations, booktabs tables and matplotlib figures — then compiles them to PDF and checks the result.
-version: 1.0.0
-author: clawhub.ai/earthwalking/research-paper-writer-pro
-tools: [exec, filesystem]
-commands: []
-icon: 📝
+description: >-
+  Drafts research papers and typesets them in one house style — A4 single-column LaTeX article in Palatino with author–year APA references, numbered propositions and equations, booktabs tables and matplotlib figures — then compiles them to PDF and checks the result.
+metadata:
+  version: "1.0.0"
+  author: clawhub.ai/earthwalking/research-paper-writer-pro
+  jclaw-icon: "📝"
+  jclaw-tools: exec filesystem
+  jclaw-commands: ""
 ---
 
 # Research Paper Writer

@@ -1,11 +1,13 @@
 ---
 name: visual-explainer
-description: Generate rich HTML pages or slide decks for diagrams, diff reviews, plan audits, data tables, and project recaps
-version: 1.0.1
-author: Tarun Sukhani
-tools: [filesystem, exec, documents]
-commands: []
-icon: 🖼️
+description: >-
+  Generate rich HTML pages or slide decks for diagrams, diff reviews, plan audits, data tables, and project recaps
+metadata:
+  version: "1.0.1"
+  author: Tarun Sukhani
+  jclaw-icon: "🖼️"
+  jclaw-tools: filesystem exec documents
+  jclaw-commands: ""
 ---
 
 # Visual Explainer

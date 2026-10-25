@@ -1,11 +1,13 @@
 ---
 name: radarr-delete
-icon: 📺
-description: Delete movies from Radarr library. Owner-only with full verification and cleanup.
-version: 1.0.5
-author: Tarun Sukhani
-tools: [exec]
-commands: []
+description: >-
+  Delete movies from Radarr library. Owner-only with full verification and cleanup.
+metadata:
+  version: "1.0.5"
+  author: Tarun Sukhani
+  jclaw-icon: "📺"
+  jclaw-tools: exec
+  jclaw-commands: ""
 ---
 # Radarr Movie Delete Workflow
 
