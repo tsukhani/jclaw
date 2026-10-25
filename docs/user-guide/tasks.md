@@ -59,7 +59,7 @@ The output itself goes only where the task's delivery sends it, never into the c
 
 An error message can hold private details, so the notice shows one only in a chat that just you read, with any key in it hidden. In a group chat, the notice says the reason is on the Tasks page. Only the agent that owns the task, or `main`, is told how its run ended. If two chats ask about the same run, the first one to ask is told.
 
-If you cancel the run, or JClaw stops it for running too long, the notice says it was cancelled. If a restart cuts the run short, or it fails and will be retried, the notice comes when the task's next run ends.
+A paused task does not run, so the agent is told that straight away instead of waiting. If you cancel the run, or JClaw stops it for running too long, the notice says it was cancelled. If a restart cuts the run short, or it fails and will be retried, the notice comes when the task's next run ends.
 
 ### Cancel vs delete
 

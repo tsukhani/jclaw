@@ -36,6 +36,11 @@ public final class TaskRunReports {
     public static final String AGENT_NOTE = "When the run ends, its result is posted to this chat and you are "
             + "resumed to report it. End your turn now; do not poll, sleep or check on the run.";
 
+    /** What the agent is told instead of {@link #AGENT_NOTE} for a paused task, whose fire is skipped. */
+    public static String pausedNote(String taskName) {
+        return "Task '%s' is paused, so nothing runs until it is resumed.".formatted(taskName);
+    }
+
     private static final String EVENT_CATEGORY = "task";
     private static final String LABEL = "[task result]";
     // The output went where the task delivers it; a group chat may hold readers it was not meant for.

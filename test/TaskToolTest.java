@@ -405,6 +405,52 @@ class TaskToolTest extends UnitTest {
     }
 
     @Test
+    void runNowOnAPausedTaskRunsNothingAndPromisesNoReport() {
+        execute("""
+                {"action":"createTask","name":"held","schedule":"every 1h"}""");
+        var taskId = findTaskByName("held").id;
+        execute("""
+                {"action":"pause","name":"held"}""");
+        var chat = Tx.run(() -> ConversationService.create(agent, "web", null).id);
+        commitAndReopen();
+        stub.reschedules.clear();
+
+        var reply = ToolContext.withConversation(chat, () -> execute("""
+                {"action":"runNow","name":"held"}"""));
+        commitAndReopen();
+        JPA.em().clear();
+
+        assertEquals("Task 'held' is paused, so nothing runs until it is resumed.", reply);
+        assertEquals(List.of(), stub.reschedules);
+        assertNull(((Task) Tx.run(() -> Task.findById(taskId))).reportConversationId);
+    }
+
+    @Test
+    void runNowRunsTheUnpausedTasksOfANameAndSaysTheRestDidNot() {
+        execute("""
+                {"action":"createTask","name":"dup","schedule":"30m"}""");
+        execute("""
+                {"action":"createTask","name":"dup","schedule":"30m"}""");
+        var ids = Tx.run(() -> JPA.em().createQuery("SELECT t.id FROM Task t WHERE t.name = :name ORDER BY t.id", Long.class)
+                .setParameter("name", "dup").getResultList());
+        assertEquals(2, ids.size());
+        Tx.run(() -> {
+            Task held = Task.findById(ids.getFirst());
+            held.paused = true;
+            held.save();
+        });
+        commitAndReopen();
+        stub.reschedules.clear();
+
+        var reply = execute("""
+                {"action":"runNow","name":"dup"}""");
+        commitAndReopen();
+
+        assertEquals("Task 'dup' run-now triggered. 1 more named 'dup' is paused and did not run.", reply);
+        assertEquals(List.of(ids.getLast().toString()), stub.reschedules.stream().map(r -> r.instanceId.getId()).toList());
+    }
+
+    @Test
     void runNowOutsideAChatAsksForNoReport() {
         execute("""
                 {"action":"createTask","name":"headless-run","schedule":"every 1h"}""");

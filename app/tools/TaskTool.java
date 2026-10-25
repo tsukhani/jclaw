@@ -710,7 +710,9 @@ public class TaskTool implements ToolRegistry.Tool {
 
         // Any-state lookup — runNow can target COMPLETED/FAILED/CANCELED too.
         var scan = Tx.run(() -> collectRunNowTargets(name, agent));
-        if (scan.ranIds().isEmpty()) return MSG_NO_TASK_FOUND.formatted(name);
+        if (scan.ranIds().isEmpty()) {
+            return scan.paused() > 0 ? TaskRunReports.pausedNote(name) : MSG_NO_TASK_FOUND.formatted(name);
+        }
         // Recorded before the fire, so the run the executor opens finds it.
         var chat = ToolContext.conversationId();
         boolean reported = false;
@@ -739,6 +741,10 @@ public class TaskTool implements ToolRegistry.Tool {
         var triggered = scan.ranIds().size() == 1
                 ? "Task '%s' run-now triggered%s.".formatted(name, revivedSuffix)
                 : "%d tasks named '%s' run-now triggered%s.".formatted(scan.ranIds().size(), name, revivedSuffix);
+        if (scan.paused() > 0) {
+            triggered += " %d more named '%s' %s paused and did not run.".formatted(scan.paused(), name,
+                    scan.paused() == 1 ? "is" : "are");
+        }
         return reported ? triggered + " " + TaskRunReports.AGENT_NOTE : triggered;
     }
 
@@ -749,14 +755,20 @@ public class TaskTool implements ToolRegistry.Tool {
      * so the caller can force-remove their stale scheduled_tasks row.
      * Returns the full list of matched task ids (any state).
      */
-    private record RunNowScan(List<Long> ranIds, int revived, List<Long> lostIds) {}
+    private record RunNowScan(List<Long> ranIds, int revived, List<Long> lostIds, int paused) {}
 
     private static RunNowScan collectRunNowTargets(String name, Agent agent) {
         var tasks = findTasks("name = ?1 AND agent = ?2", name, agent);
         var ids = new ArrayList<Long>(tasks.size());
         var lostIds = new ArrayList<Long>();
         int revived = 0;
+        int paused = 0;
         for (var task : tasks) {
+            // TaskExecutionHandler skips a paused task's fire, so there is nothing to run or report.
+            if (task.paused) {
+                paused++;
+                continue;
+            }
             if (task.status == Task.Status.CANCELLED) {
                 // Revive — otherwise TaskExecutionHandler skips the fire body.
                 // Recurring tasks get ACTIVE; one-shot tasks get PENDING.
@@ -779,7 +791,7 @@ public class TaskTool implements ToolRegistry.Tool {
             }
             ids.add(task.id);
         }
-        return new RunNowScan(ids, revived, lostIds);
+        return new RunNowScan(ids, revived, lostIds, paused);
     }
 
     private String cancelTask(JsonObject args, Agent agent) {

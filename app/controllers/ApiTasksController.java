@@ -702,6 +702,12 @@ public class ApiTasksController extends Controller {
             notFound();
             throw ApiResponses.unreachable();
         }
+        // TaskExecutionHandler skips a paused task's fire: say so now rather than leave an agent waiting.
+        if (task.paused) {
+            response.setHeader(RequestPrincipal.AGENT_NOTE_HEADER, TaskRunReports.pausedNote(task.name));
+            renderJSON(gson.toJson(TaskView.of(task)));
+            throw ApiResponses.unreachable();
+        }
 
         boolean revivedFromCancel = false;
         if (task.status == Task.Status.CANCELLED) {

@@ -138,6 +138,21 @@ class ApiTasksControllerRunTest extends FunctionalTest {
     }
 
     @Test
+    void runningAPausedTaskFromAChatSaysItIsPausedAndPromisesNoReport() {
+        var agentId = seedAgent();
+        var taskId = seedTask(agentId, "held-run", "every 1h");
+        mutateAndCommit(taskId, t -> t.paused = true);
+        var chat = committed(() -> ConversationService.create(Agent.findById(agentId), "web", null).id);
+
+        var resp = asAgent(() -> POST(agentRequest(agentId, chat), "/api/tasks/" + taskId + "/run", "application/json", "{}"));
+
+        assertIsOk(resp);
+        assertEquals("Task 'held-run' is paused, so nothing runs until it is resumed.",
+                resp.getHeader(RequestPrincipal.AGENT_NOTE_HEADER));
+        assertNull(committed(() -> ((Task) Task.findById(taskId)).reportConversationId));
+    }
+
+    @Test
     void anotherAgentRunningTheTaskIsNotToldHowItEnds() {
         var ownerId = seedAgent();
         var otherId = seedAgent("task-run-other-agent");
