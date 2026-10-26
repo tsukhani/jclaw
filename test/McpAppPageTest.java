@@ -134,6 +134,13 @@ class McpAppPageTest extends UnitTest {
                 remote.dropped().toString());
     }
 
+    @Test
+    void anOriginOfThousandsOfLabelsIsReadWithoutOverflowingTheStack() {
+        var origin = "https://a" + ".b".repeat(100_000);
+
+        assertEquals(origin, connectSrc(connecting(REMOTE, origin)));
+    }
+
     private static McpServer server(McpServer.Transport transport, String config) {
         var row = new McpServer();
         row.transport = transport;

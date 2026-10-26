@@ -61,7 +61,7 @@ public final class JavaRuntimeService {
     private static final Duration CHECK_TTL = Duration.ofHours(1);
 
     // The shapes apply_staged_jre in jclaw.sh accepts, so a manifest written here is one it reads.
-    private static final Pattern VERSION = Pattern.compile("\\d+(\\.\\d+)*");
+    private static final Pattern VERSION = Pattern.compile("\\d+(?:\\.\\d+)*+");
     private static final Pattern SHA256 = Pattern.compile("[0-9a-f]{64}");
     private static final Pattern ARCHIVE = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]*\\.(tar\\.gz|zip)");
 

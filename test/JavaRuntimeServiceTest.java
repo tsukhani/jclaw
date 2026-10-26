@@ -388,6 +388,17 @@ class JavaRuntimeServiceTest extends UnitTest {
     }
 
     @Test
+    void aVersionOfThousandsOfPartsIsReadWithoutOverflowingTheStack() throws IOException {
+        var home = Files.createDirectories(tmp.resolve("home"));
+        var dir = Files.createDirectories(home.resolve("jre.staged"));
+        var version = "25" + ".0".repeat(100_000);
+        Files.writeString(dir.resolve(ARCHIVE), "bytes");
+        Files.writeString(dir.resolve("manifest"), "version=" + version + "\nsha256=" + hash("C3") + "\narchive=" + ARCHIVE + "\n");
+
+        assertEquals(new JavaRuntimeService.Staged(version, hash("C3"), ARCHIVE), JavaRuntimeService.staged(home));
+    }
+
+    @Test
     void theLastStartIsTheStatusFilesFirstLine() throws IOException {
         var app = install();
         assertNull(JavaRuntimeService.lastStart(app));

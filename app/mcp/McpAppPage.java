@@ -36,7 +36,7 @@ public final class McpAppPage {
     private static final String CATEGORY = "MCP_APPS";
     /** An origin as {@code McpUiResourceCsp} declares one, with an optional {@code *.} subdomain and path. */
     private static final Pattern DECLARED_ORIGIN = Pattern.compile("(https?|wss?)://(?<wildcard>\\*\\.)?"
-            + "(?<host>[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*)(:(\\d{1,5}|\\*))?(/[A-Za-z0-9._~%/-]*)?",
+            + "(?<host>[a-z0-9-]+(\\.[a-z0-9-]+)*+)(:(\\d{1,5}|\\*))?(/[a-z0-9._~%/-]*)?",
             Pattern.CASE_INSENSITIVE);
     /** Names that point inside a home or office network by convention, matched as written. */
     private static final List<String> LOCAL_SUFFIXES = List.of(
