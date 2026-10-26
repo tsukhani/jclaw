@@ -79,7 +79,7 @@ public record CertificationSplit(String split, String set, long seed, List<Strin
         }
 
         /**
-         * The held-out set: {@code json} is {@code heldout.json} and {@code loaded} its labelled cases, both keyed by
+         * The held-out set: {@code json} is {@code heldout.json} and {@code loaded} its labeled cases, both keyed by
          * memory id; each case is re-identified by its memory id, which stays under {@code data/graph-eval/}.
          */
         public static Source heldout(String json, HeldOut.Loaded loaded, String sequences, byte[] guide,

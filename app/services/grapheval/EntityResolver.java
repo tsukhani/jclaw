@@ -401,7 +401,7 @@ public final class EntityResolver {
      * {@code from.mergedInto} cleared.
      *
      * @throws IllegalArgumentException when {@code from} names no Term, is not merged, or its target is itself merged
-     *     (the copies travelled onward, so that merge is undone first)
+     *     (the copies traveled onward, so that merge is undone first)
      */
     public static List<OntologyRecord> undo(long agentId, List<OntologyRecord> graph, String from) {
         var g = new Graph(agentId, graph);

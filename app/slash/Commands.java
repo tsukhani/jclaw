@@ -1159,7 +1159,7 @@ public final class Commands {
 
     /** JCLAW-274: per-message content hard cap when rendering inline. The
      *  full content stays accessible via the conversation viewer; this just
-     *  keeps a runaway LLM essay from monopolising a chat bubble. */
+     *  keeps a runaway LLM essay from monopolizing a chat bubble. */
     private static final int SUBAGENT_HISTORY_CONTENT_CAP = 500;
 
     private static Result executeSubagent(Agent agent, String channelType,

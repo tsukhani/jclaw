@@ -222,7 +222,7 @@ public final class RestartService {
      * shell with {@code jclaw.sh}, leaving no idle shell behind.
      *
      * <p>Deliberately not {@code setsid}: it is absent on macOS, and it buys
-     * nothing here. Both start paths already daemonise the JVM away from any
+     * nothing here. Both start paths already daemonize the JVM away from any
      * controlling terminal, so there is no SIGHUP to shield against; and
      * {@code play stop} signals {@code server.pid} specifically, never the
      * process group, so the helper is not in the blast radius of its own stop.

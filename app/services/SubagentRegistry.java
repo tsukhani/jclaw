@@ -537,7 +537,7 @@ public final class SubagentRegistry {
     }
 
     /**
-     * Until closed, cancelling task run {@code taskRunId} kills every run it started that is still in
+     * Until closed, canceling task run {@code taskRunId} kills every run it started that is still in
      * flight. A fire waiting on a subagent otherwise reaches its next checkpoint only once the subagent
      * has finished, and then discards the result (JCLAW-1567).
      */

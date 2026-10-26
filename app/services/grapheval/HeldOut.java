@@ -50,7 +50,7 @@ public final class HeldOut {
             "consolidation_derived", UNATTRIBUTED);
 
     /**
-     * A labelled held-out case; {@code memoryId} stays inside the harness and never reaches a report. A null
+     * A labeled held-out case; {@code memoryId} stays inside the harness and never reaches a report. A null
      * {@code authorType} is an unattributed memory.
      */
     public record HeldCase(long memoryId, Case labels, @Nullable MemoryAuthorType authorType,
@@ -95,9 +95,9 @@ public final class HeldOut {
     }
 
     /**
-     * Writes {@code count} of the agent's active memories, chosen by {@code seed}, to {@code file} unlabelled.
+     * Writes {@code count} of the agent's active memories, chosen by {@code seed}, to {@code file} unlabeled.
      *
-     * @throws IllegalStateException when {@code file} already exists, so a labelled file is never overwritten
+     * @throws IllegalStateException when {@code file} already exists, so a labeled file is never overwritten
      */
     public static Sampled sample(Path file, String agentId, int count, long seed) throws IOException {
         if (Files.exists(file)) throw new IllegalStateException("held-out file already exists; move it aside first");
@@ -152,7 +152,7 @@ public final class HeldOut {
     }
 
     /**
-     * The labelled cases in {@code file}, validated under the v3 rules with tags optional; an unlabelled one is
+     * The labeled cases in {@code file}, validated under the v3 rules with tags optional; an unlabeled one is
      * skipped and counted. Refusals name a case by its position, never its memory.
      */
     public static Loaded load(Path file, OntologySchema schema) throws IOException {

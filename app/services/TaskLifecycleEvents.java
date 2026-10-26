@@ -106,7 +106,7 @@ public final class TaskLifecycleEvents {
     public static final String BUS_LOST = "task.lost";
     /** A completed run's delivery step is over, whatever its outcome, so its delivery columns are final. */
     public static final String BUS_DELIVERY_SETTLED = "task.delivery_settled";
-    /** An operator or the fire's time limit cancelled a run; a shutdown's cancel is not announced. */
+    /** An operator or the fire's time limit canceled a run; a shutdown's cancel is not announced. */
     public static final String BUS_RUN_CANCELLED = "task.run_cancelled";
 
     private TaskLifecycleEvents() {}

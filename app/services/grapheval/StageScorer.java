@@ -45,7 +45,7 @@ public final class StageScorer {
 
     /**
      * One case's answers to the stage questions: the settling of its overlapping candidates, the typing of its gold
-     * spans, the relations of its gold terms, and the qualifier stages asked on gold: {@code tense} on its labelled
+     * spans, the relations of its gold terms, and the qualifier stages asked on gold: {@code tense} on its labeled
      * dates, {@code negation} on its terms, {@code occurs} on its events and dates, {@code status} and {@code slot} on
      * its relations.
      */
@@ -84,9 +84,9 @@ public final class StageScorer {
 
     /**
      * {@code overlap} counts the overlap groups settled on a gold span, or on neither when no span is gold;
-     * {@code relation} the labelled pairs whose kept relation is the label, in its direction, with yes at least
+     * {@code relation} the labeled pairs whose kept relation is the label, in its direction, with yes at least
      * one half; {@code noRelation} the pairs with no {@code holds} or admissible {@code ended} label whose kept
-     * relation has yes below one half. {@code dateRecall} is the labelled dates the finder found, {@code normalizer}
+     * relation has yes below one half. {@code dateRecall} is the labeled dates the finder found, {@code normalizer}
      * those found with a reading equal to the label; {@code tense}, {@code occurs}, {@code status} and {@code slot}
      * count answers equal to the gold one; {@code negationYes} is yes on denied labels, {@code negationNo} no on
      * positive ones, and {@code vetoRate} {@code unstated} on {@code holds} or admissible {@code ended} labels.
@@ -316,7 +316,7 @@ public final class StageScorer {
             return c.dates().stream().anyMatch(d -> d.span().equals(span));
         }
 
-        /** The parsed label of a dated span, or null when it is unlabelled or labelled excluded. */
+        /** The parsed label of a dated span, or null when it is unlabeled or labeled excluded. */
         private static @Nullable EdtfInterval label(Case c, String span) {
             for (var d : c.dates()) {
                 var value = d.value();
@@ -346,7 +346,7 @@ public final class StageScorer {
         return ExtractionPipeline.NEITHER;
     }
 
-    /** The labelled dates (non-null value) whose span the finder found at the case's anchor. */
+    /** The labeled dates (non-null value) whose span the finder found at the case's anchor. */
     public static Ratio dateRecall(List<Case> cases) {
         var count = new Count();
         for (var c : cases) {
@@ -359,7 +359,7 @@ public final class StageScorer {
         return count.done();
     }
 
-    /** Of the labelled dates the finder found, those with some reading equal to the label. */
+    /** Of the labeled dates the finder found, those with some reading equal to the label. */
     public static Ratio normalizer(List<Case> cases) {
         var count = new Count();
         for (var c : cases) {

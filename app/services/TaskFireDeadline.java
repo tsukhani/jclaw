@@ -60,7 +60,7 @@ public final class TaskFireDeadline {
                 return t;
             });
 
-    /** Run ids the watchdog cancelled (as opposed to an operator cancel), with the note saying why.
+    /** Run ids the watchdog canceled (as opposed to an operator cancel), with the note saying why.
      *  Cleared by {@link #disarm}. */
     private static final Map<Long, String> TIMED_OUT = new ConcurrentHashMap<>();
 
@@ -129,14 +129,14 @@ public final class TaskFireDeadline {
     }
 
     /**
-     * Whether the watchdog (not an operator) cancelled {@code taskRunId}; a peek, so it stays true
+     * Whether the watchdog (not an operator) canceled {@code taskRunId}; a peek, so it stays true
      * until {@link #disarm} clears it in the fire's {@code finally}.
      */
     public static boolean wasTimedOut(@Nullable Long taskRunId) {
         return taskRunId != null && TIMED_OUT.containsKey(taskRunId);
     }
 
-    /** The close-out note for a fire the watchdog cancelled, or null when it did not. */
+    /** The close-out note for a fire the watchdog canceled, or null when it did not. */
     public static @Nullable String timeoutNote(@Nullable Long taskRunId) {
         return taskRunId == null ? null : TIMED_OUT.get(taskRunId);
     }

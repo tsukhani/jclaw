@@ -135,7 +135,7 @@ public final class PgVectorProvisioner {
     /**
      * The dimension of the existing {@code memory.embedding} column, or {@link #COLUMN_ABSENT}
      * when there is none. pgvector stores the declared width in {@code atttypmod}, and an
-     * unparameterised {@code vector} column reports -1 there — which reads as "absent" here,
+     * unparameterized {@code vector} column reports -1 there — which reads as "absent" here,
      * correctly: an unconstrained column accepts any width, so there is nothing to mismatch.
      */
     private static int observedDimension(Connection conn) {

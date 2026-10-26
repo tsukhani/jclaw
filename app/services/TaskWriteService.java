@@ -42,7 +42,7 @@ public final class TaskWriteService {
     private static final String KEY_TIMEZONE = "timezone";
 
     /**
-     * Task columns whose fire-time behaviour is not built yet: script mode, pre-check and
+     * Task columns whose fire-time behavior is not built yet: script mode, pre-check and
      * noAgent (JCLAW-296), workdir, contextFrom and repeat limit (JCLAW-298). Both write
      * paths refuse them so a caller cannot believe it bounded or gated a task; each
      * ticket re-adds its keys here and to {@code TaskTool}'s schema when it builds them.

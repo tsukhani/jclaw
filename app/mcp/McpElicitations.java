@@ -223,7 +223,7 @@ public final class McpElicitations {
     /**
      * The operator's answer to {@code form}, one {@link #questionsForAgent} found could be put to them on this
      * thread's web-chat turn. Blocks until they answer, the turn stops, or {@code wait} runs out; a form asked once
-     * it has run out, or once the turn has ended, is cancelled without being shown.
+     * it has run out, or once the turn has ended, is canceled without being shown.
      */
     public static Answer ask(String server, JsonObject form, Wait wait) {
         var conversationId = ToolContext.conversationId();
@@ -278,7 +278,7 @@ public final class McpElicitations {
     }
 
     /**
-     * Test seam: the wait before an unanswered form is cancelled is {@code wait} while {@code body} runs on this
+     * Test seam: the wait before an unanswered form is canceled is {@code wait} while {@code body} runs on this
      * thread. {@code CapabilityRulesTest} fails the build if anything in {@code app/} calls it.
      */
     public static <T> T callWithWaitForTest(Duration wait, Supplier<T> body) {

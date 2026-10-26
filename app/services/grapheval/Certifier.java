@@ -141,7 +141,7 @@ public final class Certifier {
 
     /**
      * The one-sided Clopper-Pearson lower bound at {@code tail} on {@code right} of {@code total}: the p at which
-     * P(X >= right) is {@code tail}. 0 when nothing is right or nothing is labelled.
+     * P(X >= right) is {@code tail}. 0 when nothing is right or nothing is labeled.
      */
     public static double lowerBound(int right, int total, double tail) {
         if (total <= 0 || right <= 0) return 0.0;

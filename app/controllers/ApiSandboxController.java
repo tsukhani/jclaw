@@ -11,7 +11,7 @@ import tools.HarnessSandbox;
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
-/** Whether this host can honour {@code shell.sandbox} and {@code subagent.acp.sandbox}, for the Settings panels. */
+/** Whether this host can honor {@code shell.sandbox} and {@code subagent.acp.sandbox}, for the Settings panels. */
 @With(AuthCheck.class)
 public class ApiSandboxController extends Controller {
 

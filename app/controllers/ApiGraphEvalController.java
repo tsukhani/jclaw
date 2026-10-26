@@ -490,7 +490,7 @@ public class ApiGraphEvalController extends Controller {
     /**
      * {@code POST /api/graph/eval/heldout/coverage}: the coverage report's label sections over the held-out file and
      * the competency questions (JCLAW-1374). Model-free: it asks no model, reads no decision setting and no memory, and
-     * covers every labelled case, frozen splits included.
+     * covers every labeled case, frozen splits included.
      */
     @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,

@@ -58,7 +58,7 @@ public final class MemoryBounds implements GateBounds {
     /**
      * The cluster bootstrap: memories with gold, sorted by id, resampled {@link #RESAMPLES} times with replacement from
      * {@link #BOOTSTRAP_SEED}; the ascending resample ratio at index floor(tail × resamples), never above the point
-     * estimate. 0 when nothing is labelled.
+     * estimate. 0 when nothing is labeled.
      */
     @Override
     public double recallLower(List<MemoryCounts> labelled, double tail) {

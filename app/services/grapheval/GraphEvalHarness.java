@@ -64,7 +64,7 @@ import static utils.GsonHolder.GSON;
 
 /**
  * Certifies decision models for graph extraction (JCLAW-1344, JCLAW-1356): every stage and the end-to-end pipeline
- * over the labelled cases, {@code runs} times per model. A synthetic case is stored as a real memory of the requested
+ * over the labeled cases, {@code runs} times per model. A synthetic case is stored as a real memory of the requested
  * agent for the run; a held-out one is read where it lives. Either way the harness proves every row was left as it
  * was found. Graph records exist only in the returned report; nothing writes one anywhere.
  */

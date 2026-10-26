@@ -411,7 +411,7 @@ public final class SequenceHarness {
 
     /**
      * The end-to-end facts: terms at the configured term threshold, then each enabled relation type's relations and
-     * denials at its own threshold, kept only between written terms. A span takes its labelled entity's id when the
+     * denials at its own threshold, kept only between written terms. A span takes its labeled entity's id when the
      * type agrees with the one that id was first recorded under.
      */
     private static Facts modelFacts(CaseRun run, GraphCases.Case labels, long id, List<OntologyRecord> records,

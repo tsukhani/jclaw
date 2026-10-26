@@ -118,7 +118,7 @@ public final class ExtractionPipeline {
                     } catch (JevException.Outage e) {
                         if (!e.timedOut()) throw e;
                         boolean cold = OllamaDecision.stillLoading(baseUrl, model);
-                        // Ollama drops a load when its request is cancelled, so a timed-out cold model needs a load of its own.
+                        // Ollama drops a load when its request is canceled, so a timed-out cold model needs a load of its own.
                         var load = OllamaDecision.pin(baseUrl, model);
                         if (!cold || attempt == OLLAMA_ATTEMPTS) throw e;
                         load.join();

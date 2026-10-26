@@ -25,7 +25,7 @@ import java.util.TreeMap;
 /**
  * Strict end-to-end scoring of extraction runs against the case labels (JCLAW-1356, JCLAW-1366), from what
  * {@link Statements#at} would write. A written term is right only when its span is the mention or an alias of a
- * labelled entity, of the labelled type, written once; a written positive relation is right only when the labels state
+ * labeled entity, of the labeled type, written once; a written positive relation is right only when the labels state
  * it, {@code holds} or an admissible {@code ended}, between the entities its endpoints wrote. Status, valid time,
  * occurrence and valence are scored only on parents right at base; denials are scored against denied labels. Records
  * written by rule — the implicit operator or one mentioned as "The user", and a {@code holds} on a relation that cannot
@@ -63,7 +63,7 @@ public final class GraphEvalScorer {
 
     /**
      * One qualifier class at a threshold: {@code n} values written on base-right parents, of which {@code right} and
-     * {@code wrong}; {@code gold} labelled values; {@code recall} is right / gold, null when gold is zero.
+     * {@code wrong}; {@code gold} labeled values; {@code recall} is right / gold, null when gold is zero.
      */
     public record ClassTally(int n, int right, int wrong, int gold, @Nullable Double recall) {
         public static final ClassTally EMPTY = new ClassTally(0, 0, 0, 0, null);
@@ -75,7 +75,7 @@ public final class GraphEvalScorer {
      * {@code ended} relations. {@code ruleWritten} counts the rule-written operator terms and {@code ruleStatus} the
      * statuses set by rule, both left out of every count. {@code gWritten} and {@code gWrong} are every written item
      * but noise — terms, positives and denials — and those wrong at base or in any written qualifier;
-     * {@code trapGold} counts the labelled ended, denied and unasserted relations, and {@code trapViolations} those
+     * {@code trapGold} counts the labeled ended, denied and unasserted relations, and {@code trapViolations} those
      * written as what they are not.
      */
     public record Point(double threshold, int written, int right, int wrong, int wrongMatch, int wrongType,

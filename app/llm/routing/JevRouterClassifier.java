@@ -81,7 +81,7 @@ public final class JevRouterClassifier {
         }
         var body = request(message, model);
         OllamaDecision.addKeepAlive(body);
-        // Ollama drops a load when its request is cancelled, so a timed-out cold model needs a load of its own.
+        // Ollama drops a load when its request is canceled, so a timed-out cold model needs a load of its own.
         return decide("Ollama " + model, target, body, minConfidence, timeoutSeconds,
                 () -> OllamaDecision.pin(baseUrl, model));
     }

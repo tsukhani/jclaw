@@ -224,7 +224,7 @@ public final class CoreMemoryCapMigration {
         if (reply == null) return List.of();
         var arr = ReplyJson.lenientArray(reply)
                 .orElseThrow(() -> new JsonParseException("the reply holds no JSON array"));
-        // Answers land on memories by position, so a short or long array recategorises the wrong rows.
+        // Answers land on memories by position, so a short or long array recategorizes the wrong rows.
         if (arr.size() != expected) {
             throw new JsonParseException("the reply answers for %d memories, not %d".formatted(arr.size(), expected));
         }
