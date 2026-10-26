@@ -287,24 +287,29 @@ class InboundRecoverySweepTest extends UnitTest {
     }
 
     @Test
-    void onlyARequestInsideTheLookbackGetsTheNote() throws Exception {
-        assertEquals(Duration.ofHours(1), InboundRecoverySweep.NOTE_LOOKBACK, "a restart notes only its last hour");
+    void afterALongOutageOnlyARequestFromTheHourBeforeTheStopGetsTheNote() throws Exception {
+        assertEquals(Duration.ofHours(1), InboundRecoverySweep.NOTE_LOOKBACK, "a restart notes only the hour before the stop");
         var agent = persistAgent();
+        // Web chat is never noted, so its row only marks when the previous run last wrote.
+        var lastWrite = persistConversation(agent, "web", "admin");
+        appendUserRow(lastWrite, "the last thing the previous run saved");
         var recent = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
         appendUserRow(recent, "check my calendar");
         var stale = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
         appendUserRow(stale, "check my calendar");
         commit();
-        var lookbackStart = cutoff().minus(InboundRecoverySweep.NOTE_LOOKBACK);
-        backdate(recent, lookbackStart.plusSeconds(60));
-        backdate(stale, lookbackStart.minusSeconds(60));
+        var stoppedAt = PREVIOUS_PROCESS.minus(Duration.ofHours(3));
+        backdate(lastWrite, stoppedAt);
+        backdate(recent, stoppedAt.minus(InboundRecoverySweep.NOTE_LOOKBACK).plusSeconds(60));
+        backdate(stale, stoppedAt.minus(InboundRecoverySweep.NOTE_LOOKBACK).minusSeconds(60));
 
         TelegramStreamingRecoveryJob.sweep(cutoff());
 
         assertEquals(List.of(new Row("user", "check my calendar"),
                 new Row("assistant", TelegramStreamingRecoveryJob.INTERRUPT_NOTE)), rows(recent));
         assertEquals(List.of(new Row("user", "check my calendar")), rows(stale));
-        assertEquals(0, llmCalls.get(), "neither turn is run again");
+        assertEquals(List.of(new Row("user", "the last thing the previous run saved")), rows(lastWrite));
+        assertEquals(0, llmCalls.get(), "no turn is run again");
     }
 
     @Test

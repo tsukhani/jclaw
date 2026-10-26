@@ -29,7 +29,10 @@ public final class InboundRecoverySweep {
     public static final String INTERRUPT_NOTE =
             "This response was interrupted — please send your message again.";
 
-    /** A request older than this gets no note: it is a turn that failed long ago, not one this restart cut off. */
+    /**
+     * How far before the previous run's last write a request still gets the note. Counted from the stop, not
+     * the boot, so an outage of any length still notes the turn it cut off; anything older failed long ago.
+     */
     public static final Duration NOTE_LOOKBACK = Duration.ofHours(1);
 
     private static final String CATEGORY = "queue";
@@ -58,6 +61,9 @@ public final class InboundRecoverySweep {
     }
 
     private static int noteInterruptedTurns(Instant cutoff, Set<Long> placeholderEdited) {
+        var stoppedAt = previousRunStopped(cutoff);
+        if (stoppedAt == null) return 0;
+        var since = stoppedAt.minus(NOTE_LOOKBACK);
         // A subagent child carries its parent's channel and peer, or no peer: the user hears once, from the parent.
         List<Long> candidates = Tx.run(() -> JPA.em().createQuery(
                         "SELECT DISTINCT m.conversation.id FROM Message m WHERE m.role = :user"
@@ -67,7 +73,7 @@ public final class InboundRecoverySweep {
                                 + " AND NOT EXISTS (SELECT n.id FROM Message n WHERE n.conversation = m.conversation"
                                 + " AND n.role = :user AND n.createdAt >= :cutoff)", Long.class)
                 .setParameter("user", MessageRole.USER.value)
-                .setParameter("since", cutoff.minus(NOTE_LOOKBACK))
+                .setParameter("since", since)
                 .setParameter("cutoff", cutoff)
                 .setParameter("channels", ConversationQueue.EXTERNAL_CHANNELS)
                 .getResultList());
@@ -76,7 +82,7 @@ public final class InboundRecoverySweep {
             // A turn of this process owns it, and its own reply closes the request.
             if (ConversationQueue.isBusy(conversationId)) continue;
             try {
-                var delivery = Tx.run(() -> closeInterrupted(conversationId, cutoff));
+                var delivery = Tx.run(() -> closeInterrupted(conversationId, since, cutoff));
                 if (delivery == null) continue;
                 notified++;
                 var channel = delivery.channel();
@@ -92,23 +98,30 @@ public final class InboundRecoverySweep {
     }
 
     /** Append the note under the conversation's unanswered request, so no later sweep notes it again; null when answered. */
-    private static @Nullable Delivery closeInterrupted(Long conversationId, Instant cutoff) {
+    private static @Nullable Delivery closeInterrupted(Long conversationId, Instant since, Instant cutoff) {
         Conversation conversation = Conversation.findById(conversationId);
-        if (conversation == null || !sentBeforeCutoff(conversation, cutoff)
+        if (conversation == null || !sentInWindow(conversation, since, cutoff)
                 || !ConversationService.isUnanswered(conversation)) return null;
         ConversationService.appendAssistantMessage(conversation, INTERRUPT_NOTE, null);
         return new Delivery(ChannelRegistry.forConversation(conversation), conversation.peerId, conversation.agent);
     }
 
+    /** The newest message saved before the boot: the nearest record of when the previous run stopped. */
+    private static @Nullable Instant previousRunStopped(Instant cutoff) {
+        return Tx.run(() -> JPA.em().createQuery(
+                        "SELECT MAX(m.createdAt) FROM Message m WHERE m.createdAt < :cutoff", Instant.class)
+                .setParameter("cutoff", cutoff)
+                .getSingleResult());
+    }
+
     /** Re-read inside the transaction: a live message may have arrived since the scan, and a delivered report is no request. */
-    private static boolean sentBeforeCutoff(Conversation conversation, Instant cutoff) {
+    private static boolean sentInWindow(Conversation conversation, Instant since, Instant cutoff) {
         List<Message> newest = Message.find(
                 "conversation = ?1 AND role = ?2 AND subagentRunId IS NULL ORDER BY createdAt DESC, id DESC",
                 conversation, MessageRole.USER.value).fetch(1);
         if (newest.isEmpty()) return false;
         var request = newest.getFirst();
-        return request.messageKind == null && request.createdAt.isBefore(cutoff)
-                && !request.createdAt.isBefore(cutoff.minus(NOTE_LOOKBACK));
+        return request.messageKind == null && request.createdAt.isBefore(cutoff) && !request.createdAt.isBefore(since);
     }
 
     private static int requeueStored(Instant cutoff) {
