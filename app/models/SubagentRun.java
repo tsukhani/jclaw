@@ -150,8 +150,8 @@ public class SubagentRun extends Model {
      * loop exits without emitting a final assistant reply. The async-spawn
      * announce VT reads this column after the child terminates and switches
      * the announce-message role from {@code SYSTEM} (the default JCLAW-270
-     * fire-and-forget shape) to {@code USER}, then re-invokes
-     * {@code AgentRunner.run} on the parent conversation so the parent's
+     * fire-and-forget shape) to {@code USER}, then calls
+     * {@code AgentRunner.resumeAndDeliver} on the parent conversation so the parent's
      * logical turn resumes with the child's reply as its next user input.
      *
      * <p>Defaults to {@code false} for every plain async spawn that the

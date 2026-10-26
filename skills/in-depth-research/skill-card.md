@@ -23,9 +23,9 @@ Mitigation: Confirm the intended depth and decision context before starting, doc
 
 
 ## Reference(s): <br>
-- [Research Methodology](artifact/methodology.md) <br>
-- [Source Types & Evaluation](artifact/sources.md) <br>
-- [Research Output Formats](artifact/output-formats.md) <br>
+- [Research Methodology](methodology.md) <br>
+- [Source Types & Evaluation](sources.md) <br>
+- [Research Output Formats](output-formats.md) <br>
 
 
 ## Skill Output: <br>

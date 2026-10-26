@@ -22,11 +22,9 @@ import java.util.function.Consumer;
  * <p>Unlike Slack's app-token model there's no per-binding secret to rotate on —
  * a WhatsApp-Web binding is identified solely by its id and pairs lazily via QR —
  * so the ACTIVE set is keyed on binding id alone. A binding the runner has never
- * seen is opened with {@link WhatsAppCobaltSession#connect} (QR pairing if needed,
- * resume if a session is already on disk); Cobalt itself resumes a stored session
- * transparently when {@code registered()} succeeds, so the runner doesn't track
- * paired-vs-unpaired — it always calls {@code connect} for a fresh id and lets the
- * session pick the on-disk path.
+ * seen is opened with {@link WhatsAppCobaltSession#resume} when it has a
+ * {@code pairedJid}, else {@link WhatsAppCobaltSession#connect} (QR pairing);
+ * resume falls back to a QR when nothing is on disk.
  *
  * <p>The latest pending QR string per binding is exposed via
  * {@link #pendingQr(Long)} so {@link controllers.WhatsAppQrController} can return it
@@ -39,7 +37,7 @@ public final class WhatsAppCobaltRunner {
 
     /** bindingId → live session. The presence of a key means "active". */
     private static final ConcurrentHashMap<Long, WhatsAppCobaltSession> HANDLES = new ConcurrentHashMap<>();
-    /** bindingId → latest QR string awaiting a scan (cleared on successful pair via reconcile). */
+    /** bindingId → latest QR string awaiting a scan (cleared when the session closes). */
     private static final ConcurrentHashMap<Long, String> PENDING_QR = new ConcurrentHashMap<>();
 
     private WhatsAppCobaltRunner() {}
@@ -82,7 +80,7 @@ public final class WhatsAppCobaltRunner {
     }
 
     /** The latest pending QR string for a binding (awaiting a scan), or null when
-     *  none is pending (not yet generated, or already paired). */
+     *  none is pending (not yet generated, or the session closed). */
     public static @Nullable String pendingQr(Long bindingId) {
         return PENDING_QR.get(bindingId);
     }
@@ -105,9 +103,8 @@ public final class WhatsAppCobaltRunner {
 
     /**
      * Open (and connect) a session for {@code binding}. A QR consumer feeds the
-     * latest pairing QR into {@link #PENDING_QR}; the session clears it on a
-     * successful login via {@link WhatsAppCobaltSession}'s logged-in path (the QR
-     * is moot once paired, and the next reconcile sees {@code isPaired}). Mirrors
+     * latest pairing QR into {@link #PENDING_QR}; {@link #unregister} clears it;
+     * once paired, callers check {@link #isPaired} first. Mirrors
      * {@link SlackSocketModeRunner#register}.
      */
     public static void register(WhatsAppBinding binding) {
@@ -117,7 +114,7 @@ public final class WhatsAppCobaltRunner {
             HANDLES.put(bindingId, session);
             // An already-paired binding (pairedJid persisted) resumes silently; a
             // fresh one shows a QR. Resume is attempted first; if there's no stored
-            // session, the session logs "awaiting re-pair" and we fall to a QR open.
+            // session, the session falls back to a QR open itself.
             Consumer<String> qrConsumer = qr -> PENDING_QR.put(bindingId, qr);
             if (binding.pairedJid != null && !binding.pairedJid.isBlank()) {
                 session.resume(binding, qrConsumer);

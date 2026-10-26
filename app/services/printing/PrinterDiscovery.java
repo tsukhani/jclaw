@@ -136,7 +136,7 @@ public final class PrinterDiscovery {
     /**
      * Hand {@code close()} to a detached thread rather than blocking the browse on it.
      *
-     * <p>JmDNS 3.6.3 spends about two seconds in {@code close()} waiting for its own cancel
+     * <p>JmDNS 3.6.3 spent about two seconds in {@code close()} waiting for its own cancel
      * state machine, and that cost is unconditional: measured 2008 ms for a bare
      * create-then-close, 2011 ms after a {@code list()}, with {@code unregisterAllServices()}
      * itself costing 0 ms (JCLAW-1254). It is not our {@code timeout}, which bounds only

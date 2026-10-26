@@ -91,7 +91,7 @@ const launch = computed(() => {
   return p.effective !== p.command || p.env.length > 0 || !!p.rejection ? p : null
 })
 
-// Auto-detect the ACP coding harnesses installed on the host (claude/pi/codex).
+// Auto-detect the ACP coding harnesses installed on the host.
 // The probe shells out per binary, so use useLazyFetch — a slow/hung probe must
 // never suspend the panel. Re-probed only on Settings (re)open.
 interface DetectedHarness {

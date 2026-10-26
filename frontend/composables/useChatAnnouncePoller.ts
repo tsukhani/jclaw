@@ -65,7 +65,7 @@ const CONVERSATION_UPDATED_GRACE_MS = 60_000
 
 /**
  * Tool name that schedules background tasks; matches
- * {@code TaskTool.TOOL_NAME} on the backend. Detecting by name (not by
+ * {@code TaskTool.name()} on the backend. Detecting by name (not by
  * tool-result substring) is stable across the two shapes a tool call
  * takes in the local list — the SSE {@code tool_call} frame may not
  * populate {@code resultText} the same way the persisted-row reload
@@ -206,11 +206,8 @@ export function useChatAnnouncePoller(deps: UseChatAnnouncePollerDeps): UseChatA
    * True when the open conversation has any {@code task_manager} tool call
    * within {@link TASK_DELIVERY_POLL_GRACE_MS}. While true,
    * {@link announcePollTick} polls so a task fire's auto-delivered message
-   * (Bug 1 fix) surfaces inline. Scans both shapes the tool call takes in
-   * the local list (mirrors {@link hasPendingAsyncAnnounce}): standalone
-   * tool-role rows post-reload (where the assistant row above carried the
-   * call's name), and live SSE-pushed entries on the streaming assistant's
-   * {@link Message.toolCalls} array pre-reload.
+   * (Bug 1 fix) surfaces inline. Reads each row's {@link Message.toolCalls},
+   * where hydration also puts reloaded calls.
    *
    * <p>Triggers on every {@code task_manager} action, not just
    * {@code createTask} — only createTask actually schedules a new fire,

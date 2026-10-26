@@ -1,8 +1,8 @@
 /**
  * Shared ref pages can populate with a sub-crumb to append onto the layout's
- * route-derived breadcrumb trail. Primarily for in-page editors that don't
- * change the URL (e.g. agents.vue opens an "Edit Agent" form on the same
- * {@code /agents} route). Set to the resource's identity when the editor opens;
+ * route-derived breadcrumb trail. Names the entity a URL identifies, or a form
+ * with no URL of its own (the agents page's create form). Set to the resource's
+ * identity when the editor opens;
  * reset to {@code null} when it closes and on unmount so the crumb never leaks
  * across page navigations.
  */

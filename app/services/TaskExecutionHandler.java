@@ -30,12 +30,11 @@ import java.util.function.Supplier;
  * <p>CRON Tasks use a custom {@link CompletionHandler} that runs
  * <em>after</em> {@code executeOnce} completes: first
  * {@code executionOperations.stop()} removes the current row, then a
- * fresh {@link SchedulerClient#schedule schedule()} call inserts the
+ * fresh {@code scheduleIfNotExists} call inserts the
  * next-fire row using the same {@code task_instance} id (so each
  * JClaw Task occupies at most one row in {@code scheduled_tasks} at
- * any time). The stop-then-schedule order matters — calling
- * {@code schedule} while the original row still exists would trip the
- * unique constraint on {@code (task_name, task_instance)}.
+ * any time). The stop-then-schedule order matters — scheduling
+ * while the original row still exists would insert nothing.
  *
  * <h2>Why custom over OnCompleteReschedule</h2>
  * db-scheduler ships {@link CompletionHandler.OnCompleteReschedule}
@@ -198,10 +197,7 @@ public final class TaskExecutionHandler {
     /**
      * Race-tolerant Task lookup. db-scheduler's poll thread can fire a
      * scheduled row before the controller's INSERT for the Task row has
-     * committed — the schedule row goes into {@code scheduled_tasks} in
-     * the same Tx as the Task INSERT, but the poll reads via a separate
-     * connection / Tx so it can briefly see the schedule before the
-     * Task row. Observed in production at ~1ms separation between
+     * committed. Observed in production at ~1ms separation between
      * "Scheduled Task '...'" and "missing Task id N; skipping" log
      * lines; the lost fire never recovers (IMMEDIATE/SCHEDULED Tasks
      * never retry, INTERVAL/CRON Tasks lose their initial fire AND
@@ -398,8 +394,8 @@ public final class TaskExecutionHandler {
      * Two-step CRON re-schedule: drop the current row via
      * {@link #stopCurrentRow}, then insert the next-fire
      * row with the same task_instance id via
-     * {@link SchedulerClient#schedule}. The stop-then-schedule order
-     * is load-bearing for the unique-constraint reasons documented at
+     * {@code scheduleIfNotExists}. The stop-then-schedule order
+     * is load-bearing for the reasons documented at
      * the class level.
      *
      * <p>If next-fire computation fails (malformed cron) or

@@ -7,7 +7,7 @@ import { sections } from '~/components/settings/sections'
 
 /**
  * Tests for the Settings page's TOC + single-section swap shell (JCLAW-680).
- * The 20 per-section suites cover each panel's behavior; this file covers the
+ * The per-section suites cover each panel's behavior; this file covers the
  * page-level navigation the swap introduced: rail rendering, the active-item
  * highlight, click-to-swap, and ?section= deep-linking.
  */
@@ -63,14 +63,14 @@ describe('Settings page — TOC navigation + section swap', () => {
     const component = await mountSuspended(Settings)
     await flushPromises()
 
-    // General is active; Shell is not yet.
+    // Timezone is active; Shell is not yet.
     expect(component.find('[data-testid="settings-toc-item-timezone"]').attributes('aria-current')).toBe('page')
 
     await component.find('[data-testid="settings-toc-item-shell"]').trigger('click')
     await flushPromises()
     await flushPromises()
 
-    // Highlight moved to Shell; General is no longer current.
+    // Highlight moved to Shell; Timezone is no longer current.
     expect(component.find('[data-testid="settings-toc-item-shell"]').attributes('aria-current')).toBe('page')
     expect(component.find('[data-testid="settings-toc-item-timezone"]').attributes('aria-current')).toBeUndefined()
     // The Shell panel is now mounted (its Allowlist control renders).

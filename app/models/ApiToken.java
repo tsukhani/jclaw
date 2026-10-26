@@ -21,17 +21,16 @@ import java.time.Instant;
  * validates the {@code Authorization: Bearer <plaintext>} header an
  * agent's HTTP call carries when {@code jclaw_api} loopbacks to its
  * own {@code /api/**}. {@link services.InternalApiTokenService}
- * bootstraps a single row at first boot, stores the plaintext under
- * {@code auth.internal.apiToken} in the Config table, and the bearer
- * filter resolves incoming headers to this row via
+ * mints a row on each boot and keeps the plaintext in the process only,
+ * and the bearer filter resolves incoming headers to this row via
  * {@link #findActiveByPlaintext}.
  *
  * <p>The operator-minted-token surface that originally shipped with
  * JCLAW-282 (Settings → API Tokens, {@code ApiTokensController},
  * {@code /api/api-tokens/**} routes) was dropped — after the standalone
  * mcp-server jar pivot, no in-tree caller consumed external tokens, so
- * the related fields ({@code name}, {@code displayPrefix}, {@code Scope},
- * {@code revokedAt}) collapsed into dead weight. They live in git
+ * the related fields ({@code name}, {@code displayPrefix}, {@code Scope})
+ * collapsed into dead weight. They live in git
  * history if external tokens come back as an explicit need.
  *
  * <p><b>L2 cache.</b> Query-cache enabled on

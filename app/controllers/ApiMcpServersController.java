@@ -425,17 +425,17 @@ public class ApiMcpServersController extends Controller {
         throw new AssertionError("notFound() did not throw");
     }
 
+    private static void restoreMaskedSecrets(JsonObject body, McpServerService.TransportConfig stored) {
+        var refusal = McpServerService.restoreMaskedSecrets(body, stored);
+        if (refusal != null) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, refusal);
+    }
+
     /**
      * A STDIO server is a command this JVM spawns, unconfined — {@code McpStdioTransport} builds
      * a bare {@code ProcessBuilder}, outside {@code HarnessSandbox} and outside the shell
      * allowlist. That is the operator's authority to delegate, and {@code main} holds it;
      * a custom agent gets HTTP transports only (JCLAW-1270).
      */
-    private static void restoreMaskedSecrets(JsonObject body, McpServerService.TransportConfig stored) {
-        var refusal = McpServerService.restoreMaskedSecrets(body, stored);
-        if (refusal != null) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, refusal);
-    }
-
     private static void requireMainForStdio(McpServer.Transport transport) {
         if (transport == McpServer.Transport.STDIO && !RequestPrincipal.isOperatorOrMainAgent()) {
             ApiResponses.error(403, ApiResponses.AGENT_SCOPE,

@@ -26,7 +26,7 @@ import java.util.Optional;
  *
  * This class only understands the envelope grammar and produces an ordered list of
  * {@link FileOp} describing what should happen to each file. It never touches the
- * filesystem and knows nothing about agents or workspaces — {@code FileSystemTools}
+ * filesystem and knows nothing about agents or workspaces — {@code FsPatchApplier}
  * owns resolving paths, locking, applying chunks, and rollback.
  */
 public final class UnifiedPatchParser {

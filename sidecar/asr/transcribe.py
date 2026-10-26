@@ -13,7 +13,7 @@ unchanged while wall clock drops 5-20x:
   - NVIDIA:        faster-whisper (CTranslate2) on CUDA
   - plain CPU:     faster-whisper int8 (still beats whisper.cpp)
 
-Runs in its OWN uv script env, shelled from serve.py per /transcribe call
+Runs in its OWN uv script env, run as serve.py's persistent worker
 (one uv-managed script per model family).
 
 usage (one-shot): uv run transcribe.py <audio> <model-size> [language]
@@ -23,8 +23,7 @@ usage (worker):   uv run transcribe.py --worker
   one response per line on stdout: {"segments": [...]} or {"error": ...}
   JCLAW-649: mlx_whisper caches its model in-process (ModelHolder) and
   faster-whisper's WhisperModel is held per size — a persistent worker
-  amortizes the ~5s model load that every one-shot call paid (the
-  under-speech pass transcribes several sub-second slices per run).
+  amortizes the ~5s model load that every one-shot call paid.
 """
 import json
 import os
@@ -50,8 +49,7 @@ def run_mlx(audio, size, language):
     sys.stderr.write("[transcribe] mlx-whisper %s\n" % repo)
     # NO word_timestamps: enabling it perturbs mlx's decode (measured: text
     # changes + 31s stamp drift on the debate benchmark) and its attention-
-    # derived stamps are imprecise — word TIMES come from the JVM's CTC
-    # aligner (wav2vec2 Viterbi), the WhisperX principle (JCLAW-651 r2).
+    # derived stamps are imprecise.
     result = mlx_whisper.transcribe(audio, path_or_hf_repo=repo, language=language,
                                     condition_on_previous_text=False)
     return [(s["start"], s["end"], s["text"])

@@ -121,7 +121,7 @@ export function useChatComposer(deps: UseChatComposerDeps): UseChatComposer {
     }
     event.preventDefault()
     // Escape closes the popup but leaves "/prompt foo" in the box; sending it
-    // would hand the model a slash command it doesn't recognize as one.
+    // would get the server's /prompt reply instead.
     if (completer.blocksSend.value) return
     sendMessage()
   }

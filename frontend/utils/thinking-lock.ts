@@ -17,7 +17,7 @@
  *    like OpenAI o1/o3, DeepSeek-R1, and Qwen QwQ have no non-thinking
  *    mode \u2014 the provider API accepts a "reasoning off" value but the model
  *    thinks anyway. The flag is operator-set in Settings (or seeded by
- *    discovery in the future); resolveThinkingLock checks it first because
+ *    discovery); resolveThinkingLock checks it first because
  *    it's intrinsic to the model regardless of how it's routed.
  *
  * 2. Provider integration limit (JCLAW-127). Google's OpenAI-compat docs

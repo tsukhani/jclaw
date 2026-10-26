@@ -11,8 +11,8 @@ import java.util.Optional;
  * takes effect on the next read-aloud with no restart.
  *
  * <ul>
- *   <li><b>Sidecar</b> — the Python sidecar (mlx-audio on Apple silicon,
- *       vLLM/transformers on NVIDIA): Qwen3-TTS + Kokoro. Quality-first, does
+ *   <li><b>Sidecar</b> — the Python sidecar (mlx-audio on Apple silicon;
+ *       Chatterbox also on NVIDIA): Qwen3-TTS + Kokoro. Quality-first, does
  *       voice cloning, GPU-capable — but needs {@code uv} and a spawned
  *       process.</li>
  *   <li><b>JVM-native</b> — in-process sherpa-onnx {@code OfflineTts}

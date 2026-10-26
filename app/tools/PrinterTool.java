@@ -129,8 +129,8 @@ public class PrinterTool implements ToolRegistry.Tool {
                                 List.of(ACTION_DISCOVER, ACTION_PRINT, ACTION_STATUS, ACTION_CANCEL),
                                 "Which operation to perform.")),
                         Map.entry(ARG_PRINTER, prop(SchemaKeys.STRING, null,
-                                "Printer name or host, as reported by 'discover'. Required for "
-                                        + "'print'. A bare hostname or IP is also accepted when "
+                                "Printer name or host, as reported by 'discover'. "
+                                        + "A bare hostname or IP is also accepted when "
                                         + "mDNS is unavailable.")),
                         Map.entry("host", prop(SchemaKeys.STRING, null,
                                 "Explicit printer host, bypassing discovery. Use when the network "
@@ -479,7 +479,7 @@ public class PrinterTool implements ToolRegistry.Tool {
                 + alternatives;
     }
 
-    /** MIME type from the filename, or null to let the printer sniff. */
+    /** MIME type from the filename. */
     public static String formatFor(String path) {
         var lower = path.toLowerCase();
         if (lower.endsWith(".pdf")) return "application/pdf";

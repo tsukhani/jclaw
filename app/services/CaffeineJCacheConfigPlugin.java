@@ -21,8 +21,7 @@ import play.PlayPlugin;
  * {@code reference.conf} graph (caffeine-jcache's own bundled defaults),
  * bypassing the {@code application.conf} lookup entirely. Per-region tuning
  * (TTL, size, eviction) is left at Hibernate's defaults — adequate for the
- * current candidate entities (Agent, ChannelConfig, AgentToolConfig,
- * AgentSkillConfig, Config); revisit if a future entity needs custom region
+ * cached entities; revisit if a future entity needs custom region
  * config by extending the supplier to overlay a HOCON file from the conf dir.
  *
  * <p>Registered at priority 350 in {@code conf/play.plugins} so {@link #onLoad}

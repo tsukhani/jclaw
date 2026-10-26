@@ -29,7 +29,7 @@ import java.util.regex.PatternSyntaxException;
  * Telegram inbound-update parsing, extracted from {@link TelegramChannel} in
  * JCLAW-151. Pure static functions: turn a Bot API {@link Update} (or raw
  * {@link JsonObject}) into an {@link InboundMessage} / {@link InboundCallback},
- * apply the inbound modality + size gates ({@link #prepareInboundAttachments}),
+ * apply the inbound size gate ({@link #prepareInboundAttachments}),
  * and decide bot-addressed / wake-word gating. Holds no per-token state; the
  * one network touch (attachment download) is delegated back through
  * {@link TelegramChannel#forToken}.
@@ -43,13 +43,13 @@ public final class TelegramInboundParser {
     private TelegramInboundParser() {}
 
     /**
-     * JCLAW-136: apply the modality + size gates to {@code message.attachments()},
+     * JCLAW-136: apply the size gate to {@code message.attachments()},
      * then download each pending attachment into the agent's workspace
      * staging directory. Shared by the webhook controller and polling
      * runner — both route user uploads through the same rejection + stage
      * pipeline so behavior stays identical regardless of delivery mode.
      *
-     * <p>On any rejection (modality mismatch, size exceeded, network/API
+     * <p>On any rejection (size exceeded, network/API
      * failure) sends a user-visible reply, logs at warn, and returns
      * {@code null} so the caller can bail out. On success returns a
      * (possibly empty) list of {@link services.AttachmentService.Input}
@@ -69,7 +69,7 @@ public final class TelegramInboundParser {
         // text-only models get a transcript / caption text part (via the
         // transcription + captioning pipelines), audio-/vision-capable models
         // get native input_audio / image_url. No model-side gate; the rest of
-        // the pipeline (AgentRunner.userMessageFor) handles the downgrade.
+        // the pipeline (VisionAudioAssembler.userMessageFor) handles the downgrade.
 
         var inputs = new ArrayList<AttachmentService.Input>(
                 message.attachments().size());

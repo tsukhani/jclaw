@@ -5,8 +5,8 @@ import type { Message } from '~/types/api'
  * logic extracted verbatim from pages/chat.vue). Kept as pure functions here so
  * the subtle role-stack pairing — the part most likely to regress — is
  * unit-testable without mounting the page or faking a stream. The impure
- * orchestrator (reconcileMessageIds: fetch + messages shallowRef + triggerRef)
- * stays in the page and calls {@link backfillServerIds}.
+ * orchestrator (useChatConversation's reconcileMessageIds) calls
+ * {@link backfillServerIds}.
  *
  * Pair id-less local rows with their server-side counterparts by role,
  * mutating local rows to carry the server id. Used both at end-of-stream

@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   "openrouter" → {@link OpenRouterProvider}
  *   "ollama"     → {@link OllamaProvider}  (covers ollama-cloud, ollama-local)
  *   "openai"     → {@link OpenAiProvider}
+ *   "together"   → {@link TogetherAiProvider}
  *   anything else → {@link OpenAiProvider}  (lm-studio, groq, azure, …)
  */
 public final class ProviderRegistry {

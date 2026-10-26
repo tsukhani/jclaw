@@ -3,7 +3,7 @@ name: skill-creator
 description: >-
   Create new skills or refactor existing skills to follow the standard directory structure.
 metadata:
-  version: "1.2.0"
+  version: "1.2.1"
   author: Tarun Sukhani
   jclaw-icon: "🛠️"
   jclaw-tools: filesystem
@@ -63,15 +63,15 @@ Separate from `jclaw-tools` — which names JClaw **tools** the skill consumes (
 - Each entry is the **basename** of an executable in the skill's `tools/` folder. No paths, no arguments, no wildcards, no spaces inside a name. `./tools/wacli` on disk becomes `wacli` in the list.
 - Use an empty string when the skill ships no binaries: `jclaw-commands: ""`. Prompt-only skills, document generators, and reasoning-only skills all fall here.
 - Omit the key entirely only if the skill predates the declaration system — new skills MUST include it (empty when not applicable) so reviewers can tell "this skill intentionally ships zero binaries" from "this skill is missing its declaration."
-- Every entry must correspond to a file that actually exists under `tools/`. Declared-but-missing binaries fail the promotion malware scan and the install snapshot.
+- Every entry must correspond to a file that actually exists under `tools/`.
 - Every executable under `tools/` MUST appear in `jclaw-commands`. Undeclared binaries are dormant — the agent can see them on disk but can't run them because they're not in its shell allowlist.
 - Names are case-sensitive and match the literal filename. `wacli`, not `WACLI` or `wacli.sh`.
 
 ## Author field
 
-Every skill MUST include an `author` entry under `metadata`. The value is the **name of the agent creating the skill** — i.e., *your own* agent name, substituted from your Environment section of the system prompt (the line beginning `Agent:`). Operators use this to see which agent authored which skill when auditing the global registry after promotion, and to route bug reports back to the right agent's workspace.
+Every skill MUST include an `author` entry under `metadata`. The value is the **name of the agent creating the skill** — i.e., *your own* agent name, substituted from your Environment section of the system prompt (its `Agent name:` line). Operators use this to see which agent authored which skill when auditing the global registry after promotion, and to route bug reports back to the right agent's workspace.
 
-- Use the agent's literal name, not a description. If your Environment says `Agent: main`, write `author: main`. If it says `Agent: research-bot`, write `author: research-bot`.
+- Use the agent's literal name, not a description. If that line says `main`, write `author: main`; `research-bot`, write `author: research-bot`.
 - The value is a single unquoted YAML scalar: `author: main` (no list, no object).
 - When refactoring an existing skill, leave the existing `author` value alone — it records the original creator. Only edit it if the user explicitly asks to reassign authorship.
 

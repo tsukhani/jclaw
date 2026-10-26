@@ -54,7 +54,7 @@ import java.util.stream.Collectors;
  *
  * <p>Hybrid recall on both backends shares one retrieval contract (JCLAW-527):
  * each backend supplies a keyword leg and a vector leg as ranked lists, and
- * {@link #fuseHydrateRerank} — Reciprocal Rank Fusion (k = 60), agent-bounded
+ * {@link #fuseHydrateRerank} — Reciprocal Rank Fusion, agent-bounded
  * hydration, optional {@link MemoryReranker cross-encoder rerank} — does the
  * rest, written once above the backend seam.
  */
@@ -466,11 +466,11 @@ public class JpaMemoryStore implements MemoryStore {
 
     @Override
     public int deleteAll(String agentId) {
-        // Bulk JPQL delete. The caller (AgentService.delete) calls em.clear()
-        // before invoking us, so there are no stale Memory entities in the
-        // Hibernate session that could conflict. We intentionally do NOT call
-        // em.clear() here — the caller may still hold re-fetched entities
-        // (e.g. the Agent itself) that must remain attached for subsequent ops.
+        // Bulk JPQL delete. The caller (AgentDeletionCascade.delete) clears the
+        // session after this pass, so no stale Memory entity outlives it. We
+        // intentionally do NOT call em.clear() here — the caller may still hold
+        // re-fetched entities (e.g. the Agent itself) that must remain attached
+        // for subsequent ops.
         // The FK's ON DELETE CASCADE (JCLAW-537) is the DB-level backstop for
         // raw agent deletes; this explicit pass remains the service-path cleanup.
         Long pk = pkOrNull(agentId);
@@ -487,8 +487,8 @@ public class JpaMemoryStore implements MemoryStore {
         // fsyncs, and AgentDeletionCascade calls this at the top of a cascade that still
         // has to delete config rows, evict four other scopes and cascade the Agent row —
         // so a throw anywhere after this point used to leave the rows alive in the DB with
-        // their documents permanently gone, unreachable because init() only backfills a
-        // scope whose docCount() is 0. Same afterCompletion shape as
+        // their documents gone, until a restart's backfill noticed
+        // docCount() < rowCount. Same afterCompletion shape as
         // ConfigService.scheduleRollbackEviction.
         evictAfterCommit(pk);
         GraphLifecycle.withdrawAllAfterCommit(pk);
@@ -782,7 +782,7 @@ public class JpaMemoryStore implements MemoryStore {
     public static final int DEFAULT_RECALL_RRF_K = 5;
 
     /**
-     * JCLAW-527: the shared retrieval contract — RRF fusion (k = 60), agent-
+     * JCLAW-527: the shared retrieval contract — RRF fusion, agent-
      * bounded hydration, and the optional cross-encoder rerank — written once,
      * above the backend seam. The Lucene path (H2, all dev/test) and the
      * Postgres path (production) both land here, so the fusion logic the AC
@@ -894,7 +894,7 @@ public class JpaMemoryStore implements MemoryStore {
      *
      * <p>A metadata edit no longer drops the vector: {@code Memory.onIndexUpsert}
      * short-circuits on an unchanged doc identity (JCLAW-921). A text change still
-     * would, but nothing mutates {@code Memory.text} after insert.
+     * would, so a writer that changes the text re-embeds the row.
      */
     private void generateAndIndexEmbedding(Memory memory) {
         var indexed = searchText(memory.text, memory.retrievalKey);

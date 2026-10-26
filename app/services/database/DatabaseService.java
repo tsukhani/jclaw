@@ -152,7 +152,7 @@ public final class DatabaseService {
 
     // ---- backups ----
 
-    /** A backup id is a bare zip file name inside the backups directory — never a path. */
+    /** A backup id is a bare file name inside a backups directory — never a path. */
     public static @Nullable Path resolveBackup(String id) {
         if (!BACKUP_ID.matcher(id).matches() || (id.endsWith(UPGRADE_COPY_SUFFIX) && !isUpgradeCopy(id))) {
             return null;

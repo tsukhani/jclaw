@@ -136,7 +136,7 @@ public final class McpGrantKeyMigration {
                 if (!rs.next() || "YES".equalsIgnoreCase(rs.getString(1))) return false;
             }
         }
-        // H2 (dev + test) and PostgreSQL (prod) share the catalog views but not this ALTER.
+        // H2 and PostgreSQL share the catalog views but not this ALTER.
         boolean postgres = conn.getMetaData().getDatabaseProductName()
                 .toLowerCase(Locale.ROOT).contains("postgresql");
         try (Statement s = conn.createStatement()) {

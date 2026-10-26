@@ -276,9 +276,8 @@ public class SystemPromptAssembler {
     private static final Gson TOOL_GSON = GsonHolder.GSON;
 
     /**
-     * Identical to the existing chars/4 estimate used by the context-window trimmer
-     * in {@link ContextWindowManager#estimateTokens}. Keeping them in sync means breakdown
-     * numbers line up with the trimmer's numbers; diverging would be confusing.
+     * A chars/4 approximation; the context-window trimmer measures with
+     * {@link TokenUsageEstimator}.
      */
     private static int approxTokens(int chars) {
         return (int) Math.round(chars / 4.0);
@@ -884,7 +883,7 @@ public class SystemPromptAssembler {
      * As the four-arg form, with {@code limitOverride} replacing {@code memory.recall.limit}
      * for this call (JCLAW-969). Zero or negative means "use the configured limit".
      *
-     * <p>Exists so an agent asking {@code memory_tool} for more results can actually get
+     * <p>Exists so an agent asking {@code memory} for more results can actually get
      * them: the tool used to apply its {@code limit} as a {@code stream().limit(n)} AFTER
      * this method had already cut to the configured value, so the parameter could only ever
      * narrow. Bounded by {@code memory.recall.toolMaxLimit} at the call site, not here — a

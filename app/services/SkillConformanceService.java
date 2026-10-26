@@ -26,8 +26,8 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 
 /**
- * Conforms an externally-authored skill (downloaded from GitHub via the
- * importable-skills catalog) to JClaw's skill format/contract — the same
+ * Conforms an externally-authored skill (fetched from the importable-skills
+ * catalog, or uploaded) to JClaw's skill format/contract — the same
  * contract the {@code skill-creator} skill applies when it creates or refactors
  * skills via chat. External skills are written for Claude Code / Cursor / etc.,
  * so their frontmatter and tool names ({@code Bash}, {@code Read}, {@code WebFetch})

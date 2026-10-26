@@ -43,8 +43,7 @@ public final class UsageMetricsBuilder {
      * Resolve the reasoning-token count to surface in usage metrics.
      * Prefers the summed provider-reported {@code reasoning_tokens}
      * across every LLM round in the turn when available; falls back to
-     * a character-length estimate over the streamed reasoning text
-     * ({@code ~4 chars per token}, the standard English heuristic) when
+     * jtokkit's count, then to ~4 chars per token of the streamed reasoning, when
      * every round reported zero despite reasoning having been detected
      * on at least one round. Returning an estimate — clearly non-zero
      * when reasoning ran — is better than showing no count at all,

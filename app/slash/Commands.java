@@ -52,9 +52,8 @@ import java.util.function.Supplier;
  * reload shows the acknowledgment.
  *
  * <h2>/reset ordering</h2>
- * {@link Conversation#contextSince} is written <i>after</i> the assistant
- * response is appended, so the acknowledgment stays out of the next LLM
- * context window (its {@code createdAt} will be less than the watermark).
+ * /reset's acknowledgment is never persisted, so it stays out of the next LLM
+ * context window.
  */
 public final class Commands {
 
@@ -166,7 +165,7 @@ public final class Commands {
      * Parse the first token of {@code text} as a recognized command.
      * Case-insensitive. Leading/trailing whitespace ignored. Anything
      * after the command (e.g. {@code "/help foo bar"}) is discarded —
-     * commands don't currently take arguments.
+     * {@link #extractArgs} reads them.
      */
     public static Optional<Command> parse(String text) {
         if (text == null) return Optional.empty();
@@ -259,9 +258,9 @@ public final class Commands {
      *
      * <p>{@code /start} is deliberately NOT a {@link Command}: on Telegram it
      * must fall through to the LLM once a conversation exists, so it can't go
-     * through the always-short-circuiting {@link #execute} path. The Telegram
-     * entry point (JCLAW-97) checks this and only intercepts the FIRST contact,
-     * running the {@link #startIntroPrompt} self-introduction turn.
+     * through the always-short-circuiting {@link #execute} path. The channel
+     * entry point checks this and runs the {@link #startIntroPrompt} turn on a
+     * fresh conversation.
      */
     public static boolean isStart(String text) {
         if (text == null) return false;
@@ -282,9 +281,8 @@ public final class Commands {
     /**
      * Argument-aware execute overload (JCLAW-108). {@code args} is the text
      * following the command literal with leading/trailing whitespace stripped;
-     * null or empty when none. Only {@code /model} currently consumes args:
-     * {@code /model NAME} writes the conversation-scoped override,
-     * {@code /model reset} clears it.
+     * null or empty when none. {@code /model}, {@code /think}, {@code /compact},
+     * {@code /subagent} and {@code /prompt} consume it.
      *
      * <p>Treats the turn as owner-initiated; a channel that can carry a guest calls the
      * {@code ownerInitiated} overload instead.
@@ -350,8 +348,8 @@ public final class Commands {
      * (JCLAW-430). Sent to the LLM in place of the bare {@code /start} so the
      * agent introduces itself in its own voice — its identity/persona comes from
      * its md-file system prompt, already assembled — and lists the slash commands
-     * (supplied here so they're always accurate). The AgentRunner /start path
-     * runs it as a normal streaming turn on a fresh conversation.
+     * (supplied here so they're always accurate). ChannelInboundDispatcher's /start
+     * path runs it as a normal streaming turn on a fresh conversation.
      */
     public static String startIntroPrompt() {
         return """
@@ -364,9 +362,11 @@ public final class Commands {
                 • /compact — summarize older turns to free up context
                 • /help — show the command list
                 • /model — show the current model
+                • /think — set reasoning effort for this chat
                 • /usage — show context usage for this chat
                 • /stop — interrupt a response in progress
                 • /subagent — inspect, kill, or read subagent transcripts
+                • /prompt — use a saved prompt from your library
                 Keep it concise and friendly.""";
     }
 
@@ -404,7 +404,7 @@ public final class Commands {
      * {@code /stop} — interrupt an in-flight assistant turn for this conversation.
      *
      * <p>Sets {@link services.ConversationQueue#cancellationFlag} so
-     * {@link agents.AgentRunner}'s {@code checkCancelled} polls short-circuit
+     * {@code CancellationManager.checkCancelled} polls short-circuit
      * the streaming loop on the next checkpoint. The shared
      * {@code AtomicBoolean} works because {@code tryAcquire} (which any active
      * stream has already passed through) creates the {@code QueueState} via

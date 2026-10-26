@@ -36,10 +36,8 @@ import java.util.Set;
  *
  * <p>Pattern: an embedded HTTP server stands in for the LLM provider — the
  * standard JClaw test pattern (see {@code AgentRunnerCoreTest}). This test
- * lives in the default package and calls the package-private
- * {@code CompactionGate.maybeCompactAndRebuild} and
- * {@code ContextWindowManager.estimateTokens} directly; the helpers don't
- * justify a public API surface.
+ * calls {@code CompactionGate.maybeCompactAndRebuild} and
+ * {@code ContextWindowManager.estimateTokens} directly.
  */
 class CompactionGateTest extends UnitTest {
 

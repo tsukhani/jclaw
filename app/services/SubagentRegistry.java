@@ -606,8 +606,7 @@ public final class SubagentRegistry {
     }
 
     /** Convenience for tests + callers that don't care about the parent agent
-     *  for an access check (slash commands always run scoped to the parent
-     *  conversation, so the caller has already confirmed scope). */
+     *  for an access check. */
     @SuppressWarnings("unused")
     public static boolean isActive(Long runId) {
         return runId != null && ACTIVE.containsKey(runId);
@@ -663,7 +662,7 @@ public final class SubagentRegistry {
         return SubagentRun.findById(id);
     }
 
-    /** Convenience for the {@code /subagent kill} return text: did the
+    /** Did the
      *  caller's runId match a row at all? Distinct from {@link #isActive}
      *  because a row may exist in the DB but not in the registry (terminal,
      *  or post-restart orphan recovery cleaned it up). */
@@ -675,8 +674,7 @@ public final class SubagentRegistry {
     // ---- Type-safe helper for callers that want to scope by parent agent ---
 
     /** Whether a row with the given {@code runId} is owned by {@code parent}.
-     *  Slash commands use this to enforce per-conversation scoping. Returns
-     *  false when the row is missing or the parent FK doesn't match. */
+     *  Returns false when the row is missing or the parent FK doesn't match. */
     @SuppressWarnings("unused")
     public static boolean isOwnedBy(Long runId, Agent parent) {
         if (runId == null || parent == null) return false;

@@ -197,7 +197,7 @@ public final class TaskWriteService {
     }
 
     /**
-     * Boolean fields. Explicit null is rejected (no meaningful semantic) —
+     * Boolean fields. Explicit null is ignored (no meaningful semantic) —
      * callers should omit instead.
      */
     private static boolean applyOptionalBooleanFields(Task task, JsonObject body) {

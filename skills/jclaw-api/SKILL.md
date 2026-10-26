@@ -1,9 +1,9 @@
 ---
 name: jclaw-api
 description: >-
-  Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, toggle tools/skills on agents, read or write config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
+  Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, read config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
 metadata:
-  version: "0.1.0"
+  version: "0.1.1"
   author: Tarun Sukhani
   jclaw-icon: "⚙️"
   jclaw-tools: jclaw_api
@@ -11,7 +11,7 @@ metadata:
 
 # JClaw API
 
-Use this skill when the user asks you to **change JClaw's own state** — adding an MCP server, creating an agent, toggling a tool on an agent, editing a config value, etc.
+Use this skill when the user asks you to **change JClaw's own state** — adding an MCP server, creating an agent, etc.
 
 The `jclaw_api` tool exposes JClaw's own HTTP API, and the list of callable endpoints is **discovered at runtime** — there is no fixed catalog to drift. Do not invent endpoints, and never call one that `discover` does not list. An endpoint is callable only when its backend action is declared agent-reachable (`@AgentAccess` level `OPEN`, or `OWN_ONLY`, which reaches only your own agent's rows — `main` reaches every agent's); an undeclared action is operator-only. So a new endpoint appears in `discover` once the backend opens it, with no skill edit, and if `discover` does not list something, it is deliberately off-limits (see below). Access is decided by that backend declaration, never by this skill.
 
@@ -30,16 +30,9 @@ The tool returns `HTTP <status>\n<body>` so you can read both. A 4xx response us
 
 These staples don't need a discover round-trip first; run `action="discover"` for anything else.
 
-- **Agents** — `GET /api/agents` (list); `POST /api/agents` body `name`, `modelProvider`, `modelId` (create); `PUT /api/agents/{id}` (update); `DELETE /api/agents/{id}` (delete an agent). The built-in **main** agent cannot be deleted — `DELETE` on it returns 409; don't attempt it.
+- **Agents** — `GET /api/agents` (list); `POST /api/agents` body `name`, `modelProvider`, `modelId` (create); `PUT /api/agents/{id}` (update).
 - **MCP servers** — `POST /api/mcp-servers` body `name`, `enabled`, `transport` (`STDIO` or `HTTP`), then `command`/`args`/`env` or `url`/`headers`; confirm it boots with `POST /api/mcp-servers/{id}/test`.
-- **Toggle a tool on an agent** — `PUT /api/agents/{id}/tools/{name}` with `{ "enabled": <bool> }`.
-- **Install a skill on an agent** — `POST /api/agents/{id}/skills/{name}/copy` with an empty body (installs **and** enables); `PUT /api/agents/{id}/skills/{name}` only toggles an already-installed skill.
-- **Config** — `GET /api/config` (all, masked) or `GET /api/config/{key}`; `POST /api/config` body `{ "key": ..., "value": ... }`. Confirm with the user before touching `provider.*`, `auth.*`, `chat.*`, or `shell.*`.
-
-**Common composition** — "create agent X with skill Y":
-1. `POST /api/agents` → capture the returned `id`.
-2. `POST /api/agents/{id}/skills/Y/copy` with `{}` → installs Y into the new agent's workspace **and** enables it.
-3. Skip the PUT — the copy step already enabled the skill. Only call PUT if the user later wants to disable Y without uninstalling it.
+- **Config** — `GET /api/config` (all, masked) or `GET /api/config/{key}`.
 
 ## Off-limits
 
@@ -47,7 +40,6 @@ The following endpoints exist in JClaw's API but are **deliberately not callable
 
 - `POST /api/chat/send` / `POST /api/chat/stream` / `POST /api/chat/upload` — these would create a recursion loop where this skill sends a chat that itself invokes this skill again. If the user wants to send a chat programmatically, suggest the per-channel webhook endpoints instead.
 - `POST /api/auth/login` / `POST /api/auth/setup` / `POST /api/auth/reset-password` — credential operations belong in the Settings UI.
-- All `/api/api-tokens` routes — minting or revoking API tokens through chat would be a privilege-escalation surface.
 - `/api/webhooks/*` — verified by their own signature mechanisms; not for in-process use.
 - `/api/events` — Server-Sent Events; the tool buffers full responses and isn't suited to streams.
 
@@ -64,5 +56,5 @@ If the user requests an operation that resolves to one of these, refuse explicit
 ## When in doubt
 
 - Read before write. For "update X", first `GET` the resource, show the user the relevant before-state, then propose the change.
-- Echo the result. After a successful mutation, read the response body and summarize what changed (the new id, the new connected-status, the new config value) so the user has explicit confirmation.
+- Echo the result. After a successful mutation, read the response body and summarize what changed (the new id, the new connected-status) so the user has explicit confirmation.
 - If JClaw returns 4xx, read the `error` field and either correct the request or report the constraint plainly. Never silently retry the same call.

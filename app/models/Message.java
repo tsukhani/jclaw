@@ -99,8 +99,8 @@ public class Message extends Model {
     /**
      * JCLAW-270: discriminator for non-LLM-confusing system-role messages that
      * the chat UI should render as a structured card rather than as an opaque
-     * system prompt. Currently {@code "subagent_announce"} for async-spawn
-     * completion announcements. Null for every other row — the dominant case.
+     * system prompt. E.g. {@code "subagent_announce"} for async-spawn
+     * completion announcements. Null for an ordinary row — the dominant case.
      *
      * <p>The chat view inspects this field and, when set, switches the message
      * to a kind-specific render path (the subagent announce card) instead of

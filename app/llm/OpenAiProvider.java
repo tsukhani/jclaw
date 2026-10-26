@@ -43,7 +43,7 @@ public final class OpenAiProvider extends LlmProvider {
     protected void disableReasoning(JsonObject request) {
         // JCLAW-851: the base is a no-op, so before this the Think toggle sent no
         // off-signal at all on any OpenAI-compatible provider — the same omission
-        // as extractReasoningFromDelta above, in the opposite direction.
+        // as extractReasoningFromDelta below, in the opposite direction.
         //
         // Two guards, because a naive emit here would be a regression rather than
         // a fix. serializeRequest calls this on EVERY request whose thinking mode

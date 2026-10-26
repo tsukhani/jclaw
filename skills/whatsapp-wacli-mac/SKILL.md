@@ -3,7 +3,7 @@ name: whatsapp-wacli-mac
 description: >-
   Use wacli (WhatsApp CLI) to sync, search, send messages, manage contacts/groups, and backfill chat history. REQUIRES AUTHENTICATION FIRST. macOS ARM64 binary.
 metadata:
-  version: "1.2.0"
+  version: "1.2.1"
   author: Tarun Sukhani
   jclaw-icon: "🍎"
   jclaw-tools: exec
@@ -77,7 +77,7 @@ Phone numbers must be digits only with country code, **without** the `+` prefix:
 
 For groups, use JID format: `[PHONE_NUMBER]@g.us`
 
-Use `./skills/whatsapp-wacli/tools/wacli chats list` or `contacts search` to find JIDs.
+Use `./skills/whatsapp-wacli-mac/tools/wacli chats list` or `contacts search` to find JIDs.
 
 ---
 
@@ -95,7 +95,7 @@ Before executing any wacli command, follow this logic:
 
 2. **If `.authenticated` does NOT exist:** Check auth status via wacli
    ```bash
-   ./skills/whatsapp-wacli/tools/wacli auth status
+   ./skills/whatsapp-wacli-mac/tools/wacli auth status
    ```
    - **If status shows authenticated:** Create marker file and execute command
      ```bash
@@ -106,7 +106,7 @@ Before executing any wacli command, follow this logic:
 
 3. **Full authentication flow:** Run interactive auth and create marker on success
    ```bash
-   ./skills/whatsapp-wacli/tools/wacli auth
+   ./skills/whatsapp-wacli-mac/tools/wacli auth
    # User scans QR code...
    # On success:
    touch ./skills/whatsapp-wacli-mac/.authenticated
@@ -120,7 +120,7 @@ result = exec({"command": "test -f ./skills/whatsapp-wacli-mac/.authenticated &&
 
 if result contains 'marker_exists':
     # Proceed with command
-    result = exec({"command": "./skills/whatsapp-wacli/tools/wacli <REQUESTED_COMMAND>"})
+    result = exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli <REQUESTED_COMMAND>"})
     
     # If command fails due to auth issues
     if result contains 'unauthorized' or 'not authenticated':
@@ -131,24 +131,24 @@ if result contains 'marker_exists':
         return result
 
 # Step 2: Check actual auth status
-status = exec({"command": "./skills/whatsapp-wacli/tools/wacli auth status --json"})
+status = exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli auth status --json"})
 
 if status contains '"status": "authenticated"':
     # User is already authenticated, create marker and execute
     exec({"command": "touch ./skills/whatsapp-wacli-mac/.authenticated"})
-    result = exec({"command": "./skills/whatsapp-wacli/tools/wacli <REQUESTED_COMMAND>"})
+    result = exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli <REQUESTED_COMMAND>"})
     return result
 else:
     # Step 3: Need to authenticate
     print("Please scan the QR code with WhatsApp to authenticate...")
-    auth_result = exec({"command": "./skills/whatsapp-wacli/tools/wacli auth", "timeout": 120})
+    auth_result = exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli auth", "timeout": 120})
     
     # Verify auth succeeded
-    verify = exec({"command": "./skills/whatsapp-wacli/tools/wacli auth status --json"})
+    verify = exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli auth status --json"})
     if verify contains '"status": "authenticated"':
         exec({"command": "touch ./skills/whatsapp-wacli-mac/.authenticated"})
         # Now execute the requested command
-        result = exec({"command": "./skills/whatsapp-wacli/tools/wacli <REQUESTED_COMMAND>"})
+        result = exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli <REQUESTED_COMMAND>"})
         return result
     else:
         return "Authentication failed. Please try again."
@@ -158,17 +158,17 @@ else:
 
 **Check auth status:**
 ```bash
-./skills/whatsapp-wacli/tools/wacli auth status
+./skills/whatsapp-wacli-mac/tools/wacli auth status
 ```
 
 **Logout (also removes `.authenticated` marker):**
 ```bash
-./skills/whatsapp-wacli/tools/wacli auth logout && rm -f ./skills/whatsapp-wacli-mac/.authenticated
+./skills/whatsapp-wacli-mac/tools/wacli auth logout && rm -f ./skills/whatsapp-wacli-mac/.authenticated
 ```
 
 **Diagnostics:**
 ```bash
-./skills/whatsapp-wacli/tools/wacli doctor
+./skills/whatsapp-wacli-mac/tools/wacli doctor
 ```
 
 ---
@@ -177,12 +177,12 @@ else:
 
 ### Text message
 ```bash
-./skills/whatsapp-wacli/tools/wacli send text --to [PHONE_NUMBER] --message "Hello!"
+./skills/whatsapp-wacli-mac/tools/wacli send text --to [PHONE_NUMBER] --message "Hello!"
 ```
 
 ### File (image/video/audio/document)
 ```bash
-./skills/whatsapp-wacli/tools/wacli send file --to [PHONE_NUMBER] --file /path/to/photo.jpg
+./skills/whatsapp-wacli-mac/tools/wacli send file --to [PHONE_NUMBER] --file /path/to/photo.jpg
 ```
 
 Optional flags:
@@ -196,14 +196,14 @@ Optional flags:
 
 ### List messages in a chat
 ```bash
-./skills/whatsapp-wacli/tools/wacli messages list --chat [PHONE_NUMBER]@s.whatsapp.net --limit 20
+./skills/whatsapp-wacli-mac/tools/wacli messages list --chat [PHONE_NUMBER]@s.whatsapp.net --limit 20
 ```
 
 Optional: `--after 2025-01-01` `--before 2025-12-31`
 
 ### Search messages (full-text)
 ```bash
-./skills/whatsapp-wacli/tools/wacli messages search "keyword" --limit 20
+./skills/whatsapp-wacli-mac/tools/wacli messages search "keyword" --limit 20
 ```
 
 Optional filters:
@@ -214,12 +214,12 @@ Optional filters:
 
 ### Show a specific message
 ```bash
-./skills/whatsapp-wacli/tools/wacli messages show --chat <JID> --id <MESSAGE_ID>
+./skills/whatsapp-wacli-mac/tools/wacli messages show --chat <JID> --id <MESSAGE_ID>
 ```
 
 ### Show context around a message
 ```bash
-./skills/whatsapp-wacli/tools/wacli messages context --chat <JID> --id <MESSAGE_ID> --before 5 --after 5
+./skills/whatsapp-wacli-mac/tools/wacli messages context --chat <JID> --id <MESSAGE_ID> --before 5 --after 5
 ```
 
 ---
@@ -228,17 +228,17 @@ Optional filters:
 
 ### List chats
 ```bash
-./skills/whatsapp-wacli/tools/wacli chats list --limit 20
+./skills/whatsapp-wacli-mac/tools/wacli chats list --limit 20
 ```
 
 ### Search chats by name/number
 ```bash
-./skills/whatsapp-wacli/tools/wacli chats list --query "name or number"
+./skills/whatsapp-wacli-mac/tools/wacli chats list --query "name or number"
 ```
 
 ### Show a specific chat
 ```bash
-./skills/whatsapp-wacli/tools/wacli chats show --jid [PHONE_NUMBER]@s.whatsapp.net
+./skills/whatsapp-wacli-mac/tools/wacli chats show --jid [PHONE_NUMBER]@s.whatsapp.net
 ```
 
 ---
@@ -247,27 +247,27 @@ Optional filters:
 
 ### Search contacts
 ```bash
-./skills/whatsapp-wacli/tools/wacli contacts search "name" --limit 20
+./skills/whatsapp-wacli-mac/tools/wacli contacts search "name" --limit 20
 ```
 
 ### Show a specific contact
 ```bash
-./skills/whatsapp-wacli/tools/wacli contacts show --jid [PHONE_NUMBER]@s.whatsapp.net
+./skills/whatsapp-wacli-mac/tools/wacli contacts show --jid [PHONE_NUMBER]@s.whatsapp.net
 ```
 
 ### Set a local alias for a contact
 ```bash
-./skills/whatsapp-wacli/tools/wacli contacts alias set --jid [PHONE_NUMBER]@s.whatsapp.net --alias "Mom"
+./skills/whatsapp-wacli-mac/tools/wacli contacts alias set --jid [PHONE_NUMBER]@s.whatsapp.net --alias "Mom"
 ```
 
 ### Remove an alias
 ```bash
-./skills/whatsapp-wacli/tools/wacli contacts alias rm --jid [PHONE_NUMBER]@s.whatsapp.net
+./skills/whatsapp-wacli-mac/tools/wacli contacts alias rm --jid [PHONE_NUMBER]@s.whatsapp.net
 ```
 
 ### Refresh contacts from session store
 ```bash
-./skills/whatsapp-wacli/tools/wacli contacts refresh
+./skills/whatsapp-wacli-mac/tools/wacli contacts refresh
 ```
 
 ---
@@ -276,42 +276,42 @@ Optional filters:
 
 ### List groups
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups list
+./skills/whatsapp-wacli-mac/tools/wacli groups list
 ```
 
 ### Refresh groups (live from WhatsApp)
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups refresh
+./skills/whatsapp-wacli-mac/tools/wacli groups refresh
 ```
 
 ### Get group info
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups info --jid <GROUP_JID>
+./skills/whatsapp-wacli-mac/tools/wacli groups info --jid <GROUP_JID>
 ```
 
 ### Rename a group
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups rename --jid <GROUP_JID> --name "New Name"
+./skills/whatsapp-wacli-mac/tools/wacli groups rename --jid <GROUP_JID> --name "New Name"
 ```
 
 ### Join a group by invite code
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups join --code <INVITE_CODE>
+./skills/whatsapp-wacli-mac/tools/wacli groups join --code <INVITE_CODE>
 ```
 
 ### Leave a group
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups leave --jid <GROUP_JID>
+./skills/whatsapp-wacli-mac/tools/wacli groups leave --jid <GROUP_JID>
 ```
 
 ### Manage group invite links
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups invite --jid <GROUP_JID>
+./skills/whatsapp-wacli-mac/tools/wacli groups invite --jid <GROUP_JID>
 ```
 
 ### Manage group participants
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups participants --jid <GROUP_JID>
+./skills/whatsapp-wacli-mac/tools/wacli groups participants --jid <GROUP_JID>
 ```
 
 ---
@@ -320,12 +320,12 @@ Optional filters:
 
 ### One-time sync (sync until idle, then exit)
 ```bash
-./skills/whatsapp-wacli/tools/wacli sync --once
+./skills/whatsapp-wacli-mac/tools/wacli sync --once
 ```
 
 ### Continuous sync (keeps running)
 ```bash
-./skills/whatsapp-wacli/tools/wacli sync --follow
+./skills/whatsapp-wacli-mac/tools/wacli sync --follow
 ```
 
 Optional flags:
@@ -341,7 +341,7 @@ Optional flags:
 Request older messages for a specific chat from the primary device:
 
 ```bash
-./skills/whatsapp-wacli/tools/wacli history backfill --chat <JID> --requests 10 --count 50
+./skills/whatsapp-wacli-mac/tools/wacli history backfill --chat <JID> --requests 10 --count 50
 ```
 
 Flags:
@@ -358,7 +358,7 @@ Flags:
 
 ### Download media from a message
 ```bash
-./skills/whatsapp-wacli/tools/wacli media download --chat <JID> --id <MESSAGE_ID>
+./skills/whatsapp-wacli-mac/tools/wacli media download --chat <JID> --id <MESSAGE_ID>
 ```
 
 Optional: `--output /path/to/save`
@@ -386,22 +386,22 @@ Optional: `--output /path/to/save`
 
 ```python
 # Send text (NO + prefix on phone number)
-exec({"command": "./skills/whatsapp-wacli/tools/wacli send text --to [PHONE_NUMBER] --message 'Hello!'"})
+exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli send text --to [PHONE_NUMBER] --message 'Hello!'"})
 
 # Send file
-exec({"command": "./skills/whatsapp-wacli/tools/wacli send file --to [PHONE_NUMBER] --file /tmp/report.pdf --caption 'Monthly report'"})
+exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli send file --to [PHONE_NUMBER] --file /tmp/report.pdf --caption 'Monthly report'"})
 
 # Search messages (JSON for parsing)
-exec({"command": "./skills/whatsapp-wacli/tools/wacli messages search 'invoice' --json"})
+exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli messages search 'invoice' --json"})
 
 # List recent chats
-exec({"command": "./skills/whatsapp-wacli/tools/wacli chats list --limit 10"})
+exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli chats list --limit 10"})
 
 # One-time sync
-exec({"command": "./skills/whatsapp-wacli/tools/wacli sync --once", "timeout": 60})
+exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli sync --once", "timeout": 60})
 
 # Check auth status
-exec({"command": "./skills/whatsapp-wacli/tools/wacli auth status"})
+exec({"command": "./skills/whatsapp-wacli-mac/tools/wacli auth status"})
 ```
 
 ---

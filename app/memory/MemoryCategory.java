@@ -78,7 +78,7 @@ public enum MemoryCategory {
      * migration.
      *
      * <p>Unrecognized labels are not mapped to a "nearest" bucket. The extractor is given
-     * a closed set of six and told to pick one; when it returns {@code opinion} or
+     * a closed set of five and told to pick one; when it returns {@code opinion} or
      * {@code project} instead, any specific bucket we chose would be our guess at an intent
      * the model did not express. {@code fact} is the neutral option that adds no meaning.
      */

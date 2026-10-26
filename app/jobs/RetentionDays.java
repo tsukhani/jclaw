@@ -5,7 +5,7 @@ import services.ConfigService;
 import services.EventLogger;
 
 /**
- * JCLAW-1231: the one retention-window resolver the three cleanup jobs share.
+ * JCLAW-1231: the one retention-window resolver the cleanup jobs share.
  * They had a copy each and the copies disagreed on what {@code 0} meant, which
  * is how {@code logs.retentionDays=0} came to empty the event log (JCLAW-1269).
  */

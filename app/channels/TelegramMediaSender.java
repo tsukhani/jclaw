@@ -47,7 +47,7 @@ final class TelegramMediaSender {
     /**
      * JCLAW-141: generic cross-channel photo send (the {@link Channel} contract).
      * Delegates to {@link #trySendPhoto(String, java.io.File, String, ReplyParameters,
-     * Integer, String)} (no reply/topic context) so a caller routing through the
+     * Integer, String)} (no reply context) so a caller routing through the
      * uniform interface still uploads via the dedicated upload client.
      */
     SendResult sendPhoto(String peerId, File file, @Nullable String caption) {
@@ -61,7 +61,7 @@ final class TelegramMediaSender {
     /**
      * JCLAW-141: generic cross-channel document send (the {@link Channel} contract).
      * Delegates to {@link #trySendDocument(String, java.io.File, String,
-     * ReplyParameters, Integer, String)} (no reply/topic context).
+     * ReplyParameters, Integer, String)} (no reply context).
      */
     SendResult sendDocument(String peerId, File file, @Nullable String caption) {
         if (file == null) return SendResult.FAILED;
@@ -74,9 +74,8 @@ final class TelegramMediaSender {
 
     /**
      * Upload {@code file} as a Telegram photo. The {@code displayName} is shown
-     * to the user as the filename hint; Telegram renders images inline, so
-     * captions aren't used in this MVP — prose accompanying the photo arrives as
-     * a separate text message above or below it.
+     * to the user as the filename hint. This overload sends no caption; the
+     * six-arg one takes it.
      */
     boolean trySendPhoto(String peerId, File file, String displayName) {
         return trySendPhoto(peerId, file, displayName, null, null);

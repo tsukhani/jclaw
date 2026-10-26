@@ -8,9 +8,9 @@ import java.util.function.Consumer;
 
 /**
  * Progress of a certification run (JCLAW-1359): a {@code pass} event when one model finishes one run over the case
- * set, and {@code heartbeat} events naming every pass under way. Counts only, so it is safe for the held-out set; the
- * report never sees it, so it carries no timings. Thread-safe: cases finish on the harness's pool and heartbeats
- * arrive from a timer.
+ * set, and {@code heartbeat} events naming every pass under way. Counts and pass seconds only, so it is safe for the
+ * held-out set; the report never sees it, so it carries no timings. Thread-safe: cases finish on the harness's pool
+ * and heartbeats arrive from a timer.
  */
 public final class EvalProgress {
 

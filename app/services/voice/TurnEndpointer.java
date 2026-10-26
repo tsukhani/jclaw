@@ -16,8 +16,7 @@ package services.voice;
  * that seam later without touching this state machine.
  *
  * <p>This is the endpointing brain of the JCLAW-795 Tier-1 cascade; it is wired
- * to a live continuous audio stream in the pipelined-orchestration story
- * (JCLAW-799), which replaces the current client-side energy VAD.
+ * to the live audio stream by {@link VoiceSession} (JCLAW-799).
  */
 public final class TurnEndpointer {
 

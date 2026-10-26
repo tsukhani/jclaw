@@ -40,7 +40,7 @@ public class MemoryStoreFactory {
     }
 
     /**
-     * Test-only: pin a specific store instance, bypassing config-driven creation
+     * Test-only: pin a specific store instance, bypassing creation
      * (or clear back to lazy creation with {@link #reset()}). Lets a test drive the
      * pipeline through a vector-enabled or spy store without flipping process-global
      * config; parallels {@link JpaMemoryStore#setEmbedderForTest}. Callers that touch

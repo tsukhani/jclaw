@@ -90,7 +90,7 @@ public final class ChannelErrorTemplates {
      *
      * <p>Truncation takes from the middle, never the end: cutting the tail drops the retry
      * instruction, the only part the reader acts on. If even the first and last sections do
-     * not fit, the check section goes entirely rather than the message being cut mid-word.
+     * not fit, the whole message is hard-cut at the cap.
      *
      * @param maxChars the channel's hard message cap
      */

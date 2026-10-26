@@ -680,7 +680,7 @@ class SubagentSpawnToolTest extends UnitTest {
         configureProvider();
 
         // Non-main parent with the shell "exec" tool explicitly disabled. exec is
-        // enabled by default for non-main agents (only browser/jclaw_api are
+        // enabled by default for non-main agents (only browser is
         // seeded off), so a fresh clone would otherwise re-enable it.
         var parent = createAgent("p-restrict", "spawn-provider", "test-model");
         var deny = new AgentToolConfig();

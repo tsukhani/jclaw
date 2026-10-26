@@ -11,7 +11,7 @@ import java.util.Optional;
  * configured value is unrecognized) — callers treat that as "no
  * transcription backend available, skip dispatch."
  *
- * <p>Recognized values match {@code frontend/pages/settings.vue} radio
+ * <p>Recognized values match the Transcription panel's radio
  * options:
  * <ul>
  *   <li>{@code whisper-local} → {@link WhisperLocalTranscriptionService}</li>

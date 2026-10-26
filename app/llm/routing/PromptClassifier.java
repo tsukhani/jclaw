@@ -243,7 +243,7 @@ public final class PromptClassifier {
     /**
      * Agent work: a clause whose leading verb tells the assistant to act — on its own for a system
      * action, and for {@code create}-style verbs only when the object is something JClaw manages —
-     * or two such verbs anywhere, or a numbered plan, or a continuation of a tool-heavy turn.
+     * or two such verbs with a numbered plan, or one after a tool-heavy turn.
      */
     private static List<String> agenticSignals(String text, String lower, int priorToolCalls) {
         var leading = new LinkedHashSet<String>();

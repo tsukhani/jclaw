@@ -3,7 +3,7 @@ name: whatsapp-wacli-linux
 description: >-
   Use wacli (WhatsApp CLI) to sync, search, send messages, manage contacts/groups, and backfill chat history. REQUIRES AUTHENTICATION FIRST. Linux x86_64 binary.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
   author: Tarun Sukhani
   jclaw-icon: "🐧"
   jclaw-tools: exec
@@ -54,31 +54,31 @@ Phone numbers must be digits only with country code, **without** the `+` prefix:
 
 For groups, use JID format: `[PHONE_NUMBER]@g.us`
 
-Use `./skills/whatsapp-wacli/tools/wacli chats list` or `contacts search` to find JIDs.
+Use `./skills/whatsapp-wacli-linux/tools/wacli chats list` or `contacts search` to find JIDs.
 
 ---
 
 ## Authentication (Required First)
 
 ```bash
-./skills/whatsapp-wacli/tools/wacli auth
+./skills/whatsapp-wacli-linux/tools/wacli auth
 ```
 
 This displays a QR code. The user must scan it with WhatsApp (Settings > Linked Devices > Link a Device). The command stays running while waiting for the scan and initial sync. Use a timeout of at least 120 seconds.
 
 **Check auth status:**
 ```bash
-./skills/whatsapp-wacli/tools/wacli auth status
+./skills/whatsapp-wacli-linux/tools/wacli auth status
 ```
 
 **Logout:**
 ```bash
-./skills/whatsapp-wacli/tools/wacli auth logout
+./skills/whatsapp-wacli-linux/tools/wacli auth logout
 ```
 
 **Diagnostics:**
 ```bash
-./skills/whatsapp-wacli/tools/wacli doctor
+./skills/whatsapp-wacli-linux/tools/wacli doctor
 ```
 
 ---
@@ -87,12 +87,12 @@ This displays a QR code. The user must scan it with WhatsApp (Settings > Linked 
 
 ### Text message
 ```bash
-./skills/whatsapp-wacli/tools/wacli send text --to [PHONE_NUMBER] --message "Hello!"
+./skills/whatsapp-wacli-linux/tools/wacli send text --to [PHONE_NUMBER] --message "Hello!"
 ```
 
 ### File (image/video/audio/document)
 ```bash
-./skills/whatsapp-wacli/tools/wacli send file --to [PHONE_NUMBER] --file /path/to/photo.jpg
+./skills/whatsapp-wacli-linux/tools/wacli send file --to [PHONE_NUMBER] --file /path/to/photo.jpg
 ```
 
 Optional flags:
@@ -106,14 +106,14 @@ Optional flags:
 
 ### List messages in a chat
 ```bash
-./skills/whatsapp-wacli/tools/wacli messages list --chat [PHONE_NUMBER]@s.whatsapp.net --limit 20
+./skills/whatsapp-wacli-linux/tools/wacli messages list --chat [PHONE_NUMBER]@s.whatsapp.net --limit 20
 ```
 
 Optional: `--after 2025-01-01` `--before 2025-12-31`
 
 ### Search messages (full-text)
 ```bash
-./skills/whatsapp-wacli/tools/wacli messages search "keyword" --limit 20
+./skills/whatsapp-wacli-linux/tools/wacli messages search "keyword" --limit 20
 ```
 
 Optional filters:
@@ -124,12 +124,12 @@ Optional filters:
 
 ### Show a specific message
 ```bash
-./skills/whatsapp-wacli/tools/wacli messages show --chat <JID> --id <MESSAGE_ID>
+./skills/whatsapp-wacli-linux/tools/wacli messages show --chat <JID> --id <MESSAGE_ID>
 ```
 
 ### Show context around a message
 ```bash
-./skills/whatsapp-wacli/tools/wacli messages context --chat <JID> --id <MESSAGE_ID> --before 5 --after 5
+./skills/whatsapp-wacli-linux/tools/wacli messages context --chat <JID> --id <MESSAGE_ID> --before 5 --after 5
 ```
 
 ---
@@ -138,17 +138,17 @@ Optional filters:
 
 ### List chats
 ```bash
-./skills/whatsapp-wacli/tools/wacli chats list --limit 20
+./skills/whatsapp-wacli-linux/tools/wacli chats list --limit 20
 ```
 
 ### Search chats by name/number
 ```bash
-./skills/whatsapp-wacli/tools/wacli chats list --query "name or number"
+./skills/whatsapp-wacli-linux/tools/wacli chats list --query "name or number"
 ```
 
 ### Show a specific chat
 ```bash
-./skills/whatsapp-wacli/tools/wacli chats show --jid [PHONE_NUMBER]@s.whatsapp.net
+./skills/whatsapp-wacli-linux/tools/wacli chats show --jid [PHONE_NUMBER]@s.whatsapp.net
 ```
 
 ---
@@ -157,27 +157,27 @@ Optional filters:
 
 ### Search contacts
 ```bash
-./skills/whatsapp-wacli/tools/wacli contacts search "name" --limit 20
+./skills/whatsapp-wacli-linux/tools/wacli contacts search "name" --limit 20
 ```
 
 ### Show a specific contact
 ```bash
-./skills/whatsapp-wacli/tools/wacli contacts show --jid [PHONE_NUMBER]@s.whatsapp.net
+./skills/whatsapp-wacli-linux/tools/wacli contacts show --jid [PHONE_NUMBER]@s.whatsapp.net
 ```
 
 ### Set a local alias for a contact
 ```bash
-./skills/whatsapp-wacli/tools/wacli contacts alias set --jid [PHONE_NUMBER]@s.whatsapp.net --alias "Mom"
+./skills/whatsapp-wacli-linux/tools/wacli contacts alias set --jid [PHONE_NUMBER]@s.whatsapp.net --alias "Mom"
 ```
 
 ### Remove an alias
 ```bash
-./skills/whatsapp-wacli/tools/wacli contacts alias rm --jid [PHONE_NUMBER]@s.whatsapp.net
+./skills/whatsapp-wacli-linux/tools/wacli contacts alias rm --jid [PHONE_NUMBER]@s.whatsapp.net
 ```
 
 ### Refresh contacts from session store
 ```bash
-./skills/whatsapp-wacli/tools/wacli contacts refresh
+./skills/whatsapp-wacli-linux/tools/wacli contacts refresh
 ```
 
 ---
@@ -186,42 +186,42 @@ Optional filters:
 
 ### List groups
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups list
+./skills/whatsapp-wacli-linux/tools/wacli groups list
 ```
 
 ### Refresh groups (live from WhatsApp)
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups refresh
+./skills/whatsapp-wacli-linux/tools/wacli groups refresh
 ```
 
 ### Get group info
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups info --jid <GROUP_JID>
+./skills/whatsapp-wacli-linux/tools/wacli groups info --jid <GROUP_JID>
 ```
 
 ### Rename a group
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups rename --jid [PHONE_NUMBER]@g.us --name "New Name"
+./skills/whatsapp-wacli-linux/tools/wacli groups rename --jid [PHONE_NUMBER]@g.us --name "New Name"
 ```
 
 ### Join a group by invite code
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups join --code <INVITE_CODE>
+./skills/whatsapp-wacli-linux/tools/wacli groups join --code <INVITE_CODE>
 ```
 
 ### Leave a group
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups leave --jid <GROUP_JID>
+./skills/whatsapp-wacli-linux/tools/wacli groups leave --jid <GROUP_JID>
 ```
 
 ### Manage group invite links
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups invite --jid <GROUP_JID>
+./skills/whatsapp-wacli-linux/tools/wacli groups invite --jid <GROUP_JID>
 ```
 
 ### Manage group participants
 ```bash
-./skills/whatsapp-wacli/tools/wacli groups participants --jid <GROUP_JID>
+./skills/whatsapp-wacli-linux/tools/wacli groups participants --jid <GROUP_JID>
 ```
 
 ---
@@ -230,12 +230,12 @@ Optional filters:
 
 ### One-time sync (sync until idle, then exit)
 ```bash
-./skills/whatsapp-wacli/tools/wacli sync --once
+./skills/whatsapp-wacli-linux/tools/wacli sync --once
 ```
 
 ### Continuous sync (keeps running)
 ```bash
-./skills/whatsapp-wacli/tools/wacli sync --follow
+./skills/whatsapp-wacli-linux/tools/wacli sync --follow
 ```
 
 Optional flags:
@@ -251,7 +251,7 @@ Optional flags:
 Request older messages for a specific chat from the primary device:
 
 ```bash
-./skills/whatsapp-wacli/tools/wacli history backfill --chat <JID> --requests 10 --count 50
+./skills/whatsapp-wacli-linux/tools/wacli history backfill --chat <JID> --requests 10 --count 50
 ```
 
 Flags:
@@ -268,7 +268,7 @@ Flags:
 
 ### Download media from a message
 ```bash
-./skills/whatsapp-wacli/tools/wacli media download --chat <JID> --id <MESSAGE_ID>
+./skills/whatsapp-wacli-linux/tools/wacli media download --chat <JID> --id <MESSAGE_ID>
 ```
 
 Optional: `--output /path/to/save`
@@ -296,25 +296,25 @@ Optional: `--output /path/to/save`
 
 ```python
 # Authenticate (use timeout=120 for QR scan)
-exec({"command": "./skills/whatsapp-wacli/tools/wacli auth", "timeout": 120})
+exec({"command": "./skills/whatsapp-wacli-linux/tools/wacli auth", "timeout": 120})
 
 # Send text (NO + prefix on phone number)
-exec({"command": "./skills/whatsapp-wacli/tools/wacli send text --to [PHONE_NUMBER] --message 'Hello!'"})
+exec({"command": "./skills/whatsapp-wacli-linux/tools/wacli send text --to [PHONE_NUMBER] --message 'Hello!'"})
 
 # Send file
-exec({"command": "./skills/whatsapp-wacli/tools/wacli send file --to [PHONE_NUMBER] --file /tmp/report.pdf --caption 'Monthly report'"})
+exec({"command": "./skills/whatsapp-wacli-linux/tools/wacli send file --to [PHONE_NUMBER] --file /tmp/report.pdf --caption 'Monthly report'"})
 
 # Search messages (JSON for parsing)
-exec({"command": "./skills/whatsapp-wacli/tools/wacli messages search 'invoice' --json"})
+exec({"command": "./skills/whatsapp-wacli-linux/tools/wacli messages search 'invoice' --json"})
 
 # List recent chats
-exec({"command": "./skills/whatsapp-wacli/tools/wacli chats list --limit 10"})
+exec({"command": "./skills/whatsapp-wacli-linux/tools/wacli chats list --limit 10"})
 
 # One-time sync
-exec({"command": "./skills/whatsapp-wacli/tools/wacli sync --once", "timeout": 60})
+exec({"command": "./skills/whatsapp-wacli-linux/tools/wacli sync --once", "timeout": 60})
 
 # Check auth status
-exec({"command": "./skills/whatsapp-wacli/tools/wacli auth status"})
+exec({"command": "./skills/whatsapp-wacli-linux/tools/wacli auth status"})
 ```
 
 ---

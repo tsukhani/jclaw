@@ -427,9 +427,8 @@ final class SubagentAcpRunner {
                                                    List<String> modelArgs, Map<String, String> env) {
         var argv = concat(SubagentSpawnTool.withPermissionArgs(adapter, adapter.launchArgs(command, task)), modelArgs);
         boolean taskOnStdin = !argv.contains(task);
-        // Route approval prompts to the PARENT conversation — the child's own
-        // conversation is channelType="subagent" with no approval surface, so a
-        // Telegram/Slack prompt must reach the operator where they're watching.
+        // Route approval prompts to the PARENT conversation, so a
+        // Telegram/Slack prompt reaches the operator where they're watching.
         var conversationId = parentConversationId(runId);
         Process proc = null;
         OutputStream stdin = null;

@@ -133,9 +133,9 @@ public final class TaskRunRegistry {
      * loop bails at its next safe checkpoint. Returns {@code true} when an
      * entry existed (the run is in-flight on this JVM and will observe the
      * flag), {@code false} when none is registered (already finished, or never
-     * ran here — the caller still marks the row CANCELED in the DB). Never
+     * ran here — the caller still marks the row CANCELLED in the DB). Never
      * touches the fire's thread, and leaves terminal-status persistence to the
-     * caller (see {@code ApiTasksController.cancelRun}); what the fire registered
+     * caller (see {@code ApiTaskRunsController.cancelRun}); what the fire registered
      * against the flag, such as stopping its subagents, runs on threads of its own.
      */
     public static boolean requestCancel(Long taskRunId) {

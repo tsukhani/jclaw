@@ -467,7 +467,7 @@ public class ApiChatController extends Controller {
                 cancelled, callbacks, acceptedAtNs, ctx.attachments());
 
         // Suspend this invocation until the SSE stream closes (terminal frame,
-        // disconnect, or 10-min timeout). The Play worker thread returns to
+        // disconnect, or the inactivity timeout). The Play worker thread returns to
         // the pool immediately; all real work happens on the agent's virtual
         // thread via sse.send() / sse.close() calls.
         await(sse.completion());
@@ -610,8 +610,8 @@ public class ApiChatController extends Controller {
                             "SSE stream error: %s".formatted(error.getMessage()));
                 },
                 // onCancel: web cancellation is signaled via SSE close, not via
-                // ConversationQueue.cancellationFlag (the only flag /stop flips),
-                // so the runner-level onCancel hook has no transport frame to send.
+                // ConversationQueue.cancellationFlag, so the runner-level onCancel
+                // hook has no transport frame to send.
                 // It still fires on the SSE-close path (where onComplete/onError do
                 // not), so JCLAW-661 uses it to drop the coding-run bridge for a
                 // tab that closed mid-turn.

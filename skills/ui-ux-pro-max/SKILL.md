@@ -3,7 +3,7 @@ name: ui-ux-pro-max
 description: >-
   UI/UX design intelligence for web and mobile. Includes 67 styles, 161 color palettes, 57 font pairings, 161 product types, 99 UX guidelines, and 25 chart types across 16 stacks (React, Next.js, Vue, Svelte, SwiftUI, React Native, Flutter, Tailwind, shadcn/ui, Angular, Laravel, and more). Actions: plan, build, create, design, implement, review, fix, improve, optimize, enhance, refactor, and check UI/UX code. Projects: website, landing page, dashboard, admin panel, e-commerce, SaaS, portfolio, blog, and mobile app. Elements: button, modal, navbar, sidebar, card, table, form, and chart. Styles: glassmorphism, claymorphism, minimalism, brutalism, neumorphism, bento grid, dark mode, responsive, skeuomorphism, and flat design. Topics: color systems, accessibility, animation, layout, typography, font pairing, spacing, interaction states, shadow, and gradient.
 metadata:
-  version: "1.0.1"
+  version: "1.0.2"
   author: Tarun Sukhani
   jclaw-icon: "🎨"
   jclaw-tools: exec filesystem

@@ -226,8 +226,8 @@ class DeliveryDispatcherTest extends UnitTest {
         assertFalse(result.ok());
         assertEquals(DispatchResult.Status.FAILED_NO_CONFIG, result.status());
         // AC-6: clear error with setup instructions
-        assertTrue(result.reason().contains("Settings → Channels → Telegram")
-                        || result.reason().contains("api/telegram-bindings"),
+        assertTrue(result.reason().contains("Channels → Telegram")
+                        || result.reason().contains("api/channels/telegram/bindings"),
                 "no-config error should point to where to configure: " + result.reason());
     }
 

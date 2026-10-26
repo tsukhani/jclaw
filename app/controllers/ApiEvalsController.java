@@ -90,9 +90,8 @@ public class ApiEvalsController extends Controller {
         var agent = Agent.findByName(agentName);
         if (agent == null && Agent.EVALTEST_AGENT_NAME.equalsIgnoreCase(agentName)) {
             // Provision the eval agent on first use, like LoadTestRunner does for its
-            // benchmark agents. It lands with an empty tool surface, so the first sweep
-            // against a fresh one fails its tool checks until the operator grants what
-            // the suite needs — which is the safe direction to be wrong in.
+            // benchmark agents. It lands with an empty tool surface, and capture grants
+            // what the suite declares.
             agent = EvalCapture.ensureEvalAgent();
             if (agent == null) {
                 ApiResponses.error(400, ApiResponses.INVALID_REQUEST,

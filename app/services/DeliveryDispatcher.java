@@ -27,7 +27,7 @@ import java.util.Map;
  *   <li>{@link tools.MessageTool} — the agent-facing {@code message} tool
  *       that lets a running agent push a message to its channel mid-turn
  *       (JCLAW-327, the Radarr-monitor use case).</li>
- *   <li>Future task-completion delivery wiring (JCLAW-295) that reads
+ *   <li>Task-completion delivery (JCLAW-295) in {@link TaskExecutor}, which reads
  *       {@link models.Task#delivery} and surfaces task output to the
  *       configured channel when a {@link models.TaskRun} terminates.</li>
  * </ul>
@@ -115,13 +115,13 @@ public final class DeliveryDispatcher {
      *
      * <p>Wraps {@link Channel#sendWithRetry} so callers get one automatic
      * retry against the platform's rate-limit hint. Must run inside a JPA
-     * transaction when telegram or slack is the channel — the per-agent
-     * binding lookup goes through JPA.
+     * transaction: every channel's binding or conversation lookup goes
+     * through JPA.
      *
      * @param agent the agent owning the conversation that initiated the
-     *              dispatch. Required for telegram + slack (per-agent binding
-     *              lookup); ignored for whatsapp (workspace-scoped config).
-     * @param channelType one of {@code telegram}, {@code slack}, {@code whatsapp}.
+     *              dispatch. Required for every channel (per-agent binding
+     *              or conversation lookup).
+     * @param channelType one of {@code telegram}, {@code slack}, {@code whatsapp}, {@code web}.
      *              Case-insensitive. Other values return {@code CHANNEL_UNSUPPORTED}.
      * @param target  channel-specific peer id. Telegram: numeric chat id.
      *              Slack: channel id ({@code Cxxxx}). WhatsApp: e.164 phone.
@@ -211,8 +211,8 @@ public final class DeliveryDispatcher {
         if (binding == null) {
             return DispatchResult.noConfig(TELEGRAM,
                     "Connect a Telegram bot for agent '" + agent.name
-                            + "' (or any of its ancestors) in Settings → Channels → Telegram, "
-                            + "or via POST /api/telegram-bindings.");
+                            + "' (or any of its ancestors) in Channels → Telegram, "
+                            + "or via POST /api/channels/telegram/bindings.");
         }
         if (!binding.enabled) {
             return DispatchResult.noConfig(TELEGRAM,
@@ -245,7 +245,7 @@ public final class DeliveryDispatcher {
         if (binding == null) {
             return DispatchResult.noConfig(SLACK,
                     "Connect a Slack bot for agent '" + agent.name
-                            + "' (or any of its ancestors) in Settings → Channels → Slack.");
+                            + "' (or any of its ancestors) in Channels → Slack.");
         }
         if (!binding.enabled) {
             return DispatchResult.noConfig(SLACK,
@@ -304,7 +304,7 @@ public final class DeliveryDispatcher {
         if (binding == null) {
             return DispatchResult.noConfig(WHATSAPP,
                     "Connect a WhatsApp binding for agent '" + agent.name
-                            + "' (or any of its ancestors) in Settings → Channels → WhatsApp.");
+                            + "' (or any of its ancestors) in Channels → WhatsApp.");
         }
         if (!binding.enabled) {
             return DispatchResult.noConfig(WHATSAPP,

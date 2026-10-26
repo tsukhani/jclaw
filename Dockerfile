@@ -91,7 +91,7 @@ ENV PNPM_HOME=/root/.local/share/pnpm
 ENV PATH=$PNPM_HOME/bin:$PATH
 
 # Play 1.13.x — tsukhani/play1 fork at /opt/play1, matching the path
-# build.gradle.kts (frameworkPath) and settings.gradle.kts (includeBuild)
+# build.gradle.kts (frameworkPath) and settings.gradle.kts (gradle-plugin-repo)
 # both point at. The exact version is pinned in .play-version at the
 # repo root (single source of truth shared with build.gradle.kts and
 # the .devcontainer Dockerfile). build.gradle.kts also enforces a

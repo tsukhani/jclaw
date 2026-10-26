@@ -19,16 +19,14 @@ import static utils.GsonHolder.GSON;
 
 /**
  * Notifications API — surface for the global {@code NotificationBar}
- * toast component (mounted in {@code layouts/default.vue}) and the
- * {@code /reminders} page's "Past reminders" tab.
+ * toast component (mounted in {@code layouts/default.vue}).
  *
  * <p>Notifications are written by {@link services.ReminderDispatcher}
  * when a reminder task fires on the {@code web} channel. They persist
  * forever (operator's choice — reminders are by definition things the
  * user wants to keep around) and are removed only by an explicit
  * {@link #delete} call from the UI's dismiss button. {@link #ack} marks
- * a row read without removing it, so the past-reminders tab can still
- * show acknowledged entries.
+ * a row read without removing it.
  *
  * <p>Single-operator by design: the one authenticated admin sees every
  * notification — there is no per-user scoping because there is only one user.
@@ -110,7 +108,7 @@ public class ApiNotificationsController extends Controller {
 
     /**
      * DELETE /api/notifications/{id} — hard-delete a notification. Used
-     * by the toast / reminders-page dismiss button when the user wants
+     * by the toast's dismiss button when the user wants
      * the row gone for good. No soft-delete column because acknowledged
      * rows already serve that purpose for the "I've seen it, keep it"
      * path; this endpoint is for "I never want to see this again."

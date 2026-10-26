@@ -30,15 +30,15 @@ export interface MessageUsage {
   cached: number
   cacheCreation?: number
   durationMs: number
-  /** Wall-clock ms spent in the reasoning phase (first→last reasoning chunk). Omitted when no reasoning was streamed. */
+  /** Wall-clock ms spent in the reasoning phase (reasoning → first content). Omitted when no reasoning was streamed. */
   reasoningDurationMs?: number
   promptPrice?: number
   completionPrice?: number
   cachedReadPrice?: number
   cacheWritePrice?: number
-  /** JCLAW-107: the agent's modelProvider at the time this turn ran. */
+  /** JCLAW-107: the modelProvider this turn ran on, override-aware. */
   modelProvider?: string
-  /** JCLAW-107: the agent's modelId at the time this turn ran. */
+  /** JCLAW-107: the modelId this turn ran on, override-aware. */
   modelId?: string
   /** JCLAW-107: the model's contextWindow at the time this turn ran (tokens). */
   contextWindow?: number
@@ -291,7 +291,7 @@ export interface ConversationCostBreakdown {
 /**
  * Sum per-turn costs across the conversation, honoring each turn's own
  * embedded pricing. Pricing is frozen at emission time (see
- * `AgentRunner.buildUsageJson`), so this function does not need to re-resolve
+ * `UsageMetricsBuilder.buildUsageJson`), so this function does not need to re-resolve
  * ModelInfo or consult the provider registry — it just calls
  * `computeUsageCostBreakdown` per turn and sums the results. Turns whose
  * usage lacks pricing (returned null from the per-turn computation) contribute
@@ -336,7 +336,7 @@ export function computeConversationCost(usages: MessageUsage[]): ConversationCos
 /**
  * Compact conversation-level cost label: "$0.0149" across all turns, or
  * "< $0.0001" for sub-tenth-cent totals. Returns null when the conversation
- * has zero turns (fresh/empty) or no paid turns (all free-tier).
+ * has zero turns (fresh/empty); "$0.00" when none was paid.
  */
 export function formatConversationCost(breakdown: ConversationCostBreakdown): string | null {
   if (breakdown.turnCount === 0) return null

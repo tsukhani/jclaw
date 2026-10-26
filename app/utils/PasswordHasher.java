@@ -21,9 +21,8 @@ import java.util.Base64;
  * work factor for PBKDF2-HMAC-SHA256 (JCLAW-731 raised it from 150,000).
  * {@link #verify} reads the count from the stored string rather than the
  * constant, so hashes written at any earlier factor still authenticate — no
- * forced reset. Transparent rehash-on-login (upgrade an old hash on the next
- * successful verify) is a one-line change at the caller and remains unwired;
- * within the single-admin model a manual password reset is the upgrade path.
+ * forced reset. Login re-hashes an older hash on the next successful verify
+ * ({@link #needsRehash}).
  *
  * <p>Why PBKDF2 instead of BCrypt: no new dependency needed, JDK ships the
  * algorithm, and the threat model is "single-user self-hosted app" — the

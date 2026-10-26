@@ -38,7 +38,7 @@ public final class TelegramModelKeyboard {
     public static final int MODELS_PER_PAGE = 8;
 
     /** Display labels for the canonical provider IDs jclaw ships with. Mirrors
-     *  the frontend's PROVIDER_LABELS in {@code frontend/pages/settings.vue}. Any
+     *  PROVIDER_LABELS in {@code SettingsProvidersPanel.vue}. Any
      *  provider not in this map falls back to its raw registry name — operators
      *  who add a custom provider see exactly the name they configured. */
     private static final Map<String, String> PROVIDER_LABELS = Map.of(

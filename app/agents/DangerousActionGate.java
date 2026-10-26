@@ -33,12 +33,12 @@ import java.util.function.Supplier;
  *
  * <ol>
  *   <li>the tool is marked {@link ToolRegistry.Tool#dangerous() dangerous}
- *       (today: {@code exec}); AND</li>
+ *       (e.g. {@code exec}); AND</li>
  *   <li>the running agent (or an ancestor, for sub-agents) is bound to a
  *       Telegram bot via {@link TelegramBinding#findByAgentOrAncestor(Agent)}; AND</li>
  *   <li>JCLAW-423: the conversation that triggered the action is itself on
- *       Telegram — the only channel with an interactive approve/deny surface,
- *       and the only one where a prompt actually reaches the operator.</li>
+ *       Telegram, or on a Slack binding with an owner — the channels with an
+ *       approve/deny surface.</li>
  * </ol>
  *
  * <p>When both hold, the gate raises an interactive approve/deny prompt in
@@ -47,7 +47,7 @@ import java.util.function.Supplier;
  * request times out. {@code APPROVED_*} proceeds; {@code DENIED} /
  * {@code TIMED_OUT} / {@code EXPIRED} aborts.
  *
- * <p>JCLAW-423: a dangerous tool on any other channel (web, Slack) has no
+ * <p>JCLAW-423: a dangerous tool on any other channel (web, WhatsApp) has no
  * interactive approval surface, so the gate applies the configured off-channel
  * policy ({@value #CFG_OFF_CHANNEL_POLICY}, default {@code allow}) instead of
  * routing a prompt to a Telegram chat the operator may not be watching — which
@@ -71,8 +71,7 @@ import java.util.function.Supplier;
  * comes from {@link #withFireOrigin} — the channel recorded on the Task when it was
  * created. With nothing bound the origin stays unknown and fails closed. That origin is
  * a <em>floor</em> for everything the fire reaches, including a dispatch that does carry
- * a conversation: {@code agent_spawn} picks the child's conversation by recency, so an
- * untrusted fire would otherwise borrow the operator's web trust one hop out.
+ * a conversation, so a spawned child cannot borrow the operator's web trust one hop out.
  *
  * <h2>Session / always scope</h2>
  * <p>An {@code APPROVED_SESSION} or {@code APPROVED_ALWAYS} tap records a
@@ -116,7 +115,7 @@ public final class DangerousActionGate {
 
     /**
      * JCLAW-423: policy for a dangerous tool dispatched on a channel with no
-     * interactive approval surface (anything but Telegram). {@code allow}
+     * interactive approval surface (not Telegram/Slack). {@code allow}
      * (default) runs it ungated on a <em>trusted operator origin</em> (the web UI),
      * preserving the pre-423 behavior; {@code deny} fails closed;
      * JCLAW-709 {@code ask} routes the confirmation to the agent's bound Telegram
@@ -441,7 +440,7 @@ public final class DangerousActionGate {
      * <p>The fire's origin is a floor rather than a fallback because a conversation reached
      * from inside a fire says nothing about who started the fire. When a spawned child's was
      * picked by recency — typically the operator's {@code web} one — honoring it outright
-     * let an untrusted fire abort a direct {@code exec}, call {@code agent_spawn}, and run
+     * let an untrusted fire abort a direct {@code exec}, spawn a subagent, and run
      * the same {@code exec} ungated in the child on borrowed operator trust (JCLAW-1021).
      *
      * <p>Public so the task-write path can record the same provenance the gate will later

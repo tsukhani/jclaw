@@ -51,13 +51,13 @@ export interface TelegramBindingSummary {
   telegramUserId: string
   transport: string
   /** Editable public base (scheme + host, no path) Telegram reaches this instance
-   *  at, e.g. https://host.tailnet.ts.net. The fixed path + secret are appended
+   *  at, e.g. https://host.tailnet.ts.net. The fixed path + id are appended
    *  to form the full webhook URL. Null for polling bindings. */
   webhookBaseUrl: string | null
   hasWebhookSecret: boolean
   /**
    * Full webhook URL JClaw registers with Telegram (JCLAW-338/339):
-   * base + /api/webhooks/telegram/{id}/{secret}. Non-null only for a WEBHOOK
+   * base + /api/webhooks/telegram/{id}. Non-null only for a WEBHOOK
    * binding that has both a public base and a secret.
    */
   effectiveWebhookUrl: string | null
@@ -438,7 +438,6 @@ export interface SubagentAnnounceMetadata {
   truncated?: boolean | null
 }
 
-/** A single message within a conversation. */
 /** What a web reply quotes; the server maps the kind to the label the agent reads (JCLAW-1299). */
 export type ChatQuoteKind = 'assistant' | 'user' | 'delivered' | 'reminder'
 
@@ -447,6 +446,7 @@ export interface ChatQuote {
   text: string
 }
 
+/** A single message within a conversation. */
 export interface Message {
   /** Server-assigned id. Absent on optimistic/streaming placeholders until the backend persists the row. */
   id?: number
@@ -790,7 +790,7 @@ export interface PromptBreakdownEntry {
   tokens: number
 }
 
-/** Shape returned by GET/POST /api/memories/core-migration. */
+/** Shape of GET/POST /api/agents/:id/core-migration. */
 export interface CoreMigrationStatus {
   running: boolean
   processed: number
@@ -891,7 +891,7 @@ export interface Task {
 
 /**
  * One TaskRun row as returned by GET /api/tasks/:id/runs (most-recent first).
- * Mirrors the backend ApiTasksController.TaskRunView record.
+ * Mirrors ApiTaskRunsController.TaskRunView.
  */
 export interface TaskRunView {
   id: number
@@ -1022,7 +1022,7 @@ export interface ProviderInfo {
   paymentModality: 'PER_TOKEN' | 'SUBSCRIPTION'
   subscriptionMonthlyUsd: number
   supportedModalities: ('PER_TOKEN' | 'SUBSCRIPTION')[]
-  /** Local by base URL, or by the operator's classification (JCLAW-939, JCLAW-1102). */
+  /** The operator's Remote/Local flag, `provider.<name>.local` (JCLAW-939, JCLAW-1102). */
   local: boolean
 }
 
@@ -1079,14 +1079,6 @@ export interface DiscoverModelsResponse {
   models: DiscoveredModel[]
 }
 
-/**
- * One configured MCP (Model Context Protocol) server, as surfaced by
- * {@code GET /api/mcp-servers}. Transport-specific fields are exploded
- * out of the row's stored configJson so the admin form binds directly:
- * {@code command/args/env} for STDIO, {@code url/headers} for HTTP.
- * Status/lastError/lastConnected* are populated from the runtime
- * McpConnectionManager — they're cross-cutting state not stored on the row.
- */
 /** One circuit breaker as `GET /api/breakers` reports it (JCLAW-1170). */
 export interface Breaker {
   /** Registry name, `<subsystem>:<target>`: what trip and reset take. */
@@ -1127,6 +1119,14 @@ export interface CloudUsage {
   fetchedAt: string | null
 }
 
+/**
+ * One configured MCP (Model Context Protocol) server, as surfaced by
+ * {@code GET /api/mcp-servers}. Transport-specific fields are exploded
+ * out of the row's stored configJson so the admin form binds directly:
+ * {@code command/args/env} for STDIO, {@code url/headers} for HTTP.
+ * Status/lastError/lastConnected* are populated from the runtime
+ * McpConnectionManager — they're cross-cutting state not stored on the row.
+ */
 export interface McpServer {
   id: number
   name: string

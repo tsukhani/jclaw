@@ -3,8 +3,8 @@ package services;
 import com.github.kagkarlsson.scheduler.SchedulerClient;
 
 /**
- * Package-internal access shim used exclusively by
- * {@code TaskSchedulingServiceTest} to inject a recording stub
+ * Package-internal access shim used only by tests
+ * to inject a recording stub
  * {@link SchedulerClient} for unit-test isolation.
  *
  * <p>Play 1.x test classes live in the default package, so they

@@ -26,9 +26,8 @@ public class AgentService {
 
     /**
      * Does the agent's registered model (default, not conversation override)
-     * declare {@code supportsVision}? Callers use this before accepting image
-     * attachments on inbound paths (web controller, Telegram webhook) so the
-     * user gets a clear reject rather than a silent drop. Returns {@code false}
+     * declare {@code supportsVision}? The video-understanding dispatcher uses
+     * this to choose an image-based strategy. Returns {@code false}
      * when the provider or model can't be resolved — better to reject an
      * attachment than accept it against an unknown model.
      *
@@ -149,7 +148,7 @@ public class AgentService {
         agent.enabled = agent.isMain() || isProviderConfigured(modelProvider, modelId);
         agent.thinkingMode = normalizeThinkingMode(thinkingMode, modelProvider, modelId);
         // JCLAW-465: content compression defaults on for the main agent, off for
-        // custom agents (same main-vs-custom split as the jclaw_api tool below).
+        // custom agents.
         agent.compressionEnabled = agent.isMain();
         agent.save();
 

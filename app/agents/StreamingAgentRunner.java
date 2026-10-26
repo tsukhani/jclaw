@@ -58,7 +58,7 @@ final class StreamingAgentRunner {
      *                       {@code "slack"}, {@code "whatsapp"}
      * @param peerId         channel-specific peer identifier
      * @param userMessage    the user's input text
-     * @param isCancelled    flag the transport flips on disconnect / Telegram /cancel
+     * @param isCancelled    flag the transport flips on disconnect or /stop
      * @param cb             event callbacks for SSE / streaming transports
      * @param acceptedAtNs   {@code System.nanoTime()} at process entry, or {@code null}
      * @param attachments    per-file metadata the frontend roundtripped, or {@code null}
@@ -607,8 +607,7 @@ final class StreamingAgentRunner {
 
     /**
      * Post round-1 processing: detect the empty-toolCalls truncation case, then drive
-     * the tool-call loop if the model produced tool calls. Returns {@code null} when
-     * cancellation fired inside the loop.
+     * the tool-call loop if the model produced tool calls.
      */
     @SuppressWarnings("java:S107") // mirrors the orchestration state of streamLlmLoop
     private static StreamingPostAccumulator runPostAccumulatorToolLoop(LlmProvider.StreamAccumulator accumulator,
@@ -709,7 +708,7 @@ final class StreamingAgentRunner {
     }
 
     /**
-     * Streaming-side truncated-tool-call handler: emit a retry marker,
+     * Streaming-side truncated-tool-call handler: emit a truncation marker,
      * persist the truncated content, and fire the terminal complete
      * callback. Persist BEFORE the terminal frame so the assistant
      * message is committed by the time the SSE closes / HTTP response
@@ -721,9 +720,9 @@ final class StreamingAgentRunner {
         EventLogger.warn("llm", agent.name, channelType,
                 "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
         var truncMsg = content.isEmpty()
-                ? "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach."
+                ? "I tried to use a tool but my response was too long and got cut off, so the tool call was not run."
                 : content;
-        cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — retrying with a simpler approach]*");
+        cb.onToken().accept(truncMsg.equals(content) ? "" : "\n\n*[Response was truncated — the incomplete tool call was not run.]*");
         trace.mark(LatencyTrace.STREAM_BODY_END);
         var finalContent = truncMsg;
         long truncPersistStartNs = System.nanoTime();

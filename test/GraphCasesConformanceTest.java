@@ -28,7 +28,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 /**
- * JCLAW-1356, JCLAW-1358: the committed v2 cases load against the seed ontology and meet every composition target, a
+ * JCLAW-1356, JCLAW-1358: the committed v3 cases load against the seed ontology and meet every composition target, a
  * set short of any target fails naming it, and each refusal rule fires, naming the case, on an edited copy of the file.
  */
 class GraphCasesConformanceTest extends UnitTest {

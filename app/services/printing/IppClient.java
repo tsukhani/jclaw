@@ -40,8 +40,8 @@ import java.util.stream.Collectors;
  * <p>RFC 8010 frames an IPP request as a binary attribute packet followed
  * immediately by the document bytes, POSTed as {@code application/ipp}. HP JIPP
  * encodes and decodes the packet; the HTTP hop rides JClaw's shared OkHttp
- * client, per the tree-wide rule that outbound HTTP goes through
- * {@link HttpFactories} (pinned by ArchitectureTest).
+ * client, per the rule that outbound HTTP goes through
+ * {@link HttpFactories} (pinned by CapabilityRulesTest).
  *
  * <p>The reason this is tried first is not speed — it is that IPP answers. A
  * successful Print-Job returns a job id and a status code, so the tool can report

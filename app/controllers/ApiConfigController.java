@@ -33,8 +33,8 @@ public class ApiConfigController extends Controller {
             "provider." + LoadTestRunner.LOADTEST_PROVIDER + ".";
 
     /** All {@code auth.*} config is reserved: the admin password hash
-     *  ({@code auth.admin.passwordHash}) and the auto-managed internal bearer
-     *  token ({@code auth.internal.*}). Auth is administered through the dedicated
+     *  ({@code auth.admin.passwordHash}) and the reserved
+     *  {@code auth.internal.*} keys. Auth is administered through the dedicated
      *  {@code /api/auth/*} endpoints and the Settings UI, never the generic config
      *  API -- so reserving the whole prefix closes a lockout / privilege path (e.g.
      *  an agent calling {@code DELETE /api/config/auth.admin.passwordHash} via the
@@ -63,11 +63,9 @@ public class ApiConfigController extends Controller {
 
     /** True for any key the user must not see or mutate through the
      *  Config API: the load-test reservation plus the
-     *  {@code auth.internal.*} prefix that {@link services.InternalApiTokenService}
-     *  uses for the auto-managed bearer token plaintext. The latter is
+     *  {@code auth.internal.*} prefix. The latter is
      *  not just hidden but rejected outright on save/delete so an
-     *  operator typing the key by mistake gets a clear error instead
-     *  of breaking the in-process {@code jclaw_api} tool. */
+     *  operator typing the key by mistake gets a clear error. */
     private static boolean isReservedKey(String key) {
         if (key == null) return false;
         return key.startsWith(RESERVED_KEY_PREFIX)

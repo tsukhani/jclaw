@@ -463,7 +463,8 @@ public class ApiSkillsController extends Controller {
      * <p>Exists so the skills page can draw its agent rows at full height on first paint;
      * fetched per agent, they expand after paint and shift the list below them.
      */
-    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = AgentSkillView.class)))
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(type = "object"),
+            additionalPropertiesArraySchema = @ArraySchema(schema = @Schema(implementation = AgentSkillView.class))))
     @Operation(summary = "List every agent's installed skills and enabled state, keyed by agent id")
     @AgentAccess(OPEN)
     public static void listByAgent() {

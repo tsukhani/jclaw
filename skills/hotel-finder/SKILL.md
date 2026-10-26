@@ -3,7 +3,7 @@ name: hotel-finder
 description: >-
   Search the web for best hotels in a specified city and provide findings directly in chat with names, ratings, prices, amenities, and contact information.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
   author: Tarun Sukhani
   jclaw-icon: "🏨"
   jclaw-tools: web_search web_fetch
@@ -33,7 +33,7 @@ Use the `web_search` tool to find the best hotels in the specified city.
 ## 3. Fetch Detailed Information
 
 For each promising hotel found:
-- Use `web_fetch` with mode="text" to extract readable content from hotel booking sites, review platforms, and official hotel websites
+- Use `web_fetch` with format="text" to extract readable content from hotel booking sites, review platforms, and official hotel websites
 - Prioritize Booking.com, Agoda, TripAdvisor, Google Hotels, and official hotel websites
 - Extract: hotel name, star rating, guest rating (out of 10 or 5), number of reviews, approximate price per night (in USD or local currency), address, phone number, key amenities (pool, spa, gym, free WiFi, breakfast, etc.), and notable review excerpts
 

@@ -26,7 +26,7 @@ import static utils.GsonHolder.GSON;
 
 /**
  * Local image-generation Settings UI backend (JCLAW-226), the producing analog
- * of {@link ApiTranscriptionController}. Two endpoints:
+ * of {@link ApiTranscriptionController}. Among them:
  *
  * <ul>
  *   <li>{@code GET /api/imagegen/local/state} — snapshot of the configured local

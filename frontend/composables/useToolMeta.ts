@@ -8,7 +8,7 @@
  * string dictionary keyed by the backend-supplied icon name.
  *
  * Adding a new tool in app/tools/ is now a backend-only change. This file
- * should not need updates unless the four-category taxonomy grows or the
+ * should not need updates unless the category taxonomy grows or the
  * set of supported SVG icons expands.
  */
 

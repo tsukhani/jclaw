@@ -77,13 +77,10 @@ public record InboundMessage(String chatId, @Nullable String chatType, String te
     /**
      * JCLAW-367: pre-sender-capture convenience overload. Callers that
      * carry attachments + media-group context but no per-message sender
-     * display name / addressed-bot signal (e.g. the media-group reassembler)
+     * display name / addressed-bot signal (tests)
      * use this; {@code fromDisplayName} defaults to null and
-     * {@code botMentioned} to false. JCLAW-368: {@code messageId} and
-     * {@code messageThreadId} default to null — the merge path that uses
-     * this overload synthesizes one inbound from many and has no single
-     * message id / thread id to attribute. JCLAW-366: {@code replyContext}
-     * defaults to null for the same reason.
+     * {@code botMentioned} to false. {@code messageId}, {@code messageThreadId}
+     * and {@code replyContext} default to null.
      */
     public InboundMessage(String chatId, @Nullable String chatType, String text,
                           @Nullable String fromId, @Nullable String fromUsername,

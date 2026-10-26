@@ -9,9 +9,9 @@ import services.ConfigService;
  * {@link TranscriptionService} contract. Resolves the configured
  * {@code transcription.localModel} on every call (so model swaps
  * via Settings take effect immediately) and routes the on-disk
- * attachment path through the JNI engine.
+ * attachment path through the ASR sidecar.
  *
- * <p>Fail-fast: if the configured model isn't downloaded, the
+ * <p>Fail-fast: if the sidecar cannot run or fails, the
  * underlying engine throws {@link TranscriptionException} with a clear
  * message — the orchestrator above catches and treats as silent
  * failure (transcript stays NULL on the row, callers fall back to the
@@ -26,7 +26,7 @@ public final class WhisperLocalTranscriptionService implements TranscriptionServ
         var model = AsrModel.byId(modelId).orElse(AsrModel.DEFAULT);
         var path = AgentService.workspaceRoot().resolve(attachment.storagePath);
         // Language follows the model selection (JCLAW-556): multilingual
-        // models auto-detect per clip, .en models decode English.
+        // models auto-detect per clip.
         return WhisperTranscriber.transcribe(path, model);
     }
 }

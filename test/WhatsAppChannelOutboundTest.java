@@ -31,8 +31,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * the 4096-char text chunker and the MIME → media-message-type mapping. The live
  * HTTP send paths (sendMedia upload two-step, sendReaction, the window-gated text
  * send) post to the fixed Graph host through {@code HttpFactories.general()} and
- * are exercised by the integrator's full suite; here we pin the deterministic
- * splitting + type-selection logic that those paths depend on.
+ * are driven here through a canned transport, beside the splitting and
+ * type-selection logic.
  */
 class WhatsAppChannelOutboundTest extends UnitTest {
 

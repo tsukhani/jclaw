@@ -156,8 +156,7 @@ public final class ImageModelManager {
      * Drive the sidecar's {@code POST /pull} and relay its ndjson progress into
      * {@link #statuses} + the optional callback. The sidecar goes silent while
      * downloading a single shard between progress lines, so we read with a long
-     * read timeout (a continuously-streaming body the way WhisperModelManager's
-     * direct GET does would otherwise let general()'s 30s readTimeout trip).
+     * read timeout (general()'s 30s readTimeout would otherwise trip).
      */
     private static void doPull(String model, @Nullable Consumer<DownloadProgress> onProgress) throws IOException {
         var baseUrl = LocalImageSidecarManager.ensureRunning();

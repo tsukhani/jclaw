@@ -30,7 +30,7 @@ public final class PrintDispatcher {
     private static final String CATEGORY = "printer";
     private static final int TIMEOUT_MS = 15_000;
 
-    /** Queue name used for LPD. Daemons overwhelmingly accept one of these two. */
+    /** Queue name used for LPD; daemons overwhelmingly accept it or {@code raw}. */
     private static final String LPD_QUEUE = "lp";
 
     /**

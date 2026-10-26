@@ -78,10 +78,8 @@ public class ApiTaskStatsController extends Controller {
                 runsToday, successRate, avgDurationMs,
                 TaskStatsService.countTasks(Task.Status.PENDING, false, payloadType, excludePayloadType),
                 // RUNNING is the only live-execution stat that lives on the
-                // TaskRun, not the Task: a recurring task stays ACTIVE (a
-                // one-shot stays PENDING) while its run executes, so count
-                // RUNNING runs — the same signal the UI's runningRunId uses —
-                // rather than Task.Status.RUNNING, which nothing currently sets.
+                // TaskRun, not the Task: count RUNNING runs — the same signal
+                // the UI's runningRunId uses.
                 TaskStatsService.countRunningRuns(payloadType, excludePayloadType),
                 // Pending/Active pass paused=false so a suspended schedule is
                 // counted once, under Paused, instead of twice.

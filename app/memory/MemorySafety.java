@@ -12,8 +12,8 @@ import java.util.regex.Pattern;
  * wholesale: losing one memory is far cheaper than persisting a live credential
  * or a hostile directive to the long-term store.
  *
- * <p>Four independent guards. The first three read the candidate alone; the fourth reads it
- * against the turn that produced it, because what it rejects is indistinguishable from an
+ * <p>Six independent guards. Four read the candidate alone; the last two read it
+ * against the turn that produced it, because what they reject is indistinguishable from an
  * ordinary fact in isolation.
  *
  * <ul>
@@ -255,7 +255,7 @@ public final class MemorySafety {
      * Whether a candidate memory rests only on what the turn presupposed rather than on
      * anything the operator asserted (JCLAW-1055).
      *
-     * <p>Unlike the three guards above this one cannot work on the candidate alone: "The user
+     * <p>Unlike the guards above this one cannot work on the candidate alone: "The user
      * has a dentist." is a perfectly ordinary memory, and the only thing wrong with it is that
      * the turn behind it was "forget my dentist's name" — a request whose object is taken for
      * granted, not claimed. So the turn is split into what it asserts and what it merely

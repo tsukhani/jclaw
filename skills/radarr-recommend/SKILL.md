@@ -3,7 +3,7 @@ name: radarr-recommend
 description: >-
   Get personalized movie recommendations based on user's preferences. Checks library to avoid duplicates.
 metadata:
-  version: "1.0.3"
+  version: "1.0.4"
   author: Tarun Sukhani
   jclaw-icon: "📺"
   jclaw-tools: exec filesystem
@@ -18,7 +18,7 @@ Personalized movie recommendations that learn each user's taste.
 ```bash
 # Agent exec runs with CWD = workspace root, so the credentials file
 # (shared with the radarr skill) sits at a known workspace-relative
-# path. Do NOT use $BASH_SOURCE — exec is `bash -c "…"`, where
+# path. Do NOT use $BASH_SOURCE — exec is `sh -c "…"`, where
 # $BASH_SOURCE[0] is empty and would mis-resolve SCRIPT_DIR.
 CREDS="skills/radarr/credentials/radarr.json"
 RADARR_URL=$(jq -r '.radarr.url' "$CREDS")
@@ -232,7 +232,7 @@ After gathering preferences (via explicit questions, learning from choices, or h
 - **Notes:** {any additional notes from conversation}
 ```
 
-**Use the Edit tool** to append this section before the final `---` line in USER.md.
+**Use `filesystem` editFile** to append this section before the final `---` line in USER.md.
 
 **Confirm to user:**
 ```
@@ -439,7 +439,7 @@ When learning new info, update the `## Movie Preferences` section in USER.md:
 
 1. Read the current section
 2. Modify the relevant line (e.g., add a genre to favorites)
-3. Use the Edit tool to replace the old section with the updated one
+3. Use `filesystem` editFile to replace the old section with the updated one
 
 **Example:** User says "I also like anime" → Add "anime" to Favorite genres line.
 

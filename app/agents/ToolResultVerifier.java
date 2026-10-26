@@ -42,7 +42,7 @@ import java.util.stream.Collectors;
  * <p>{@link Verdict#EMPTY} and {@link Verdict#ERROR_REPORTED} are the two generic shapes
  * that actually occur. The error convention is real rather than assumed: the
  * registry returns "Error: Unknown tool …" and "Error executing tool …", and
- * tools follow it themselves — {@code web_fetch} returns "Error fetching URL:
+ * tools follow it themselves — {@code web_fetch} returned "Error fetching URL:
  * HTTP 404 …", which a live eval sweep recorded on a turn that scored a clean
  * pass (JCLAW-891). Matching on that convention is a heuristic and is treated as
  * one: it feeds a counter, not a control-flow decision.
@@ -52,9 +52,9 @@ import java.util.stream.Collectors;
  * sees that field — it is the UI's payload — so this catches a rendering defect
  * rather than an agent-quality one. It is here because it is free, not because it
  * is the AC's "JSON schema validation for structured tool outputs": no tool
- * declares an output schema today, and only {@code web_search} emits structured
- * JSON at all, so that AC has nothing to validate against until output schemas
- * exist. Recorded on the ticket rather than silently reinterpreted.
+ * declares an output schema today, so that AC has nothing to validate against
+ * until output schemas exist. Recorded on the ticket rather than silently
+ * reinterpreted.
  */
 public final class ToolResultVerifier {
 

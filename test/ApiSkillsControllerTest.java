@@ -909,8 +909,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
 
     /**
      * Re-copy of a previously-disabled workspace skill flips
-     * AgentSkillConfig.enabled back to true (lines 309-313 of
-     * ApiSkillsController). Without the toggle, a user who disabled then
+     * AgentSkillConfig.enabled back to true. Without the toggle, a user who disabled then
      * re-installed a skill would silently keep it disabled.
      */
     @Test
@@ -946,7 +945,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
     /**
      * When a skill SKILL.md frontmatter declares {@code tools:}, the file
      * listing's "tools" key reflects the declared list verbatim and skips
-     * the body-text heuristic (lines 138-151 of ApiSkillsController). The
+     * the body-text heuristic. The
      * declared-tools branch never executes against the SonarQube fixture
      * because shipped skills don't declare tools — covered now.
      */
@@ -983,7 +982,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
     /**
      * Skill without {@code tools:} frontmatter falls back to the body-text
      * heuristic. A SKILL.md body that contains a bash code fence triggers
-     * the implicit 'exec' detection (lines 184-193 of ApiSkillsController).
+     * the implicit 'exec' detection.
      */
     @Test
     void listGlobalSkillFilesDetectsImplicitShellFromBashFence() throws Exception {
@@ -1014,7 +1013,7 @@ class ApiSkillsControllerTest extends FunctionalTest {
     /**
      * Skill without {@code tools:} frontmatter whose body literally mentions
      * the alias "readFile" triggers the TOOL_ALIASES map → canonical
-     * 'filesystem' tool (lines 171-180 of ApiSkillsController).
+     * 'filesystem' tool.
      */
     @Test
     void listGlobalSkillFilesDetectsFilesystemAlias() throws Exception {

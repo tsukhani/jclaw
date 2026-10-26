@@ -36,11 +36,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * will re-fire the task; the abandoned TaskRun keeps the partial
  * transcript as an audit record.
  *
- * <p>Attachments on user messages and structured tool-result payloads
- * are accepted at the interface level but ignored on this sink:
- * task fires don't have external file uploads, and the structured-payload
- * UI rendering happens in the PeekPanel which queries
- * {@link TaskRunMessage#toolResultStructured} directly.
+ * <p>Attachments on user messages are accepted at the interface level
+ * but ignored on this sink: task fires don't have external file uploads.
  *
  * <p>Part of JCLAW-21's Tasks foundation.
  */
@@ -173,8 +170,8 @@ public class TaskRunSink implements AgentExecutionSink {
      * JCLAW-414: close the run as {@link TaskRun.Status#CANCELLED} when the tool
      * loop bailed on an operator cancel ({@link agents.RunCancelledException}).
      * Idempotent on the terminal status: only a still-RUNNING row is transitioned,
-     * so this never clobbers the CANCELED stamp the cancel endpoint already wrote
-     * (it sets the row CANCELED immediately for instant UI feedback). Whichever
+     * so this never clobbers the CANCELLED stamp the cancel endpoint already wrote
+     * (it sets the row CANCELLED immediately for instant UI feedback). Whichever
      * writer reaches a RUNNING row first sets the timing. {@code announce} publishes
      * {@link TaskLifecycleEvents#BUS_RUN_CANCELLED} when this call is the one that closes the run;
      * a shutdown's cancel passes false.

@@ -107,7 +107,7 @@ export interface SettingsSectionGroup {
   sections: SettingsSection[]
 }
 
-// Sections are organised into functional domains so the 20-item rail stays
+// Sections are organised into functional domains so the rail stays
 // scannable. The media features group by modality (2026-07-23): Audio
 // (Transcription, Speech), Image (OCR, Image Captioning, Image Generation), and
 // Video (Video Interpretation, Video Generation) — each modality pairs its

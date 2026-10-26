@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
 /**
  * Segments an outbound agent response into ordered text + file chunks so the
  * Telegram channel can dispatch each piece with the right Bot API method
- * (sendMessage for text, sendPhoto for images, sendDocument for other files).
+ * (sendMessage for text, a per-kind media send for files).
  *
  * <p>Detection runs before the markdown-to-HTML formatter: we scan the raw
  * markdown for the JClaw Workspace File Delivery convention —

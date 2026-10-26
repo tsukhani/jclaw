@@ -201,7 +201,7 @@ class PlaywrightToolTest extends UnitTest {
     @Test
     void parallelBrowserOpsOnSameAgentDoNotCorruptPage() throws Exception {
         // Regression: when the LLM emits navigate + screenshot in a single
-        // streaming round, AgentRunner.executeToolsParallel dispatches them on
+        // streaming round, ParallelToolExecutor.executeToolsParallel dispatches them on
         // separate virtual threads. Playwright's Page is not thread-safe, so
         // without per-session serialization one call surfaces as
         //   "Browser error: Object doesn't exist: request@<hash>"

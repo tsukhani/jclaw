@@ -10,7 +10,7 @@ byte for byte.
 This runs as a separate process rather than in the JVM because the one Java
 library that impersonates in-process (impersonator-okhttp) ships its own copy
 of 309 okhttp3/ classes, OkHttpClient included, and would collide with the
-okhttp-jvm 5.4.0 the rest of jclaw runs on.
+okhttp-jvm the rest of jclaw runs on.
 
 Protocol (--host defaults to 127.0.0.1; the server binds whatever it is given):
   GET  /health   -> 200 {status, model, curl_cffi, profile_supported, reason}

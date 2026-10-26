@@ -23,8 +23,7 @@ import java.util.Optional;
  * </ul>
  *
  * <p>{@code approxSizeMb} is the rough download size of the engine artifact
- * (fp16-class), used as the Settings progress denominator until the live
- * X-Linked-Size from HF replaces it once a download begins.
+ * (fp16-class), used as the Settings progress denominator.
  *
  * <p>Only multilingual Whisper variants are exposed — the English-only
  * {@code *.en} models were dropped since jclaw is general-purpose and must not
@@ -55,9 +54,7 @@ public enum AsrModel {
 
     public String id() { return id; }
     public String displayName() { return displayName; }
-    /** Approximate on-disk size in MB. Used by the Settings UI before the file
-     *  is downloaded; the live X-Linked-Size from HF replaces this once a
-     *  download begins. Q5_1 sizes don't drift between releases. */
+    /** Approximate on-disk size in MB. Used as the Settings progress denominator. */
     public int approxSizeMb() { return approxSizeMb; }
 
     public static Optional<AsrModel> byId(@Nullable String id) {

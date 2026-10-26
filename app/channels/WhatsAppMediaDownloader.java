@@ -45,7 +45,7 @@ public final class WhatsAppMediaDownloader {
 
     private WhatsAppMediaDownloader() {}
 
-    /** Per-message inbound media cap, matching Slack/Telegram. */
+    /** Per-message inbound media cap, matching Slack. */
     static final int MAX_INBOUND_FILES = 8;
 
     /** Cloud-API media size cap: 20 MiB (single-sourced by {@link StagedDownload#MAX_FILE_BYTES}). */

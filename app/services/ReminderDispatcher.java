@@ -105,8 +105,8 @@ public final class ReminderDispatcher {
         if (binding == null) {
             return DeliveryDispatcher.DispatchResult.noConfig(TELEGRAM,
                     "Connect a Telegram bot for agent '" + task.agent.name
-                            + "' (or any of its ancestors) in Settings → Channels → Telegram, "
-                            + "or via POST /api/telegram-bindings.");
+                            + "' (or any of its ancestors) in Channels → Telegram, "
+                            + "or via POST /api/channels/telegram/bindings.");
         }
         if (!binding.enabled) {
             return DeliveryDispatcher.DispatchResult.noConfig(TELEGRAM,

@@ -4,12 +4,12 @@
  * Configures Marked (CommonMark + GFM) and DOMPurify once at module import,
  * then exposes the memoized markdown → safe-HTML conversion the chat transcript
  * renders through. Kept out of the page SFC so the sanitizer allow-list,
- * angle-bracket link normalization, and the LRU cache are unit-testable without
+ * angle-bracket link normalization, and the cache are unit-testable without
  * mounting the page.
  *
  * The `marked.setOptions` + `DOMPurify.addHook` calls below are deliberate
  * module-level side effects: they must run exactly once, and the
- * `markdownCache` must stay module-scoped so the LRU is shared across every
+ * `markdownCache` must stay module-scoped so the cache is shared across every
  * caller. Do not move these into a factory or per-call path — the /api/ src+href
  * allow-list and the cache bound both depend on the single-instance semantics.
  */
@@ -179,7 +179,7 @@ export function normalizeMarkdownLinks(text: string): string {
 // Cache is keyed by (text + agentId); the streaming message renders through
 // renderMarkdownStreaming() which bypasses the cache entirely (its content
 // changes every token, so caching every intermediate state would thrash both
-// the cache and the LRU bound).
+// the cache and its bound).
 const markdownCache = new Map<string, string>()
 const MARKDOWN_CACHE_MAX = 200
 let cachedLewisVersion = 0
@@ -217,7 +217,7 @@ export function renderMarkdown(text: string, agentId: number | null = null): str
 
 // Cache-bypassing variant for the in-flight streaming bubble. The content
 // changes every token; caching every intermediate string would saturate the
-// 200-entry LRU before the cache helped any historical message.
+// 200-entry cache before it helped any historical message.
 export function renderMarkdownStreaming(text: string, agentId: number | null = null): string {
   if (!text) return ''
   parsingStream = true

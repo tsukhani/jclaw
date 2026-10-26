@@ -20,7 +20,7 @@ import java.time.ZoneId;
  *       so the value picks up {@code %prod.} / {@code %test.} prefix
  *       overrides at boot. Shipped commented-out, so absent by default.</li>
  *   <li>{@link #appZone()} — the operator's wall-clock zone (Settings →
- *       General, {@code app.timezone}), defaulting to the server's JVM
+ *       Timezone, {@code app.timezone}), defaulting to the server's JVM
  *       zone. This is the default: with no explicit task zone above, CRON /
  *       SCHEDULED tasks follow the same zone the assistant treats as "now",
  *       so a 9 AM task fires at the operator's 9 AM rather than 9 AM UTC.</li>
@@ -110,7 +110,7 @@ public final class TimezoneResolver {
      * </ol>
      *
      * <p>Unlike {@link #resolve(Task)}, this never consults
-     * {@code tasks.defaultTimezone} (which ships as UTC): the operator's clock
+     * {@code tasks.defaultTimezone}: the operator's clock
      * and the task scheduler's default zone are independent settings. Invalid
      * IANA strings fall through with a one-time warn; never throws.
      */

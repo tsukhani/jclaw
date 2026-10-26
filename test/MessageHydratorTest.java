@@ -34,10 +34,9 @@ import java.util.Map;
  * (which already caps at {@code chat.maxContextMessages}); the window-aware
  * drop-oldest pass runs in a separate component downstream.
  *
- * <p>This test lives in the default package and invokes the package-private
+ * <p>This test invokes the
  * static helpers ({@code buildMessages}, {@code contentAsString},
- * {@code parseToolCalls}) on {@link MessageHydrator} directly. The helpers
- * don't justify a public API surface; same-package visibility is enough.
+ * {@code parseToolCalls}) on {@link MessageHydrator} directly.
  */
 class MessageHydratorTest extends UnitTest {
 

@@ -30,8 +30,8 @@ import java.util.concurrent.ExecutionException;
  * <p>JCLAW-441: outbound is per-agent-binding. The send/stream methods take an
  * explicit bot token (resolved from the agent's {@link models.SlackBinding} at
  * the call site); {@link #forToken(String)} binds an instance to one agent's bot
- * for the generic {@link Channel} send path ({@code DeliveryDispatcher},
- * {@code ChannelRegistry}). There is no app-global Slack config.
+ * for the generic {@link Channel} send path ({@code ChannelRegistry}). There
+ * is no app-global Slack config.
  */
 public class SlackChannel implements Channel {
 

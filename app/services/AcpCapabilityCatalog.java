@@ -7,7 +7,7 @@ import java.util.Map;
 /**
  * Curated catalog of which coding harnesses speak Zed's Agent Client Protocol
  * (ACP), and how. Used by {@link AcpHarnessProbe} to badge each detected
- * harness in Settings → Subagents, and (later, Stage 2) by the subagent runtime
+ * harness in Settings → Subagents, and by the subagent runtime
  * to pick the ACP launch command over the stdin/stdout wrapper.
  *
  * <p>The classification is a hand-maintained catalog, NOT derived from
@@ -16,7 +16,7 @@ import java.util.Map;
  * would mislabel. Verified against the installed CLIs: {@code gemini --acp} and
  * {@code opencode acp} are native ACP servers; {@code codex app-server} is
  * Codex's near-ACP JSON-RPC (drivable via a shim); Claude Code and Pi need a
- * separate adapter binary ({@code claude-code-acp} / {@code pi-acp}).
+ * separate adapter binary ({@code claude-agent-acp} / {@code pi-acp}).
  */
 public final class AcpCapabilityCatalog {
 

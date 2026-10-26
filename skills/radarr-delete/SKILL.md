@@ -3,7 +3,7 @@ name: radarr-delete
 description: >-
   Delete movies from Radarr library. Owner-only with full verification and cleanup.
 metadata:
-  version: "1.0.5"
+  version: "1.0.6"
   author: Tarun Sukhani
   jclaw-icon: "📺"
   jclaw-tools: exec
@@ -20,7 +20,7 @@ When a user requests to delete a movie, follow this workflow.
 ```bash
 # Agent exec runs with CWD = workspace root, so the credentials file
 # (shared with the radarr skill) sits at a known workspace-relative
-# path. Do NOT use $BASH_SOURCE — exec is `bash -c "…"`, where
+# path. Do NOT use $BASH_SOURCE — exec is `sh -c "…"`, where
 # $BASH_SOURCE[0] is empty and would mis-resolve SCRIPT_DIR.
 CREDS="skills/radarr/credentials/radarr.json"
 RADARR_URL=$(jq -r '.radarr.url' "$CREDS")

@@ -38,8 +38,8 @@ import static utils.GsonHolder.GSON;
  *   <li><b>Parallel-safe tool</b> (opt-in via
  *   {@link ToolRegistry.Tool#parallelSafe()}): each call gets its own
  *   virtual thread — the pre-v0.7.13 behavior. Appropriate for stateless
- *   HTTP clients ({@code web_fetch}, {@code web_search}), pure-compute
- *   helpers ({@code date_time}), and validators ({@code checklist}).</li>
+ *   HTTP clients ({@code web_fetch}, {@code web_search}) and pure-compute
+ *   helpers ({@code date_time}).</li>
  *   <li><b>Non-parallel-safe tool</b>: calls are grouped by
  *   {@link ToolRegistry.Tool#serializationGroup()} into a single virtual
  *   thread and run sequentially in declared order. The default group key
@@ -98,12 +98,10 @@ public final class ParallelToolExecutor {
                                 displayArgs.length() > 200
                                         ? displayArgs.substring(0, 200) + "..."
                                         : displayArgs));
-        // JCLAW-382: gate sensitive/irreversible actions (today: exec) behind
-        // an interactive Telegram approve/deny prompt when the agent is bound
-        // to a Telegram bot. No-op for non-dangerous tools and non-Telegram
-        // agents — DangerousActionGate returns PROCEED before any I/O in those
-        // cases. Uses the raw (wire-format) name so the gate's dangerous()
-        // lookup matches the registered tool.
+        // JCLAW-382: gate sensitive/irreversible actions through
+        // DangerousActionGate. No-op for non-dangerous tools — it returns
+        // PROCEED before any I/O. Uses the raw (wire-format) name so the
+        // gate's dangerous() lookup matches the registered tool.
         if (DangerousActionGate.guard(agent, conversationId, rawName, rawArgs) == DangerousActionGate.Decision.ABORT) {
             return ToolRegistry.ToolResult.text(DangerousActionGate.abortResult(displayName));
         }

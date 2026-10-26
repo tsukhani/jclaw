@@ -55,8 +55,7 @@ public final class SlackWebApi {
     private static final String DM_OPEN_FAILED = "dm_open_failed";
     private static final int CHANNEL_CACHE_MAX = 2048;
     /** name→id and user→DM cache keyed by (token-hash, lowercased name | {@code U…} id); bounded LRU.
-     *  The two key spaces can't collide — names are lowercased, user ids are upper-case {@code U}-prefixed.
-     *  Mirrors {@link SlackFileUploader}'s DM cache. */
+     *  The two key spaces can't collide — names are lowercased, user ids are upper-case {@code U}-prefixed. */
     private static final Map<String, String> CHANNEL_ID_CACHE = Collections.synchronizedMap(
             new LinkedHashMap<>(64, 0.75f, true) {
                 @Override protected boolean removeEldestEntry(Map.Entry<String, String> e) {

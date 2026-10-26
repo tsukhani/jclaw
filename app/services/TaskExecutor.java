@@ -77,7 +77,7 @@ public final class TaskExecutor {
 
     /**
      * Run one fire of {@code task} and return the persisted TaskRun.
-     * The returned TaskRun has a terminal status (COMPLETED or FAILED),
+     * The returned TaskRun has a terminal status,
      * a populated {@code outputSummary} on success / {@code error} on
      * failure, and — on success when {@link Task#delivery} is set — a
      * populated {@code deliveryStatus} / {@code deliveryTarget} /
@@ -202,8 +202,8 @@ public final class TaskExecutor {
     /**
      * Open the TaskRun in RUNNING state. The re-query can race with deletion
      * (Fixtures.deleteDatabase in tests, or an operator cancel + delete in
-     * prod) — return {@link Optional#empty()} so TaskExecutionHandler can drop
-     * the orphan via defaultCompletion (same path as its own pre-flight null check).
+     * prod) — return {@link Optional#empty()} so {@link #runTask} skips the fire
+     * and returns null.
      */
     private static Optional<TaskRun> openRunningTaskRun(Task task) {
         return Tx.run(() -> {
@@ -213,7 +213,7 @@ public final class TaskExecutor {
             // task — or a re-fired LOST one — enters RUNNING for the duration of
             // the fire, so the Status pill and LostTaskDetector observe it. Flip
             // only alive/lost states; a task canceled in the race window between
-            // the handler's CANCELED check and here stays CANCELED (the run we
+            // the handler's CANCELLED check and here stays CANCELLED (the run we
             // open is reconciled by the normal completion path).
             // A bulk UPDATE of the status alone: a full-row save would write this
             // entity's older copy of an edit committed since it was loaded.
@@ -376,7 +376,7 @@ public final class TaskExecutor {
             // JCLAW-414: this fire's cooperative-cancel flag was flipped mid-run.
             // Two flippers share this path: an operator (POST /task-runs/{id}/cancel)
             // and JCLAW-803's TaskFireDeadline watchdog (fire blew its max
-            // duration). Both stamp the run CANCELED here (idempotent —
+            // duration). Both stamp the run CANCELLED here (idempotent —
             // onCancelled only acts on a still-RUNNING row) so the run is terminal
             // even if the endpoint's write lagged. Do NOT rethrow — a clean
             // cancellation, not a failure for JClawFailureHandler to classify.
@@ -439,7 +439,7 @@ public final class TaskExecutor {
             // recurring (CRON/INTERVAL) ends RUNNING → ACTIVE, ready for its next
             // fire (the scheduled_tasks row carries the next time; per-fire
             // history lives in task_run rows). Both guarded on still-RUNNING so a
-            // concurrent operator cancel (→ CANCELED) is not clobbered.
+            // concurrent operator cancel (→ CANCELLED) is not clobbered.
             // Symmetric with JClawFailureHandler's RUNNING → FAILED on terminal
             // failure.
             if (task.type == Task.Type.IMMEDIATE || task.type == Task.Type.SCHEDULED) {

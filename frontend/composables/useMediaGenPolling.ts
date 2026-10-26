@@ -37,7 +37,7 @@ export function useMediaGenPolling(
   // JCLAW-234: async video-generation progress. A generated-video attachment starts as a zero-byte
   // placeholder linked to a VideoGenerationJob; we poll the job status (~2s — the SV-4 decision: polling,
   // not SSE, because the job outlives the per-turn chat stream) until it fills or fails, then the card
-  // swaps to an inline player or an error. Mirrors settings.vue's imagegen-download poll: start on a
+  // swaps to an inline player or an error. Mirrors SettingsImageGenPanel's pull poll: start on a
   // trigger, stop when nothing's pending, clean up on unmount.
   const videoJobStatus = ref<Record<number, VideoJobStatus>>({})
   const VIDEO_POLL_INTERVAL_MS = 2000

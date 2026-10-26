@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit;
  * carrier-free platform thread.
  *
  * <p>Single-thread, daemon, named — adequate for the low-volume retry-wait
- * use case (channel delivery retry, LLM 429 backoff). The scheduler itself
+ * use case (channel delivery retry, JEV backoff). The scheduler itself
  * only blocks for the timer; the scheduled {@link Callable} runs synchronously
  * on the scheduler thread, so callers should keep the work brief (one I/O call,
  * not a chain of them).

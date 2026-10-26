@@ -13,9 +13,9 @@ import java.util.Map;
  *
  * <p>Used in two places today:
  * <ul>
- *   <li>{@code ApiChatController.uploadChatFiles} picks a canonical
+ *   <li>{@code UploadStaging.stage} picks a canonical
  *       extension when the uploader's sanitized filename has none</li>
- *   <li>{@code agents.VisionAudioAssembler.userMessageFor} derives the OpenAI
+ *   <li>{@code services.transcription.LlmAudio.prepare} derives the OpenAI
  *       {@code input_audio.format} hint from the sniffed MIME stored on the
  *       attachment row</li>
  * </ul>

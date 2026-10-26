@@ -200,16 +200,15 @@ class McpStdioTransportTest extends UnitTest {
     void closeReturnsPromptlyWhenSubprocessIsIdle() throws Exception {
         // JCLAW-439 regression: an idle MCP server (no stdout output, ignores
         // stdin EOF) leaves the readLoop blocked in a non-interruptible
-        // readLine() holding the stdout BufferedReader's monitor. close() must
-        // destroy the process BEFORE closing stdout, or stdout.close() deadlocks
-        // on that monitor — which wedged graceful shutdown for ShutdownJob's
-        // full 15s. `sleep` is the ideal stand-in: outputs nothing, never exits
+        // read of stdout. close() must destroy the process BEFORE closing
+        // stdout, or stdout.close() stalls — which wedged graceful shutdown
+        // for ShutdownJob's full 15s. `sleep` is the ideal stand-in: outputs nothing, never exits
         // on stdin EOF, so the old close()-stdout-first order would hang here.
         Assumptions.assumeFalse(System.getProperty("os.name", "").toLowerCase().startsWith("windows"),
                 "no POSIX 'sleep'; skipping");
         try (var idle = new McpStdioTransport("idle", List.of("sleep", "30"), Map.of())) {
             idle.start(received::add, error::set);
-            Thread.sleep(150); // let the reader loop enter the blocking readLine()
+            Thread.sleep(150); // let the reader loop enter the blocking read
             // close() is the assertion here; the resource block only covers the paths
             // that never reach it. McpStdioTransport.close() is idempotent.
             assertTimeoutPreemptively(Duration.ofSeconds(5), idle::close,

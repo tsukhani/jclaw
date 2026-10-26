@@ -34,7 +34,7 @@ export function useStreamMarkdownRender(
   // Throttled markdown HTML for the streaming bubble. Updated at most once per
   // STREAM_RENDER_INTERVAL_MS so a 200 tok/s reasoning burst does not run
   // marked.parse + DOMPurify on a growing string at full throttle. Final state
-  // gets a forced flush in onComplete so the bubble lands on the exact final
+  // gets a forced flush at stream end so the bubble lands on the exact final
   // text before we hand off to renderMarkdown's cached path.
   const streamContentHtml = ref('')
   const streamReasoningHtml = ref('')

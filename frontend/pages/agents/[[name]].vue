@@ -1349,7 +1349,7 @@ async function toggleSkill(skill: AgentSkill) {
  * main agent fail with "The main agent cannot be disabled" and — since only the
  * main agent is guarded — quietly switched off any custom agent instead. An
  * unconfigured provider is a configuration gap, not an instruction to turn the
- * agent off; the editor already says so via `providerConfigured`.
+ * agent off; the agent list already says so via `providerConfigured`.
  */
 watch(() => form.value.modelProvider, (newProvider) => {
   if (populatingForm.value) return
@@ -3572,7 +3572,7 @@ const agentKinds = [
  *
  * Plain CSS against the design-token CSS variables (not Tailwind @apply, which
  * the scoped-style flow can't see in Tailwind 4). Mirrors the per-surface prose
- * convention used by pages/chat.vue (.prose-chat) and GuideRenderer
+ * convention used by assets/css/prose-chat.css (.prose-chat) and GuideRenderer
  * (.guide-section): each markdown surface owns a namespaced block so styles
  * don't leak. Because --fg-* / --border / --muted are redefined under `.dark`,
  * the token references below flip for dark mode automatically — no mirrored

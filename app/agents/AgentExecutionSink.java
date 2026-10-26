@@ -32,7 +32,7 @@ import java.util.List;
  * <p>Lifecycle methods ({@link #onStart}, {@link #onComplete},
  * {@link #onFailure}) are no-ops by default. {@link ConversationSink}
  * leaves them empty because the Conversation already exists before the
- * run; {@code TaskRunSink} uses them to open and close the
+ * run; {@code TaskRunSink} uses the last two to close the
  * {@code TaskRun} row that bookends the agent loop.
  *
  * <p>Naming note: "sink" in this codebase has historically meant a

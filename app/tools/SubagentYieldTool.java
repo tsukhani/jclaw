@@ -63,8 +63,8 @@ import java.util.Map;
  *   <li>The row's {@code parentAgent} must equal the calling agent — a
  *       parent can only yield into its own running children, not into a
  *       sibling or unrelated agent's run.</li>
- *   <li>{@code timeoutSeconds}, when provided, must be in {@code [1, 3600]};
- *       out-of-range values are clamped silently.</li>
+ *   <li>{@code timeoutSeconds} above 3600 is clamped; 0 disables the
+ *       watchdog, a negative value takes the default.</li>
  * </ul>
  * Invalid calls return a descriptive error string and do not mutate any
  * state, matching the {@link SubagentSpawnTool} validation idiom.

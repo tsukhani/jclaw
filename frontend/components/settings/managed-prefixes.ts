@@ -9,7 +9,7 @@ export const MANAGED_PREFIXES: readonly string[] = [
   'dispatcher.', // OkHttp dispatcher caps — Settings (Performance)
   'transcription.', // Transcription provider + local model — Settings (Transcription)
   'tts.', // TTS engine + per-engine model/port (tts.engine, tts.local.port, tts.<engine>.model) — Settings (Speech). JCLAW-789/793.
-  'caption.', // Image captioning cloud + local model (caption.cloud.*) — Settings (Image Captioning)
+  'caption.', // Image captioning provider + model (caption.*) — Settings (Image Captioning)
   'video.', // Video interpretation frame-sample density (video.sampleFrames) — Settings (Video Interpretation)
   'imagegen.', // Image generation provider selection (imagegen.provider) — Settings (Image Generation)
   'videogen.', // Video generation provider + job timeout (videogen.provider) — Settings (Video Generation)

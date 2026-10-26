@@ -431,7 +431,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
 
     /**
      * Build the tool-result string for a captured screenshot. The markdown image
-     * tag is included so {@code AgentRunner.extractImageUrls} picks it up — the
+     * tag is included so {@code MessageDeduplicator.extractImageUrls} picks it up — the
      * runtime then guarantees both the inline image (via
      * {@code buildImagePrefix}) and a download link below (via
      * {@code buildDownloadSuffix}) in the assistant message. The instruction
@@ -796,7 +796,7 @@ public class PlaywrightBrowserTool implements ToolRegistry.Tool {
     }
 
     // The release bundle ships without driver-bundle, so a bundle install downloads the one official
-    // Node.js its host needs. Dev, tests and the Docker image already have one and skip straight past.
+    // Node.js its host needs. Dev and tests already have one and skip straight past.
     private static void ensureDriver() {
         var status = BrowserSetup.driver();
         switch (status.source()) {

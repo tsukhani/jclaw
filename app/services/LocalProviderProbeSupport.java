@@ -20,7 +20,7 @@ public final class LocalProviderProbeSupport {
     private LocalProviderProbeSupport() {}
 
     /**
-     * Probe a local LLM provider's {@code /models} endpoint. Both probes share one client with
+     * Probe a local LLM provider's {@code /models} endpoint. Every probe shares one client with
      * no HTTP-version pin (JCLAW-186): OkHttp does not attempt h2c upgrade on plain HTTP, so the
      * LM Studio Express/Node upgrade-event hang the JDK driver had to dodge is structurally absent.
      */
@@ -62,8 +62,7 @@ public final class LocalProviderProbeSupport {
             // (ClassCastException from getAsJsonArray). OkHttp got a response, so
             // the port is reachable (connectionRefused stays false), but the
             // payload is unusable. Catch RuntimeException broadly so no unchecked
-            // parse surprise escapes this synchronous @OnApplicationStart probe to
-            // rethrow as UnexpectedException and fail the boot pass.
+            // parse surprise escapes the probe.
             return new Result(false, 0,
                     "%s/models returned an unusable body: %s".formatted(baseUrl, e.getMessage()),
                     false);

@@ -15,7 +15,7 @@ ltx_pipelines_mlx — generates audio); everywhere else it uses Lightricks' offi
   GET  /capability        -> {kind, gpu, freeVramGb, totalVramGb, models:[{id,label,tier,runnable}...]}
   (CLI) --probe           -> same capability JSON to stdout, one-shot (no server, no model load)
   POST /jobs {prompt, num_frames?, fps?, steps?, width?, height?}   (fps default 24; duration = num_frames/fps)
-                          -> 202 {job_id, state} | 409 {busy} | 400 {insufficient_vram|unknown}
+                          -> 202 {job_id, state} | 409 {busy} | 400 {insufficient_vram}
   GET  /jobs/<id>         -> {job_id, state, percent, error, output}
   GET  /jobs/<id>/result  -> mp4 bytes | 409 {not_ready}
   POST /pull              -> ndjson stream of {bytesDownloaded,totalBytes} while weights download (WAN)
@@ -46,8 +46,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 _OUTDIR = tempfile.gettempdir()
 
 # Apple Silicon takes the MLX path (JCLAW-233 follow-up): LTX-2.3 via ltx_pipelines_mlx — faster, higher
-# quality, and it generates synchronized audio. Everywhere else keeps the diffusers path (WAN on CUDA,
-# LTX-Video as the cross-platform fallback). The two runtimes never share a venv (platform-conditional
+# quality, and it generates synchronized audio. Everywhere else runs LTX-2.3 on ltx_pipelines and WAN on
+# diffusers. The two runtimes never share a venv (platform-conditional
 # deps in pyproject), so all runtime imports below are lazy + branched on this flag.
 IS_APPLE_SILICON = platform.system() == "Darwin" and platform.machine() == "arm64"
 
@@ -219,7 +219,7 @@ class State:
 
     def _load_mlx(self):
         """Apple Silicon: load the quantized LTX-2.3 distilled pipeline (kept warm for reuse). Pre-fetches
-        ONLY the int4-essential files (skipping the bundled dev/old transformers + LoRAs, ~36GB) into a
+        ONLY the essential files (skipping the bundled dev/old transformers + LoRAs, ~36GB) into a
         pruned local dir, which ltx_pipelines_mlx then uses directly (no full-repo re-download)."""
         from huggingface_hub import snapshot_download
         from ltx_pipelines_mlx import DistilledPipeline
@@ -294,7 +294,7 @@ def run_job(state, jid, prompt, frames, steps, width, height, fps):
 
 
 def _run_job_mlx(state, jid, prompt, frames, width, height, fps):
-    """Apple Silicon MLX generation (LTX-2.3 int4). Output is an h264+AAC mp4 — video WITH synchronized
+    """Apple Silicon MLX generation (LTX-2.3). Output is an h264+AAC mp4 — video WITH synchronized
     audio. The pipeline exposes no progress callback, so live percent comes from wrapping the sampler's
     tqdm: we count denoise steps across its two distilled stages against the step budget."""
     import ltx_pipelines_mlx.utils.samplers as samplers

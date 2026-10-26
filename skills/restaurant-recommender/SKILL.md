@@ -3,7 +3,7 @@ name: restaurant-recommender
 description: >-
   Search the web for highest-rated restaurants in a specified city and provide findings directly in chat with names, ratings, reviews, and contact information.
 metadata:
-  version: "1.0.2"
+  version: "1.0.3"
   author: Tarun Sukhani
   jclaw-icon: "🍽️"
   jclaw-tools: web_search web_fetch
@@ -31,7 +31,7 @@ Use the `web_search` tool to find highly-rated restaurants in the specified city
 ## 3. Fetch Detailed Information
 
 For each promising restaurant found:
-- Use `web_fetch` with mode="text" to extract readable content from review sites
+- Use `web_fetch` with format="text" to extract readable content from review sites
 - Prioritize Google Maps results, official websites, and reliable review platforms
 - Extract: restaurant name, rating (out of 5), number of reviews, address, phone number, cuisine type, price range, and notable review excerpts
 

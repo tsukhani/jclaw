@@ -190,10 +190,9 @@ public class ToolRegistry {
         default String summary() { return description(); }
 
         /** Taxonomy bucket used to group tools in the system-prompt Tool Catalog.
-         *  Must be one of {@code "System"}, {@code "Files"}, {@code "Web"},
-         *  {@code "Utilities"} — matching the {@code CANONICAL_CATEGORY_ORDER}
-         *  list exposed by {@link ToolCatalog}. Defaults to {@code "Utilities"}
-         *  so a tool that forgets to override still renders somewhere sensible. */
+         *  Must be one of {@link ToolCatalog#CANONICAL_CATEGORY_ORDER}. Defaults
+         *  to {@code "Utilities"} so a tool that forgets to override still
+         *  renders somewhere sensible. */
         default String category() { return "Utilities"; }
 
         /** Semantic icon key consumed by the admin UI's SVG dictionary (e.g.
@@ -227,7 +226,7 @@ public class ToolRegistry {
         /** Safe to invoke concurrently from multiple virtual threads on behalf
          *  of the SAME agent in a SINGLE round?
          *
-         *  <p>The default is {@code false} — under {@link agents.AgentRunner}'s
+         *  <p>The default is {@code false} — under the
          *  JCLAW-80 scheduler, multiple calls to a non-parallel-safe tool in
          *  one round run sequentially in the LLM's declared order on a single
          *  virtual thread. This is the conservative position that matches
@@ -252,12 +251,9 @@ public class ToolRegistry {
          *
          *  <p>The default is {@code false} — the overwhelming majority of
          *  tools are reversible reads or scoped writes that need no gate.
-         *  When a tool returns {@code true} AND the running agent is bound to
-         *  a channel that supports interactive approval (today: Telegram),
-         *  {@link DangerousActionGate} raises an approve/deny prompt and
-         *  blocks the dispatch on the user's decision. On every other channel
-         *  — and for every non-dangerous tool — the gate is a no-op, so this
-         *  flag never changes behavior outside the Telegram-bound path.
+         *  When a tool returns {@code true}, {@link DangerousActionGate}
+         *  prompts on Telegram or Slack, or applies the off-channel policy;
+         *  for every non-dangerous tool the gate is a no-op.
          *
          *  <p>Native {@code exec} ({@code ShellExecTool}) is the canonical
          *  always-dangerous tool. JCLAW-388 extends the gate to MCP: a
@@ -477,8 +473,8 @@ public class ToolRegistry {
      *
      * <p>"Only what was offered" rather than "not disabled" because it needs no
      * lookup and covers both holes with one rule. Grouped (MCP) per-action adapters
-     * are unaffected: {@code McpServerTool} invokes them object-directly and never
-     * resolves them through this registry, so they never reach this check. The
+     * are unaffected: {@code McpServerTool} calls them directly, never through
+     * {@link #executeRich}, so they never reach this check. The
      * server-level {@code mcp_<group>} handle IS offered and IS checked, which is
      * correct — an MCP server switched off for an agent should not run.
      *
@@ -522,8 +518,8 @@ public class ToolRegistry {
         // tool. When the LLM hits its output-token budget mid-tool-call, the
         // streaming accumulator emits a truncated arguments string (e.g. for
         // writeDocument: "{\"action\":\"writeDocument\",\"path\":\"foo.docx\"" — no
-        // closing brace, no content field). The per-round truncation guards in
-        // AgentRunner catch finish_reason="length"/"max_tokens", but some providers
+        // closing brace, no content field). The tool loops' truncation guards
+        // catch finish_reason="length"/"max_tokens", but some providers
         // (notably OpenRouter's Bedrock route for Anthropic models) can end a
         // stream without a clear finish_reason, letting the malformed call reach
         // the tool. Gson then throws EOFException deep inside the tool and the LLM
@@ -650,9 +646,9 @@ public class ToolRegistry {
     }
 
     /**
-     * Per-agent cache of disabled-tool names. The write path for AgentToolConfig is
-     * a single endpoint ({@link controllers.ApiToolsController}) which calls
-     * {@link #invalidateDisabledToolsCache} after every toggle. Every other caller
+     * Per-agent cache of disabled-tool names. AgentToolConfig's writers
+     * ({@link controllers.ApiToolsController}, EvalCapture, SubagentChildBootstrap)
+     * call {@link #invalidateDisabledToolsCache}. Every other caller
      * is a read, and each streaming turn reads once, so caching here eliminates a
      * DB round-trip per turn. Keyed by agent ID; values are unmodifiable to guard
      * against callers accidentally mutating the cached set. JCLAW-203 moved from
@@ -821,7 +817,7 @@ public class ToolRegistry {
      *
      * <p>Deliberately immediate, unlike {@link #invalidateDisabledToolsCache}: this is an
      * explicit "clear it now" operation rather than an eviction ordered against a write, and
-     * four test classes call it expecting the next read to recompute.
+     * six test classes call it expecting the next read to recompute.
      */
     public static void clearDisabledToolsCache() {
         DISABLED_TOOLS_CACHE.invalidateAll();

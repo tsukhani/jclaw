@@ -19,7 +19,7 @@ public class JevException extends RuntimeException {
         return status;
     }
 
-    /** JEV's circuit breaker, open or isolated by the operator, turned the call away before anything was sent. */
+    /** The provider's breaker, open or isolated, turned the call away before anything was sent. */
     public static final class BreakerOpen extends JevException {
         BreakerOpen(String message) {
             super(message);

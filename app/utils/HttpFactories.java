@@ -44,8 +44,8 @@ import java.util.function.Supplier;
  *       pool + VT dispatcher as streaming so connection reuse is unified
  *       across the LLM stack.</li>
  *
- *   <li>{@link #general()} — non-LLM HTTP: channel webhooks, the
- *       openrouter leaderboard fetch, scanner production HTTP, web search.
+ *   <li>{@link #general()} — non-LLM HTTP: channel webhooks,
+ *       scanner production HTTP, web search.
  *       Default 60s {@code callTimeout}; callers override per-call via
  *       {@link okhttp3.Call#timeout() Call.timeout()}. Smaller 32-slot
  *       connection pool. Uses {@link #GEN_DISPATCHER} with the same
@@ -307,8 +307,8 @@ public final class HttpFactories {
 
     /**
      * SSRF-guarded streaming LLM client (JCLAW-778) — same tuning as
-     * {@link #llmStreaming()} plus the provider screens. For the
-     * agent-settable MCP streamable-HTTP endpoint. Permits loopback/LAN, blocks
+     * {@link #llmStreaming()} plus the provider screens. For provider
+     * chat streams and MCP endpoints. Permits loopback/LAN, blocks
      * link-local + cloud metadata at resolve and connect time.
      */
     public static @NonNull OkHttpClient llmStreamingGuarded() {
@@ -327,8 +327,8 @@ public final class HttpFactories {
 
     /**
      * SSRF-guarded general client (JCLAW-778) — same tuning as
-     * {@link #general()} plus the provider screens. For the
-     * config-set leaderboard fetch. Permits loopback/LAN, blocks link-local +
+     * {@link #general()} plus the provider screens. For config-set
+     * URLs: leaderboard, decision providers. Permits loopback/LAN, blocks link-local +
      * cloud metadata at resolve and connect time.
      */
     public static @NonNull OkHttpClient generalGuarded() {

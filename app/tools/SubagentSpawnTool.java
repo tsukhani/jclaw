@@ -79,7 +79,7 @@ import java.util.concurrent.Future;
  * <p>JCLAW-677: this class is the stable public facade + LLM tool contract.
  * The implementation lives in cohesive package-private collaborators in this
  * package: {@link SubagentSpawnArgs} (parsing), {@link SubagentLimits}
- * (recursion/capability policy), {@link SubagentChildBootstrap} (child rows +
+ * (recursion caps), {@link SubagentChildBootstrap} (child rows +
  * grants), {@link SubagentRunStore} (audit rows), {@link SubagentSyncRunner}
  * and {@link SubagentAsyncRunner} (dispatch), {@link SubagentResponses}
  * (transcript shaping), {@link SubagentChatBridge} (chat SSE bridge),
@@ -136,7 +136,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
     static final String FIELD_REPLY = "reply";
     static final String FIELD_ERROR = "error";
     /** JCLAW-662 bus-event key — camelCase, consumed by the frontend
-     *  (chat.vue d.runId / CodingRunMonitor envelope.runId). NOT the
+     *  (d.runId / CodingRunMonitor envelope.runId). NOT the
      *  snake_case FIELD_RUN_ID of the spawn-response payload. */
     static final String BUS_RUN_ID = "runId";
     static final String GOT_LITERAL = " (got '";
@@ -229,8 +229,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
      *  (whitespace-split; literal "none" = no flags at all). */
     public static final String ACP_PERMISSION_ARGS_KEY = "subagent.acp.permissionArgs";
 
-    /** JCLAW-659: which harness adapter drives the acp runtime — {@code pi},
-     *  {@code claude}, {@code codex}, or {@code generic}. Operator-configured
+    /** JCLAW-659: which harness adapter drives the acp runtime — an id in
+     *  {@code SubagentAcpRunner.ACP_HARNESS_IDS}. Operator-configured
      *  (Config DB), not model-supplied; selects the {@link HarnessAdapter} that
      *  knows how to launch and parse that CLI. */
     public static final String ACP_HARNESS_KEY = "subagent.acp.harness";
@@ -302,7 +302,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
                 Fires ONCE per call — there is no schedule/interval parameter. For \
                 anything recurring or scheduled ("every 30 seconds", "every minute", \
                 "every day at 9am"), even if the operator describes it as a \
-                "subagent", use the `task` tool's createTask action instead — that \
+                "subagent", use `task_manager`'s createTask action instead — that \
                 is the abstraction that carries cron/interval and can invoke an agent \
                 on each fire.""";
     }
@@ -430,10 +430,8 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
             return "Subagent spawn refused: " + refusal;
         }
 
-        // Resolve the parent conversation. AgentRunner does not pass it into
-        // tools — by convention the most-recent conversation for this agent
-        // is the one the tool call is being made from. Subagent spawning is
-        // first introduced here so there's no incumbent pattern to match;
+        // Resolve the parent conversation: the calling turn's own, else the
+        // agent's most recent (DeliveryResolver.operatingConversation);
         // the lookup is wrapped in a Tx to dodge detached-entity issues on
         // VT-dispatched tool calls.
         var parentAgentId = parentAgent.id;
@@ -497,7 +495,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         // posts a structured announce Message into the parent conversation
         // on terminal state (completion / failure / timeout). Async + inline
         // was already rejected up top so this branch can hard-assume session
-        // mode (inlineMode == false, runIdForMarker == null).
+        // mode (inlineMode == false).
         @Nullable String note = inlineRanAsSession ? INLINE_RAN_AS_SESSION : null;
         if (parsed.asyncRequested()) {
             // JCLAW-497: a task fire has no persistent conversation to resume into,
@@ -527,7 +525,7 @@ public class SubagentSpawnTool implements ToolRegistry.Tool {
         var childConvId = child.childConvId();
         final boolean inlineMode = MODE_INLINE.equals(parsed.resolvedMode());
         // Step 4: synchronous AgentRunner.run on a VT so we can enforce the
-        // wall-clock budget via Future.get(timeout).
+        // idle and ceiling budgets.
         // JCLAW-661: for an acp coding run, bridge the open chat SSE (if any) to
         // this run so the harness's live steps stream into the turn that spawned
         // it; always unbind in the finally so a finished run can't leak callbacks.

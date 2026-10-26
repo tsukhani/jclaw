@@ -49,9 +49,9 @@ public interface ChannelStreamingSink {
      *  finished generate_video clip) so a channel that delivers media out-of-band
      *  can upload them at {@link #seal}. Fires once per tool call that produced
      *  attachments; the list is this call's uuids only. Default no-op — the web
-     *  transport renders these inline from the SSE frame, and Slack has no native
-     *  file-upload send, so both ignore it; {@link TelegramStreamingSink}
-     *  overrides it to upload the files as native photo/voice/video messages. */
+     *  transport renders these inline from the SSE frame, so it ignores it;
+     *  {@link TelegramStreamingSink} and {@link SlackStreamingSink} override it
+     *  to upload the files. */
     default void collectGeneratedAttachments(List<String> attachmentUuids) {
         // no-op by default
     }

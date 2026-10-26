@@ -51,7 +51,7 @@ interface LlmStreamCarriers {
          * Accumulated reasoning text across all streamed deltas. Populated even
          * when the provider doesn't report {@code reasoning_tokens} in the usage
          * block, so callers can estimate a token count from the text length when
-         * needed (see {@code AgentRunner.emitUsageAndComplete}).
+         * needed (see {@code UsageMetricsBuilder.effectiveReasoningTokens}).
          *
          * <p>Guarded by {@link #reasoningLock} (a {@link java.util.concurrent.locks.ReentrantLock}
          * rather than {@code synchronized}). The streaming callback fires on
@@ -76,7 +76,7 @@ interface LlmStreamCarriers {
         // every append so it naturally captures "end of reasoning phase" — the
         // gap between the last reasoning chunk and the first content chunk is
         // within one provider tick, accurate enough for a user-visible seconds
-        // label. See AgentRunner.buildUsageJson for the ms conversion.
+        // label. See UsageMetricsBuilder.buildUsageJson for the ms conversion.
         volatile long reasoningStartNanos = 0L;
         volatile long reasoningEndNanos = 0L;
         /**

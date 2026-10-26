@@ -94,7 +94,7 @@ public class SkillLoader {
     private static final String KEY_DESCRIPTION = "description";
     /** YAML key holding the skill's semver version. */
     private static final String KEY_VERSION = "version";
-    /** YAML key listing slash-commands the skill registers. */
+    /** YAML key listing shell binaries the skill provides. */
     private static final String KEY_COMMANDS = "commands";
     /** YAML key naming the skill's author. */
     private static final String KEY_AUTHOR = "author";
@@ -372,7 +372,7 @@ public class SkillLoader {
     public static final String SKILL_MATCHING_INSTRUCTIONS = """
             ## Skills (mandatory)
             Before replying: scan <available_skills> <description> entries.
-            - If exactly one skill clearly applies: read its SKILL.md at <location> with the readFile tool, then follow it.
+            - If exactly one skill clearly applies: read its SKILL.md at <location> with the filesystem tool's readFile action, then follow it.
             - If multiple could apply: choose the most specific one, then read/follow it.
             - If platform-specific variants exist (e.g., mac vs linux): select the variant matching the current platform from the Environment section.
             - If the request involves multiple skills: select the skill matching the primary action (the first or most important verb), not secondary follow-up actions.

@@ -85,8 +85,8 @@ public class WebFetchTool implements ToolRegistry.Tool {
 
     /**
      * Package-private and non-final so {@code WebFetchToolTest} can substitute
-     * a loopback-friendly client (SsrfGuard's {@code SAFE_DNS} blocks 127.0.0.1
-     * where MockWebServer binds). Production code must not mutate this — the
+     * a client that answers from an interceptor without opening a socket.
+     * Production code must not mutate this — the
      * guarded client is the only supported runtime path.
      */
     static OkHttpClient CLIENT = SsrfGuard.buildGuardedClient(
@@ -198,8 +198,8 @@ public class WebFetchTool implements ToolRegistry.Tool {
                 ? ScrapeOutput.Format.HTML : ScrapeOutput.Format.MARKDOWN;
     }
 
-    /** Stateless HTTP GET — holds no handles between calls, writes nothing
-     *  to disk. Safe to call many URLs in parallel. */
+    /** Stateless HTTP GET — holds no handles between calls.
+     *  Safe to call many URLs in parallel. */
     @Override public boolean parallelSafe() { return true; }
 
     @Override

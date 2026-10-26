@@ -55,7 +55,7 @@ public final class TelegramPollingRunner {
      * EXCLUDES {@code message_reaction} from its default set, so reactions are
      * only delivered when the type is named explicitly. We enumerate exactly the
      * update types JClaw dispatches — {@code message} and {@code callback_query}
-     * (the only two {@link #dispatch} acts on) plus {@code edited_message} for
+     * plus {@code edited_message} for
      * parity with the historical empty-list behavior — and add
      * {@code message_reaction} so the inbound reaction-notification path fires.
      */
@@ -302,9 +302,7 @@ public final class TelegramPollingRunner {
      * <p>JCLAW-375: {@code allowed_updates} is no longer empty. Telegram's
      * default (empty list) excludes {@code message_reaction}, so the inbound
      * reaction-notification handler in {@link #dispatch} would never fire.
-     * Passing {@link #ALLOWED_UPDATES} (the default set PLUS
-     * {@code message_reaction}) opts the poller into reaction deliveries while
-     * keeping every update type Telegram sends by default.
+     * Passing {@link #ALLOWED_UPDATES} opts the poller into reaction deliveries.
      */
     private static Function<Integer, GetUpdates> seedingGetUpdatesGenerator(int persistedOffset) {
         return sdkLastReceived -> GetUpdates.builder()

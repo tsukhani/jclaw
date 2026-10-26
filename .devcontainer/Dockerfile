@@ -30,16 +30,15 @@ ENV LANG=C.UTF-8
 # language packs install separately (tesseract-ocr-fra, tesseract-ocr-jpn,
 # etc.).
 #
-# openssl is invoked by ./jclaw.sh start's first-run cert auto-gen path
-# (ensure_certs_for_start → do_cert) when no PEM exists at certs/host.cert
-# and mkcert isn't installed.
+# openssl is invoked by ./jclaw.sh https (do_https) when mkcert isn't
+# installed, and by start's certs_valid check.
 #
 # ffmpeg matches the production image (audio transcode, diarization
 # extraction). tini is PID 1, so the orphans JClaw's subprocesses leave are
 # reaped rather than lingering as zombies that still read as alive.
 #
 # The lib*-dev packages are Playwright/Chromium runtime shared libs —
-# parity with the production Dockerfile so dev `play auto-test` runs
+# parity with the production Dockerfile so dev `play autotest` runs
 # (PlaywrightToolTest, WebFetchToolTest) and `./jclaw.sh --dev start`
 # can drive a real browser when the WebFetchTool fires. The t64 suffix
 # is load-bearing: Ubuntu 24.04+ ran the time_t 64-bit ABI transition

@@ -3,10 +3,9 @@ package services.caption;
 import models.MessageAttachment;
 
 /**
- * Single contract for any image-captioning backend in jclaw (JCLAW-207) — the local in-JVM
- * captioner (JCLAW-213, the vision analog of whisper-jni) and the cloud OpenAI / OpenRouter
- * clients (JCLAW-212) all implement this so the message pipeline can pick one via the
- * {@code caption.provider} config key without caring about the transport.
+ * Single contract for any image-captioning backend in jclaw (JCLAW-207) — the OpenAI,
+ * OpenRouter and Ollama clients (JCLAW-212/214) all implement this so the message pipeline
+ * can pick one via the {@code caption.provider} config key without caring about the transport.
  *
  * <p>This is the fallback path for <b>non-vision</b> models: a text-only agent still "sees" an
  * uploaded image as a generated description, exactly as a non-audio agent "hears" audio as a

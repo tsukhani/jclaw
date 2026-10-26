@@ -3,7 +3,7 @@ name: jira-operations
 description: >-
   Perform JIRA operations using the MCP server as primary, with automatic fallback to REST API for operations that don't work via MCP (e.g., story points via Agile estimation endpoint, epic linking via parent field). Includes sprint workflow helpers.
 metadata:
-  version: "1.0.4"
+  version: "1.0.5"
   author: Tarun Sukhani
   jclaw-icon: "🎯"
   jclaw-tools: mcp_jira-confluence exec filesystem
@@ -15,11 +15,11 @@ Perform JIRA operations with intelligent MCP/REST API fallback. Uses the `jira-c
 
 ## Configuration
 
-Credentials are read from `~/.claude.json` (the same config that drives the MCP server):
+Credentials are read from `~/.claude.json`:
 - `JIRA_URL` — base URL (e.g., `[JIRA_URL]`)
 - `JIRA_PERSONAL_TOKEN` — PAT for Bearer auth
 
-The skill reads this file directly via `filesystem` to construct `curl` fallback calls.
+The skill reads this file via `exec` + `jq` to construct `curl` fallback calls.
 
 ## Core Principle: MCP First, REST Fallback
 

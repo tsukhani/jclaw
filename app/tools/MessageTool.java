@@ -605,11 +605,11 @@ public class MessageTool implements ToolRegistry.Tool {
             case ACTION_PIN -> TelegramChannel.pinChatMessage(binding.botToken, chatId, messageId);
             case ACTION_UNPIN -> TelegramChannel.unpinChatMessage(binding.botToken, chatId, messageId);
             case ACTION_REACT -> TelegramChannel.setMessageReaction(binding.botToken, chatId, messageId, emoji);
-            // JCLAW-381: reply = sendMessage with replyToMessageId set (null thread);
+            // JCLAW-381: reply = sendTurn with replyToMessageId set (null thread);
             // edit = editMessageText with the new text (null keyboard, no change to markup).
             // JCLAW-387 (A3): a non-blank `quote` routes through the quote-aware
             // reply path (which itself falls back to a plain reply on a quote
-            // mismatch); a blank/null quote keeps the legacy sendMessage path.
+            // mismatch); a blank/null quote takes the plain sendTurn reply.
             case ACTION_REPLY -> TelegramChannel.sendReplyWithQuote(
                     binding.botToken, chatId, message, agent, messageId, quote);
             case ACTION_EDIT -> TelegramChannel.editMessageText(

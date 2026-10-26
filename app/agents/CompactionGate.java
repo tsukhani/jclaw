@@ -56,8 +56,8 @@ public final class CompactionGate {
      * injected into the system prompt and the older turns dropped).
      * Otherwise, returns {@code current} unchanged (JCLAW-38).
      *
-     * <p>Called from both {@link AgentRunner#run} and the streaming
-     * loop after the initial prep Tx closes, because the
+     * <p>Called from both {@link AgentPromptPreparer} rewrite paths
+     * after the initial prep Tx closes, because the
      * summarization call itself is LLM-bound and must not hold a JDBC
      * connection.
      */

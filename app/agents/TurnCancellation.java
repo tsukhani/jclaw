@@ -90,7 +90,7 @@ public final class TurnCancellation {
     }
 
     // Platform threads: an action may wait a timed grace (JDK-8373224) or open a transaction. One each,
-    // so a slow kill (an ACP harness's graceful close) cannot hold back exec's two-second one.
+    // so a slow kill (an ACP harness's graceful close) cannot hold back exec's half-second one.
     private static void runOffThread(List<Registration> regs) {
         for (var reg : regs) {
             Thread.ofPlatform().daemon().name("turn-cancel").start(() -> {

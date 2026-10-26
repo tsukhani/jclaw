@@ -33,8 +33,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * list to the chat call) lands a precise test failure.
  *
  * <p>Trigger setup: configure a tiny {@code contextWindow=2000} model and a
- * tiny {@code chat.compactionReserveTokens=500} budget, then seed enough
- * pre-existing turns so {@code estimateTokens(messages) > 1500}. The runner
+ * tiny {@code chat.compactionReserveTokens=200} budget, then seed enough
+ * pre-existing turns so {@code estimateTokens(messages) > 1800}. The runner
  * then crosses the {@link services.SessionCompactor#shouldCompact} gate on
  * the first LLM round and the gate fires.
  */
@@ -234,9 +234,8 @@ class AgentRunnerCompactionTest extends UnitTest {
     void runStillPersistsUserAndAssistantMessagesEvenWhenCompactionFires() throws Exception {
         startLlmServer(exchange -> {
             var bytes = exchange.getRequestBody().readAllBytes();
-            // Capture the call count via a static counter — first call is
-            // summarize, second is the chat reply, third (if any) would
-            // mean the loop diverged.
+            // First call is summarize, second is the chat reply, third
+            // (if any) would mean the loop diverged.
             //
             // We don't need to branch on the call here because both
             // responses can carry the same shape; the assertions look at

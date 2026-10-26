@@ -60,7 +60,7 @@ public class ToolRegistrationJob extends Job<Void> {
         // agent — synthesis costs seconds and can trigger a sidecar model load.
         toolList.add(new GenerateAudioTool());
         // JCLAW-559: on-demand speaker diarization of an uploaded recording.
-        // Default-on: local CPU only, and the tool description steers the
+        // Default-on: the tool description steers the
         // model away from invoking it on ordinary voice notes.
         toolList.add(new DiarizeAudioTool());
         // JCLAW-462: ccr_retrieve — fetch the full original of a content-
@@ -93,9 +93,8 @@ public class ToolRegistrationJob extends Job<Void> {
         toolList.add(new PlaywrightBrowserTool());
         toolList.add(new ShellExecTool());
         // JCLAW-282: in-process JClaw API tool. Registered globally so the
-        // Tools page shows it, but AgentService.create disables it for
-        // every non-main agent so only main can actually invoke it
-        // (defense in depth alongside the skill-not-installed gate).
+        // Tools page shows it, but ToolRegistry keeps it opt-in for every
+        // non-main agent (defense in depth alongside the skill-not-installed gate).
         toolList.add(new JClawApiTool());
         // JCLAW-265: subagent_spawn — the synchronous primitive; recursion limits and the async path are JCLAW-266 / JCLAW-270.
         toolList.add(new SubagentSpawnTool());

@@ -775,11 +775,8 @@ function exportConversation() {
         optically centered regardless of the left/right content widths.
       -->
       <!--
-        border-b uses neutral-300/700 instead of --border (which is
-        neutral-200/800 — near-isoluminant with --surface-elevated in
-        dark mode and invisible). One palette step up on both modes
-        lifts the header above the chat canvas without jumping to a
-        hard division line.
+        border-b uses neutral-300/700, a softer line than --border, so
+        the header lifts without a hard division.
       -->
       <div
         data-testid="chat-header"
@@ -1081,7 +1078,7 @@ function exportConversation() {
              listbox semantics because no native HTML element covers the WAI ARIA
              combobox plus listbox pattern for typeahead pickers; the label comes
              from the active source so it names what is actually being picked.
-             max-h fits the full command menu (9 rows) without scrolling; the
+             max-h fits the full command menu (10 rows) without scrolling; the
              model source runs to dozens of rows and still scrolls. -->
           <div
             v-if="completer.open.value"
@@ -1135,9 +1132,7 @@ function exportConversation() {
           <!--
           Composer card — traced from Unsloth Studio via devtools.
           rounded-[22px] (their rounded-3xl), 1px border in #2e3035
-          (neutral-700 at 50% opacity) in dark mode. Border override is
-          needed because the project's --border token is invisible
-          against --surface-elevated in dark mode.
+          (neutral-700 at 50% opacity) in dark mode.
 
           Shadow differs by theme:
           - light: three-layer stacked drop shadow at 4–5% alpha,

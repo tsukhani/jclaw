@@ -18,9 +18,8 @@ export function isPromptArgumentContext(text: string): boolean {
 
 /**
  * True for any text the composer must not send verbatim. Covers the bare
- * literal as well as the argument form: `Commands.parse` doesn't recognize
- * `/prompt`, and ApiChatController falls unknown slash input through as normal
- * text — so without this guard "/prompt foo" reaches the model as a message.
+ * literal as well as the argument form: sent, "/prompt foo" gets the server's
+ * text reply instead of an insert.
  */
 export function isPromptCommandText(text: string): boolean {
   const lower = text.toLowerCase().trimEnd()

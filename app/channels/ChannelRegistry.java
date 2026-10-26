@@ -20,9 +20,9 @@ import org.jspecify.annotations.Nullable;
  * <p>Telegram and Slack are per-binding: the bot token lives on the matching
  * {@link TelegramBinding} / {@link SlackBinding} (looked up from the
  * conversation's agent), so the resolved instance carries that token. WhatsApp
- * is a stateless adapter. Web is a no-op push channel (replies are DB-persisted).
+ * is per-binding too. Web is a no-op push channel (replies are DB-persisted).
  *
- * <p>Returns {@code null} only when no usable channel exists — an unknown
+ * <p>Returns {@code null} when no usable channel exists — an unknown
  * channel-type string, or a Telegram/Slack conversation with no enabled binding
  * — so callers can drop the dispatch (the same way the old null branch did)
  * rather than throwing.
@@ -47,8 +47,8 @@ public final class ChannelRegistry {
     /**
      * Resolve a {@link Channel} from the raw (channelType, agent, peerId) tuple —
      * the shape queue-dispatch holds without a materialized {@link Conversation}
-     * row. {@code agent}/{@code peerId} are only consulted for Telegram (per-binding
-     * token lookup); the other channels ignore them.
+     * row. {@code peerId} is consulted only for Telegram; Slack and WhatsApp resolve
+     * their binding from {@code agent}.
      */
     public static @Nullable Channel forChannel(String channelType, Agent agent, String peerId) {
         var type = ChannelType.fromValue(channelType);
@@ -68,8 +68,7 @@ public final class ChannelRegistry {
             case WHATSAPP -> {
                 // JCLAW-446: prefer the per-agent binding (transport-aware via the
                 // factory). A subagent reaches the user via an ancestor's binding, so
-                // walk the parent chain. Fall back to the app-global config while the
-                // inbound/outbound migration completes (JCLAW-447 removes the fallback).
+                // walk the parent chain. Fall back to the app-global config.
                 var binding = WhatsAppBinding.findByAgentOrAncestor(agent);
                 yield (binding != null && binding.enabled)
                         ? WhatsAppChannelFactory.forBinding(binding)

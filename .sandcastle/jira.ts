@@ -46,7 +46,7 @@ export const snapshot = async (key: string): Promise<Snapshot> => {
   };
 };
 
-// Every `afk` candidate in board order, each snapshot written to state/ (gitignored: it holds ticket text).
+// Every `afk` candidate in board order, each snapshot written to state/ (not in git: it holds ticket text).
 // Which of them may run, and in what order, is the caller's plan.
 export const intake = async (): Promise<Snapshot[]> => {
   const found = await api(`/rest/api/2/search?jql=${encodeURIComponent(intakeJql(await afkEpics()))}&fields=summary&maxResults=50`);

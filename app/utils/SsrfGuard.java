@@ -37,9 +37,8 @@ import java.util.function.Supplier;
  * {@link UnknownHostException} before OkHttp ever opens a socket.
  *
  * <p>Scope is intentionally narrow — this is for LLM-emitted URLs only.
- * Fixed admin-configured endpoints (LLM provider base URLs, channel APIs,
- * malware scanners) continue to use {@link HttpFactories#general()} /
- * {@link HttpFactories#llmStreaming()} without SSRF overhead.
+ * Fixed admin-configured endpoints (channel APIs, malware scanners) use
+ * {@link HttpFactories#general()} without SSRF overhead.
  *
  * <p><strong>Why OkHttp's {@code Dns} interface is the right pin point:</strong>
  * {@code RouteSelector.resetNextInetSocketAddress} calls

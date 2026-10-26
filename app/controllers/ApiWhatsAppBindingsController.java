@@ -40,8 +40,8 @@ import static utils.GsonHolder.GSON;
  * credentials here — it's QR-paired later (JCLAW-448) — so its create form only
  * needs an agent (and surfaces the ban-risk warning in the UI).
  *
- * <p>Credential <em>verification</em> (probing the Graph API to confirm a valid
- * WhatsApp Business number) is JCLAW-445; this controller just persists. Secrets
+ * <p>Create and update verify Cloud-API credentials against the Graph API
+ * (JCLAW-445), 422 on failure. Secrets
  * are write-only: the projection exposes presence flags, never the values.
  */
 @With(AuthCheck.class)

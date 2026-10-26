@@ -47,7 +47,7 @@ public class AgentRunner {
      * summarize → format → send chains that legitimately consume rounds).
      * Hermes ships with 90 by default for the same reason; OpenClaw
      * inherits per-agent. Override via {@code chat.maxToolRounds} in
-     * application.conf.
+     * Settings.
      */
     public static final int DEFAULT_MAX_TOOL_ROUNDS = 100;
 
@@ -373,8 +373,7 @@ public class AgentRunner {
      * turn) and then runs the standard {@link #runAfterAcquire} pipeline
      * with {@code skipUserAppend=true} so the announce isn't duplicated.
      * The LLM sees the announce verbatim via
-     * {@link ConversationService#loadRecentMessages} (whose filter keeps
-     * USER-role announces in context).
+     * {@link ConversationService#loadRecentMessages}.
      *
      * <p>If the queue is busy (a Telegram message or web turn arrived in the
      * gap between the child's terminal state and this call), the resume is
@@ -573,8 +572,8 @@ public class AgentRunner {
         var messages = new ArrayList<ChatMessage>();
         messages.add(ChatMessage.system(assembled.systemPrompt()));
         messages.add(ChatMessage.user(userPrompt));
-        // Task fires reuse the same clock placement as the streaming path: on
-        // the last user message, not in the system prompt (see CurrentTimeInjector).
+        // Task fires reuse the same clock placement as the streaming path: as
+        // a trailing message, not in the system prompt (see CurrentTimeInjector).
         messages = new ArrayList<>(CurrentTimeInjector.inject(messages));
 
         var providerName = ModelResolver.effectiveModelProvider(agent, stubConv);
@@ -699,7 +698,7 @@ public class AgentRunner {
 
         // Short setup transaction: persist user message, assemble prompt, resolve provider.
         // Re-fetch the conversation by ID so it is managed in this persistence context.
-        // Callers on virtual threads (TaskExecutionHandler, webhooks) pass entities that were
+        // Callers on virtual threads (webhooks, queue drains) pass entities that were
         // loaded in a separate, already-committed Tx.run() — those are detached and
         // would throw PersistentObjectException on save().
         var preparedOpt = AgentPromptPreparer.prepareSyncData(agent, userMessage, attachments,
@@ -775,8 +774,7 @@ public class AgentRunner {
      *                       id, Slack channel id, WhatsApp e.164, or
      *                       {@code null} for web)
      * @param userMessage    the user's input text
-     * @param isCancelled    flag the transport flips on disconnect / Telegram
-     *                       /cancel
+     * @param isCancelled    flag the transport flips on disconnect or /stop
      * @param cb             event callbacks for SSE / streaming transports
      * @param acceptedAtNs   {@code System.nanoTime()} of when the inbound
      *                       message entered the process. Web controllers
@@ -842,7 +840,6 @@ public class AgentRunner {
     /**
      * Shared webhook message handler: resolve agent route, find/create conversation,
      * run the agent synchronously, and send the response via the provided sender.
-     * Used by Slack, Telegram, and WhatsApp webhook controllers.
      *
      * @param channelType  channel identifier ("slack", "telegram", "whatsapp")
      * @param peerId       channel-specific peer/chat ID
@@ -877,17 +874,17 @@ public class AgentRunner {
 
     /**
      * Streaming-aware counterpart to {@link #processInboundForAgent}: wires
-     * LLM tokens into a {@link channels.TelegramStreamingSink} so the user
+     * LLM tokens into a {@link ChannelStreamingSink} so the user
      * sees progressive edits rather than waiting for the full response
      * (JCLAW-94). {@link #runStreaming} starts its own virtual thread, so
      * this call returns immediately after queue acquisition; the sink is
      * sealed asynchronously when the LLM call completes.
      *
      * <p>The sink receives text-only tokens (reasoning and status callbacks
-     * are no-ops — Telegram has no separate surface for them yet). On
-     * completion the full response is handed to {@link channels.TelegramStreamingSink#seal},
-     * which either performs one final HTML edit or falls back to the
-     * chunked planner path for oversize / media-rich responses.
+     * are no-ops). On completion the full response is handed to
+     * {@link ChannelStreamingSink#seal}, which on Telegram either performs
+     * one final HTML edit or falls back to the chunked planner path for
+     * oversize / media-rich responses.
      *
      * @param agent       the bound agent
      * @param channelType channel identifier
@@ -934,9 +931,8 @@ public class AgentRunner {
      * Chat-type-aware variant: stamps the Telegram {@code chat.type} onto the
      * conversation at creation so {@link ConversationService#effectiveHistoryLimit}
      * (and any other chat-type-scoped behavior) can distinguish a plain DM from a
-     * plain group. Only the two Telegram ingress call sites
-     * ({@link controllers.WebhookTelegramController} and
-     * {@link channels.TelegramPollingRunner}) pass a real value; every other
+     * plain group. Only {@link channels.TelegramInboundTurn} and
+     * {@link channels.WhatsAppInbound} pass a real value; every other
      * overload delegates with {@code chatType=null}, leaving the column null and
      * behavior unchanged. The chat type is stamped once at creation — an existing
      * conversation row is never re-stamped.

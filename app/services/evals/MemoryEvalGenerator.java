@@ -376,7 +376,7 @@ public final class MemoryEvalGenerator {
      * Generate temporal cases: questions that reach a stretch of the corpus through an
      * explicit time reference (JCLAW-943).
      *
-     * <p>The shape the other three modes structurally cannot produce. Each of them writes a
+     * <p>The shape the other four modes structurally cannot produce. Each of them writes a
      * question from memory <em>text</em>, so time never enters the query unless a memory
      * happened to mention it; here the span itself is the handle, and the gold is whatever
      * was recorded inside it regardless of subject.

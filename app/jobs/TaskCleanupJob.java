@@ -30,9 +30,9 @@ import java.util.List;
  *
  * <p>Configuration: {@code tasks.retentionDays} (integer; default
  * {@link #DEFAULT_RETENTION_DAYS}). Set to {@link #RETENTION_DISABLED}
- * — or unset — to disable cleanup entirely (the AC's "unset means
- * forever" semantic). Out-of-range or non-numeric values fall back to
- * the default, with a one-shot warn so a typo isn't silently ignored.
+ * to disable cleanup entirely; unset means the default. Out-of-range
+ * or non-numeric values fall back to the default, with a one-shot warn
+ * so a typo isn't silently ignored.
  *
  * <p>Why the bulk JPQL deletes match {@link controllers.ApiTasksController#delete}:
  * the FK chain is the same and the per-task delete loop would do N
@@ -97,7 +97,7 @@ public class TaskCleanupJob extends PeriodicJob {
     /**
      * Read {@code tasks.retentionDays}: missing → {@link #DEFAULT_RETENTION_DAYS}, 0 or
      * less → disabled, above the ceiling or non-numeric → default plus a warn.
-     * {@link RetentionDays#resolve} is the rule the three cleanup jobs share.
+     * {@link RetentionDays#resolve} is the rule the cleanup jobs share.
      *
      * <p>Public because Play 1.x test classes live in the default package, so
      * {@code TaskCleanupJobTest} could not reach a package-private method.
@@ -156,7 +156,7 @@ public class TaskCleanupJob extends PeriodicJob {
 
         for (var taskId : expiredIds) {
             // Idempotent: terminal tasks usually have no scheduler row,
-            // but a CANCELED-then-revived flow could leave one behind.
+            // but a CANCELLED-then-revived flow could leave one behind.
             TaskSchedulingService.cancel(taskId);
         }
 

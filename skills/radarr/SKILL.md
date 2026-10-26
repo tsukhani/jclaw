@@ -3,7 +3,7 @@ name: radarr
 description: >-
   Download movies via Radarr API with automated download monitoring and import handling.
 metadata:
-  version: "1.3.0"
+  version: "1.3.1"
   author: Tarun Sukhani
   jclaw-icon: "📺"
   jclaw-tools: exec subagent_spawn subagent_yield message filesystem
@@ -112,7 +112,7 @@ every workflow phase.
 ```bash
 # Agent exec runs with CWD = workspace root (workspace/<agent>/), so the
 # credentials file is a known workspace-relative path. Do NOT use
-# $BASH_SOURCE — exec runs via `bash -c "…"`, where $BASH_SOURCE[0] is
+# $BASH_SOURCE — exec runs via `sh -c "…"`, where $BASH_SOURCE[0] is
 # empty and a SCRIPT_DIR-style lookup collapses to the CWD, missing the
 # skill subdirectory entirely.
 CREDS="skills/radarr/credentials/radarr.json"
@@ -327,12 +327,12 @@ Sequence inside this single turn, in order:
    ```
    message(action="send", message="⬇️ Download started! I'll update you on progress.")
    ```
-2. **Immediately** call `subagent_spawn` with the monitor task body from Phase 3. Use `async: true` and `runTimeoutSeconds: 86400` (24h ceiling for slow downloads). Capture the returned `run_id`.
+2. **Immediately** call `subagent_spawn` with the monitor task body from Phase 3. Use `async: true` and `runTimeoutSeconds: 86400`. Capture the returned `run_id`.
 3. **Immediately** call `subagent_yield(runId=<run_id from step 2>, timeoutSeconds=0)`. The `timeoutSeconds: 0` disables the yield watchdog so the parent waits for the monitor without a separate clock racing it; the child is still bounded by its spawn `runTimeoutSeconds`.
 
 **Anti-pattern (this is what's breaking the workflow):**
 - ❌ Emit "Download started!" as assistant text and end the turn → monitor never spawns, no updates, workflow stalls.
-- ❌ Spawn the monitor without yielding → the announce on completion will be SYSTEM-role and invisible to the next turn (see Phase 4 trigger rules above).
+- ❌ Spawn the monitor without yielding → the announce on completion does not resume the turn (see Phase 4 trigger rules above).
 
 **Correct pattern:**
 - ✅ One LLM turn: `message` → `subagent_spawn` → `subagent_yield` → turn ends silently. Monitor runs. When it terminates, the announce flips USER-role and re-enters the main agent's loop with `DOWNLOAD_COMPLETE` visible, triggering Phase 4.
@@ -398,7 +398,7 @@ Run each step as a separate, non-background exec call:
 
 CREDENTIALS (load once at start — exec CWD is the workspace root,
 so the credentials path is workspace-relative. Do NOT use
-$BASH_SOURCE; it's empty under `bash -c` and would mis-resolve.
+$BASH_SOURCE; it's empty under `sh -c` and would mis-resolve.
 We use curl + Transmission RPC because transmission-remote is not
 in JClaw's shell allowlist; curl is):
   CREDS=\"skills/radarr/credentials/radarr.json\"
@@ -465,19 +465,19 @@ orphaned processes that send stale/empty progress messages forever.
 By keeping the loop in the agent, it dies when the session ends."
 
   async: true
-  runTimeoutSeconds: 86400      ← 24h ceiling; a 4K Bluray on a slow connection can take many hours
+  runTimeoutSeconds: 86400      ← idle budget; subagent.maxWallClockSeconds caps the run
 ```
 
 **Immediately after the spawn returns, yield on the run** so the main
 agent's turn auto-resumes when the child terminates. Pass
 `timeoutSeconds: 0` to disable the yield watchdog — the monitor is
-already bounded by its `runTimeoutSeconds: 86400` ceiling above, so
+already bounded by `subagent.maxWallClockSeconds`, so
 the parent just waits for it without a second clock racing it:
 
 ```
 subagent_yield with:
   runId: [the run_id from subagent_spawn above]
-  timeoutSeconds: 0   ← no yield watchdog; child's runTimeoutSeconds is the bound
+  timeoutSeconds: 0   ← no yield watchdog; the child's own limits bound it
 ```
 
 **Why `timeoutSeconds: 0`?** The yield default is 300s (5 min), which
@@ -486,9 +486,8 @@ watchdog fires before the download finishes, the parent resumes with a
 TIMEOUT outcome, and Phase 4 never triggers. The monitor sub-agent
 keeps running and may even send the `✅ download complete` message
 afterward, but the parent has already given up on it. Passing `0`
-removes the yield clock entirely; the spawn's `runTimeoutSeconds: 86400`
-is the only timeout that can fire, and that's long enough for any
-realistic download.
+removes the yield clock entirely; `subagent.maxWallClockSeconds`
+(seeded 1800) still caps the run.
 
 **Why both async + yield?** Async lets the monitor sub-agent run on its
 own virtual thread (independent of the main agent's tool-call carrier),
@@ -502,13 +501,9 @@ reads `DOWNLOAD_COMPLETE` (or `TORRENT_CANCELLED`) from the announce
 and proceeds to Phase 4.
 
 ⚠️ **What goes wrong without yield**: with `async=true` alone, the
-sub-agent's terminal announce is posted as a SYSTEM-role row —
-intentionally filtered out of LLM context by
-`ConversationService.loadRecentMessages` (per JCLAW-270, so
-fire-and-forget background work doesn't pollute later user turns).
-The main agent's next turn would never see `DOWNLOAD_COMPLETE` and
-the workflow would stop mid-flight, with the download done but the
-import never triggered.
+sub-agent's terminal announce is posted without resuming the main
+agent, so nothing acts on `DOWNLOAD_COMPLETE` until the user writes
+again, with the download done but the import never triggered.
 
 **The `message` tool reaches the user automatically.** No channel/target plumbing needed — the sub-agent's Conversation row inherits the parent's `channelType` + `peerId` at spawn time (JCLAW-327 AC-5), so `message(action="send", ...)` routes to wherever the user is watching (Telegram, Slack, WhatsApp, or the in-app web chat).
 

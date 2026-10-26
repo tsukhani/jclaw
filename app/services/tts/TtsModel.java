@@ -11,9 +11,8 @@ import java.util.Optional;
  * model} field (mapped to an mlx-audio repo in synth.py), or the JVM engine's
  * model map (mapped to a sherpa-onnx model archive in {@code TtsJvmEngine}).
  *
- * <p>{@code approxSizeMb} is the rough download size of the weights, used as the
- * Settings progress denominator until a live size replaces it — mirrors
- * {@link services.transcription.AsrModel}.
+ * <p>{@code approxSizeMb} is the rough download size of the weights, shown beside
+ * each model in Settings.
  */
 public enum TtsModel {
     // Sidecar (Python) — Qwen3-TTS is quality-first + zero-shot cloning; Kokoro is light.

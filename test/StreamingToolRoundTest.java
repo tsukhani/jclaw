@@ -19,7 +19,7 @@ class StreamingToolRoundTest extends UnitTest {
 
     @Test
     void estimateTokensCalculatesApproximately() throws Exception {
-        // Use reflection to test the private estimateTokens method
+        // Use reflection to test the estimateTokens method
         var method = agents.ContextWindowManager.class.getDeclaredMethod("estimateTokens", List.class);
         method.setAccessible(true);
 

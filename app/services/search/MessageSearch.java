@@ -48,9 +48,8 @@ public final class MessageSearch {
     /**
      * Initialize the dialect-appropriate backend once. Idempotent —
      * re-running just re-runs {@code init()} on the cached
-     * impl, which is itself idempotent (H2's
-     * {@code FullTextLucene.createIndex} no-ops when the index
-     * already exists; Postgres's is currently a no-op).
+     * impl, which is itself idempotent (the Lucene backend's
+     * {@code open()} no-ops when already open; Postgres's is a no-op).
      *
      * <p>Called from {@link jobs.FullTextSearchInitJob} at
      * {@code @OnApplicationStart}.
@@ -103,7 +102,7 @@ public final class MessageSearch {
     }
 
     /**
-     * Short name of the active backend: {@code "h2"}, {@code "postgres"},
+     * Short name of the active backend: {@code "lucene"}, {@code "postgres"},
      * or {@code "none"} when {@link #init} hasn't run.
      */
     public static String activeDialect() {

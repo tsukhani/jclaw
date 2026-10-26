@@ -54,7 +54,7 @@ async function fetchTaskCount(status: string, scope = 'excludePayloadType=remind
 const { data: agents } = useLazyFetch<Agent[]>('/api/agents')
 
 // /api/channels/active aggregates the transport-backed channels
-// (telegram bindings + slack/whatsapp ChannelConfig) into a single
+// (Telegram/Slack/WhatsApp bindings + ChannelConfig) into a single
 // count. The in-app "web" chat is deliberately excluded so this number
 // matches the channel cards on /channels. The plain /api/channels
 // endpoint reads only ChannelConfig and silently misses Telegram

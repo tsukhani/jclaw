@@ -40,7 +40,7 @@ final class SubagentSyncRunner {
 
     /**
      * Step 4: dispatch the child run to a virtual thread, enforce the
-     * wall-clock budget via Future.get(timeout), and translate the await
+     * idle and ceiling budgets, and translate the await
      * outcome into a {@link SyncRunOutcome}. The child Agent + Conversation
      * are re-fetched inside the VT so they're managed in a fresh persistence
      * context.

@@ -52,7 +52,7 @@ import java.util.stream.Collectors;
  * <p><b>Threading.</b> All public methods are safe to call from any virtual
  * thread. The transport's read loop drives {@link #onInbound(JsonRpc.Message)}
  * on its own thread; that handler does no blocking work — it completes futures
- * and dispatches notifications via {@code listChangedHandler}.
+ * and starts a tool-list refresh on {@code list_changed}.
  *
  * <p><b>Protocol eras (JCLAW-1443).</b> A client speaks one of two eras, settled in
  * {@link #connect()} by its {@link Opening}: the {@code initialize} handshake, pinned to
@@ -263,7 +263,7 @@ public class McpClient implements AutoCloseable {
 
     /**
      * Invoke a tool by name with arguments. Blocks up to {@code requestTimeout}
-     * for the server's response. Throws {@link McpException} on JSON-RPC error
+     * per round, forms excepted. Throws {@link McpException} on JSON-RPC error
      * (server returned error) or timeout. Returns the parsed result envelope —
      * note that {@link CallToolResult#isError()} is the spec's separate
      * "tool ran but reported failure" channel.
@@ -1294,7 +1294,7 @@ public class McpClient implements AutoCloseable {
         // holding stdio open even after the MCP server inside the container
         // has died — the watchdog observes state≠READY and reconnects, but
         // the orphaned docker container persists. Idempotent in transport
-        // impls (McpStdioTransport sets `closed=true` and skips repeat work).
+        // impls (McpStdioTransport sets `closed=true`; a repeat close is harmless).
         try { transport.close(); } catch (RuntimeException _) { /* best effort */ }
     }
 }

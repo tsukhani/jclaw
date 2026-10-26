@@ -604,8 +604,8 @@ class SubagentYieldToolTest extends UnitTest {
     @Test
     void asyncWithoutYieldStillUsesSystemRoleRegression() throws Exception {
         // JCLAW-270 regression guard: when yielded=false (the default), the
-        // announce stays SYSTEM-role and NO resume turn fires. The parent
-        // sees the announce as a UI-only card.
+        // announce stays SYSTEM-role and NO resume turn fires. The parent's
+        // model reads the announce as its own reply.
         startLlmServer(simpleResponse("Plain async reply"));
         configureProvider();
 

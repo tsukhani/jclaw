@@ -85,7 +85,7 @@ const steps: TourStep[] = [
     path: '/channels',
     selector: '[data-tour="channel-list"]',
     title: 'Connect a channel (optional)',
-    description: 'Wire your agent to a messaging channel — <strong>Telegram</strong>, <strong>Slack</strong>, or <strong>Discord</strong>. Once configured, your agent will respond to messages automatically.',
+    description: 'Wire your agent to a messaging channel — <strong>Telegram</strong>, <strong>Slack</strong>, or <strong>WhatsApp</strong>. Once configured, your agent will respond to messages automatically.',
   },
 ]
 

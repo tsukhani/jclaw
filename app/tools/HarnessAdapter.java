@@ -11,10 +11,9 @@ import java.util.List;
  * the process for a task, (b) how to turn a line of its output into a common
  * {@link HarnessEvent}, and (c) what its output stream is capable of.
  *
- * <p>Adapters are registered against a harness id ({@code pi|claude|codex|
- * generic}) in {@link SubagentSpawnTool} and selected at spawn time by the
- * {@code subagent.acp.harness} config key. This story only defines the seam and
- * wires selection; concrete adapters land in later JCLAW-657 stories.
+ * <p>Adapters are registered against a harness id ({@code pi|claude|generic})
+ * in {@link SubagentAcpRunner} and selected at spawn time by the
+ * {@code subagent.acp.harness} config key.
  */
 public interface HarnessAdapter {
 
@@ -22,8 +21,8 @@ public interface HarnessAdapter {
      * Build the full argv to launch the harness for one task. Given the
      * operator-configured {@code baseCommand} (e.g. {@code ["claude", "-p"]})
      * and the {@code task} text, an adapter decides whether the task rides as a
-     * trailing argument or is delivered on stdin — return the argv to exec, and
-     * if the task is passed on stdin simply return {@code baseCommand} unchanged.
+     * trailing argument or is delivered on stdin — return the argv to exec;
+     * leaving the task out of it delivers it on stdin.
      *
      * @param baseCommand the operator-configured command, already whitespace-split
      * @param task        the instruction for the child

@@ -70,7 +70,7 @@ public class SessionCompaction extends Model {
 
     /**
      * Most recent compaction for {@code conversation}, or {@code null} if
-     * none exist yet. Used by {@code AgentRunner} to append the summary to
+     * none exist yet. Used by {@code SessionCompactor} to append the summary to
      * the system prompt on every subsequent turn.
      */
     public static SessionCompaction findLatest(Conversation conversation) {

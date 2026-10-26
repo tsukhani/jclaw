@@ -84,7 +84,7 @@ public class DefaultConfigJob extends Job<Void> {
         // JCLAW-164: provider defaults to whisper-local; the cloud backends (JCLAW-162) are
         // switched on via Settings → Transcription once an OpenRouter / OpenAI API key is configured.
         seedIfAbsent("transcription.provider", "whisper-local");
-        // JCLAW-654: diarization is cloud-only — an audio-capable chat model
+        // JCLAW-654: diarization is an audio-capable chat model or pyannote-local,
         // chosen in Settings; empty means "not configured" and the diarize
         // tool explains what to set up.
         seedIfAbsent("transcription.diarization.provider", "");
@@ -280,8 +280,7 @@ public class DefaultConfigJob extends Job<Void> {
         // both tools register unconditionally, per-agent enable via the Tools page); the shell knobs below stay.
 
         // OCR backends. The parse-time tunables (languages, timeout, pdf
-        // strategy) stay in conf/application.conf because they're read once
-        // per parse and don't need a UI; the user-facing on/off lives here
+        // strategy) are unseeded Settings > OCR keys; the user-facing on/off lives here
         // so the Settings page OCR section can flip it. The actual binary's
         // presence is detected at boot by jobs.TesseractProbeJob — when the
         // probe says missing, the Settings UI grays out the toggle even if
@@ -351,15 +350,15 @@ public class DefaultConfigJob extends Job<Void> {
         // parent can't saturate the executor with concurrent children. Both
         // keys are editable from the Settings page's Subagents section
         // (DB-backed so changes take effect without a restart). Read path
-        // lives in tools.SubagentSpawnTool#enforceRecursionLimits.
+        // lives in tools.SubagentLimits#enforceRecursionLimits.
         seedIfAbsent(SubagentSpawnTool.DEPTH_LIMIT_KEY,
                 String.valueOf(SubagentSpawnTool.DEFAULT_DEPTH_LIMIT));
         seedIfAbsent(SubagentSpawnTool.BREADTH_LIMIT_KEY,
                 String.valueOf(SubagentSpawnTool.DEFAULT_BREADTH_LIMIT));
         // JCLAW-424: absolute wall-clock ceiling on a single subagent run — the
         // runaway guard the idle budget (an active child never trips it) cannot
-        // provide. Operator-only; 0 disables. Read path lives in
-        // tools.SubagentSpawnTool#awaitFuture.
+        // provide. Operator-only; 0 disables. Read by the
+        // tools.Subagent*Runner classes.
         seedIfAbsent(SubagentSpawnTool.MAX_WALLCLOCK_KEY,
                 String.valueOf(SubagentSpawnTool.DEFAULT_MAX_WALLCLOCK_SECONDS));
         // JCLAW-812: global defaults for the per-call runTimeoutSeconds (spawn) and
@@ -399,7 +398,7 @@ public class DefaultConfigJob extends Job<Void> {
     /**
      * JCLAW-282: bring up the in-process JClaw API tool. Two steps:
      * <ol>
-     *   <li>Mint (or recover) the internal bearer token so {@code jclaw_api}
+     *   <li>Mint the internal bearer token so {@code jclaw_api}
      *       can authenticate against the same auth filter that gates
      *       external clients.</li>
      *   <li>Install the {@code jclaw-api} skill into {@code main}'s

@@ -224,7 +224,7 @@ public class ApiTaskRunsController extends Controller {
      * JCLAW-414: cancel an in-progress task run. Flips the run's cooperative-
      * cancellation flag ({@link services.TaskRunRegistry}) so the agent tool
      * loop bails at its next safe checkpoint (between LLM rounds / tool calls —
-     * cooperative, never {@code Thread.interrupt}), and stamps the run CANCELED
+     * cooperative, never {@code Thread.interrupt}), and stamps the run CANCELLED
      * immediately for instant UI feedback. The recurring schedule and next-run
      * time are untouched — only this one fire is canceled. 404 when no such
      * run; 400 when the run is not currently RUNNING (already terminal).
@@ -247,7 +247,7 @@ public class ApiTaskRunsController extends Controller {
 
         // Flip the cooperative flag first so the loop's next checkpoint observes
         // it (no-op if the run isn't in-flight on this JVM), then stamp the row
-        // CANCELED so the UI reflects it at once. The tool loop's onCancelled is
+        // CANCELLED so the UI reflects it at once. The tool loop's onCancelled is
         // idempotent and won't double-write once this terminal status lands.
         TaskRunRegistry.requestCancel(runId);
         run.completedAt = AppClock.now();

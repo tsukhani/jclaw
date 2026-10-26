@@ -14,9 +14,9 @@ import java.util.List;
 /**
  * Deletion-cascade collaborator for agents (JCLAW-728), extracted from {@link AgentService#delete}.
  * The DB-level {@code ON DELETE CASCADE} (JCLAW-542) removes every FK-linked child when the root
- * Agent row goes, but three resources live outside the FK graph and need an explicit sweep over the
+ * Agent row goes, but four resources live outside the FK graph and need an explicit sweep over the
  * sub-agent subtree. This class owns that out-of-band teardown across the five subsystems it used to
- * be feature-envious of — memory store, native-SQL config rows, the external Lucene index (three
+ * be feature-envious of — memory store, native-SQL config rows, the external Lucene index (four
  * scopes), and the filesystem workspace — then triggers the single cascading root delete.
  *
  * <p>Coordinates with the FK/cascade design (JCLAW-540): introduces <b>no new DB-level cascades</b>.
@@ -116,7 +116,7 @@ public final class AgentDeletionCascade {
     }
 
     /**
-     * JCLAW-673: remove the SUBAGENT_RUN, TASK, and TASK_RUN_MESSAGE Lucene docs
+     * JCLAW-673: remove the Lucene docs of four scopes
      * for an entire agent subtree before its rows cascade-delete. A cascade /
      * bulk delete never fires the entities' {@code @PostRemove} hooks, so their
      * full-text docs would linger after the rows are gone. Collects the doc ids

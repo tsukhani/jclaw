@@ -43,7 +43,7 @@ public class ApiChannelsController extends Controller {
     /**
      * JCLAW-780: parse the stored channel config and mask secret-bearing
      * top-level fields (botToken, apiKey, signingSecret, …) before it reaches
-     * the agent-reachable {@link #list()} / {@link #get} responses. Sensitivity
+     * the {@link #list()} / {@link #get} responses. Sensitivity
      * is key-driven via {@link ConfigService#maskValue}; non-string / nested
      * values pass through unchanged (channel configs are flat string maps in
      * practice).
@@ -77,15 +77,15 @@ public class ApiChannelsController extends Controller {
 
     /**
      * GET /api/channels/active — channel kinds currently doing work,
-     * aggregated across the three sources of truth (web, telegram
-     * bindings, ChannelConfig). Dashboard-only consumer; the existing
+     * aggregated across the Telegram, Slack and WhatsApp bindings and
+     * ChannelConfig. Dashboard-only consumer; the existing
      * {@link #list()} endpoint stays as-is for the Channels admin page
      * which legitimately wants the {@code ChannelConfig} rows directly.
      *
-     * <p>Response: {@code {"count": N, "channelTypes": ["telegram", "web", ...]}}.
+     * <p>Response: {@code {"count": N, "channelTypes": ["telegram", "slack", ...]}}.
      */
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = ActiveChannelsResponse.class)))
-    @Operation(summary = "Get the count and set of channel types currently doing work, aggregated across web, telegram, and ChannelConfig")
+    @Operation(summary = "Get the count and set of channel types currently doing work, aggregated across channel bindings and ChannelConfig")
     @AgentAccess(OPEN)
     public static void active() {
         var types = ChannelStatusService.activeChannelTypes();
@@ -137,8 +137,7 @@ public class ApiChannelsController extends Controller {
 
     /**
      * Start/stop the channel's polling runner to match the newly-saved config.
-     * Today only Telegram has a polling transport; extend here as other channels
-     * (Slack Socket Mode — JCLAW-83) land.
+     * Today only Telegram has a polling transport.
      */
     private static void reconcileRunner(String channelType) {
         if ("telegram".equals(channelType)) {

@@ -3,7 +3,7 @@ name: in-depth-research
 description: >-
   Conduct exhaustive multi-source investigation with methodology tracking, source evaluation, and iterative depth.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
   author: clawhub.ai/ivangdavila/in-depth-research
   jclaw-icon: "🔬"
   jclaw-tools: web_search web_fetch browser filesystem checklist memory

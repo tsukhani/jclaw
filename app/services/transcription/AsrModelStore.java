@@ -74,8 +74,7 @@ public final class AsrModelStore extends ModelPrefetchStore<AsrModelStore.Status
     }
 
     /** Folds in the ASR size denominator: {@code approxSizeMb} from the model
-     *  the id maps to, as the Settings progress total until the live X-Linked-Size
-     *  from HF replaces it once a download begins. */
+     *  the id maps to, as the Settings progress total. */
     @Override
     protected Status buildStatus(String key, State state, long bytesDownloaded,
                                  @Nullable String engine, @Nullable String error) {
@@ -84,7 +83,7 @@ public final class AsrModelStore extends ModelPrefetchStore<AsrModelStore.Status
     }
 
     /** Kick a background prefetch of the HOST engine's weights; single-flight
-     *  per model id, mirroring WhisperModelManager.ensureAvailable. */
+     *  per model id. */
     public static void prefetch(AsrModel model) {
         INSTANCE.startPrefetch(model.id(), id -> {
             new AsrSidecarClient().asrPrefetch(id);

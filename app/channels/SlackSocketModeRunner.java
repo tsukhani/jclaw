@@ -129,7 +129,7 @@ public final class SlackSocketModeRunner {
      * {@link SlackInbound}. {@code events_api} → the message pipeline (re-fetching the
      * binding for current owner/bot-id), {@code interactive} → approval resolution.
      * {@code hello} / {@code disconnect} carry no payload and are ignored (the SDK
-     * reconnects on disconnect). Package-visible + ack-sender-injected so it's testable
+     * reconnects on disconnect). Public + ack-sender-injected so it's testable
      * without a live {@link SocketModeClient}.
      */
     public static void routeMessage(Long bindingId, Consumer<String> ackSender, String message) {

@@ -252,7 +252,7 @@ public class ApiConversationsController extends Controller {
         setPaginationHeaders(page.total());
 
         // Bulk-fetch SessionCompaction counts for the page in one GROUP BY pass
-        // so conversationToMap doesn't fire a per-row COUNT (N+1, up to 100/call).
+        // so conversationToMap doesn't fire a per-row COUNT (N+1, up to 500/call).
         // Mirrors the lastFiredAt bulk pattern in ApiTasksController.list;
         // conversations with no compactions are absent from the map (default 0).
         var convIds = convos.stream().map(c -> c.id).filter(Objects::nonNull).toList();
@@ -817,7 +817,7 @@ public class ApiConversationsController extends Controller {
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = NameResponse.class)))
     @Operation(summary = "Rename a conversation; the name is non-blank and at most 100 characters")
     @AgentAccess(value = OWN_ONLY,
-            reason = "conversation metadata; the destructive siblings in this controller are hidden")
+            reason = "conversation metadata; the destructive siblings in this controller are operator-only")
     public static void renameConversation(Long id) {
         Conversation conversation = requireConversation(id);
 
@@ -1017,7 +1017,7 @@ public class ApiConversationsController extends Controller {
      * normalize the shape to a JSON array.
      *
      * <p>The persisted column holds a single ToolCall object per assistant row
-     * ({@code gson.toJson(tc)} in {@code AgentRunner.executeToolsParallel})
+     * ({@code gson.toJson(tc)} in {@code ParallelToolExecutor.commitOneResult})
      * rather than a proper array — each tool invocation gets its own row so
      * the persisted shape is {@code {id, type, function: {name, arguments}}}
      * for one call or, in theory, an array for callers that batch. This

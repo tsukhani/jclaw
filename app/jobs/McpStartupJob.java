@@ -9,9 +9,8 @@ import services.EventLogger;
 /**
  * Boot all enabled MCP servers (JCLAW-31).
  *
- * <p>Runs once on application start, AFTER {@link ToolRegistrationJob} so
- * native tools are already published — MCP-discovered tools merge into the
- * registry on top. {@code @NoTransaction} because
+ * <p>Runs once on application start; MCP-discovered tools merge into the
+ * registry beside the native ones, in either order. {@code @NoTransaction} because
  * {@link McpConnectionManager#startAll} opens its own short-lived
  * {@code Tx.run} to read the {@code mcp_server} rows; it doesn't want a
  * caller-supplied tx held open across the per-server connector spawn.

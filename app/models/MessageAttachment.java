@@ -68,11 +68,11 @@ public class MessageAttachment extends Model {
     @Column(name = "size_bytes", nullable = false)
     public long sizeBytes;
 
-    /** One of {@link #KIND_IMAGE} or {@link #KIND_FILE}. */
+    /** One of the {@code KIND_*} constants. */
     @Column(nullable = false, length = 16)
     public String kind;
 
-    /** Whisper transcript for audio attachments; nullable until JCLAW-165 wires the writer. */
+    /** Transcript for audio attachments; null until transcribed. */
     @Column(columnDefinition = "TEXT")
     public String transcript;
 

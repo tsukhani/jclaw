@@ -64,7 +64,7 @@ import java.util.stream.Collectors;
  * all three call sites was the original design, and it was wrong for forget: dedup must
  * not lose a write, forget must not leave behind data the operator has been told is gone,
  * and those two costs pull in opposite directions. Forget therefore runs on its own
- * lexical floors; the semantic leg is still shared.
+ * lexical floors; a semantic match is only offered.
  */
 public class MemoryTool implements ToolRegistry.Tool {
 
@@ -592,10 +592,7 @@ public class MemoryTool implements ToolRegistry.Tool {
      * finding, restated here rather than re-derived.
      *
      * <p>The semantic leg embeds over HTTP and therefore runs outside any transaction;
-     * only the lexical query and the hydration take one. It stays on the capture cosine for
-     * both callers: the forget query is keyless against keyed stored vectors, so its recall
-     * loss is the embedding asymmetry rather than the threshold, and lowering a cosine
-     * floor on a destructive path without measuring it would be guesswork.
+     * only the lexical query and the hydration take one.
      */
     private static List<Memory> matching(String agentId, String text, @Nullable String retrievalKey,
             double jaccard, double containment) {

@@ -63,7 +63,7 @@ import java.util.function.Supplier;
  *       the same controller / tool that invoked
  *       {@code task.save()}. Mixing the two in one place would
  *       create silent inversions where the {@code scheduled_tasks}
- *       row exists but the {@link Task} thinks it's CANCELED, or
+ *       row exists but the {@link Task} thinks it's CANCELLED, or
  *       vice versa.</li>
  * </ul>
  *
@@ -180,15 +180,15 @@ public final class TaskSchedulingService {
      *       run has already closed and its execution is only delivering, we
      *       retry each second, for up to two minutes, until it ends.</li>
      *   <li>The row is gone — common after a one-shot Task COMPLETED
-     *       (OnCompleteRemove dropped it) or a Task was CANCELED.
+     *       (OnCompleteRemove dropped it) or a Task was CANCELLED.
      *       Reschedule throws {@code TaskInstanceNotFoundException};
      *       we fall through to {@link #scheduleFire} which registers
      *       a fresh row at {@code AppClock.now()}.</li>
      * </ol>
      *
-     * <p>Note: case (3) for CANCELED Tasks requires the caller to
+     * <p>Note: case (3) for CANCELLED Tasks requires the caller to
      * have already flipped status back to PENDING — otherwise
-     * {@link services.TaskExecutionHandler}'s CANCELED-skip swallows
+     * {@link services.TaskExecutionHandler}'s CANCELLED-skip swallows
      * the fire body at pick-up time. The API's {@code /run} endpoint
      * is the canonical caller and does that revive itself. Deferred like
      * {@link #register}, or the fire reads the status from before that revive.
@@ -232,7 +232,7 @@ public final class TaskSchedulingService {
         } catch (TaskInstanceNotFoundException _) {
             // Row was removed (terminal one-shot completion, cancel, etc.)
             // — fall through to registration. Common after operators
-            // re-run a COMPLETED or CANCELED Task.
+            // re-run a COMPLETED or CANCELLED Task.
         }
         if (rescheduled) {
             EventLogger.info("task", null, null,
@@ -365,7 +365,7 @@ public final class TaskSchedulingService {
                             .formatted(task.name));
             return null;
         }
-        // JCLAW-261: resolve the per-task / config / conf / JVM-default
+        // JCLAW-261: resolve the per-task / config / conf / operator-zone
         // timezone so "0 0 9 * * *" fires at 09:00 in the user's zone,
         // not the server's. null task.timezone falls through to the global
         // default via TimezoneResolver.

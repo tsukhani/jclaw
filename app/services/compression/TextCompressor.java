@@ -12,8 +12,8 @@ import java.util.regex.Pattern;
  *
  * <p>Per the Headroom-style recipe:
  * <ol>
- *   <li>Normalize whitespace (tabs→spaces, collapse runs of spaces and 3+ blank
- *       lines).</li>
+ *   <li>Normalize whitespace (tabs→spaces, collapse runs of spaces and 3+
+ *       newlines).</li>
  *   <li>Split into blocks on blank lines.</li>
  *   <li>Per block: a long block (&gt; {@value #LONG_BLOCK_WORDS} words) keeps its
  *       first unit and a summary marker; a short block has its units (sentences

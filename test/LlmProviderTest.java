@@ -21,11 +21,11 @@ import java.util.Map;
 
 /**
  * Tests for the abstract {@link LlmProvider} base — the factory routing,
- * the instance-vs-static usage-parsing distinction, the request-serialization
+ * per-provider usage parsing, the request-serialization
  * shape, and the {@code ToolCallBuilder} accumulator.
  *
- * <p>Behavior already exercised by {@code LlmClientTest} (the static
- * {@code parseUsageBlock}, OpenRouter cache breakpoints, the mergeToolCallChunks
+ * <p>Behavior already exercised by {@code LlmClientTest} ({@code parseUsage},
+ * OpenRouter cache breakpoints, the mergeToolCallChunks
  * variants, the StreamAccumulator) is not duplicated here.
  */
 class LlmProviderTest extends UnitTest {

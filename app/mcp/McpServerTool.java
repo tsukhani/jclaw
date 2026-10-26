@@ -31,7 +31,7 @@ import java.util.function.Consumer;
  * parameterized {@link ToolRegistry.Tool} to the LLM, instead of N per-action
  * wrappers. The function-calling schema sent to the model now contains a
  * single entry per connected server (name {@code mcp_<server>}, parameters
- * {@code {tool, args}}); the per-action {@link McpToolAdapter} registrations
+ * {@code {tool, args, describe, read}}); the per-action {@link McpToolAdapter} registrations
  * remain in the registry as the internal execution path but are hidden from
  * the function-calling defs via {@link ToolRegistry.Tool#isServerLevel()}.
  *
@@ -620,12 +620,9 @@ public final class McpServerTool implements ToolRegistry.Tool {
     }
 
     /**
-     * Compact name-only list for the unknown-action error path. The full
-     * {@link #enumerateActions} dump includes each action's
-     * {@code inputSchema} — for a typo-correction signal that's overkill
-     * and on schema-heavy servers (google-workspace observed at ~175 KB)
-     * inflates the next LLM turn's prompt by tens of thousands of tokens.
-     * Names alone let the model spot the right action; if it actually needs
+     * Compact name-only list for the unknown-action error path.
+     * {@link #enumerateActions} can carry every {@code inputSchema}, which is
+     * overkill for a typo-correction signal. Names alone let the model spot the right action; if it actually needs
      * a schema it can ask for that one with {@code describe}.
      */
     private String enumerateActionNames(BooleanSupplier webChat) {

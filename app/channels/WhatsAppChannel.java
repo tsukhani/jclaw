@@ -54,7 +54,7 @@ public class WhatsAppChannel implements Channel {
     /** Graph messages-API envelope key, required on every outbound body. */
     private static final String MESSAGING_PRODUCT = "messaging_product";
 
-    /** Inbound webhook envelope keys: entry[].changes[].value.messages[].timestamp. */
+    /** Inbound webhook envelope keys: entry[].changes[].value.messages[]. */
     private static final String KEY_ENTRY = "entry";
     private static final String KEY_CHANGES = "changes";
     private static final String KEY_MESSAGES = "messages";
@@ -92,8 +92,7 @@ public class WhatsAppChannel implements Channel {
     }
 
     // Per-binding credentials (JCLAW-446). Null on the stateless instance, which
-    // falls back to the app-global config — the pre-444 path, retired once
-    // JCLAW-446/447 migrate their last callers off WhatsAppConfig.load().
+    // falls back to the app-global config — the pre-444 path.
     private final @Nullable String phoneNumberId;
     private final @Nullable String accessToken;
     private final @Nullable String appSecret;

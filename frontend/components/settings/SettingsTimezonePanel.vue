@@ -2,7 +2,7 @@
 // Timezone settings panel (JCLAW-680). The operator wall-clock zone the
 // assistant treats as "now" when its system prompt injects the current
 // date/time. Defaults to the server's JVM zone; distinct from the Tasks default
-// timezone (which governs CRON scheduling and defaults to UTC).
+// timezone (which governs CRON scheduling and defaults to this zone).
 // Moved verbatim from pages/settings.vue. Owns its own (Nuxt-deduped)
 // /api/timezones fetch — the same URL the Tasks panel fetches.
 import {
@@ -52,7 +52,7 @@ async function saveGeneralField(configKey: string, value: string) {
   <!-- General: operator-wide settings. Timezone is the zone the assistant
        treats as "now" when its system prompt injects the current date/time.
        Defaults to the server's JVM zone; distinct from the Tasks default
-       timezone (which governs CRON scheduling and defaults to UTC). -->
+       timezone (which governs CRON scheduling and defaults to this zone). -->
   <div class="mb-6 space-y-4">
     <h2 class="text-sm font-medium text-fg-muted">
       Timezone

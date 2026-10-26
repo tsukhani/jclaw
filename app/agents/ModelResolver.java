@@ -15,7 +15,7 @@ import java.util.Optional;
 /**
  * Conversation-override-aware lookups for the model identity and
  * configuration that should drive a turn. Extracted from
- * {@link AgentRunner} as part of JCLAW-299; all four helpers center on
+ * {@link AgentRunner} as part of JCLAW-299; its helpers center on
  * a single question — "for this {agent, conversation, provider}
  * triple, what model are we actually running?" — and the JCLAW-108 /
  * JCLAW-269 override resolution that answers it.

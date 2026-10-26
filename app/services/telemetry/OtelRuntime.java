@@ -106,7 +106,7 @@ public final class OtelRuntime {
     /** Outcome of {@link #sendTestSpan()}: whether the exporter confirmed delivery. */
     public record TestResult(boolean delivered, String traceId, @Nullable String error) {}
 
-    /** Called once from the plugin at application start; safe to call again after a reload. */
+    /** Called at start by {@code TelemetryBootstrapJob}; safe to call again after a reload. */
     public static synchronized void init() {
         if (sdk != null) {
             applyConfig();

@@ -608,7 +608,7 @@ onUnmounted(() => stopTranscriptionPolling())
       </template>
     </div>
 
-    <!-- Diarization = audio-capable chat model (cloud or Ollama Local). Outside
+    <!-- Diarization = audio-capable chat model (cloud or local). Outside
            the master-toggle template — the diarize_audio tool works whatever the
            inbound-transcription provider is (JCLAW-654). -->
     <div class="bg-surface-elevated border border-border">

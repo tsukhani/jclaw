@@ -54,7 +54,7 @@ import java.util.List;
  * the next fire transitions {@code LOST → RUNNING → COMPLETED/FAILED}
  * without operator intervention. Operators wanting to pre-empt the
  * auto-recovery use {@code /api/tasks/{id}/retry} which flips
- * {@code LOST → PENDING} and registers a fresh row immediately.
+ * LOST to PENDING/ACTIVE and registers a fresh row immediately.
  */
 public final class LostTaskDetector {
 

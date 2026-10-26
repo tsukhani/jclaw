@@ -27,8 +27,8 @@ import java.util.Locale;
  * and leaves the constraint absent — which is exactly the state this class then finds and
  * repairs, within the same boot.
  *
- * <p>Orphans are resolved the way the new constraint would have resolved them: a
- * {@code CASCADE} reference deletes the row, a {@code SET NULL} reference clears the column.
+ * <p>Orphans are resolved the way the new {@code ON DELETE CASCADE} constraint would have:
+ * the row is deleted.
  * That keeps the repair and the rule it installs from ever disagreeing.
  */
 public final class OrphanFkMigrator {

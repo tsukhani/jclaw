@@ -75,7 +75,7 @@ public final class WhatsAppCobaltSession {
     private volatile @Nullable Whatsapp whatsapp;
     private volatile @Nullable Jid pairedJid;
 
-    /** message id → live Cobalt object, LRU-bounded, access-synchronized. */
+    /** message id → live Cobalt object, FIFO-bounded, access-synchronized. */
     private final Map<String, ChatMessageInfo> recentMessages =
             Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, false) {
                 @Override

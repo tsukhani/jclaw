@@ -9,8 +9,8 @@ import java.util.List;
 
 /**
  * Probes the host PATH for external coding-harness CLIs usable by the ACP
- * runtime ({@code runtime=acp} / {@code subagent.acp.command}) — {@code claude},
- * {@code pi}, {@code codex}, {@code gemini}, {@code opencode}, plus any
+ * runtime ({@code runtime=acp} / {@code subagent.acp.command}) — each of
+ * {@link #HARNESSES}, plus any
  * operator-added custom commands ({@link #CUSTOM_COMMANDS_KEY}). Surfaced in
  * Settings → Subagents so the operator can pick a detected harness instead of
  * typing the command by hand. Fresh on each call (a quick {@code --version}

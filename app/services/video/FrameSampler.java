@@ -18,15 +18,13 @@ import java.util.concurrent.TimeUnit;
 /**
  * Sample evenly-spaced JPEG frames from a video attachment for the JCLAW-208
  * video-understanding pipeline. Shells out to {@code ffmpeg} (frame extraction)
- * and {@code ffprobe} (duration) exactly as
- * {@link services.transcription.WhisperTranscriber} does for audio — same
+ * and {@code ffprobe} (duration) with this
  * process hygiene: stderr captured to a temp file, stdout drained <em>before</em>
  * {@code waitFor} so a full pipe can't deadlock the child, a bounded timeout, and
  * {@code destroyForcibly} on a hang.
  *
- * <p>The frames feed all three interpretation strategies (JCLAW-220/221/222): the
- * native-video strategy hands the list to a video model as a {@code video} content
- * part, the multi-image strategy threads them in as individual {@code image_url}
+ * <p>The frames feed two interpretation strategies (JCLAW-221/222): the
+ * multi-image strategy threads them in as individual {@code image_url}
  * parts for a vision model, and the text-summary strategy captions each frame and
  * assembles a {@code [hh:mm:ss]} timeline for a text-only model.
  *
@@ -44,8 +42,8 @@ public final class FrameSampler {
     public record Frame(byte[] jpeg, double timestampSeconds) {}
 
     /**
-     * The sampled frames plus the source duration. All three interpretation strategies need
-     * the duration (native-video {@code sample_fps}, multi-image header text, text-summary
+     * The sampled frames plus the source duration. Both frame strategies need
+     * the duration (multi-image header text, text-summary
      * {@code [hh:mm:ss]} lines), so it travels with the frames from the single ffprobe pass.
      */
     public record SampleResult(List<Frame> frames, double durationSeconds) {}
@@ -170,7 +168,7 @@ public final class FrameSampler {
                 var proc = pb.start();
 
                 // Drain stdout fully BEFORE waitFor so a large frame can't backpressure
-                // ffmpeg into hanging on a full stdout pipe (mirrors WhisperTranscriber).
+                // ffmpeg into hanging on a full stdout pipe.
                 byte[] jpeg;
                 try (InputStream stdout = proc.getInputStream()) {
                     jpeg = stdout.readAllBytes();

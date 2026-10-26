@@ -83,7 +83,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
 
     @Override
     public String shortDescription() {
-        return "Read and author rich formats — PDF, DOCX, HTML, XLSX, PPTX, EPUB — from markdown.";
+        return "Read PDF/DOCX/XLSX/PPTX/EPUB; write PDF, DOCX or HTML from markdown.";
     }
 
     @Override
@@ -267,7 +267,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
         }
 
         // Avoid clobbering existing files. If the target exists we pick the next
-        // free " (N).ext" slot in the same parent directory. Both the filesystem
+        // free "-N.ext" slot in the same parent directory. Both the filesystem
         // target and the relativePath string we report back must be updated so
         // the markdown download link the LLM echoes into chat actually resolves
         // to the file we just wrote.
@@ -337,7 +337,7 @@ public class DocumentsTool implements ToolRegistry.Tool {
 
     /**
      * Return {@code desired} if no file sits at that path, otherwise the first
-     * " (N)" sibling that's free. Public so {@code DocumentsToolTest} in the
+     * "-N" sibling that's free. Public so {@code DocumentsToolTest} in the
      * default test package can exercise it against a tmp dir without going
      * through Agent/workspace plumbing. The loop cap of 1000 is arbitrarily
      * high — any legitimate workspace will land well before it, and an

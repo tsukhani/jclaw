@@ -19,10 +19,9 @@ import java.util.concurrent.atomic.AtomicInteger;
  * {@code AtomicInteger} on {@link BotSession}
  * ({@code lastReceivedUpdate}, starts at 0). On JVM restart that resets, so the
  * next {@code getUpdates} re-fetches every update Telegram still buffers (up to
- * its 24 h retention) and {@code dispatch} re-processes them — {@code
- * MessageDeduplicator} keys on chat/message identity, not Telegram update ids,
- * so it does not stop the replay. This store persists the high-water update id
- * so {@link TelegramPollingRunner} can seed the start offset on (re)start.
+ * its 24 h retention) and {@code dispatch} re-processes them. This store
+ * persists the high-water update id so {@link TelegramPollingRunner} can seed
+ * the start offset on (re)start.
  *
  * <p><b>Scoping.</b> Keyed by <i>bot id</i> — the numeric prefix before the
  * {@code ':'} in the bot token (the immutable account id; the secret half after

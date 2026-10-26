@@ -77,8 +77,8 @@ import java.util.function.Predicate;
  *       not enough to replace a row, though: a survivor must also carry a
  *       comparable amount of content, or a thinner restatement of a stored fact
  *       supersedes the fuller one and the difference is lost (JCLAW-1050).</li>
- *   <li><b>Cheap extraction.</b> The extractor model is configurable via
- *       {@code memory.autocapture.model}; operators should point it at a cheap
+ *   <li><b>Cheap extraction.</b> The extractor model is configurable per agent
+ *       in its Memory section; operators should point it at a cheap
  *       model. It falls back to the agent's effective model when unset.</li>
  * </ul>
  */
@@ -1127,7 +1127,7 @@ public final class MemoryAutoCapture {
         if (!o.has(KEY_TEXT) || o.get(KEY_TEXT).isJsonNull()) return null;
         var text = o.get(KEY_TEXT).getAsString().strip();
         if (text.isEmpty()) return null;
-        // JCLAW-927: the prompt names six categories and says to pick exactly one;
+        // JCLAW-927: the prompt names five categories and says to pick exactly one;
         // the model still returns others (opinion, belief, instruction, project).
         // Storing those verbatim leaves rows the taxonomy does not describe, and
         // silently drops them to BASELINE_IMPORTANCE whenever the extractor also

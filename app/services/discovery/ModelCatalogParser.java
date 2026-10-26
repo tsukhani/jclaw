@@ -581,9 +581,8 @@ public final class ModelCatalogParser {
      *
      * <p>Vision support is inferred from {@code type == "vlm"} and
      * marked {@code visionDetectedFromProvider=true} since the type
-     * field is authoritative. Thinking and audio are left
-     * detector-defaulted because the native API doesn't enumerate them
-     * — id-based heuristics in the standard detectors fill in.
+     * field is authoritative. Thinking and audio are left false
+     * because the native API doesn't enumerate them.
      */
     public static List<Map<String, Object>> parseLmStudioNativeResponse(JsonObject body) {
         var results = new ArrayList<Map<String, Object>>();
@@ -618,9 +617,6 @@ public final class ModelCatalogParser {
                     ctxWin,
                     0,
                     // Thinking and audio aren't enumerated in the native API.
-                    // Leave fromProvider=false so the existing id-based heuristic
-                    // picks up known thinking models (deepseek-r1, qwq, etc.)
-                    // downstream without overriding a confirmed answer here.
                     false, false,
                     lmAlwaysThinks.confirmed(), lmAlwaysThinks.fromProvider(),
                     isVlm, true,

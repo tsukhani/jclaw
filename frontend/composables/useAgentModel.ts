@@ -420,8 +420,7 @@ export function useAgentModel(deps: UseAgentModelDeps): UseAgentModel {
 
     const convoId = selectedConvoId.value
     if (convoId != null) {
-      // Write the conversation override. Match the refresh-on-success pattern
-      // used by updateAgentSetting so the local conversations list realigns
+      // Write the conversation override. Refresh so the local conversations list realigns
       // with persisted state (including the fields listConversations now
       // returns — modelProviderOverride / modelIdOverride). A rejection
       // (unknown provider/model, network) refetches too, so the dropdown

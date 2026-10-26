@@ -13,8 +13,8 @@
 """MERaLiON-SER emotion worker (JCLAW-565 emotion stage). Per-turn
 speech-emotion recognition over diarization turns — a categorical label plus
 continuous valence/arousal/dominance. Runs in its OWN uv script env
-(transformers + MERaLiON custom modeling code), shelled from serve.py per
-/diarize call when emotions are requested — isolated from the pyannote
+(transformers + MERaLiON custom modeling code), serve.py's persistent
+worker once emotions are requested — isolated from the pyannote
 worker's env.
 
 usage (worker): uv run ser.py --worker

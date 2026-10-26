@@ -1,7 +1,7 @@
 // Stylelint config for the Nuxt 4 frontend.
 //
 // Scope: custom CSS in `assets/css/*.css` and the `<style>` blocks inside
-// Vue SFCs (chiefly `pages/chat.vue`, ~300 lines of custom rules). Tailwind
+// Vue SFCs. Tailwind
 // utility classes in templates are NOT linted here — that's the job of
 // ESLint or a future Tailwind-specific plugin.
 //

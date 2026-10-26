@@ -38,7 +38,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *       (opens RUNNING, closes COMPLETED, durationMs populated)</li>
  *   <li>{@link agents.AgentRunner#runForTask} with
  *       {@link agents.TaskRunSink} writes
- *       (system → user → assistant turns land in
+ *       (user → assistant turns land in
  *       {@code task_run_message})</li>
  *   <li>{@link services.TaskLifecycleEvents} emissions —
  *       TASK_STARTED and TASK_COMPLETED land in

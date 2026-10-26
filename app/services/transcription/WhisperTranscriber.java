@@ -43,12 +43,10 @@ public final class WhisperTranscriber {
     /**
      * Segment-level transcription (JCLAW-556).
      * Same blocking/preconditions contract as {@link #transcribe}; returns
-     * one {@link Segment} per whisper.cpp segment, in order.
+     * one {@link Segment} per engine segment, in order.
      *
      * <p>{@code language}: an ISO 639-1 code ({@code "en"}, {@code "ms"}, …)
-     * forces that language. Null/blank means auto-detect on multilingual
-     * models and whisper-jni's {@code "en"} default on English-only models
-     * (whisper.cpp rejects detection on {@code .en} models).
+     * forces that language. Null/blank means auto-detect.
      */
     public static List<Segment> transcribeSegments(Path audioFile, AsrModel model, @Nullable String language) {
         // JCLAW-650: sidecar-or-error, the JCLAW-614 pattern. The engine is

@@ -212,7 +212,7 @@ pipeline {
                         // matches what Sonar's binaries path sees.
                         //
                         // That works because playPrecompile runs with
-                        // playId="test" (Play1Plugin.kt:160) — so precompiled/
+                        // playId="test" (Play1Plugin.kt:200) — so precompiled/
                         // and the tmp/classes the test JVM actually loaded are
                         // both Play test-mode-enhanced and carry matching
                         // class IDs. JaCoCo matches execution data to classes
@@ -325,7 +325,7 @@ pipeline {
                 // bearing, not style: playDist and playBundle each declare
                 // `outputs.upToDateWhen { false }` and depend on playPrecompile,
                 // which in turn depends on a Delete task that wipes tmp/ +
-                // precompiled/ first (Play1Plugin.kt:151-163). There is no
+                // precompiled/ first (Play1Plugin.kt:191-211). There is no
                 // incremental reuse to lean on — the previous shape
                 // (`./jclaw.sh dist` then `./gradlew playBundle`, two separate
                 // processes) therefore ran a full clean precompile TWICE.

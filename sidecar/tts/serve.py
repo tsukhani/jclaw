@@ -55,7 +55,7 @@ def _open_worker_stderr(tag):
     is already gone by the time we notice, so its stderr is the only evidence of
     why — discarding it made a corrupt uv cache, an OOM kill, a failed weight
     download and a plain traceback all surface as the same opaque
-    "died mid-request". Mirrors what the prefetch paths already do.
+    "died mid-request". Mirrors the ASR sidecar's prefetch path.
     """
     import tempfile
     fd, path = tempfile.mkstemp(suffix=".%s.stderr" % tag)

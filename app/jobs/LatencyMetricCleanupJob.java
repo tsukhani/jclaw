@@ -53,7 +53,7 @@ public class LatencyMetricCleanupJob extends PeriodicJob {
         }
     }
 
-    /** Read {@code latency.metrics.retentionDays} through the resolver the three cleanup
+    /** Read {@code latency.metrics.retentionDays} through the resolver the cleanup
      *  jobs share. Public for direct test access. */
     public static int resolveRetentionDays() {
         return RetentionDays.fromConfig(CONFIG_KEY, DEFAULT_RETENTION_DAYS,

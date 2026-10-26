@@ -3,7 +3,7 @@ name: gamma-presenter
 description: >-
   Create beautiful AI-generated presentations, documents, webpages, and social posts via the Gamma API. Supports generation from text prompts, templates, multi-page gammas, exports to PDF/PPTX/PNG, and management of existing gammas.
 metadata:
-  version: "1.0.3"
+  version: "1.0.4"
   author: main
   jclaw-icon: "🎨"
   jclaw-tools: web_fetch filesystem datetime exec
@@ -59,7 +59,7 @@ Generate polished presentations, documents, webpages, and social media posts usi
 ```bash
 curl -X POST "https://public-api.gamma.app/v1.0/generations" \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: $(cat credentials/gamma-api-key.txt)" \
+  -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
   -d '{
     "inputText": "Your content or prompt here",
     "textMode": "generate",
@@ -80,7 +80,7 @@ curl -X POST "https://public-api.gamma.app/v1.0/generations" \
 ### 2. Poll for Generation Completion
 
 ```bash
-curl -H "X-API-KEY: $(cat credentials/gamma-api-key.txt)" \
+curl -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
   "https://public-api.gamma.app/v1.0/generations/{generationId}"
 ```
 
@@ -97,7 +97,7 @@ Poll every 5 seconds until `status` is `completed` or `failed`.
 ```bash
 curl -X POST "https://public-api.gamma.app/v1.0/generations/from-template" \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: $(cat credentials/gamma-api-key.txt)" \
+  -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
   -d '{
     "templateGammaId": "template-id-here",
     "textMode": "generate",
@@ -110,7 +110,7 @@ curl -X POST "https://public-api.gamma.app/v1.0/generations/from-template" \
 ```bash
 curl -X POST "https://public-api.gamma.app/v1.0/gammas/{gammaId}/export" \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: $(cat credentials/gamma-api-key.txt)" \
+  -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
   -d '{
     "format": "pptx"
   }'
@@ -123,7 +123,7 @@ Then poll: `GET /v1.0/exports/{exportId}`
 ```bash
 curl -X POST "https://public-api.gamma.app/v1.0/images" \
   -H "Content-Type: application/json" \
-  -H "X-API-KEY: $(cat credentials/gamma-api-key.txt)" \
+  -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
   -d '{
     "prompt": "A hero image of a futuristic city skyline at sunset",
     "aspectRatio": "16:9"
@@ -134,13 +134,13 @@ curl -X POST "https://public-api.gamma.app/v1.0/images" \
 
 ### List Themes
 ```bash
-curl -H "X-API-KEY: $(cat credentials/gamma-api-key.txt)" \
+curl -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
   "https://public-api.gamma.app/v1.0/themes"
 ```
 
 ### List Folders
 ```bash
-curl -H "X-API-KEY: $(cat credentials/gamma-api-key.txt)" \
+curl -H "X-API-KEY: $(cat skills/gamma-presenter/credentials/gamma-api-key.txt)" \
   "https://public-api.gamma.app/v1.0/folders"
 ```
 
@@ -148,7 +148,7 @@ curl -H "X-API-KEY: $(cat credentials/gamma-api-key.txt)" \
 
 When asked to create a Gamma presentation:
 
-1. **Read the API key** from `credentials/gamma-api-key.txt` using the `filesystem` tool
+1. **Read the API key** from `skills/gamma-presenter/credentials/gamma-api-key.txt` using the `filesystem` tool
 2. **Build the request payload** based on user's specifications (format, numCards, theme, exportAs, etc.)
 3. **Start generation** via `exec` using `curl` to POST `/v1.0/generations`
 4. **Parse the `generationId`** from the response

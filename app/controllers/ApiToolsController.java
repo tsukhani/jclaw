@@ -53,7 +53,7 @@ public class ApiToolsController extends Controller {
      * GET /api/tools — List all registered tools (global catalog).
      */
     @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = ToolListEntry.class))))
-    @Operation(summary = "List all globally-registered tools (name, category, description)")
+    @Operation(summary = "List all globally-registered tools (name, description)")
     @AgentAccess(OPEN)
     public static void list() {
         var result = ToolRegistry.listTools().stream()

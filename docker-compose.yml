@@ -44,15 +44,15 @@ services:
       - ./certs:/app/certs
     restart: unless-stopped
     # Readiness probe via curl against ApiController.status. curl is already
-    # in the runtime image (the Dockerfile's RUN block installs it for the
-    # Play CLI download from GitHub), so this adds nothing to the image
+    # in the runtime image (the Dockerfile's runtime RUN block installs it to
+    # fetch Azul's apt key), so this adds nothing to the image
     # surface. Hitting /api/status — not just :9000's TCP bind — closes the
     # false-positive window where the JVM has bound the port but Play hasn't
     # finished registering routes yet, so a "healthy" container is one that
     # actually serves requests rather than one that merely accepts sockets.
     #
     # start_period (120s) suppresses failure-counting during cold boot so a
-    # slow precompile/DB-seed doesn't trip `retries` and force a restart. A first
+    # slow DB-seed doesn't trip `retries` and force a restart. A first
     # start, or one after an image upgrade, also trains the JDK's AOT cache: a
     # full start and stop before the real one.
     # start_interval (2s) tightens the probe cadence during start_period

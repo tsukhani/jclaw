@@ -43,9 +43,8 @@ import java.util.Locale;
  * </ul>
  *
  * <p><b>Fails closed.</b> When the sandbox is enabled but this platform has no
- * supported mechanism (native Windows, WSL1) or its binary is missing/broken
- * (a WSL2 kernel with unprivileged user namespaces disabled), {@link #wrap}
- * throws — the caller aborts the run rather than launching unsandboxed.
+ * supported mechanism (native Windows, WSL1) or its binary is missing from PATH,
+ * {@link #wrap} throws — the caller aborts the run rather than launching unsandboxed.
  *
  * <p>Network egress stays open (the harness needs its API); a deny+allowlist
  * variant is future work, noted in the JCLAW-671 spike.

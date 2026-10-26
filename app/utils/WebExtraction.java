@@ -503,7 +503,7 @@ public final class WebExtraction {
      * one, so relative hrefs on a page reached through a redirect resolve against
      * where the page actually came from.
      *
-     * <p>Empty for any non-HTML response — a crawl has nothing to follow out of a PDF.
+     * <p>Empty for a response neither HTML nor markdown: nothing to follow out of a PDF.
      */
     public static List<URI> links(FetchResult fetched) {
         if (isMarkdown(fetched.contentType())) {

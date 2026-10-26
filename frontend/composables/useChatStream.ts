@@ -421,8 +421,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
     streamStatus.value = ''
     m.content = event.content || streamContent.value
     // Collapsing thinking + swapping in final content shifts layout height.
-    // Re-pin to the bottom so the next thing the user sees (the metrics pill
-    // landing on the subsequent status event) is fully in view.
+    // Re-pin to the bottom so the next thing the user sees is fully in view.
     scrollToBottom()
   }
 
@@ -613,8 +612,7 @@ export function useChatStream(deps: UseChatStreamDeps): UseChatStream {
       // Fire the refresh twice. Immediate: catches the common case where the
       // backend persist already landed by the time onComplete fires. Delayed:
       // catches the race where the SSE `complete` frame beat the persist Tx
-      // commit (see AgentRunner.streamLlmLoop — emitUsageAndComplete is
-      // intentionally called before the Tx.run persist block for latency).
+      // commit.
       refreshConversations()
       // Re-sync agents too: the agent can rewrite its own model mid-turn via
       // the jclaw_api tool (PUT /api/agents/{id} → Agent.modelProvider/modelId).

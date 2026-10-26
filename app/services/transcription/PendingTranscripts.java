@@ -11,9 +11,9 @@ import java.util.concurrent.TimeUnit;
  * Static holder for in-flight transcription futures keyed by
  * {@code MessageAttachment.id}. The dispatcher in
  * {@code ConversationService.appendUserMessage} registers a future
- * here when it kicks off a virtual-thread transcription; the
- * {@code agents.VisionAudioAssembler.userMessageFor} text-only branch and the
- * provider-rejection retry branch look up the future to await it.
+ * here when it kicks off a virtual-thread transcription;
+ * {@code agents.VisionAudioAssembler.applyTranscriptsForCapability} looks up the
+ * future to await it on the text-only and retry paths.
  *
  * <p>Lookup semantics: completed futures stay in the map until a
  * consumer awaits and {@linkplain #consume(Long) consumes} them. Keys

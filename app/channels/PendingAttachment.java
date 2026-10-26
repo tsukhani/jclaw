@@ -21,8 +21,7 @@ import org.jspecify.annotations.Nullable;
  * @param kind              derived at parse time from which Telegram
  *                          field the attachment came from (photo →
  *                          IMAGE, voice/audio → AUDIO, document/video →
- *                          FILE). Authoritative for the inbound
- *                          modality gate; the stored MessageAttachment
+ *                          FILE). The stored MessageAttachment
  *                          row's kind is re-sniffed from disk by
  *                          {@code finalizeAttachment}.
  */

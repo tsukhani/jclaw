@@ -141,7 +141,7 @@ is_developer_clone() {
 usage() {
     if is_developer_clone; then
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|evals|diagnostics|test|e2e|dist|bundle|backup|restore|repair|compact|db-clean|db-status|completion|shim|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|secret|setup|init-worktree|reset|start|stop|restart|status|logs|loadtest|scrapetest|grapheval|evals|diagnostics|test|e2e|dist|bundle|backup|restore|repair|compact|db-clean|db-status|completion|shim|uninstall|help>
 
 Commands:
   setup     One-time per-clone bootstrap: wires git hooks (.githooks/),
@@ -178,6 +178,11 @@ Commands:
   status    Show whether backend and frontend are running
   logs      Tail the production application log
   loadtest  Drive the in-process load-test harness against /api/chat/stream
+  scrapetest
+            Run the scrape corpus against one rung of the fetch ladder and
+            report access rates. Needs the backend running.
+  grapheval Certify local Ollama decision models for graph extraction.
+            Needs the backend running.
   evals     Validate the eval dataset in evals/suites, and score a
             recorded agent run against it. Offline — no backend, no model.
   diagnostics
@@ -215,9 +220,10 @@ Commands:
             Stops and restarts a running instance.
   db-clean  Delete the files a successful repair left behind.
   db-status Database size, free space, health, last backup and repair remnants.
-  completion Print a shell completion script (completion <bash|zsh>) so
+  completion Print a shell completion script (completion <bash|zsh|install|uninstall>) so
             \`${INVOKE} <TAB>\` completes subcommands. The installer wires this up;
             run it by hand for dev clones or after an upgrade.
+  shim      Rewrite the \`jclaw\` command so it points at this install.
   uninstall Remove an installed JClaw: undo completion wiring, drop the \`jclaw\`
             shim, and delete the install dir (~/.jclaw). Warns first, then
             confirms. Not applicable to a developer git clone.
@@ -274,8 +280,7 @@ Load-test options (only used with the 'loadtest' command):
                           server died partway through, or data from an older build.
   --compress              Send 'Accept-Encoding: br, gzip' on each loadtest request so the
                           server's HttpContentCompressor engages — measures the cost of the
-                          encoding path. Default off (Java HttpClient sends no Accept-Encoding,
-                          so compression doesn't engage even when wired into the pipeline).
+                          encoding path. Default off.
   --provider <name>       Registered provider name to drive (e.g. ollama-local,
                           ollama-cloud, openrouter, openai). Must be configured
                           (apiKey/baseUrl set). Pairs with --model: providing
@@ -324,7 +329,7 @@ EOF
         # running prod backend, but it's an operator/dev tool and not
         # part of the "I just want to run JClaw" contract.
         cat <<EOF
-Usage: ${INVOKE} [options] <https|no-https|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|compact|db-clean|db-status|completion|shim|uninstall|help>
+Usage: ${INVOKE} [options] <https|no-https|secret|reset|start|stop|restart|status|logs|upgrade|backup|restore|repair|compact|db-clean|db-status|completion|shim|uninstall|help>
 
 Commands:
   https     Generate a TLS PEM cert+key at certs/host.cert and host.key.
@@ -332,6 +337,8 @@ Commands:
             port 9443 when the cert+key pass strict validation.
   no-https  Disable HTTPS by deleting certs/host.cert and host.key. The
             next 'start' boots HTTP/1.1 only on port 9000.
+  secret    Generate (or rotate) the application secret in certs/.env.
+            Restart the app to pick up the new value.
   reset     Clear the admin password hash from the Config DB so the next
             launch routes through the in-app /setup-password flow. Use
             when you've forgotten the password and are locked out of
@@ -359,7 +366,7 @@ Commands:
             Stops and restarts a running instance.
   db-clean  Delete the files a successful repair left behind.
   db-status Database size, free space, health, last backup and repair remnants.
-  completion Print a shell completion script (completion <bash|zsh>) so
+  completion Print a shell completion script (completion <bash|zsh|install|uninstall>) so
             \`${INVOKE} <TAB>\` completes subcommands. The installer wires this up.
   shim      Rewrite the \`jclaw\` command so it points at this install. Written
             by the installer and refreshed by \`upgrade\`; run it by hand only if
@@ -468,7 +475,7 @@ EOF
 
 usage_completion() {
     cat <<EOF
-Usage: ${INVOKE} completion <bash|zsh|install>
+Usage: ${INVOKE} completion <bash|zsh|install|uninstall>
 
 Generate shell completion for \`jclaw\`/\`jclaw.sh\` so \`${INVOKE} <TAB>\` completes
 subcommands. The emitted command list reflects this install (a dist exposes
@@ -477,6 +484,8 @@ fewer commands than a developer clone).
   install  Write the bash + zsh scripts to your per-user completion dirs and
            wire your shell's rc file (idempotent; honors JCLAW_NO_RC_EDIT=1).
            This is what the one-line installer runs; also handy on a dev clone.
+  uninstall
+           Delete those scripts and remove the managed block from your shell rc.
   bash     Print a bash completion script to stdout. Enable for this shell:
              source <(${INVOKE} completion bash)
            or permanently where bash-completion looks:
@@ -800,7 +809,7 @@ usage_status() {
 Usage: ${INVOKE} [options] status
 
 Show whether the Play backend (and, in --dev, the Nuxt frontend) is
-running. Reports PID and port when up; "not running" otherwise.
+running. Reports the PID when up; "stopped" otherwise.
 
 Options:
   --dev                   Check dev-mode services
@@ -812,8 +821,8 @@ EOF
         cat <<EOF
 Usage: ${INVOKE} status
 
-Show whether the backend is running. Reports PID and port when up;
-"not running" otherwise.
+Show whether the backend is running. Reports the PID when up;
+"stopped" otherwise.
 
 Example:
   ${INVOKE} status
@@ -1041,6 +1050,8 @@ measure curl instead.
 
 Options:
   --rung ID          Rung to measure (default 1). 1 = shared fetch chain;
+                     2 = TLS-impersonating fetch sidecar; 3 = stealth browser;
+                     ladder = the escalation ladder end to end;
                      scrape = the web_scrape tool's own path (adds robots + pacing).
   --concurrency N    Outbound fan-out, 1-16 (default 8).
   --out FILE         Write the full JSON report to FILE.
@@ -1155,7 +1166,7 @@ usage_evals() {
     if is_developer_clone; then
         cat <<EOF
 Usage: ${INVOKE} evals [--suites <dir>] [--responses <file>] [--baseline <file>] [--out <file>]
-       ${INVOKE} evals --capture <file> --agent <name> --suite <id> [--concurrency <n>]
+       ${INVOKE} evals --capture <file> --agent <name> --suite <id> [--local] [--concurrency <n>]
 
 Work with the eval dataset in evals/suites (JCLAW-875, JCLAW-883).
 
@@ -1183,7 +1194,7 @@ not recorded into the Chat Performance histograms.
 
 Tools DO execute for real, so use __evaltest__ — the eval sibling of
 __loadtest__, provisioned on first capture, for which every tool is opt-in.
-Grant it only what a suite needs in the agent editor; delete the agent to
+Capture grants it exactly the suite's requiredTools; delete the agent to
 clean up everything a sweep created.
 
 Options:
@@ -1351,7 +1362,7 @@ to install JClaw, then run ${INVOKE} start inside the unzipped tree.
 The resulting tarball is NOT self-contained: framework jar, framework
 lib, and Gradle-resolved app deps are excluded. Operators need a local
 Java 25 + Gradle + Play 1 fork install — the bundled \`${INVOKE} start\`
-delegates to \`play run\`, which uses the host's Gradle to assemble the
+delegates to \`play start\`, which uses the host's Gradle to assemble the
 runtime classpath. For a self-contained tarball that runs with only a
 JRE, see the Dockerfile (\`play bundle\` instead of \`play dist\`).
 
@@ -1754,7 +1765,8 @@ while [[ $# -gt 0 ]]; do
             # check_prereqs / git mid-execution.
             if ! is_developer_clone; then
                 echo "Error: '$1' is a developer-only command, not available in this distribution."
-                echo "       This install supports: https, no-https, secret, reset, start, stop, restart, status, logs, help."
+                echo "       This install supports: https, no-https, secret, reset, start, stop, restart, status, logs, upgrade,"
+                echo "       backup, restore, repair, compact, db-clean, db-status, completion, shim, uninstall, help."
                 exit 1
             fi
             COMMAND="$1"
@@ -1826,7 +1838,8 @@ fi
 # developer machine with the full source tree).
 if [[ "$DEV_MODE" == true ]] && ! is_developer_clone; then
     echo "Error: --dev is a developer-only flag, not available in this distribution."
-    echo "       This install supports the production commands: start, stop, restart, status, logs, https, no-https, secret."
+    echo "       This install supports the production commands: start, stop, restart, status, logs, https, no-https, secret,"
+    echo "       reset, upgrade, backup, restore, repair, compact, db-clean, db-status, completion, shim, uninstall."
     exit 1
 fi
 
@@ -1889,8 +1902,7 @@ fi
 
 # Read the packageManager pin from frontend/package.json. Echoes the raw
 # value (e.g. "pnpm@10.33.1+sha512.abc...") on stdout, or empty when the
-# field or file is absent. Used by both the setup-time pin migration and
-# the start-time validation guard.
+# field or file is absent. Used by validate_pnpm_pin.
 read_pnpm_pin() {
     local frontend_dir="$SCRIPT_DIR/frontend"
     [[ -f "$frontend_dir/package.json" ]] || return 0
@@ -1899,7 +1911,7 @@ read_pnpm_pin() {
 }
 
 
-# Start-time only: check the packageManager pin is intact and let pnpm resolve
+# Start, dist and bundle: check the packageManager pin is intact and let pnpm resolve
 # it. Read-only — never mutates package.json.
 #
 # Integrity moved rather than disappeared. Corepack verified the downloaded
@@ -1962,11 +1974,11 @@ ensure_pnpm_on_path_for_gradle() {
 }
 
 # Resolve the env-var name that backs `application.secret` in conf.
-# Mirrors framework/pym/play/utils.py:secretVarName so jclaw.sh and
+# Mirrors the fork's Play1Plugin.kt readSecretVarName so jclaw.sh and
 # `play secret` always agree on which variable to read/write — the
 # operator can rename `${APP_SECRET}` to anything in conf and this
-# helper picks it up automatically. Falls back to the framework's
-# DEFAULT_SECRET_VAR ("PLAY_SECRET") when conf is missing or the line
+# helper picks it up automatically. Falls back to
+# "PLAY_SECRET" when conf is missing or the line
 # uses an unparseable form, matching the framework's behaviour.
 secret_var_name() {
     local conf="$SCRIPT_DIR/conf/application.conf"
@@ -2073,9 +2085,9 @@ require_application_secret() {
 #   4. cert's public key matches the key file's public key — catches a
 #      half-rotated pair (cert regenerated, key stale, or vice versa).
 # Algorithm-agnostic via `openssl pkey -pubout`: works for both mkcert's
-# ECDSA P-256 default and the openssl-fallback RSA pair. Used by start
-# to gate the runtime -Dhttps.port=9443 override; conf has https.port
-# commented out, so a missing override = HTTPS off (HTTP-1.1 only on 9000).
+# pair and the openssl-fallback RSA pair. Used by start
+# to gate the runtime -Dhttps.port=9443 override; conf defaults https.port
+# to -1, so a missing override = HTTPS off (HTTP-1.1 only on 9000).
 certs_valid() {
     local cert_file="$SCRIPT_DIR/certs/host.cert"
     local key_file="$SCRIPT_DIR/certs/host.key"
@@ -2724,7 +2736,7 @@ check_prereqs() {
 }
 
 # SCRIPT_DIR is the canonical working directory — set at the top of the
-# script via realpath of $0, it points at wherever this jclaw.sh lives,
+# script from dirname of $0, it points at wherever this jclaw.sh lives,
 # which is also where the install (or developer clone) sits. The
 # working directory is always this script's own location.
 
@@ -2771,7 +2783,7 @@ do_setup() {
     if [[ ! -d "frontend" ]]; then
         echo "    Skipped: frontend/ directory not found."
     elif ! command -v pnpm &>/dev/null; then
-        echo "    Warning: pnpm not on PATH. Install with: npm install -g pnpm"
+        echo "    Warning: pnpm not on PATH. Install with: curl -fsSL https://get.pnpm.io/install.sh | sh -"
         echo "             Then re-run: ${INVOKE} setup"
     else
         (cd frontend && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install))
@@ -2897,10 +2909,9 @@ do_setup() {
 do_dist() {
     cd "$SCRIPT_DIR"
 
-    # Add a workspace-local pnpm shim to PATH so the play1 plugin's
+    # Put pnpm on PATH so the play1 plugin's
     # playDist task (which probes `pnpm --version` via Gradle's
-    # ExecOperations.exec) can find pnpm. The bash pnpm() shadow doesn't
-    # reach grandchild processes, so the shim is what crosses the boundary.
+    # ExecOperations.exec) can find pnpm; only PATH crosses into Gradle.
     ensure_pnpm_on_path_for_gradle
 
     # Resolve and validate the pnpm pin (hard-fail on a missing pin) before
@@ -2918,10 +2929,10 @@ do_dist() {
     # playDist task probes pnpm via ExecOperations.exec, which defaults to
     # the JVM's frozen-at-startup PATH — i.e. the daemon's environment. A
     # daemon started in an earlier shell (or in another concurrent Jenkins
-    # job on the same agent) wouldn't have our shim on PATH, so its pnpm
+    # job on the same agent) wouldn't have pnpm on PATH, so its pnpm
     # probe fails. -Dorg.gradle.daemon=false makes Gradle run in-process for
     # this single invocation; the in-process JVM inherits the calling shell's
-    # PATH directly, so the shim is visible.
+    # PATH directly, so pnpm is visible.
     #
     # Why not `gradlew --stop`: --stop is global — it kills every daemon in
     # the user's daemon registry regardless of project or version, which on
@@ -2930,8 +2941,7 @@ do_dist() {
     # and leaves other Gradle work untouched. Cost: ~5-10s extra cold-start
     # for play dist (acceptable; play dist isn't a hot-loop command).
     #
-    # Why GRADLE_OPTS rather than `--no-daemon`: the play wrapper invokes
-    # gradlew without forwarding arbitrary CLI flags, but POSIX env-var
+    # Why GRADLE_OPTS rather than `--no-daemon`: POSIX env-var
     # inheritance carries GRADLE_OPTS through cleanly. gradlew's launcher
     # appends GRADLE_OPTS to the JVM args (gradlew:242), so a -D system
     # property lands on Gradle's own properties parser.
@@ -2961,7 +2971,7 @@ do_dist() {
 do_bundle() {
     cd "$SCRIPT_DIR"
 
-    # Same Gradle-needs-pnpm-on-PATH + pin-hash plumbing as do_dist (see there
+    # Same Gradle-needs-pnpm-on-PATH + pin plumbing as do_dist (see there
     # for the rationale). play bundle (PlayBundleTask) is self-contained too —
     # playPrecompile + buildFrontendAndCopySpa + dep/framework resolution + zip
     # in one task — so, like do_dist, we don't pre-run any of it here.
@@ -3642,7 +3652,7 @@ do_start_prod() {
     # shell, generate one on the fly so end-users who skip the developer-
     # only `setup` command don't get blocked. Then source certs/.env into
     # the JVM env and validate. TLS cert generation is opt-in via
-    # `$0 cert` — start happily on plain HTTP/1.1 (port 9000) without it.
+    # `$0 https` — start happily on plain HTTP/1.1 (port 9000) without it.
     ensure_env_for_start
     load_env_file
     require_application_secret
@@ -3800,7 +3810,7 @@ do_start_prod() {
         # Dist install: precompiled/ and public/spa/ are baked into the
         # tarball by do_dist. Refuse to start if either is missing —
         # that means the dist was assembled wrong (or someone hand-
-        # edited it). The matching `play run -Dprecompiled=true` below
+        # edited it). The matching `play start -Dprecompiled=true` below
         # would otherwise produce Play's terse "Precompiled classes
         # are missing!!" with no hint at the operator-side cause.
         if [[ ! -f precompiled/classes.jar ]]; then
@@ -3869,7 +3879,7 @@ do_start_prod() {
     #   - GC log: rotated, time-stamped, very low overhead; invaluable for
     #     diagnosing GC-related latency spikes.
     # Play 1.x passes unrecognized args straight to the JVM (see
-    # framework/pym/play/application.py:java_cmd), so these become the
+    # the fork's `play` forward_args), so these become the
     # actual java command line — no -J prefix needed.
     #
     # JCLAW_JVM_OPTS is appended last; the JVM uses last-wins for value
@@ -3921,8 +3931,8 @@ do_start_prod() {
     fi
 
     # HTTPS toggle: enable the 9443 listener (HTTPS + h2 + h3) only when
-    # certs/host.{cert,key} pass strict validation (certs_valid). The
-    # commented `# https.port=9443` in application.conf means HTTPS is off
+    # certs/host.{cert,key} pass strict validation (certs_valid).
+    # application.conf's `https.port=${https.port:-1}` means HTTPS is off
     # without this -D — so absence of the flag = HTTP-1.1 only on 9000.
     # Placed after JCLAW_JVM_OPTS so an operator can still override the
     # port (e.g. JCLAW_JVM_OPTS='-Dhttps.port=8443') without losing the
@@ -3982,7 +3992,7 @@ do_start_prod() {
 }
 
 # JCLAW zombie-JVM sweep (2026-07-08 incident): a Play JVM whose server.pid
-# was removed (play stop deletes it immediately) but whose shutdown wedged
+# was removed but whose shutdown wedged
 # becomes invisible to the pidfile path AND to port checks once its HTTP
 # listener dies — it survived 11.5h of restarts, leaking a db-scheduler
 # generation per dev reload. Sweep by process signature instead: every Play
@@ -4037,29 +4047,27 @@ do_stop_prod() {
         return
     fi
     echo "==> Stopping Play backend (pid: $pid)..."
-    # `play stop` shells out to the gradle :playStop task, which waits a
-    # bounded ~10s for the JVM to exit and returns BUILD FAILED (non-zero)
-    # if it doesn't — e.g. when the shutdown hook deadlocks (the Play.stop
+    # `play stop` shells out to the gradle :playStop task, which waits up
+    # to 35 s for the JVM to exit, then returns either way
+    # — e.g. when the shutdown hook deadlocks (the Play.stop
     # ↔ ApplicationClassloader circular wait, triggered by an in-flight
     # Groovy 404 render holding the classloader monitor onApplicationStop
-    # needs). Under `set -e` that non-zero would abort this function before
+    # needs). Under `set -e` a non-zero exit would abort this function before
     # the wait-and-escalate loop below ever runs, leaving a half-dead JVM
     # and surfacing only a bare gradle stack trace. Swallow it: the SIGTERM
     # is delivered regardless, and the kill -0 loop below is our real exit
     # signal.
     play stop || true
 
-    # JCLAW-190: `play stop` (framework/pym/play/commands/daemon.py:84-86)
-    # signals the JVM with SIGTERM and immediately removes server.pid —
-    # it does NOT wait for the JVM to actually exit. The shutdown hook
+    # JCLAW-190: `play stop` (the fork's PlayStopTask) sends SIGTERM and
+    # waits at most 35 s, so a slow shutdown can outlive it. The shutdown hook
     # (ShutdownJob + Play plugins + Hikari close) keeps running for up
     # to Play's 30s scheduler-shutdown budget. If we return now, a
     # follow-up `play start` boots a new JVM that overlaps the old one
     # — both polling Telegram with the same bot token, 409 Conflict on
     # the new JVM's first getUpdates.
     #
-    # Polling on `[[ -f server.pid ]]` is therefore wrong (the file is
-    # gone within milliseconds of `play stop`). The only reliable
+    # Polling on `[[ -f server.pid ]]` is therefore wrong. The only reliable
     # liveness signal is `kill -0 $pid` — sends signal 0, which probes
     # the process without delivering a signal.
     #
@@ -4604,21 +4612,6 @@ if segs:
 
 # ─── Eval dataset (JCLAW-875) ───
 
-# Runs services.evals.EvalRunner over the suites in evals/.  Offline:
-# no backend, no model, no DB — so it can run on a laptop mid-edit and costs
-# nothing on the serving path.
-#
-# Invoked as a plain `java -cp`, not through `play`, because the eval classes
-# deliberately depend on nothing from the Play runtime; booting the framework
-# just to read JSON files would trade a 200 ms command for a multi-second one.
-# Drives a suite against a live agent via POST /api/evals/capture and writes the
-# recorded run to a file (JCLAW-883). Unlike the offline path below this needs the
-# running backend: capturing means real agent turns, which need JPA, a configured
-# provider and the tool registry. Scoring what it writes stays offline.
-#
-# Auth mirrors loadtest — loopback plus the X-Loadtest-Auth header carrying the
-# application secret — because it is the same trust boundary: an operator-run
-# harness on the local host with no plaintext admin credential to log in with.
 do_scrapetest() {
     local rung="1" concurrency="" out=""
     while [[ $# -gt 0 ]]; do
@@ -5143,6 +5136,21 @@ PYSUM
     return "$summary"
 }
 
+# Runs services.evals.EvalRunner over the suites in evals/.  Offline:
+# no backend, no model, no DB — so it can run on a laptop mid-edit and costs
+# nothing on the serving path.
+#
+# Invoked as a plain `java -cp`, not through `play`, because the eval classes
+# deliberately depend on nothing from the Play runtime; booting the framework
+# just to read JSON files would trade a 200 ms command for a multi-second one.
+# Drives a suite against a live agent via POST /api/evals/capture and writes the
+# recorded run to a file (JCLAW-883). Unlike the offline path below this needs the
+# running backend: capturing means real agent turns, which need JPA, a configured
+# provider and the tool registry. Scoring what it writes stays offline.
+#
+# Auth mirrors loadtest — loopback plus the X-Loadtest-Auth header carrying the
+# application secret — because it is the same trust boundary: an operator-run
+# harness on the local host with no plaintext admin credential to log in with.
 do_evals_capture() {
     local out="" agent="" suite="" concurrency="" local_suites=""
     local -a rest=()
@@ -5614,9 +5622,12 @@ do_completion() {
             setup         "One-time per-clone bootstrap"
             init-worktree "Per-worktree bootstrap"
             loadtest      "Run the load-test harness"
+            scrapetest    "Run the scrape corpus against one rung"
+            grapheval     "Certify graph-extraction decision models"
             evals         "Validate or score the eval dataset"
             diagnostics   "Report build and test failures as JSON"
             test          "Run backend + frontend tests"
+            e2e           "Run the Playwright end-to-end suite"
             dist          "Build the developer-distribution zip"
             bundle        "Build the self-contained bundle zip"
         )
@@ -5822,8 +5833,8 @@ EOF
     # whatever write_shim produces, and an installer-written shim would go stale.
     #
     # `bash -l <script> %*` rather than `bash -lc "... $@"`: passing the script
-    # directly sidesteps a second round of quote parsing, so `jclaw config set x
-    # "a b"` survives cmd -> bash intact. -l is required for play/java to be on
+    # directly sidesteps a second round of quote parsing, so `jclaw restore
+    # "a b.zip"` survives cmd -> bash intact. -l is required for play/java to be on
     # PATH. install.ps1 owns the one part bash cannot do — the Windows PATH entry.
     #
     # Written to the install root as well as the PATH directory. Same generator,
@@ -5957,7 +5968,7 @@ IZGsQ3joF/NEpzn/jTMzI+UT4r/btJ+LTsXpI+pHG+7Rl2VV2mI4dadqSg==
 # in the old tree that the release doesn't ship is carried over (see
 # merge_absent) — an inverted allowlist, so a runtime directory added in a
 # later version is preserved without anyone remembering to list it here.
-# These five are the inverse case: merging them would leave a deleted class on
+# These are the inverse case: merging them would leave a deleted class on
 # the classpath, two versions of a jar in lib/, or orphaned SPA chunks.
 UPGRADE_NO_MERGE="precompiled lib framework modules .classpath public/spa server.pid"
 

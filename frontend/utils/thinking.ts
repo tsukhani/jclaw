@@ -32,7 +32,7 @@ export interface ThinkingMessage {
  *
  * Prefers in-flight client capture over persisted backend timing. The two
  * measurements differ by ~network-latency + event-loop-jitter (backend timing
- * is purely JVM-side: first reasoning chunk → last reasoning chunk; client
+ * is purely JVM-side: first reasoning → first content chunk; client
  * timing spans first reasoning SSE event → first content SSE event, so it
  * includes transit). Once the user has seen a duration stamp mid-stream, we
  * don't want the final `usage` frame to retroactively revise the number they

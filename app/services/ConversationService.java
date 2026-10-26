@@ -32,8 +32,8 @@ public class ConversationService {
      * Message persisted via {@link #appendMessage} on the current (virtual)
      * thread is stamped with this id so the chat UI can fold the nested-turn
      * trace into a collapsible block. Set by
-     * {@link tools.SubagentSpawnTool} around its inline branch's
-     * {@code AgentRunner.run} call; cleared in a finally so unrelated traffic
+     * {@code SubagentAcpRunner} around its inline branch's
+     * {@code AgentRunner} call; cleared in a finally so unrelated traffic
      * on the same carrier thread never inherits a stale marker.
      *
      * <p>Plain {@link ThreadLocal} (not {@link ScopedValue}) so virtual threads
@@ -75,15 +75,14 @@ public class ConversationService {
      * Chat-type-aware {@link #findOrCreate}. When a new row is created, its
      * {@link Conversation#chatType} is set to {@code chatType} (when non-null);
      * an existing row is returned unchanged — chat type is stamped once at
-     * creation, never overwritten on subsequent turns. Only the Telegram ingress
-     * paths pass a real value; every other caller delegates with {@code null}
+     * creation, never overwritten on subsequent turns. Telegram and WhatsApp
+     * ingress pass a real value; every other caller delegates with {@code null}
      * via the 3-arg overload, leaving chatType null and behavior unchanged.
      *
      * @param agent       the owning agent
      * @param channelType the channel identifier
      * @param peerId      the channel-specific peer key
-     * @param chatType    Telegram {@code chat.type}, or null for non-Telegram /
-     *                    unknown
+     * @param chatType    the channel's chat type, or null when it has none
      * @return the existing or newly-created conversation
      */
     public static Conversation findOrCreate(Agent agent, String channelType, String peerId, @Nullable String chatType) {
@@ -96,8 +95,7 @@ public class ConversationService {
      * Read-only counterpart to {@link #findOrCreate}: return the existing
      * conversation for this {@code (agent, channelType, peerId)}, or
      * {@code null} when none exists yet. Lets callers detect first contact
-     * (no row) without creating one — used by the Telegram {@code /start}
-     * welcome (JCLAW-97).
+     * (no row) without creating one.
      */
     public static Conversation find(Agent agent, String channelType, String peerId) {
         return Conversation.findByAgentChannelPeer(agent, channelType, peerId);
@@ -250,13 +248,13 @@ public class ConversationService {
 
     /**
      * Chat-type-aware {@link #create}. Sets {@link Conversation#chatType} only
-     * when {@code chatType} is non-null, so non-Telegram channels and callers
+     * when {@code chatType} is non-null, so callers
      * without a chat type leave the column null.
      *
      * @param agent       the owning agent
      * @param channelType the channel identifier
      * @param peerId      the channel-specific peer key
-     * @param chatType    Telegram {@code chat.type}, or null
+     * @param chatType    the channel's chat type, or null
      * @return the newly-created conversation
      */
     public static Conversation create(@Nullable Agent agent, String channelType, @Nullable String peerId, @Nullable String chatType) {

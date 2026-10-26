@@ -166,12 +166,9 @@ class TaskFireOriginTrustTest extends FunctionalTest {
     }
 
     // ── The fire origin is a FLOOR, not a fallback ──────────────────────
-    //    agent_spawn resolves the child's conversation by recency
-    //    (Conversation.find("agent = ?1 ORDER BY updatedAt DESC")), so a child born
-    //    inside an untrusted fire routinely lands on the operator's own web row — whose
-    //    channelType the child conversation then inherits. The child's loop passes that
-    //    REAL conversation id, and honoring it outright hands the fire back the trust it
-    //    was just denied.
+    //    subagent_spawn's child inherits the fire's origin, but the guard may still be
+    //    passed a web conversation id, and honoring it outright hands the fire back the
+    //    trust it was just denied.
 
     @Test
     void aSpawnedChildsWebConversationCannotRaiseTrustAboveTheFire() {

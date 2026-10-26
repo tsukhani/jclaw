@@ -43,8 +43,8 @@ import static controllers.AgentAccess.Level.OPERATOR_ONLY;
  * against the {@code X-Telegram-Bot-Api-Secret-Token} header registered with
  * setWebhook. JCLAW-784 (VULN-011) dropped the secret from the URL path — a path
  * segment leaks into proxy / access logs and browser history, and the header
- * already proves possession. Unknown or disabled bindings get dropped at 404/403
- * rather than being silently accepted.
+ * already proves possession. An unknown binding gets 404; a disabled one is acked
+ * with 200 and dropped.
  */
 public class WebhookTelegramController extends Controller {
 

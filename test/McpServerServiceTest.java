@@ -28,7 +28,7 @@ import java.util.concurrent.TimeUnit;
  * lock across the handshake caused {@code LockTimeoutException} storms when
  * toggling servers on. The connect outcome (CONNECTED / ERROR) is observed
  * asynchronously by polling, exactly as the admin UI does via
- * {@code pollUntilStable}. (Was JCLAW-288's synchronous-await contract;
+ * {@code useMcpStatusWatcher}. (Was JCLAW-288's synchronous-await contract;
  * reverted to fire-and-forget.)
  *
  * <p>The disable path stays synchronous teardown.

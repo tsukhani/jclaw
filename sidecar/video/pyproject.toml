@@ -1,7 +1,7 @@
 [project]
 name = "jclaw-video-sidecar"
 version = "0.2.0"
-description = "Local video-generation sidecar for jclaw — LTX-2.3/MLX on Apple Silicon, WAN/LTX-Video diffusers on CUDA (JCLAW-232/233)"
+description = "Local video-generation sidecar for jclaw — LTX-2.3/MLX on Apple Silicon, LTX-2.3 + WAN on CUDA (JCLAW-232/233)"
 requires-python = ">=3.11"
 # Dual runtime, split by platform so the MLX and diffusers stacks NEVER share a venv (they pin
 # incompatible transformers versions). serve.py branches on the same platform check.
@@ -11,7 +11,7 @@ dependencies = [
     "imageio[ffmpeg]>=2.34",
     "pillow>=10.0",
 
-    # Apple Silicon — MLX LTX-2.3 int4 (JCLAW-233): faster, higher quality, generates audio. Pulls mlx +
+    # Apple Silicon — MLX LTX-2.3 (JCLAW-233): faster, higher quality, generates audio. Pulls mlx +
     # ltx-core-mlx + transformers (5.x) transitively. No torch/diffusers on this platform.
     "ltx-pipelines-mlx ; sys_platform == 'darwin'",
 

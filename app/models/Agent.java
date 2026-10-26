@@ -119,7 +119,7 @@ public class Agent extends TimestampedModel {
      * the main agent always has it ({@link #isMain()} short-circuits the gate),
      * every other agent is denied unless an operator explicitly grants it.
      * {@code @ColumnDefault} keeps the ALTER safe on a populated table — existing
-     * rows default to false. See {@code tools.SubagentSpawnTool#acpRuntimeError}.
+     * rows default to false. See {@code tools.SubagentAcpRunner#acpRuntimeError}.
      */
     @Column(name = "acp_allowed", nullable = false)
     @ColumnDefault("false")

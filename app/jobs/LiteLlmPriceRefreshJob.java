@@ -6,7 +6,7 @@ import services.PricingRefreshService;
 
 /**
  * Nightly refresh of model pricing data from LiteLLM's community manifest
- * (JCLAW-28 follow-up). Schedule fires at 03:00 UTC; the off-peak window
+ * (JCLAW-28 follow-up). Fires at 03:00 server time; the off-peak window
  * keeps the GitHub fetch out of operator-active hours and avoids any
  * possible thundering-herd effect on the LiteLLM repo.
  *

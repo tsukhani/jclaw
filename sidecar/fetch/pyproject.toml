@@ -7,7 +7,7 @@ requires-python = ">=3.10"
 # ClientHello and HTTP/2 SETTINGS frame. That is the whole reason this process
 # exists: both fingerprints are emitted before our request is sent, and JSSE
 # cannot be configured to forge either. Nothing else is needed — the server is
-# stdlib http.server, matching the other five sidecars.
+# stdlib http.server, matching the other six sidecars.
 dependencies = [
     "curl_cffi>=0.13",
     # curl_cffi's built-in CA store rejects chains the JVM and openssl both accept

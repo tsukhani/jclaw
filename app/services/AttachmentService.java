@@ -97,7 +97,7 @@ public final class AttachmentService {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to inspect staged attachment: " + e.getMessage(), e);
         }
-        // WebM/Matroska disambiguation, shared with ApiChatController.sniffMime
+        // WebM/Matroska disambiguation, shared with UploadStaging.sniffMime
         // (JCLAW-165 follow-up + JCLAW-560): Tika sniffs every such container
         // as video/* regardless of track content. The upload's classification
         // (carried in input.mimeType) is the fast-path hint; without it the
@@ -261,7 +261,7 @@ public final class AttachmentService {
     /**
      * Read a finalized attachment's bytes and encode them as a
      * {@code data:<mime>;base64,<bytes>} URL suitable for the OpenAI
-     * {@code image_url.url} content part. Used by {@code AgentRunner} when
+     * {@code image_url.url} content part. Used by {@code VisionAudioAssembler} when
      * assembling the LLM request for a vision-capable model.
      */
     public static String readAsDataUrl(MessageAttachment att) {
@@ -270,16 +270,15 @@ public final class AttachmentService {
 
     /**
      * Read a finalized attachment's bytes and encode them as bare base64.
-     * Used for the OpenAI {@code input_audio.data} content part (JCLAW-132),
-     * which takes raw base64 without the {@code data:...} URL prefix.
+     * Used by {@link #readAsDataUrl}.
      */
     public static String readAsBase64(MessageAttachment att) {
         return Base64.getEncoder().encodeToString(readBytes(att));
     }
 
     /**
-     * Read a finalized attachment's raw bytes from disk. Used by the image
-     * captioner (JCLAW-213), which decodes them into a {@code BufferedImage}.
+     * Read a finalized attachment's raw bytes from disk. Used by
+     * {@code GenerateImageTool} to send a source image.
      */
     public static byte[] readBytes(MessageAttachment att) {
         var path = resolveOnDisk(att);
@@ -311,7 +310,7 @@ public final class AttachmentService {
     /**
      * JCLAW-209: reclaim a conversation's attachment bytes from the workspace. Every attachment in a
      * conversation is stored under one directory ({@code {agent}/attachments/{conversationId}/}), so a
-     * recursive sweep of that directory frees them all at once. Called by {@code ConversationService}
+     * recursive sweep of that directory frees them all at once. Called by {@code ConversationDeletionCascade}
      * before the row cascade so deleting a conversation doesn't orphan its files on disk. Best-effort —
      * a missing directory (no attachments were ever written) is a quiet no-op.
      */
@@ -414,9 +413,7 @@ public final class AttachmentService {
     }
 
     /**
-     * Assert every input has an IMAGE kind. Used by the controller vision
-     * gate — rejects a send that carries any image attachments when the
-     * selected model does not declare {@code supportsVision}.
+     * Whether any input has an IMAGE kind.
      */
     public static boolean anyImage(List<Input> inputs) {
         if (inputs == null) return false;

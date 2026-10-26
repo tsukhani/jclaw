@@ -92,7 +92,7 @@ class MemoryVectorSettingsTest extends UnitTest {
                 "a model exactly at the limit must remain usable");
         assertFalse(MemoryVectorSettings.dimensionsSupported(max + 1, false));
         // text-embedding-3-small is this class's own default model and is 1536-dim,
-        // so on lucene-core 10.5.0 (limit 1024) the default is unusable on the default
+        // so on lucene-core 10.5.2 (limit 1024) the default is unusable on the default
         // backend — the case that makes this guard worth having.
         assertFalse(MemoryVectorSettings.dimensionsSupported(1536, false),
                 "1536 exceeds the Lucene limit; accepting it would silently drop documents");

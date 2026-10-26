@@ -18,7 +18,7 @@
  *    for http(s); images are left untouched.
  *
  * Extracted from `chat.vue` so the behavior is unit-testable outside a
- * component mount; the component re-exports it via its normal import path.
+ * component mount.
  */
 
 /**

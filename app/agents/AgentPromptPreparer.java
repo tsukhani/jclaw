@@ -136,9 +136,8 @@ final class AgentPromptPreparer {
             }
             var fallback = ModelResolver.fallbackFor(agent, conv);
 
-            // Conversation-aware overload: lazy-load MCP tool schemas
-            // based on which servers the model has discovered via
-            // list_mcp_tools. Native tools always ship.
+            // Conversation-aware overload: native tools and each MCP
+            // server's handle always ship.
             var tools = TaskToolPolicy.restrictSubagent(
                     ToolRegistry.getToolDefsForAgent(agent, conv), conv.enabledToolNames, agent.name);
 
@@ -166,7 +165,7 @@ final class AgentPromptPreparer {
         // fails.
         // JCLAW-465: content-aware compression of TOOL-role outputs, before
         // compaction so the budget check sees the smaller payload. No-op
-        // unless chat.compression.enabled=true. When compaction fires it
+        // unless the agent's compression is on. When compaction fires it
         // rebuilds from originals; trimToContextWindow below stays the net.
         var compressedMessages = CompressionPipeline.compress(
                 ToolResultPruner.prune(prepared.messages(), agent, conversation), agent, conversation);
@@ -198,7 +197,7 @@ final class AgentPromptPreparer {
         // multi-image / text-summary) and splice the content parts in. supportsVision/Audio
         // are threaded so a co-attached downgraded image / voice note survives the rebuild.
         finalMessages = VisionAudioAssembler.applyVideoForCapability(finalMessages, hydration.videoBearers(), agent, supportsAudioForCall, supportsVisionForCall);
-        // Clock rides the last user message rather than the system prompt (see
+        // Clock rides a trailing message rather than the system prompt (see
         // CurrentTimeInjector). Must mirror applyMediaRewrite's placement: last,
         // after compaction/trim/media, since each of those rebuilds the list.
         finalMessages = CurrentTimeInjector.inject(finalMessages, CheckListTool.reminder(conversation, finalMessages));
@@ -222,7 +221,7 @@ final class AgentPromptPreparer {
      */
     static PreparedPrologue buildStreamingPrologue(Agent agent, Conversation conversation,
                                                    String channelType, String userMessage) {
-        // JCLAW-960: BEFORE the Tx — see the sibling call in buildPrologue.
+        // JCLAW-960: BEFORE the Tx — see the sibling call in prepareSyncData.
         long embedStartNs = System.nanoTime();
         var queryEmbedding = MemoryStoreFactory.get().embedQuery(userMessage);
         LatencyTrace.recordQueryEmbed((System.nanoTime() - embedStartNs) / 1_000_000L);
@@ -241,8 +240,7 @@ final class AgentPromptPreparer {
             sysPrompt = SessionCompactor.appendParentContextToPrompt(sysPrompt, convo);
             var hydration = MessageHydrator.buildMessages(sysPrompt, convo);
             // Conversation-aware overload: applies the loadtest-agent
-            // short-circuit AND the lazy MCP discovery gate (only ship
-            // schemas for servers the model has called list_mcp_tools on).
+            // short-circuit.
             var toolDefs = TaskToolPolicy.restrictSubagent(
                     ToolRegistry.getToolDefsForAgent(agent, convo), convo.enabledToolNames, agent.name);
             return new PreparedPrologue(assembled0, hydration.messages(), toolDefs, disabledTools,
@@ -289,7 +287,7 @@ final class AgentPromptPreparer {
         // JCLAW-224: route video attachments through the dispatcher on the streaming path too.
         var finalMessages = VisionAudioAssembler.applyVideoForCapability(captioned, hydration.videoBearers(), agent,
                 supportsAudioForStream, supportsVisionForStream);
-        // The clock rides the last user message instead of the system prompt so
+        // The clock rides a trailing message instead of the system prompt so
         // the cacheable prefix — and the whole history sitting behind it — stays
         // byte-stable across turns. Injected last, after compaction/trim/media
         // rewrites, so nothing downstream rebuilds the list and drops it.

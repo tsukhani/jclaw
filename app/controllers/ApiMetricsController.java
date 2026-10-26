@@ -43,7 +43,7 @@ import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
 
 /**
- * Runtime observability endpoints. In-memory only — histograms reset
+ * Runtime observability endpoints. The live histograms reset
  * on JVM restart or via {@link #resetLatency()}. Includes an auth-gated
  * load-test harness that uses an in-process mock LLM provider.
  *
@@ -521,10 +521,7 @@ public class ApiMetricsController extends Controller {
      *
      * <p>{@code compress=true} adds {@code Accept-Encoding: br, gzip} to each
      * harness request so the pipeline's {@link io.netty.handler.codec.http.HttpContentCompressor}
-     * (when wired) actually engages on the response. Without it, Java's
-     * {@code HttpClient} sends no Accept-Encoding and the compressor passes
-     * traffic through as identity — so loadtest results reflect the controller
-     * hot path, not the encoding path.
+     * (when wired) actually engages on the response.
      *
      * <p>Returns the aggregate counts + wall-clock. Use GET
      * /api/metrics/latency afterwards for per-segment histograms.

@@ -15,8 +15,8 @@ import java.util.List;
  * <p>This class is the single point that reverses that encoding:
  * <ul>
  *   <li>{@link #parse(String)} turns a stored {@code description} back into
- *       its ordered steps. The fire path and the admin UI (JCLAW-22) both
- *       go through here, so they agree on what "the steps" are.</li>
+ *       its ordered steps. The fire path goes through here; the Tasks page's
+ *       {@code parseTaskSteps} is its twin.</li>
  *   <li>{@link #flattenForPrompt(String)} renders the steps into the single
  *       string injected into the agent prompt at fire time — a numbered list
  *       for multi-step tasks, verbatim for the single-step case.</li>

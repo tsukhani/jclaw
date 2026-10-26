@@ -58,7 +58,7 @@ public class FullTextSearchInitJob extends Job<Void> {
             MessageSearch.init();
         } catch (Exception e) {
             // Don't crash the JVM: the facade returns List.of() pre-init, so searches come back empty
-            // until an operator re-runs init from the admin path; the error surfaces in Recent Activity.
+            // until the next start re-runs init; the error surfaces in Recent Activity.
             EventLogger.error("search", null, null,
                     "FullTextSearchInitJob: init failed (%s) — searches will return empty until repaired"
                             .formatted(e.getMessage()));

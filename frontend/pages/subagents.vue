@@ -361,7 +361,7 @@ const hasNoData = computed(() => !loading.value && total.value === 0 && !hasActi
 /**
  * Wipe every terminal run matching the active filter (or the whole table when
  * unfiltered). Separate destructive surface from "Delete N": filter-scoped,
- * so it reaches rows beyond the 200-row page cap, and gated behind a typed
+ * so it reaches rows beyond the current page, and gated behind a typed
  * 'delete' confirmation because the blast radius is the full matching set.
  */
 async function deleteAll() {

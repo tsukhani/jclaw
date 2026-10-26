@@ -12,7 +12,7 @@
 """MERaLiON-3-ASR worker for the jclaw ASR sidecar (SEA-tuned speech LLM).
 
 Produces a PLAIN transcript — no timestamps. Whisper emits segment times
-natively; MERaLiON doesn't, so the diarization path pairs this with align.py
+natively; MERaLiON doesn't, so serve.py pairs this with align.py
 (forced alignment) to recover segment times. Runs in its OWN uv script env
 (transformers==4.50.1 — a tight pin the model requires), isolated from the
 whisper worker's env.

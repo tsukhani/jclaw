@@ -9,8 +9,8 @@
 """Pyannote diarization worker (JCLAW-565 revival). Speaker turns only — no
 transcription, no emotion.
 
-Runs in its OWN uv script env (torch + pyannote, numpy>=2), shelled from
-serve.py per /diarize call — isolated from the ASR sidecar's env.
+Runs in its OWN uv script env (torch + pyannote, numpy>=2), run as
+serve.py's persistent worker — isolated from the ASR sidecar's env.
 
 usage (one-shot): uv run diarize.py <audio> [num_speakers]
 usage (worker):   uv run diarize.py --worker

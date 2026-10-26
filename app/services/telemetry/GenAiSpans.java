@@ -26,8 +26,8 @@ import java.util.Locale;
 
 /**
  * One CLIENT span and the {@code gen_ai.client.*} metrics per model call, following the
- * GenAI semantic conventions (JCLAW-34). Opened at the two {@code LlmProvider} dispatch
- * points — the same two places JCLAW-882 put the call counter, for the same reason: a
+ * GenAI semantic conventions (JCLAW-34). Opened at {@code LlmProvider}'s dispatch
+ * points — chat's two are where JCLAW-882 put the call counter, for the same reason: a
  * span anywhere else would be one more site a later caller could miss.
  *
  * <p>Prompt and completion text are deliberately not recorded: the convention marks them

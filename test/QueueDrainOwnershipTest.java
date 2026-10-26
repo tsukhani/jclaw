@@ -8,8 +8,7 @@ import services.ConversationQueue.QueuedMessage;
 
 /**
  * Characterization tests for the JCLAW-117 queue-ownership transfer
- * contract that {@code AgentRunner.processQueueDrain} relies on, ahead
- * of the JCLAW-299 refactor that extracts {@code QueueDrainOrchestrator}.
+ * contract that {@code QueueDrainOrchestrator.processQueueDrain} relies on.
  *
  * <p>The contract is subtle: {@code drain()} sometimes releases ownership
  * (when pending is empty) and sometimes transfers it to the caller (when

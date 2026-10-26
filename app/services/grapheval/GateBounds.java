@@ -2,7 +2,7 @@ package services.grapheval;
 
 import java.util.List;
 
-/** Every bound the certifier reads. The placeholder pools records; a memory-clustered one replaces it later. */
+/** Every bound the certifier reads. RecordBounds pools records; MemoryBounds clusters them by memory. */
 public interface GateBounds {
     /**
      * One memory's counts for one gate at one threshold. written leaves noise out, as today; wrong counts its unmatched

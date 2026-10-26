@@ -5,9 +5,8 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Resolves the outbound {@link Channel} for a {@link WhatsAppBinding} by its
- * transport (JCLAW-446). Centralizes the one transport switch so both call sites —
- * {@link ChannelRegistry} (agent-initiated dispatch) and {@link WhatsAppInbound}
- * (reply sink) — share it rather than each branching, and so the WhatsApp-Web arm
+ * transport (JCLAW-446). Centralizes the one transport switch so every caller
+ * shares it rather than each branching, and so the WhatsApp-Web arm
  * is filled in exactly one place (JCLAW-450).
  */
 public final class WhatsAppChannelFactory {

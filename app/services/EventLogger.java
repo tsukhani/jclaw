@@ -69,7 +69,7 @@ public class EventLogger {
     private static final CopyOnWriteArraySet<Listener> LISTENERS = new CopyOnWriteArraySet<>();
     private static final int BATCH_SIZE = 20;
 
-    /** Set at the start of graceful shutdown (by the @OnApplicationStop hooks).
+    /** Set at the start of graceful shutdown (by {@code ShutdownJob}).
      *  Once true, EventLogger logs to the file only and skips DB persistence:
      *  H2's own exit hook may already have closed the database, so a batched
      *  flush would fail to begin a transaction and emit a "Failed to flush N
@@ -77,13 +77,13 @@ public class EventLogger {
      *  File logging — the actual shutdown observability — is unaffected. */
     private static final AtomicBoolean shuttingDown = new AtomicBoolean(false);
 
-    /** Marks shutdown started — called first by every @OnApplicationStop hook,
+    /** Marks shutdown started — called first by {@code ShutdownJob},
      *  before any subsystem teardown, so EventLogger goes file-only and the
-     *  shutdown logging doesn't trip the batch flush. The first caller (any
-     *  hook; Play doesn't order them) also logs the "Shutting down JClaw"
+     *  shutdown logging doesn't trip the batch flush. The first call
+     *  also logs the "Shutting down JClaw"
      *  banner: the symmetric counterpart to Play's "Application 'JClaw' is now
      *  started !" and the opening bookend to "Graceful shutdown complete". The
-     *  compareAndSet keeps the banner to exactly one line even if two hooks
+     *  compareAndSet keeps the banner to exactly one line even if two calls
      *  race. */
     public static void markShuttingDown() {
         // Flush the pending tail to the DB BEFORE flipping the flag: once
@@ -205,8 +205,8 @@ public class EventLogger {
             for (var l : LISTENERS) if (l.match.test(captured)) l.seen.add(captured);
         }
 
-        // During graceful shutdown stay file-only: the JPA layer is closing, so
-        // queuing for DB persistence is pointless and would trip the batch flush
+        // During graceful shutdown stay file-only: H2 may have closed the database, so
+        // queuing for it is pointless and would trip the batch flush
         // into a doomed "begin transaction failed". The file line above is what
         // shutdown observability needs.
         if (shuttingDown.get()) return;

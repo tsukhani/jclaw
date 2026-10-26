@@ -61,8 +61,8 @@ public record EvalCheck(Kind kind, List<String> args, @Nullable JsonObject schem
          * fail, and so does a repeat beyond the listed count.
          *
          * <p>This is how a case spells "or". The clock is the motivating example:
-         * {@code CurrentTimeInjector} stamps the current time onto the last user
-         * message, so an agent that answers "what time is it?" with no tool call is
+         * {@code CurrentTimeInjector} appends the current time to every turn,
+         * so an agent that answers "what time is it?" with no tool call is
          * behaving correctly, and so is one that calls {@code datetime} once —
          * {@code tools_called_within: [datetime]} accepts both while still rejecting
          * a web search or a second clock call. Use {@link #TOOLS_CALLED_EXACTLY}
@@ -137,7 +137,7 @@ public record EvalCheck(Kind kind, List<String> args, @Nullable JsonObject schem
         return new EvalCheck(Kind.MAX_LLM_CALLS, List.of(), null, limit);
     }
 
-    /** The single argument of a one-arg kind (today only {@code matches}). */
+    /** The first argument: the regex, or the tool a tool kind names. */
     public String arg() {
         return args.getFirst();
     }

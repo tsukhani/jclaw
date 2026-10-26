@@ -83,8 +83,8 @@ public class ApiVideogenController extends Controller {
      *
      *  <p>No owner-scoping: JClaw is single-operator — there is no {@code User} entity or
      *  owner FK (see {@code ApiToken}/{@code AuthCheck}), so the {@code AuthCheck}-gated operator owns
-     *  every job. This mirrors {@code ApiConversationsController} / {@code ApiAttachmentsController},
-     *  which likewise serve rows by id/uuid to the one authenticated operator. */
+     *  every job. This mirrors {@code ApiAttachmentsController},
+     *  which likewise serves rows by uuid to the one authenticated operator. */
     @Operation(summary = "Status of video-generation jobs by id (chat progress polling)")
     @AgentAccess(OPEN)
     public static void jobs(String ids) {

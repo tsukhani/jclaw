@@ -118,14 +118,11 @@ public final class McpServerService {
             // watchdog; the DB column lags behind by however long the
             // background persistStatus call takes to commit. For rows with
             // no in-memory entry (disabled or never connected), the manager
-            // returns DISCONNECTED naturally. The persisted column remains
-            // useful for post-restart display before the connector reports.
+            // returns DISCONNECTED naturally.
             var liveStatus = McpConnectionManager.status(row.name).name();
-            // JCLAW-288: same live-preferred read for lastError so admin
-            // endpoints that just blocked on the first connect attempt
-            // (syncRuntime → connectAndAwait) see the error reason on the
-            // same response. Fall back to the persisted column when the
-            // manager has no entry (e.g. disabled rows after restart).
+            // JCLAW-288: same live-preferred read for lastError. Fall back to
+            // the persisted column when the manager has no entry (e.g.
+            // disabled rows after restart).
             var liveLastError = McpConnectionManager.lastError(row.name);
             var effectiveLastError = liveLastError != null ? liveLastError : row.lastError;
             return new View(
@@ -334,7 +331,7 @@ public final class McpServerService {
      * toggle) collide with it and time out against H2's 2 s lock timeout
      * ({@code LockTimeoutException}). Returning now lets the request
      * transaction commit in milliseconds. The admin UI polls the list while
-     * any row is {@code CONNECTING} ({@code pollUntilStable} in
+     * any row is {@code CONNECTING} ({@code useMcpStatusWatcher} in
      * {@code mcp-servers.vue}), so the badge still ticks over to {@code
      * CONNECTED}/{@code ERROR} with no synchronous wait. (This reverts
      * JCLAW-288's synchronous-await contract, which was the cause of the lock
@@ -342,9 +339,7 @@ public final class McpServerService {
      * {@link McpConnectionManager#startAll}, where no request tx is in play.)
      *
      * <p>For the disable path we also reset the row's persisted status to
-     * {@code DISCONNECTED}. The {@link McpConnectionManager#status} call
-     * site reads {@code McpServer.status} (the DB column), but
-     * {@link McpConnectionManager#stop} only mutates the in-memory map —
+     * {@code DISCONNECTED}. {@link McpConnectionManager#stop} only mutates the in-memory map —
      * without this explicit reset, a server toggled off would keep
      * surfacing whatever status its last connect persisted.
      */

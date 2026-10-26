@@ -5,7 +5,7 @@ import org.jspecify.annotations.Nullable;
 import java.lang.management.ManagementFactory;
 
 /**
- * Point-in-time JVM runtime state for the Settings → Maintenance panel (JCLAW-1057).
+ * Point-in-time JVM runtime state for the Settings → Performance panel (JCLAW-1057).
  *
  * <p>Memory is reported as three separate figures because collapsing them is how a
  * healthy JVM gets read as a sick one: the heap is what the JVM allocates inside its

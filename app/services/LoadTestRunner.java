@@ -45,8 +45,8 @@ import java.util.function.IntFunction;
  * provider HTTP client → SSE response → persist) so the LatencyTrace histograms
  * populate with realistic numbers, including {@code queue_wait}.
  *
- * <p>Uses a local {@link LoadTestHarness} mock provider so no external LLM is
- * called. Auth-gated at the controller layer.
+ * <p>Uses a local {@link LoadTestHarness} mock provider unless
+ * {@code realProvider} is set. Auth-gated at the controller layer.
  */
 public final class LoadTestRunner {
 
@@ -113,8 +113,8 @@ public final class LoadTestRunner {
      * @param concurrency  number of parallel virtual workers
      * @param turns        number of turns each worker runs in its
      *                     conversation
-     * @param compress     when true, force-compaction is invoked between
-     *                     turns to exercise the compaction path
+     * @param compress     when true, requests carry
+     *                     {@code Accept-Encoding: br, gzip}
      * @param scenario     mock-endpoint timing scenario (ignored when
      *                     {@code realProvider} is true)
      * @param realProvider when true, the run hits the configured real

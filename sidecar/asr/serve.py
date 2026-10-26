@@ -5,8 +5,8 @@ A long-running localhost HTTP daemon, launched on demand by the jclaw JVM
 (AsrSidecarManager) and hosting a persistent GPU whisper worker
 (transcribe.py --worker: mlx-whisper on Apple silicon, faster-whisper on
 CUDA/CPU). Local speaker diarization was removed in JCLAW-654 after the
-measured tier comparison — speaker attribution now runs through an
-audio-capable cloud chat model (the diarize_audio tool); this daemon's job
+measured tier comparison — speaker attribution runs through the
+diarize_audio tool (a cloud audio model or sidecar/diarize); this daemon's job
 is plain transcription and ASR model management for the Settings page.
 
 Protocol (--host defaults to 127.0.0.1; the server binds what it is given):

@@ -61,7 +61,7 @@ public final class ScheduleShorthandParser {
     private ScheduleShorthandParser() {}
 
     /**
-     * Bundle returned to callers — exactly the four fields the Task
+     * Bundle returned to callers — exactly the five fields the Task
      * entity stores for scheduling.
      *
      * @param type            resolved {@link Task.Type} (IMMEDIATE,

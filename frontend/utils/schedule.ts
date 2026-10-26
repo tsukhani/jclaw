@@ -54,7 +54,7 @@ export function humanDuration(secs: number): string {
 
 /**
  * Recognize common cron patterns and return a natural-language equivalent.
- * Returns null for patterns we don't know — caller falls back to the
+ * Returns null for an invalid expression — caller falls back to the
  * server's scheduleDisplay so the operator at least sees their raw input.
  */
 export function humanCron(expr: string): string | null {

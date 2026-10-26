@@ -29,9 +29,8 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Web search tool supporting multiple providers: Exa, Brave, and Tavily.
- * Uses the first enabled provider with a configured API key, or a user-specified
- * provider. All provider config (enabled flag, base URL, API key) lives in the
+ * Web search tool supporting the providers in {@link #PROVIDERS}. Tries each
+ * enabled provider with a configured API key in priority order. All provider config (enabled flag, base URL, API key) lives in the
  * Config DB under {@code search.{id}.*} and is seeded by {@code DefaultConfigJob}.
  * A provider is skipped when {@code search.{id}.enabled} is {@code false} or its
  * API key is blank.
@@ -113,7 +112,7 @@ public class WebSearchTool implements ToolRegistry.Tool {
     @Override
     public List<ToolAction> actions() {
         return List.of(
-                new ToolAction(ACTION_SEARCH, "Execute a web search; provider is auto-selected or can be specified explicitly")
+                new ToolAction(ACTION_SEARCH, "Execute a web search; provider is auto-selected by configured priority")
         );
     }
 

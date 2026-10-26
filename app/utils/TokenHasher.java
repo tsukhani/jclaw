@@ -17,8 +17,7 @@ import java.util.HexFormat;
  * {@code jcl_} so operators and secret scanners can recognize a leaked
  * token at a glance. The on-disk representation is the SHA-256 hex of
  * the full token string; the database stores the hash, the plaintext
- * sits in a JClaw-internal config row that's filtered from every
- * HTTP-visible surface.
+ * exists only in the running process.
  *
  * <p>Why SHA-256 (not PBKDF2 like {@link PasswordHasher}): the token
  * carries ~256 bits of entropy from a CSPRNG, so the brute-force cost
@@ -36,9 +35,7 @@ public final class TokenHasher {
 
     private TokenHasher() {}
 
-    /** Mint a new plaintext token. Caller must persist this exactly
-     *  once (the {@code auth.internal.apiToken} config row) and discard
-     *  the in-memory copy after use — the database only ever sees
+    /** Mint a new plaintext token; the database only ever sees
      *  {@link #hash}. */
     public static @NonNull String mint() {
         var bytes = new byte[RANDOM_BYTES];

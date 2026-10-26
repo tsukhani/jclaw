@@ -12,8 +12,8 @@ const replicateApiKeyConfigured = computed(() => apiKeyConfigured('replicate'))
 const bflApiKeyConfigured = computed(() => apiKeyConfigured('bfl'))
 
 // Cloud video generation via Replicate (JCLAW-231/235). Mirrors Image Generation: a non-empty
-// videogen.provider IS the "enabled" state. Replicate is the only cloud backend today (the second
-// cloud provider was dropped in SV-1); self-hosted WAN 2 / LTX 2 land in JCLAW-232/233.
+// videogen.provider IS the "enabled" state. Replicate and BFL are the cloud backends; self-hosted
+// WAN 2 / LTX 2 are JCLAW-232/233.
 const videogenProvider = computed(() =>
   configData.value?.entries?.find(e => e.key === 'videogen.provider')?.value ?? '',
 )
@@ -383,7 +383,7 @@ onUnmounted(() => stopVideoCapPolling())
           </div>
         </div>
 
-        <!-- Replicate — the cloud backend; reuses the Replicate API key from Image Generation. -->
+        <!-- Replicate — a cloud backend; reuses the Replicate API key from Image Generation. -->
         <div class="bg-surface-elevated border border-border">
           <label
             for="videogen-provider-replicate"

@@ -416,7 +416,7 @@ public final class ToolErrorTemplates {
                 "`%s` on MCP server '%s' is not on the allowlist for agent '%s'."
                         .formatted(tool, server, agent),
                 "A per-agent grant, not a connection problem: the server can be connected and its "
-                        + "tools still ungranted, which is the default for a newly connected server.",
+                        + "tools still ungranted.",
                 "Ask the operator to grant this agent the server's tools in the agent editor. The "
                         + "grant is theirs to make, so do not call it again until they have.");
     }

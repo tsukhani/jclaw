@@ -139,9 +139,8 @@ function onCloseAutoFocus(event: Event) {
       w-[440px] p-2 rounded-[10px] wrapper, space-y-2 between the pill-shaped
       search and a max-h-64 list scroller. Section headers use the tight 10px
       uppercase pattern; rows are flex with a rounded-[6px] hover/selected
-      bg in #ececec (light) / #2e3035 (dark). Border override needed because
-      jclaw's --border is invisible against --popover in dark mode (same
-      gotcha as ChatContextMeter).
+      bg in #ececec (light) / #2e3035 (dark). Border override keeps Unsloth's
+      hairline; jclaw's --border is heavier.
     -->
     <PopoverContent
       align="start"

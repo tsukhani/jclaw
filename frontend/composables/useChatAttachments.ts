@@ -7,7 +7,7 @@ import type { ConfigResponse } from '~/types/api'
  * Owns the staged-file queue, per-kind size caps sourced from /api/config,
  * thumbnail previews, the paperclip upload, and the browser voice-note
  * recorder. Extracted from pages/chat.vue so the attachment gate and voice
- * pipeline are one cohesive unit; the page keeps only the read-only-transcript
+ * pipeline are one cohesive unit; useChatComposer has the read-only-transcript
  * guarded event handlers (drop/paste/file-input) that call {@link
  * UseChatAttachments.addAttachments}.
  */

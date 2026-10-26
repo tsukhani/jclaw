@@ -5,7 +5,7 @@ import { test, expect, gotoPage } from './helpers'
 /**
  * UAT-9 — Settings.
  *
- * Twenty-six panels behind one page, each lazily mounted from the TOC. The
+ * Thirty-six panels behind one page, each lazily mounted from the TOC. The
  * historical failure mode is a panel that throws on mount and leaves the
  * content column blank while the TOC still highlights it (see the cold-boot
  * top-level-await regression), so every section is visited rather than

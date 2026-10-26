@@ -3,7 +3,7 @@ name: business-card-reader
 description: >-
   Read a business card image, extract contact details (name, phone, email, company, etc.), append them to a Google Sheet, then send a welcome email and WhatsApp message to the contact.
 metadata:
-  version: "1.0.6"
+  version: "1.0.7"
   author: Tarun Sukhani
   jclaw-icon: "📇"
   jclaw-tools: documents exec datetime
@@ -13,9 +13,9 @@ metadata:
 
 OCR a business card, parse the contact, append it to a Google Sheet, and (after explicit user approval) send a welcome email and WhatsApp message.
 
-> **Prerequisite:** WhatsApp sending uses the `wacli` binary contributed by the **whatsapp-wacli-mac** skill. This skill ships no binaries of its own (`commands: []`); it calls `wacli` through `exec`, which only works once whatsapp-wacli-mac is installed on this agent (that install adds `wacli` to the shell allowlist). If it isn't installed, skip Step 5 and tell the user.
+> **Prerequisite:** WhatsApp sending uses the `wacli` binary contributed by the **whatsapp-wacli-mac** skill. This skill ships no binaries of its own (`jclaw-commands: ""`); it calls `wacli` through `exec`, which only works once whatsapp-wacli-mac is installed on this agent (that install adds `wacli` to the shell allowlist). If it isn't installed, skip Step 5 and tell the user.
 >
-> **Prerequisite:** Steps 3 and 4 need a connected MCP server that reaches Google Sheets and Gmail. Its name is chosen by whoever connected it, so this skill never names one — it is deliberately absent from `tools:`, where an unknown name would hide the whole skill from the agent rather than just this step. Find it at run time (Step 0).
+> **Prerequisite:** Steps 3 and 4 need a connected MCP server that reaches Google Sheets and Gmail. Its name is chosen by whoever connected it, so this skill never names one — it is deliberately not in `jclaw-tools`, where an unknown name would hide the whole skill from the agent rather than just this step. Find it at run time (Step 0).
 
 ## Safety contract (read this first)
 

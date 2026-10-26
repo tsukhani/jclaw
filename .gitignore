@@ -17,8 +17,7 @@
 
 # Per-clone runtime security material — application secret (PLAY_SECRET)
 # and TLS cert+key. Lives under certs/ (write paths: `./jclaw.sh secret`,
-# `./jclaw.sh cert`, `play secret`, `play enable-https`, the Docker
-# entrypoint). NEVER commit — the secret is an admin-session-forgery
+# `./jclaw.sh https`, `play secret`, the Docker entrypoint). NEVER commit — the secret is an admin-session-forgery
 # primitive and the TLS private key binds to a per-machine CA root.
 # certs/.env.example is the tracked template that keeps the directory
 # in the repo and dist tarball; everything else under certs/ is
@@ -99,8 +98,7 @@ evals/local/
 *.ipr
 out/
 
-# VS Code (its Java language-server build output is redirected to build/ via the
-# eclipse plugin in build.gradle.kts, so it no longer lands in bin/)
+# VS Code
 .vscode/
 
 # Eclipse / Buildship IDE metadata (generated, same category as .idea/ above)
@@ -156,8 +154,8 @@ public/spa/
 /public/apps/
 
 # SSL certificates/keys (defense-in-depth wildcards — the certs/ directory
-# itself is handled above with a !certs/.gitkeep negation). `.cert` is
-# jclaw's chosen extension via `./jclaw.sh cert` and `play enable-https`;
+# itself is handled above with a !certs/.env.example negation). `.cert` is
+# jclaw's chosen extension via `./jclaw.sh https`;
 # `.crt` is the more common convention elsewhere — we list both.
 *.key
 *.pem

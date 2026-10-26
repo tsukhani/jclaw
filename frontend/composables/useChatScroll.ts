@@ -70,8 +70,8 @@ export function useChatScroll(
   }
 
   /**
-   * Reasoning bubble is a fixed-height scroll region (see the h-80 data-
-   * reasoning-body div in the template). As reasoning tokens stream in, pin
+   * Reasoning bubble is a fixed-height scroll region (data-reasoning-body in
+   * ChatThinkingCard.vue). As reasoning tokens stream in, pin
    * the last one to its own bottom so the latest thought is visible without
    * the user having to chase the scroll themselves. Only the in-flight
    * message's bubble is updated — historical messages keep whatever scroll

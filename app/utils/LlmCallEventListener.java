@@ -17,7 +17,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * <ul>
  *   <li>Records the time spent acquiring an outbound connection
  *       (dispatcher queue + DNS + connect + TLS handshake) as the
- *       {@code dispatcher_wait} segment under the {@code llm} channel
+ *       {@code dispatcher_wait} segment under the call's chat channel
  *       in {@link LatencyStats}. Lets a future regression — or just a
  *       loadtest run that pushes past
  *       {@link okhttp3.Dispatcher#getMaxRequestsPerHost()} — surface as

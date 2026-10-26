@@ -121,7 +121,7 @@ final class TelegramSendPolicy {
      * Resolve the configured reply mode, normalizing unknown/blank values to
      * {@link #REPLY_MODE_FIRST}. Public so default-package tests can assert the
      * config-read contract (matches the {@code *ForTest} convention used
-     * elsewhere in this class for test-reachable surface).
+     * elsewhere for test-reachable surface).
      */
     public static String replyToMode() {
         var raw = ConfigService.get(CFG_REPLY_TO_MODE, REPLY_MODE_FIRST);

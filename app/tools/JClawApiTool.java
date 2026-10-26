@@ -472,7 +472,7 @@ public class JClawApiTool implements ToolRegistry.Tool {
      * Resolve a route's action string to its {@link Method}, or {@code null} if it
      * can't be resolved to a controller method. Defensive: many routes (static
      * dirs, 404, non-controller actions) don't map to a controller Method -- those
-     * are simply skipped by callers, which is what makes the default-allow gate
+     * are simply skipped by callers, which is what makes the default-deny gate
      * still refuse non-controller routes.
      */
     private static @Nullable Method resolveMethod(String action) {

@@ -157,8 +157,8 @@ export function useChatSubagents(
 
   /**
    * Extract a short terminal-status hint ("Completed" / "Failed" / "Timed out" /
-   * "Running") for the run header from its boundary-end marker. Empty string
-   * while the block has no end marker yet (streaming case).
+   * "Running") for the run header from its boundary-end marker. 'Running'
+   * while the block has no end marker yet.
    */
   function subagentBlockStatus(runId: number, msgs: Message[]): string {
     for (const m of msgs) {

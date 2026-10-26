@@ -125,8 +125,8 @@ class WhatsAppCloudApiParserTest extends UnitTest {
     }
 
     /**
-     * JCLAW-1163: the sibling of {@code WhatsAppCobaltParserTest.reactionWithoutATargetIsDropped}
-     * — both transports drop a reaction they cannot attribute to a message.
+     * JCLAW-1163: the sibling of {@code WhatsAppCobaltParserTest.theSdkRefusesAReactionWithoutAKey},
+     * whose SDK cannot build a reaction without a target.
      */
     @Test
     void reactionWithoutATargetIsDropped() {

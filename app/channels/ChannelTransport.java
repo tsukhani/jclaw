@@ -4,7 +4,7 @@ import java.util.Locale;
 
 /**
  * Inbound transport mode a channel uses to receive updates from the upstream
- * platform. Defaults to {@link #POLLING} when the config field is absent.
+ * platform.
  *
  * <p>Polling modes (POLLING, SOCKET) do not require a public URL — the jclaw
  * process initiates the connection outbound. Webhook modes (WEBHOOK, HTTP)
@@ -14,8 +14,7 @@ import java.util.Locale;
  * <p>Which values are valid depends on the channel:
  * <ul>
  *   <li>Telegram: {@link #POLLING} (default), {@link #WEBHOOK}</li>
- *   <li>Slack: {@link #SOCKET} (default — JCLAW-83), {@link #HTTP} (JCLAW-83)</li>
- *   <li>WhatsApp: {@link #WEBHOOK} only (Meta Cloud API)</li>
+ *   <li>Slack: {@link #HTTP} (default), {@link #SOCKET} (JCLAW-351)</li>
  * </ul>
  */
 public enum ChannelTransport {

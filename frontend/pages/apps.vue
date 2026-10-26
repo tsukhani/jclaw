@@ -2,7 +2,7 @@
 // Apps page (SPEC-apps): a home-screen-style grid of operator-hosted mini-apps
 // discovered from public/apps/<slug>/ via GET /api/apps. Clicking a card opens
 // the app in a new tab at /apps/<slug>/. Pricing is metadata-only — a label.
-// The "Create app" affordance (slice 3) will sit above the grid.
+// The "Create app" affordance (slice 3) sits above the grid.
 import { ArrowDownTrayIcon, MagnifyingGlassIcon, PencilSquareIcon, PlusIcon, Squares2X2Icon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 import type { Agent } from '~/types/api'
 

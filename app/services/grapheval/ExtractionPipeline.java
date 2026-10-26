@@ -87,7 +87,7 @@ public final class ExtractionPipeline {
     public static final int OLLAMA_ATTEMPTS = 3;
     /** The lowest threshold a relation can write at; below it nothing is qualified. */
     public static final double KEPT = Collections.min(GraphEvalScorer.THRESHOLDS);
-    /** Until JCLAW-1366 gives cases their own, every case is read at this anchor. */
+    /** The anchor of a case or run built without one. */
     public static final LocalDate DEFAULT_ANCHOR = LocalDate.of(2026, 2, 15);
     /** Where the pair filter splits a memory into clauses. */
     public static final String CLAUSE_BOUNDARY =

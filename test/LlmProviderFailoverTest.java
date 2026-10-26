@@ -20,10 +20,9 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * JCLAW-300: pin {@link LlmProvider#chatWithFailover} — the primary→
  * secondary fallback path the JCLAW-299 AgentRunner extraction carved
- * out as deferred work. The ticket described this as "streaming" but
- * the failover utility is actually called from
- * {@link agents.ToolCallLoopRunner#callWithToolLoop} (the synchronous
- * tool-call loop); the streaming path got its own, narrower entry in
+ * out as deferred work. The ticket described this as "streaming"; the
+ * sync loop ({@link agents.ToolCallLoopRunner#callWithToolLoop}) calls its
+ * streamed twin, {@code chatStreamedWithFailover}, and the streaming path got its own, narrower entry in
  * JCLAW-1182 — see {@code LlmStreamFailoverTest}. Tests target the
  * static utility directly so its three branches are exercised without
  * standing up the loop scaffolding.

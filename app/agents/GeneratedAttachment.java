@@ -15,8 +15,7 @@ import org.jspecify.annotations.Nullable;
  * @param mimeType the content type (e.g. {@code image/png}, {@code audio/wav})
  * @param metadata small JSON blob (prompt, model, labels) stored on the attachment row
  * @param filename display filename for the chat chip, or {@code null} for the
- *                 default {@code generated-<timestamp>} name — the
- *                 so the user can tell them apart
+ *                 default {@code generated-<timestamp>} name
  */
 public record GeneratedAttachment(byte[] bytes, String mimeType, @Nullable String metadata,
                                   @Nullable String filename) {

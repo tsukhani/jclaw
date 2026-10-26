@@ -33,7 +33,6 @@ final class ChannelInboundDispatcher {
     /**
      * Shared webhook message handler: resolve agent route, find/create conversation,
      * run the agent synchronously, and send the response via the provided sender.
-     * Used by Slack, Telegram, and WhatsApp webhook controllers.
      *
      * @param channelType  channel identifier ("slack", "telegram", "whatsapp")
      * @param peerId       channel-specific peer/chat ID
@@ -96,17 +95,17 @@ final class ChannelInboundDispatcher {
 
     /**
      * Streaming-aware counterpart to {@link #processInboundForAgent}: wires
-     * LLM tokens into a {@link channels.TelegramStreamingSink} so the user
+     * LLM tokens into a {@link ChannelStreamingSink} so the user
      * sees progressive edits rather than waiting for the full response
      * (JCLAW-94). {@link AgentRunner#runStreaming} starts its own virtual thread, so
      * this call returns immediately after queue acquisition; the sink is
      * sealed asynchronously when the LLM call completes.
      *
      * <p>The sink receives text-only tokens (reasoning and status callbacks
-     * are no-ops — Telegram has no separate surface for them yet). On
-     * completion the full response is handed to {@link channels.TelegramStreamingSink#seal},
-     * which either performs one final HTML edit or falls back to the
-     * chunked planner path for oversize / media-rich responses.
+     * are no-ops). On completion the full response is handed to
+     * {@link ChannelStreamingSink#seal}, which on Telegram either performs
+     * one final HTML edit or falls back to the chunked planner path for
+     * oversize / media-rich responses.
      *
      * @param agent        the bound agent
      * @param channelType  channel identifier
@@ -154,9 +153,8 @@ final class ChannelInboundDispatcher {
      * Chat-type-aware variant: stamps the Telegram {@code chat.type} onto the
      * conversation at creation so {@link ConversationService#effectiveHistoryLimit}
      * (and any other chat-type-scoped behavior) can distinguish a plain DM from a
-     * plain group. Only the two Telegram ingress call sites
-     * ({@link controllers.WebhookTelegramController} and
-     * {@link channels.TelegramPollingRunner}) pass a real value; every other
+     * plain group. Only {@link channels.TelegramInboundTurn} and
+     * {@link channels.WhatsAppInbound} pass a real value; every other
      * overload delegates with {@code chatType=null}, leaving the column null and
      * behavior unchanged. The chat type is stamped once at creation — an existing
      * conversation row is never re-stamped.

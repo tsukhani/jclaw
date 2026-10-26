@@ -8,8 +8,7 @@ import { dirname } from 'node:path'
  * test file; the resulting JSON is read back via `use.storageState` in
  * playwright.config.ts.
  *
- * Credentials default to admin / changeme (the Play.configuration defaults in
- * ApiAuthController). Override via JCLAW_ADMIN_USERNAME / JCLAW_ADMIN_PASSWORD
+ * Credentials default to admin / changeme. Override via JCLAW_ADMIN_USERNAME / JCLAW_ADMIN_PASSWORD
  * environment variables if your local config differs.
  */
 export default async function globalSetup(_config: FullConfig) {

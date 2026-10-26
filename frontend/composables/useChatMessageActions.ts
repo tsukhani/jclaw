@@ -103,7 +103,7 @@ export function useChatMessageActions(deps: UseChatMessageActionsDeps): UseChatM
   }
 
   /**
-   * Find the index of the most recent user message at-or-before {@code fromIdx}.
+   * Find the index of the most recent user message before {@code fromIdx}.
    * Returns -1 if none is found.
    */
   function findPriorUserMessageIdx(fromIdx: number): number {

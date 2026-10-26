@@ -169,7 +169,7 @@ public class DocumentWriter {
      * or list-numbering styles.
      */
     private static class DocxVisitor {
-        // Font sizes in half-points (DOCX native unit)
+        // Font sizes in points (POI stores half-points)
         private static final int BODY_FONT_SIZE = 11;
         private static final int CODE_FONT_SIZE = 10;
         // Spacing in twips (1/20 of a point, DOCX native unit)

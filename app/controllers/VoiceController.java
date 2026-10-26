@@ -238,7 +238,7 @@ public class VoiceController extends WebSocketController {
      *
      * <p>Best-effort by design: a failure here must not propagate out of the socket's
      * finally and mask whatever actually ended the session. The startup sweep in
-     * {@link jobs.BootConsistencyCheck} is the backstop for anything left behind,
+     * {@link jobs.VoiceConversationSweepJob} is the backstop for anything left behind,
      * including a hard kill that skips this path entirely.
      */
     private static void discardSessionConversation(VoiceBinding binding) {

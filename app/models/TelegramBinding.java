@@ -24,8 +24,8 @@ import java.util.List;
  * the agent the operator wired it to.
  *
  * <p>Inbound routing is binding-first: the polling runner (or webhook controller)
- * identifies the binding by the bot token that received the update, verifies the
- * sender's Telegram user id matches {@link #telegramUserId}, and dispatches to
+ * identifies the binding by the bot token that received the update, gates the
+ * sender through {@link channels.TelegramAccessPolicy}, and dispatches to
  * {@link #agent} directly — bypassing {@link agents.AgentRouter}'s 3-tier fallback
  * for the telegram channel.
  */
@@ -35,10 +35,7 @@ import java.util.List;
 })
 // JCLAW-204: Hibernate L2 cache via Caffeine. The polling-runner hot path
 // calls findById per inbound message; annotating here gives the same
-// transparent caching that Agent enjoys (JCLAW-205). findByBotToken is
-// admin-only (uniqueness check on create/edit) so it does NOT warrant a
-// secondary-key Caches.named layer — re-scoped per the JCLAW-204 comment
-// thread, the only meaningful win is L2 here.
+// transparent caching that Agent enjoys (JCLAW-205).
 @Cache(usage = CacheConcurrencyStrategy.READ_WRITE)
 // JCLAW-1455: an update writes only the changed columns, so a credential that will not decrypt (read as null) survives it.
 @DynamicUpdate
@@ -62,8 +59,8 @@ public class TelegramBinding extends AgentBoundBinding {
 
     /**
      * Numeric Telegram user id (string-typed because the Telegram SDK exposes it
-     * that way and our comparisons stay stringwise). Peer-level authorization: only
-     * messages where {@code from.id} equals this value are dispatched.
+     * that way and our comparisons stay stringwise). Peer-level authorization: a DM
+     * is served only when {@code from.id} equals this value.
      */
     @Column(name = "telegram_user_id", nullable = false)
     public String telegramUserId;
@@ -136,7 +133,7 @@ public class TelegramBinding extends AgentBoundBinding {
     /** Why a binding whose stored bot token will not decrypt (it reads as null) cannot send. */
     public static String unreadableBotToken(String agentName) {
         return "The Telegram bot token for agent '" + agentName + "' cannot be decrypted with this installation's "
-                + "secret; re-enter it in Settings → Channels → Telegram.";
+                + "secret; re-enter it in Channels → Telegram.";
     }
 
     @PrePersist

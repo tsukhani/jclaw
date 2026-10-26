@@ -7,8 +7,8 @@ import java.util.List;
 
 /**
  * Postgres tsvector-backed implementation of
- * {@link MessageSearchRepository}. Activated when the JDBC product
- * name reports "PostgreSQL" — for JClaw's operator-opt-in Postgres
+ * {@link MessageSearchRepository}. Activated on PostgreSQL with
+ * {@code -Djclaw.search.postgres-native=true} — for JClaw's operator-opt-in Postgres
  * deployment path.
  *
  * <h2>Status: skeleton</h2>

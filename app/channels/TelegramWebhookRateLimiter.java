@@ -9,8 +9,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * request counter keyed by {@code bindingId}. The webhook controller consults
  * this BEFORE the secret-token compare so a wrong-secret flood against one
  * binding is rejected with a cheap HTTP 429 rather than paying the
- * {@link java.security.MessageDigest} compares (and DB-backed binding load
- * upstream) on every request.
+ * {@link java.security.MessageDigest} compares on every request.
  *
  * <p>Single-JVM by design — the limiter lives in process memory and resets on
  * restart. JClaw runs as one JVM, so a shared in-memory counter is the right

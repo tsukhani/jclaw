@@ -74,7 +74,7 @@
     {
       "id": "no-prose-around-json",
       "input": "Reply with only this JSON object and no other text: {\"ok\": true}",
-      "rubric": "'Here is the JSON you asked for:' and ```json fences both break machine callers; the schema check alone would not catch them.",
+      "rubric": "'Here is the JSON you asked for:' and ```json fences both break machine callers.",
       "checks": [
         { "kind": "matches", "args": ["^\\s*\\{"] },
         { "kind": "not_contains_any", "args": ["```"] },

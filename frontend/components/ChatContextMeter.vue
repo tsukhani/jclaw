@@ -139,9 +139,8 @@ function handleMouseLeave() {
       notes): px-3 py-2, rounded-[10px], grid gap-1.5, text-xs body,
       font-mono on numerical values, font-medium only on the emphasized
       percent. min-w-44 stops narrow rows collapsing on the token-only
-      cases. We still need the explicit border-neutral override because
-      the project's --border token is invisible against --popover in
-      dark mode; /50 opacity thins it to the hairline Unsloth uses.
+      cases. The explicit border-neutral override is for Unsloth's
+      hairline; --border is heavier. /50 opacity thins it in dark mode.
     -->
     <PopoverContent
       align="end"

@@ -106,8 +106,8 @@ export function useChatConversation(deps: UseChatConversationDeps): UseChatConve
   /**
    * Backfill server ids onto the local `messages` array after a stream turn.
    *
-   * The stream protocol doesn't emit persisted message ids (see
-   * ApiChatController.writeSse — the complete event carries only content).
+   * The stream protocol doesn't emit persisted message ids
+   * (ApiChatController's complete frame carries only content).
    * Without this, the optimistic user + assistant bubbles stay id-less until
    * the user leaves and re-enters the conversation, which disabled the Delete
    * button (gated on `msg.id`) and caused pollForAnnounce to treat the

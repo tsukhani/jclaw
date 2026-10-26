@@ -294,11 +294,11 @@ final class SubagentAsyncRunner {
      * @param parentAgentName parent agent's name (used in announce metadata
      *                        and lifecycle events)
      * @param mode            {@code "inline"} or {@code "session"}
-     * @param context         optional context string included in the
-     *                        announce Message body
+     * @param context         the spawn's context mode, for the lifecycle
+     *                        event
      * @param label           short label for the announce card
-     * @param timeoutSeconds  wall-clock cap; on expiry the SubagentRun is
-     *                        marked TIMED_OUT
+     * @param timeoutSeconds  idle budget; on expiry the SubagentRun is
+     *                        marked TIMEOUT
      * @param task            the user-prompt-equivalent string the child
      *                        agent processes
      */
@@ -341,9 +341,8 @@ final class SubagentAsyncRunner {
 
         // JCLAW-273: resume the parent agent's logical turn for a yielded
         // caller. The announce Message we just posted is the parent's next
-        // user input; calling AgentRunner.run kicks off a fresh turn that
-        // picks up the announce via ConversationService.loadRecentMessages
-        // (which keeps USER-role announce rows visible to the LLM) and
+        // user input; calling AgentRunner.resumeAndDeliver kicks off a fresh turn that
+        // picks up the announce via ConversationService.loadRecentMessages and
         // produces a final assistant reply.
         if (Boolean.TRUE.equals(yieldedFlag)) {
             try {

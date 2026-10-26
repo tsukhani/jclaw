@@ -37,8 +37,8 @@ import java.util.Locale;
  *
  * <p>Dialect: the {@code information_schema.referential_constraints} /
  * {@code key_column_usage} views and the {@code ALTER TABLE ... DROP/ADD
- * CONSTRAINT} syntax are shared by H2 (dev file DB + the test lane) and
- * PostgreSQL (prod), so no per-engine branch is needed. Identifier casing is
+ * CONSTRAINT} syntax are shared by H2 and PostgreSQL, so no per-engine
+ * branch is needed. Identifier casing is
  * handled by matching case-insensitively ({@code UPPER(...)}) and quoting only
  * the catalog-sourced constraint name verbatim.
  */
@@ -143,7 +143,7 @@ public final class CascadeFkMigrator {
      * constraint absent) is skipped. Does <em>not</em> commit — the caller owns
      * the transaction boundary. Returns the number of FKs converted.
      *
-     * <p>Package-visible seam so a test can drive the exact conversion logic
+     * <p>Public seam so a test can drive the exact conversion logic
      * against a self-contained temp schema without depending on the production
      * inventory or the shared JPA connection.
      *

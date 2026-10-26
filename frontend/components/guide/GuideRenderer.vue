@@ -286,8 +286,7 @@ function onClick(event: MouseEvent) {
  *
  * Plain CSS (not @apply) because the project's scoped-style flow in
  * Tailwind 4 can't see utility-class macros from inside a scoped block.
- * Mirrors the convention pages/chat.vue uses for `.prose-chat` — write
- * the rules against the design tokens (CSS variables) directly. The
+ * Written against the design tokens (CSS variables) directly. The
  * `.guide-section` class namespace keeps these from leaking onto any
  * other markdown output (the chat surface keeps its own prose-chat).
  */

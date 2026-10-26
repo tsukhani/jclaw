@@ -26,7 +26,7 @@ import java.util.Set;
 public enum PaymentModality {
 
     /** Operator pays per request, billed against the model's
-     *  ${@code inputPricePerMillionTokens} / {@code outputPricePerMillionTokens}
+     *  {@code promptPrice} / {@code completionPrice}
      *  rates already in {@link LlmTypes.ModelInfo}. */
     PER_TOKEN,
 
@@ -54,9 +54,8 @@ public enum PaymentModality {
 
     /**
      * Resolve the supported modalities for a configured provider name.
-     * Returns an empty set when the name is unknown <i>and</i> doesn't
-     * match any known prefix — the safer default since an empty set
-     * preserves today's "free-tier" cost treatment rather than silently
+     * Returns an empty set when the name is unknown — the safer default
+     * since an empty set preserves today's "free-tier" cost treatment rather than silently
      * inventing per-token charges for an unrecognized provider.
      */
     public static Set<PaymentModality> supportedFor(String providerName) {

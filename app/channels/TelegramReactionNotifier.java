@@ -287,17 +287,17 @@ public final class TelegramReactionNotifier {
 
     // ===== JCLAW-387 D2: own the polling-error classification (NOT the backoff) =====
     //
-    // Scope note: the pengrad/telegrambots long-polling SDK owns the getUpdates
+    // Scope note: the telegrambots long-polling SDK owns the getUpdates
     // network loop AND its own backoff/retry — JClaw never sees a per-poll network
     // error to retry. We deliberately do NOT add a competing retry loop (that would
     // fight the SDK's own backoff and risk double-polling → HTTP 409). What JClaw
     // CAN own cleanly is the *classification* of the polling-related errors that DO
-    // surface on its side — registration (registerInternal) and app.start() — into
+    // surface on its side — registration (registerInternal) — into
     // recoverable vs non-recoverable, plus a log line that names the recovery curve.
     // This is observability over the SDK's curve, not a replacement for it.
 
     /** Recoverable: a transient condition the SDK's own retry/backoff (or the
-     *  cooldown reconcile) will clear without operator action. */
+     *  next reconcile) will clear without operator action. */
     public static final String ERR_RECOVERABLE = "recoverable";
     /** Non-recoverable: a config/auth condition that won't clear by retrying;
      *  needs an operator (bad token, bot blocked, binding misconfigured). */
@@ -308,7 +308,7 @@ public final class TelegramReactionNotifier {
      * {@link #ERR_NON_RECOVERABLE}. Non-recoverable means an operator must act —
      * auth/permission failures (HTTP 401/403) and not-found (404) on a bad token;
      * everything else (timeouts, connection resets, 5xx, 429 rate-limit, the
-     * 409 stale-poll conflict the cooldown already handles) is treated as
+     * 409 stale-poll conflict) is treated as
      * recoverable. Conservative by design: when in doubt, recoverable — so we
      * never tell an operator to act on a transient blip.
      *

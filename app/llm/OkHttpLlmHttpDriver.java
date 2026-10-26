@@ -80,8 +80,8 @@ final class OkHttpLlmHttpDriver {
      * calls {@code onComplete} when the server closes the stream cleanly;
      * calls {@code onError} on transport failure or non-200 HTTP status.
      *
-     * <p>The {@code [DONE]} sentinel is NOT filtered out here — the caller in
-     * {@link LlmProvider#chatStream} skips it before parsing.
+     * <p>The {@code [DONE]} sentinel is NOT filtered out here — LlmProvider's
+     * OpenAI wire skips it before parsing.
      *
      * <p>Per-call timeout is intentionally absent: the streaming client uses
      * {@code callTimeout(0)} + a 180s {@code readTimeout} (see {@link utils.HttpFactories#llmStreaming()})

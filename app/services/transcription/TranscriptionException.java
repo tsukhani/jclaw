@@ -1,7 +1,7 @@
 package services.transcription;
 
 /**
- * Failure surfacing from any transcription backend (local whisper-jni,
+ * Failure surfacing from any transcription backend (the local ASR sidecar,
  * cloud OpenAI/OpenRouter clients). Callers — typically the message
  * pipeline orchestrator (JCLAW-165) — catch this and decide whether to
  * fall through to the next backend, log and persist the empty transcript,

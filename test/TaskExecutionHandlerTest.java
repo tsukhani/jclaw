@@ -50,7 +50,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li>SCHEDULED one-shot at a fixed future timestamp produces one
  *       TaskRun and removes its row.</li>
  *   <li>CRON fire self-rescheduling: a successful fire invokes
- *       {@code SchedulerClient.schedule} with the next cron tick.</li>
+ *       {@code SchedulerClient.scheduleIfNotExists} with the next cron tick.</li>
  *   <li>CRON fire cancelled-skip: a Task whose status flipped to
  *       CANCELLED is skipped without producing a TaskRun.</li>
  *   <li>INTERVAL drift: completion handler schedules the next fire at

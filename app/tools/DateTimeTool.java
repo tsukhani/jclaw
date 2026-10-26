@@ -20,10 +20,9 @@ import java.util.Objects;
 /**
  * Provides accurate date/time information and calculations.
  *
- * <p>The system prompt injects only the current <em>date</em> (not time) to
- * preserve prompt-cache stability. Skills that need the current time — or need
- * to do timezone conversions or date arithmetic — should call this tool instead
- * of relying on the LLM to guess.
+ * <p>Each turn already carries the current date and time
+ * ({@code agents.CurrentTimeInjector}); skills that need timezone conversions or
+ * date arithmetic should call this tool instead of relying on the LLM to guess.
  */
 public class DateTimeTool implements ToolRegistry.Tool {
 

@@ -36,8 +36,8 @@ import static utils.GsonHolder.GSON;
  * <p>Simpler than Telegram in two ways: Slack request authenticity comes from
  * the signing-secret HMAC (no per-URL webhook secret to generate), and the HTTP
  * (Events API) transport needs no server-side registration — the operator pastes
- * the per-binding Request URL into the Slack app dashboard. Socket Mode runner
- * reconciliation arrives with JCLAW-351.
+ * the per-binding Request URL into the Slack app dashboard.
+ * SlackSocketModeRunner reconciles Socket Mode bindings.
  */
 @With(AuthCheck.class)
 public class ApiSlackBindingsController extends ApiBindingController {

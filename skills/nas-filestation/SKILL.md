@@ -3,7 +3,7 @@ name: nas-filestation
 description: >-
   Access a Synology NAS over the FileStation HTTP API via the bundled nas.sh script — list shares, browse folders, upload files, create folders, delete, and stat files. Use for any task that needs to store or retrieve files on the operator's Synology NAS.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
   author: main
   jclaw-icon: "🗄️"
   jclaw-tools: exec filesystem
@@ -17,7 +17,7 @@ Talk to a Synology NAS directly through its FileStation web API using the bundle
 
 The script reads all connection details from `credentials/nas.env` in this skill folder. Each person/agent using this skill configures their own:
 
-1. Copy `credentials/nas.env.example` to `credentials/nas.env` (keep the existing one if it is already configured).
+1. Copy `tools/nas.env.example` to `credentials/nas.env` (keep the existing one if it is already configured).
 2. Fill in the five values:
    - `NAS_URL` — e.g. `https://nas.example.com`
    - `NAS_USER` / `NAS_PASS` — a DSM user account with FileStation permission. **Important:** `NAS_PASS` must be URL-encoded (e.g. `+` → `%2B`, `|` → `%7C`, `%` → `%25`) because it is passed verbatim in the login query string.

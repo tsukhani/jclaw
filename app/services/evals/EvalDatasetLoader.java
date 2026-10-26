@@ -18,7 +18,7 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 /**
- * Reads and validates the versioned eval suites under {@code evals/suites/} (JCLAW-875).
+ * Reads and validates the eval suites under {@code evals/suites/} (JCLAW-875).
  *
  * <p>Validation is deliberately unforgiving: an unknown key, an unknown check
  * kind, or a JSON Schema keyword {@link EvalScorer} does not implement is a hard

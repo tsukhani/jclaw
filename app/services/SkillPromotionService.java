@@ -60,7 +60,7 @@ public class SkillPromotionService {
      *
      * @param ok      true when every tool the skill declares is enabled on
      *                the target agent
-     * @param message human-readable explanation; empty when {@code ok} is
+     * @param message human-readable explanation; null when {@code ok} is
      *                true, otherwise names the missing tool(s)
      */
     public record ToolValidationResult(boolean ok, @Nullable String message) {}
@@ -151,8 +151,7 @@ public class SkillPromotionService {
      * Mirror the registry's blessed command list for {@code skillName} into the
      * per-agent allowlist table. Idempotent: clears any prior rows for this
      * (agent, skill) pair, then inserts one row per registry-declared command.
-     * Called at install time (both fresh and re-install) and by
-     * {@link #revokeAgentAllowlist} via the skill-delete path.
+     * Called at install time (both fresh and re-install).
      */
     public static void syncAgentAllowlistFromRegistry(Agent agent, String skillName) {
         AgentSkillAllowedTool.deleteByAgentAndSkill(agent, skillName);
@@ -208,7 +207,7 @@ public class SkillPromotionService {
 
     /**
      * Run the full promotion pipeline in the current thread. This is designed
-     * to be called from a virtual thread — the controller returns 202 immediately.
+     * to be called from a virtual thread — the controller returns immediately.
      *
      * <p>The {@code agentId} parameter is the agent that requested this promotion.
      * Promotion is gated on that agent having {@code skill-creator} installed
@@ -575,8 +574,8 @@ public class SkillPromotionService {
     /**
      * Refresh {@link SkillRegistryTool} rows for this skill from the on-disk
      * SKILL.md at {@code globalSkillDir}. Clears existing rows for the skill
-     * and inserts one row per entry in the frontmatter {@code commands:} list.
-     * Missing or empty {@code commands:} frontmatter produces zero rows
+     * and inserts one row per entry in the frontmatter {@code jclaw-commands} list.
+     * Missing or empty {@code jclaw-commands} frontmatter produces zero rows
      * (skill declares no shell-allowlist contribution — the legitimate case
      * for skills that only ship prompt instructions).
      */

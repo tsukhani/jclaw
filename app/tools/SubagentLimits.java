@@ -6,7 +6,7 @@ import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 
 /**
- * JCLAW-677: recursion caps and privilege-escalation policy for subagent
+ * JCLAW-677: recursion caps for subagent
  * spawning, extracted from {@link SubagentSpawnTool}. Depth/breadth enforcement
  * reads the operator-editable limits off the facade's config keys.
  */

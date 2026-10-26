@@ -12,7 +12,7 @@
 # ///
 """TTS synthesis worker (JCLAW-789). Text in, audio bytes out.
 
-Runs in its OWN uv script env, shelled from serve.py per /synthesize call. The
+Runs in its OWN uv script env, run as serve.py's persistent worker. The
 engine + weights are chosen by the request `model` id (the router), mirroring
 the ASR AsrModel routing. Apple silicon runs via mlx-audio (validated
 JCLAW-788: Qwen3-TTS 0.6B ~2.6-3x realtime, streaming TTFA ~170ms, EN/ZH/Malay,

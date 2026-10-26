@@ -37,13 +37,13 @@ import java.util.concurrent.atomic.AtomicReference;
  *   <li>{@link AgentRunner#runYieldResume} — async-yield resume entrypoint
  *       that runs the standard pipeline WITHOUT re-appending a user
  *       message (the announce row was already persisted by
- *       {@code SubagentSpawnTool#postAnnounceMessage}).</li>
+ *       {@code SubagentResponses#postAnnounceMessage}).</li>
  * </ul>
  *
  * <p>The AC "cancellation mid-tool-call stops the loop at the next safe
  * checkpoint and surfaces a cancelled status" is pinned at the lowest
  * layer here: the checkpoint itself. The integration between the
- * checkpoint and {@code SubagentSpawnTool}'s outer catch (which marks the
+ * checkpoint and {@code SubagentSyncRunner}'s outer catch (which marks the
  * SubagentRun KILLED) is already covered in SubagentSpawnToolTest's
  * cancellation tests.
  */
@@ -343,7 +343,7 @@ class AgentRunnerSubagentTest extends UnitTest {
         ConversationService.appendAssistantMessage(parentConv,
                 "I'll yield to a subagent for that.", null);
 
-        // Simulate what SubagentSpawnTool#postAnnounceMessage already did
+        // Simulate what SubagentResponses#postAnnounceMessage already did
         // BEFORE runAsyncAndAnnounce calls runYieldResume: persist a
         // USER-role announce row carrying the child's final reply.
         Tx.run(() -> {

@@ -108,7 +108,7 @@ class PerformanceFixesTest extends UnitTest {
                 .getResultList();
         assertEquals(3, all.size());
 
-        // Test filtered query (same pattern as ApiChatController.listConversations)
+        // Test filtered query (same pattern as ApiConversationsController.listConversations)
         var webOnly = JPA.em()
                 .createQuery("SELECT c FROM Conversation c JOIN FETCH c.agent WHERE channelType = ?1 ORDER BY c.updatedAt DESC",
                         Conversation.class)
@@ -123,7 +123,7 @@ class PerformanceFixesTest extends UnitTest {
 
     @Test
     void conversationsFiltersWordBoundaryPeerAndChannels() {
-        // Covers the filter pipeline in ApiChatController.listConversations:
+        // Covers the filter pipeline in ApiConversationsController.listConversations:
         // - Peer: case-insensitive LIKE (substring)
         // - Name: SQL LIKE pre-filter + Java \b regex post-filter (word-boundary)
         //   so "Hi" matches "Hi there" and "Hi, team" but not "Hide"

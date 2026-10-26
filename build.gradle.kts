@@ -63,8 +63,7 @@ listOf("compileJava", "compileTestJava").forEach { taskName ->
 // Note removeUnusedImports does NOT catch same-package-but-used imports (the S1128
 // subset where the simple name IS referenced) — Sonar S1128 still owns those.
 // Wildcard bans are the pre-push grep gate. `spotlessApply` canonicalises;
-// `spotlessCheck` (wired into .githooks/pre-push) fails the push on drift. Scoped to
-// app/ to match the production-only cleanup; test/ is intentionally out of scope.
+// `spotlessCheck` (wired into .githooks/pre-push) fails the push on drift.
 spotless {
     java {
         // JCLAW-895: tests are in scope too. They were excluded for no recorded
@@ -196,7 +195,7 @@ sonar {
         // because `play precompile` emits app classes only — no test class is written
         // anywhere by the CI pipeline's own steps. `play autotest` compiles tests
         // in-process and leaves nothing behind, so the directory below exists only
-        // because the sonar task is wired to compileTestJava further down. Removing
+        // because the sonar task is wired to compileTestJava above. Removing
         // that wiring makes this property silently point at nothing.
         property("sonar.java.test.binaries", "build/classes/java/test")
 
@@ -222,7 +221,7 @@ sonar {
         // S1220 (default package): every test/*.java file in this codebase
         // lives in the default package per Play 1.x's test-runner convention.
         // Adding a package declaration to a single test creates inconsistency
-        // without benefit; doing it across all 90 tests would touch every file
+        // without benefit; doing it across every test would touch every file
         // with no functional change. Suppressed project-wide for the test/
         // tree only — main-source files (app/) still get flagged correctly.
         //
@@ -334,7 +333,7 @@ dependencies {
     // JCLAW-735: JSpecify nullness annotations (@Nullable / @NonNull, TYPE_USE).
     // The tree-wide standard for expressing null contracts; introduced first on
     // the security-utility public surface (PasswordHasher / SsrfGuard /
-    // WorkspacePathGuard). Broadening to the rest of app/ is the next increment.
+    // WorkspacePathGuard).
     implementation("org.jspecify:jspecify:1.0.1")
 
     // JCLAW-34: OpenTelemetry. The SDK runs in-process (traces + metrics over OTLP) so
@@ -374,7 +373,7 @@ dependencies {
 
     // JCLAW-911: printer discovery over mDNS/Bonjour. Pure Java, Apache-2.0, no
     // native deps — which is the whole point of the printer tool: it works on a
-    // box with no CUPS and no OS print subsystem. 3.6.3 rather than the 3.5.9 the
+    // box with no CUPS and no OS print subsystem. 3.6.4 rather than the 3.5.9 the
     // ticket named; 3.5.9 is two minors stale and Renovate would bump it on sight.
     implementation("org.jmdns:jmdns:3.6.4")
 
@@ -383,8 +382,8 @@ dependencies {
     // runs on framework/lib's kotlin-stdlib.
     implementation("com.hp.jipp:jipp-core:0.7.18")
 
-    // jsoup 1.22.2 is one patch ahead of the 1.22.1 that Tika 3.3.0's
-    // parent POM pins for its parser modules; keeps resolved/declared in sync.
+    // jsoup 1.23.2 is the version Tika 4.1.0's parent POM pins for its
+    // parser modules; keeps resolved/declared in sync.
     implementation("org.jsoup:jsoup:1.23.2")
 
     // crawler-commons — Googlebot-compatible robots.txt parsing and sitemap handling
@@ -397,7 +396,7 @@ dependencies {
 
     // Readability4J — Kotlin port of Mozilla Readability, drives WebFetchTool's
     // main-content extraction (JCLAW-775). Pins an old jsoup transitively; the
-    // 1.22.2 above wins on the resolved classpath. WebFetchTool falls back to a
+    // 1.23.2 above wins on the resolved classpath. WebFetchTool falls back to a
     // Jsoup boilerplate strip if this yields no article, so a readability miss
     // (or throw) never surfaces as an empty result.
     implementation("net.dankito.readability4j:readability4j:1.0.8") {
@@ -631,7 +630,7 @@ dependencies {
     // The direct repo owns its own FSDirectory under data/jclaw-lucene/,
     // kept in sync via JPA lifecycle hooks on TaskRunMessage rather than
     // H2 triggers. tika-parsers-standard-package above already excludes
-    // the transitive lucene pull (line 205), so these declarations own
+    // the transitive lucene pull (group org.apache.lucene), so these declarations own
     // the resolved graph.
     // lucene-queryparser is deliberately absent: collectScored builds its query
     // programmatically from PrefixQuery/TermQuery/BooleanQuery (all in core) so a

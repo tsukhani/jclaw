@@ -25,10 +25,9 @@ public class Tx {
      * JCLAW-1144: name any shutdown component that reaches the database.
      *
      * <p>Teardown must not depend on the DB, and static analysis cannot check that on its
-     * own: the access is usually transitive ({@code disableIfEnabled -> isFunnelEnabled ->
-     * ConfigService.get}) and can sit inside a third-party frame that ArchUnit never
-     * imports. Every application transaction passes through here, so this is the one place
-     * that sees all of it, whatever the route.
+     * own: the access is usually transitive and can sit inside a third-party frame that
+     * ArchUnit never imports. Every application transaction passes through here, so this is
+     * the one place that sees all of it, whatever the route.
      *
      * <p>The thread name carries the component identity, so a hit names the culprit
      * directly. It reports only what actually executes — a warm config cache means no

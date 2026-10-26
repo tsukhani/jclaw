@@ -23,7 +23,7 @@ import java.util.concurrent.TimeUnit;
  * Outbound {@link Channel} for a WhatsApp-Web (Cobalt) binding (JCLAW-450). The
  * WhatsApp-Web peer of the Cloud-API {@link WhatsAppChannel}: same
  * {@link Channel} contract — {@link #trySend}, {@link #sendPhoto},
- * {@link #sendDocument} — plus WhatsApp-Web-only reactions and presence/typing.
+ * {@link #sendDocument} — plus reactions and presence/typing.
  *
  * <p>It holds no socket of its own: the live {@link WhatsAppCobaltSession} is owned
  * by {@link WhatsAppCobaltRunner}, so this channel resolves the handle by binding

@@ -43,14 +43,12 @@ public final class JClawCronUtils {
     /**
      * Compute the next fire instant after now for the given cron
      * expression in the JVM-default zone. Returns null on blank input
-     * or any parse failure — callers (TaskSchedulingService.computeNextRunAt,
+     * or any parse failure — callers (TaskSchedulingService.computeCronFirstFire,
      * TaskExecutionHandler.scheduleCronNextCompletion) treat null as
      * "skip and log".
      *
      * <p>Prefer {@link #nextExecution(String, ZoneId)} for per-task
-     * timezone support (JCLAW-261). This single-arg overload is kept
-     * for legacy call sites that don't yet have a {@link models.Task}
-     * context to resolve a zone from.
+     * timezone support (JCLAW-261).
      */
     public static @Nullable Instant nextExecution(String expr) {
         return nextExecution(expr, null);

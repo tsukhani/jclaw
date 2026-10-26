@@ -95,7 +95,7 @@ export default defineNuxtConfig({
         },
       },
     },
-    // The User Guide imports `../../docs/user-guide/*.md?raw` so the
+    // The User Guide imports `docs/user-guide/*.md?raw` so the
     // canonical operator-facing copy can live next to the rest of the
     // repo's docs. Vite's default fs.allow root is the frontend/ folder;
     // widen it one level to the repo root so those imports resolve.

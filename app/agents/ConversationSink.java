@@ -23,8 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * persistence semantics for chat flows.
  *
  * <h2>Detached-entity safety</h2>
- * Callers on virtual threads (db-scheduler fires via TaskExecutionHandler,
- * webhooks, the streaming
+ * Callers on virtual threads (webhooks, the streaming
  * runStreaming entry point) pass a {@link Conversation} loaded in an
  * already-committed {@code Tx.run()} block — that entity is detached
  * when AgentRunner sees it, and {@code conversation.save()} inside
@@ -40,7 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * the natural end of the streaming response — there's nothing to mark
  * on a row that already represents the conversation as a whole.
  * {@code TaskRunSink} (sibling implementation in the JCLAW-21 series)
- * overrides {@link #onStart}, {@link #onComplete}, and
+ * overrides {@link #onComplete} and
  * {@link #onFailure} because the TaskRun row's lifecycle bookends the
  * agent loop one-to-one with a single fire.
  *

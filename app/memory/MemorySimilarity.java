@@ -33,7 +33,7 @@ public final class MemorySimilarity {
 
     /**
      * Stripped before the containment test only. Auto-capture writes every memory
-     * in the third person ("The user ...", per {@code EXTRACTION_INSTRUCTIONS}), so
+     * in the third person ("The user ..." until USER.md names the owner), so
      * these tokens are near-universal and inflate overlap between unrelated facts.
      */
     static final Set<String> BOILERPLATE = Set.of(

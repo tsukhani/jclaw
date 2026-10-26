@@ -19,7 +19,7 @@ import java.util.Comparator;
  * path-containment of staged writes, per-file failure tolerance, HTTP error
  * mapping, and the optional token header.
  *
- * <p>Uses {@code mockwebserver3} (same pattern as {@code WhisperModelManagerTest})
+ * <p>Uses {@code mockwebserver3}
  * so the fetcher makes real OkHttp calls to a server we control, pointed at it
  * via the {@code jclaw.skills.catalog.github.{api,raw}.url} config seam (the
  * GitHub analog of {@code ClawhubSkillFetcher}'s BASE_URL_PROPERTY). Only this

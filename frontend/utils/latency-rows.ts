@@ -27,8 +27,7 @@
  *   `TOP_LEVEL_ORDER` happened to enumerate everything the backend emitted, so
  *   a segment the frontend didn't know about pushed itself *below* the summary.
  *
- * - **`buildChartSeries(metrics)`** — top-level segments only, for the
- *   overlay chart. `prologue_*` children are suppressed because their
+ * - **`buildChartSeries(metrics)`** — for the overlay chart. `prologue_*` children are suppressed because their
  *   contribution is already represented by the `Prologue` line they
  *   sum to.
  *

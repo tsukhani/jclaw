@@ -229,9 +229,7 @@ public final class TtsJvmEngine {
         }
     }
 
-    /** Extract a .tar.bz2 via the host {@code tar} (-j handles bzip2). jclaw's
-     *  hosts are POSIX — the sidecars already require {@code uv} — so shelling
-     *  to tar avoids pulling commons-compress just for one archive format. */
+    /** Extract a .tar.bz2 via the host {@code tar} (-j handles bzip2). */
     private static void extractTarBz2(Path archive, Path targetDir) throws IOException {
         try {
             var pb = new ProcessBuilder("tar", "-xjf",

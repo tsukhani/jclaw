@@ -104,7 +104,7 @@ public final class LuceneIndexer {
          * from a JPA entity: it has no {@code @PostPersist}/{@code @PostUpdate}/
          * {@code @PostRemove} hooks and NO backfiller in
          * {@code DirectLuceneMessageSearchRepository}. It is (re)populated
-         * lazily by {@code services.SkillCatalogService} on the first search —
+         * lazily by {@code StaticDumpCatalog} on the first query —
          * which downloads the upstream snapshot, {@link #clear(Scope)}s this
          * scope, and re-upserts every row keyed by its position in the loaded
          * list (so a Lucene hit's id is an index back into the in-memory
@@ -497,7 +497,7 @@ public final class LuceneIndexer {
      * commit once. A bulk delete never fires the entity's {@code @PostRemove}, so a
      * caller must collect the ids <em>before</em> deleting and hand them here, or the
      * docs orphan. Lives on the indexer rather than beside any one delete path because
-     * five callers across four classes need it.
+     * seven callers across five classes need it.
      */
     public static void removeAll(Scope scope, Collection<Long> ids) {
         if (ids == null || ids.isEmpty()) return;
@@ -593,7 +593,7 @@ public final class LuceneIndexer {
      *
      * <p>Read from the codec rather than hardcoded, so a later codec override or a
      * Lucene upgrade that raises the cap is picked up without editing a constant.
-     * lucene-core 10.5.0 defaults to 1024, which is below several common embedding
+     * lucene-core 10.5.2 defaults to 1024, which is below several common embedding
      * models — text-embedding-3-small is 1536 — so this is a limit operators hit
      * with an ordinary choice, not an exotic one.
      *

@@ -634,7 +634,7 @@ public class ApiMemoryController extends Controller {
      * <p>Returns 409 with the reason when it cannot start — this agent is not over the
      * cap, or another agent's migration holds the single-flight slot.
      */
-    @ApiResponse(responseCode = "202")
+    @ApiResponse(responseCode = "200")
     @Operation(summary = "Recategorise one agent's core memories past the cap")
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "rewrites any agent's core memories -- the cross-agent reach /api/memories is floored for")
@@ -674,7 +674,7 @@ public class ApiMemoryController extends Controller {
      * last one is a refusal rather than a warning because the rebuild wipes the index
      * before writing, so starting it with an unusable model would leave nothing behind.
      */
-    @ApiResponse(responseCode = "202")
+    @ApiResponse(responseCode = "200")
     @Operation(summary = "Start re-embedding stored memories")
     @AgentAccess(value = OPERATOR_ONLY, reason = "re-embeds every stored memory -- bulk model spend")
     public static void reembedStart() {

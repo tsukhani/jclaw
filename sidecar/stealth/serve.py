@@ -33,8 +33,8 @@ derives from its own install secret; without it in the environment the sidecar
 refuses to start.
 `--no-auth` drops both requirements for hand-running (see README).
 
-SSRF containment mirrors what PlaywrightBrowserTool does in-JVM (JCLAW-731),
-because moving the launch out of the JVM moves the pinning with it:
+SSRF containment is rebuilt here in four layers (JCLAW-731), because moving
+the launch out of the JVM moved the pinning with it:
 
   1. --host-resolver-rules MAP clauses, supplied by the JVM from its own
      SsrfGuard resolution, pin the entry host to the address the guard actually
@@ -115,8 +115,7 @@ DEFAULT_MAX_CONCURRENT = 4
 # Sec-CH-UA is NOT fixable from the route interceptor: rewriting it in
 # continue_(headers=...) is accepted and then discarded, because Chromium regenerates
 # browser-managed client hints after interception. Verified by sending an x-probe header
-# through the same call — the probe arrives, the brand list does not change. It goes
-# through Emulation.setUserAgentOverride instead, below.
+# through the same call — the probe arrives, the brand list does not change.
 from ssrf import is_allowed_proxy_host, is_public_host, is_public_ip
 
 try:
@@ -162,7 +161,7 @@ _HOST_DECISIONS = {}
 # window.chrome (undefined vs an object with loadTimes), WebGL (SwiftShader vs the
 # real GPU), languages, Notification.permission, pdfViewerEnabled.
 #
-# The full build ships WITH Patchright, so this needs no system browser and behaves
+# The full build is Playwright's download, so this needs no system browser and behaves
 # identically on a headless Linux server. Proprietary codecs (H.264, AAC, MP3) and
 # Widevine are present in it too, checked rather than assumed.
 _CHANNEL = "chromium"

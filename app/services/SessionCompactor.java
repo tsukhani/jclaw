@@ -77,8 +77,8 @@ public final class SessionCompactor {
 
     /**
      * True when the current message list exceeds the compaction budget.
-     * Callers should compute {@code estimatedTokens} with the same
-     * heuristic {@code AgentRunner.estimateTokens} uses so thresholds
+     * Callers should compute {@code estimatedTokens} with
+     * {@code ContextWindowManager.adjustedPromptTokens} so thresholds
      * compare apples to apples.
      */
     public static boolean shouldCompact(int estimatedTokens, ModelInfo modelInfo) {

@@ -460,7 +460,7 @@ fs.mkdirSync(checkout);
 g(checkout, "init", "--quiet", "--initial-branch=main");
 commit(checkout, "base.txt", "base\n");
 g(sandbox, "clone", "--quiet", checkout, clone);
-// The factory's clone commits as its own identity, as setup gives it.
+// The factory's clone commits as its own identity.
 g(clone, "config", "user.name", "jclaw-factory-agent");
 g(clone, "config", "user.email", "jclaw-factory-agent@localhost");
 const operatorEmail = g(checkout, "config", "user.email");

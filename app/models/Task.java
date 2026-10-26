@@ -212,7 +212,7 @@ public class Task extends TimestampedModel {
     /**
      * JCLAW-294 plumbing for JCLAW-295 (delivery layer). Channel +
      * identifier route for the task's output, e.g. "telegram:12345" or
-     * "email:foo@bar.com". Stored verbatim; parsed by the
+     * "slack:C0123". Stored verbatim; parsed by the
      * {@code DeliveryDispatcher} that JCLAW-295 wires in. Null = no
      * delivery (operator reads the TaskRun row directly).
      */
@@ -220,9 +220,8 @@ public class Task extends TimestampedModel {
     public String delivery;
 
     /**
-     * JCLAW-294 plumbing for JCLAW-295 (delivery layer). Output format
-     * hint for the delivery layer — "text", "json", "markdown". Channel
-     * adapters render the TaskRun's outputSummary accordingly.
+     * JCLAW-294 plumbing for JCLAW-295 (delivery layer). "reminder" routes
+     * a fire through ReminderDispatcher; no other value changes a fire.
      */
     @Column(name = "payload_type", length = 50)
     public String payloadType;
@@ -260,38 +259,29 @@ public class Task extends TimestampedModel {
     public String enabledToolNames;
 
     /**
-     * JCLAW-294 plumbing for JCLAW-298 (advanced features). Working
-     * directory for the task fire — script-mode and file-scoped tasks
-     * resolve relative paths against this. Filesystem paths can be
-     * long; sized at 500 chars rather than the default 255.
+     * JCLAW-294 plumbing for JCLAW-298: a working directory for the task's
+     * fires. Unbuilt: {@link services.TaskWriteService#UNBUILT_KEYS} refuses it.
      */
     @Column(name = "workdir", length = 500)
     public String workdir;
 
     /**
-     * JCLAW-294 plumbing for JCLAW-296 (pre-check). Pre-fire condition
-     * expression/script. If non-null, evaluated before each fire; a
-     * falsy result skips the fire without consuming a retry budget.
-     * JCLAW-296 owns the evaluator wiring.
+     * JCLAW-294 plumbing for JCLAW-296: a pre-fire condition expression or
+     * script. Unbuilt: {@link services.TaskWriteService#UNBUILT_KEYS} refuses it.
      */
     @Column(name = "pre_check", columnDefinition = "TEXT")
     public String preCheck;
 
     /**
-     * JCLAW-294 plumbing for JCLAW-296 (script mode). Shell script body.
-     * When non-null and {@link #noAgent} is true, the task fire execs
-     * this script instead of invoking the LLM agent — the Hermes-parity
-     * cost-saving path for tasks that don't need reasoning. JCLAW-296
-     * owns the exec wiring.
+     * JCLAW-294 plumbing for JCLAW-296: a shell script body to run in place
+     * of the agent. Unbuilt: {@link services.TaskWriteService#UNBUILT_KEYS} refuses it.
      */
     @Column(name = "script", columnDefinition = "TEXT")
     public String script;
 
     /**
-     * JCLAW-294 plumbing for JCLAW-296 (no-agent payload). When true,
-     * the task fire skips the LLM round-trip entirely — either runs
-     * {@link #script} (if set) or delivers {@link #description}
-     * verbatim. Default false: tasks go through the agent like JCLAW-21.
+     * JCLAW-294 plumbing for JCLAW-296: whether a fire skips the agent.
+     * Unbuilt: {@link services.TaskWriteService#UNBUILT_KEYS} refuses it.
      *
      * <p>{@code @ColumnDefault} is load-bearing for the same reason as
      * {@link #autoDeleteOnComplete}: the ALTER must backfill existing rows.
@@ -301,19 +291,16 @@ public class Task extends TimestampedModel {
     public boolean noAgent = false;
 
     /**
-     * JCLAW-294 plumbing for JCLAW-298 (contextFrom). JSON-encoded array
-     * of Long Task ids whose latest TaskRun outputs should be available
-     * as context for this task's fires. JCLAW-298 owns the
-     * context-assembly wiring.
+     * JCLAW-294 plumbing for JCLAW-298: a JSON array of Task ids whose latest
+     * outputs a fire would take as context. Unbuilt:
+     * {@link services.TaskWriteService#UNBUILT_KEYS} refuses it.
      */
     @Column(name = "context_from_task_ids", columnDefinition = "TEXT")
     public String contextFromTaskIds;
 
     /**
-     * JCLAW-294 plumbing for JCLAW-298 (repeat limit). Max fires for a
-     * recurring (CRON/INTERVAL) task before auto-cancellation. Null =
-     * unlimited (the JCLAW-21 default). JCLAW-298 wires the fire-counter
-     * check in TaskExecutionHandler.
+     * JCLAW-294 plumbing for JCLAW-298: the most fires a recurring task
+     * would run. Unbuilt: {@link services.TaskWriteService#UNBUILT_KEYS} refuses it.
      */
     @Column(name = "repeat_limit")
     public Integer repeatLimit;
@@ -326,7 +313,7 @@ public class Task extends TimestampedModel {
      *
      * <p>When null the effective zone comes from {@link services.TimezoneResolver},
      * whose chain ends at the operator's own wall-clock zone ({@code app.timezone},
-     * Settings &rarr; General) rather than the server's JVM zone — so a zone-less
+     * Settings &rarr; Timezone) rather than the server's JVM zone — so a zone-less
      * 9 AM task fires at the operator's 9 AM. The order lives in that class alone:
      * a second copy here is a copy that drifts out of step with the resolver.
      *

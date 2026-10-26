@@ -20,7 +20,7 @@ import services.ConfigService;
  *       once baseUrl passes its guard).</li>
  * </ul>
  *
- * <p>{@code ControllerApiTest.providersDiscoverModelsRequiresConfig} covers
+ * <p>{@code ControllerApiTest.emptyBodyPostRejection} covers
  * the missing-baseUrl path against an unconfigured provider; this file adds
  * the remaining error contracts and guards the auth boundary directly.
  */

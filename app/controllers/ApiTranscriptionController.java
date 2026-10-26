@@ -71,7 +71,7 @@ public class ApiTranscriptionController extends Controller {
     /** GET /api/transcription/state — snapshot for the Settings UI. */
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TranscriptionStateResponse.class)))
-    @Operation(summary = "Snapshot transcription config, ffmpeg availability, and per-Whisper-model download status")
+    @Operation(summary = "Snapshot transcription config, ffmpeg availability, and per-ASR-model download status")
     @AgentAccess(OPEN)
     public static void state() {
         var ffmpeg = FfmpegProbe.lastResult();
@@ -120,7 +120,7 @@ public class ApiTranscriptionController extends Controller {
     @SuppressWarnings({"java:S2259", "java:S3655"})
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = DownloadStartedResponse.class)))
     @AgentAccess(value = OPERATOR_ONLY,
-            reason = "triggers a Whisper model download -- disk/network resource action")
+            reason = "triggers an ASR model download -- disk/network resource action")
     public static void download(String id) {
         var model = AsrModel.byId(id);
         if (model.isEmpty()) ApiResponses.error(400, ApiResponses.INVALID_REQUEST, "Unknown whisper model id: " + id);

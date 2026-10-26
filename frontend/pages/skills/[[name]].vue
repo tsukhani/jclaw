@@ -242,7 +242,7 @@ async function openCatalog() {
   if (!catalogResults.value.length && !catalogLoading.value) runCatalogSearch()
 }
 
-// Import is only wired for the static GitHub catalog (clawhub import is a follow-up).
+// Import is wired for the GitHub (mastra) and ClawHub catalogs.
 const canImport = (s: CatalogSkill) => s.provider === 'mastra' || s.provider === 'clawhub'
 const catalogKey = (s: CatalogSkill) => `${s.provider}/${s.skillId}`
 const importingKey = ref<string | null>(null)
@@ -750,7 +750,7 @@ onUnmounted(() => {
 const skillFiles = ref<SkillFile[]>([])
 const skillTools = ref<SkillToolRef[]>([])
 // Shell commands this skill contributes to an installing agent's allowlist.
-// Populated from the SKILL.md `commands:` frontmatter via the files API.
+// Populated from the SKILL.md `jclaw-commands` frontmatter via the files API.
 const skillCommands = ref<string[]>([])
 // Agent name recorded in the SKILL.md `author:` frontmatter. Empty string for
 // legacy skills that predate the field — the header suppresses the attribution
@@ -1490,8 +1490,8 @@ function totalSkillCount(agentId: number) {
       </div>
     </template>
 
-    <!-- Skill viewer — read-only file browser. Skills are created and updated via
-         the skill-creator skill, not through this page. -->
+    <!-- Skill viewer — read-only file browser. This page creates skills only by
+         import; it never edits their files. -->
     <div
       v-if="editing"
       class="space-y-4"
@@ -1578,7 +1578,7 @@ function totalSkillCount(agentId: number) {
 
       <!--
         Shell commands this skill contributes to an installing agent's
-        effective allowlist (from the `commands:` frontmatter). Rendered below
+        effective allowlist (from the `jclaw-commands` frontmatter). Rendered below
         Required Tools because tools are the dependencies the skill consumes
         while commands are the binaries it *provides* — consume-before-provide
         matches the reading order a reviewer uses to trust the skill.

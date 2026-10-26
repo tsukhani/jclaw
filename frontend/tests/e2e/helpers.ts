@@ -102,7 +102,7 @@ export async function gotoPage(page: Page, path: string) {
  * Type a query into a FilterBar and commit it.
  *
  * Addressed by aria-label, not placeholder: FilterBar swaps its placeholder to
- * "Add filter..." once any chip is committed (FilterBar.vue:190), so a
+ * "Add filter..." once any chip is committed (FilterBar.vue:211), so a
  * placeholder locator silently stops matching after the first filter.
  *
  * The Enter press is load-bearing too — FilterBar parses its facet grammar on
@@ -126,7 +126,7 @@ export async function applyFilter(page: Page, query: string) {
  * up": a facet that matches nothing legitimately renders an empty state, so
  * asserting on rows makes the test pass or fail with the operator's data.
  * A parser regression instead drops the text into a plain search term and no
- * chip appears. Chip label comes from FilterBar.vue:174.
+ * chip appears. Chip label comes from FilterBar.vue:194.
  */
 export async function expectFilterChip(page: Page, key: string, value: string) {
   await expect(page.getByLabel(`Filter: ${key} is ${value}`)).toBeVisible({ timeout: 10_000 })

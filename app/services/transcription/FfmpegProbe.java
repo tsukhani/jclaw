@@ -4,16 +4,14 @@ import services.ExecutableProbeSupport;
 import services.ProbeCache;
 
 /**
- * Detect whether {@code ffmpeg} is on PATH. JCLAW-163's transcription pipeline
- * shells out to ffmpeg to coerce arbitrary audio containers into PCM float32
- * 16 kHz mono before handing samples to whisper-jni — without ffmpeg the
- * transcriber can't accept anything but raw 16 kHz PCM input.
+ * Detect whether {@code ffmpeg} is on PATH. Video frame sampling and
+ * voice-note encoding shell out to it.
  *
  * <p>Probe lazily on first call and cache the result; the binary doesn't
  * appear or disappear at runtime in any realistic single-process scenario.
  * The Settings UI (separate story) reads {@link #lastResult} to surface a
- * "ffmpeg missing" banner; {@link WhisperTranscriber} reads it to throw
- * a clear error before attempting to spawn the process.
+ * "ffmpeg missing" banner; {@code FrameSampler} and {@code VoiceNoteEncoder}
+ * read it before spawning the process.
  */
 public final class FfmpegProbe {
 

@@ -113,8 +113,8 @@ final class SubagentChildBootstrap {
 
         // JCLAW-268: inherit-mode tool union. Snapshot the parent's enabled
         // tool set and flip every tool the parent has enabled but the child
-        // currently has disabled (via AgentService.create's default-disabled
-        // rows for browser / jclaw_api on non-main agents) to enabled. The
+        // currently has disabled (the browser row AgentService.create seeds
+        // on non-main agents) to enabled. The
         // child's already-enabled tools stay enabled; "union" means the child
         // gets the broader of the two surfaces. Skipped in fresh mode AND in
         // the inherit-mode summarization-failure degradation path so the
@@ -286,9 +286,8 @@ final class SubagentChildBootstrap {
         // updates. (b) The /conversations + /subagents UIs filter by
         // {@code parentConversation IS NULL}, so subagent children stay
         // hidden from the main listings regardless of channelType — no UI
-        // regression. The {@code SUBAGENT_CHANNEL} constant survives as
-        // an EventLogger category tag (see warn() sites below); it's no
-        // longer used as a Conversation column value.
+        // regression. {@code SUBAGENT_CHANNEL} is the EventLogger category,
+        // and a task-started child's channel when its fire has no origin.
         // A task-started child has no chat to take a channel from, so it takes the fire's origin
         // and DangerousActionGate judges its tool calls exactly as it judges the fire's.
         var childConv = parentConv != null
@@ -378,8 +377,8 @@ final class SubagentChildBootstrap {
      *   <li>Walk the child's existing {@code AgentToolConfig} rows. For any
      *       row whose {@code toolName} is in the parent's enabled set and
      *       currently has {@code enabled=false} on the child (the
-     *       {@link AgentService#create} default-disables for {@code browser}
-     *       and {@code jclaw_api} on non-main agents), flip it to
+     *       {@link AgentService#create} default-disable row for {@code browser}
+     *       on non-main agents), flip it to
      *       {@code enabled=true}.</li>
      * </ol>
      *
@@ -390,10 +389,7 @@ final class SubagentChildBootstrap {
      *
      * <p>Toolset-restriction caveat: the AC references "JCLAW-252 patterns"
      * for an additional restriction layer on top of the union. That ticket
-     * does not exist in this codebase. There is no explicit allowlist /
-     * deny-list mechanism beyond {@code AgentToolConfig} itself, so the
-     * union IS the full grant — the child only sees tools the parent had
-     * enabled OR the child default-allowed.
+     * does not exist in this codebase.
      */
     private static void unionParentToolGrants(Agent parentAgent, Agent childAgent) {
         var parentDisabled = ToolRegistry.loadDisabledTools(parentAgent);
@@ -453,8 +449,8 @@ final class SubagentChildBootstrap {
     /**
      * JCLAW-500 (Change 1): copy the parent's explicit tool DENY-rows onto a
      * freshly-cloned child so the child's capability set is bounded above by
-     * the parent's. {@link AgentService#create} seeds only the standard
-     * non-main defaults (browser, jclaw_api, plus MCP-default-disabled); it
+     * the parent's. {@link AgentService#create} seeds only the non-main
+     * {@code browser} row; it
      * does not carry the parent's custom restrictions, so without this a child
      * cloned from a restricted custom agent reverts to the broader non-main
      * baseline and ends up MORE capable than its parent. We copy only the

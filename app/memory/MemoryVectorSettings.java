@@ -12,8 +12,8 @@ import services.search.LuceneIndexer;
  * {@code conf/application.conf} their only source and a JVM restart the only way to
  * change them. Everything else in the memory system already reads {@link ConfigService},
  * which is DB-backed, cached for 60s, seeds the cache on write for read-your-writes, and
- * is safe from {@code @OnApplicationStart} — {@code ConversationQueueEvictionJob} and
- * {@code DefaultConfigJob} already depend on that.
+ * is safe from {@code @OnApplicationStart} — {@code DefaultConfigJob} already depends
+ * on that.
  *
  * <p>A change here does not reach {@link JpaMemoryStore} on its own: the store reads all
  * four in its constructor into final fields and {@link MemoryStoreFactory} caches the
@@ -83,7 +83,7 @@ public final class MemoryVectorSettings {
      *
      * <p>Only the Lucene backend has a cap low enough to hit by accident: it rejects
      * anything above {@link LuceneIndexer#maxVectorDimensions()} (1024 on
-     * lucene-core 10.5.0), while text-embedding-3-small — this class's own default
+     * lucene-core 10.5.2), while text-embedding-3-small — this class's own default
      * model — is 1536. pgvector's ceiling is far higher and is not asserted here,
      * since it has not been verified against a live Postgres.
      */

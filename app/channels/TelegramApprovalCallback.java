@@ -12,8 +12,8 @@ import java.util.Optional;
  * {@link TelegramCallbackDispatcher} route on the prefix without ambiguity.
  *
  * <p>Telegram caps {@code callback_data} at 64 UTF-8 bytes. The approval
- * id is an opaque short token (see {@link TelegramApprovalService}); a
- * realistic id of ~24 chars plus the {@code "a:o:"} tag stays well under
+ * id is an opaque short token (see {@link TelegramApprovalService}); an
+ * 8-char id plus the {@code "a:o:"} tag stays well under
  * the budget.
  *
  * <h2>Schema</h2>

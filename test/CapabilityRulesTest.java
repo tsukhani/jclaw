@@ -628,7 +628,7 @@ class CapabilityRulesTest extends UnitTest {
     }
 
     /**
-     * Every seam here binds a {@code ScopedValue} for the dynamic extent of a call: an IP-literal
+     * Most seams here bind a {@code ScopedValue} for the dynamic extent of a call: an IP-literal
      * origin the SSRF guard would otherwise refuse ({@code SsrfGuard}), the frozen-page bound
      * ({@code JevPage}, both JCLAW-1277), a canned transport ({@code HttpFactories}) or a fixed clock
      * ({@code AppClock}, JCLAW-1282). A test cannot leak one into a concurrently running class, but a

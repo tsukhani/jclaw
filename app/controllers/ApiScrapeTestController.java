@@ -22,13 +22,13 @@ import static utils.GsonHolder.GSON;
  *
  * <p>Gated by {@link LoadtestAuthCheck}: loopback origin plus {@code X-Loadtest-Auth}
  * carrying {@code application.secret}. Same gate as loadtest and eval capture rather
- * than a third one, and it fits — this endpoint makes outbound requests to a hundred
+ * than a third one, and it fits — this endpoint makes outbound requests to 150
  * third-party origins, which is not something a passing visitor should be able to
  * trigger.
  */
 public class ApiScrapeTestController extends Controller {
 
-    /** Bound on outbound fan-out: the corpus is a hundred unrelated third parties and
+    /** Bound on outbound fan-out: the corpus is 150 unrelated third parties and
      *  the point is to measure access, not to arrive as a burst. */
     private static final int MAX_CONCURRENCY = 16;
 

@@ -29,7 +29,7 @@ public final class TaskService {
     /**
      * JCLAW-153: recurring-task name conflicts for the create path. Returns the
      * tasks sharing {@code name} + {@code agent} whose type is CRON or INTERVAL
-     * and status is not CANCELED — the set {@code ApiTasksController.create}
+     * and status is not CANCELLED — the set {@code ApiTasksController.create}
      * inspects to 409 a duplicate recurring task. Relies on the caller's
      * ambient transaction.
      *

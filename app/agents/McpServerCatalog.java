@@ -150,8 +150,7 @@ public final class McpServerCatalog {
     /**
      * Convenience: returns the list of connected server names that would
      * appear in the catalog for {@code agent}, in the same order as the
-     * markdown rows. Used by the PromptBreakdown so the byte footprint of
-     * the manifest can be reported as its own line item.
+     * markdown rows.
      */
     public static List<String> serversForAgent(Agent agent) {
         return serversForAgent(ToolRegistry.loadDisabledTools(agent));

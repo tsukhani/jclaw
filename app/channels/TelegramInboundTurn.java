@@ -36,8 +36,7 @@ public final class TelegramInboundTurn {
                            Agent bindingAgent, InboundMessage message) {
         final String chatId = message.chatId();
         try {
-            // JCLAW-136: gate attachments against the agent's model capabilities, then
-            // download each into workspace staging. Rejections (modality mismatch, size
+            // JCLAW-136: download each attachment into workspace staging. Rejections (size
             // exceeded, network failures) reply to the user rather than dropping silently.
             var inputs = TelegramChannel.prepareInboundAttachments(
                     botToken, chatId, bindingAgent, message);

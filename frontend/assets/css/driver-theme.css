@@ -158,9 +158,9 @@
   background-color: hsl(0 74% 42%); /* red-700 — darker hover feedback below the new red-600 base */
 }
 
-/* Paired-button popovers (steps 4 & 5): force Finish and Continue to render at
+/* Paired-button popovers: force Finish and Continue to render at
    identical width so they read as a decision pair. Scoped to the paired
-   modifier so single-button steps (1, 3, 6) keep their natural narrow width. */
+   modifier so single-button steps keep their natural narrow width. */
 .driver-popover.jclaw-tour-paired {
   max-width: 560px;
 }

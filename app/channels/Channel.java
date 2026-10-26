@@ -138,7 +138,7 @@ public interface Channel {
      * JCLAW-141: generic cross-channel photo send. {@code caption} (null/blank to
      * omit) rides with the image. Channels without a native photo-upload path
      * return {@link SendResult#FAILED} via this default so a caller can detect
-     * the no-op uniformly; channels that support it (Telegram) override. Must not
+     * the no-op uniformly; channels that support it override. Must not
      * throw.
      */
     default SendResult sendPhoto(String peerId, File file, String caption) {
@@ -149,7 +149,7 @@ public interface Channel {
      * JCLAW-141: generic cross-channel document send. {@code caption} (null/blank
      * to omit) rides with the file. Channels without a native document-upload
      * path return {@link SendResult#FAILED} via this default; channels that
-     * support it (Telegram) override. Must not throw.
+     * support it override. Must not throw.
      */
     default SendResult sendDocument(String peerId, File file, String caption) {
         return SendResult.FAILED;

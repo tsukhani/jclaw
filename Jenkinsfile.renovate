@@ -46,8 +46,8 @@
 // the renovate/renovate image and points it at this clone's repo on
 // Bitbucket Server. Renovate scans renovate.json5 + the source tree,
 // auto-merges patch and minor bumps directly to main via signed git push
-// (renovate.json5's automergeType: "branch" rule), and opens PRs only
-// for major bumps that need human review. The /deploy flow propagates
+// (renovate.json5's automergeType: "branch" rule), and opens PRs for the
+// rest. The /deploy flow propagates
 // the resulting commits to the github mirror via its second remote push.
 
 pipeline {

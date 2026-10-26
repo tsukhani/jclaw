@@ -16,7 +16,7 @@ import java.util.List;
 
 /**
  * Tracks which tools are enabled for each agent.
- * If no config exists for an agent, all tools are enabled by default.
+ * A tool with no row is on unless ToolRegistry makes it opt-in.
  *
  * <p>A row addresses its tool one of two ways: a native tool by {@link #toolName}, an MCP
  * tool by {@link #mcpServer} + {@link #mcpAction} (JCLAW-983). Exactly one of the two is

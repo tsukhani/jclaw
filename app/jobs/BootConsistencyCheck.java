@@ -51,7 +51,7 @@ import java.util.Set;
  *   JCLAW-1103 added {@link #reconcileStrandedRunning} for a RUNNING
  *   Task that has lost it, which neither can see.</li>
  *
- *   <li>Tasks in terminal states (COMPLETED / FAILED / CANCELED)
+ *   <li>Tasks in terminal states (COMPLETED / FAILED / CANCELLED)
  *   — they shouldn't have rows in {@code scheduled_tasks} and we
  *   don't want to re-fire them.</li>
  *
@@ -61,7 +61,7 @@ import java.util.Set;
  * </ul>
  *
  * <h2>Invocation</h2>
- * Called inline from {@link DbSchedulerBootstrapJob#doJob}
+ * Called by {@link DbSchedulerBootstrapJob}'s gate thread
  * immediately after {@code scheduler.start()} so the ordering is
  * deterministic. Pre-fix this class was its own
  * {@code @OnApplicationStart} job, but Play 1.x doesn't order
@@ -99,7 +99,7 @@ public class BootConsistencyCheck extends Job<Void> {
      *   <li>Read the set of {@code task_instance} ids currently
      *       sitting in {@code scheduled_tasks} for our
      *       {@link TaskExecutionHandler#TASK_NAME}.</li>
-     *   <li>Walk all PENDING Tasks. Skip any whose id is in the
+     *   <li>Walk all alive Tasks. Skip any whose id is in the
      *       set (already scheduled — no action needed).</li>
      *   <li>For each orphan, call
      *       {@link TaskSchedulingService#register} which translates

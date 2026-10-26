@@ -145,7 +145,7 @@ class ApiChatControllerTest extends FunctionalTest {
     @Test
     void sendSlashHelpReturnsSyntheticResponseWithoutLlm() {
         // /help is the simplest slash-command path: it doesn't need any
-        // provider configuration, doesn't hit Commands.executeArgs branches,
+        // provider configuration, doesn't hit Commands' argument branches,
         // and never invokes the LLM. The response payload must include the
         // synthetic response text and the agent identity.
         login();

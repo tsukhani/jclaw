@@ -54,7 +54,7 @@ import java.util.Map;
  *
  * <h2>Fan-out semantics</h2>
  * One-shot tasks (IMMEDIATE/SCHEDULED) allow duplicate names per agent.
- * {@code cancelTask}/{@code pause}/{@code resume}/{@code runNow} fan out
+ * {@code cancelTask}/{@code pause}/{@code resume} fan out
  * across all non-canceled matches and report a count.
  * {@code updateTask} requires exactly one match (the patch surface is
  * wider, and silently mass-updating multiple tasks would be surprising
@@ -129,7 +129,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 new ToolAction(ACTION_UPDATE_TASK,           "Partial update to a task by name — fields that aren't provided stay as-is"),
                 new ToolAction(ACTION_PAUSE,                 "Pause a recurring task by name; cadence is preserved, fires no-op until resume"),
                 new ToolAction(ACTION_RESUME,                "Resume a previously-paused task by name"),
-                new ToolAction(ACTION_RUN_NOW,               "Fire a task immediately by name; accepts any state (revives CANCELLED to PENDING)"),
+                new ToolAction(ACTION_RUN_NOW,               "Fire a task immediately by name; accepts any state but paused (revives CANCELLED)"),
                 new ToolAction(ACTION_CANCEL_TASK,           "Cancel a task by name (any type) — sets status=CANCELLED, row stays so runNow can revive it later"),
                 new ToolAction(ACTION_DELETE_TASK,           "Hard-delete a task and its run history by name. Irreversible — the row is gone. Use cancelTask if you might want it back"),
                 new ToolAction(ACTION_LIST_RECURRING_TASKS,  "List the agent's currently active recurring tasks"),
@@ -302,8 +302,8 @@ public class TaskTool implements ToolRegistry.Tool {
 
     /**
      * Non-canceled task ids matching (name, agent). Returns empty list
-     * when nothing matches. Used by pause/resume/cancelTask — runNow uses
-     * the any-state variant below because it explicitly revives CANCELED.
+     * when nothing matches. Used by updateTask/pause/resume — runNow uses
+     * the any-state variant below because it explicitly revives CANCELLED.
      */
     private static List<Long> findTaskIds(String name, Agent agent) {
         return Tx.run(() -> {
@@ -386,7 +386,7 @@ public class TaskTool implements ToolRegistry.Tool {
      * Three input shapes from the LLM:
      * <ol>
      *   <li>Missing / null → infer the full {@code "<channel>:<target>"}
-     *       from the calling agent's most-recently-updated Conversation.</li>
+     *       from the calling turn's Conversation, else the latest.</li>
      *   <li>Bare channel name ({@code "web"}, {@code "telegram"},
      *       {@code "slack"}, {@code "whatsapp"}) with no colon → keep the
      *       agent's channel choice, fill the target from the same
@@ -708,7 +708,7 @@ public class TaskTool implements ToolRegistry.Tool {
         }
         var name = args.get(KEY_NAME).getAsString();
 
-        // Any-state lookup — runNow can target COMPLETED/FAILED/CANCELED too.
+        // Any-state lookup — runNow can target COMPLETED/FAILED/CANCELLED too.
         var scan = Tx.run(() -> collectRunNowTargets(name, agent));
         if (scan.ranIds().isEmpty()) {
             return scan.paused() > 0 ? TaskRunReports.pausedNote(name) : MSG_NO_TASK_FOUND.formatted(name);
@@ -750,10 +750,9 @@ public class TaskTool implements ToolRegistry.Tool {
 
     /**
      * Inside the calling Tx: scan tasks matching (name, agent) and prepare
-     * them for a manual fire. Mutates {@code revivedRef[0]} as it flips
-     * CANCELED rows to PENDING, and appends LOST ids to {@code lostIds}
-     * so the caller can force-remove their stale scheduled_tasks row.
-     * Returns the full list of matched task ids (any state).
+     * them for a manual fire. Counts the CANCELLED rows it revives and the
+     * paused ones it skips, and lists LOST ids for the caller to force-remove.
+     * Returns the ids to fire.
      */
     private record RunNowScan(List<Long> ranIds, int revived, List<Long> lostIds, int paused) {}
 
@@ -772,7 +771,7 @@ public class TaskTool implements ToolRegistry.Tool {
             if (task.status == Task.Status.CANCELLED) {
                 // Revive — otherwise TaskExecutionHandler skips the fire body.
                 // Recurring tasks get ACTIVE; one-shot tasks get PENDING.
-                // JCLAW-733: genuine CANCELED -> ACTIVE/PENDING transition, route
+                // JCLAW-733: genuine CANCELLED -> ACTIVE/PENDING transition, route
                 // through the guard (both edges are legal for an existing task).
                 task.transitionTo(Task.initialStatusFor(task.type));
                 task.save();
@@ -812,8 +811,8 @@ public class TaskTool implements ToolRegistry.Tool {
             var ids = new ArrayList<Long>(tasks.size());
             for (var task : tasks) {
                 // JCLAW-733: intentionally NOT routed through transitionTo. The
-                // finder matches every non-CANCELED state, including LOST /
-                // COMPLETED / FAILED, whose edge to CANCELED the lifecycle guard
+                // finder matches every non-CANCELLED state, including LOST /
+                // COMPLETED / FAILED, whose edge to CANCELLED the lifecycle guard
                 // deliberately forbids — routing here would throw on a cancel
                 // that is legal today. Direct assignment preserves that behavior.
                 task.status = Task.Status.CANCELLED;

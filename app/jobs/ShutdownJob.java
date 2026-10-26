@@ -96,8 +96,7 @@ public class ShutdownJob extends Job<Void> {
     public void doJob() {
         // From here on EventLogger is file-only: H2's exit hook may have closed the database,
         // so the shutdown logging below would otherwise trip a batched DB flush
-        // into a doomed "begin transaction failed" WARN. (Set in every
-        // @OnApplicationStop hook — whichever runs first wins; the rest no-op.)
+        // into a doomed "begin transaction failed" WARN.
         EventLogger.markShuttingDown();
         var components = List.of(
                 new Component("db-scheduler", DbSchedulerBootstrapJob::shutdownGracefully),

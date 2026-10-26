@@ -120,11 +120,9 @@
        borders on tables, menus, cards, and form inputs effectively
        vanished. The visible borders in this app (sidebar outer chrome,
        composer card, ChatContextMeter) all bypass the token with explicit
-       hsl(0 0% 25%)/50 or fg-muted/40 overrides. Lifting the token to
-       ~22% L (~#383838) gives ~7 points of contrast against the elevated
-       surface — clearly visible without becoming heavy chrome. The two
+       hsl(0 0% 25%)/50 or fg-muted/40 overrides. The two
        intentional-invisibility uses of `dark:border-border` in
-       layouts/default.vue have been switched to `dark:border-transparent`
+       layouts/default.vue have been switched to `border-transparent`
        to preserve their structural-spacer behavior. */
     --border: hsl(0 0% 44%);               /* ≥3:1 non-text on --muted as well as the elevated dark surface (43% was 2.95:1 on --muted). Heavier chrome — see audit note. */
     --input: hsl(0 0% 45%);                /* JCLAW-691 #4: 22%→45% so form-field borders ≥3:1 non-text on the elevated dark surface */
@@ -171,7 +169,7 @@
 
   /* Tailwind v4's preflight renders ::placeholder as currentColor at 50%
      opacity, which measures 3.34:1 against our fields — under the 4.5:1 WCAG
-     1.4.3 wants. Only four of this app's placeholders set a colour of their
+     1.4.3 wants. Only five of this app's placeholders set a colour of their
      own, and a `placeholder:` utility still wins over this base rule. */
   ::placeholder {
     color: var(--fg-muted);

@@ -30,7 +30,7 @@ import static utils.GsonHolder.GSON;
  * wait is bounded to a single shared deadline ({@code LISTENER_TIMEOUT_MS}
  * from the first {@code get}) regardless of listener count — so a
  * slow/stalled SSE writer can never block the fan-out for other subscribers.
- * Listeners that throw or exceed the timeout are removed.
+ * SSE listeners that throw or time out are removed.
  */
 public class NotificationBus {
 

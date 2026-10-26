@@ -417,8 +417,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
      *
      * <p>Takes the already-parsed {@link JsonObject} instead of the raw string so
      * we don't pay {@link JsonParser#parseString} twice per chunk (once
-     * implicitly inside {@code gson.fromJson} and once here). Caller in
-     * {@link #chatStream} parses the SSE data field once and reuses the tree
+     * implicitly inside {@code gson.fromJson} and once here). The OpenAI wire's
+     * {@code stream} parses the SSE data field once and reuses the tree
      * for both the field-mapping and the usage augmentation pass.
      */
     private ChatCompletionChunk augmentChunkUsage(ChatCompletionChunk chunk, JsonObject root) {
@@ -888,8 +888,8 @@ public abstract sealed class LlmProvider implements LlmStreamCarriers
         // real content stamps firstContentNanos at the same instant
         // as reasoningStartNanos → reasoningDurationMs collapses to 0
         // → the frontend renders the generic "Thinking" label after
-        // reload. Mirrors the frontend's `if (!event.content) continue`
-        // guard at chat.vue:1116.
+        // reload. Mirrors the frontend's `if (!event.content) return`
+        // guard in useChatStream.ts.
         if (delta.content() != null && !delta.content().isEmpty()) {
             accumulator.noteFirstContentChunk();
             contentBuilder.append(delta.content());

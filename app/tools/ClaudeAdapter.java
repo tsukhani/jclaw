@@ -133,9 +133,8 @@ public final class ClaudeAdapter implements HarnessAdapter {
     /**
      * The full assembled assistant turn. A {@code tool_use} content block becomes
      * a {@link HarnessEvent#TOOL_CALL} (its input is complete here); a text-only
-     * turn becomes a {@link HarnessEvent#STEP} because that prose already streamed
-     * as {@code text_delta} tokens. Falls back to a raw-line step when the message
-     * carries no structured content.
+     * or contentless turn is dropped ({@code null}), since that prose already
+     * streamed as {@code text_delta} tokens.
      */
     private static @Nullable HarnessEvent fromAssistant(JsonObject obj, String line) {
         var message = obj.has(FIELD_MESSAGE) && obj.get(FIELD_MESSAGE).isJsonObject()
@@ -160,7 +159,7 @@ public final class ClaudeAdapter implements HarnessAdapter {
      * content_block_delta} whose delta is a {@code text_delta} carries live output
      * — surface it as a {@link HarnessEvent#TOKEN}. Every other frame ({@code
      * message_start}, {@code ping}, {@code content_block_start}/{@code _stop},
-     * {@code input_json_delta}, …) is a coarse {@link HarnessEvent#STEP}.
+     * {@code input_json_delta}, …) is dropped ({@code null}).
      */
     private static @Nullable HarnessEvent fromStreamEvent(JsonObject obj) {
         JsonElement event = obj.get("event");

@@ -6,7 +6,7 @@ Wraps the Synology FileStation HTTP API in curl. No MCP server needed.
 
 Reads `../credentials/nas.env` (relative to the script). Environment variables
 of the same names override the file; `NAS_ENV_FILE` overrides the file path.
-Copy `../credentials/nas.env.example` to `../credentials/nas.env` to configure.
+Copy `nas.env.example` to `../credentials/nas.env` to configure.
 
 ## Commands
 

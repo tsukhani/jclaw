@@ -47,7 +47,7 @@ import java.util.Objects;
 public final class ContextWindowManager {
 
     /**
-     * Absorbs slack between the chars/4 token heuristic and the provider's
+     * Absorbs slack between the jtokkit estimate and the provider's
      * real tokenizer, plus the overhead of role tags, JSON punctuation,
      * and streaming framing that promptTokens accounting doesn't cover.
      */

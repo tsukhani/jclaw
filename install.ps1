@@ -400,7 +400,7 @@ function ConvertTo-PosixPath($p) {
 }
 
 # Write the shim, then put its directory on PATH. Both are needed and neither is
-# sufficient: install.sh runs `jclaw.sh shim` (line ~455) and this must too —
+# sufficient: install.sh runs `jclaw.sh shim` (line ~545) and this must too —
 # write_shim's only caller is that subcommand, so without it the PATH entry points
 # at an empty directory (JCLAW-1105 follow-up).
 $BinDir      = Join-Path $env:USERPROFILE '.local\bin'

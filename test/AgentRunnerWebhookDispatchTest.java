@@ -27,7 +27,7 @@ import java.util.concurrent.atomic.AtomicReference;
  *
  * <p>Each test pins a single branch in
  * {@link AgentRunner#processWebhookMessage},
- * {@link AgentRunner#processInboundForAgent} and the package-private
+ * {@link AgentRunner#processInboundForAgent} and
  * {@code dispatchToChannel} so a regression that, for example, lets a
  * no-route webhook silently drop instead of invoking the sendNoRoute
  * callback, lands a precise failure.

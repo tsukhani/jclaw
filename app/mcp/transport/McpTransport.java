@@ -11,7 +11,7 @@ import java.util.function.Consumer;
 /**
  * Bidirectional MCP transport channel (JCLAW-31).
  *
- * <p>Three implementations exist: {@link McpStdioTransport} (subprocess
+ * <p>Two implementations exist: {@link McpStdioTransport} (subprocess
  * stdin/stdout), {@code McpStreamableHttpTransport} (HTTP POST with optional
  * SSE upgrade per the MCP 2025-06-18 spec). The shared contract:
  *

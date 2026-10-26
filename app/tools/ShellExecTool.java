@@ -84,7 +84,7 @@ import java.util.stream.Collectors;
  *       that is what {@code shell.sandbox} below adds.</li>
  *   <li>The {@link #validateAllowlist(String, Agent)} check exists for <em>UX
  *       guardrails</em> — catching accidental LLM misfires on obvious bad
- *       commands ({@code rm -rf /}, {@code curl | sh}) — not as a
+ *       commands ({@code rm -rf /}) — not as a
  *       metacharacter-hardened sandbox. Anyone who needs metacharacter-level
  *       isolation must wrap this tool in an external sandbox
  *       (firejail, Docker, etc.) at the platform-operator layer.</li>
@@ -119,7 +119,7 @@ import java.util.stream.Collectors;
  * <p>The reasoning above rests on "a hostile prompt that reaches this tool has already
  * breached the prompt-injection perimeter." That perimeter is thinner than it sounds.
  * Grant one agent both {@code exec} and any tool that pulls in text the operator did not
- * write — {@code web_fetch}, {@code web_search}, {@code playwright_browser}, or an MCP
+ * write — {@code web_fetch}, {@code web_search}, {@code browser}, or an MCP
  * server that reads issues, pages or email — and a single turn can ingest
  * attacker-controlled instructions and reach a shell with the Play process's privileges.
  * No operator mistake is required for that; enabling two individually reasonable tools is

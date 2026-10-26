@@ -45,9 +45,8 @@ import java.util.regex.Pattern;
 /**
  * {@code diarize_audio} (JCLAW-654): speaker-attributed transcription via an
  * audio-capable chat model — cloud (OpenRouter/OpenAI) or a local audio-native
- * model served by Ollama ({@code ollama-local}). The former fully-on-device
- * diarization sidecar was removed after the measured tier comparison — an
- * audio-native LLM through a single {@code input_audio} chat call beat every
+ * model served by Ollama ({@code ollama-local}). In the measured tier
+ * comparison an audio-native LLM through a single {@code input_audio} chat call beat every
  * on-device sidecar configuration on turn attribution (18/18 vs 13/17 on the
  * human-arbitrated benchmark) at a fraction of the wall-clock; a local
  * audio-native LLM via Ollama is that same single-call shape, run locally.

@@ -9,7 +9,7 @@ import java.util.function.Function;
 
 /**
  * Shared boot-probe logic for the local-LLM provider probe jobs
- * ({@link LmStudioProbeJob}, {@link OllamaLocalProbeJob}). Both probe a
+ * (LM Studio, Ollama, vLLM). Each probes a
  * configured local provider once at boot and log the same three-way outcome —
  * INFO with a model count when reachable, DEBUG (silent under default logging)
  * when connection-refused so a fresh install without the provider running stays

@@ -19,7 +19,7 @@ import java.lang.reflect.Field;
  * JCLAW-455 unit tests for {@link DeliveryAdvisor#advisoryFor}: only Slack channel targets are
  * probed; a non-Slack target, a missing/disabled binding, or a reachable channel yields no
  * advisory; an unreachable channel yields an actionable one. The {@code conversations.list}
- * lookup is swapped via the {@code SlackWebApi.CHANNEL_LISTER} seam (reflection), and each
+ * lookup is swapped via the {@code SlackWebApi.channelLister} seam (reflection), and each
  * Slack test uses a distinct bot token (probe verdicts are 60 s-cached), so nothing hits the
  * network.
  */

@@ -28,7 +28,7 @@ public final class UvProbe {
     /** Run the probe (idempotent), update cache, return result. */
     public static ProbeResult probe() {
         var r = ExecutableProbeSupport.probeOnPath("uv", "--version", "UvProbe",
-                " — install uv to enable local image and video generation");
+                " — install uv to enable the local sidecars");
         return CACHE.set(new ProbeResult(r.available(), r.reason()));
     }
 

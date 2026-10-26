@@ -62,7 +62,7 @@ public class ApiOnboardingController extends Controller {
     @SuppressWarnings("java:S2259")
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = TourProgressRequest.class)))
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = TourProgressResponse.class)))
-    @Operation(summary = "Record guided-tour progress, upserting the max step reached (clamped to [1, totalSteps])")
+    @Operation(summary = "Record guided-tour progress, upserting the max step reached (400 outside [1, totalSteps])")
     @AgentAccess(value = OPEN, reason = "guided-tour step counter -- operator UI state with no reach")
     public static void recordProgress() {
         var body = JsonBodyReader.readJsonBody();

@@ -35,13 +35,13 @@ import java.util.Set;
  *       registered.</li>
  *   <li>PENDING Tasks that are already in scheduled_tasks do
  *       NOT get re-registered (no duplicate fires).</li>
- *   <li>Terminal-status Tasks (RUNNING / COMPLETED / FAILED /
- *       CANCELLED) are skipped — the sweep only acts on PENDING.</li>
+ *   <li>Terminal Tasks (COMPLETED / FAILED / CANCELLED) are
+ *       skipped; a fresh RUNNING one is left alone.</li>
  * </ul>
  *
  * <p>Stub pattern: dynamic Proxy with response shape configurable
  * per test (which "already-scheduled" rows to surface in
- * {@code fetchScheduledExecutionsForTask}). Same approach the
+ * {@code getScheduledExecutionsForTask}). Same approach the
  * other Task-related tests use, generalised to also serve as the
  * "already-scheduled" data source.
  */
@@ -467,7 +467,7 @@ class BootConsistencyCheckTest extends UnitTest {
      *       Tasks got registered.</li>
      *   <li>Surfaces a configurable set of "already-scheduled"
      *       task_instance ids via
-     *       {@code fetchScheduledExecutionsForTask} — the
+     *       {@code getScheduledExecutionsForTask} — the
      *       call site the sweep uses to discover what's already in
      *       scheduled_tasks.</li>
      * </ul>

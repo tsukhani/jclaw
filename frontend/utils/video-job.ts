@@ -1,8 +1,8 @@
 /**
  * Display-state logic for generated-video attachments (JCLAW-234). Pure functions, so the user-visible
  * correctness — given a placeholder attachment and its polled job status, is the card "generating",
- * "ready", or "failed"? — is unit-testable without mounting chat.vue or faking the poll timer. The poll
- * loop in chat.vue is thin glue over these.
+ * "ready", or "failed"? — is unit-testable without mounting chat.vue or faking the poll timer.
+ * useMediaGenPolling's poll is thin glue over these.
  */
 
 export interface VideoJobStatus {

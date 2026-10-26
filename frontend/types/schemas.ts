@@ -10,11 +10,11 @@
  * and fail loudly with a useful error path.
  *
  * Scope is deliberately narrow: chat messages, conversation rows, and tool
- * calls. Every other endpoint keeps using {@code useApi}/{@code $fetch} with
+ * calls. Every other endpoint keeps using {@code useFetch}/{@code $fetch} with
  * raw type assertions until we have a reason to widen.
  *
  * The schemas mirror {@code types/api.ts} where the field set is known and
- * lean on {@code .passthrough()} where the backend may add fields the UI
+ * lean on {@code .loose()} where the backend may add fields the UI
  * doesn't care about (notably {@link ToolCallResultStructuredSchema}, which
  * carries provider-specific blobs).
  */

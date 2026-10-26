@@ -12,7 +12,7 @@ const showConfirm = ref(false)
 const error = ref('')
 const loading = ref(false)
 
-// Respect the stored theme preference (unlike /login which forces light).
+// Respect the stored theme preference (as /login does).
 // The setup screen is the user's first impression — if they've already
 // toggled dark mode via system preference it'd be jarring to flash light.
 function resolveEffectiveTheme(saved: string | null, prefersDark: boolean): 'dark' | 'light' {

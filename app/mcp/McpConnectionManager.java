@@ -62,7 +62,7 @@ import java.util.function.Consumer;
  * memory note (jdk25 vt_thread_sleep) calls this out — the timer pool
  * stays platform-only and only schedules work onto the VT pool.
  *
- * <p><b>Backoff schedule.</b> {@code min(2^attempts, ceiling) seconds},
+ * <p><b>Backoff schedule.</b> {@code min(2^(attempts-1), ceiling) seconds},
  * reset on successful connect. Defaults to 30s ceiling per the AC ("max
  * 1 attempt per 30s") with a 1s initial. Configurable via the
  * {@code backoff*} setters for tests.
@@ -213,9 +213,8 @@ public final class McpConnectionManager {
     /** Connect (or restart) one configured server. Idempotent: replaces
      *  any prior entry for the same name. Fire-and-forget: returns once the
      *  first attempt has been scheduled, not when it resolves. Used by
-     *  {@link #startAll()} on boot, where waiting per-server would serialize
-     *  startup. Callers that need to know the first-attempt outcome (the
-     *  admin API on registration) should use {@link #connectAndAwait}. */
+     *  {@code McpServerService.syncRuntime}; {@link #startAll()} awaits
+     *  through {@link #connectAndAwait}. */
     public static void connect(McpServer server) {
         connectInternal(server, null);
     }
@@ -513,7 +512,7 @@ public final class McpConnectionManager {
      * the <em>server</em>: an {@link McpException} (JSON-RPC error, protocol violation
      * or request timeout) and an {@link IOException} record a failure. A returned
      * {@link CallToolResult#isError()} does not — the tool ran, and its own failure is
-     * tool-level semantics — and neither does {@link McpException.ResourceNotFound}.
+     * tool-level semantics — nor {@link McpException.ResourceNotFound} or {@link McpException.InputRequired}.
      *
      * <p>Public so a test can drive the gate against a fake clock without a live server.
      *

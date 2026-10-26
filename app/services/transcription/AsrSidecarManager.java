@@ -5,9 +5,8 @@ import services.UvProbe;
 
 /**
  * Lifecycle owner for the ASR Python sidecar (JCLAW-565; ASR-only since
- * JCLAW-654 — local diarization was removed and speaker attribution moved
- * to the cloud audio-model tool). One sidecar per JVM, reached over
- * {@code 127.0.0.1:<transcription.asr.local.port>}. The
+ * JCLAW-654 — diarization runs in {@link DiarizeSidecarManager}). One
+ * sidecar per JVM, reached over {@code 127.0.0.1:<transcription.asr.local.port>}. The
  * spawn/drain/health/stop mechanism is shared with the imagegen/videogen
  * daemons via {@link LocalSidecarDaemon}.
  *

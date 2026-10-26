@@ -45,7 +45,7 @@ import java.util.stream.Collectors;
  * <ul>
  *   <li><b>Owned</b>: round dispatch, JCLAW-291 cooperative-cancel
  *   checkpoints, JCLAW-165 audio-format retry in the sync path, the
- *   empty-continuation synthesis-nudge retry in the streaming path,
+ *   empty-continuation synthesis-nudge retry,
  *   JCLAW-273 yield-on-success detection.</li>
  *   <li><b>Delegated</b>: token estimation
  *   ({@link ContextWindowManager}), model resolution
@@ -480,7 +480,7 @@ public final class ToolCallLoopRunner {
             EventLogger.warn("llm", agent.name, null,
                     "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
             var content = assistantMsg.content() != null ? (String) assistantMsg.content()
-                    : "I tried to use a tool but my response was too long and got cut off. Let me try a more concise approach.";
+                    : "I tried to use a tool but my response was too long and got cut off, so the tool call was not run.";
             return new LoopOutcome(content, true);
         }
 
@@ -651,8 +651,7 @@ public final class ToolCallLoopRunner {
         UsageMetricsBuilder.addRoundAndReport(ctx.turnUsage(), accumulator, ctx.cb());
 
         // Truncation guard: if the model hit max_tokens mid-tool-call, the tool arguments
-        // will be an incomplete JSON fragment. Passing that to ToolRegistry.execute causes
-        // a Gson EOFException and the user sees a cryptic "End of input" error. Instead,
+        // will be an incomplete JSON fragment. Instead of dispatching it,
         // surface a clear message so the LLM can retry with a more concise approach.
         if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason()) && !accumulator.toolCalls().isEmpty()) {
             return handleTruncatedToolCallAccumulator(accumulator, ctx.agent(), ctx.cb(), round);

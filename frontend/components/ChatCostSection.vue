@@ -265,7 +265,7 @@ const configuredSubscriptionProviders = computed(() => {
 })
 
 // Display names for the configured-provider tooltip. Mirrors the
-// PROVIDER_LABELS map in settings.vue (small enough that duplicating is
+// PROVIDER_LABELS map (small enough that duplicating is
 // cheaper than threading a shared util through). Unknown providers fall
 // back to their raw registry name.
 const PROVIDER_DISPLAY_NAMES: Record<string, string> = {

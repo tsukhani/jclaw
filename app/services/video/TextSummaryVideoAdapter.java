@@ -26,7 +26,7 @@ import java.util.Map;
  *
  * <p><b>Cost control.</b> Each frame caption is a full LLM round-trip, so this adapter caps the
  * frame count below the duration-aware figure: effective N = {@code min(frameCountFor(duration),
- * MAX_FRAMES)}. That keeps caption-call cost bounded even when an operator raises
+ * maxFrames)}. That keeps caption-call cost bounded even when an operator raises
  * {@code video.sampleFrames} to densify the native-video / multi-image strategies.
  *
  * <p><b>Resilience.</b> A single frame's caption failing does not fail the whole summary — the line

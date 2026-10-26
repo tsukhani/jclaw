@@ -72,7 +72,7 @@ public class ToolApprovalGrant extends Model {
         return ToolApprovalGrant.delete("agent.id = ?1 AND toolName = ?2", agentId, toolName) > 0;
     }
 
-    /** Standing grants for one agent, newest first. */
+    /** Standing grants for one agent, by tool name. */
     public static List<ToolApprovalGrant> findByAgent(Long agentId) {
         return ToolApprovalGrant.find("agent.id = ?1 ORDER BY toolName", agentId).fetch();
     }

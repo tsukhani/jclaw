@@ -33,8 +33,8 @@ const typeFilter = ref('')
 
 interface Filter { key: string, value: string }
 function onFiltersChanged(filters: Filter[]) {
-  // A bare token parses to key `name` in FilterBar; map it to q too so plain
-  // typing searches the reminder text without needing the `q:` prefix.
+  // A bare token parses to `q`, the first filter key, so plain typing searches
+  // the reminder text.
   qFilter.value = filters.find(f => f.key === 'q' || f.key === 'name')?.value ?? ''
   statusFilter.value = filters.find(f => f.key === 'status')?.value ?? ''
   typeFilter.value = filters.find(f => f.key === 'type')?.value ?? ''
@@ -378,8 +378,8 @@ const statusColors: Record<string, string> = {
 
     <!-- Search / filter bar — one chip-based bar (JCLAW-304 pattern). `q:`
          keyword runs FTS over the reminder name + description; `status:` and
-         `type:` are equality filters. A bare word also searches (mapped to q
-         in onFiltersChanged). -->
+         `type:` are equality filters. A bare word also searches (FilterBar
+         binds it to q). -->
     <div class="mb-4">
       <FilterBar
         storage-key="reminders"

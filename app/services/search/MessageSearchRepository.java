@@ -40,11 +40,8 @@ public interface MessageSearchRepository {
      * One-time initialization. Idempotent — re-running on every boot
      * costs microseconds when the schema is already in place.
      *
-     * <p>For H2 this calls {@code FullTextLucene.init} (creates the
-     * {@code FT_*} system aliases if missing) and
-     * {@code FullTextLucene.createIndex} (installs the
-     * INSERT/UPDATE/DELETE triggers on {@code task_run_message} if
-     * not already present).
+     * <p>For the Lucene backend this opens every scope's index and
+     * backfills any scope short of its table.
      *
      * <p>For Postgres this is currently a no-op — the
      * {@code search_vector} column + GIN index + trigger DDL is
@@ -115,7 +112,7 @@ public interface MessageSearchRepository {
     }
 
     /**
-     * Short identifier for log lines. {@code "h2"} or {@code "postgres"}.
+     * Short identifier for log lines. {@code "lucene"} or {@code "postgres"}.
      */
     String dialectName();
 }

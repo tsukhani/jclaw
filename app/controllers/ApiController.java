@@ -18,7 +18,7 @@ import static controllers.AgentAccess.Level.OPEN;
 import static utils.GsonHolder.GSON;
 
 /**
- * API controller for the Nuxt 3 frontend.
+ * API controller for the Nuxt 4 frontend.
  * All endpoints are prefixed with /api/ in the routes file.
  */
 public class ApiController extends Controller {

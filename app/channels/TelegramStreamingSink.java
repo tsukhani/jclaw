@@ -59,8 +59,8 @@ import java.util.regex.Pattern;
  *       media-message delivery).
  *   <li>{@link #errorFallback(Exception)} is called on LLM-side errors. The
  *       placeholder is deleted and a plain error message is sent.
- *   <li>On queue-interrupt cancellation the sink is abandoned — no callback
- *       fires and the partial draft stays on Telegram as the user saw it
+ *   <li>On cancellation {@link #cancel} quiesces the sink and the partial
+ *       draft stays on Telegram as the user saw it
  *       (intentional; matches the ACs on JCLAW-94).
  * </ol>
  *
@@ -137,7 +137,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     private static final String ACK_ERROR = "❌";
 
     /**
-     * Single-thread scheduler used ONLY to dispatch throttled flush tasks.
+     * Single-thread scheduler used ONLY to dispatch flush and typing ticks.
      * The scheduler thread itself never performs network I/O — it spawns a
      * fresh virtual thread for each flush. Keeping one scheduler thread
      * preserves the "one scheduled flush per sink in flight" invariant (via
@@ -148,8 +148,8 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * <p>Lazily-initialized, re-initializable scheduler. Direct static init would
      * mean that {@link #shutdown} leaves a dead scheduler reference for the
      * rest of the JVM lifetime — a problem during testing where
-     * {@code JobLifecycleTest} invokes {@code ShutdownJob.doJob()} in the
-     * middle of the suite, and subsequent tests still need a live scheduler.
+     * {@code TelegramStreamingSinkTest} calls {@link #shutdown} mid-suite,
+     * and subsequent tests still need a live scheduler.
      * The AtomicReference pattern lets the next {@link #scheduler()} call
      * transparently recreate a fresh executor after shutdown.
      */
@@ -198,9 +198,9 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * JCLAW-369: inbound message id to reply to (null disables reply
      * targeting) and forum-topic thread id to scope sends into (null = no
      * topic). Both default to null through the existing constructors so every
-     * legacy call site keeps today's behavior; the parent wires the inbound
-     * values in after merge. The reply badge is applied to the placeholder /
-     * planner-first message per {@link TelegramChannel#replyToMode()}, and the
+     * legacy call site keeps today's behavior. The reply badge is applied to
+     * the placeholder / planner-first message per
+     * {@link TelegramChannel#replyToMode()}, and the
      * thread id is set on the placeholder send, the planner send, and the
      * typing heartbeat (General topic included for typing, omitted on sends).
      */
@@ -1017,7 +1017,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
      * conversation can both pass the check if their reads interleave with
      * the put. Worst case is two adjacent notifications, which is still a
      * better UX than missing one entirely. The {@code ConcurrentHashMap}
-     * itself is thread-safe; what's approximate here is the 60-second
+     * itself is thread-safe; what's approximate here is the cooldown
      * window, not the structure.
      */
     private static final ConcurrentHashMap<Long, Long>
@@ -1028,14 +1028,12 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
     /**
      * Error-reply policy + cooldown (JCLAW-362). Replaces the previously
      * hardcoded 60 s cooldown with operator-configurable values, read from
-     * {@code conf/application.conf}:
+     * the Config DB:
      *
      * <ul>
      *   <li>{@code telegram.notifier.policy} — {@code reply} (default) sends
      *       the user a "couldn't deliver" message; {@code silent} suppresses
-     *       it (the failure is still logged). Channel/config level because the
-     *       per-binding {@code TelegramBinding} model is owned by another lane
-     *       this wave; the per-binding override is a follow-up.</li>
+     *       it (the failure is still logged). A binding may override it.</li>
      *   <li>{@code telegram.notifier.cooldownMs} — per-conversation rate-limit
      *       window in milliseconds (default {@value #DEFAULT_NOTIFIER_RATE_LIMIT_MS}).</li>
      * </ul>
@@ -1094,7 +1092,7 @@ public final class TelegramStreamingSink implements ChannelStreamingSink {
 
     /**
      * Tell the user their response couldn't be delivered (JCLAW-106). Called
-     * from seal()'s three send paths when {@link TelegramChannel#sendTurn}
+     * from seal()'s two planner sends when {@link TelegramChannel#sendTurn}
      * returns {@code false} after retries. Rate-limited per conversation so
      * a Telegram outage doesn't spam the chat. The notifier itself uses
      * {@link TelegramChannel#sendText} directly — bypassing this sink —

@@ -42,8 +42,8 @@ import static utils.GsonHolder.GSON;
  * deliberately cleared it — both cases surface the same "setup password"
  * flow in the frontend.
  *
- * <p>The {@code jclaw.admin.username} config in application.conf is still
- * read as a display default; the password key there is ignored post-setup.
+ * <p>The {@code jclaw.admin.username} config in application.conf is the
+ * login username; no password is read from there.
  */
 public class ApiAuthController extends Controller {
 

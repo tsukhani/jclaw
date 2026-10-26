@@ -184,7 +184,7 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
                 // Task.status to LOST at the 60 s mark (2 missed heartbeats),
                 // so operator visibility consistently leads scheduler
                 // recovery by roughly 60 s. Floor of missedHeartbeatsLimit
-                // is 4 in db-scheduler 16.9 — pinning to the floor (rather
+                // is 4 in db-scheduler 16.12 — pinning to the floor (rather
                 // than 2 to mirror the visibility threshold) keeps the
                 // safety margin db-scheduler's authors mandate for the
                 // re-fire path.
@@ -318,11 +318,8 @@ public class DbSchedulerBootstrapJob extends Job<Void> {
      * windows aren't fighting for Play's 30s scheduler budget.
      *
      * <p>{@link Scheduler#stop} blocks until in-flight fires finish or
-     * the executor times out (db-scheduler's internal default is 30s
-     * which is past our ceiling, but the parallel-VT pattern in
-     * {@code ShutdownJob} means our 15s overall-cap still bounds the
-     * wall-clock — db-scheduler's stop runs in a sibling VT alongside
-     * the other components and gets cut off by the latch await).
+     * the executor times out (bounded at 5 s by the {@code shutdownMaxWait}
+     * {@link #doJob} sets, inside ShutdownJob's 15 s cap).
      */
     public static void shutdownGracefully() {
         try {

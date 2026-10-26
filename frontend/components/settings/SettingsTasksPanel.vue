@@ -14,7 +14,7 @@ const { configData, saving, refresh } = useSettingsConfig()
 
 // ──────────────────── Tasks retention (JCLAW-259) ───────────────────────
 // tasks.retentionDays controls TaskCleanupJob's TTL sweep. Default '30';
-// '0' (or blank) means "never auto-delete". Mirrors the subagent.* editing
+// '0' means "never auto-delete". Mirrors the subagent.* editing
 // pattern — same managed-config-key shape, same edit/save/cancel triple.
 const tasksRetentionDays = computed(() => {
   const entries = configData.value?.entries ?? []

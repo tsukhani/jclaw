@@ -213,7 +213,7 @@ public final class SlackInbound {
     /**
      * JCLAW-344: download up to {@link #MAX_INBOUND_FILES} inbound Slack files into the
      * agent's staging dir, returning the staged {@link services.AttachmentService.Input}s
-     * the runner finalizes. Each failure (too large / unreadable / non-Slack host) is
+     * the runner finalizes. Each failure (too large / unreadable / non-file host) is
      * logged and counted; a single note is sent to the channel if any were rejected, so
      * the user isn't left wondering why an attachment was ignored.
      */

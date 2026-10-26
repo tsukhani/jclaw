@@ -5,7 +5,7 @@
 # Home page
 GET     /                                       Application.index
 
-# Map static resources from the /app/public folder to the /public path
+# Map static resources from the /public folder to the /public path
 GET     /public/                                staticDir:public
 
 # API endpoints for Nuxt frontend
@@ -413,7 +413,7 @@ POST    /api/webhooks/whatsapp                  WebhookWhatsAppController.webhoo
 GET     /api/logs                               ApiLogsController.list
 GET     /api/logs/categories                    ApiLogsController.categories
 
-# ACP coding-harness detection (Settings → Subagents)
+# ACP coding-harness detection (Settings → Coding)
 GET     /api/subagents/acp-harnesses            ApiAcpHarnessController.list
 POST    /api/subagents/acp-harnesses            ApiAcpHarnessController.add
 DELETE  /api/subagents/acp-harnesses            ApiAcpHarnessController.remove

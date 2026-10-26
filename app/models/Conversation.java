@@ -224,7 +224,7 @@ public class Conversation extends TimestampedModel {
      * most one row per tuple for non-web channels so ordering was moot; now
      * {@code /new} can produce multiple rows and we always want the newest.
      *
-     * <p>Web bypasses this path (see {@code AgentRunner.resolveConversationAndAcquireQueue}),
+     * <p>Web bypasses this path (see {@code StreamingAgentRunner.resolveConversationAndAcquireQueue}),
      * so the ordering change only affects Telegram / other inbound-driven channels.
      */
     public static Conversation findByAgentChannelPeer(Agent agent, String channelType, String peerId) {

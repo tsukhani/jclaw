@@ -17,8 +17,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * JCLAW-129: regression test for the shared graceful-shutdown helper that
- * backs the ShutdownJob wiring for TelegramPollingRunner, TelegramStreamingSink,
- * and ApiChatController.
+ * backs TelegramStreamingSink's ShutdownJob wiring.
  */
 class VirtualThreadsTest extends UnitTest {
 

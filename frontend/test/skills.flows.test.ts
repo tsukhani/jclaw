@@ -307,9 +307,8 @@ describe('Skills page — delete a global custom skill', () => {
 
 /**
  * JCLAW-323 — additional skills.vue coverage. The original ticket asked for
- * file-upload error paths, an edit-dialog form, and pagination — none of those
- * features exist in skills.vue today (it's a read-only viewer with drag-drop
- * skill assignment). These tests instead drive the actual uncovered surface:
+ * file-upload error paths, an edit-dialog form, and pagination. These tests
+ * instead drive the actual uncovered surface:
  * filter clear buttons, view-skill flow, version-update affordances, dragError
  * banner promote failures, and SSE-driven promote completion events.
  */
