@@ -42,8 +42,10 @@ class SidecarDefaultPortsConformanceTest extends UnitTest {
         return sources;
     }
 
-    @Test
-    void everySidecarManagerDeclaresADistinctDefaultPort() throws IOException {
+    /** Each sidecar directory's literal default port, and the manager files whose port is not a literal. */
+    private record Scan(Map<String, Integer> ports, List<String> unreadable) {}
+
+    private static Scan scan() throws IOException {
         var root = Path.of(Play.applicationPath.getAbsolutePath());
         Map<String, Integer> ports = new LinkedHashMap<>();
         var unreadable = new ArrayList<String>();
@@ -54,10 +56,18 @@ class SidecarDefaultPortsConformanceTest extends UnitTest {
                 ports.put(m.group(1), Integer.parseInt(m.group(2)));
                 read++;
             }
-            // A port passed as a constant is not read, and the clash check below would skip that sidecar.
+            // A port passed as a constant is not read, and the port checks would skip that sidecar.
             if (read < DAEMON.matcher(source.getValue()).results().count()) unreadable.add(root.relativize(source.getKey()).toString());
         }
-        assertEquals(List.of(), unreadable, () -> "no literal default port to check in " + unreadable);
+        return new Scan(ports, unreadable);
+    }
+
+    @Test
+    void everySidecarManagerDeclaresADistinctDefaultPort() throws IOException {
+        var root = Path.of(Play.applicationPath.getAbsolutePath());
+        var scan = scan();
+        var ports = scan.ports();
+        assertEquals(List.of(), scan.unreadable(), () -> "no literal default port to check in " + scan.unreadable());
         assertTrue(ports.size() >= KNOWN_MANAGERS, () -> "scan found only " + ports);
         for (var dir : ports.keySet()) {
             assertTrue(Files.isDirectory(root.resolve(dir)), () -> dir + " has no sidecar directory");
@@ -66,5 +76,23 @@ class SidecarDefaultPortsConformanceTest extends UnitTest {
         ports.forEach((dir, port) -> byPort.computeIfAbsent(port, _ -> new ArrayList<>()).add(dir));
         var shared = byPort.entrySet().stream().filter(e -> e.getValue().size() > 1).toList();
         assertEquals(List.of(), shared, () -> "default ports shared between sidecars: " + shared);
+    }
+
+    @Test
+    void worktreeTestServersNeverTakeASidecarDefaultPort() throws IOException {
+        var script = Files.readString(Path.of(Play.applicationPath.getAbsolutePath(), "jclaw.sh"));
+        var band = Pattern.compile("if \\(\\( port >= (\\d+) && port <= (\\d+) \\)\\)").matcher(script);
+        assertTrue(band.find(), "jclaw.sh's ensure_play_test_port no longer skips the sidecar ports");
+        int lo = Integer.parseInt(band.group(1));
+        int hi = Integer.parseInt(band.group(2));
+        var ports = scan().ports();
+        assertTrue(ports.size() >= KNOWN_MANAGERS, () -> "scan found only " + ports);
+        // ensure_play_test_port picks from 9100-9899, so a sidecar port there must be inside the band it skips.
+        var exposed = ports.entrySet().stream()
+                .filter(e -> e.getValue() >= 9100 && e.getValue() <= 9899 && (e.getValue() < lo || e.getValue() > hi))
+                .map(Map.Entry::toString).toList();
+        assertEquals(List.of(), exposed,
+                () -> "a worktree's test server can take these sidecar ports; widen the band ensure_play_test_port skips ("
+                        + lo + "-" + hi + "): " + exposed);
     }
 }

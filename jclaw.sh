@@ -2300,6 +2300,8 @@ ensure_play_test_port() {
     worktree_path=$(/usr/bin/git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || echo "$SCRIPT_DIR")
     local port
     port=$(printf '%s' "$worktree_path" | cksum | awk '{print 9100 + ($1 % 800)}')
+    # The sidecars' default ports: a test server there stops the live instance starting that sidecar.
+    if (( port >= 9527 && port <= 9533 )); then port=$((port + 7)); fi
     {
         echo ""
         echo "# Per-worktree HTTP port for \`play autotest\`. Derived from this"
