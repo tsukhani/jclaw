@@ -124,7 +124,7 @@ class MemoryBoundsTest extends UnitTest {
         assertEquals(0.0, BOUNDS.power(memories(129), 0.01, LIMIT, Certifier.BASE_GATE_TAIL));
     }
 
-    private static List<MemoryCounts> labelled(int seed, int count) {
+    private static List<MemoryCounts> labeled(int seed, int count) {
         var random = new Random(seed);
         var out = new ArrayList<MemoryCounts>();
         for (int i = 0; i < count; i++) {
@@ -134,26 +134,26 @@ class MemoryBoundsTest extends UnitTest {
         return out;
     }
 
-    private static double point(List<MemoryCounts> labelled) {
-        return (double) labelled.stream().mapToInt(MemoryCounts::right).sum()
-                / labelled.stream().mapToInt(MemoryCounts::gold).sum();
+    private static double point(List<MemoryCounts> labeled) {
+        return (double) labeled.stream().mapToInt(MemoryCounts::right).sum()
+                / labeled.stream().mapToInt(MemoryCounts::gold).sum();
     }
 
     @Test
     void recallIsDeterministicInAnyOrderAndAtMostThePointEstimate() {
-        var labelled = labelled(7, 80);
-        double lower = BOUNDS.recallLower(labelled, TAIL);
-        assertEquals(lower, BOUNDS.recallLower(labelled, TAIL));
-        var shuffled = new ArrayList<>(labelled);
+        var labeled = labeled(7, 80);
+        double lower = BOUNDS.recallLower(labeled, TAIL);
+        assertEquals(lower, BOUNDS.recallLower(labeled, TAIL));
+        var shuffled = new ArrayList<>(labeled);
         Collections.shuffle(shuffled, new Random(3));
         assertEquals(lower, BOUNDS.recallLower(shuffled, TAIL));
-        assertTrue(lower <= point(labelled), lower + " vs " + point(labelled));
-        assertTrue(lower > point(labelled) - 0.2, "a bootstrap bound, not a floor: " + lower);
+        assertTrue(lower <= point(labeled), lower + " vs " + point(labeled));
+        assertTrue(lower > point(labeled) - 0.2, "a bootstrap bound, not a floor: " + lower);
         assertEquals(10_000, MemoryBounds.RESAMPLES);
     }
 
     @Test
-    void recallIsTheEstimateWhenEveryMemoryIsRightAndZeroWithNothingLabelled() {
+    void recallIsTheEstimateWhenEveryMemoryIsRightAndZeroWithNothingLabeled() {
         var all = new ArrayList<MemoryCounts>();
         for (int i = 0; i < 40; i++) all.add(new MemoryCounts("m" + i, 0, 0, 0, 3, 3));
         assertEquals(1.0, BOUNDS.recallLower(all, TAIL));

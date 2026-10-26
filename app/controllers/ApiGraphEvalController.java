@@ -182,7 +182,7 @@ public class ApiGraphEvalController extends Controller {
             }
             var frozen = frozenIds("heldout");
             var kept = loaded.cases().stream().filter(h -> !frozen.contains(String.valueOf(h.memoryId()))).toList();
-            var unsplit = new HeldOut.Loaded(kept, loaded.unlabelled());
+            var unsplit = new HeldOut.Loaded(kept, loaded.unlabeled());
             var options = new GraphEvalHarness.DevOptions(guide(), agreedSeed, agreedShare,
                     Adjudications.DEFAULT_CHECK_SHARE, loaded.cases().size() - kept.size());
             var verdicts = verdicts(root().resolve(Adjudications.HELDOUT_FILE));
@@ -490,7 +490,7 @@ public class ApiGraphEvalController extends Controller {
     /**
      * {@code POST /api/graph/eval/heldout/coverage}: the coverage report's label sections over the held-out file and
      * the competency questions (JCLAW-1374). Model-free: it asks no model, reads no decision setting and no memory, and
-     * covers every labelled case, frozen splits included.
+     * covers every labeled case, frozen splits included.
      */
     @NoTransaction
     @AgentAccess(value = OPERATOR_ONLY,

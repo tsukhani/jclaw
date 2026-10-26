@@ -149,13 +149,6 @@ public final class SkillFrontmatter {
     /** One top-level value as written, or null when absent. */
     public @Nullable Object get(String key) { return top.get(key); }
 
-    /** The top-level keys in order, {@code metadata} last when there is any. */
-    public List<String> topLevelKeys() {
-        var keys = new ArrayList<>(top.keySet());
-        if (!meta.isEmpty()) keys.add(METADATA);
-        return keys;
-    }
-
     // --- writing ---
 
     /** Set a top-level value; null removes the key. */

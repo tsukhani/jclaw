@@ -390,7 +390,7 @@ public final class BrowserScreenProxy implements AutoCloseable {
             case ATYP_IPV6 -> "[" + InetAddress.getByAddress(read(in, 16)).getHostAddress() + "]";
             // ISO-8859-1 keeps every byte distinct; a name that is not ASCII fails the guard rather than the parse.
             case ATYP_DOMAIN -> new String(read(in, read(in, 1)[0] & 0xFF), StandardCharsets.ISO_8859_1);
-            // The address length is unknown, so the stream cannot be resynchronised: close rather than answer.
+            // The address length is unknown, so the stream cannot be resynchronized: close rather than answer.
             default -> throw new IOException("unknown SOCKS5 address type " + addressType);
         };
     }

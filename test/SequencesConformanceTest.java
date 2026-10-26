@@ -190,7 +190,7 @@ class SequencesConformanceTest extends UnitTest {
     }
 
     @Test
-    void theBaseDocumentAndItsAcceptedNeighboursParse() {
+    void theBaseDocumentAndItsAcceptedNeighborsParse() {
         var set = parse(base());
         assertEquals(1, set.chains().getFirst().links());
 

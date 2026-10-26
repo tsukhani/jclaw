@@ -116,7 +116,7 @@ class OntologyValidatorTest extends UnitTest {
     }
 
     @Test
-    void theAllowedNeighboursOfEachDisallowedPairPass() {
+    void theAllowedNeighborsOfEachDisallowedPairPass() {
         assertEquals(List.of(), validate(with(
                 relation("r2", "part_of", "a1", "pr1"),
                 relation("r3", "kind_of", "t1", "t2"),
@@ -125,7 +125,7 @@ class OntologyValidatorTest extends UnitTest {
     }
 
     @Test
-    void aPlaceMayBePartOfAPlaceButNotOfItsNeighbours() {
+    void aPlaceMayBePartOfAPlaceButNotOfItsNeighbors() {
         assertEquals(List.of(), validate(with(relation("r2", "part_of", "pl1", "pl2"))));
         var violations = validate(with(
                 term("ev1", "Event"),

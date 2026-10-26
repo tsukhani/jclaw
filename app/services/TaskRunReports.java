@@ -121,7 +121,7 @@ public final class TaskRunReports {
         return link(held.getFirst()[1], held.getFirst()[2]);
     }
 
-    /** The bus listener: a run whose delivery settled, that failed or that was cancelled is reported on a fresh thread. */
+    /** The bus listener: a run whose delivery settled, that failed or that was canceled is reported on a fresh thread. */
     public static BiConsumer<String, Map<String, Object>> listener(CompletionTurn turn) {
         return (type, data) -> {
             if (!REPORTED_EVENTS.contains(type)) return;
@@ -205,7 +205,7 @@ public final class TaskRunReports {
         return switch (run.status) {
             case COMPLETED -> whereTheOutputWent(run, ownerReadsAlone);
             case FAILED -> failure(run, ownerReadsAlone);
-            // The executor writes who cancelled it, or the time limit it hit, as the run's summary.
+            // The executor writes who canceled it, or the time limit it hit, as the run's summary.
             case CANCELLED -> run.outputSummary == null || run.outputSummary.isBlank() ? "" : sentence(run.outputSummary.strip());
             case RUNNING -> "";
         };

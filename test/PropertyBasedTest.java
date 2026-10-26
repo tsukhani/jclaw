@@ -421,12 +421,12 @@ class PropertyBasedTest extends UnitTest {
     // tries=30: two 10,000-resample bootstraps over at most 40 memories per try (~2 ms) — under 100 ms.
     @Property(tries = 30)
     void theClusteredRecallBoundIsRepeatableAndNeverAboveTheEstimate(
-            @ForAll("labelledMemories") List<MemoryCounts> labelled) {
-        double lower = MemoryBounds.INSTANCE.recallLower(labelled, 0.05);
-        double point = (double) labelled.stream().mapToInt(MemoryCounts::right).sum()
-                / labelled.stream().mapToInt(MemoryCounts::gold).sum();
-        assertTrue(lower <= point, () -> "lower " + lower + " above the estimate " + point + " for " + labelled);
-        assertEquals(lower, MemoryBounds.INSTANCE.recallLower(labelled, 0.05), () -> "a repeat differed for " + labelled);
+            @ForAll("labelledMemories") List<MemoryCounts> labeled) {
+        double lower = MemoryBounds.INSTANCE.recallLower(labeled, 0.05);
+        double point = (double) labeled.stream().mapToInt(MemoryCounts::right).sum()
+                / labeled.stream().mapToInt(MemoryCounts::gold).sum();
+        assertTrue(lower <= point, () -> "lower " + lower + " above the estimate " + point + " for " + labeled);
+        assertEquals(lower, MemoryBounds.INSTANCE.recallLower(labeled, 0.05), () -> "a repeat differed for " + labeled);
     }
 
     /** A sentence holding one in-set relative phrase at {@code [phraseStart, phraseEnd)}, maybe one out-of-set phrase. */

@@ -68,7 +68,7 @@ public final class WhatsAppSubscription {
     static final String WABA_ID_REFUSED = "Graph named a WhatsApp Business Account id that is not all digits";
 
     /**
-     * Test overrides honoured by the two-argument entries. Not replaceable by
+     * Test overrides honored by the two-argument entries. Not replaceable by
      * {@code HttpFactories.runWith}: the callers are {@code FunctionalTest}s driving
      * a controller, and a {@code ScopedValue} binding does not reach Play's request thread.
      */
@@ -88,7 +88,7 @@ public final class WhatsAppSubscription {
         subscribeOverride = null;
     }
 
-    /** Check against the live Graph API, honouring an {@link #installForTest} override. Never throws. */
+    /** Check against the live Graph API, honoring an {@link #installForTest} override. Never throws. */
     public static State check(String phoneNumberId, String accessToken) {
         var override = checkOverride;
         if (override != null) {
@@ -145,7 +145,7 @@ public final class WhatsAppSubscription {
         return new NotSubscribed(ids.wabaId(), appId);
     }
 
-    /** Subscribe against the live Graph API, honouring an {@link #installForTest} override. Never throws. */
+    /** Subscribe against the live Graph API, honoring an {@link #installForTest} override. Never throws. */
     public static SubscribeResult subscribe(String phoneNumberId, String accessToken) {
         var override = subscribeOverride;
         if (override != null) {

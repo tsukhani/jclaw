@@ -127,7 +127,7 @@ class CoreMemoryCapMigrationTest extends UnitTest {
     }
 
     @Test
-    void keepsTheCapAndRecategorisesTheRest() {
+    void keepsTheCapAndRecategorizesTheRest() {
         for (int i = 0; i < cap() + 5; i++) storeCore("Core fact %02d".formatted(i), 0.9);
         assertEquals(cap() + 5L, liveCore(), "seed must actually exceed the cap");
         classifyAllAs(MemoryCategory.ENTITY.label);

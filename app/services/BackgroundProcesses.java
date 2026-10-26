@@ -6,6 +6,7 @@ import play.Play;
 import utils.AppClock;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -41,7 +42,7 @@ import java.util.stream.Collectors;
  * its output file open on descriptor {@link #HELD_FD}, so each process it starts holds that file there until
  * it exits, whether or not it redirects its own output. The processes holding a workspace's output files on
  * that descriptor are therefore what its commands left running, found again after a restart, and nothing else
- * is ever signalled. An output file is one exec itself created, recorded by device and inode under
+ * is ever signaled. An output file is one exec itself created, recorded by device and inode under
  * {@code data/}, where no command writes: a hardlink an agent plants in the folder shares its inode with a
  * file elsewhere, and a file it moves in keeps its own, so neither is recorded and whatever holds them is left
  * alone, however {@code lsof} matches by inode (JCLAW-1574). A process that closes the descriptor it inherits
@@ -399,7 +400,7 @@ public final class BackgroundProcesses {
         try {
             var process = new ProcessBuilder(args)
                     .redirectError(ProcessBuilder.Redirect.DISCARD)
-                    .redirectInput(ProcessBuilder.Redirect.from(new java.io.File("/dev/null")))
+                    .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")))
                     .start();
             // Read on another thread: end of stream arrives only when lsof exits, so reading
             // first would wait out a slow lsof (20-80 s beside a descriptor-heavy process) and

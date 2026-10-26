@@ -50,7 +50,7 @@ public final class HeldOut {
             "consolidation_derived", UNATTRIBUTED);
 
     /**
-     * A labelled held-out case; {@code memoryId} stays inside the harness and never reaches a report. A null
+     * A labeled held-out case; {@code memoryId} stays inside the harness and never reaches a report. A null
      * {@code authorType} is an unattributed memory.
      */
     public record HeldCase(long memoryId, Case labels, @Nullable MemoryAuthorType authorType,
@@ -75,7 +75,7 @@ public final class HeldOut {
         }
     }
 
-    public record Loaded(List<HeldCase> cases, int unlabelled) {
+    public record Loaded(List<HeldCase> cases, int unlabeled) {
         public Loaded {
             cases = List.copyOf(cases);
         }
@@ -95,9 +95,9 @@ public final class HeldOut {
     }
 
     /**
-     * Writes {@code count} of the agent's active memories, chosen by {@code seed}, to {@code file} unlabelled.
+     * Writes {@code count} of the agent's active memories, chosen by {@code seed}, to {@code file} unlabeled.
      *
-     * @throws IllegalStateException when {@code file} already exists, so a labelled file is never overwritten
+     * @throws IllegalStateException when {@code file} already exists, so a labeled file is never overwritten
      */
     public static Sampled sample(Path file, String agentId, int count, long seed) throws IOException {
         if (Files.exists(file)) throw new IllegalStateException("held-out file already exists; move it aside first");
@@ -152,7 +152,7 @@ public final class HeldOut {
     }
 
     /**
-     * The labelled cases in {@code file}, validated under the v3 rules with tags optional; an unlabelled one is
+     * The labeled cases in {@code file}, validated under the v3 rules with tags optional; an unlabeled one is
      * skipped and counted. Refusals name a case by its position, never its memory.
      */
     public static Loaded load(Path file, OntologySchema schema) throws IOException {
@@ -161,14 +161,14 @@ public final class HeldOut {
         var symmetric = schema.symmetricSet();
         var cases = new ArrayList<HeldCase>();
         var types = new HashMap<String, String>();
-        int unlabelled = 0;
+        int unlabeled = 0;
         int index = 0;
         for (var element : root.getAsJsonArray("cases")) {
             var id = "h" + index++;
             if (!element.isJsonObject()) throw new IllegalArgumentException("case " + id + ": must be an object");
             var o = element.getAsJsonObject();
             if (!o.has("labelled") || !GraphCases.flag(o, "labelled", "case " + id)) {
-                unlabelled++;
+                unlabeled++;
                 continue;
             }
             long memoryId;
@@ -196,7 +196,7 @@ public final class HeldOut {
                     raw.equals(UNATTRIBUTED) ? null : MemoryAuthorType.valueOf(raw.toUpperCase(Locale.ROOT)),
                     coverage));
         }
-        return new Loaded(cases, unlabelled);
+        return new Loaded(cases, unlabeled);
     }
 
     /** The case's coverage labels, null unless it carries all three; a present one is checked even so. */

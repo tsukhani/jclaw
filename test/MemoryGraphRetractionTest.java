@@ -215,7 +215,7 @@ class MemoryGraphRetractionTest extends UnitTest {
     // ---- the write guard ----
 
     @Test
-    void aRetractedRunCannotBeWrittenAgainButItsNeighboursCan() throws Exception {
+    void aRetractedRunCannotBeWrittenAgainButItsNeighborsCan() throws Exception {
         twoRunsOnOneTerm(A);
         store.retract(A, Set.of(RUN_A));
         var files = files(A);

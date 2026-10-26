@@ -37,7 +37,7 @@ import java.util.concurrent.TimeUnit;
  * is read whenever a body carries it, so the budget guard returns by itself if the fractions do.
  * Routing reads the cached value and never waits on the fetch; a refresh starts in the background
  * once the value is a minute old, or an hour old while it carries no windows, since a read can then
- * only learn whether they returned. ollama.com answers that unparameterised read for range {@code 7d},
+ * only learn whether they returned. ollama.com answers that unparameterized read for range {@code 7d},
  * so one fetch fills both it and the 7d entry.
  *
  * <p><b>Reactive.</b> A call that fails for exhausted credit marks what failed as unavailable for a

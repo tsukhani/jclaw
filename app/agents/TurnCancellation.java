@@ -12,7 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Actions to run when a turn is cancelled, keyed by the turn's own cancel flag (by identity).
+ * Actions to run when a turn is canceled, keyed by the turn's own cancel flag (by identity).
  * Every path that cancels a turn calls {@link #cancel}, so a tool registers once and is reached
  * by a stop, an SSE disconnect or interrupt mode alike, with no poller and no interrupt.
  */
@@ -52,7 +52,7 @@ public final class TurnCancellation {
     }
 
     /**
-     * Register {@code action} to run when {@code flag} is cancelled through {@link #cancel}. When the
+     * Register {@code action} to run when {@code flag} is canceled through {@link #cancel}. When the
      * flag is already set, the action runs at once (still off the caller's thread).
      */
     @MustBeClosed
@@ -80,7 +80,7 @@ public final class TurnCancellation {
         if (regs != null) runOffThread(claim(regs));
     }
 
-    /** Claimed on the cancelling thread, so a scope that closes before an action's thread starts cannot take it back. */
+    /** Claimed on the canceling thread, so a scope that closes before an action's thread starts cannot take it back. */
     private static List<Registration> claim(Collection<Registration> regs) {
         var claimed = new ArrayList<Registration>();
         for (var reg : regs) {

@@ -116,7 +116,7 @@ public final class OllamaDecision {
 
     /**
      * Asks the server at {@code baseUrl} to load {@code model} and keep it as {@link #KEEP_ALIVE_KEY} says, without
-     * waiting. Ollama cancels a load when the request that started it is cancelled (v0.35.0), so a classifier call cut
+     * waiting. Ollama cancels a load when the request that started it is canceled (v0.35.0), so a classifier call cut
      * off at its timeout can leave a cold model unloaded on every turn; this request has its own, longer timeout. It
      * is no decision, so it stays outside the provider's breaker.
      *

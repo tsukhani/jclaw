@@ -151,7 +151,7 @@ class SequenceScorerTest extends UnitTest {
             }
 
             @Override
-            public double recallLower(List<GateBounds.MemoryCounts> labelled, double tail) {
+            public double recallLower(List<GateBounds.MemoryCounts> labeled, double tail) {
                 return 0;
             }
 

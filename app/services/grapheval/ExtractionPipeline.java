@@ -20,6 +20,7 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDate;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
@@ -29,10 +30,14 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
+import java.util.function.BiPredicate;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -118,7 +123,7 @@ public final class ExtractionPipeline {
                     } catch (JevException.Outage e) {
                         if (!e.timedOut()) throw e;
                         boolean cold = OllamaDecision.stillLoading(baseUrl, model);
-                        // Ollama drops a load when its request is cancelled, so a timed-out cold model needs a load of its own.
+                        // Ollama drops a load when its request is canceled, so a timed-out cold model needs a load of its own.
                         var load = OllamaDecision.pin(baseUrl, model);
                         if (!cold || attempt == OLLAMA_ATTEMPTS) throw e;
                         load.join();
@@ -254,15 +259,15 @@ public final class ExtractionPipeline {
     /** A relation decision that writes at {@link #KEPT}, and the type its From was given. */
     public record Kept(Decision relation, String fromType) {
         public String type() {
-            return java.util.Objects.requireNonNull(relation.choice(), "a kept relation has a choice");
+            return Objects.requireNonNull(relation.choice(), "a kept relation has a choice");
         }
 
         public String from() {
-            return java.util.Objects.requireNonNull(relation.from(), "a relation has a From");
+            return Objects.requireNonNull(relation.from(), "a relation has a From");
         }
 
         public String to() {
-            return java.util.Objects.requireNonNull(relation.to(), "a relation has a To");
+            return Objects.requireNonNull(relation.to(), "a relation has a To");
         }
 
         double strength() {
@@ -346,10 +351,10 @@ public final class ExtractionPipeline {
         public static List<Decision> vetoed(CaseRun run) {
             var unstated = new HashSet<List<String>>();
             for (var d : run.stage(STATUS)) {
-                if (UNSTATED.equals(d.choice())) unstated.add(java.util.Arrays.asList(d.from(), d.to()));
+                if (UNSTATED.equals(d.choice())) unstated.add(Arrays.asList(d.from(), d.to()));
             }
             return run.stage(RELATION).stream()
-                    .filter(d -> !d.failed() && unstated.contains(java.util.Arrays.asList(d.from(), d.to()))).toList();
+                    .filter(d -> !d.failed() && unstated.contains(Arrays.asList(d.from(), d.to()))).toList();
         }
 
         public List<Decision> terms() {
@@ -382,7 +387,7 @@ public final class ExtractionPipeline {
         for (var stage : List.of(OVERLAP, LINEAGE, TERM, TENSE, RELATION, NEGATION, OCCURS, STATUS, SLOT)) {
             counts.put(stage, 0);
         }
-        Set<Request> sent = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        Set<Request> sent = ConcurrentHashMap.newKeySet();
         var decisions = new ArrayList<Decision>();
         var typed = new ArrayList<Typed>();
         var strength = new HashMap<String, Double>();
@@ -454,11 +459,11 @@ public final class ExtractionPipeline {
         var bySpan = new HashMap<String, Candidate>();
         candidates.forEach(c -> bySpan.putIfAbsent(c.span(), c));
         var owner = inputs.ownerName();
-        java.util.function.Predicate<String> isOwner = span -> {
+        Predicate<String> isOwner = span -> {
             var c = bySpan.get(span);
             return (c != null && c.operator()) || (owner != null && span.equalsIgnoreCase(owner.strip()));
         };
-        java.util.function.BiPredicate<String, String> asks = (a, b) -> {
+        BiPredicate<String, String> asks = (a, b) -> {
             boolean ownerPair = isOwner.test(a) || isOwner.test(b);
             if (voice.guest() && ownerPair) return false;
             if (!inputs.pairFilter() || ownerPair) return true;
@@ -662,8 +667,8 @@ public final class ExtractionPipeline {
      * allows between them; the other direction of a symmetric relation is never asked.
      */
     private static List<List<Asked>> pairs(OntologySchema schema, List<Typed> terms,
-                                           java.util.function.BiPredicate<String, String> asks, int[] pruned,
-                                           java.util.function.BiPredicate<String, String> relationAsked) {
+                                           BiPredicate<String, String> asks, int[] pruned,
+                                           BiPredicate<String, String> relationAsked) {
         var out = new ArrayList<List<Asked>>();
         for (int i = 0; i < terms.size(); i++) {
             for (int j = i + 1; j < terms.size(); j++) {
@@ -701,7 +706,7 @@ public final class ExtractionPipeline {
      * {@code strength}. A pair any of whose questions failed is one failed decision.
      */
     private static RelateStage relateStage(OntologySchema schema, List<Typed> terms, Map<String, Double> strength,
-                                           Voice voice, java.util.function.BiPredicate<String, String> asks) {
+                                           Voice voice, BiPredicate<String, String> asks) {
         var pruned = new int[1];
         var pairs = pairs(schema, terms, asks, pruned, (_, _) -> true);
         var questions = new LinkedHashMap<String, JsonObject>();
@@ -766,7 +771,7 @@ public final class ExtractionPipeline {
     }
 
     private static Stage negationStage(OntologySchema schema, List<Typed> terms, Map<String, Double> strength,
-                                       java.util.function.BiPredicate<String, String> asks) {
+                                       BiPredicate<String, String> asks) {
         var flat = new ArrayList<Asked>();
         pairs(schema, terms, asks, new int[1],
                 (relation, fromType) -> schema.effectiveStatuses(relation, fromType).contains(DENIED))
@@ -892,9 +897,9 @@ public final class ExtractionPipeline {
     /** Each slot decision floored at the confidence of its relation's status decision, when one was asked. */
     private static List<Decision> floorSlots(List<Decision> slots, List<Decision> statuses) {
         var confidence = new HashMap<List<String>, Double>();
-        for (var s : statuses) confidence.put(java.util.Arrays.asList(s.from(), s.to()), s.confidence());
+        for (var s : statuses) confidence.put(Arrays.asList(s.from(), s.to()), s.confidence());
         return slots.stream().map(d -> {
-            var c = confidence.get(java.util.Arrays.asList(d.from(), d.to()));
+            var c = confidence.get(Arrays.asList(d.from(), d.to()));
             return c == null ? d : d.withFloor(Math.min(d.floor(), c));
         }).toList();
     }

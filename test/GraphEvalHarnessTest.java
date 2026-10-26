@@ -177,7 +177,7 @@ class GraphEvalHarnessTest extends UnitTest {
                         yes = event != null && event.occurs() != null && label != null
                                 && label.equals(EdtfInterval.parse(event.occurs()).toString());
                     } else {
-                        var r = labelled(c, rules, spans.get(0), spans.get(1), key.startsWith("n"));
+                        var r = labeled(c, rules, spans.get(0), spans.get(1), key.startsWith("n"));
                         yes = r != null && (r.denied() || c.holdsOrEnded(r, SCHEMA));
                     }
                     var noul = new JsonObject();
@@ -200,12 +200,12 @@ class GraphEvalHarnessTest extends UnitTest {
                 } else if (key.startsWith("t")) {
                     choice = tense(c, spans.getFirst());
                 } else if (key.startsWith("s")) {
-                    var r = labelled(c, rules, spans.get(0), spans.get(1), false);
+                    var r = labeled(c, rules, spans.get(0), spans.get(1), false);
                     var status = r == null ? ExtractionPipeline.UNSTATED : c.scoredStatus(r, SCHEMA);
                     choice = status.equals(ExtractionPipeline.HOLDS) || status.equals(ExtractionPipeline.ENDED) ? status
                             : ExtractionPipeline.UNSTATED;
                 } else if (key.startsWith("d")) {
-                    var r = labelled(c, rules, spans.get(1), spans.get(2), false);
+                    var r = labeled(c, rules, spans.get(1), spans.get(2), false);
                     var label = dateLabel(c, spans.get(0));
                     choice = r == null || r.valid() == null || label == null ? ExtractionPipeline.NEITHER
                             : slot(EdtfInterval.parse(label), EdtfInterval.parse(r.valid()));
@@ -221,7 +221,7 @@ class GraphEvalHarnessTest extends UnitTest {
     }
 
     /** The positive (or, when {@code denied}, the denied) label of the question's relation between two spans. */
-    private static GraphCases.@Nullable Relation labelled(Case c, String rules, String fromSpan, String toSpan,
+    private static GraphCases.@Nullable Relation labeled(Case c, String rules, String fromSpan, String toSpan,
                                                          boolean denied) {
         var from = c.entityAt(fromSpan);
         var to = c.entityAt(toSpan);
@@ -694,7 +694,7 @@ class GraphEvalHarnessTest extends UnitTest {
         var dir = Files.createTempDirectory("graph-heldout");
         var file = dir.resolve(HeldOut.FILE);
         try {
-            var labelled = Map.of("cases", List.of(
+            var labeled = Map.of("cases", List.of(
                     Map.of("memoryId", Long.parseLong(memoryId), "labelled", true, "text", text, "capturedAt", "2026-10-03",
                             "authorType", "human_turn",
                             "entities", List.of(
@@ -706,7 +706,7 @@ class GraphEvalHarnessTest extends UnitTest {
                             "notRepresentable", List.of("instruction"), "numbers", List.of(), "backReference", false),
                     Map.of("memoryId", 1, "labelled", false, "text", "unlabelled", "entities", List.of(),
                             "relations", List.of())));
-            Files.writeString(file, GSON.toJson(labelled));
+            Files.writeString(file, GSON.toJson(labeled));
             var loaded = HeldOut.load(file, SCHEMA);
             var events = new ArrayList<JsonObject>();
             var progress = new EvalProgress(events::add);
@@ -1201,7 +1201,7 @@ class GraphEvalHarnessTest extends UnitTest {
         }
 
         @Override
-        public double recallLower(List<GateBounds.MemoryCounts> labelled, double tail) {
+        public double recallLower(List<GateBounds.MemoryCounts> labeled, double tail) {
             return 1;
         }
 

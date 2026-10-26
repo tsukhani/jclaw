@@ -154,10 +154,10 @@ public final class Adjudications {
     }
 
     /** What the verdicts under one guide version say about the records written at one configuration. */
-    public record Judgement(Map<String, Integer> unjudgedByGate, List<GateRecord> unjudged, List<GateRecord> sampled,
+    public record Judgment(Map<String, Integer> unjudgedByGate, List<GateRecord> unjudged, List<GateRecord> sampled,
                             boolean labelError, int marked, int checked, int disagreed, int uncheckedMarked,
                             @Nullable Double disagreementRate) {
-        public Judgement {
+        public Judgment {
             unjudgedByGate = Collections.unmodifiableMap(new TreeMap<>(unjudgedByGate));
             unjudged = List.copyOf(unjudged);
             sampled = List.copyOf(sampled);
@@ -229,7 +229,7 @@ public final class Adjudications {
          * an unsampled agreed record never is. Model verdicts are marked for an operator check by the same hash rule
          * at the check share.
          */
-        public Judgement judge(List<GateRecord> records) {
+        public Judgment judge(List<GateRecord> records) {
             var byGate = new TreeMap<String, Integer>();
             var unjudged = new ArrayList<GateRecord>();
             var sample = new ArrayList<GateRecord>();
@@ -254,7 +254,7 @@ public final class Adjudications {
                 checked++;
                 if (check.equals(DISAGREE)) disagreed++;
             }
-            return new Judgement(byGate, unjudged, sample, labelError, marked, checked, disagreed, marked - checked,
+            return new Judgment(byGate, unjudged, sample, labelError, marked, checked, disagreed, marked - checked,
                     checked == 0 ? null : (double) disagreed / checked);
         }
     }

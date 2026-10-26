@@ -29,7 +29,7 @@ import java.util.stream.Collectors;
 /**
  * Builds a memory-recall eval suite from an agent's own corpus (JCLAW-529).
  *
- * <p>Synthesised rather than sourced. LOCOMO and LongMemEval score retrieval over their
+ * <p>Synthesized rather than sourced. LOCOMO and LongMemEval score retrieval over their
  * own transcripts, which makes results comparable across systems but says nothing about
  * whether recall works on the memories this instance actually holds — and those are what
  * it has to serve. The trade is deliberate: relevance now, comparability later.

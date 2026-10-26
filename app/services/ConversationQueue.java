@@ -432,7 +432,7 @@ public class ConversationQueue {
 
         synchronized (state) {
             if (state.generation != generation) return List.of();
-            // A fresh flag, not a reset: a stopped channel turn still holds the old one and must stay cancelled.
+            // A fresh flag, not a reset: a stopped channel turn still holds the old one and must stay canceled.
             if (state.cancelled.get()) state.cancelled = new AtomicBoolean(false);
             state.lastActivityMs = System.currentTimeMillis();
 

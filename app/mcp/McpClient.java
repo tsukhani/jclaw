@@ -1161,7 +1161,7 @@ public class McpClient implements AutoCloseable {
         } catch (TimeoutException e) {
             pending.remove(id);
             var reason = "Request " + method + " timed out after " + timeout;
-            // The spec forbids cancelling initialize.
+            // The spec forbids canceling initialize.
             if (!INITIALIZE.equals(method)) {
                 try { transport.cancel(id, reason); } catch (RuntimeException _) { /* best effort */ }
             }

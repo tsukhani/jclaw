@@ -351,14 +351,14 @@ class CertifierTest extends UnitTest {
 
         private GateCounts counts(int[] w) {
             var writing = new ArrayList<MemoryCounts>();
-            var labelled = new ArrayList<MemoryCounts>();
+            var labeled = new ArrayList<MemoryCounts>();
             for (int i = 0; i < Math.max(w[0], w[2]); i++) {
                 var mc = new MemoryCounts("m" + i, i < w[0] ? perMemory : 0, i < w[1] ? 1 : 0, 0, i < w[2] ? 1 : 0,
                         i < w[3] ? 1 : 0);
                 if (mc.written() > 0) writing.add(mc);
-                if (mc.gold() > 0) labelled.add(mc);
+                if (mc.gold() > 0) labeled.add(mc);
             }
-            return new GateCounts(writing, labelled);
+            return new GateCounts(writing, labeled);
         }
 
         /** {@code n} records, the first {@code wrong} of them wrong, {@link #packed} to a memory. */
@@ -569,7 +569,7 @@ class CertifierTest extends UnitTest {
         }
 
         @Override
-        public double recallLower(List<MemoryCounts> labelled, double tail) {
+        public double recallLower(List<MemoryCounts> labeled, double tail) {
             return 1;
         }
 

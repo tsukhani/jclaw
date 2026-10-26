@@ -284,7 +284,7 @@ class ApiTasksControllerUpdateTest extends FunctionalTest {
             "script             | \"echo hello\"",
             "noAgent            | false"
     })
-    void refusesAnArgumentWhoseBehaviourIsNotBuilt(String key, String value) {
+    void refusesAnArgumentWhoseBehaviorIsNotBuilt(String key, String value) {
         var agent = seedAgent();
         var taskId = seedTask(agent, "unbuilt-task", "every 1h");
         seedUnbuiltValues(taskId);

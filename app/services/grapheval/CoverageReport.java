@@ -60,7 +60,7 @@ public final class CoverageReport {
 
     public record Share(int count, @Nullable Double share) {}
 
-    /** Labelled cases counted, and those left out for lacking the three coverage fields. */
+    /** Labeled cases counted, and those left out for lacking the three coverage fields. */
     public record Labelled(int counted, int lackingFields) {}
 
     /** {@code questions} is null when there is no question file. */
@@ -70,7 +70,7 @@ public final class CoverageReport {
     /** One model's gold Project, System and Artifact spans against what its typing stage chose. */
     public record Confusion(String model, Map<String, Map<String, Integer>> rows) {}
 
-    /** The label sections over the labelled {@code cases} that carry all three coverage fields. */
+    /** The label sections over the labeled {@code cases} that carry all three coverage fields. */
     public static Sections sections(List<HeldCase> cases, @Nullable List<Question> questions, OntologySchema schema) {
         var counted = counted(cases);
         int n = counted.size();

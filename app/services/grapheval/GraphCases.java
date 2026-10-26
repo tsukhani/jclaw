@@ -24,7 +24,7 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * The v3 labelled memories in {@code evals/graph/cases.json} (JCLAW-1356, JCLAW-1366), validated against an ontology.
+ * The v3 labeled memories in {@code evals/graph/cases.json} (JCLAW-1356, JCLAW-1366), validated against an ontology.
  * The rules are {@code evals/graph/GUIDE.md}'s; the format is {@code evals/graph/README.md}'s. Labels are checked for
  * syntax and verbatim spans only, never against the code that extracts them.
  */
@@ -66,7 +66,7 @@ public final class GraphCases {
 
     private GraphCases() {}
 
-    /** A labelled entity; {@code mention} is null only on an implicit operator. */
+    /** A labeled entity; {@code mention} is null only on an implicit operator. */
     public record Entity(String id, @Nullable String mention, String type, List<String> aliases, boolean implicit,
                          boolean noise, @Nullable String occurs) {
         public Entity {
@@ -105,7 +105,7 @@ public final class GraphCases {
         }
     }
 
-    /** {@code status} is one of {@link #STATUSES}; {@code valid} and {@code valence} are as labelled. */
+    /** {@code status} is one of {@link #STATUSES}; {@code valid} and {@code valence} are as labeled. */
     public record Relation(String from, String type, String to, String status, @Nullable String valid,
                            @Nullable String valence, boolean noise) {
         public Relation(String from, String type, String to, boolean noise) {
@@ -125,7 +125,7 @@ public final class GraphCases {
         }
     }
 
-    /** A labelled date span; {@code value} is an EDTF string, or null for a span excluded from scoring. */
+    /** A labeled date span; {@code value} is an EDTF string, or null for a span excluded from scoring. */
     public record DateLabel(String span, @Nullable String value) {}
 
     public record Case(String id, List<String> tags, String text, List<Entity> entities, List<Relation> relations,

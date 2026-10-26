@@ -58,11 +58,11 @@ public final class MemoryBounds implements GateBounds {
     /**
      * The cluster bootstrap: memories with gold, sorted by id, resampled {@link #RESAMPLES} times with replacement from
      * {@link #BOOTSTRAP_SEED}; the ascending resample ratio at index floor(tail × resamples), never above the point
-     * estimate. 0 when nothing is labelled.
+     * estimate. 0 when nothing is labeled.
      */
     @Override
-    public double recallLower(List<MemoryCounts> labelled, double tail) {
-        var memories = labelled.stream().filter(m -> m.gold() > 0).sorted(BY_MEMORY).toArray(MemoryCounts[]::new);
+    public double recallLower(List<MemoryCounts> labeled, double tail) {
+        var memories = labeled.stream().filter(m -> m.gold() > 0).sorted(BY_MEMORY).toArray(MemoryCounts[]::new);
         if (memories.length == 0) return 0.0;
         long right = 0;
         long gold = 0;

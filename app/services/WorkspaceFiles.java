@@ -568,7 +568,7 @@ public final class WorkspaceFiles {
                  assumptions, warm-up context. -->
             """;
 
-    // The template before the name step, recognised so an untouched copy is replaced whole.
+    // The template before the name step, recognized so an untouched copy is replaced whole.
     private static final String PRE_NAME_BOOTSTRAP_TEMPLATE = """
             # Bootstrap
 

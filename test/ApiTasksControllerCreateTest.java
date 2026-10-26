@@ -161,7 +161,7 @@ class ApiTasksControllerCreateTest extends FunctionalTest {
             "noAgent            | true",
             "noAgent            | false"
     })
-    void rejectsAnArgumentWhoseBehaviourIsNotBuilt(String key, String value) {
+    void rejectsAnArgumentWhoseBehaviorIsNotBuilt(String key, String value) {
         var agentId = seedAgent();
         var resp = POST("/api/tasks", "application/json", """
                 {"agentId": %d, "name": "unbuilt", "schedule": "@hourly", "%s": %s}

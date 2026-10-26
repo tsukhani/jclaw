@@ -172,7 +172,7 @@ public final class McpStreamableHttpTransport implements McpTransport {
             @Override
             public void onFailure(Call call, IOException e) {
                 try {
-                    // A cancelled call is one request given up on, not a failed connection.
+                    // A canceled call is one request given up on, not a failed connection.
                     if (!closed && !call.isCanceled()) ioFailure(e, requestId, isListen);
                 } finally {
                     forget(token, requestId, call);
@@ -223,14 +223,14 @@ public final class McpStreamableHttpTransport implements McpTransport {
         return true;
     }
 
-    /** Cancelling the call closes its response stream, which is how Streamable HTTP cancels a request. */
+    /** Canceling the call closes its response stream, which is how Streamable HTTP cancels a request. */
     @Override
     public void cancel(Object requestId, String reason) {
         var call = requestCalls.remove(requestId);
         if (call != null) call.cancel();
     }
 
-    /** HTTP calls sent and not yet finished, for a test to see that a cancelled one went. */
+    /** HTTP calls sent and not yet finished, for a test to see that a canceled one went. */
     public int inFlightCalls() {
         return inFlight.size();
     }

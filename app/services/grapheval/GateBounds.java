@@ -12,7 +12,7 @@ public interface GateBounds {
 
     boolean passes(List<MemoryCounts> writing, double limit, double tail);
     double upper(List<MemoryCounts> writing, double tail);
-    double recallLower(List<MemoryCounts> labelled, double tail);
+    double recallLower(List<MemoryCounts> labeled, double tail);
     double power(List<MemoryCounts> writing, double trueWrongShare, double limit, double tail);
     int recordsNeeded(int wrong, double limit, double tail);
 }

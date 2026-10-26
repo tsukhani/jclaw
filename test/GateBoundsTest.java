@@ -72,8 +72,8 @@ class GateBoundsTest extends UnitTest {
 
     @Test
     void recallLowerIsTheOneSidedClopperPearsonBound() {
-        var labelled = List.of(new MemoryCounts("m1", 0, 0, 0, 60, 30), new MemoryCounts("m2", 0, 0, 0, 40, 20));
-        double lower = BOUNDS.recallLower(labelled, TAIL);
+        var labeled = List.of(new MemoryCounts("m1", 0, 0, 0, 60, 30), new MemoryCounts("m2", 0, 0, 0, 40, 20));
+        double lower = BOUNDS.recallLower(labeled, TAIL);
         assertTrue(lower < 0.5 && lower > 0.40, String.valueOf(lower));
         assertEquals(TAIL, upperTail(50, 100, lower), 1e-6);
         assertEquals(Math.pow(TAIL, 1.0 / 20), BOUNDS.recallLower(List.of(new MemoryCounts("m", 0, 0, 0, 20, 20)), TAIL),

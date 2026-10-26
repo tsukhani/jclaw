@@ -101,7 +101,7 @@ public final class ToolContext {
     }
 
     /**
-     * Run {@code action} when the turn dispatching this tool is cancelled, until the returned
+     * Run {@code action} when the turn dispatching this tool is canceled, until the returned
      * registration is closed. A no-op registration when the scope carries no turn flag.
      */
     @MustBeClosed

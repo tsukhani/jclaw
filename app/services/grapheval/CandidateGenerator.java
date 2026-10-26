@@ -70,7 +70,7 @@ public final class CandidateGenerator {
             "(?<![\\w.+\\-])[\\w][\\w.+\\-]*@[A-Za-z0-9](?:[A-Za-z0-9\\-]*[A-Za-z0-9])?(?:\\.[A-Za-z0-9](?:[A-Za-z0-9\\-]*[A-Za-z0-9])?)++");
     private static final Pattern HANDLE = Pattern.compile("(?<![\\w.@])@[A-Za-z_]\\w++");
     /**
-     * At least two digit groups, joined by single spaces, hyphens or dots, or by nothing after a parenthesised group;
+     * At least two digit groups, joined by single spaces, hyphens or dots, or by nothing after a parenthesized group;
      * every group after the first has two digits or more, so a version or a trailing count is not one.
      */
     private static final Pattern PHONE = Pattern.compile(
