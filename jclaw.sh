@@ -1019,7 +1019,7 @@ Examples:
   ${INVOKE} --concurrency 50 --turns 1 loadtest                                                     # 50 cold starts in parallel, mock
   ${INVOKE} --concurrency 5 --turns 50 loadtest                                                     # 5 deep conversations, mock
   ${INVOKE} --provider ollama-local --model gemma4:latest loadtest                                  # local real provider
-  ${INVOKE} --provider ollama-cloud --model kimi-k2.5 loadtest                                      # cloud
+  ${INVOKE} --provider ollama-cloud --model kimi-k3 loadtest                                        # cloud
   ${INVOKE} --provider openrouter --model google/gemini-3-flash-preview loadtest                    # alt cloud
   ${INVOKE} --turns 10 --prompts loadtest/prompts.txt loadtest                                      # varied prompts (mock)
   ${INVOKE} --turns 10 --prompts loadtest/prompts.txt --provider openrouter --model amazon/nova-micro-v1 loadtest  # varied prompts (real)

@@ -147,12 +147,13 @@ public class DefaultConfigJob extends Job<Void> {
         seedIfAbsent("provider.ollama-cloud.apiKey", "");
         seedIfAbsent("provider.ollama-cloud.leaderboardUrl", "");
         // Ollama's /v1 endpoint accepts reasoning_effort: low|medium|high (plus "none",
-        // which we model on the client side as null). Kimi and Qwen both expose the
-        // full gradient; OpenAI-style providers may add "minimal"/"xhigh" for their
-        // effort-based models (GPT-5, Grok) — seed those per-model when applicable.
+        // which we model on the client side as null). Both seeded models report the
+        // thinking capability, so both get the full gradient; OpenAI-style providers
+        // may add "minimal"/"xhigh" for their effort-based models (GPT-5, Grok) — seed
+        // those per-model when applicable.
         seedIfAbsent("provider.ollama-cloud.models", """
-                [{"id":"qwen3.5","name":"Qwen 3.5","contextWindow":262144,"maxTokens":65535,"supportsThinking":true,"thinkingLevels":["low","medium","high"]},\
-                {"id":"kimi-k2.5","name":"Kimi K2.5","contextWindow":262144,"maxTokens":65535,"supportsThinking":true,"thinkingLevels":["low","medium","high"]}]""");
+                [{"id":"kimi-k3","name":"Kimi K3","contextWindow":1048576,"maxTokens":65535,"supportsThinking":true,"thinkingLevels":["low","medium","high"]},\
+                {"id":"deepseek-v4.1-flash","name":"DeepSeek V4.1 Flash","contextWindow":1048576,"maxTokens":65535,"supportsThinking":true,"thinkingLevels":["low","medium","high"]}]""");
 
         // JCLAW-178: ollama-local routes to OllamaProvider via the substring
         // match in LlmProvider.forConfig — no new provider class needed. The
@@ -374,7 +375,7 @@ public class DefaultConfigJob extends Job<Void> {
 
     private void seedDefaultAgent() {
         if (Agent.findByName("main") == null) {
-            AgentService.create("main", "ollama-cloud", "kimi-k2.5");
+            AgentService.create("main", "ollama-cloud", "kimi-k3");
             EventLogger.info(EVENT_CATEGORY_AGENT, "main", null, "Default agent 'main' created");
         }
         // Non-destructive workspace fill-in: creates any missing workspace files
