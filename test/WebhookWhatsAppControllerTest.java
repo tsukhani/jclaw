@@ -37,7 +37,9 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
 
     private static final String APP_SECRET = "whatsapp-app-secret-fixture";
     private static final String VERIFY_TOKEN = "whatsapp-verify-token-fixture";
-    private static final String PHONE_NUMBER_ID = "PN1";
+    private static final String PHONE_NUMBER_ID = "100000000000001";
+    private static final String OTHER_PHONE_NUMBER_ID = "100000000000002";
+    private static final String UNBOUND_PHONE_NUMBER_ID = "100000000000009";
 
     @BeforeEach
     void setup() {
@@ -71,6 +73,16 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
 
     /** Seed an enabled Cloud-API binding with full inbound credentials and no access token, so a reply stops before calling graph.facebook.com. */
     private Long seedBinding(String appSecret) {
+        return seedBinding(PHONE_NUMBER_ID, appSecret, VERIFY_TOKEN, true, WhatsAppTransport.CLOUD_API);
+    }
+
+    /** A binding for another number, on its own agent, likewise without an access token. */
+    private Long seedBinding(String phoneNumberId, String appSecret, boolean enabled, WhatsAppTransport transport) {
+        return seedBinding(phoneNumberId, appSecret, null, enabled, transport);
+    }
+
+    private Long seedBinding(String phoneNumberId, String appSecret, String verifyToken, boolean enabled,
+                             WhatsAppTransport transport) {
         return commitInFreshTx(() -> {
             var agent = new Agent();
             agent.name = "wa-webhook-agent-" + System.nanoTime();
@@ -81,11 +93,11 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
 
             var b = new WhatsAppBinding();
             b.agent = agent;
-            b.transport = WhatsAppTransport.CLOUD_API;
-            b.phoneNumberId = PHONE_NUMBER_ID;
+            b.transport = transport;
+            b.phoneNumberId = phoneNumberId;
             b.appSecret = appSecret;
-            b.verifyToken = VERIFY_TOKEN;
-            b.enabled = true;
+            b.verifyToken = verifyToken;
+            b.enabled = enabled;
             b.save();
             return b.id;
         });
@@ -184,7 +196,7 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         seedBinding(APP_SECRET);
         // A payload whose phone_number_id matches no binding → fast-ack, no work.
         var body = "{\"entry\":[{\"changes\":[{\"value\":{"
-                + "\"metadata\":{\"phone_number_id\":\"UNKNOWN\"},"
+                + "\"metadata\":{\"phone_number_id\":\"" + UNBOUND_PHONE_NUMBER_ID + "\"},"
                 + "\"messages\":[{\"from\":\"15551234567\",\"id\":\"wamid.u\","
                 + "\"type\":\"text\",\"text\":{\"body\":\"hi\"}}]}}]}]}";
         // Signed with the right secret, but routing fails first → 200 (acked, ignored).
@@ -789,13 +801,194 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         var theirs = uniqueSender();
         var otherId = uniqueWamid();
         var body = "{\"entry\":[{\"changes\":[" + change(PHONE_NUMBER_ID, textMessage(uniqueWamid(), ours, secondsAgo(0)))
-                + "," + change("PN-OTHER", textMessage(otherId, theirs, secondsAgo(0))) + "]}]}";
+                + "," + change(UNBOUND_PHONE_NUMBER_ID, textMessage(otherId, theirs, secondsAgo(0))) + "]}]}";
 
         var logged = loggedWhilePosting(body, 200, ours, otherId);
 
         assertEquals(java.util.List.of(
-                "WhatsApp message " + otherId + " for phone number PN-OTHER skipped in a webhook for binding " + bindingId,
+                skipped(otherId, UNBOUND_PHONE_NUMBER_ID, bindingId),
                 served(ours)), logged);
         assertFalse(isRecorded(otherId));
+    }
+
+    // ── Two numbers under one Meta app share its callback URL, so one body can carry both ──
+
+    private static final String OTHER_APP_SECRET = "whatsapp-other-app-secret-fixture";
+
+    private static String changesBody(String... changes) {
+        return "{\"entry\":[{\"changes\":[" + String.join(",", changes) + "]}]}";
+    }
+
+    private static String skipped(String wamid, String phoneNumberId, Long routedBindingId) {
+        return "WhatsApp message " + wamid + " for phone number " + phoneNumberId
+                + " skipped in a webhook for binding " + routedBindingId;
+    }
+
+    private static boolean hasWindowRow(Long bindingId, String from) {
+        return commitInFreshTx(() -> WhatsAppConversationWindow.findRow(bindingId, from) != null);
+    }
+
+    /** The bindings whose agent holds a WhatsApp conversation with {@code peer}, polled: the dispatch thread opens it. */
+    private static java.util.List<Long> bindingsConversingWith(String peer) {
+        var deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+        while (true) {
+            java.util.List<Long> ids = commitInFreshTx(() -> {
+                java.util.List<models.Conversation> rows =
+                        models.Conversation.find("channelType = ?1 and peerId = ?2", "whatsapp", peer).fetch();
+                var out = new java.util.ArrayList<Long>();
+                for (var c : rows) out.add(WhatsAppBinding.findByAgent(c.agent).id);
+                return out;
+            });
+            if (!ids.isEmpty() || System.nanoTime() > deadline) return ids;
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return ids;
+            }
+        }
+    }
+
+    @Test
+    void twoBindingsOfOneAppEachDispatchTheMessageForTheirOwnNumber() {
+        var bindingA = seedBinding(APP_SECRET);
+        var bindingB = seedBinding(OTHER_PHONE_NUMBER_ID, APP_SECRET, true, WhatsAppTransport.CLOUD_API);
+        var idA = uniqueWamid();
+        var idB = uniqueWamid();
+        var a = uniqueSender();
+        var b = uniqueSender();
+        var sentA = secondsAgo(60);
+        var sentB = secondsAgo(120);
+        var body = changesBody(change(PHONE_NUMBER_ID, textMessage(idA, a, sentA)),
+                change(OTHER_PHONE_NUMBER_ID, textMessage(idB, b, sentB)));
+
+        assertEquals(java.util.List.of(served(a), served(b)), loggedWhilePosting(body, 200, idA, idB, a, b));
+
+        assertEquals(java.util.List.of(bindingA), bindingsConversingWith(a));
+        assertEquals(java.util.List.of(bindingB), bindingsConversingWith(b));
+        assertEquals(java.time.Instant.ofEpochSecond(sentA), windowStart(bindingA, a));
+        assertEquals(java.time.Instant.ofEpochSecond(sentB), windowStart(bindingB, b));
+        assertFalse(hasWindowRow(bindingA, b));
+        assertFalse(hasWindowRow(bindingB, a));
+        assertTrue(isRecorded(idA));
+        assertTrue(isRecorded(idB));
+    }
+
+    @Test
+    void aMessageForANumberOfAnotherAppIsSkippedAndTheRestOfTheBodyDispatched() {
+        // The body's signature is APP_SECRET's, so a binding holding another app's secret cannot take a message from it.
+        var bindingA = seedBinding(APP_SECRET);
+        var bindingB = seedBinding(OTHER_PHONE_NUMBER_ID, OTHER_APP_SECRET, true, WhatsAppTransport.CLOUD_API);
+        var idA = uniqueWamid();
+        var idB = uniqueWamid();
+        var a = uniqueSender();
+        var b = uniqueSender();
+        var body = changesBody(change(PHONE_NUMBER_ID, textMessage(idA, a, secondsAgo(0))),
+                change(OTHER_PHONE_NUMBER_ID, textMessage(idB, b, secondsAgo(0))));
+
+        assertEquals(java.util.List.of(skipped(idB, OTHER_PHONE_NUMBER_ID, bindingA), served(a)),
+                loggedWhilePosting(body, 200, idA, idB, a, b));
+
+        assertEquals(java.util.List.of(bindingA), bindingsConversingWith(a));
+        assertTrue(isRecorded(idA));
+        assertFalse(isRecorded(idB));
+        assertFalse(hasWindowRow(bindingB, b));
+        assertFalse(hasWindowRow(bindingA, b));
+    }
+
+    @Test
+    void messagesForUnboundDisabledWebOrSecretlessNumbersAreSkippedAndTheRestDispatched() {
+        var bindingA = seedBinding(APP_SECRET);
+        var bindingB = seedBinding(OTHER_PHONE_NUMBER_ID, APP_SECRET, true, WhatsAppTransport.CLOUD_API);
+        var disabledNumber = "100000000000003";
+        var webNumber = "100000000000004";
+        var secretlessNumber = "100000000000005";
+        var disabled = seedBinding(disabledNumber, APP_SECRET, false, WhatsAppTransport.CLOUD_API);
+        var web = seedBinding(webNumber, APP_SECRET, true, WhatsAppTransport.WHATSAPP_WEB);
+        var secretless = seedBinding(secretlessNumber, null, true, WhatsAppTransport.CLOUD_API);
+        var idA = uniqueWamid();
+        var idB = uniqueWamid();
+        var idUnbound = uniqueWamid();
+        var idDisabled = uniqueWamid();
+        var idWeb = uniqueWamid();
+        var idSecretless = uniqueWamid();
+        var a = uniqueSender();
+        var b = uniqueSender();
+        var other = uniqueSender();
+        var body = changesBody(change(PHONE_NUMBER_ID, textMessage(idA, a, secondsAgo(0))),
+                change(UNBOUND_PHONE_NUMBER_ID, textMessage(idUnbound, other, secondsAgo(0))),
+                change(disabledNumber, textMessage(idDisabled, other, secondsAgo(0))),
+                change(webNumber, textMessage(idWeb, other, secondsAgo(0))),
+                change(secretlessNumber, textMessage(idSecretless, other, secondsAgo(0))),
+                change(OTHER_PHONE_NUMBER_ID, textMessage(idB, b, secondsAgo(0))));
+
+        assertEquals(java.util.List.of(
+                skipped(idUnbound, UNBOUND_PHONE_NUMBER_ID, bindingA),
+                skipped(idDisabled, disabledNumber, bindingA),
+                skipped(idWeb, webNumber, bindingA),
+                skipped(idSecretless, secretlessNumber, bindingA),
+                served(a),
+                served(b)), loggedWhilePosting(body, 200, idA, idB, idUnbound, idDisabled, idWeb, idSecretless, a, b, other));
+
+        assertEquals(java.util.List.of(bindingA), bindingsConversingWith(a));
+        assertEquals(java.util.List.of(bindingB), bindingsConversingWith(b));
+        assertEquals(java.util.List.of(true, true, false, false, false, false), java.util.List.of(
+                isRecorded(idA), isRecorded(idB),
+                isRecorded(idUnbound), isRecorded(idDisabled), isRecorded(idWeb), isRecorded(idSecretless)));
+        assertEquals(java.util.List.of(false, false, false), java.util.List.of(
+                hasWindowRow(disabled, other), hasWindowRow(web, other), hasWindowRow(secretless, other)));
+    }
+
+    @Test
+    void aRedeliveredMessageForTheSecondBindingIsDroppedLikeTheFirstBindings() {
+        seedBinding(APP_SECRET);
+        var bindingB = seedBinding(OTHER_PHONE_NUMBER_ID, APP_SECRET, true, WhatsAppTransport.CLOUD_API);
+        var idA = uniqueWamid();
+        var idB = uniqueWamid();
+        var a = uniqueSender();
+        var b = uniqueSender();
+        var body = changesBody(change(PHONE_NUMBER_ID, textMessage(idA, a, secondsAgo(0))),
+                change(OTHER_PHONE_NUMBER_ID, textMessage(idB, b, secondsAgo(0))));
+
+        assertEquals(java.util.List.of(served(a), served(b)), loggedWhilePosting(body, 200, idA, idB, a, b));
+        assertEquals(java.util.List.of(duplicate(idA), duplicate(idB)), loggedWhilePosting(body, 200, idA, idB, a, b));
+
+        assertEquals(java.util.List.of(bindingB), bindingsConversingWith(b));
+    }
+
+    @Test
+    void anIdTheSecondBindingRecordedEarlierIsDroppedBeforeItsAgeIsChecked() {
+        seedBinding(APP_SECRET);
+        var bindingB = seedBinding(OTHER_PHONE_NUMBER_ID, APP_SECRET, true, WhatsAppTransport.CLOUD_API);
+        var idA = uniqueWamid();
+        var idB = uniqueWamid();
+        var a = uniqueSender();
+        var b = uniqueSender();
+        recordAccepted(idB);
+        var body = changesBody(change(PHONE_NUMBER_ID, textMessage(idA, a, secondsAgo(0))),
+                change(OTHER_PHONE_NUMBER_ID, textMessage(idB, b, secondsAgo(EIGHT_DAYS))));
+
+        assertEquals(java.util.List.of(duplicate(idB), served(a)), loggedWhilePosting(body, 200, idA, idB, a, b));
+
+        assertFalse(hasWindowRow(bindingB, b));
+    }
+
+    @Test
+    void aStaleMessageForTheSecondBindingRefusesTheWholeBody() {
+        var bindingA = seedBinding(APP_SECRET);
+        var bindingB = seedBinding(OTHER_PHONE_NUMBER_ID, APP_SECRET, true, WhatsAppTransport.CLOUD_API);
+        var idA = uniqueWamid();
+        var idB = uniqueWamid();
+        var a = uniqueSender();
+        var b = uniqueSender();
+        var body = changesBody(change(PHONE_NUMBER_ID, textMessage(idA, a, secondsAgo(0))),
+                change(OTHER_PHONE_NUMBER_ID, textMessage(idB, b, secondsAgo(EIGHT_DAYS))));
+
+        assertEquals(java.util.List.of(), loggedWhilePosting(body, 401, idA, idB, a, b));
+
+        assertFalse(isRecorded(idA));
+        assertFalse(isRecorded(idB));
+        assertFalse(hasWindowRow(bindingA, a));
+        assertFalse(hasWindowRow(bindingB, b));
     }
 }

@@ -12,6 +12,7 @@ import models.WhatsAppAcceptedMessage;
 import models.WhatsAppBinding;
 import models.WhatsAppConversationWindow;
 import models.WhatsAppTransport;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.NoTransaction;
 import play.mvc.Controller;
 import play.mvc.Http;
@@ -22,6 +23,8 @@ import utils.WebhookUtil;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Optional;
 
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 
@@ -29,8 +32,8 @@ import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 /**
  * Cloud-API inbound webhook for WhatsApp (JCLAW-446). Per-binding routed: a single
  * endpoint serves every Cloud-API {@link WhatsAppBinding} on the instance, routing
- * each request to its binding by the {@code phone_number_id} in the payload (POST)
- * or the {@code verify_token} (GET hub-verification). Mirrors the per-binding shape
+ * each message to its binding by its {@code phone_number_id} (POST) or each request
+ * by the {@code verify_token} (GET hub-verification). Mirrors the per-binding shape
  * of {@link WebhookSlackController}/{@link WebhookTelegramController}.
  *
  * <p>The controller does no business logic: it verifies the request (HMAC for POST,
@@ -73,11 +76,13 @@ public class WebhookWhatsAppController extends Controller {
     }
 
     /**
-     * POST — inbound message notifications. Routes to the binding by
+     * POST — inbound message notifications. Routes to the binding by the first
      * {@code phone_number_id}, verifies the {@code X-Hub-Signature-256} HMAC against
      * that binding's {@code appSecret} (fail-closed per JCLAW-16 when the secret is
-     * absent), parses, records the 24h window, dispatches, and fast-acks. Runs outside a
-     * request transaction, so each message's id claim commits on its own (JCLAW-1520).
+     * absent), and parses. Each message is windowed and dispatched under the binding that
+     * owns its number, provided that binding's secret also verifies the signature; then the
+     * request is fast-acked. Runs outside a request transaction, so each message's id claim
+     * commits on its own (JCLAW-1520).
      */
     @SuppressWarnings("java:S2259")
     @AgentAccess(value = OPERATOR_ONLY,
@@ -135,6 +140,7 @@ public class WebhookWhatsAppController extends Controller {
             EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_WHATSAPP,
                     "Invalid webhook signature for binding " + binding.id);
             unauthorized("Invalid signature");
+            return;
         }
 
         for (var status : WhatsAppCloudApiParser.parseStatuses(payload)) {
@@ -145,16 +151,23 @@ public class WebhookWhatsAppController extends Controller {
         }
 
         var now = AppClock.now();
+        var signature = signatureHeader.value();
+        var owners = new HashMap<String, Optional<WhatsAppBinding>>();
+        owners.put(binding.phoneNumberId, Optional.of(binding));
         var accepted = new ArrayList<Accepted>();
         for (var received : WhatsAppCloudApiParser.parse(payload)) {
             var msg = received.message();
-            if (!binding.phoneNumberId.equals(msg.phoneNumberId())) {
-                // The signature names this binding's app; a message for another number is not its to dispatch.
+            var number = msg.phoneNumberId();
+            var owner = number == null ? Optional.<WhatsAppBinding>empty()
+                    : owners.computeIfAbsent(number, n -> Optional.ofNullable(signedOwner(n, rawBody, signature)));
+            if (owner.isEmpty()) {
+                // Meta posts all of an app's numbers here; only a binding whose secret signed the body may take one.
                 EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
                         "WhatsApp message %s for phone number %s skipped in a webhook for binding %d"
-                                .formatted(msg.messageId(), msg.phoneNumberId(), binding.id));
+                                .formatted(msg.messageId(), number, binding.id));
                 continue;
             }
+            var target = owner.get();
             if (Boolean.TRUE.equals(Tx.run(() -> WhatsAppAcceptedMessage.isRecorded(msg.messageId())))) {
                 EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
                         "Duplicate WhatsApp event %s dropped".formatted(msg.messageId()));
@@ -165,7 +178,7 @@ public class WebhookWhatsAppController extends Controller {
             var sentAt = received.sentAt();
             if (sentAt == null || !WhatsAppChannel.isFreshTimestamp(sentAt, now)) {
                 EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_WHATSAPP,
-                        "Webhook rejected: stale/replayed timestamp for binding " + binding.id);
+                        "Webhook rejected: stale/replayed timestamp for binding " + target.id);
                 unauthorized("Stale request");
                 return;
             }
@@ -176,18 +189,28 @@ public class WebhookWhatsAppController extends Controller {
                                 .formatted(msg.messageId(), ageSeconds));
             }
             // Meta's 24h window runs from the customer's send, so a late redelivery must not reopen it at receipt.
-            accepted.add(new Accepted(msg, sentAt.isAfter(now) ? now : sentAt));
+            accepted.add(new Accepted(target, msg, sentAt.isAfter(now) ? now : sentAt));
         }
 
         for (var a : accepted) {
             // JCLAW-447: reactions still open the 24h window — the user touched the conversation.
-            Tx.run(() -> WhatsAppConversationWindow.recordInbound(binding.id, a.message().from(), a.sentAt()));
-            WhatsAppInbound.dispatchMessage(binding, a.message());
+            Tx.run(() -> WhatsAppConversationWindow.recordInbound(a.binding().id, a.message().from(), a.sentAt()));
+            WhatsAppInbound.dispatchMessage(a.binding(), a.message());
         }
         ok();
     }
 
-    private record Accepted(WhatsAppInboundMessage message, Instant sentAt) {}
+    private record Accepted(WhatsAppBinding binding, WhatsAppInboundMessage message, Instant sentAt) {}
+
+    /** The enabled Cloud-API binding for {@code phoneNumberId} whose app secret signed {@code rawBody}, else null. */
+    private static @Nullable WhatsAppBinding signedOwner(String phoneNumberId, String rawBody, String signature) {
+        var b = Tx.run(() -> WhatsAppBinding.findByPhoneNumberId(phoneNumberId));
+        if (b == null || !b.enabled || b.transport != WhatsAppTransport.CLOUD_API
+                || b.appSecret == null || b.appSecret.isBlank()) {
+            return null;
+        }
+        return WhatsAppChannel.verifySignature(b.appSecret, rawBody, signature) ? b : null;
+    }
 
     /** JCLAW-1411: Meta could not deliver a reply; statuses touch no conversation state. */
     private static void recordFailedStatus(WhatsAppBinding binding, WhatsAppDeliveryStatus status) {
