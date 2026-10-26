@@ -262,7 +262,7 @@ final class StreamingAgentRunner {
         }
 
         var queueMsg = new ConversationQueue.QueuedMessage(
-                userMessage, channelType, peerId, agent);
+                userMessage, channelType, peerId, agent, attachments);
         long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, isCancelled);
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             cb.onInit().accept(conversation);

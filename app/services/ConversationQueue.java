@@ -35,11 +35,26 @@ public class ConversationQueue {
      *                       USER row (a yield-resume announce), so the drain must run
      *                       it without re-appending {@code text}. Carried on the record
      *                       because the enqueue/drain boundary drops call arguments.
+     * @param attachments    JCLAW-1514: the staged files the message arrived with, finalized
+     *                       onto the drained turn's USER row
      */
     public record QueuedMessage(String text, String channelType, String peerId, Agent agent,
-                                boolean skipUserAppend) {
+                                boolean skipUserAppend, List<AttachmentService.Input> attachments) {
+        public QueuedMessage {
+            attachments = List.copyOf(attachments);
+        }
+
         public QueuedMessage(String text, String channelType, String peerId, Agent agent) {
             this(text, channelType, peerId, agent, false);
+        }
+
+        public QueuedMessage(String text, String channelType, String peerId, Agent agent, boolean skipUserAppend) {
+            this(text, channelType, peerId, agent, skipUserAppend, List.of());
+        }
+
+        public QueuedMessage(String text, String channelType, String peerId, Agent agent,
+                             @Nullable List<AttachmentService.Input> attachments) {
+            this(text, channelType, peerId, agent, false, attachments == null ? List.of() : attachments);
         }
     }
 

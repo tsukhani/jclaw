@@ -296,7 +296,7 @@ public class AgentRunner {
     public static RunResult run(Agent agent, Conversation conversation, String userMessage,
                                 @Nullable List<AttachmentService.Input> attachments) {
         var queueMsg = new ConversationQueue.QueuedMessage(
-                userMessage, conversation.channelType, conversation.peerId, agent);
+                userMessage, conversation.channelType, conversation.peerId, agent, attachments);
         long generation = ConversationQueue.tryAcquireOwnership(conversation.id, queueMsg, null);
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
@@ -348,13 +348,15 @@ public class AgentRunner {
      * @param agent          the executing agent
      * @param conversation   the conversation the caller already owns
      * @param userMessage    the user's input text; empty for a pure yield-resume
+     * @param attachments    the drained messages' staged files, finalized onto the USER row
      * @param skipUserAppend true to run without persisting {@code userMessage}
      * @param generation     the queue ownership generation the drain transferred
      * @return the run outcome
      */
     static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage,
-                                       boolean skipUserAppend, long generation) {
-        return runAfterAcquire(agent, conversation, userMessage, null, skipUserAppend, generation, true, true);
+                                       List<AttachmentService.Input> attachments, boolean skipUserAppend,
+                                       long generation) {
+        return runAfterAcquire(agent, conversation, userMessage, attachments, skipUserAppend, generation, true, true);
     }
 
     /**

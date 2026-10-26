@@ -99,6 +99,7 @@ public final class QueueDrainOrchestrator {
             var appendable = drained.stream().filter(m -> !m.skipUserAppend()).toList();
             boolean skipUserAppend = appendable.isEmpty();
             var combined = skipUserAppend ? "" : ConversationQueue.formatCollectedMessages(appendable);
+            var attachments = appendable.stream().flatMap(m -> m.attachments().stream()).toList();
             var msg = drained.getFirst(); // channel info is the same for all queued messages
             boolean runStarted = false;
             try {
@@ -111,7 +112,7 @@ public final class QueueDrainOrchestrator {
                 // JCLAW-117: queue ownership was transferred to us by drain()
                 // above — use the owned-queue variant to avoid re-acquire.
                 var result = AgentRunner.runWithOwnedQueue(msg.agent(), conversation, combined,
-                        skipUserAppend, generation);
+                        attachments, skipUserAppend, generation);
                 AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
             } catch (Exception e) {
                 EventLogger.error("queue", msg.agent().name, msg.channelType(),

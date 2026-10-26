@@ -370,6 +370,26 @@ class ConversationQueueTest extends UnitTest {
         services.ConfigService.delete("agent.queue-test-agent.queue.mode");
     }
 
+    @Test
+    void aQueuedMessageKeepsItsAttachmentsThroughTheDrain() {
+        var photo = new services.AttachmentService.Input("att-15140", "photo.jpg", "image/jpeg", 10, "IMAGE");
+        long convId = 15140L;
+        assertTrue(ConversationQueue.tryAcquire(convId, new QueuedMessage("owner", "telegram", "p", agent)));
+        assertFalse(ConversationQueue.tryAcquire(convId,
+                new QueuedMessage("with photo", "telegram", "p", agent, List.of(photo))));
+
+        assertEquals(List.of(photo), ConversationQueue.drain(convId).getFirst().attachments());
+        assertTrue(ConversationQueue.drain(convId).isEmpty());
+    }
+
+    @Test
+    void aMessageQueuedWithoutAttachmentsCarriesNone() {
+        assertEquals(List.of(), new QueuedMessage("plain", "telegram", "p", agent).attachments());
+        assertEquals(List.of(), new QueuedMessage("resume", "telegram", "p", agent, true).attachments());
+        assertEquals(List.of(), new QueuedMessage("text only", "telegram", "p", agent,
+                (List<services.AttachmentService.Input>) null).attachments());
+    }
+
     // --- Interrupt mode cancellation signal ---
 
     @Test
