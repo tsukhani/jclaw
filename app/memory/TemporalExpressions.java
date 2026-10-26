@@ -177,7 +177,7 @@ public final class TemporalExpressions {
     private static final LocalDate CLAIM_ANCHOR = LocalDate.of(2000, 6, 15);
 
     private static final List<Rule> RULES = List.of(
-            rule("\\b(\\d{4})-(\\d{2})-(\\d{2})\\b", 0, (m, t, a) -> absolute(Kind.DAY, EdtfDate.ofDay(
+            rule("\\b(\\d{4})-(\\d{2})-(\\d{2})\\b", 0, (m, _, _) -> absolute(Kind.DAY, EdtfDate.ofDay(
                     LocalDate.of(Integer.parseInt(m.group(1)), Integer.parseInt(m.group(2)),
                             Integer.parseInt(m.group(3))), false))),
             rule("(?<![\\w/.-])\\d{1,2}/\\d{1,2}(?:/\\d{2,4})?(?![\\w/])"
@@ -192,43 +192,43 @@ public final class TemporalExpressions {
             rule("\\b(\\d{1,2})\\s*[\u2013-]\\s*(\\d{1,2})\\s+(" + MONTHS_CAPITALIZED + ")\\.?,?\\s+" + YEAR + "\\b", 0,
                     TemporalExpressions::dayRange),
             rule("\\b(" + MONTHS_CAPITALIZED + ")\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,\\s*|\\s+)" + YEAR + "\\b", 0,
-                    (m, t, a) -> absolute(Kind.DAY, EdtfDate.ofDay(LocalDate.of(Integer.parseInt(m.group(3)),
+                    (m, _, _) -> absolute(Kind.DAY, EdtfDate.ofDay(LocalDate.of(Integer.parseInt(m.group(3)),
                             month(m.group(1)), Integer.parseInt(m.group(2))), false))),
             rule("\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(" + MONTHS_CAPITALIZED + ")\\.?,?\\s+" + YEAR + "\\b",
-                    0, (m, t, a) -> absolute(Kind.DAY, EdtfDate.ofDay(LocalDate.of(Integer.parseInt(m.group(3)),
+                    0, (m, _, _) -> absolute(Kind.DAY, EdtfDate.ofDay(LocalDate.of(Integer.parseInt(m.group(3)),
                             month(m.group(2)), Integer.parseInt(m.group(1))), false))),
-            rule("\\b(" + MONTHS_CAPITALIZED + ")\\s+(?:of\\s+)?" + YEAR + "\\b", 0, (m, t, a) -> absolute(
+            rule("\\b(" + MONTHS_CAPITALIZED + ")\\s+(?:of\\s+)?" + YEAR + "\\b", 0, (m, _, _) -> absolute(
                     Kind.MONTH, EdtfDate.ofMonth(YearMonth.of(Integer.parseInt(m.group(2)), month(m.group(1))),
                             false))),
             rule("\\b(" + MONTHS_CAPITALIZED + ")\\.?\\s+(\\d{1,2})(?:st|nd|rd|th)?\\b(?![:\\d])", 0,
-                    (m, t, a) -> yearless(Kind.DAY, a, y -> EdtfDate.ofDay(
+                    (m, _, a) -> yearless(Kind.DAY, a, y -> EdtfDate.ofDay(
                             LocalDate.of(y, month(m.group(1)), Integer.parseInt(m.group(2))), false))),
             rule("\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(?:of\\s+)?(" + MONTHS_CAPITALIZED + ")\\b", 0,
-                    (m, t, a) -> yearless(Kind.DAY, a, y -> EdtfDate.ofDay(
+                    (m, _, a) -> yearless(Kind.DAY, a, y -> EdtfDate.ofDay(
                             LocalDate.of(y, month(m.group(2)), Integer.parseInt(m.group(1))), false))),
             rule("\\b(?i:" + DEICTIC + ")\\s+(" + MONTHS_CAPITALIZED + ")\\b", 0, TemporalExpressions::deicticMonth),
             rule("(?<=\\b(?i:" + YEARLESS_OPENERS + ")[\\s-]{1,3})(" + FULL_MONTHS_CAPITALIZED + ")\\b", 0,
-                    (m, t, a) -> yearless(Kind.MONTH, a, y -> EdtfDate.ofMonth(YearMonth.of(y, month(m.group(1))),
+                    (m, _, a) -> yearless(Kind.MONTH, a, y -> EdtfDate.ofMonth(YearMonth.of(y, month(m.group(1))),
                             false))),
-            rule("(?i)\\b" + SEASON + "\\s+(?:of\\s+)?" + YEAR + "\\b", 0, (m, t, a) -> absolute(Kind.SEASON,
+            rule("(?i)\\b" + SEASON + "\\s+(?:of\\s+)?" + YEAR + "\\b", 0, (m, _, _) -> absolute(Kind.SEASON,
                     EdtfDate.ofSeason(Integer.parseInt(m.group(2)), season(m.group(1))))),
             rule("(?i)\\b" + DEICTIC + "\\s+" + SEASON + "\\b", 0, TemporalExpressions::deicticSeason),
             rule("(?i)(?<=\\b(?:" + YEARLESS_OPENERS + "|during|over|through|throughout)[\\s-]{1,3})"
                     + "(spring|summer|autumn|winter)\\b(?!\\s+(?:of\\s+)?(?:19|20)\\d{2}\\b)", 0,
-                    (m, t, a) -> yearless(Kind.SEASON, a, y -> EdtfDate.ofSeason(y, season(m.group(1))))),
-            rule("\\bQ([1-4])\\s+(?:of\\s+)?" + YEAR + "\\b", 0, (m, t, a) -> absolute(Kind.QUARTER,
+                    (m, _, a) -> yearless(Kind.SEASON, a, y -> EdtfDate.ofSeason(y, season(m.group(1))))),
+            rule("\\bQ([1-4])\\s+(?:of\\s+)?" + YEAR + "\\b", 0, (m, _, _) -> absolute(Kind.QUARTER,
                     EdtfDate.ofQuarter(Integer.parseInt(m.group(2)), Integer.parseInt(m.group(1))))),
             rule("(?i)\\b(?:the\\s+)?(first|second|third|fourth|1st|2nd|3rd|4th)\\s+quarter\\s+of\\s+" + YEAR + "\\b",
-                    0, (m, t, a) -> absolute(Kind.QUARTER, EdtfDate.ofQuarter(Integer.parseInt(m.group(2)),
+                    0, (m, _, _) -> absolute(Kind.QUARTER, EdtfDate.ofQuarter(Integer.parseInt(m.group(2)),
                             ordinal(m.group(1))))),
-            rule("\\bQ([1-4])\\b", 0, (m, t, a) -> relative(Kind.QUARTER,
+            rule("\\bQ([1-4])\\b", 0, (m, _, a) -> relative(Kind.QUARTER,
                     EdtfDate.ofQuarter(a.getYear(), Integer.parseInt(m.group(1))))),
             rule("(?i)\\b" + DEICTIC + "\\s+(week|month|quarter|year)\\b", 0, TemporalExpressions::deicticUnit),
             rule("(?i)\\bthe\\s+day\\s+(?:before\\s+yesterday|after\\s+tomorrow)\\b"
                     + "|\\b(today|tomorrow|yesterday|tonight)\\b|\\blast\\s+night\\b"
                     + "|\\bthis\\s+(?:morning|afternoon|evening)\\b", 0, TemporalExpressions::dayWord),
-            rule("(?i)\\b" + NUMBER + "\\s+" + UNIT + "\\s+ago\\b", 0, (m, t, a) -> offset(m, a, -1)),
-            rule("(?i)\\bin\\s+" + NUMBER + "\\s+" + UNIT + "\\b", 0, (m, t, a) -> offset(m, a, 1)),
+            rule("(?i)\\b" + NUMBER + "\\s+" + UNIT + "\\s+ago\\b", 0, (m, _, a) -> offset(m, a, -1)),
+            rule("(?i)\\bin\\s+" + NUMBER + "\\s+" + UNIT + "\\b", 0, (m, _, a) -> offset(m, a, 1)),
             rule("(?i)\\bfor\\s+(?:the\\s+(?:past|last)\\s+)?(" + NUMBER + "\\s+" + UNIT + ")\\b", 1,
                     TemporalExpressions::duration),
             rule("(?<!\\d)" + YEAR + "(?!\\d)", 0, TemporalExpressions::year),
@@ -331,7 +331,7 @@ public final class TemporalExpressions {
 
     private static Normalizer refuse(Reason reason) {
         var refusal = new Refusal(reason);
-        return (m, t, a) -> refusal;
+        return (_, _, _) -> refusal;
     }
 
     private static Reading absolute(Kind kind, EdtfDate date) {

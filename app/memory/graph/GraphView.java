@@ -125,8 +125,8 @@ public final class GraphView {
         private final Map<String, List<EdtfInterval>> bySource = new HashMap<>();
 
         void add(String source, EdtfInterval value) {
-            values.computeIfAbsent(value, k -> new TreeSet<>());
-            bySource.computeIfAbsent(source, k -> new ArrayList<>()).add(value);
+            values.computeIfAbsent(value, _ -> new TreeSet<>());
+            bySource.computeIfAbsent(source, _ -> new ArrayList<>()).add(value);
         }
 
         /** Joins the Relation to every value {@code source} stated; false when it stated none. */

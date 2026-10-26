@@ -75,7 +75,7 @@ public final class OntologyValidator {
     public static List<Violation> validate(OntologySchema schema, Collection<? extends OntologyRecord> records) {
         var byId = new TreeMap<String, List<OntologyRecord>>();
         for (var record : new LinkedHashSet<OntologyRecord>(records)) {
-            byId.computeIfAbsent(record.id(), id -> new ArrayList<>()).add(record);
+            byId.computeIfAbsent(record.id(), _ -> new ArrayList<>()).add(record);
         }
         var run = new Run(schema, byId);
         byId.forEach((id, shared) -> {
@@ -103,15 +103,15 @@ public final class OntologyValidator {
             this.byId = byId;
             byId.values().forEach(records -> records.forEach(record -> {
                 if (record instanceof Relation r) {
-                    relationsByEnds.computeIfAbsent(List.of(r.type(), r.from(), r.to()), k -> new TreeSet<>()).add(r.id());
+                    relationsByEnds.computeIfAbsent(List.of(r.type(), r.from(), r.to()), _ -> new TreeSet<>()).add(r.id());
                 }
                 var subjectId = record instanceof Evidence e && claimBearing(e) ? e.subjectId() : null;
                 if (record instanceof Evidence e && subjectId != null) {
-                    claimsBySourceAndSubject.computeIfAbsent(List.of(e.source(), subjectId), k -> new TreeSet<>())
+                    claimsBySourceAndSubject.computeIfAbsent(List.of(e.source(), subjectId), _ -> new TreeSet<>())
                             .add(e.id());
                 }
                 for (var evidenceId : evidenceIdsOf(record)) {
-                    listers.computeIfAbsent(evidenceId, k -> new TreeSet<>()).add(record.id());
+                    listers.computeIfAbsent(evidenceId, _ -> new TreeSet<>()).add(record.id());
                 }
             }));
         }
