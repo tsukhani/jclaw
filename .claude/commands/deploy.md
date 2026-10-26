@@ -119,12 +119,12 @@ If that prints anything, stop and list it. The usual sources are an AFK factory 
 15. Push to `origin` first: `/usr/bin/git push --follow-tags origin HEAD`. The `--follow-tags` flag pushes both the branch HEAD and any annotated tags reachable from it (i.e., the `v<NEW_VERSION>` tag we just created), so the commit and tag land in one atomic operation per remote. Report the result.
 16. Push to `github`: `/usr/bin/git push --follow-tags github HEAD`. Report the result.
 17. If either push fails, surface the error verbatim and stop — do **not** retry with force, do not skip hooks, do not rewrite history. A failed push on one remote with a successful push on the other is a known-consistent state the user can recover from manually. If GitHub answers `GH006: Protected branch update failed … Commits must have verified signatures`, it lists the unsigned commits: the preflight should have caught them, so report them rather than bypass.
-18. **Delete the Renovate branches this release merged**, only after both pushes succeeded. A `renovate/*` branch that the pushed `HEAD` contains is now on Bitbucket's `main` and is dead; Renovate would prune it only at its next Monday run. Delete it now and not earlier: a branch deleted while its bump is still only local is recreated by that Monday run. A branch `HEAD` does not contain is a pending bump, so leave it. The Bash tool runs zsh, which does not word-split an unquoted variable, hence the array:
+18. **Delete the Renovate branches this release merged**, only after both pushes succeeded. A `renovate/*` branch that the pushed `HEAD` contains is now on Bitbucket's `main` and is dead; Renovate would prune it only at its next Monday run. Delete it now and not earlier: a branch deleted while its bump is still only local is recreated by that Monday run. A branch `HEAD` does not contain is a pending bump, so leave it. The names go one per line into `xargs`, which needs no word-splitting (zsh, which the Bash tool runs, does none) and no zsh array, whose `${(f)…}` Claude Code's safety check cannot parse and refuses; `-r` skips the push when nothing merged:
     ```bash
     /usr/bin/git fetch -q origin --prune
-    B=(${(f)"$(/usr/bin/git branch -r --list 'origin/renovate/*' | tr -d ' ' | sed 's|^origin/||')"})
-    merged=(); for b in "${B[@]}"; do /usr/bin/git merge-base --is-ancestor "origin/$b" HEAD && merged+=("$b"); done
-    if (( ${#merged[@]} )); then /usr/bin/git push origin --delete "${merged[@]}"; fi
+    /usr/bin/git branch -r --list 'origin/renovate/*' | sed 's|^ *origin/||' |
+      while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b" HEAD && echo "$b"; done |
+      xargs -r /usr/bin/git push origin --delete
     ```
     The pre-push hook skips the suite on a delete-only push, so this needs no bypass. Renovate pushes only to Bitbucket, so `github` has no such branches. A failed delete does not undo the release: report it.
 

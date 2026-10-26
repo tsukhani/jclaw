@@ -116,9 +116,12 @@ Process **BACKEND** branches first, then **FRONTEND**, then **FACTORY** — each
 11. **Stop here.** Hand off to the user for `/deploy` (the only path that pushes). Do not push, do not run `/deploy` yourself.
 12. **Optional cleanup, only if the user asks:** delete the merged remote branches. Renovate runs as a **weekly** Jenkins job (not continuously), so this is safe immediately and they won't bounce back; once `/deploy` lands the bumps on `origin/main`, Renovate won't recreate them. Otherwise `/deploy` deletes them once its push has carried the bumps to `origin/main` (its step 18); failing both, Renovate's next Monday run deletes each merged branch as an orphan: one with no pending update and no commit off `main` (`pruneStaleBranches`, on by default); a newer version of the same dependency reuses the branch instead. The main JClaw pipeline never touches `renovate/*`. This is the one push allowed outside `/deploy` (it touches no commits on `main`). `.githooks/pre-push` skips the suite on a push that only deletes refs, so it needs no bypass:
     ```bash
-    /usr/bin/git push origin --delete renovate/<a> renovate/<b> …
+    /usr/bin/git fetch -q origin --prune
+    /usr/bin/git branch -r --list 'origin/renovate/*' | sed 's|^ *origin/||' |
+      while read -r b; do /usr/bin/git merge-base --is-ancestor "origin/$b" HEAD && echo "$b"; done |
+      xargs -r /usr/bin/git push origin --delete
     ```
-    The Bash tool runs zsh, which does not word-split an unquoted variable: build the list as an array (`B=(${(f)"$(…)"})`, then `"${B[@]}"`), or the whole list goes as one ref name.
+    Only branches `HEAD` contains are deleted. The names go one per line into `xargs`, which needs no word-splitting (zsh, which the Bash tool runs, does none) and no zsh array, whose `${(f)…}` Claude Code's safety check cannot parse and refuses; `-r` skips the push when nothing merged.
 
 ---
 
