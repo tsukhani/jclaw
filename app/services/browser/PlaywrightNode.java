@@ -34,7 +34,7 @@ public final class PlaywrightNode {
 
     private PlaywrightNode() {}
 
-    public static final String VERSION = "24.21.0";
+    public static final String VERSION = "24.22.1";
 
     /**
      * One official Node.js build: its archive URL, the SHA-256 that release publishes in
@@ -56,19 +56,19 @@ public final class PlaywrightNode {
                 dir + (windows ? "/node.exe" : "/bin/node"));
     }
 
-    // From https://nodejs.org/dist/v24.21.0/SHASUMS256.txt. Pinned here rather than fetched beside
+    // From https://nodejs.org/dist/v24.22.1/SHASUMS256.txt. Pinned here rather than fetched beside
     // the archive, so a compromised mirror cannot vouch for its own download.
     private static final Map<String, Build> BUILDS = Map.of(
             MAC_ARM64, official(MAC_ARM64, "darwin-arm64",
-                    "6239d4cf92d864487ec8cd3615038f7b67e7f58b77b21cd2f09ea9fbd68065fe"),
+                    "654ba79de6155647e22321932b45f2a1ccb705976cc337c9b8e278beb085a628"),
             MAC, official(MAC, "darwin-x64",
-                    "0ae5a24c24bb7d015cd816c5036b3f90f2945aa872fcf54e58da054753b3a299"),
+                    "65e450f90a6eaacd5000f611861c4ce65fadc87f813795dc4ed0c0e5f2fca2d4"),
             LINUX_ARM64, official(LINUX_ARM64, "linux-arm64",
-                    "6ad1325edbdb5649c379b75a237147a666c95d4f9ae8d340fef2d1575d289ad2"),
+                    "dbabf7a1cbf947e6059ffad2c27b80041db97dea1e553b62afdee7f13fca336e"),
             LINUX, official(LINUX, "linux-x64",
-                    "fd8e59d5a511510f6a298afb548f18c7d2b1be404d8b4a27d94fbe49f56cb2d6"),
+                    "6c172a9ab6718f7b801fb5a7bd486af2ee5e32758086a04b84fcce2aa77095e6"),
             WIN32_X64, official(WIN32_X64, "win-x64",
-                    "158f7685b44de51f6c0df1d153526cbcd3e1bc739a8dfc607721cef75de9e541"));
+                    "d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5"));
 
     /** The archives are 26-36 MB; the hash is only known once the last byte arrives. */
     static final long MAX_ARCHIVE_BYTES = 200L * 1024 * 1024;
