@@ -54,7 +54,11 @@ class RestartProgressScriptTest extends UnitTest {
 
     /** What the stubs leave out of a real start; wait_for_backend_ready stays real where a test asks for it. */
     private static final String STUBBED = """
-            check_stale_h2_lock_or_exit() { :; }
+            # Runs between the narrator's launch and narrator_stop, whose 5 s wait a stub slowed by a loaded host outran.
+            check_stale_h2_lock_or_exit() {
+                [ -n "${STUB_AWAIT_NARRATOR_START:-}" ] || return 0
+                for _ in $(seq 1 300); do [ -s "$STUB_PIDFILE" ] && break; sleep 0.1; done
+            }
             ensure_env_for_start() { :; }
             validate_pnpm_pin() { :; }
             prune_heap_dumps() { :; }
@@ -62,6 +66,13 @@ class RestartProgressScriptTest extends UnitTest {
             aot_check_used() { :; }
             certs_valid() { [[ -n "${STUB_HTTPS:-}" ]]; }
             jre_install_staged() { probe java; echo "java install" >> "$STUB_CALLS"; echo "upgraded 25.0.4 → 25.0.5"; }
+            # The narrator's own line lands whenever its process gets to run; this one is when jclaw.sh launched it.
+            eval "jclaw_$(declare -f narrator_start)"
+            narrator_start() {
+                local before="${NARRATOR_JOB:-}"
+                jclaw_narrator_start
+                if [[ -n "${NARRATOR_JOB:-}" && "$NARRATOR_JOB" != "$before" ]]; then echo "launch narrator" >> "$STUB_CALLS"; fi
+            }
             """;
 
     private static final String READY = "wait_for_backend_ready() { echo ready >> \"$STUB_CALLS\"; }\n";
@@ -283,16 +294,17 @@ class RestartProgressScriptTest extends UnitTest {
     void onWindowsTheNarratorWaitsForAStagedJavaAndIsStartedAndStoppedNatively() throws Exception {
         distInstall();
         stageJava();
-        var run = restart(Map.of("IS_WINDOWS", "1", "STUB_FAKE_NARRATOR", "1"), false);
+        var run = restart(Map.of("IS_WINDOWS", "1", "STUB_FAKE_NARRATOR", "1", "STUB_AWAIT_NARRATOR_START", "1"), false);
         assertEquals(0, run.exit(), run.out());
 
         // The JVM cache is off on Windows, so its rebuild never appears.
         assertEquals(List.of("stop:Stopping JClaw", "java:Installing Java 25.0.5", "start:Starting JClaw (connecting channels)"), phases());
         var calls = calls();
         int install = calls.indexOf("java install");
+        int launch = calls.indexOf("launch narrator");
         int narrator = indexOf(calls, "narrator ");
         assertTrue(calls.contains("stop finds no narrator"), calls.toString());
-        assertTrue(calls.indexOf("play stop") < install && install < narrator && narrator < calls.indexOf("play start"),
+        assertTrue(calls.indexOf("play stop") < install && install < launch && launch < calls.indexOf("play start"),
                 "a running java.exe would keep jre/ from being renamed, so the narrator starts after the install: " + calls + "\n" + run.out());
         assertEquals("narrator -cp W:" + home.resolve("precompiled/classes.jar") + " utils.RestartNarrator --status W:"
                         + statusFile() + " --pid-file W:" + home.resolve("logs/restart-narrator.pid")
