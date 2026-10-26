@@ -36,8 +36,8 @@ import java.util.regex.Pattern;
 /**
  * The operator's Ollama server as a decision provider (JCLAW-1336): its System One models answer
  * {@code POST /v1/systemone} with the body JEV takes, through {@link JevApi} under their own breaker.
- * Ollama refuses a cloud model there ("System One requires a local Nimble or Tev model", v0.35.0), so
- * the server is always the operator's own, on this machine or the LAN.
+ * The server is the operator's own, on this machine or the LAN; since Ollama 0.40.5 a signed-in server also
+ * hands a {@code :cloud} model such as {@code clef:cloud} to ollama.com, so the prompt leaves it.
  */
 public final class OllamaDecision {
 
@@ -71,8 +71,12 @@ public final class OllamaDecision {
 
     private OllamaDecision() {}
 
-    /** The server's installed decision models, or why they could not be read. */
-    public record Status(String baseUrl, boolean reachable, @Nullable String error, List<String> models) {}
+    /**
+     * The server's decision models, or why they could not be read: {@code models} run on it, {@code cloudModels} are
+     * the ones it hands to ollama.com.
+     */
+    public record Status(String baseUrl, boolean reachable, @Nullable String error, List<String> models,
+                         List<String> cloudModels) {}
 
     /** The operator's address, else the Ollama Local LLM provider's server without its {@code /v1}. */
     public static String baseUrl() {
@@ -191,13 +195,20 @@ public final class OllamaDecision {
 
     /**
      * Whether the server at {@code base} answers {@code GET /api/ps} without {@code model} among its loaded models, so
-     * a call that timed out was waiting on a load. False when it cannot tell, which leaves the timeout counted.
+     * a call that timed out was waiting on a load. False when it cannot tell, which leaves the timeout counted, and for
+     * a model {@code /api/tags} says runs on ollama.com, which never loads here.
      */
     public static boolean stillLoading(String base, String model) {
         try {
-            return !loadedModels(base, PS_TIMEOUT_SECONDS).contains(tagged(model));
+            if (loadedModels(base, PS_TIMEOUT_SECONDS).contains(tagged(model))) return false;
         } catch (IOException | JsonParseException | IllegalArgumentException | IllegalStateException | ClassCastException _) {
             return false;
+        }
+        try {
+            var entry = listed(base, model, PS_TIMEOUT_SECONDS);
+            return entry == null || !runsInCloud(entry);
+        } catch (IOException | JsonParseException | IllegalArgumentException | IllegalStateException | ClassCastException _) {
+            return true;
         }
     }
 
@@ -324,7 +335,9 @@ public final class OllamaDecision {
         try (var response = call.execute()) {
             // Status only: the body comes from a server whose address the operator chose (JCLAW-778).
             if (!response.isSuccessful()) return unreachable(base, "HTTP " + response.code() + " from /api/tags");
-            return new Status(base, true, null, decisionModels(JsonParser.parseString(response.body().string())));
+            var tags = JsonParser.parseString(response.body().string());
+            return new Status(base, true, null, decisionModels(tags, model -> !runsInCloud(model)),
+                    decisionModels(tags, OllamaDecision::runsInCloud));
         } catch (JsonParseException | IllegalStateException | ClassCastException _) {
             return unreachable(base, "/api/tags did not answer with Ollama's model list");
         } catch (IOException e) {
@@ -340,27 +353,33 @@ public final class OllamaDecision {
         var base = trimSlash(baseUrl);
         try {
             SsrfGuard.assertProviderUrlSafe(base);
-            var models = JsonParser.parseString(get(base, "/api/tags", TAGS_TIMEOUT_SECONDS)).getAsJsonObject()
-                    .getAsJsonArray("models");
-            if (models == null) return null;
-            var wanted = tagged(model);
-            for (var entry : models) {
-                if (!entry.isJsonObject()) continue;
-                var name = entry.getAsJsonObject().get("name");
-                var digest = entry.getAsJsonObject().get("digest");
-                if (name != null && name.isJsonPrimitive() && tagged(name.getAsString()).equals(wanted)
-                        && digest != null && digest.isJsonPrimitive()) {
-                    return digest.getAsString();
-                }
-            }
-            return null;
+            var entry = listed(base, model, TAGS_TIMEOUT_SECONDS);
+            var digest = entry == null ? null : entry.get("digest");
+            return digest != null && digest.isJsonPrimitive() ? digest.getAsString() : null;
         } catch (SecurityException | IOException | JsonParseException | IllegalArgumentException | IllegalStateException
                 | ClassCastException _) {
             return null;
         }
     }
 
+    /** {@code model}'s entry in {@code GET /api/tags} at {@code base}, or null when the server does not list it. */
+    private static @Nullable JsonObject listed(String base, String model, long timeoutSeconds) throws IOException {
+        var models = JsonParser.parseString(get(base, "/api/tags", timeoutSeconds)).getAsJsonObject().getAsJsonArray("models");
+        if (models == null) return null;
+        var wanted = tagged(model);
+        for (var entry : models) {
+            if (!entry.isJsonObject()) continue;
+            var name = entry.getAsJsonObject().get("name");
+            if (name != null && name.isJsonPrimitive() && tagged(name.getAsString()).equals(wanted)) return entry.getAsJsonObject();
+        }
+        return null;
+    }
+
     static List<String> decisionModels(JsonElement tags) {
+        return decisionModels(tags, _ -> true);
+    }
+
+    private static List<String> decisionModels(JsonElement tags, Predicate<JsonObject> keep) {
         var models = tags.getAsJsonObject().getAsJsonArray("models");
         var out = new ArrayList<String>();
         if (models == null) return out;
@@ -368,11 +387,17 @@ public final class OllamaDecision {
             if (!entry.isJsonObject()) continue;
             var model = entry.getAsJsonObject();
             var name = model.get("name");
-            if (name != null && name.isJsonPrimitive() && hasDecision(model.get("capabilities"))) {
+            if (name != null && name.isJsonPrimitive() && hasDecision(model.get("capabilities")) && keep.test(model)) {
                 out.add(name.getAsString());
             }
         }
         return out;
+    }
+
+    /** Ollama 0.40.5 and later mark a {@code /api/tags} entry it hands to ollama.com with that host. */
+    private static boolean runsInCloud(JsonObject model) {
+        var host = model.get("remote_host");
+        return host != null && host.isJsonPrimitive() && !host.getAsString().isBlank();
     }
 
     private static boolean hasDecision(@Nullable JsonElement capabilities) {
@@ -405,7 +430,7 @@ public final class OllamaDecision {
     }
 
     private static Status unreachable(String base, @Nullable String error) {
-        return new Status(base, false, error, List.of());
+        return new Status(base, false, error, List.of(), List.of());
     }
 
     private static String trimSlash(String url) {

@@ -151,6 +151,12 @@ class OllamaDecisionTest extends UnitTest {
         return chain -> reply(chain, 200, result.toString());
     }
 
+    /** Answers {@code /api/tags} with {@code tags} and holds every other request as {@link #hang} does. */
+    private static Answer listingThenHanging(String tags) {
+        return chain -> chain.request().url().encodedPath().equals("/api/tags") ? reply(chain, 200, tags)
+                : hang().reply(chain);
+    }
+
     private static Answer unreachable() {
         return _ -> {
             throw new ConnectException("Connection refused");
@@ -299,7 +305,7 @@ class OllamaDecisionTest extends UnitTest {
 
     @Test
     void timeoutsWhileTheModelIsStillLoadingAreNotCountedAgainstTheBreaker() throws Exception {
-        var notYet = serverWith(List.of("snowflake-arctic-embed:latest"), hang());
+        var notYet = serverWith(List.of("snowflake-arctic-embed:latest"), listingThenHanging(TAGS));
         for (var i = 0; i < 3; i++) {
             var verdict = withOllama(notYet, () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "tev1", 0.9, 1));
             assertTrue(verdict.reason().contains("did not answer within 1 s"), verdict.reason());
@@ -316,6 +322,27 @@ class OllamaDecisionTest extends UnitTest {
         withOllama(loaded, () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "tev1", 0.9, 1));
         assertEquals(1, OllamaDecision.breaker().stats().failures());
         withOllama(loaded, () -> OllamaDecision.pin(BASE, "tev1")).get(10, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void aCloudModelsTimeoutCountsAgainstTheBreakerAndLoadsNothingToWaitFor() throws Exception {
+        var cloud = serverWith(List.of("snowflake-arctic-embed:latest"), listingThenHanging(CLOUD_TAGS));
+        var verdict = withOllama(cloud, () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "clef:cloud", 0.9, 1));
+        assertEquals("the Ollama clef:cloud classifier failed (Ollama did not answer within 1 s)", verdict.reason());
+        assertEquals(1, OllamaDecision.breaker().stats().failures(), "ollama.com timing out is not a model loading here");
+        withOllama(cloud, () -> OllamaDecision.pin(BASE, "clef:cloud")).get(10, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void onlyAModelThatRunsOnTheServerIsStillLoading() {
+        var server = serverWith(List.of("snowflake-arctic-embed:latest"), chain -> reply(chain, 200, CLOUD_TAGS));
+        assertAll(
+                () -> assertTrue(withOllama(server, () -> OllamaDecision.stillLoading(BASE, "d1"))),
+                () -> assertTrue(withOllama(server, () -> OllamaDecision.stillLoading(BASE, "tev1")), "a blank remote host is none"),
+                () -> assertFalse(withOllama(server, () -> OllamaDecision.stillLoading(BASE, "clef:cloud"))));
+        var tagsFails = serverWith(List.of(), chain -> reply(chain, 500, "{}"));
+        assertTrue(withOllama(tagsFails, () -> OllamaDecision.stillLoading(BASE, "clef:cloud")),
+                "a model is treated as local unless the server says it runs elsewhere");
     }
 
     @Test
@@ -620,11 +647,28 @@ class OllamaDecisionTest extends UnitTest {
         assertEquals(BASE, status.baseUrl());
     }
 
+    /** What Ollama 0.40.11's {@code /api/tags} listed for a signed-in server holding a cloud decision model. */
+    private static final String CLOUD_TAGS = """
+            {"models":[
+              {"name":"clef:cloud","remote_model":"clef:27b","remote_host":"https://ollama.com","capabilities":["decision","vision"]},
+              {"name":"d1:latest","capabilities":["decision","vision"]},
+              {"name":"glm-5.2:cloud","remote_model":"glm-5.2","remote_host":"https://ollama.com:443","capabilities":["completion"]},
+              {"name":"tev1:latest","remote_host":"","capabilities":["decision"]}
+            ]}""";
+
+    @Test
+    void statusListsCloudDecisionModelsApartFromTheOnesThatRunOnTheServer() {
+        var status = withOllama(chain -> reply(chain, 200, CLOUD_TAGS), () -> OllamaDecision.status(BASE));
+        assertEquals(new OllamaDecision.Status(BASE, true, null, List.of("d1:latest", "tev1:latest"), List.of("clef:cloud")),
+                status);
+    }
+
     @Test
     void statusOfAServerWithNoModelsIsReachableAndEmpty() {
         var status = withOllama(chain -> reply(chain, 200, "{\"models\":[]}"), () -> OllamaDecision.status(BASE));
         assertTrue(status.reachable());
         assertEquals(List.of(), status.models());
+        assertEquals(List.of(), status.cloudModels());
     }
 
     @Test
@@ -633,6 +677,7 @@ class OllamaDecisionTest extends UnitTest {
         assertFalse(status.reachable());
         assertEquals("not reachable (ConnectException)", status.error());
         assertEquals(List.of(), status.models());
+        assertEquals(List.of(), status.cloudModels());
     }
 
     @Test
@@ -659,7 +704,7 @@ class OllamaDecisionTest extends UnitTest {
         assertNull(DecisionSettings.rejectionFor(OllamaDecision.BASE_URL_KEY, address), "the write check lets it through");
         var status = withOllama(chain -> reply(chain, 200, TAGS), () -> OllamaDecision.status(address));
         assertTrue(requests.isEmpty());
-        assertEquals(new OllamaDecision.Status(address, false, "not a usable address", List.of()), status);
+        assertEquals(new OllamaDecision.Status(address, false, "not a usable address", List.of(), List.of()), status);
     }
 
     @Test

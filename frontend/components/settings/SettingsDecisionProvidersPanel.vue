@@ -72,12 +72,17 @@ async function saveAddress() {
 
 const selectedModels = computed(() => parseDecisionModels(configValue(OLLAMA_MODELS)))
 // A selected model the server no longer lists stays visible, so it can be cleared.
-const modelChoices = computed(() => {
+const modelGroups = computed(() => {
   const installed = ollama.value?.models ?? []
-  return [
+  const cloud = ollama.value?.cloudModels ?? []
+  const local = [
     ...installed.map(name => ({ name, installed: true })),
-    ...selectedModels.value.filter(m => !installed.includes(m)).map(name => ({ name, installed: false })),
+    ...selectedModels.value.filter(m => !installed.includes(m) && !cloud.includes(m)).map(name => ({ name, installed: false })),
   ]
+  return [
+    { id: 'local', heading: 'On this server', cloud: false, models: local },
+    { id: 'cloud', heading: 'On ollama.com', cloud: true, models: cloud.map(name => ({ name, installed: true })) },
+  ].filter(g => g.models.length > 0)
 })
 
 async function toggleModel(name: string, box: HTMLInputElement) {
@@ -596,6 +601,17 @@ function playClip(audio: HTMLAudioElement | undefined) {
           class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
           data-testid="decision-ollama-status"
         >not reachable</span>
+        <!-- The list is read once on mount, so a model pulled since then needs a fresh read. -->
+        <button
+          type="button"
+          class="ml-auto text-xs text-fg-strong underline disabled:opacity-50"
+          aria-label="Refresh Ollama's decision models"
+          :disabled="ollamaPending"
+          data-testid="decision-ollama-refresh"
+          @click="refreshOllama()"
+        >
+          Refresh
+        </button>
       </div>
       <div class="px-4 py-2.5 flex items-start gap-3 text-xs text-fg-muted leading-relaxed border-b border-border">
         <button
@@ -632,10 +648,10 @@ function playClip(audio: HTMLAudioElement | undefined) {
           preload="none"
         />
         <p data-testid="decision-ollama-privacy">
-          Decision models such as tev1 and nimble, running on your own Ollama server. They answer the same
-          questions JEV does, but Ollama runs them only on that server and will not hand a decision to a cloud
-          model, so no third party ever sees or keeps what they are sent. The Model Router's classifier sends
-          the first 4000 characters of each prompt, only to this server.
+          Decision models such as d1 and tev1, served by your own Ollama server. They answer the same questions
+          JEV does. A model that runs on this server keeps what it is sent there, so no third party sees or keeps
+          it. A cloud model, listed separately below, runs on ollama.com instead. The Model Router's classifier
+          sends the first 4000 characters of each prompt to the model it uses.
         </p>
       </div>
       <div class="divide-y divide-border">
@@ -705,34 +721,65 @@ function playClip(audio: HTMLAudioElement | undefined) {
               {{ ollama.error }}
             </p>
             <p
-              v-else-if="ollama && modelChoices.length === 0"
+              v-else-if="ollama && modelGroups.length === 0"
               class="text-xs text-fg-muted"
               data-testid="decision-ollama-no-models"
             >
               No decision models installed; pull one with <code>ollama pull tev1</code>.
             </p>
-            <label
-              v-for="m in modelChoices"
-              :key="m.name"
-              class="flex items-center gap-2 text-sm text-fg-strong"
-              :for="`decision-ollama-model-${m.name}`"
-              :data-testid="`decision-ollama-model-${m.name}`"
+            <div
+              v-for="group in modelGroups"
+              :key="group.id"
+              role="group"
+              :aria-labelledby="`decision-ollama-${group.id}-heading`"
+              class="space-y-1"
+              :class="{ 'border-l-2 border-amber-400/60 pl-2': group.cloud }"
+              :data-testid="`decision-ollama-${group.id}`"
             >
-              <input
-                :id="`decision-ollama-model-${m.name}`"
-                type="checkbox"
-                :checked="selectedModels.includes(m.name)"
-                :disabled="saving || lockedByRouter(m.name)"
-                @change="toggleModel(m.name, $event.target as HTMLInputElement)"
+              <p
+                :id="`decision-ollama-${group.id}-heading`"
+                class="text-xs font-medium text-fg-muted"
+                :data-testid="`decision-ollama-${group.id}-heading`"
               >
-              <span class="font-mono">{{ m.name }}</span>
-              <span
-                v-if="!m.installed"
-                class="text-xs text-fg-muted"
-              >not installed</span>
-            </label>
+                {{ group.heading }}
+              </p>
+              <p
+                v-if="group.cloud"
+                class="text-xs text-amber-700 dark:text-amber-400"
+                data-testid="decision-ollama-cloud-warning"
+              >
+                These run on ollama.com, not on your server. What they are sent, such as the first 4000 characters
+                of each prompt the Model Router classifies, leaves this machine for Ollama, which says it does not
+                train on it. Ollama bills each request by its input tokens, which needs a paid plan or usage
+                credits, and your server must run Ollama 0.40.5 or later, signed in to ollama.com.
+              </p>
+              <label
+                v-for="m in group.models"
+                :key="m.name"
+                class="flex items-center gap-2 text-sm text-fg-strong"
+                :for="`decision-ollama-model-${m.name}`"
+                :data-testid="`decision-ollama-model-${m.name}`"
+              >
+                <input
+                  :id="`decision-ollama-model-${m.name}`"
+                  type="checkbox"
+                  :checked="selectedModels.includes(m.name)"
+                  :disabled="saving || lockedByRouter(m.name)"
+                  @change="toggleModel(m.name, $event.target as HTMLInputElement)"
+                >
+                <span class="font-mono">{{ m.name }}</span>
+                <span
+                  v-if="group.cloud"
+                  class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
+                >cloud</span>
+                <span
+                  v-if="!m.installed"
+                  class="text-xs text-fg-muted"
+                >not installed</span>
+              </label>
+            </div>
             <p
-              v-if="modelChoices.length > 0"
+              v-if="modelGroups.length > 0"
               class="text-xs text-fg-muted"
               data-testid="decision-ollama-selection"
             >

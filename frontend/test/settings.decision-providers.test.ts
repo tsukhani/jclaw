@@ -70,6 +70,16 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void>, o
   })
 }
 
+/** Wrapped template text, as it reads on one line. */
+function words(text: string) {
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+/** A model row's name and badges, spaced as the flex row shows them. */
+function rowText(label: { findAll: (selector: string) => Array<{ text: () => string }> }) {
+  return label.findAll('span').map(s => words(s.text())).join(' ')
+}
+
 async function mountDecisionProviders() {
   const component = await mountSuspended(Settings)
   ;(component.vm as unknown as { activeSectionId: string }).activeSectionId = 'decision-providers'
@@ -85,7 +95,7 @@ describe('Settings page — Decision Providers', () => {
     posted = []
     breakers = []
     deleted = []
-    ollama = { baseUrl: 'http://localhost:11434', customized: false, reachable: true, error: null, models: ['tev1:latest', 'nimble:latest'] }
+    ollama = { baseUrl: 'http://localhost:11434', customized: false, reachable: true, error: null, models: ['tev1:latest', 'nimble:latest'], cloudModels: [] }
     laya = { baseUrl: 'http://localhost:8000', reachable: true, error: null, loaded: ['english'], device: 'cpu' }
   })
 
@@ -270,14 +280,77 @@ describe('Settings page — Decision Providers', () => {
       expect(laya.nextElementSibling?.nextElementSibling).toBeNull()
     })
 
-    it('says the prompt goes only to the operator\'s server, without JEV\'s retention notice', async () => {
+    it('says a model on the server keeps the prompt there and a cloud model sends it to ollama.com, without JEV\'s retention notice', async () => {
       baseEndpoints()
       const component = await mountDecisionProviders()
       const card = component.find('[data-testid="decision-provider-ollama"]')
-      const note = card.find('[data-testid="decision-ollama-privacy"]').text()
-      expect(note).toContain('first 4000 characters of each prompt')
-      expect(note).toContain('only to this server')
+      expect(words(card.find('[data-testid="decision-ollama-privacy"]').text())).toBe(
+        'Decision models such as d1 and tev1, served by your own Ollama server. They answer the same questions JEV '
+        + 'does. A model that runs on this server keeps what it is sent there, so no third party sees or keeps it. '
+        + 'A cloud model, listed separately below, runs on ollama.com instead. The Model Router\'s classifier sends '
+        + 'the first 4000 characters of each prompt to the model it uses.')
       expect(card.text()).not.toContain('record or retain')
+    })
+
+    it('lists cloud models apart from the ones on the server, under a warning that what they are sent leaves this machine', async () => {
+      ollama = { ...ollama, models: ['tev1:latest'], cloudModels: ['clef:cloud'] }
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-cloud"]').exists()).toBe(true))
+      const local = component.find('[data-testid="decision-ollama-local"]')
+      const cloud = component.find('[data-testid="decision-ollama-cloud"]')
+      expect(words(local.find('[data-testid="decision-ollama-local-heading"]').text())).toBe('On this server')
+      expect(local.findAll('label').map(rowText)).toEqual(['tev1:latest'])
+      expect(words(cloud.find('[data-testid="decision-ollama-cloud-heading"]').text())).toBe('On ollama.com')
+      expect(cloud.findAll('label').map(rowText)).toEqual(['clef:cloud cloud'])
+      expect(words(cloud.find('[data-testid="decision-ollama-cloud-warning"]').text())).toBe(
+        'These run on ollama.com, not on your server. What they are sent, such as the first 4000 characters of each '
+        + 'prompt the Model Router classifies, leaves this machine for Ollama, which says it does not train on it. '
+        + 'Ollama bills each request by its input tokens, which needs a paid plan or usage credits, and your server '
+        + 'must run Ollama 0.40.5 or later, signed in to ollama.com.')
+    })
+
+    it('shows no cloud group or warning while the server lists no cloud model', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-local"]').findAll('label')).toHaveLength(2))
+      expect(component.find('[data-testid="decision-ollama-cloud"]').exists()).toBe(false)
+      expect(component.find('[data-testid="decision-ollama-cloud-warning"]').exists()).toBe(false)
+    })
+
+    it('a cloud model is ticked into the same selection as the others', async () => {
+      ollama = { ...ollama, cloudModels: ['clef:cloud'] }
+      stored.set('decision.ollama.models', JSON.stringify(['tev1:latest']))
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const box = () => component.find('[data-testid="decision-ollama-model-clef:cloud"] input')
+      await vi.waitFor(() => expect(box().exists()).toBe(true))
+      expect((box().element as HTMLInputElement).checked).toBe(false)
+
+      await box().setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.ollama.models', value: '["tev1:latest","clef:cloud"]' }]))
+    })
+
+    it('Refresh reads the server again, so a model pulled since the page opened appears', async () => {
+      let reads = 0
+      baseEndpoints()
+      registerEndpoint('/api/decision/ollama', () => {
+        reads++
+        return ollama
+      })
+      const component = await mountDecisionProviders()
+      const names = () => component.find('[data-testid="decision-ollama-models"]').findAll('label').map(rowText)
+      await vi.waitFor(() => expect(names()).toEqual(['tev1:latest', 'nimble:latest']))
+      expect(reads).toBe(1)
+      const refresh = component.find('[data-testid="decision-ollama-refresh"]')
+      expect(refresh.attributes('type')).toBe('button')
+      expect(words(refresh.text())).toBe('Refresh')
+
+      ollama = { ...ollama, models: ['tev1:latest', 'nimble:latest', 'd1:latest'], cloudModels: ['clef:cloud'] }
+      await refresh.trigger('click')
+      await vi.waitFor(() => expect(names()).toEqual(['tev1:latest', 'nimble:latest', 'd1:latest', 'clef:cloud cloud']))
+      expect(reads).toBe(2)
+      expect(posted).toEqual([])
     })
 
     it('shows the llama beside the note, decorative and sized before it loads', async () => {
@@ -415,7 +488,7 @@ describe('Settings page — Decision Providers', () => {
     })
 
     it('an unreachable server says why, and lists nothing', async () => {
-      ollama = { baseUrl: 'http://192.168.1.20:11434', customized: true, reachable: false, error: 'not reachable (ConnectException)', models: [] }
+      ollama = { baseUrl: 'http://192.168.1.20:11434', customized: true, reachable: false, error: 'not reachable (ConnectException)', models: [], cloudModels: [] }
       baseEndpoints()
       const component = await mountDecisionProviders()
       await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-status"]').text()).toBe('not reachable'))
@@ -473,11 +546,6 @@ describe('Settings page — Decision Providers', () => {
   })
 
   describe('Laya card (JCLAW-1447)', () => {
-    /** Wrapped template text, as it reads on one line. */
-    function words(text: string) {
-      return text.replace(/\s+/g, ' ').trim()
-    }
-
     it('sits directly below the JEV card', async () => {
       baseEndpoints()
       const component = await mountDecisionProviders()

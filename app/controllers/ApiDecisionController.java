@@ -19,9 +19,12 @@ import static utils.GsonHolder.GSON;
 @With(AuthCheck.class)
 public class ApiDecisionController extends Controller {
 
-    /** {@code customized} is true when the operator stored an address rather than inheriting Ollama Local's. */
+    /**
+     * {@code customized} is true when the operator stored an address rather than inheriting Ollama Local's;
+     * {@code cloudModels} are the decision models the server hands to ollama.com, kept out of {@code models}.
+     */
     public record OllamaDecisionStatus(String baseUrl, boolean customized, boolean reachable,
-                                       @Nullable String error, List<String> models) {}
+                                       @Nullable String error, List<String> models, List<String> cloudModels) {}
 
     @ApiResponse(responseCode = "200",
             content = @Content(schema = @Schema(implementation = OllamaDecisionStatus.class)))
@@ -30,7 +33,7 @@ public class ApiDecisionController extends Controller {
     public static void ollama() {
         var status = OllamaDecision.status(OllamaDecision.baseUrl());
         renderJSON(GSON.toJson(new OllamaDecisionStatus(status.baseUrl(), OllamaDecision.customized(),
-                status.reachable(), status.error(), status.models())));
+                status.reachable(), status.error(), status.models(), status.cloudModels())));
     }
 
     /**

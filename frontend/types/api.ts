@@ -540,8 +540,10 @@ export interface OllamaDecisionStatus {
   customized: boolean
   reachable: boolean
   error: string | null
-  /** Only models whose capabilities include `decision`. */
+  /** Only models whose capabilities include `decision` and that run on the server. */
   models: string[]
+  /** Decision models the server hands to ollama.com (Ollama 0.40.5 and later), kept out of `models`. */
+  cloudModels: string[]
 }
 
 /** GET /api/decision/laya: the Laya decision server and what it reports of itself (JCLAW-1447). */
