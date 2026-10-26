@@ -1,3 +1,4 @@
+import channels.Channel;
 import channels.WhatsAppChannel;
 import com.google.gson.JsonParser;
 import models.Agent;
@@ -6,15 +7,22 @@ import models.WhatsAppTransport;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
+import okhttp3.Request;
 import okhttp3.Response;
 import okhttp3.ResponseBody;
 import okio.Buffer;
 import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
 import play.test.UnitTest;
+import services.EventLogger;
 import services.Tx;
 import utils.HttpFactories;
 
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -251,7 +259,7 @@ class WhatsAppChannelOutboundTest extends UnitTest {
             var b = new WhatsAppBinding();
             b.agent = agent;
             b.transport = WhatsAppTransport.CLOUD_API;
-            b.phoneNumberId = "PN-OUT-" + suffix;
+            b.phoneNumberId = "1" + suffix;
             b.accessToken = "EAAG-tok";
             b.enabled = true;
             b.save();
@@ -274,5 +282,111 @@ class WhatsAppChannelOutboundTest extends UnitTest {
                 agent.delete();
             });
         }
+    }
+
+    // ── JCLAW-1024 follow-up: the phone number id goes out as one Graph path segment ──
+
+    private static final String PHONE_NUMBER_ID = "106540352242922";
+    private static final String PEER = "447900000001";
+
+    @Test
+    void aDigitsOnlyPhoneNumberIdSendsToItsMessagesEdge() {
+        var sent = new CopyOnWriteArrayList<Request>();
+        var result = HttpFactories.callWith(graph(sent), () -> channelFor(PHONE_NUMBER_ID).trySend(PEER, "hi"));
+
+        assertEquals(Channel.SendResult.sent(List.of("wamid.M")), result);
+        assertEquals(List.of("POST https://graph.facebook.com/v21.0/106540352242922/messages"), lines(sent));
+        assertEquals(List.of("v21.0", PHONE_NUMBER_ID, "messages"), sent.get(0).url().pathSegments());
+        assertEquals("Bearer EAAG-tok", sent.get(0).header("Authorization"));
+    }
+
+    @Test
+    void aDigitsOnlyPhoneNumberIdSendsTheTypingCueToItsMessagesEdge() {
+        var sent = new CopyOnWriteArrayList<Request>();
+        HttpFactories.runWith(graph(sent), () -> channelFor(PHONE_NUMBER_ID).startTyping(PEER, "wamid.IN"));
+
+        assertEquals(List.of("POST https://graph.facebook.com/v21.0/106540352242922/messages"), lines(sent));
+        assertEquals("Bearer EAAG-tok", sent.get(0).header("Authorization"));
+    }
+
+    @Test
+    void aDigitsOnlyPhoneNumberIdUploadsMediaToItsMediaEdge() throws IOException {
+        var file = tempImage();
+        try {
+            var sent = new CopyOnWriteArrayList<Request>();
+            var result = HttpFactories.callWith(graph(sent),
+                    () -> channelFor(PHONE_NUMBER_ID).sendMedia(PEER, file, "image/png", "a chart"));
+
+            assertEquals(Channel.SendResult.sent(List.of("wamid.M")), result);
+            assertEquals(List.of("POST https://graph.facebook.com/v21.0/106540352242922/media",
+                    "POST https://graph.facebook.com/v21.0/106540352242922/messages"), lines(sent));
+            assertEquals(List.of("v21.0", PHONE_NUMBER_ID, "media"), sent.get(0).url().pathSegments());
+            assertEquals(List.of("Bearer EAAG-tok", "Bearer EAAG-tok"),
+                    sent.stream().map(r -> r.header("Authorization")).toList());
+        } finally {
+            Files.deleteIfExists(file.toPath());
+        }
+    }
+
+    @Test
+    void aPhoneNumberIdThatIsNotDigitsSendsNothingFromAnySink() throws IOException {
+        var file = tempImage();
+        try {
+            for (var id : List.of("../me/accounts?fields=access_token", PHONE_NUMBER_ID + "?fields=access_token",
+                    "%2e%2e/me/accounts", PHONE_NUMBER_ID + "/../../me")) {
+                var sent = new CopyOnWriteArrayList<Request>();
+                var channel = channelFor(id);
+                var results = new ArrayList<Channel.SendResult>();
+                var logged = EventLogger.captureForTest(() -> HttpFactories.runWith(graph(sent), () -> {
+                    results.add(channel.trySend(PEER, "hi"));
+                    results.add(channel.sendReaction(PEER, "wamid.T", "ok"));
+                    results.add(channel.sendMedia(PEER, file, "image/png", "a chart"));
+                    channel.startTyping(PEER, "wamid.IN");
+                }));
+
+                assertEquals(List.of(), lines(sent), "phone number id " + id + " must send nothing");
+                assertEquals(Collections.nCopies(3, Channel.SendResult.FAILED), results, "phone number id " + id);
+                assertEquals(Collections.nCopies(4,
+                                "Graph request refused: phoneNumberId must be Meta's numeric Phone number ID (digits only)"),
+                        logged.stream().map(EventLogger.Captured::message).toList(), "phone number id " + id);
+            }
+        } finally {
+            Files.deleteIfExists(file.toPath());
+        }
+    }
+
+    private static WhatsAppChannel channelFor(String phoneNumberId) {
+        var binding = new WhatsAppBinding();
+        binding.phoneNumberId = phoneNumberId;
+        binding.accessToken = "EAAG-tok";
+        return WhatsAppChannel.forBinding(binding);
+    }
+
+    /** Records each request and answers as Graph does: a media id for an upload, a message id otherwise. */
+    private static OkHttpClient graph(List<Request> sent) {
+        Interceptor canned = chain -> {
+            var request = chain.request();
+            sent.add(request);
+            var body = "media".equals(request.url().pathSegments().getLast())
+                    ? "{\"id\":\"9001\"}" : "{\"messages\":[{\"id\":\"wamid.M\"}]}";
+            return new Response.Builder()
+                    .request(request)
+                    .protocol(Protocol.HTTP_1_1)
+                    .code(200)
+                    .message("canned")
+                    .body(ResponseBody.create(body, null))
+                    .build();
+        };
+        return new OkHttpClient.Builder().addInterceptor(canned).build();
+    }
+
+    private static List<String> lines(List<Request> sent) {
+        return sent.stream().map(r -> r.method() + " " + r.url()).toList();
+    }
+
+    private static File tempImage() throws IOException {
+        var path = Files.createTempFile("wa-graph-id", ".png");
+        Files.write(path, new byte[] {(byte) 0x89, 'P', 'N', 'G'});
+        return path.toFile();
     }
 }

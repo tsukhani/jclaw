@@ -3,9 +3,11 @@ package channels;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import okhttp3.HttpUrl;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import org.jspecify.annotations.Nullable;
+import services.EventLogger;
 import utils.HttpFactories;
 import utils.HttpKeys;
 import utils.JsonArgs;
@@ -63,6 +65,8 @@ public final class WhatsAppSubscription {
 
     private static final String NO_APP = "Graph named no app for this access token";
 
+    static final String WABA_ID_REFUSED = "Graph named a WhatsApp Business Account id that is not all digits";
+
     /**
      * Test overrides honoured by the two-argument entries. Not replaceable by
      * {@code HttpFactories.runWith}: the callers are {@code FunctionalTest}s driving
@@ -108,9 +112,13 @@ public final class WhatsAppSubscription {
         if (appId == null) {
             return new Unknown(NO_APP);
         }
+        var waba = WhatsAppGraphIds.nodeUrl(apiBase, ids.wabaId());
+        if (waba == null) {
+            return new Unknown(refused(WABA_ID_REFUSED));
+        }
         GraphResponse response;
         try {
-            response = send(get(apiBase + ids.wabaId() + "/subscribed_apps", accessToken));
+            response = send(get(waba.addPathSegment("subscribed_apps").build(), accessToken));
         } catch (Exception e) {
             return new Unknown(transportError(e));
         }
@@ -162,9 +170,13 @@ public final class WhatsAppSubscription {
             return new Failed(NO_APP);
         }
         var wabaId = ids.wabaId();
+        var waba = WhatsAppGraphIds.nodeUrl(apiBase, wabaId);
+        if (waba == null) {
+            return new Failed(refused(WABA_ID_REFUSED));
+        }
         GraphResponse response;
         try {
-            response = send(authorized(apiBase + wabaId + "/subscribed_apps", accessToken)
+            response = send(authorized(waba.addPathSegment("subscribed_apps").build(), accessToken)
                     .post(RequestBody.create(new byte[0]))
                     .build());
         } catch (Exception e) {
@@ -190,9 +202,13 @@ public final class WhatsAppSubscription {
      * {@link NotFound} without a WABA. The one WABA lookup, shared with {@link WhatsAppUsage}.
      */
     static Lookup resolveIds(String phoneNumberId, String accessToken, String apiBase) {
+        var number = WhatsAppGraphIds.nodeUrl(apiBase, phoneNumberId);
+        if (number == null) {
+            return new NotFound(refused(WhatsAppGraphIds.PHONE_NUMBER_ID_REFUSED));
+        }
         GraphResponse response;
         try {
-            response = send(get(apiBase + phoneNumberId + "?fields=health_status", accessToken));
+            response = send(get(number.addEncodedQueryParameter("fields", "health_status").build(), accessToken));
         } catch (Exception e) {
             return new NotFound(transportError(e));
         }
@@ -227,13 +243,13 @@ public final class WhatsAppSubscription {
         return new Found(new Ids(wabaId, appId));
     }
 
-    private static Request.Builder authorized(String url, String accessToken) {
+    private static Request.Builder authorized(HttpUrl url, String accessToken) {
         return new Request.Builder()
                 .url(url)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + accessToken);
     }
 
-    static Request get(String url, String accessToken) {
+    static Request get(HttpUrl url, String accessToken) {
         return authorized(url, accessToken).get().build();
     }
 
@@ -252,5 +268,11 @@ public final class WhatsAppSubscription {
 
     static String unexpected(String body) {
         return "unexpected Graph response: " + Strings.truncate(body, 200);
+    }
+
+    /** Logs a refused Graph id and returns {@code reason} for the caller's result. */
+    static String refused(String reason) {
+        EventLogger.warn("channel", null, "whatsapp", reason);
+        return reason;
     }
 }

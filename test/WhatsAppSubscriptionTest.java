@@ -8,6 +8,7 @@ import okhttp3.ResponseBody;
 import okio.Buffer;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.EventLogger;
 import utils.HttpFactories;
 
 import java.io.IOException;
@@ -82,7 +83,10 @@ class WhatsAppSubscriptionTest extends UnitTest {
         var state = run(() -> WhatsAppSubscription.check("111", TOKEN, BASE));
 
         assertEquals(new WhatsAppSubscription.Subscribed("222", "444"), state);
-        assertEquals(2, requests.size());
+        assertEquals(List.of("GET http://graph.invalid/v21.0/111?fields=health_status",
+                "GET http://graph.invalid/v21.0/222/subscribed_apps"), urls());
+        assertEquals(List.of("v21.0", "111"), requests.get(0).url().pathSegments());
+        assertEquals(List.of("v21.0", "222", "subscribed_apps"), requests.get(1).url().pathSegments());
         var health = requests.get(0);
         assertEquals("GET", health.method());
         assertEquals("/v21.0/111", health.url().encodedPath());
@@ -239,7 +243,8 @@ class WhatsAppSubscriptionTest extends UnitTest {
         var result = run(() -> WhatsAppSubscription.subscribe("111", TOKEN, BASE));
 
         assertEquals(new WhatsAppSubscription.Done("222"), result);
-        assertEquals(2, requests.size());
+        assertEquals(List.of("GET http://graph.invalid/v21.0/111?fields=health_status",
+                "POST http://graph.invalid/v21.0/222/subscribed_apps"), urls());
         var post = requests.get(1);
         assertEquals("POST", post.method());
         assertEquals("/v21.0/222/subscribed_apps", post.url().encodedPath());
@@ -308,6 +313,60 @@ class WhatsAppSubscriptionTest extends UnitTest {
         failTransport = true;
 
         assertFailed(run(() -> WhatsAppSubscription.subscribe("111", TOKEN, BASE)), "Graph request failed");
+    }
+
+    // ===== id shape (JCLAW-1024 follow-up) =====
+
+    private static final List<String> NOT_DIGITS = List.of("../me/accounts?fields=access_token",
+            "111?fields=access_token", "%2e%2e/me/accounts", "111/../../me");
+    private static final String PHONE_NUMBER_ID_REFUSED =
+            "phoneNumberId must be Meta's numeric Phone number ID (digits only)";
+    private static final String WABA_ID_REFUSED =
+            "Graph named a WhatsApp Business Account id that is not all digits";
+
+    @Test
+    void aPhoneNumberIdThatIsNotDigitsIsRefusedWithNoRequest() {
+        for (var id : NOT_DIGITS) {
+            requests.clear();
+            var logged = EventLogger.captureForTest(() -> {
+                assertEquals(new WhatsAppSubscription.Unknown(PHONE_NUMBER_ID_REFUSED),
+                        run(() -> WhatsAppSubscription.check(id, TOKEN, BASE)), "check with " + id);
+                assertEquals(new WhatsAppSubscription.Failed(PHONE_NUMBER_ID_REFUSED),
+                        run(() -> WhatsAppSubscription.subscribe(id, TOKEN, BASE)), "subscribe with " + id);
+            });
+
+            assertEquals(List.of(), urls(), "no Graph request for phone number id " + id);
+            assertEquals(List.of(PHONE_NUMBER_ID_REFUSED, PHONE_NUMBER_ID_REFUSED), messages(logged));
+        }
+    }
+
+    @Test
+    void aWabaIdThatIsNotDigitsIsRefusedBeforeTheSubscribedAppsCall() {
+        for (var waba : NOT_DIGITS) {
+            requests.clear();
+            answers.put(HEALTH_PATH, new Canned(200, """
+                    {"health_status":{"entities":[{"entity_type":"WABA","id":"%s"},{"entity_type":"APP","id":"444"}]},
+                     "id":"111"}""".formatted(waba)));
+            var logged = EventLogger.captureForTest(() -> {
+                assertEquals(new WhatsAppSubscription.Unknown(WABA_ID_REFUSED),
+                        run(() -> WhatsAppSubscription.check("111", TOKEN, BASE)), "check with WABA " + waba);
+                assertEquals(new WhatsAppSubscription.Failed(WABA_ID_REFUSED),
+                        run(() -> WhatsAppSubscription.subscribe("111", TOKEN, BASE)), "subscribe with WABA " + waba);
+            });
+
+            assertEquals(List.of("GET http://graph.invalid/v21.0/111?fields=health_status",
+                            "GET http://graph.invalid/v21.0/111?fields=health_status"), urls(),
+                    "only the health_status lookups for WABA " + waba);
+            assertEquals(List.of(WABA_ID_REFUSED, WABA_ID_REFUSED), messages(logged));
+        }
+    }
+
+    private List<String> urls() {
+        return requests.stream().map(r -> r.method() + " " + r.url()).toList();
+    }
+
+    private static List<String> messages(List<EventLogger.Captured> logged) {
+        return logged.stream().map(EventLogger.Captured::message).toList();
     }
 
     private void assertUnknownContaining(WhatsAppSubscription.State state, String fragment) {

@@ -6,6 +6,7 @@ import com.google.gson.JsonParser;
 import models.ChannelConfig;
 import models.WhatsAppBinding;
 import models.WhatsAppConversationWindow;
+import okhttp3.HttpUrl;
 import okhttp3.MediaType;
 import okhttp3.MultipartBody;
 import okhttp3.Request;
@@ -285,7 +286,9 @@ public class WhatsAppChannel implements Channel {
                 "message_id", inboundMessageId,
                 "typing_indicator", Map.of("type", "text")
         ));
-        var call = HttpFactories.general().newCall(messagesRequest(config, body));
+        var messages = phoneNumberEdge(config, "messages");
+        if (messages == null) return;
+        var call = HttpFactories.general().newCall(messagesRequest(messages, config, body));
         call.timeout().timeout(TYPING_CUE_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
         try (var response = call.execute()) {
             if (!response.isSuccessful()) {
@@ -327,7 +330,9 @@ public class WhatsAppChannel implements Channel {
      * logging. {@code successLog} is the info line on a 200. Must not throw.
      */
     private SendResult postMessage(WhatsAppConfig config, String jsonBody, String successLog) {
-        try (var response = HttpFactories.general().newCall(messagesRequest(config, jsonBody)).execute()) {
+        var messages = phoneNumberEdge(config, "messages");
+        if (messages == null) return SendResult.FAILED;
+        try (var response = HttpFactories.general().newCall(messagesRequest(messages, config, jsonBody)).execute()) {
             var responseBody = response.body().string();
             if (response.code() == 200) {
                 EventLogger.info(CHANNEL, null, WHATSAPP, successLog);
@@ -355,12 +360,22 @@ public class WhatsAppChannel implements Channel {
         }
     }
 
-    private static Request messagesRequest(WhatsAppConfig config, String jsonBody) {
+    private static Request messagesRequest(HttpUrl messages, WhatsAppConfig config, String jsonBody) {
         return new Request.Builder()
-                .url(API_BASE + config.phoneNumberId() + "/messages")
+                .url(messages)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + config.accessToken())
                 .post(RequestBody.create(jsonBody, JSON_MEDIA_TYPE))
                 .build();
+    }
+
+    /** {@code /{phoneNumberId}/{edge}} on the Graph API, or null, logged, when the id is not all digits. */
+    private static @Nullable HttpUrl phoneNumberEdge(WhatsAppConfig config, String edge) {
+        var number = WhatsAppGraphIds.nodeUrl(API_BASE, config.phoneNumberId());
+        if (number == null) {
+            EventLogger.warn(CHANNEL, null, WHATSAPP, "Graph request refused: " + WhatsAppGraphIds.PHONE_NUMBER_ID_REFUSED);
+            return null;
+        }
+        return number.addPathSegment(edge).build();
     }
 
     /** JCLAW-1411: mark the binding's card; a DB error degrades to a warning so a send never throws. */
@@ -517,7 +532,8 @@ public class WhatsAppChannel implements Channel {
      * id, or null on failure.
      */
     private @Nullable String uploadMedia(WhatsAppConfig config, File file, String mime) {
-        var url = API_BASE + config.phoneNumberId() + "/media";
+        var url = phoneNumberEdge(config, "media");
+        if (url == null) return null;
         var fileBody = RequestBody.create(file, MediaType.parse(mime));
         var multipart = new MultipartBody.Builder()
                 .setType(MultipartBody.FORM)

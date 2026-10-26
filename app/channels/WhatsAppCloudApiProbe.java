@@ -2,7 +2,6 @@ package channels;
 
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
-import okhttp3.HttpUrl;
 import okhttp3.Request;
 import org.jspecify.annotations.Nullable;
 import utils.HttpFactories;
@@ -12,7 +11,6 @@ import utils.Strings;
 
 import java.util.concurrent.TimeUnit;
 import java.util.function.BiFunction;
-import java.util.regex.Pattern;
 
 /**
  * Verifies a WhatsApp Cloud-API binding's credentials by probing Meta's Graph
@@ -39,9 +37,6 @@ public final class WhatsAppCloudApiProbe {
     static final String API_BASE = "https://graph.facebook.com/v21.0/";
     private static final String FIELDS = "verified_name,code_verification_status,display_phone_number";
     static final long PROBE_TIMEOUT_MS = 15_000L;
-
-    /** Meta's Phone number IDs are numeric; any other shape could steer the Bearer probe off its path. */
-    private static final Pattern PHONE_NUMBER_ID = Pattern.compile("[0-9]+");
 
     /** The Graph error envelope's top-level key ({@code {"error":{"message":...}}}). */
     private static final String FIELD_ERROR = "error";
@@ -114,14 +109,12 @@ public final class WhatsAppCloudApiProbe {
         if (accessToken == null || accessToken.isBlank()) {
             return new Failed("accessToken is required");
         }
-        if (!PHONE_NUMBER_ID.matcher(phoneNumberId).matches()) {
-            return new Failed("phoneNumberId must be Meta's numeric Phone number ID (digits only)");
+        var node = WhatsAppGraphIds.nodeUrl(apiBase, phoneNumberId);
+        if (node == null) {
+            return new Failed(WhatsAppGraphIds.PHONE_NUMBER_ID_REFUSED);
         }
 
-        var url = HttpUrl.get(apiBase).newBuilder()
-                .addPathSegment(phoneNumberId)
-                .addEncodedQueryParameter("fields", FIELDS)
-                .build();
+        var url = node.addEncodedQueryParameter("fields", FIELDS).build();
         var request = new Request.Builder()
                 .url(url)
                 .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + accessToken)

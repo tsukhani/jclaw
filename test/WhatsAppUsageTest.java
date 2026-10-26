@@ -7,6 +7,7 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.EventLogger;
 import utils.AppClock;
 import utils.HttpFactories;
 
@@ -73,7 +74,11 @@ class WhatsAppUsageTest extends UnitTest {
         var usage = read(MEASURED_NOW);
 
         assertEquals(new WhatsAppUsage.Counted(YearMonth.of(2026, 10), 2, 0), usage);
-        assertEquals(2, requests.size());
+        assertEquals(List.of("GET http://graph.invalid/v21.0/111?fields=health_status",
+                "GET http://graph.invalid/v21.0/222?fields=pricing_analytics.start(" + OCTOBER_WINDOW_START
+                        + ").end(1791340086).granularity(DAILY).dimensions(PHONE,PRICING_CATEGORY,PRICING_TYPE)"),
+                urls());
+        assertEquals(List.of("v21.0", "222"), requests.get(1).url().pathSegments());
         var query = requests.get(1);
         assertEquals("/v21.0/222", query.url().encodedPath());
         assertEquals("pricing_analytics.start(" + OCTOBER_WINDOW_START + ").end(1791340086)"
@@ -252,6 +257,47 @@ class WhatsAppUsageTest extends UnitTest {
             return null;
         });
         assertEquals(0, requests.size());
+    }
+
+    // ===== id shape (JCLAW-1024 follow-up) =====
+
+    private static final List<String> NOT_DIGITS = List.of("../me/accounts?fields=access_token",
+            "111?fields=access_token", "%2e%2e/me/accounts", "111/../../me");
+
+    @Test
+    void aPhoneNumberIdThatIsNotDigitsIsUnknownWithNoRequest() {
+        var refused = "phoneNumberId must be Meta's numeric Phone number ID (digits only)";
+        for (var id : NOT_DIGITS) {
+            requests.clear();
+            var logged = EventLogger.captureForTest(() -> assertEquals(
+                    new WhatsAppUsage.Unknown(YearMonth.of(2026, 10), refused),
+                    run(MEASURED_NOW, () -> WhatsAppUsage.read(id, TOKEN, DISPLAY, BASE)), "read with " + id));
+
+            assertEquals(List.of(), urls(), "no Graph request for phone number id " + id);
+            assertEquals(List.of(refused), logged.stream().map(EventLogger.Captured::message).toList());
+        }
+    }
+
+    @Test
+    void aWabaIdThatIsNotDigitsIsUnknownWithNoAnalyticsCall() {
+        var refused = "Graph named a WhatsApp Business Account id that is not all digits";
+        for (var waba : NOT_DIGITS) {
+            requests.clear();
+            answers.put(HEALTH_PATH, new Canned(200,
+                    "{\"health_status\":{\"entities\":[{\"entity_type\":\"WABA\",\"id\":\"%s\"}]},\"id\":\"111\"}"
+                            .formatted(waba)));
+            var logged = EventLogger.captureForTest(() -> assertEquals(
+                    new WhatsAppUsage.Unknown(YearMonth.of(2026, 10), refused), read(MEASURED_NOW),
+                    "read with WABA " + waba));
+
+            assertEquals(List.of("GET http://graph.invalid/v21.0/111?fields=health_status"), urls(),
+                    "only the health_status lookup for WABA " + waba);
+            assertEquals(List.of(refused), logged.stream().map(EventLogger.Captured::message).toList());
+        }
+    }
+
+    private List<String> urls() {
+        return requests.stream().map(r -> r.method() + " " + r.url()).toList();
     }
 
     private WhatsAppUsage.Usage read(Instant now) {

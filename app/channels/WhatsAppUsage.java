@@ -87,10 +87,13 @@ public final class WhatsAppUsage {
         if (lookup instanceof WhatsAppSubscription.NotFound(String reason)) {
             return new Unknown(month, reason);
         }
-        var wabaId = ((WhatsAppSubscription.Found) lookup).ids().wabaId();
+        var waba = WhatsAppGraphIds.nodeUrl(apiBase, ((WhatsAppSubscription.Found) lookup).ids().wabaId());
+        if (waba == null) {
+            return new Unknown(month, WhatsAppSubscription.refused(WhatsAppSubscription.WABA_ID_REFUSED));
+        }
         long start = month.atDay(1).atStartOfDay(ZoneOffset.UTC).minusDays(1).toEpochSecond();
-        var url = apiBase + wabaId + "?fields=pricing_analytics.start(" + start + ").end(" + now.getEpochSecond()
-                + ").granularity(DAILY).dimensions(PHONE,PRICING_CATEGORY,PRICING_TYPE)";
+        var url = waba.addEncodedQueryParameter("fields", "pricing_analytics.start(" + start + ").end("
+                + now.getEpochSecond() + ").granularity(DAILY).dimensions(PHONE,PRICING_CATEGORY,PRICING_TYPE)").build();
         WhatsAppSubscription.GraphResponse response;
         try {
             response = WhatsAppSubscription.send(WhatsAppSubscription.get(url, accessToken));
