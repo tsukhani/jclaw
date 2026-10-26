@@ -36,10 +36,11 @@ It can be a cloud service, such as OpenAI or OpenRouter, or a model that runs on
 
 ## See it in action
 
-<p align="center">
-  <a href="https://youtu.be/9XxW7HWfC7o"><img src="https://img.youtube.com/vi/9XxW7HWfC7o/maxresdefault.jpg" width="900" alt="Watch the JClaw demo on YouTube"></a>
-</p>
-<p align="center"><em>A 2-minute demo of three JClaw features: tasks, the prompt library, and deep research.</em></p>
+https://github.com/user-attachments/assets/b355102e-5eff-49d5-8e4e-5e4fff47ddb2
+
+*A 2-minute demo of three JClaw features: tasks, the prompt library, and deep research.*
+If you hear no sound, click the speaker icon to turn on the voiceover.
+You can also [watch it on YouTube](https://youtu.be/9XxW7HWfC7o).
 
 ## What you can do
 
