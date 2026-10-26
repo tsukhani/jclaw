@@ -532,12 +532,8 @@ public class ShellExecTool implements ToolRegistry.Tool {
             var process = startProcess(background ? "(\n" + command + "\n) &\n" : command, workdir, workspace, env, output);
             var sentinel = new Sentinel(process);
 
-            // Watchdog: destroy the process after the configured timeout.
-            // When destroyed, the process exits and the read finishes. The
-            // flag distinguishes a watchdog kill from a normal exit —
-            // process.isAlive() is false in both cases after the read, but
-            // only a watchdog kill should produce the "timed out" markers in
-            // the result.
+            // isAlive() is false after the read either way, so this flag is what tells a watchdog
+            // kill, which marks the result "timed out", from a normal exit.
             var timedOut = new AtomicBoolean(false);
             Thread.ofVirtual().name("shell-exec-watchdog").start(() -> {
                 try {

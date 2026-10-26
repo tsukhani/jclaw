@@ -1138,21 +1138,13 @@ public final class Commands {
 
     // ── /subagent ─────────────────────────────────────────────────────────
     //
-    // JCLAW-271: operator-facing introspection + kill surface for subagent
-    // runs spawned by the current parent conversation. The five subcommands
-    // map 1:1 to the AC:
+    // JCLAW-271: operator-facing introspection + kill surface for subagent runs:
     //   list           — RUNNING + recently-terminal rows scoped to current
     //   info <id>      — full metadata for a single run
     //   log <id>       — chronological EventLog rows matching run id
-    //   kill <id>      — flip RUNNING → KILLED, interrupt the VT, emit event
-    //   history <id>   — JCLAW-274: child conversation transcript (role,
-    //                    content, tool calls/results, timestamps), formatted
-    //                    as plain text for chat-bubble display
-    // Output is plain text suitable for a chat bubble; the SubagentRuns
-    // admin page (separate Vue route) gets the same data via the new
-    // /api/subagent-runs REST endpoint, and full transcripts via the
-    // "View transcript" per-row link that opens the child conversation in
-    // the standard chat viewer.
+    //   kill <id>      — flip RUNNING → KILLED through the cancel flag, emit event
+    //   history <id>   — JCLAW-274: child conversation transcript as plain text
+    // The SubagentRuns admin page reads the same data from /api/subagent-runs.
 
     /** Max EventLog rows returned by {@code /subagent log}. Chosen so the
      *  output stays readable in a chat bubble while still covering a

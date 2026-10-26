@@ -615,18 +615,9 @@ public class ConfigService {
         }
     }
 
-    // Convenience linkage: when the operator first sets the Ollama Cloud
-    // LLM apiKey, mirror that value into the Ollama search provider's
-    // apiKey AND flip search.ollama.enabled to true — but ONLY if the
-    // search key is currently empty. Both providers authenticate against
-    // the same Ollama account, so the usual case is one key serving
-    // both surfaces; this saves the operator a redundant paste.
-    //
-    // Once the search key has any value (operator-set or previously
-    // mirrored), this branch becomes a no-op — subsequent rotations of
-    // the LLM key don't drag the search key along, preserving the
-    // "set once, owned by you" model that operators expect from
-    // independent settings.
+    // The first Ollama Cloud LLM key also fills an empty Ollama search key and enables search:
+    // both authenticate against the same account. Once the search key holds any value this is a
+    // no-op, so rotating the LLM key never drags the search key along.
     private static void mirrorOllamaCloudKeyToSearch(String key, String value) {
         if (!key.equals("provider.ollama-cloud.apiKey") || value == null || value.isBlank()) {
             return;
