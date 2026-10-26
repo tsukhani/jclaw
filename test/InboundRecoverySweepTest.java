@@ -1,4 +1,5 @@
 import agents.AgentRunner;
+import agents.QueueDrainOrchestrator;
 import channels.ChannelTransport;
 import channels.TelegramChannel;
 import com.google.gson.JsonParser;
@@ -98,6 +99,7 @@ class InboundRecoverySweepTest extends UnitTest {
     @AfterEach
     void teardown() throws IOException {
         conversationIds.forEach(ConversationQueue::forgetForTest);
+        for (var name : agentNames) ConfigService.delete("agent." + name + ".queue.mode");
         for (var suffix : List.of("baseUrl", "apiKey", "models")) {
             ConfigService.delete("provider." + provider + "." + suffix);
         }
@@ -351,6 +353,89 @@ class InboundRecoverySweepTest extends UnitTest {
     }
 
     @Test
+    void aRestoredMessageNeitherCancelsALiveTurnNorDropsAMessageSentSinceTheRestart() throws Exception {
+        var agent = persistAgent();
+        var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
+        commit();
+        storeBeforeRestart(agent, convo, List.of("sent before the restart"));
+        var liveTurnCancel = holdWithQueued(agent, convo, List.of("sent after the restart"));
+        // Queued in interrupt mode, the fresh message would itself have cancelled the turn.
+        interruptMode(agent);
+
+        assertEquals(1, TelegramStreamingRecoveryJob.sweep(cutoff()).requeued());
+
+        assertFalse(liveTurnCancel.get(), "the restored message did not cancel the live turn");
+        assertEquals(2, ConversationQueue.getQueueSize(convo.id));
+        assertEquals(List.of("sent before the restart", "sent after the restart"), pendingTexts(convo));
+        finishHeldTurn(convo);
+        assertEquals(List.of(new UserRow("sent before the restart", List.of()),
+                new UserRow("sent after the restart", List.of())), userRows(convo));
+        assertEquals(List.of(), pendingTexts(convo));
+        assertEquals(2, llmCalls.get());
+    }
+
+    @Test
+    void restoredMessagesKeepTheirOrderAheadOfAFreshOneInInterruptMode() throws Exception {
+        var agent = persistAgent();
+        var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
+        commit();
+        storeBeforeRestart(agent, convo, List.of("first before", "second before"));
+        var liveTurnCancel = holdWithQueued(agent, convo, List.of("after"));
+        interruptMode(agent);
+
+        assertEquals(2, TelegramStreamingRecoveryJob.sweep(cutoff()).requeued());
+
+        assertFalse(liveTurnCancel.get(), "no restored message cancelled the live turn");
+        assertEquals(List.of("first before", "second before", "after"), pendingTexts(convo));
+        finishHeldTurn(convo);
+        assertEquals(List.of(new UserRow("first before", List.of()), new UserRow("second before", List.of()),
+                new UserRow("after", List.of())), userRows(convo));
+        assertEquals(List.of(), pendingTexts(convo));
+    }
+
+    @Test
+    void inQueueModeRestoredMessagesRunBeforeOnesThatArrivedSinceTheRestart() throws Exception {
+        var agent = persistAgent();
+        var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
+        commit();
+        storeBeforeRestart(agent, convo, List.of("first before", "second before"));
+        var liveTurnCancel = holdWithQueued(agent, convo, List.of("after"));
+
+        assertEquals(2, TelegramStreamingRecoveryJob.sweep(cutoff()).requeued());
+
+        assertFalse(liveTurnCancel.get());
+        finishHeldTurn(convo);
+        assertEquals(List.of(new UserRow("first before", List.of()), new UserRow("second before", List.of()),
+                new UserRow("after", List.of())), userRows(convo));
+        assertEquals(List.of(), pendingTexts(convo));
+    }
+
+    @Test
+    void aRestoredMessageIsTheOldestSoAFullQueueDropsItWithItsRow() {
+        var agent = persistAgent();
+        var full = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
+        var roomy = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
+        commit();
+        storeBeforeRestart(agent, full, List.of("sent before the restart"));
+        storeBeforeRestart(agent, roomy, List.of("sent before the restart"));
+        var twenty = IntStream.range(0, 20).mapToObj(i -> "m" + i).toList();
+        holdWithQueued(agent, full, twenty);
+        holdWithQueued(agent, roomy, twenty.subList(0, 19));
+
+        assertEquals(2, TelegramStreamingRecoveryJob.sweep(cutoff()).requeued());
+
+        assertEquals(20, ConversationQueue.getQueueSize(full.id));
+        assertEquals(twenty, pendingTexts(full));
+        assertEquals(List.of("m0"), drainedTexts(full));
+        var roomyExpected = new ArrayList<String>();
+        roomyExpected.add("sent before the restart");
+        roomyExpected.addAll(twenty.subList(0, 19));
+        assertEquals(20, ConversationQueue.getQueueSize(roomy.id));
+        assertEquals(roomyExpected, pendingTexts(roomy));
+        assertEquals(List.of("sent before the restart"), drainedTexts(roomy));
+    }
+
+    @Test
     void anOperatorStopDropsTheRowsOfTheMessagesItCleared() {
         var agent = persistAgent();
         var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
@@ -472,6 +557,38 @@ class InboundRecoverySweepTest extends UnitTest {
     /** Stands in for a turn already running on the conversation. */
     private static void hold(Agent agent, Conversation convo) {
         assertTrue(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, "owner turn")));
+    }
+
+    /** Stores {@code texts} behind a turn of a process that then stopped, as the boot sweep finds them. */
+    private static void storeBeforeRestart(Agent agent, Conversation convo, List<String> texts) {
+        hold(agent, convo);
+        for (var text : texts) assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, text)));
+        ConversationQueue.forgetForTest(convo.id);
+        backdate(convo);
+    }
+
+    /** Holds the conversation for a live turn with {@code texts} queued behind it, returning the turn's cancel flag. */
+    private static AtomicBoolean holdWithQueued(Agent agent, Conversation convo, List<String> texts) {
+        hold(agent, convo);
+        // A channel turn polls the conversation's flag, the one interrupt mode sets.
+        var turnCancel = ConversationQueue.cancellationFlag(convo.id);
+        for (var text : texts) assertFalse(ConversationQueue.tryAcquire(convo.id, channelMessage(agent, convo, text)));
+        return turnCancel;
+    }
+
+    private static void interruptMode(Agent agent) {
+        ConfigService.set("agent." + agent.name + ".queue.mode", "interrupt");
+    }
+
+    /** Stands in for the held turn ending: its drain runs what queued behind it, one turn at a time. */
+    private static void finishHeldTurn(Conversation convo) throws InterruptedException {
+        long generation = ConversationQueue.currentGeneration(convo.id);
+        QueueDrainOrchestrator.runOwned(convo.id, generation, ConversationQueue.drain(convo.id, generation));
+        awaitIdle(convo);
+    }
+
+    private static List<String> drainedTexts(Conversation convo) {
+        return ConversationQueue.drain(convo.id).stream().map(ConversationQueue.QueuedMessage::text).toList();
     }
 
     /** Sends a message the way a channel's inbound turn does, returning what the sender is told. */

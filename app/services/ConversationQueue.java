@@ -228,6 +228,44 @@ public class ConversationQueue {
     }
 
     /**
+     * {@link #tryAcquireOwnership} for the stored messages a restart left on one conversation (JCLAW-1521).
+     * They predate everything this process received, so in every mode none interrupts: the first acquires
+     * when no turn holds the conversation, and the rest queue ahead of the messages that arrived since the
+     * restart, in their own order. Overflow drops the oldest, as for any arrival; none is stored again.
+     *
+     * @param restored the conversation's {@link #restore restored} messages, oldest first; not empty
+     * @return the generation when the first acquired and the caller must run it, or {@link #NOT_ACQUIRED}
+     *         when every message was queued
+     */
+    public static long tryAcquireRestored(Long conversationId, List<QueuedMessage> restored) {
+        var state = queues.computeIfAbsent(conversationId, _ -> new QueueState());
+        var first = restored.getFirst();
+        var mode = ConfigService.get("agent." + first.agent().name + ".queue.mode", QUEUE);
+        long acquired = NOT_ACQUIRED;
+        var dropped = new ArrayList<QueuedMessage>();
+        synchronized (state) {
+            state.mode = mode;
+            var queued = restored;
+            if (!state.processing) {
+                state.processing = true;
+                state.ownerCancel = null;
+                state.generation = GENERATIONS.incrementAndGet();
+                acquired = state.generation;
+                queued = restored.subList(1, restored.size());
+            }
+            for (var message : queued.reversed()) state.pending.addFirst(message);
+            while (state.pending.size() > MAX_QUEUE_SIZE) dropped.add(state.pending.removeFirst());
+        }
+        if (!dropped.isEmpty()) {
+            discardPending(pendingIdsOf(dropped));
+            EventLogger.warn(QUEUE, first.agent().name, first.channelType(),
+                    "Queue overflow for conversation %d, dropped %d oldest message(s)"
+                            .formatted(conversationId, dropped.size()));
+        }
+        return acquired;
+    }
+
+    /**
      * The current ownership generation, for an owned-queue caller that was handed ownership
      * without its generation (the public 3-arg {@code AgentRunner.runWithOwnedQueue}).
      */

@@ -118,14 +118,10 @@ public final class InboundRecoverySweep {
         var byConversation = stored.stream().collect(Collectors.groupingBy(Stored::conversationId,
                 LinkedHashMap::new, Collectors.mapping(Stored::message, Collectors.toList())));
         byConversation.forEach((conversationId, messages) -> {
-            // The first starts a turn unless one of this process holds the conversation; the rest queue behind.
-            var first = messages.getFirst();
-            long generation = ConversationQueue.tryAcquireOwnership(conversationId, first, null);
-            for (var next : messages.subList(1, messages.size())) {
-                ConversationQueue.tryAcquireOwnership(conversationId, next, null);
-            }
+            // The first starts a turn unless one of this process holds the conversation.
+            long generation = ConversationQueue.tryAcquireRestored(conversationId, messages);
             if (generation != ConversationQueue.NOT_ACQUIRED) {
-                QueueDrainOrchestrator.runOwned(conversationId, generation, List.of(first));
+                QueueDrainOrchestrator.runOwned(conversationId, generation, List.of(messages.getFirst()));
             }
         });
         return stored.size();
