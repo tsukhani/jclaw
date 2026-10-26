@@ -127,4 +127,3 @@ Expose variants as toggle controls or produce a "Deck Explorations" file that ha
 The `deck_stage.js` starter includes `@media print` rules that render one slide per page. The user can print to PDF from the browser (Cmd+P / Ctrl+P). Mention this in your summary if PDF export matters.
 
 If you need to produce a PPTX instead, see whether your tooling environment has a native exporter. Otherwise, the HTML-with-print-to-PDF path is cleanest.
-

@@ -121,4 +121,3 @@ Before shipping, ask: does this actually work for the use case?
 - Mobile app → are hit targets big enough, readable at arm's length?
 
 Aesthetic direction matters, but not at the cost of function.
-

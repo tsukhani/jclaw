@@ -105,4 +105,3 @@ Skip the questions when the user's brief contains:
 - Explicit scope ("just the hero section", "full onboarding flow")
 
 When in doubt, ask. One round of focused questions early saves two rounds of rework later.
-

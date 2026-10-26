@@ -159,4 +159,3 @@ Avoid pulling libraries that are ES-module-only — they won't work without a bu
 - If a component "doesn't exist", check: (1) is it exported to window? (2) does the file loading it come AFTER the component's file?
 - If styles look broken, check for `const styles = ...` collisions.
 - If you see "Hooks can only be called inside a function component", you're probably calling `useState` at module scope.
-

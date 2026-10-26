@@ -88,4 +88,3 @@ Canvas backgrounds are usually **neutral and quiet** (white, off-white, light gr
 The canvas is the deliverable. Don't walk the user through each option in prose — the labels do that. Your summary afterward should be caveats and next steps only:
 
 > "Laid out 5 button treatments. Options 3 and 5 both use the brand indigo — 3 is more conservative, 5 is the pill shape if you want more personality. Let me know which direction to refine."
-

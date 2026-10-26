@@ -91,4 +91,3 @@ Don't put "My Animated Video" as an h1 above the Stage. The Stage IS the deliver
 ## Exporting
 
 Most environments let users screen-record or save the HTML. If the user needs an MP4, point them to screen recording (OS-level, or QuickTime / OBS) from the fullscreen playback. Don't try to render frames to video inside the browser — it's unreliable.
-

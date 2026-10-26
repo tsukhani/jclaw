@@ -1,11 +1,13 @@
 ---
 name: claude-designer
-description: Produce thoughtful design artifacts (slide decks, prototypes, mockups, landing pages, dashboards) using HTML/CSS/JS/SVG as the medium.
-version: 1.0.0
-author: clawhub.ai/cced3000/claude-designer
-tools: [filesystem, browser, documents]
-commands: [android_frame.jsx, animations.jsx, browser_window.jsx, design_canvas.jsx, ios_frame.jsx, macos_window.jsx]
-icon: 🎨
+description: >-
+  Produce thoughtful, well-crafted design artifacts (slide decks, interactive prototypes, hi-fi mockups, animated videos, landing pages, dashboards, marketing one-pagers) using HTML/CSS/JS/SVG as the medium. Use this skill whenever the user asks to "design", "mock up", "prototype", "make a deck", "make slides", "make a landing page", "create a dashboard", "visualize X", "build a UI", "build an interactive demo", or any request whose deliverable is a visual artifact rather than production code. Also trigger for requests like "recreate this UI", "explore options for X", "give me variations of Y", or when the user attaches screenshots/Figma/PRDs and wants a visual response. HTML is the tool; the medium varies — embody the right expert (slide designer, UX designer, animator, prototyper) for the task.
+metadata:
+  version: "1.0.1"
+  author: clawhub.ai/cced3000/claude-designer
+  jclaw-icon: "🎨"
+  jclaw-tools: filesystem documents browser checklist
+  jclaw-commands: ""
 ---
 # Claude Designer
 

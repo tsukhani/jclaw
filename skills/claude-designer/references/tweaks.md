@@ -153,4 +153,3 @@ Each version is a named preset that sets multiple tweak values at once. This is 
 ## Keep the design final-looking when Tweaks are off
 
 The most important rule: with the panel hidden, the design should look **finished, not stripped down**. Don't show placeholder labels where tweakable copy goes; don't show hit areas where a hover color is tweakable. Tweaks are an overlay on a polished design, not scaffolding holding it up.
-

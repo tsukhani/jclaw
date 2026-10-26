@@ -105,4 +105,3 @@ Where the original workflow used these, this skill falls back to:
 ## Credits
 
 Distilled from the Claude Design system prompt, restructured for portability.
-

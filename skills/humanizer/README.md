@@ -80,4 +80,3 @@ Based on [Wikipedia's "Signs of AI writing"](https://en.wikipedia.org/wiki/Wikip
 ## License
 
 MIT
-

@@ -138,4 +138,3 @@ const result = await window.claude.complete("Summarize this feedback: ...");
 ```
 
 If your environment doesn't have this, fall back to mocking the LLM response with a hardcoded string + setTimeout to simulate latency.
-

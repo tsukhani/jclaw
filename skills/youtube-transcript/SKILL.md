@@ -1,11 +1,13 @@
 ---
 name: youtube-transcript
-description: Fetch and summarize YouTube video transcripts using a residential IP proxy to bypass cloud IP blocks.
-version: 1.0.1
-author: clawhub.ai/xthezealot/youtube-transcript
-tools: [exec, filesystem]
-commands: []
-icon: 📜
+description: >-
+  Fetch and summarize YouTube video transcripts. Use when asked to summarize, transcribe, or extract content from YouTube videos. Handles transcript fetching via residential IP proxy to bypass YouTube's cloud IP blocks.
+metadata:
+  version: "1.0.2"
+  author: clawhub.ai/xthezealot/youtube-transcript
+  jclaw-icon: "🎬"
+  jclaw-tools: exec filesystem
+  jclaw-commands: ""
 ---
 
 # YouTube Transcript
