@@ -337,7 +337,7 @@ class RestartNarratorTest extends UnitTest {
     }
 
     @Test
-    void theCommandLineIsTakenWholeOrNotAtAll() throws Exception {
+    void theCommandLineIsTakenWholeOrNotAtAll() {
         assertTrue(options("--status", "s.json", "--http", "9000", "--now", "100").isPresent());
         assertFalse(options("--status", "s.json", "--http", "9000").isPresent(), "no --now");
         assertFalse(options("--http", "9000", "--now", "100").isPresent(), "no --status");

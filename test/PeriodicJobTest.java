@@ -37,7 +37,7 @@ class PeriodicJobTest extends UnitTest {
         }
     }
 
-    private static List<EventLogger.Captured> tick(ScriptedJob job) throws Exception {
+    private static List<EventLogger.Captured> tick(ScriptedJob job) {
         return EventLogger.captureMatchingForTest(e -> e.message().startsWith("ScriptedJob"), _ -> {
             try {
                 job.now().get(10, TimeUnit.SECONDS);
@@ -48,7 +48,7 @@ class PeriodicJobTest extends UnitTest {
     }
 
     @Test
-    void aTickWhileTheJvmRunsRunsTheJob() throws Exception {
+    void aTickWhileTheJvmRunsRunsTheJob() {
         var job = new ScriptedJob();
 
         assertEquals(List.of(), tick(job));
@@ -56,7 +56,7 @@ class PeriodicJobTest extends UnitTest {
     }
 
     @Test
-    void aTickOnceTheShutdownHasBegunDoesNotRunTheJob() throws Exception {
+    void aTickOnceTheShutdownHasBegunDoesNotRunTheJob() {
         var job = new ScriptedJob();
         job.stopping = true;
 
@@ -76,7 +76,7 @@ class PeriodicJobTest extends UnitTest {
     }
 
     @Test
-    void aTickTheShutdownCutShortIsOneInfoLine() throws Exception {
+    void aTickTheShutdownCutShortIsOneInfoLine() {
         var job = new ScriptedJob();
         job.shutdownStartsDuringTheTick = true;
         job.failure = new IllegalStateException("Database is already closed");

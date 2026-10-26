@@ -653,7 +653,7 @@ class McpElicitationsTest extends UnitTest {
     // ==================== audit ====================
 
     @Test
-    void eachQuestionAndItsActionAreLoggedButNeverTheValues() throws Exception {
+    void eachQuestionAndItsActionAreLoggedButNeverTheValues() {
         var server = server();
         var web = conversation("web");
         var lines = new ArrayList<String>();

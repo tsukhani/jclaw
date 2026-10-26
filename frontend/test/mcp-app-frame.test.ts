@@ -246,7 +246,7 @@ describe('McpAppFrame', () => {
     fromView({ jsonrpc: '2.0', id: 9, method: 'ping' })
     wrapper!.unmount()
     wrapper = null
-    expect(sent().length).toBe(before)
+    expect(sent()).toHaveLength(before)
   })
 
   it('reports a change of width, even from a width of 0 at initialization', async () => {

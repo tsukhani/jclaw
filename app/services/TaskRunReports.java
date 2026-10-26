@@ -204,13 +204,17 @@ public final class TaskRunReports {
     private static String outcome(TaskRun run, boolean ownerReadsAlone) {
         return switch (run.status) {
             case COMPLETED -> whereTheOutputWent(run, ownerReadsAlone);
-            case FAILED -> run.error == null || run.error.isBlank() ? "No reason was recorded."
-                    : ownerReadsAlone ? sentence("The error was: " + SecretRedactor.redact(run.error.strip()))
-                    : "The reason is on the Tasks page.";
+            case FAILED -> failure(run, ownerReadsAlone);
             // The executor writes who cancelled it, or the time limit it hit, as the run's summary.
             case CANCELLED -> run.outputSummary == null || run.outputSummary.isBlank() ? "" : sentence(run.outputSummary.strip());
             case RUNNING -> "";
         };
+    }
+
+    private static String failure(TaskRun run, boolean ownerReadsAlone) {
+        if (run.error == null || run.error.isBlank()) return "No reason was recorded.";
+        return ownerReadsAlone ? sentence("The error was: " + SecretRedactor.redact(run.error.strip()))
+                : "The reason is on the Tasks page.";
     }
 
     private static String sentence(String text) {
@@ -222,11 +226,7 @@ public final class TaskRunReports {
         var status = run.deliveryStatus == null ? TaskRun.DeliveryStatus.UNKNOWN : run.deliveryStatus;
         return switch (status) {
             case DELIVERED -> "Its output was delivered to %s.".formatted(channelOf(run.deliveryTarget));
-            case NOT_DELIVERED -> run.deliveryError == null || run.deliveryError.isBlank()
-                    ? "Its output was not delivered to %s: no reason was recorded.".formatted(channelOf(run.deliveryTarget))
-                    : ownerReadsAlone ? sentence("Its output was not delivered to %s: %s".formatted(channelOf(run.deliveryTarget),
-                            SecretRedactor.redact(run.deliveryError.strip())))
-                    : "Its output was not delivered to %s; the reason is on the Tasks page.".formatted(channelOf(run.deliveryTarget));
+            case NOT_DELIVERED -> notDelivered(run, ownerReadsAlone);
             case NOT_REQUESTED -> {
                 if (run.deliveryTarget != null) yield "The run sent its output itself with the 'message' tool.";
                 var spec = DeliverySpec.parse(run.task.delivery);
@@ -236,6 +236,15 @@ public final class TaskRunReports {
             }
             case UNKNOWN -> "Its delivery was not recorded.";
         };
+    }
+
+    private static String notDelivered(TaskRun run, boolean ownerReadsAlone) {
+        if (run.deliveryError == null || run.deliveryError.isBlank()) {
+            return "Its output was not delivered to %s: no reason was recorded.".formatted(channelOf(run.deliveryTarget));
+        }
+        return ownerReadsAlone ? sentence("Its output was not delivered to %s: %s".formatted(channelOf(run.deliveryTarget),
+                SecretRedactor.redact(run.deliveryError.strip())))
+                : "Its output was not delivered to %s; the reason is on the Tasks page.".formatted(channelOf(run.deliveryTarget));
     }
 
     // The channel alone: a target can be a chat id the conversation's other readers should not see.

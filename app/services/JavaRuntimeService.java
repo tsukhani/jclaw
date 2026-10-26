@@ -125,14 +125,27 @@ public final class JavaRuntimeService {
         void stage(Release release, Path home, Download progress) throws IOException;
     }
 
-    /** Test seam: where this JVM runs, in place of the real install and runtime. */
-    public static volatile @Nullable Environment environmentForTest;
+    @SuppressWarnings("java:S3077") // published whole and read once per call, never mutated
+    private static volatile @Nullable Environment environmentOverride;
+    @SuppressWarnings("java:S3077")
+    private static volatile @Nullable Release latestOverride;
+    @SuppressWarnings("java:S3077")
+    private static volatile @Nullable Stager stagerOverride;
 
-    /** Test seam: the catalog's answer, in place of a call to Azul. */
-    public static volatile @Nullable Release latestForTest;
+    /** Test seam: where this JVM runs, in place of the real install and runtime; null clears it. */
+    public static void setEnvironmentForTest(@Nullable Environment override) {
+        environmentOverride = override;
+    }
+
+    /** Test seam: the catalog's answer, in place of a call to Azul; null clears it. */
+    public static void setLatestForTest(@Nullable Release override) {
+        latestOverride = override;
+    }
 
     /** Test seam: runs in place of {@link #download}. In test mode nothing downloads without it. */
-    public static volatile @Nullable Stager stagerForTest;
+    public static void setStagerForTest(@Nullable Stager override) {
+        stagerOverride = override;
+    }
 
     /** One download's progress. The app shares {@link #CURRENT}; tests build their own. */
     public static final class Download {
@@ -204,7 +217,7 @@ public final class JavaRuntimeService {
     private JavaRuntimeService() {}
 
     public static Environment environment() {
-        var test = environmentForTest;
+        var test = environmentOverride;
         if (test != null) return test;
         return new Environment(Play.applicationPath.toPath(), Path.of(System.getProperty("java.home", "")),
                 System.getProperty("java.version", ""), System.getProperty("java.vendor"),
@@ -228,9 +241,9 @@ public final class JavaRuntimeService {
 
     // ── The catalog ──────────────────────────────────────────────────────────
 
-    /** The newest patch of the running major, from {@link #latestForTest} or the cached catalog check. */
+    /** The newest patch of the running major, from {@link #setLatestForTest} or the cached catalog check. */
     public static @Nullable Release latest(boolean refresh) {
-        var test = latestForTest;
+        var test = latestOverride;
         if (test != null) return test;
         return LOOKUP.latest(refresh, () -> fetchLatest(environment()));
     }
@@ -454,7 +467,7 @@ public final class JavaRuntimeService {
      * @throws IllegalStateException when {@link #stageable} refuses, checked before anything is written
      */
     public static Release requestStage() {
-        var stager = stagerForTest;
+        var stager = stagerOverride;
         if (stager == null) {
             stager = Play.runningInTestMode() ? JavaRuntimeService::refuseInTestMode : JavaRuntimeService::download;
         }
@@ -464,7 +477,7 @@ public final class JavaRuntimeService {
 
     // A request that outlives its test's seams must not delete or download anything.
     private static void refuseInTestMode(Release release, Path home, Download progress) throws IOException {
-        throw new IOException("in test mode a Java runtime downloads only through stagerForTest");
+        throw new IOException("in test mode a Java runtime downloads only through setStagerForTest");
     }
 
     public static Release requestStage(Environment env, @Nullable Release latest, Download progress, Stager stager) {

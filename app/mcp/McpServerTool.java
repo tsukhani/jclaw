@@ -545,8 +545,8 @@ public final class McpServerTool implements ToolRegistry.Tool {
                 atLineStart = true;
             }
             var text = c.text();
-            var body = text != null ? text
-                    : "[binary" + (mimeType != null ? " " + mimeType : "") + ", " + c.blobBytes() + " bytes]";
+            var shownType = mimeType != null ? " " + mimeType : "";
+            var body = text != null ? text : "[binary" + shownType + ", " + c.blobBytes() + " bytes]";
             pieces.add(body);
             if (!body.isEmpty()) atLineStart = body.endsWith("\n");
         }

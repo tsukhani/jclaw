@@ -62,6 +62,28 @@ function channelName(type: string): string {
   return CHANNEL_NAMES[type] ?? type.charAt(0).toUpperCase() + type.slice(1)
 }
 
+/** True when /api/status answers at all. Any throw — connection refused mid-restart
+ *  included — is a "down", which is exactly the signal the phases key off. The narrator
+ *  answers it 503, so it reads as down too. */
+async function backendUp(): Promise<boolean> {
+  try {
+    await $fetch('/api/status', { retry: 0, timeout: 4000 })
+    return true
+  }
+  catch {
+    return false
+  }
+}
+
+async function fetchProgress(): Promise<RestartProgress | null> {
+  try {
+    return await $fetch<RestartProgress>('/api/system/restart/progress', { retry: 0, timeout: 4000 })
+  }
+  catch {
+    return null
+  }
+}
+
 export function useRestartAndReconnect() {
   const { mutate, error: mutationError } = useApiMutation()
 
@@ -78,28 +100,6 @@ export function useRestartAndReconnect() {
     if (poller) {
       clearInterval(poller)
       poller = null
-    }
-  }
-
-  /** True when /api/status answers at all. Any throw — connection refused mid-restart
-   *  included — is a "down", which is exactly the signal the phases key off. The narrator
-   *  answers it 503, so it reads as down too. */
-  async function backendUp(): Promise<boolean> {
-    try {
-      await $fetch('/api/status', { retry: 0, timeout: 4000 })
-      return true
-    }
-    catch {
-      return false
-    }
-  }
-
-  async function fetchProgress(): Promise<RestartProgress | null> {
-    try {
-      return await $fetch<RestartProgress>('/api/system/restart/progress', { retry: 0, timeout: 4000 })
-    }
-    catch {
-      return null
     }
   }
 
@@ -201,48 +201,38 @@ export function useRestartAndReconnect() {
       failure.value = message
     }
 
-    async function tick() {
-      const [up, progress] = await Promise.all([backendUp(), fetchProgress()])
-      elapsed.value = secondsSince(phaseStartedAt)
-      if (progress?.source === 'narrator') narrated = true
-
-      if (phase.value === 'stopping') {
-        if (up) {
-          // The JVM about to stop still has the previous restart's file, which has finished:
-          // only a running one is this restart. Its services are the ones going away.
-          if (progress?.state === 'running') {
-            show({ ...progress, services: null })
-            narrated = true
-          }
-          else count()
-          if (elapsed.value >= shutdownBudget) {
-            giveUp(`The backend was still responding ${shutdownBudget}s after the restart `
-              + 'was accepted. Check logs/restart.log.')
-          }
-          return
-        }
+    /** True while the old JVM still answers, which ends the tick; false once it has gone and starting begins. */
+    function whileStopping(up: boolean, progress: RestartProgress | null): boolean {
+      if (!up) {
         phase.value = 'starting'
         phaseStartedAt = Date.now()
         elapsed.value = 0
+        return false
       }
-
-      if (progress?.state === 'failed' && !up) {
-        show(progress)
-        giveUp(`The restart failed: ${progress.failure ?? 'jclaw.sh stopped'}. See logs/restart.log.`)
-        return
+      // The JVM about to stop still has the previous restart's file, which has finished:
+      // only a running one is this restart. Its services are the ones going away.
+      if (progress?.state === 'running') {
+        show({ ...progress, services: null })
+        narrated = true
       }
+      else count()
+      if (elapsed.value >= shutdownBudget) {
+        giveUp(`The backend was still responding ${shutdownBudget}s after the restart `
+          + 'was accepted. Check logs/restart.log.')
+      }
+      return true
+    }
 
-      // Two consecutive answers, so a half-initialised Play answering one request
-      // mid-boot doesn't trigger a premature reload. Then its services get until they
-      // settle, or the budget runs out, before the reload.
-      consecutiveUp = up ? consecutiveUp + 1 : 0
-      const back = consecutiveUp >= 2
+    /** How long JClaw's services have been settling since it came back, and whether to keep waiting on them. */
+    function settling(back: boolean, progress: RestartProgress | null): { waited: number, waiting: boolean } {
       const services = progress?.source === 'jclaw' ? progress.services : null
       const unsettled = back && !!services && !services.settled
       if (unsettled && servicesSince === null) servicesSince = Date.now()
       const waited = servicesSince === null ? 0 : secondsSince(servicesSince)
-      const waiting = unsettled && waited < SERVICES_BUDGET
+      return { waited, waiting: unsettled && waited < SERVICES_BUDGET }
+    }
 
+    function narrate(progress: RestartProgress | null, waited: number) {
       if (progress) {
         show(progress, waited)
       }
@@ -256,6 +246,28 @@ export function useRestartAndReconnect() {
       else {
         count()
       }
+    }
+
+    async function tick() {
+      const [up, progress] = await Promise.all([backendUp(), fetchProgress()])
+      elapsed.value = secondsSince(phaseStartedAt)
+      if (progress?.source === 'narrator') narrated = true
+
+      if (phase.value === 'stopping' && whileStopping(up, progress)) return
+
+      if (progress?.state === 'failed' && !up) {
+        show(progress)
+        giveUp(`The restart failed: ${progress.failure ?? 'jclaw.sh stopped'}. See logs/restart.log.`)
+        return
+      }
+
+      // Two consecutive answers, so a half-initialised Play answering one request
+      // mid-boot doesn't trigger a premature reload. Then its services get until they
+      // settle, or the budget runs out, before the reload.
+      consecutiveUp = up ? consecutiveUp + 1 : 0
+      const back = consecutiveUp >= 2
+      const { waited, waiting } = settling(back, progress)
+      narrate(progress, waited)
 
       if (back && !waiting) {
         stopPolling()

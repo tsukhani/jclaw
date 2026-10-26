@@ -271,7 +271,6 @@ class JavaRuntimeServiceTest extends UnitTest {
         var bytes = "a Zulu JRE".getBytes(StandardCharsets.UTF_8);
         var progress = new Download();
         progress.begin();
-        var percents = new ArrayList<Integer>();
 
         var staged = stage(serving(bytes), new Release("25.0.5", URL, sha(bytes), ARCHIVE), home, progress);
 
@@ -592,7 +591,7 @@ class JavaRuntimeServiceTest extends UnitTest {
     private static void awaitQuietly(CountDownLatch latch) {
         try {
             latch.await(10, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
+        } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
         }
     }

@@ -50,7 +50,7 @@ class ApiSystemControllerTest extends FunctionalTest {
         RestartService.spawnerForTest = spawned::add;
         UpgradeService.spawnerForTest = upgrades::add;
         stagings.clear();
-        JavaRuntimeService.latestForTest = release("25.0.5");
+        JavaRuntimeService.setLatestForTest(release("25.0.5"));
         clearAotFiles();
     }
 
@@ -74,9 +74,9 @@ class ApiSystemControllerTest extends FunctionalTest {
         UpgradeService.spawnerForTest = null;
         UpgradeService.latestVersionForTest = null;
         UpgradeService.latestNotesForTest = null;
-        JavaRuntimeService.latestForTest = null;
-        JavaRuntimeService.environmentForTest = null;
-        JavaRuntimeService.stagerForTest = null;
+        JavaRuntimeService.setLatestForTest(null);
+        JavaRuntimeService.setEnvironmentForTest(null);
+        JavaRuntimeService.setStagerForTest(null);
     }
 
     private void login() {
@@ -391,11 +391,11 @@ class ApiSystemControllerTest extends FunctionalTest {
         login();
         var current = System.getProperty("java.version");
         // This JVM and this checkout, but never a container: /.dockerenv in a dev container would make it one.
-        JavaRuntimeService.environmentForTest = new JavaRuntimeService.Environment(Play.applicationPath.toPath(),
+        JavaRuntimeService.setEnvironmentForTest(new JavaRuntimeService.Environment(Play.applicationPath.toPath(),
                 Path.of(System.getProperty("java.home")), current, System.getProperty("java.vendor"),
-                System.getProperty("os.name"), System.getProperty("os.arch"), false);
-        JavaRuntimeService.latestForTest = release(current + ".1");
-        JavaRuntimeService.stagerForTest = (r, home, p) -> stagings.add(r);
+                System.getProperty("os.name"), System.getProperty("os.arch"), false));
+        JavaRuntimeService.setLatestForTest(release(current + ".1"));
+        JavaRuntimeService.setStagerForTest((r, home, p) -> stagings.add(r));
 
         var body = json(GET("/api/system/java-runtime"));
         assertEquals("external", body.get("kind").getAsString());
@@ -413,11 +413,11 @@ class ApiSystemControllerTest extends FunctionalTest {
     @Test
     void theBuiltInJavaDownloadsTheNewerPatchThenWaitsForTheNextRestart() throws Exception {
         login();
-        JavaRuntimeService.environmentForTest = builtIn("25.0.4", false);
-        JavaRuntimeService.stagerForTest = (r, home, p) -> {
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", false));
+        JavaRuntimeService.setStagerForTest((r, home, p) -> {
             stagings.add(r);
             writeStaging(home, r.version());
-        };
+        });
 
         var before = json(GET("/api/system/java-runtime"));
         assertEquals("built-in", before.get("kind").getAsString());
@@ -453,17 +453,17 @@ class ApiSystemControllerTest extends FunctionalTest {
     @Test
     void aDownloadInFlightCannotBeCancelledOrStartedTwice() throws Exception {
         login();
-        JavaRuntimeService.environmentForTest = builtIn("25.0.4", false);
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", false));
         var release = new CountDownLatch(1);
-        JavaRuntimeService.stagerForTest = (r, home, p) -> {
+        JavaRuntimeService.setStagerForTest((r, home, p) -> {
             stagings.add(r);
             p.percent(40);
             try {
                 release.await(10, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
-        };
+        });
         try {
             assertEquals(202, POST("/api/system/java-runtime", "application/json", "{}").status.intValue());
             waitUntil(() -> Integer.valueOf(40).equals(JavaRuntimeService.CURRENT.currentPercent()));
@@ -491,16 +491,16 @@ class ApiSystemControllerTest extends FunctionalTest {
     @Test
     void aContainerOrAnUpToDateJavaIsOfferedNoDownload() throws IOException {
         login();
-        JavaRuntimeService.stagerForTest = (r, home, p) -> stagings.add(r);
+        JavaRuntimeService.setStagerForTest((r, home, p) -> stagings.add(r));
 
-        JavaRuntimeService.environmentForTest = builtIn("25.0.4", true);
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", true));
         assertEquals("container", json(GET("/api/system/java-runtime")).get("kind").getAsString());
         var container = POST("/api/system/java-runtime", "application/json", "{}");
         assertEquals(409, container.status.intValue());
         assertEquals("The runtime comes with the Docker image; pull a newer image to update Java.",
                 json(container).get("message").getAsString());
 
-        JavaRuntimeService.environmentForTest = builtIn("25.0.5", false);
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.5", false));
         assertFalse(json(GET("/api/system/java-runtime")).get("updateAvailable").getAsBoolean());
         var current = POST("/api/system/java-runtime", "application/json", "{}");
         assertEquals(409, current.status.intValue());
@@ -513,7 +513,7 @@ class ApiSystemControllerTest extends FunctionalTest {
         login();
         var windows = new JavaRuntimeService.Environment(tmp.resolve("jclaw"), jreHome(), "25.0.4",
                 "Azul Systems, Inc.", "Windows 11", "amd64", false);
-        JavaRuntimeService.environmentForTest = windows;
+        JavaRuntimeService.setEnvironmentForTest(windows);
         Files.createDirectories(tmp.resolve("jclaw/data"));
         Files.writeString(tmp.resolve("jclaw/data/java-runtime.status"), "kept Java 25.0.4: Java 25.0.5 failed its SHA-256 check\n");
 
@@ -526,7 +526,7 @@ class ApiSystemControllerTest extends FunctionalTest {
     @Test
     void theStartupCacheNoteGoesWhenTheCacheIsSwitchedOff() throws Exception {
         login();
-        JavaRuntimeService.environmentForTest = builtIn("25.0.4", false);
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", false));
         assertTrue(json(GET("/api/system/java-runtime")).get("rebuildsStartupCache").getAsBoolean());
 
         assertIsOk(POST("/api/system/aot-cache", "application/json", "{\"enabled\": false}"));
@@ -537,12 +537,12 @@ class ApiSystemControllerTest extends FunctionalTest {
     @Test
     void inTestModeNothingIsDownloadedWithoutAStager() throws Exception {
         login();
-        JavaRuntimeService.environmentForTest = builtIn("25.0.4", false);
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", false));
 
         assertEquals(202, POST("/api/system/java-runtime", "application/json", "{}").status.intValue());
         waitUntil(() -> !JavaRuntimeService.CURRENT.active());
 
-        assertEquals("Java 25.0.5 could not be downloaded: in test mode a Java runtime downloads only through stagerForTest",
+        assertEquals("Java 25.0.5 could not be downloaded: in test mode a Java runtime downloads only through setStagerForTest",
                 json(GET("/api/system/java-runtime")).get("downloadError").getAsString());
         assertFalse(Files.exists(tmp.resolve("jre.staged")));
     }

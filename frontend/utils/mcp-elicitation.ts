@@ -49,6 +49,12 @@ function kindOf(field: McpElicitationField): McpFieldKind {
   return field.enum || field.oneOf ? 'choice' : 'text'
 }
 
+function fieldOptions(kind: McpFieldKind, field: McpElicitationField): McpFieldOption[] {
+  if (kind === 'choices') return options(field.items?.enum, field.items?.anyOf)
+  if (kind === 'choice') return options(field.enum, field.oneOf)
+  return []
+}
+
 export function formFields(elicitation: McpElicitation): McpFormField[] {
   const schema = elicitation.requestedSchema
   const required = new Set(Array.isArray(schema.required) ? schema.required : [])
@@ -61,9 +67,7 @@ export function formFields(elicitation: McpElicitation): McpFormField[] {
       kind,
       inputType: (field.format && INPUT_TYPES[field.format]) || 'text',
       required: required.has(key),
-      options: kind === 'choices'
-        ? options(field.items?.enum, field.items?.anyOf)
-        : kind === 'choice' ? options(field.enum, field.oneOf) : [],
+      options: fieldOptions(kind, field),
       schema: field,
     }
   })
@@ -78,29 +82,28 @@ function localDateTime(iso: string): string {
     + `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
 }
 
+function initialValue(f: McpFormField): McpFieldValue {
+  const d = f.schema.default
+  switch (f.kind) {
+    case 'boolean':
+      return d === true
+    case 'number':
+    case 'integer':
+      return typeof d === 'number' ? String(d) : ''
+    case 'choices':
+      return Array.isArray(d) ? d.filter(v => f.options.some(o => o.value === v)) as string[] : []
+    case 'choice':
+      return typeof d === 'string' && f.options.some(o => o.value === d) ? d : ''
+    default:
+      if (typeof d !== 'string') return ''
+      return f.inputType === 'datetime-local' ? localDateTime(d) : d
+  }
+}
+
 /** Each field's starting value: the schema's default, which the operator can review and change. */
 export function initialValues(fields: McpFormField[]): Record<string, McpFieldValue> {
   const values: Record<string, McpFieldValue> = {}
-  for (const f of fields) {
-    const d = f.schema.default
-    switch (f.kind) {
-      case 'boolean':
-        values[f.key] = d === true
-        break
-      case 'number':
-      case 'integer':
-        values[f.key] = typeof d === 'number' ? String(d) : ''
-        break
-      case 'choices':
-        values[f.key] = Array.isArray(d) ? d.filter(v => f.options.some(o => o.value === v)) as string[] : []
-        break
-      case 'choice':
-        values[f.key] = typeof d === 'string' && f.options.some(o => o.value === d) ? d : ''
-        break
-      default:
-        values[f.key] = typeof d !== 'string' ? '' : f.inputType === 'datetime-local' ? localDateTime(d) : d
-    }
-  }
+  for (const f of fields) values[f.key] = initialValue(f)
   return values
 }
 
@@ -149,26 +152,27 @@ function numberProblem(f: McpFormField, value: McpFieldValue): string | null {
   return null
 }
 
+function choicesProblem(f: McpFormField, value: McpFieldValue | undefined): string | null {
+  const chosen = Array.isArray(value) ? value : []
+  if (f.schema.minItems != null && chosen.length < f.schema.minItems) return `Choose at least ${f.schema.minItems}.`
+  if (f.schema.maxItems != null && chosen.length > f.schema.maxItems) return `Choose at most ${f.schema.maxItems}.`
+  return null
+}
+
+function fieldProblem(f: McpFormField, v: McpFieldValue | undefined): string | null {
+  if (f.kind === 'choices') return choicesProblem(f, v)
+  if (f.kind === 'boolean') return null
+  if (isBlank(v)) return f.required ? 'Required.' : null
+  if (f.kind === 'number' || f.kind === 'integer') return numberProblem(f, v as McpFieldValue)
+  if (f.kind === 'text') return textProblem(f, String(v))
+  return null
+}
+
 /** The problem with each field the operator must fix before sending, by key; empty when the form can go. */
 export function validate(fields: McpFormField[], values: Record<string, McpFieldValue>): Record<string, string> {
   const problems: Record<string, string> = {}
   for (const f of fields) {
-    const v = values[f.key]
-    let problem: string | null = null
-    if (f.kind === 'choices') {
-      const chosen = Array.isArray(v) ? v : []
-      if (f.schema.minItems != null && chosen.length < f.schema.minItems) {
-        problem = `Choose at least ${f.schema.minItems}.`
-      }
-      else if (f.schema.maxItems != null && chosen.length > f.schema.maxItems) {
-        problem = `Choose at most ${f.schema.maxItems}.`
-      }
-    }
-    else if (f.kind !== 'boolean') {
-      if (isBlank(v)) problem = f.required ? 'Required.' : null
-      else if (f.kind === 'number' || f.kind === 'integer') problem = numberProblem(f, v as McpFieldValue)
-      else if (f.kind === 'text') problem = textProblem(f, String(v))
-    }
+    const problem = fieldProblem(f, values[f.key])
     if (problem) problems[f.key] = problem
   }
   return problems
@@ -182,18 +186,23 @@ export function answerContent(fields: McpFormField[], values: Record<string, Mcp
   initial: Record<string, McpFieldValue>): Record<string, unknown> {
   const content: Record<string, unknown> = {}
   for (const f of fields) {
-    const v = values[f.key]
-    if (f.kind === 'boolean') {
-      if (f.required || typeof f.schema.default === 'boolean' || v !== initial[f.key]) content[f.key] = v === true
-    }
-    else if (f.kind === 'choices') {
-      const chosen = Array.isArray(v) ? v : []
-      if (chosen.length || f.required) content[f.key] = chosen
-    }
-    else if (isBlank(v)) continue
-    else if (f.kind === 'number' || f.kind === 'integer') content[f.key] = typeof v === 'number' ? v : Number(v)
-    else if (f.inputType === 'datetime-local') content[f.key] = new Date(String(v)).toISOString()
-    else content[f.key] = String(v)
+    const answer = answerOf(f, values[f.key], initial[f.key])
+    if (answer !== undefined) content[f.key] = answer
   }
   return content
+}
+
+/** One field's value as {@link answerContent} sends it, or undefined to leave the field out. */
+function answerOf(f: McpFormField, v: McpFieldValue | undefined, initial: McpFieldValue | undefined): unknown {
+  if (f.kind === 'boolean') {
+    return f.required || typeof f.schema.default === 'boolean' || v !== initial ? v === true : undefined
+  }
+  if (f.kind === 'choices') {
+    const chosen = Array.isArray(v) ? v : []
+    return chosen.length || f.required ? chosen : undefined
+  }
+  if (isBlank(v)) return undefined
+  if (f.kind === 'number' || f.kind === 'integer') return typeof v === 'number' ? v : Number(v)
+  if (f.inputType === 'datetime-local') return new Date(String(v)).toISOString()
+  return String(v)
 }

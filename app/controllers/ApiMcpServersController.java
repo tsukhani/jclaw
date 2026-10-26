@@ -373,11 +373,11 @@ public class ApiMcpServersController extends Controller {
         }
         var action = body.get("action") instanceof JsonPrimitive p && p.isString() ? p.getAsString() : null;
         switch (McpElicitations.resolve(id, action, body.get("content"))) {
-            case McpElicitations.Outcome.Answered answered -> ApiResponses.ok("action", answered.action());
+            case McpElicitations.Outcome.Answered(var taken) -> ApiResponses.ok("action", taken);
             case McpElicitations.Outcome.NotPending _ ->
                     ApiResponses.error(404, ApiResponses.NOT_FOUND, "This question is no longer waiting for an answer.");
-            case McpElicitations.Outcome.Refused refused ->
-                    ApiResponses.error(400, ApiResponses.INVALID_REQUEST, refused.message(), KEY_FIELD, refused.field());
+            case McpElicitations.Outcome.Refused(var field, var message) ->
+                    ApiResponses.error(400, ApiResponses.INVALID_REQUEST, message, KEY_FIELD, field);
         }
     }
 

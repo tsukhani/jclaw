@@ -56,14 +56,14 @@ public final class SkillFrontmatter {
     private static final Set<String> RESERVED_WORDS = Set.of("y", "n", "yes", "no", "true", "false", "on", "off", "null");
 
     private final LinkedHashMap<String, Object> top;
-    private final LinkedHashMap<String, Object> metadata;
+    private final LinkedHashMap<String, Object> meta;
     /** Metadata keys {@link #parse} moved up from the earlier layout's top level. */
     private final Set<String> fromEarlierLayout;
 
     private SkillFrontmatter(LinkedHashMap<String, Object> top, LinkedHashMap<String, Object> metadata,
                              Set<String> fromEarlierLayout) {
         this.top = top;
-        this.metadata = metadata;
+        this.meta = metadata;
         this.fromEarlierLayout = fromEarlierLayout;
     }
 
@@ -72,7 +72,7 @@ public final class SkillFrontmatter {
     }
 
     public SkillFrontmatter copy() {
-        return new SkillFrontmatter(new LinkedHashMap<>(top), new LinkedHashMap<>(metadata), new HashSet<>(fromEarlierLayout));
+        return new SkillFrontmatter(new LinkedHashMap<>(top), new LinkedHashMap<>(meta), new HashSet<>(fromEarlierLayout));
     }
 
     /** The frontmatter opening a whole SKILL.md, or null when it has none or it is not a YAML mapping. */
@@ -124,20 +124,20 @@ public final class SkillFrontmatter {
 
     public @Nullable String description() { return text(top.get(DESCRIPTION)); }
 
-    public @Nullable String version() { return text(metadata.get(VERSION)); }
+    public @Nullable String version() { return text(meta.get(VERSION)); }
 
-    public @Nullable String author() { return text(metadata.get(AUTHOR)); }
+    public @Nullable String author() { return text(meta.get(AUTHOR)); }
 
-    public @Nullable String icon() { return text(metadata.get(ICON)); }
+    public @Nullable String icon() { return text(meta.get(ICON)); }
 
-    public List<String> tools() { return words(metadata.get(TOOLS)); }
+    public List<String> tools() { return words(meta.get(TOOLS)); }
 
     /** True when the skill declares its tools, even as none: only an undeclared skill has its body scanned for them. */
-    public boolean toolsDeclared() { return metadata.containsKey(TOOLS); }
+    public boolean toolsDeclared() { return meta.containsKey(TOOLS); }
 
-    public List<String> commands() { return words(metadata.get(COMMANDS)); }
+    public List<String> commands() { return words(meta.get(COMMANDS)); }
 
-    public List<String> mcpServers() { return words(metadata.get(MCP_SERVERS)); }
+    public List<String> mcpServers() { return words(meta.get(MCP_SERVERS)); }
 
     /**
      * True when {@code key} came from the earlier layout's top level rather than from
@@ -152,7 +152,7 @@ public final class SkillFrontmatter {
     /** The top-level keys in order, {@code metadata} last when there is any. */
     public List<String> topLevelKeys() {
         var keys = new ArrayList<>(top.keySet());
-        if (!metadata.isEmpty()) keys.add(METADATA);
+        if (!meta.isEmpty()) keys.add(METADATA);
         return keys;
     }
 
@@ -167,8 +167,8 @@ public final class SkillFrontmatter {
 
     /** Set a metadata value; null removes the key. */
     public SkillFrontmatter putMetadata(String key, @Nullable String value) {
-        if (value == null) metadata.remove(key);
-        else metadata.put(key, value);
+        if (value == null) meta.remove(key);
+        else meta.put(key, value);
         return this;
     }
 
@@ -205,9 +205,9 @@ public final class SkillFrontmatter {
         top.forEach((key, value) -> {
             if (!key.equals(NAME) && !key.equals(DESCRIPTION)) line(out, "", key, value);
         });
-        if (!metadata.isEmpty()) {
+        if (!meta.isEmpty()) {
             out.append(METADATA).append(":\n");
-            metadata.forEach((key, value) -> line(out, "  ", key, value));
+            meta.forEach((key, value) -> line(out, "  ", key, value));
         }
         return out.append("---\n").toString();
     }

@@ -14,7 +14,6 @@ class McpAppPageTest extends UnitTest {
 
     private static final McpAppPage.Host JCLAW = new McpAppPage.Host("jclaw.example");
     private static final McpAppPage.Reach REMOTE = new McpAppPage.Reach(JCLAW, false);
-    private static final McpAppPage.Reach LOCAL = new McpAppPage.Reach(new McpAppPage.Host("localhost"), true);
 
     private static McpAppPage.Policy connecting(McpAppPage.Reach reach, String... origins) {
         var list = new com.google.gson.JsonArray();

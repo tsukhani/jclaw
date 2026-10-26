@@ -982,8 +982,8 @@ public class McpClient implements AutoCloseable {
                         + " retries, so JClaw stopped: the server never completed the request", notes));
             }
             p = params.deepCopy();
-            var state = input.state();
-            if (state != null) p.add("requestState", state);
+            var requestState = input.state();
+            if (requestState != null) p.add("requestState", requestState);
             if (!input.forms().isEmpty()) {
                 var questions = McpElicitations.questionsForAgent(name, input.forms().values(), unasked);
                 if (questions != null) throw new McpException.InputRequired(withNotes(questions, notes));

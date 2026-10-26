@@ -241,7 +241,7 @@ export function createMcpAppBridge(opts: McpAppBridgeOptions): McpAppBridge {
     const view = opts.view()
     if (!view || event.source !== view) return
     const msg = event.data as JsonRpcIn | null
-    if (typeof msg !== 'object' || msg === null || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') return
+    if (typeof msg !== 'object' || msg?.jsonrpc !== '2.0' || typeof msg.method !== 'string') return
     if (typeof msg.id === 'string' || typeof msg.id === 'number') onRequest(msg.id, msg.method, msg.params)
     else onNotification(msg.method, msg.params)
   }

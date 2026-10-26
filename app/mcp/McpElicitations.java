@@ -43,14 +43,14 @@ import java.util.regex.Pattern;
  * {@link Answer#note()} tells the agent what the operator did; a submit's names the fields filled in, never their
  * values. When a question cannot be put to the operator (off web chat, url mode, a form JClaw cannot show) nothing
  * goes back: the agent gets the server's questions.
- * One call's forms share one {@link #WAIT} from the first; Stop or the chat stream closing cancels them at once.
+ * One call's forms share one {@link #ANSWER_WAIT} from the first; Stop or the chat stream closing cancels them at once.
  *
  * <p>The values the operator enters are never logged or stored: they exist only in the answer handed back to
  * the waiting call. The registry is in memory, so a restart drops a waiting form along with the call behind it.
  */
 public final class McpElicitations {
 
-    public static final Duration WAIT = Duration.ofMinutes(5);
+    public static final Duration ANSWER_WAIT = Duration.ofMinutes(5);
     public static final String CATEGORY = "MCP_ELICITATION";
     /** Bus event: a form is waiting. Payload: the {@link Question}'s fields. */
     public static final String BUS_ASKED = "mcp.elicitation";
@@ -165,9 +165,9 @@ public final class McpElicitations {
         }
     }
 
-    /** A fresh {@link Wait} for one call: {@link #WAIT}, or what a test bound with {@link #callWithWaitForTest}. */
+    /** A fresh {@link Wait} for one call: {@link #ANSWER_WAIT}, or what a test bound with {@link #callWithWaitForTest}. */
     public static Wait newWait() {
-        return new Wait(WAIT_OVERRIDE.orElse(WAIT));
+        return new Wait(WAIT_OVERRIDE.orElse(ANSWER_WAIT));
     }
 
     /**
@@ -208,13 +208,16 @@ public final class McpElicitations {
                     quoted(messageOf(form)), reason != null ? reason : "another of its questions cannot be shown"));
             lines.add("- " + quoted(messageOf(form)) + described(form));
         }
-        var why = unasked != null ? unasked.why
-                : reasons.contains(URL_MODE) ? "a question asks the operator to open a link, which JClaw does not do"
-                : reasons.contains(UNKNOWN_MODE) ? "a question is of a mode JClaw does not know"
-                : "a question has a field JClaw cannot show";
+        var why = unasked != null ? unasked.why : whyNoneShown(reasons);
         return ("MCP server '%s' asked for input that JClaw did not put to the operator, because %s, so the call ended"
                 + " with nothing sent back. The server asked:\n%s\nYou can fill the values in as arguments and call"
                 + " again, ask in chat, or use another tool.").formatted(server, why, String.join("\n", lines));
+    }
+
+    private static String whyNoneShown(List<@Nullable String> reasons) {
+        if (reasons.contains(URL_MODE)) return "a question asks the operator to open a link, which JClaw does not do";
+        if (reasons.contains(UNKNOWN_MODE)) return "a question is of a mode JClaw does not know";
+        return "a question has a field JClaw cannot show";
     }
 
     /**
@@ -420,7 +423,8 @@ public final class McpElicitations {
 
     private static String typeOf(JsonObject field) {
         var raw = stringOf(field.get(TYPE));
-        var type = raw == null ? "no type" : TYPES.contains(raw) ? raw : "an unknown type";
+        if (raw == null) return "no type";
+        var type = TYPES.contains(raw) ? raw : "an unknown type";
         if ("array".equals(type)) {
             var options = field.get("items") instanceof JsonObject items ? options(items, "anyOf") : null;
             return options == null ? type : type + ", any of: " + shownOptions(options);
@@ -509,12 +513,7 @@ public final class McpElicitations {
                 yield formatOk && count(field, "minLength") && count(field, "maxLength")
                         && (!hasDefault || stringOf(defaultValue) != null) ? Kind.TEXT : null;
             }
-            case "number", "integer" -> {
-                var integer = "integer".equals(type);
-                yield bound(field, "minimum") && bound(field, "maximum")
-                        && (!hasDefault || (number(defaultValue) instanceof BigDecimal d && (!integer || whole(d))))
-                        ? (integer ? Kind.INTEGER : Kind.NUMBER) : null;
-            }
+            case "number", "integer" -> numberKind(field, "integer".equals(type), hasDefault, defaultValue);
             case "boolean" -> !hasDefault || isBoolean(defaultValue) ? Kind.BOOLEAN : null;
             case "array" -> {
                 var options = field.get("items") instanceof JsonObject items ? options(items, "anyOf") : null;
@@ -524,6 +523,13 @@ public final class McpElicitations {
             }
             default -> null;
         };
+    }
+
+    private static @Nullable Kind numberKind(JsonObject field, boolean integer, boolean hasDefault,
+                                             @Nullable JsonElement defaultValue) {
+        if (!bound(field, "minimum") || !bound(field, "maximum")) return null;
+        if (hasDefault && !(number(defaultValue) instanceof BigDecimal d && (!integer || whole(d)))) return null;
+        return integer ? Kind.INTEGER : Kind.NUMBER;
     }
 
     /**

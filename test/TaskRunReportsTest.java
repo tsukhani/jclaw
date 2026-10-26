@@ -303,7 +303,7 @@ class TaskRunReportsTest extends UnitTest {
     // ==================== the cancel ====================
 
     @Test
-    void aCancelIsAnnouncedOnceByTheCallThatClosesTheRunAndAShutdownsIsNot() throws Exception {
+    void aCancelIsAnnouncedOnceByTheCallThatClosesTheRunAndAShutdownsIsNot() {
         var agent = agent("sink");
         var task = task(agent, "sink-task", null);
         var timedOut = run(task, null, r -> r.status = TaskRun.Status.RUNNING);
