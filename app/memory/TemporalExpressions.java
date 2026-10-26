@@ -4,6 +4,7 @@ import memory.ontology.EdtfDate;
 import memory.ontology.EdtfInterval;
 import org.jspecify.annotations.Nullable;
 
+import java.time.DateTimeException;
 import java.time.LocalDate;
 import java.time.YearMonth;
 import java.util.ArrayList;
@@ -21,6 +22,7 @@ import java.util.regex.MatchResult;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Dates in memory text, found and normalized by code (JCLAW-1361): a model never emits a date. Two entry points share
@@ -44,7 +46,7 @@ public final class TemporalExpressions {
 
     /** The graph finder's month alternation: capitalized only, so "you may march on" names no month. */
     private static final String MONTHS_CAPITALIZED = String.join("|",
-            java.util.stream.Stream.concat(MONTH_NAMES.stream(), MONTH_ABBREVIATIONS.stream())
+            Stream.concat(MONTH_NAMES.stream(), MONTH_ABBREVIATIONS.stream())
                     .map(m -> Character.toUpperCase(m.charAt(0)) + m.substring(1)).toList());
 
     /** A bare month stands alone only by its full name: "Jan" is as often a person. */
@@ -303,7 +305,7 @@ public final class TemporalExpressions {
         if (touchesLiteral(literals, m.start(), m.end())) return new Refusal(Reason.LITERAL);
         try {
             return rule.normalizer().apply(m.toMatchResult(), text, anchor);
-        } catch (IllegalArgumentException | java.time.DateTimeException _) {
+        } catch (IllegalArgumentException | DateTimeException _) {
             return null;
         }
     }
@@ -383,7 +385,7 @@ public final class TemporalExpressions {
     private static @Nullable EdtfDate tryYear(IntFunction<EdtfDate> inYear, int year) {
         try {
             return inYear.apply(year);
-        } catch (java.time.DateTimeException | IllegalArgumentException _) {
+        } catch (DateTimeException | IllegalArgumentException _) {
             return null;
         }
     }

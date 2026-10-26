@@ -12,6 +12,7 @@ import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.FileAttribute;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
@@ -41,7 +42,7 @@ public final class FactoryHome {
         m.put(KEY_CPUS, "6");
         m.put(KEY_POLL_SECONDS, "120");
         m.put(KEY_MODEL, "claude-opus-5-5");
-        SETTINGS = java.util.Collections.unmodifiableMap(m);
+        SETTINGS = Collections.unmodifiableMap(m);
     }
 
     private static final Pattern DIGITS = Pattern.compile("\\d+");

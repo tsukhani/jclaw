@@ -6,6 +6,7 @@ import play.Play;
 import utils.AppClock;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
@@ -399,7 +400,7 @@ public final class BackgroundProcesses {
         try {
             var process = new ProcessBuilder(args)
                     .redirectError(ProcessBuilder.Redirect.DISCARD)
-                    .redirectInput(ProcessBuilder.Redirect.from(new java.io.File("/dev/null")))
+                    .redirectInput(ProcessBuilder.Redirect.from(new File("/dev/null")))
                     .start();
             // Read on another thread: end of stream arrives only when lsof exits, so reading
             // first would wait out a slow lsof (20-80 s beside a descriptor-heavy process) and
