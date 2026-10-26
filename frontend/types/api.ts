@@ -533,6 +533,17 @@ export interface OcrStatusResponse {
   providers: OcrBackend[]
 }
 
+/** One decision model the Ollama server lists; each figure is null where the server states none. */
+export interface OllamaDecisionModel {
+  name: string
+  /** How many tokens one request may hold: the Modelfile's num_ctx, else the model's own. */
+  contextTokens: number | null
+  /** As Ollama words it, such as `9.5B`; null for a cloud model. */
+  parameterSize: string | null
+  /** The disk space the model takes; null for a cloud model. */
+  sizeBytes: number | null
+}
+
 /** GET /api/decision/ollama: the Ollama decision server and its installed decision models (JCLAW-1336). */
 export interface OllamaDecisionStatus {
   baseUrl: string
@@ -540,12 +551,8 @@ export interface OllamaDecisionStatus {
   customized: boolean
   reachable: boolean
   error: string | null
-  /** Only models whose capabilities include `decision` and that run on the server. */
-  models: string[]
-  /** Decision models the server hands to ollama.com (Ollama 0.40.5 and later), kept out of `models`. */
-  cloudModels: string[]
-  /** By model, how many tokens one request may hold: the Modelfile's num_ctx, else the model's own; absent when unstated. */
-  contextTokens: Record<string, number>
+  /** Only models whose capabilities include `decision`: those that run on the server, then its cloud ones. */
+  models: OllamaDecisionModel[]
 }
 
 /** GET /api/decision/laya: the Laya decision server and what it reports of itself (JCLAW-1447). */

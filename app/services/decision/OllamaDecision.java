@@ -23,10 +23,8 @@ import utils.SsrfGuard;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -76,12 +74,15 @@ public final class OllamaDecision {
     private OllamaDecision() {}
 
     /**
-     * The server's decision models, or why they could not be read: {@code models} run on it, {@code cloudModels} are
-     * the ones it hands to ollama.com, and {@code contextTokens} is how many tokens one request to each may hold, for
-     * the models whose context the server states.
+     * A decision model the server lists. {@code contextTokens} is how many tokens one request to it may hold;
+     * {@code parameterSize}, as Ollama words it (such as {@code 9.5B}), and {@code sizeBytes} are given only for a
+     * model that runs on the server. Each is null where the server states none.
      */
-    public record Status(String baseUrl, boolean reachable, @Nullable String error, List<String> models,
-                         List<String> cloudModels, Map<String, Integer> contextTokens) {}
+    public record DecisionModel(String name, @Nullable Integer contextTokens, @Nullable String parameterSize,
+                                @Nullable Long sizeBytes) {}
+
+    /** The server's decision models, the ones it runs before the ones it hands to ollama.com, or why they could not be read. */
+    public record Status(String baseUrl, boolean reachable, @Nullable String error, List<DecisionModel> models) {}
 
     /** The operator's address, else the Ollama Local LLM provider's server without its {@code /v1}. */
     public static String baseUrl() {
@@ -337,38 +338,56 @@ public final class OllamaDecision {
         }
         var call = HttpFactories.generalGuarded().newCall(request);
         call.timeout().timeout(TAGS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
-        List<String> local;
-        List<String> cloud;
+        List<JsonObject> entries;
         try (var response = call.execute()) {
             // Status only: the body comes from a server whose address the operator chose (JCLAW-778).
             if (!response.isSuccessful()) return unreachable(base, "HTTP " + response.code() + " from /api/tags");
-            var tags = JsonParser.parseString(response.body().string());
-            local = decisionModels(tags, model -> !runsInCloud(model));
-            cloud = decisionModels(tags, OllamaDecision::runsInCloud);
+            entries = decisionEntries(JsonParser.parseString(response.body().string()));
         } catch (JsonParseException | IllegalStateException | ClassCastException _) {
             return unreachable(base, "/api/tags did not answer with Ollama's model list");
         } catch (IOException e) {
             return unreachable(base, "not reachable (" + e.getClass().getSimpleName() + ")");
         }
-        var context = new LinkedHashMap<String, Integer>();
-        for (var name : local) putContext(context, base, name);
-        for (var name : cloud) putContext(context, base, name);
-        return new Status(base, true, null, local, cloud, context);
+        var models = new ArrayList<DecisionModel>();
+        for (var entry : entries) if (!runsInCloud(entry)) models.add(describe(base, entry, false));
+        for (var entry : entries) if (runsInCloud(entry)) models.add(describe(base, entry, true));
+        return new Status(base, true, null, models);
     }
 
-    /** Adds how many tokens one request to {@code model} may hold: its Modelfile's num_ctx, else the model's own. */
-    private static void putContext(Map<String, Integer> context, String base, String model) {
+    /** {@code entry} from {@code /api/tags}, with what {@code /api/show} adds; a cloud model's size is only its stub's. */
+    private static DecisionModel describe(String base, JsonObject entry, boolean cloud) {
+        var name = entry.get("name").getAsString();
+        JsonObject show;
         try {
-            var show = show(base, model).getAsJsonObject();
-            var parameters = show.get("parameters");
-            // Ollama refuses a request over num_ctx rather than cutting it (v0.35.0), so a pinned one is the limit.
-            var pinned = parameters != null && parameters.isJsonPrimitive() ? NUM_CTX.matcher(parameters.getAsString()) : null;
-            int tokens = pinned != null && pinned.find() ? Integer.parseInt(pinned.group(1)) : 0;
-            if (tokens <= 0) tokens = ModelCatalogParser.extractOllamaContextLength(show);
-            if (tokens > 0) context.put(model, tokens);
-        } catch (IOException | JsonParseException | IllegalStateException | ClassCastException | NumberFormatException _) {
-            // A model whose show cannot be read is listed without a context.
+            show = show(base, name).getAsJsonObject();
+        } catch (IOException | JsonParseException | IllegalStateException _) {
+            show = null;
         }
+        var context = show == null ? null : contextTokens(show);
+        if (cloud) return new DecisionModel(name, context, null, null);
+        // An MLX model's /api/tags entry leaves parameter_size blank and /api/show states it (Ollama 0.40.11).
+        var parameters = show == null ? null : parameterSize(show);
+        if (parameters == null) parameters = parameterSize(entry);
+        var size = entry.get("size");
+        Long bytes = size != null && size.isJsonPrimitive() && size.getAsJsonPrimitive().isNumber() && size.getAsLong() > 0
+                ? size.getAsLong() : null;
+        return new DecisionModel(name, context, parameters, bytes);
+    }
+
+    private static @Nullable String parameterSize(JsonObject model) {
+        var details = model.get("details");
+        var size = details != null && details.isJsonObject() ? details.getAsJsonObject().get("parameter_size") : null;
+        return size != null && size.isJsonPrimitive() && !size.getAsString().isBlank() ? size.getAsString().strip() : null;
+    }
+
+    /** One request's limit: the Modelfile's num_ctx, else the model's own context length. */
+    private static @Nullable Integer contextTokens(JsonObject show) {
+        var parameters = show.get("parameters");
+        // Ollama refuses a request over num_ctx rather than cutting it (v0.35.0), so a pinned one is the limit.
+        var pinned = parameters != null && parameters.isJsonPrimitive() ? NUM_CTX.matcher(parameters.getAsString()) : null;
+        int tokens = pinned != null && pinned.find() ? Integer.parseInt(pinned.group(1)) : 0;
+        if (tokens <= 0) tokens = ModelCatalogParser.extractOllamaContextLength(show);
+        return tokens > 0 ? tokens : null;
     }
 
     private static JsonElement show(String base, String model) throws IOException {
@@ -414,20 +433,18 @@ public final class OllamaDecision {
     }
 
     static List<String> decisionModels(JsonElement tags) {
-        return decisionModels(tags, _ -> true);
+        return decisionEntries(tags).stream().map(model -> model.get("name").getAsString()).toList();
     }
 
-    private static List<String> decisionModels(JsonElement tags, Predicate<JsonObject> keep) {
+    private static List<JsonObject> decisionEntries(JsonElement tags) {
         var models = tags.getAsJsonObject().getAsJsonArray("models");
-        var out = new ArrayList<String>();
+        var out = new ArrayList<JsonObject>();
         if (models == null) return out;
         for (var entry : models) {
             if (!entry.isJsonObject()) continue;
             var model = entry.getAsJsonObject();
             var name = model.get("name");
-            if (name != null && name.isJsonPrimitive() && hasDecision(model.get("capabilities")) && keep.test(model)) {
-                out.add(name.getAsString());
-            }
+            if (name != null && name.isJsonPrimitive() && hasDecision(model.get("capabilities"))) out.add(model);
         }
         return out;
     }
@@ -468,7 +485,7 @@ public final class OllamaDecision {
     }
 
     private static Status unreachable(String base, @Nullable String error) {
-        return new Status(base, false, error, List.of(), List.of(), Map.of());
+        return new Status(base, false, error, List.of());
     }
 
     private static String trimSlash(String url) {

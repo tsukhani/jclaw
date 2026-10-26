@@ -11,7 +11,6 @@ import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
 
 import java.util.List;
-import java.util.Map;
 
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 import static utils.GsonHolder.GSON;
@@ -20,14 +19,9 @@ import static utils.GsonHolder.GSON;
 @With(AuthCheck.class)
 public class ApiDecisionController extends Controller {
 
-    /**
-     * {@code customized} is true when the operator stored an address rather than inheriting Ollama Local's;
-     * {@code cloudModels} are the decision models the server hands to ollama.com, kept out of {@code models};
-     * {@code contextTokens} names, by model, how many tokens one request may hold, where the server states it.
-     */
+    /** {@code customized} is true when the operator stored an address rather than inheriting Ollama Local's. */
     public record OllamaDecisionStatus(String baseUrl, boolean customized, boolean reachable,
-                                       @Nullable String error, List<String> models, List<String> cloudModels,
-                                       Map<String, Integer> contextTokens) {}
+                                       @Nullable String error, List<OllamaDecision.DecisionModel> models) {}
 
     @ApiResponse(responseCode = "200",
             content = @Content(schema = @Schema(implementation = OllamaDecisionStatus.class)))
@@ -36,7 +30,7 @@ public class ApiDecisionController extends Controller {
     public static void ollama() {
         var status = OllamaDecision.status(OllamaDecision.baseUrl());
         renderJSON(GSON.toJson(new OllamaDecisionStatus(status.baseUrl(), OllamaDecision.customized(),
-                status.reachable(), status.error(), status.models(), status.cloudModels(), status.contextTokens())));
+                status.reachable(), status.error(), status.models())));
     }
 
     /**

@@ -82,9 +82,10 @@ async function expectDirectlyBelow(page: Page, upper: string, lower: string) {
 }
 
 const DECISION_MODELS = ['tev1:latest', 'nimble:latest']
+const NOTHING_STATED = { contextTokens: null, parameterSize: null, sizeBytes: null }
 
 const REACHABLE: OllamaDecisionStatus = {
-  baseUrl: 'http://localhost:11434', customized: false, reachable: true, error: null, models: DECISION_MODELS, cloudModels: [], contextTokens: {},
+  baseUrl: 'http://localhost:11434', customized: false, reachable: true, error: null, models: DECISION_MODELS.map(name => ({ name, ...NOTHING_STATED })),
 }
 
 async function stubOllama(page: Page, status: OllamaDecisionStatus) {
@@ -230,7 +231,7 @@ test.describe('UAT-23 decision providers', () => {
     test('an unreachable server says so and shows the error', async ({ page }) => {
       await stubOllama(page, {
         baseUrl: 'http://192.168.1.20:11434', customized: true, reachable: false,
-        error: 'not reachable (ConnectException)', models: [], cloudModels: [], contextTokens: {},
+        error: 'not reachable (ConnectException)', models: [],
       })
       await stubConfig(page)
       const writes = await blockApiWrites(page)

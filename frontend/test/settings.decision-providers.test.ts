@@ -75,6 +75,11 @@ function words(text: string) {
   return text.replace(/\s+/g, ' ').trim()
 }
 
+/** An Ollama decision model as GET /api/decision/ollama lists it, stating nothing unless given. */
+function model(name: string, stated: Partial<{ contextTokens: number, parameterSize: string, sizeBytes: number }> = {}) {
+  return { name, contextTokens: null, parameterSize: null, sizeBytes: null, ...stated }
+}
+
 async function mountDecisionProviders() {
   const component = await mountSuspended(Settings)
   ;(component.vm as unknown as { activeSectionId: string }).activeSectionId = 'decision-providers'
@@ -90,7 +95,7 @@ describe('Settings page — Decision Providers', () => {
     posted = []
     breakers = []
     deleted = []
-    ollama = { baseUrl: 'http://localhost:11434', customized: false, reachable: true, error: null, models: ['tev1:latest', 'nimble:latest'], cloudModels: [], contextTokens: {} }
+    ollama = { baseUrl: 'http://localhost:11434', customized: false, reachable: true, error: null, models: [model('tev1:latest'), model('nimble:latest')] }
     laya = { baseUrl: 'http://localhost:8000', reachable: true, error: null, loaded: ['english'], device: 'cpu' }
   })
 
@@ -283,39 +288,45 @@ describe('Settings page — Decision Providers', () => {
       expect(words(note.text())).toBe(
         'Decision models such as d1 and tev1, served by your own Ollama server. They answer the same questions JEV '
         + 'does. A model that runs on this server keeps what it is sent there, so no third party sees or keeps it. '
-        + 'One marked cloud runs on ollama.com instead: read Ollama\'s cloud models in the user guide before you '
-        + 'tick one. The Model Router\'s classifier sends the first 4000 characters of each prompt to the model it uses.')
+        + 'One with cloud in its name, such as clef:cloud, runs on ollama.com instead: read Ollama\'s cloud models in '
+        + 'the user guide before you tick one. The Model Router\'s classifier sends the first 4000 characters of each '
+        + 'prompt to the model it uses.')
       expect(note.find('[data-testid="decision-ollama-cloud-link"]').attributes('href')).toBe('/guide#settings-ollama-cloud')
       expect(card.text()).not.toContain('record or retain')
     })
 
-    it('lists every model in one list with its context, marks a cloud model, and adds only the note under the list', async () => {
+    it('lists each model with its context, and a local one with its parameters and disk size, and adds only the note under the list', async () => {
       ollama = {
-        ...ollama, models: ['clef-flash:latest'], cloudModels: ['clef:cloud'],
-        contextTokens: { 'clef-flash:latest': 16384, 'clef:cloud': 65536 },
+        ...ollama, models: [
+          model('clef-flash:latest', { contextTokens: 16384, parameterSize: '9.5B', sizeBytes: 12387093750 }),
+          model('clef:cloud', { contextTokens: 65536 }),
+        ],
       }
       baseEndpoints()
       const component = await mountDecisionProviders()
       const models = component.find('[data-testid="decision-ollama-models"]')
       await vi.waitFor(() => expect(models.findAll('label')).toHaveLength(2))
-      expect(models.findAll('label').map(l => words(l.text()))).toEqual(['clef-flash:latest 16,384 tokens', 'clef:cloud 65,536 tokens cloud'])
+      expect(models.findAll('label').map(l => words(l.text()))).toEqual([
+        'clef-flash:latest 16,384 tokens, 9.5B parameters, 11.5 GB on disk',
+        'clef:cloud 65,536 tokens',
+      ])
       expect(models.findAll('p').map(p => words(p.text()))).toEqual([
         'Each takes that many tokens per request; a longer prompt is refused, not cut. Only a ticked model can be '
         + 'the Model Router\'s classifier, and the one it is using cannot be unticked.',
       ])
     })
 
-    it('a model whose context the server does not state is listed without one', async () => {
-      ollama = { ...ollama, contextTokens: { 'tev1:latest': 2050 } }
+    it('states only what the server states of a model', async () => {
+      ollama = { ...ollama, models: [model('tev1:latest', { contextTokens: 2050, sizeBytes: 4361568327 }), model('nimble:latest')] }
       baseEndpoints()
       const component = await mountDecisionProviders()
       const models = component.find('[data-testid="decision-ollama-models"]')
       await vi.waitFor(() => expect(models.findAll('label')).toHaveLength(2))
-      expect(models.findAll('label').map(l => words(l.text()))).toEqual(['tev1:latest 2,050 tokens', 'nimble:latest'])
+      expect(models.findAll('label').map(l => words(l.text()))).toEqual(['tev1:latest 2,050 tokens, 4.1 GB on disk', 'nimble:latest'])
     })
 
     it('a cloud model is ticked into the same selection as the others', async () => {
-      ollama = { ...ollama, cloudModels: ['clef:cloud'] }
+      ollama = { ...ollama, models: [model('tev1:latest'), model('clef:cloud')] }
       stored.set('decision.ollama.models', JSON.stringify(['tev1:latest']))
       baseEndpoints()
       const component = await mountDecisionProviders()
@@ -343,11 +354,11 @@ describe('Settings page — Decision Providers', () => {
       expect(words(refresh.text())).toBe('Refresh')
 
       ollama = {
-        ...ollama, models: ['tev1:latest', 'nimble:latest', 'd1:latest'], cloudModels: ['clef:cloud'],
-        contextTokens: { 'd1:latest': 16384 },
+        ...ollama,
+        models: [model('tev1:latest'), model('nimble:latest'), model('d1:latest', { contextTokens: 16384 }), model('clef:cloud')],
       }
       await refresh.trigger('click')
-      await vi.waitFor(() => expect(names()).toEqual(['tev1:latest', 'nimble:latest', 'd1:latest 16,384 tokens', 'clef:cloud cloud']))
+      await vi.waitFor(() => expect(names()).toEqual(['tev1:latest', 'nimble:latest', 'd1:latest 16,384 tokens', 'clef:cloud']))
       expect(reads).toBe(2)
       expect(posted).toEqual([])
     })
@@ -460,7 +471,7 @@ describe('Settings page — Decision Providers', () => {
     })
 
     it('a refused selection puts the box back to what is stored, with the reason on the card', async () => {
-      ollama = { ...ollama, models: ['tev1:latest', 'tev1:0.8b', 'nimble:latest'] }
+      ollama = { ...ollama, models: [model('tev1:latest'), model('tev1:0.8b'), model('nimble:latest')] }
       stored.set('decision.ollama.models', JSON.stringify(['tev1:latest', 'nimble:latest']))
       baseEndpoints({ failSaves: true })
       const component = await mountDecisionProviders()
@@ -488,7 +499,7 @@ describe('Settings page — Decision Providers', () => {
     })
 
     it('an unreachable server says why, and lists nothing', async () => {
-      ollama = { baseUrl: 'http://192.168.1.20:11434', customized: true, reachable: false, error: 'not reachable (ConnectException)', models: [], cloudModels: [], contextTokens: {} }
+      ollama = { baseUrl: 'http://192.168.1.20:11434', customized: true, reachable: false, error: 'not reachable (ConnectException)', models: [] }
       baseEndpoints()
       const component = await mountDecisionProviders()
       await vi.waitFor(() => expect(component.find('[data-testid="decision-ollama-status"]').text()).toBe('not reachable'))

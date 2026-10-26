@@ -4,7 +4,7 @@
 // consumers share — its key and its circuit breaker — and links to each consumer, where the settings
 // that belong to that consumer alone stay.
 import { SpeakerWaveIcon } from '@heroicons/vue/24/outline'
-import type { LayaDecisionStatus, OllamaDecisionStatus } from '~/types/api'
+import type { LayaDecisionStatus, OllamaDecisionModel, OllamaDecisionStatus } from '~/types/api'
 import type { LayaCheckpoint } from '~/utils/decision-models'
 
 const { configData, saving, refresh, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
@@ -73,17 +73,22 @@ async function saveAddress() {
 const selectedModels = computed(() => parseDecisionModels(configValue(OLLAMA_MODELS)))
 // A selected model the server no longer lists stays visible, so it can be cleared.
 const modelChoices = computed(() => {
-  const local = ollama.value?.models ?? []
-  const cloud = ollama.value?.cloudModels ?? []
-  const context = ollama.value?.contextTokens ?? {}
-  const listed = (name: string, isCloud: boolean) => ({ name, installed: true, cloud: isCloud, tokens: context[name] })
+  const listed = ollama.value?.models ?? []
   return [
-    ...local.map(name => listed(name, false)),
-    ...cloud.map(name => listed(name, true)),
-    ...selectedModels.value.filter(m => !local.includes(m) && !cloud.includes(m))
-      .map(name => ({ name, installed: false, cloud: false, tokens: undefined })),
+    ...listed.map(m => ({ name: m.name, note: modelNote(m) })),
+    ...selectedModels.value.filter(name => !listed.some(m => m.name === name))
+      .map(name => ({ name, note: 'not installed' })),
   ]
 })
+
+// What the server states of a model, as Laya's rows word a checkpoint's context.
+function modelNote(m: OllamaDecisionModel) {
+  return [
+    m.contextTokens ? contextLabel(m.contextTokens) : null,
+    m.parameterSize ? `${m.parameterSize} parameters` : null,
+    m.sizeBytes ? `${formatSize(m.sizeBytes)} on disk` : null,
+  ].filter(Boolean).join(', ')
+}
 
 async function toggleModel(name: string, box: HTMLInputElement) {
   const next = box.checked
@@ -650,7 +655,7 @@ function playClip(audio: HTMLAudioElement | undefined) {
         <p data-testid="decision-ollama-privacy">
           Decision models such as d1 and tev1, served by your own Ollama server. They answer the same questions
           JEV does. A model that runs on this server keeps what it is sent there, so no third party sees or keeps
-          it. One marked cloud runs on ollama.com instead: read
+          it. One with cloud in its name, such as clef:cloud, runs on ollama.com instead: read
           <NuxtLink
             to="/guide#settings-ollama-cloud"
             class="text-fg-strong underline"
@@ -746,12 +751,8 @@ function playClip(audio: HTMLAudioElement | undefined) {
                 :disabled="saving || lockedByRouter(m.name)"
                 @change="toggleModel(m.name, $event.target as HTMLInputElement)"
               >
-              <!-- The spaces are what a screen reader hears between name, context and pill; interpolated, as Vue trims a template's leading whitespace. -->
-              <span class="font-mono">{{ m.name }}</span><template v-if="m.tokens">{{ ' ' }}<span class="text-xs text-fg-muted">{{ contextLabel(m.tokens) }}</span></template><template v-if="m.cloud">{{ ' ' }}<span class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1">cloud</span></template>
-              <span
-                v-if="!m.installed"
-                class="text-xs text-fg-muted"
-              >not installed</span>
+              <!-- One line, as Laya's: the space between the two is what a screen reader hears between name and note. -->
+              <span class="font-mono">{{ m.name }}</span> <span class="text-xs text-fg-muted">{{ m.note }}</span>
             </label>
             <p
               v-if="modelChoices.length > 0"

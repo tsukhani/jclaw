@@ -643,17 +643,26 @@ class OllamaDecisionTest extends UnitTest {
         assertEquals(BASE + "/api/tags", requests.getFirst().url().toString());
         assertTrue(status.reachable());
         assertNull(status.error());
-        assertEquals(List.of("tev1:latest", "nimble:latest"), status.models());
+        assertEquals(List.of("tev1:latest", "nimble:latest"), names(status));
         assertEquals(BASE, status.baseUrl());
     }
 
-    /** What Ollama 0.40.11's {@code /api/tags} listed for a signed-in server holding a cloud decision model. */
+    private static List<String> names(OllamaDecision.Status status) {
+        return status.models().stream().map(OllamaDecision.DecisionModel::name).toList();
+    }
+
+    /**
+     * What Ollama 0.40.11's {@code /api/tags} listed for a signed-in server holding a cloud decision model; an MLX
+     * model's {@code parameter_size} there is blank, as d1's is here, and {@code /api/show} states it.
+     */
     private static final String CLOUD_TAGS = """
             {"models":[
-              {"name":"clef:cloud","remote_model":"clef:27b","remote_host":"https://ollama.com","capabilities":["decision","vision"]},
-              {"name":"d1:latest","capabilities":["decision","vision"]},
+              {"name":"clef:cloud","remote_model":"clef:27b","remote_host":"https://ollama.com","size":286,
+               "details":{"parameter_size":"27.4B"},"capabilities":["decision","vision"]},
+              {"name":"d1:latest","size":3730544597,"details":{"parameter_size":""},"capabilities":["decision","vision"]},
               {"name":"glm-5.2:cloud","remote_model":"glm-5.2","remote_host":"https://ollama.com:443","capabilities":["completion"]},
-              {"name":"tev1:latest","remote_host":"","capabilities":["decision"]}
+              {"name":"tev1:latest","remote_host":"","size":4361568327,"details":{"parameter_size":"4.2B"},
+               "capabilities":["decision"]}
             ]}""";
 
     /** Answers {@code /api/tags} with {@code tags}, and {@code /api/show} with the model's entry in {@code shows}, else 404. */
@@ -669,13 +678,18 @@ class OllamaDecisionTest extends UnitTest {
     }
 
     @Test
-    void statusListsCloudModelsApartAndGivesEachModelsContextFromItsModelfileElseTheModel() {
+    void statusListsTheServersModelsThenItsCloudOnesWithWhatTheServerStatesOfEach() {
         var shows = Map.of(
-                "d1:latest", "{\"parameters\":\"num_ctx                        16384\",\"model_info\":{\"lfm2.context_length\":32768}}",
-                "clef:cloud", "{\"model_info\":{\"qwen35.context_length\":65536}}");
+                "d1:latest", "{\"parameters\":\"num_ctx                        16384\",\"details\":{\"parameter_size\":\"2.7B\"},"
+                        + "\"model_info\":{\"lfm2.context_length\":32768}}",
+                "clef:cloud", "{\"details\":{\"parameter_size\":\"27.4B\"},\"model_info\":{\"qwen35.context_length\":65536}}");
         var status = withOllama(listingWithShows(CLOUD_TAGS, shows), () -> OllamaDecision.status(BASE));
-        assertEquals(new OllamaDecision.Status(BASE, true, null, List.of("d1:latest", "tev1:latest"), List.of("clef:cloud"),
-                Map.of("d1:latest", 16384, "clef:cloud", 65536)), status, "tev1's show answered 404, so it has no context");
+        assertEquals(new OllamaDecision.Status(BASE, true, null, List.of(
+                new OllamaDecision.DecisionModel("d1:latest", 16384, "2.7B", 3730544597L),
+                new OllamaDecision.DecisionModel("tev1:latest", null, "4.2B", 4361568327L),
+                new OllamaDecision.DecisionModel("clef:cloud", 65536, null, null))), status,
+                "tev1's show answered 404, so its parameters come from /api/tags and it has no context; a cloud model's "
+                        + "size is only its stub's, so it gets neither");
         var asked = requests.stream().filter(r -> r.url().encodedPath().equals("/api/show")).toList();
         assertEquals(List.of("POST", "POST", "POST"), asked.stream().map(Request::method).toList());
         assertEquals(List.of("{\"model\":\"d1:latest\"}", "{\"model\":\"tev1:latest\"}", "{\"model\":\"clef:cloud\"}"),
@@ -686,10 +700,10 @@ class OllamaDecisionTest extends UnitTest {
     void aContextTheServerDoesNotStateAsAPositiveWholeNumberIsLeftOut() {
         var tags = """
                 {"models":[
-                  {"name":"a:latest","capabilities":["decision"]},
-                  {"name":"b:latest","capabilities":["decision"]},
-                  {"name":"c:latest","capabilities":["decision"]},
-                  {"name":"d:latest","capabilities":["decision"]}
+                  {"name":"a:latest","size":0,"details":{"parameter_size":" "},"capabilities":["decision"]},
+                  {"name":"b:latest","size":"big","capabilities":["decision"]},
+                  {"name":"c:latest","size":-5,"details":"9B","capabilities":["decision"]},
+                  {"name":"d:latest","size":1,"capabilities":["decision"]}
                 ]}""";
         var shows = Map.of(
                 "a:latest", "{\"parameters\":\"temperature 0.1\",\"model_info\":{\"x.context_length\":\"big\"}}",
@@ -697,9 +711,13 @@ class OllamaDecisionTest extends UnitTest {
                 "c:latest", "{\"model_info\":{\"x.context_length\":-1}}",
                 "d:latest", "<html>not ollama</html>");
         var status = withOllama(listingWithShows(tags, shows), () -> OllamaDecision.status(BASE));
-        assertTrue(status.reachable());
-        assertEquals(List.of("a:latest", "b:latest", "c:latest", "d:latest"), status.models());
-        assertEquals(Map.of("b:latest", 8192), status.contextTokens(), "a num_ctx of 0 pins nothing, so the model's own is used");
+        assertEquals(List.of(
+                new OllamaDecision.DecisionModel("a:latest", null, null, null),
+                new OllamaDecision.DecisionModel("b:latest", 8192, null, null),
+                new OllamaDecision.DecisionModel("c:latest", null, null, null),
+                new OllamaDecision.DecisionModel("d:latest", null, null, 1L)), status.models(),
+                "a num_ctx of 0 pins nothing, so b's own context is used; a size or parameter count that is not stated "
+                        + "as a positive number or a non-blank string is left out");
     }
 
     @Test
@@ -707,7 +725,6 @@ class OllamaDecisionTest extends UnitTest {
         var status = withOllama(chain -> reply(chain, 200, "{\"models\":[]}"), () -> OllamaDecision.status(BASE));
         assertTrue(status.reachable());
         assertEquals(List.of(), status.models());
-        assertEquals(List.of(), status.cloudModels());
     }
 
     @Test
@@ -716,7 +733,6 @@ class OllamaDecisionTest extends UnitTest {
         assertFalse(status.reachable());
         assertEquals("not reachable (ConnectException)", status.error());
         assertEquals(List.of(), status.models());
-        assertEquals(List.of(), status.cloudModels());
     }
 
     @Test
@@ -743,7 +759,7 @@ class OllamaDecisionTest extends UnitTest {
         assertNull(DecisionSettings.rejectionFor(OllamaDecision.BASE_URL_KEY, address), "the write check lets it through");
         var status = withOllama(chain -> reply(chain, 200, TAGS), () -> OllamaDecision.status(address));
         assertTrue(requests.isEmpty());
-        assertEquals(new OllamaDecision.Status(address, false, "not a usable address", List.of(), List.of(), Map.of()), status);
+        assertEquals(new OllamaDecision.Status(address, false, "not a usable address", List.of()), status);
     }
 
     @Test
