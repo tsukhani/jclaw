@@ -47,7 +47,7 @@ class AcpEventMapperTest extends UnitTest {
     }
 
     @Test
-    void toolCallMapsToToolCallLabelledWithItsWireStatus() {
+    void toolCallMapsToToolCallLabeledWithItsWireStatus() {
         var call = new ToolCall(null, "tc-1", "Read build.gradle.kts", null, ToolKind.READ, ToolCallStatus.IN_PROGRESS,
                 null, null, null, null, null);
         var ev = AcpEventMapper.toHarnessEvent(call);

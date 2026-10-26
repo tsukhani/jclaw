@@ -123,7 +123,7 @@ class PrintRenderingTest extends UnitTest {
     }
 
     @Test
-    void aProgressiveJpegIsReEncodedToBaselineRatherThanRasterised() throws Exception {
+    void aProgressiveJpegIsReEncodedToBaselineRatherThanRasterized() throws Exception {
         // A Canon E3300 advertising image/jpeg accepted a progressive one with
         // successful-ok and printed a blank sheet; the same picture re-encoded
         // baseline came out. Rasterising also fixes the blank page but makes a

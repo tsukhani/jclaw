@@ -75,7 +75,7 @@ public final class HeldOut {
         }
     }
 
-    public record Loaded(List<HeldCase> cases, int unlabelled) {
+    public record Loaded(List<HeldCase> cases, int unlabeled) {
         public Loaded {
             cases = List.copyOf(cases);
         }
@@ -161,14 +161,14 @@ public final class HeldOut {
         var symmetric = schema.symmetricSet();
         var cases = new ArrayList<HeldCase>();
         var types = new HashMap<String, String>();
-        int unlabelled = 0;
+        int unlabeled = 0;
         int index = 0;
         for (var element : root.getAsJsonArray("cases")) {
             var id = "h" + index++;
             if (!element.isJsonObject()) throw new IllegalArgumentException("case " + id + ": must be an object");
             var o = element.getAsJsonObject();
             if (!o.has("labelled") || !GraphCases.flag(o, "labelled", "case " + id)) {
-                unlabelled++;
+                unlabeled++;
                 continue;
             }
             long memoryId;
@@ -196,7 +196,7 @@ public final class HeldOut {
                     raw.equals(UNATTRIBUTED) ? null : MemoryAuthorType.valueOf(raw.toUpperCase(Locale.ROOT)),
                     coverage));
         }
-        return new Loaded(cases, unlabelled);
+        return new Loaded(cases, unlabeled);
     }
 
     /** The case's coverage labels, null unless it carries all three; a present one is checked even so. */

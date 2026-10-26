@@ -63,7 +63,7 @@ class HeldOutTest extends UnitTest {
     }
 
     @Test
-    void samplingIsSeededReadOnlyAndUnlabelled() throws Exception {
+    void samplingIsSeededReadOnlyAndUnlabeled() throws Exception {
         var before = texts();
         var a = dir.resolve("a.json");
         var b = dir.resolve("b.json");
@@ -94,7 +94,7 @@ class HeldOutTest extends UnitTest {
     }
 
     @Test
-    void loadingSkipsAndCountsUnlabelledCasesAndValidatesTheRest() throws Exception {
+    void loadingSkipsAndCountsUnlabeledCasesAndValidatesTheRest() throws Exception {
         var file = dir.resolve("h.json");
         HeldOut.sample(file, agentId, 5, 7);
         var root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
@@ -109,7 +109,7 @@ class HeldOutTest extends UnitTest {
 
         var loaded = HeldOut.load(file, OntologySchema.seed());
         assertEquals(1, loaded.cases().size());
-        assertEquals(4, loaded.unlabelled());
+        assertEquals(4, loaded.unlabeled());
         assertEquals("h0", loaded.cases().getFirst().labels().id());
         assertEquals(first.get("memoryId").getAsLong(), loaded.cases().getFirst().memoryId());
 
@@ -132,7 +132,7 @@ class HeldOutTest extends UnitTest {
     }
 
     @Test
-    void aLabelledCaseSampledBeforeV3IsRefusedByPositionWithAResample() throws Exception {
+    void aLabeledCaseSampledBeforeV3IsRefusedByPositionWithAResample() throws Exception {
         var file = dir.resolve("old.json");
         HeldOut.sample(file, agentId, 2, 7);
         var root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
@@ -143,23 +143,23 @@ class HeldOutTest extends UnitTest {
         operator.addProperty("mention", "The user");
         operator.addProperty("type", "Person");
         cases.get(1).getAsJsonObject().getAsJsonArray("entities").add(operator);
-        var labelled = cases.get(1).getAsJsonObject().deepCopy();
+        var labeled = cases.get(1).getAsJsonObject().deepCopy();
         var expected = "case h1: sampled before v3 (no capturedAt or authorType); move the file aside and resample";
         for (Consumer<JsonObject> breakIt : List.<Consumer<JsonObject>>of(
                 o -> o.remove("capturedAt"), o -> o.remove("authorType"), o -> o.addProperty("authorType", "robot_turn"))) {
-            var broken = labelled.deepCopy();
+            var broken = labeled.deepCopy();
             breakIt.accept(broken);
             cases.set(1, broken);
             Files.writeString(file, root.toString());
             var e = assertThrows(IllegalArgumentException.class, () -> HeldOut.load(file, OntologySchema.seed()));
             assertEquals(expected, e.getMessage());
         }
-        cases.set(1, labelled);
+        cases.set(1, labeled);
         Files.writeString(file, root.toString());
         var loaded = HeldOut.load(file, OntologySchema.seed()).cases();
         assertEquals(1, loaded.size(), "the case as sampled loads");
         assertNull(loaded.getFirst().authorType(), "unattributed loads as no author type");
-        labelled.addProperty("authorType", "guest_turn");
+        labeled.addProperty("authorType", "guest_turn");
         Files.writeString(file, root.toString());
         assertEquals(MemoryAuthorType.GUEST_TURN, HeldOut.load(file, OntologySchema.seed()).cases().getFirst().authorType());
     }
@@ -185,7 +185,7 @@ class HeldOutTest extends UnitTest {
     // ---- JCLAW-1374: coverage labels ----
 
     /** A one-case file whose labelled case carries {@code extra}'s keys beside its labels. */
-    private Path labelledWith(Consumer<JsonObject> extra) throws Exception {
+    private Path labeledWith(Consumer<JsonObject> extra) throws Exception {
         var file = dir.resolve("coverage-" + UUID.randomUUID() + ".json");
         HeldOut.sample(file, agentId, 1, 7);
         var root = JsonParser.parseString(Files.readString(file)).getAsJsonObject();
@@ -209,7 +209,7 @@ class HeldOutTest extends UnitTest {
 
     @Test
     void allThreeCoverageFieldsLoadAndFewerLoadAsUncounted() throws Exception {
-        var all = labelledWith(o -> {
+        var all = labeledWith(o -> {
             o.add("notRepresentable", array("quantity", "instruction"));
             o.add("numbers", array("identifier", "quantity"));
             o.addProperty("backReference", true);
@@ -217,7 +217,7 @@ class HeldOutTest extends UnitTest {
         assertEquals(new HeldOut.Coverage(List.of("quantity", "instruction"), List.of("identifier", "quantity"), true),
                 HeldOut.load(all, OntologySchema.seed()).cases().getFirst().coverage());
 
-        var empty = labelledWith(o -> {
+        var empty = labeledWith(o -> {
             o.add("notRepresentable", array());
             o.add("numbers", array());
             o.addProperty("backReference", false);
@@ -225,9 +225,9 @@ class HeldOutTest extends UnitTest {
         assertEquals(new HeldOut.Coverage(List.of(), List.of(), false),
                 HeldOut.load(empty, OntologySchema.seed()).cases().getFirst().coverage());
 
-        var none = labelledWith(o -> {});
+        var none = labeledWith(o -> {});
         assertNull(HeldOut.load(none, OntologySchema.seed()).cases().getFirst().coverage(), "an older file loads");
-        var some = labelledWith(o -> o.add("numbers", array("date")));
+        var some = labeledWith(o -> o.add("numbers", array("date")));
         assertNull(HeldOut.load(some, OntologySchema.seed()).cases().getFirst().coverage(), "one field is not enough");
     }
 
@@ -245,7 +245,7 @@ class HeldOutTest extends UnitTest {
                 o -> o.addProperty("backReference", "zeppelin"),
                 o -> o.addProperty("backReference", "yes"));
         for (var breakIt : breaks) {
-            var file = labelledWith(o -> {
+            var file = labeledWith(o -> {
                 o.add("notRepresentable", array());
                 o.add("numbers", array());
                 o.addProperty("backReference", false);

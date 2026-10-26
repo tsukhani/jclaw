@@ -373,7 +373,7 @@ public final class GraphEvalHarness {
                     scoring.certificate(), development(cases, data, schema, adjudications, options, recallFloor)));
         }
         return new HeldOutReport("heldout", schema.fingerprint(), ExtractionPipeline.fingerprint(schema), pairFilter,
-                cases.size(), loaded.unlabelled(), runs, recallFloor,
+                cases.size(), loaded.unlabeled(), runs, recallFloor,
                 reports, new HeldOutIntegrity(before.size(), unchanged, present), options.excludedSplitIds(),
                 new HeldOutCoverage(CoverageReport.sections(loaded.cases(), questions, schema),
                         CoverageReport.confusions(loaded.cases(), typing)));
@@ -630,12 +630,12 @@ public final class GraphEvalHarness {
         var terms = StageScorer.relationTerms(c);
         var relations = ExtractionPipeline.relate(schema, text, terms, m.name(), m.decider());
 
-        var labelled = new HashSet<String>();
+        var labeled = new HashSet<String>();
         c.dates().forEach(d -> {
-            if (d.value() != null) labelled.add(d.span());
+            if (d.value() != null) labeled.add(d.span());
         });
         var dates = TemporalExpressions.find(text, c.capturedAt()).found().stream()
-                .filter(d -> labelled.contains(d.span())).toList();
+                .filter(d -> labeled.contains(d.span())).toList();
         var tense = ExtractionPipeline.tense(text, dates, m.name(), m.decider());
         var negation = TemporalExpressions.negationCueRanges(text).isEmpty() ? List.<Decision>of()
                 : ExtractionPipeline.negation(schema, text, terms, m.name(), m.decider());
@@ -732,7 +732,7 @@ public final class GraphEvalHarness {
 
     /** Stored decisions scored the v2 way; {@code sequencing} is null on a void run. */
     private record V2(Certifier.@Nullable Sequencing sequencing, Tallies tallies, AgreedSample agreedSample,
-                      Adjudications.Judgement judgement, List<GraphEvalScorer.GateRecord> inScope) {}
+                      Adjudications.Judgment judgment, List<GraphEvalScorer.GateRecord> inScope) {}
 
     private static Development development(List<Case> cases, List<RunData> data, OntologySchema schema,
                                            List<Adjudications.Verdict> adjudications, DevOptions options,
@@ -742,10 +742,10 @@ public final class GraphEvalHarness {
         var v2 = v2(cases, data.stream().map(RunData::e2e).toList(), schema, book, DEVELOPMENT_START,
                 CertificationSplit.relationOrder(cases, schema), recallFloor, MemoryBounds.INSTANCE, null);
         return new Development(DEVELOPMENT_START, v2.sequencing(), v2.tallies(), v2.agreedSample(),
-                v2.judgement().unjudgedByGate(), checks(book, v2.judgement()));
+                v2.judgment().unjudgedByGate(), checks(book, v2.judgment()));
     }
 
-    private static Checks checks(Adjudications.Book book, Adjudications.Judgement j) {
+    private static Checks checks(Adjudications.Book book, Adjudications.Judgment j) {
         return new Checks(book.checkShare(), j.marked(), j.checked(), j.disagreed(), j.disagreementRate());
     }
 
@@ -810,7 +810,7 @@ public final class GraphEvalHarness {
             memoryWeight.merge(r.caseId(), w, Double::sum);
         }
         var writing = new TreeMap<String, List<MemoryCounts>>();
-        var labelled = new TreeMap<String, List<MemoryCounts>>();
+        var labeled = new TreeMap<String, List<MemoryCounts>>();
         var classes = new TreeMap<String, List<MemoryCounts>>();
         var written = new ArrayList<MemoryCounts>();
         var trap = new ArrayList<MemoryCounts>();
@@ -819,7 +819,7 @@ public final class GraphEvalHarness {
                 var mc = new MemoryCounts(m.caseId(), t.written(), t.wrong(),
                         weights.getOrDefault(List.of(m.caseId(), gate), 0.0), t.gold(), t.right());
                 if (t.written() > 0) writing.computeIfAbsent(gate, _ -> new ArrayList<>()).add(mc);
-                if (t.gold() > 0) labelled.computeIfAbsent(gate, _ -> new ArrayList<>()).add(mc);
+                if (t.gold() > 0) labeled.computeIfAbsent(gate, _ -> new ArrayList<>()).add(mc);
             });
             for (var name : Certifier.V2_CLASSES) {
                 var c = m.classes().get(name);
@@ -836,10 +836,10 @@ public final class GraphEvalHarness {
         }
         var gates = new HashMap<String, Certifier.GateCounts>();
         var names = new TreeSet<>(writing.keySet());
-        names.addAll(labelled.keySet());
+        names.addAll(labeled.keySet());
         for (var g : names) {
             gates.put(g, new Certifier.GateCounts(writing.getOrDefault(g, List.of()),
-                    labelled.getOrDefault(g, List.of())));
+                    labeled.getOrDefault(g, List.of())));
         }
         return new Certifier.Evaluation(gates, classes, written, trap);
     }
@@ -872,11 +872,11 @@ public final class GraphEvalHarness {
         var gates = new HashMap<String, Certifier.GateCounts>();
         for (var g : names) {
             var counts = runs.stream().map(e -> e.gates().getOrDefault(g, Certifier.GateCounts.EMPTY)).toList();
-            var labelled = counts.stream().map(Certifier.GateCounts::labelled)
+            var labeled = counts.stream().map(Certifier.GateCounts::labeled)
                     .min((a, b) -> Double.compare(bounds.recallLower(a, tail), bounds.recallLower(b, tail)))
                     .orElse(List.of());
             gates.put(g, new Certifier.GateCounts(highest(counts.stream().map(Certifier.GateCounts::writing).toList(),
-                    bounds, Certifier.BASE_GATE_TAIL), labelled));
+                    bounds, Certifier.BASE_GATE_TAIL), labeled));
         }
         var classes = new HashMap<String, List<MemoryCounts>>();
         for (var name : Certifier.V2_CLASSES) {
@@ -1139,10 +1139,10 @@ public final class GraphEvalHarness {
                     stored.passes().stream().map(StoredRun.Pass::chains).toList(), sequencing.reached(), start,
                     stored.sequenceSpotCheck(), zone, RecordBounds.INSTANCE);
         }
-        var judgement = v2.judgement();
+        var judgment = v2.judgment();
         var verdict = Certifier.verdict(sequencing, new Certifier.VerdictInputs(stored.memoriesChanged() > 0, failed,
-                spotCheckDiffered(stored), judgement.labelError(), seq == null ? null : seq.timeline(),
-                agreement.complete(), judgement.unjudgedCount(), judgement.uncheckedMarked()));
+                spotCheckDiffered(stored), judgment.labelError(), seq == null ? null : seq.timeline(),
+                agreement.complete(), judgment.unjudgedCount(), judgment.uncheckedMarked()));
         CertificateDocument certificate = null;
         if (verdict.status().equals(Certifier.CERTIFIED) && sequencing != null && seq != null) {
             var timeline = seq.runs().stream().map(SequenceHarness.RunReport::endToEnd)
@@ -1154,7 +1154,7 @@ public final class GraphEvalHarness {
         var model = new CertifiedModel(stored.model(), stored.digest(), stored.passes().size(),
                 stored.memoriesChanged(), failed, stored.spotCheck(), stored.sequenceSpotCheck(),
                 stored.passes().stream().map(StoredRun.Pass::stages).toList(), sequencing, v2.tallies(),
-                v2.agreedSample(), judgement.unjudgedByGate(), checks(book, judgement), seq,
+                v2.agreedSample(), judgment.unjudgedByGate(), checks(book, judgment), seq,
                 seq == null ? null : lineagePower(seq.lineage()), verdict,
                 certificate == null ? null : certificate.id(),
                 sequencing == null ? List.of() : sequencing.requirements());

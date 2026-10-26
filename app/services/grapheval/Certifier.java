@@ -453,14 +453,14 @@ public final class Certifier {
 
     /**
      * One gate's counts at one configuration: {@code writing} the memories that wrote at least one of its records,
-     * {@code labelled} every memory with gold for it.
+     * {@code labeled} every memory with gold for it.
      */
-    public record GateCounts(List<MemoryCounts> writing, List<MemoryCounts> labelled) {
+    public record GateCounts(List<MemoryCounts> writing, List<MemoryCounts> labeled) {
         public static final GateCounts EMPTY = new GateCounts(List.of(), List.of());
 
         public GateCounts {
             writing = List.copyOf(writing);
-            labelled = List.copyOf(labelled);
+            labeled = List.copyOf(labeled);
         }
     }
 
@@ -682,7 +682,7 @@ public final class Certifier {
                     "no threshold at or below the starting threshold to evaluate"),
                     requirement(name, tail, List.of(), 0, memoryLevel));
         }
-        var atFirst = requirement(name, tail, first.writing(), goldMemories(first.labelled()), memoryLevel);
+        var atFirst = requirement(name, tail, first.writing(), goldMemories(first.labeled()), memoryLevel);
         if (routed && MemoryBounds.n(first.writing()) == 0) {
             var step = steps.getFirst();
             return new Walked(new Gate(name, OFF, null, step.n(), step.k(), step.bound(), null,
@@ -691,19 +691,19 @@ public final class Certifier {
         if (threshold == null || last == null) {
             var step = steps.getFirst();
             return new Walked(new Gate(name, OFF, null, step.n(), step.k(), step.bound(),
-                    bounds.recallLower(first.labelled(), CONFIDENCE_TAIL), Power.of(bounds, first.writing(), tail),
+                    bounds.recallLower(first.labeled(), CONFIDENCE_TAIL), Power.of(bounds, first.writing(), tail),
                     steps, "%s fails its bound at %s: %d wrong of %d, bound %s".formatted(name, fmt(step.t()),
                             step.k(), step.n(), fmt(step.bound()))), atFirst);
         }
-        double recall = bounds.recallLower(last.labelled(), CONFIDENCE_TAIL);
+        double recall = bounds.recallLower(last.labeled(), CONFIDENCE_TAIL);
         var step = steps.get(steps.size() - (steps.getLast().passes() ? 1 : 2));
         var power = Power.of(bounds, last.writing(), tail);
-        var atLast = requirement(name, tail, last.writing(), goldMemories(last.labelled()), memoryLevel);
+        var atLast = requirement(name, tail, last.writing(), goldMemories(last.labeled()), memoryLevel);
         if (recall < recallFloor) {
             return new Walked(new Gate(name, OFF, null, step.n(), step.k(), step.bound(), recall, power, steps,
                     "%s recall lower bound %s is below the floor %s at %s (%d right of %d)".formatted(name,
-                            fmt(recall), fmt(recallFloor), fmt(threshold), right(last.labelled()),
-                            gold(last.labelled()))), atLast);
+                            fmt(recall), fmt(recallFloor), fmt(threshold), right(last.labeled()),
+                            gold(last.labeled()))), atLast);
         }
         return new Walked(new Gate(name, ON, threshold, step.n(), step.k(), step.bound(), recall, power, steps, null),
                 atLast);
@@ -722,7 +722,7 @@ public final class Certifier {
         var atStart = evaluate.apply(new Configuration(start, all, new TreeMap<>()));
         for (var type : relationOrder) {
             var g = atStart.gates().getOrDefault(type, GateCounts.EMPTY);
-            out.add(requirement(type, BASE_GATE_TAIL, g.writing(), goldMemories(g.labelled()), memoryLevel(bounds)));
+            out.add(requirement(type, BASE_GATE_TAIL, g.writing(), goldMemories(g.labeled()), memoryLevel(bounds)));
         }
         var provisional = new TreeMap<String, ClassSetting>();
         V2_CLASSES.forEach(name -> provisional.put(name, new ClassSetting(PROVISIONAL, start)));
@@ -766,18 +766,18 @@ public final class Certifier {
     /** G_written's memories with gold: every memory with gold for any gate. */
     private static int goldMemories(Evaluation at) {
         var ids = new HashSet<String>();
-        at.gates().values().forEach(g -> g.labelled().forEach(m -> {
+        at.gates().values().forEach(g -> g.labeled().forEach(m -> {
             if (m.gold() > 0) ids.add(m.memoryId());
         }));
         return ids.size();
     }
 
-    private static int right(List<MemoryCounts> labelled) {
-        return labelled.stream().mapToInt(MemoryCounts::right).sum();
+    private static int right(List<MemoryCounts> labeled) {
+        return labeled.stream().mapToInt(MemoryCounts::right).sum();
     }
 
-    private static int gold(List<MemoryCounts> labelled) {
-        return labelled.stream().mapToInt(MemoryCounts::gold).sum();
+    private static int gold(List<MemoryCounts> labeled) {
+        return labeled.stream().mapToInt(MemoryCounts::gold).sum();
     }
 
     private record ClassesWalked(List<ClassGate> gates, List<Requirement> requirements) {}

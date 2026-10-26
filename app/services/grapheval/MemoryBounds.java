@@ -61,8 +61,8 @@ public final class MemoryBounds implements GateBounds {
      * estimate. 0 when nothing is labeled.
      */
     @Override
-    public double recallLower(List<MemoryCounts> labelled, double tail) {
-        var memories = labelled.stream().filter(m -> m.gold() > 0).sorted(BY_MEMORY).toArray(MemoryCounts[]::new);
+    public double recallLower(List<MemoryCounts> labeled, double tail) {
+        var memories = labeled.stream().filter(m -> m.gold() > 0).sorted(BY_MEMORY).toArray(MemoryCounts[]::new);
         if (memories.length == 0) return 0.0;
         long right = 0;
         long gold = 0;

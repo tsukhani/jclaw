@@ -38,9 +38,9 @@ public final class RecordBounds implements GateBounds {
     }
 
     @Override
-    public double recallLower(List<MemoryCounts> labelled, double tail) {
-        return Certifier.lowerBound(labelled.stream().mapToInt(MemoryCounts::right).sum(),
-                labelled.stream().mapToInt(MemoryCounts::gold).sum(), tail);
+    public double recallLower(List<MemoryCounts> labeled, double tail) {
+        return Certifier.lowerBound(labeled.stream().mapToInt(MemoryCounts::right).sum(),
+                labeled.stream().mapToInt(MemoryCounts::gold).sum(), tail);
     }
 
     /** P(at most the largest passing k wrong of n), with n this gate's records and each wrong at the given share. */

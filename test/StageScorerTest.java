@@ -105,7 +105,7 @@ class StageScorerTest extends UnitTest {
     }
 
     @Test
-    void aLabelledRelationNeedsYesOfAtLeastOneHalfAndASymmetricOneMatchesEitherWay() {
+    void aLabeledRelationNeedsYesOfAtLeastOneHalfAndASymmetricOneMatchesEitherWay() {
         var c = new Case("f", List.of("plain"), "The user's sister is Wren Castillo, who works at Harborlight.",
                 List.of(Entity.of("operator", "The user", "Person"), Entity.of("wren", "Wren Castillo", "Person"),
                         Entity.of("harborlight", "Harborlight", "Organization")),

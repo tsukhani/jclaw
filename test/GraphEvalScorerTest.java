@@ -187,7 +187,7 @@ class GraphEvalScorerTest extends UnitTest {
     }
 
     @Test
-    void anUnlabelledRelationIsWrong() {
+    void anUnlabeledRelationIsWrong() {
         var s = score(MERIDIAN, operator(), term("Wren Castillo", "Person"),
                 relation("Wren Castillo", "works_on", "The user"));
         assertEquals(1, s.point().wrongRelation());
@@ -362,9 +362,9 @@ class GraphEvalScorerTest extends UnitTest {
         assertEquals(GraphEvalScorer.TIME, wrong.wrong().getFirst().kind());
         assertTrue(wrong.wrong().getFirst().record().startsWith("valid:The user:works_at:Harborlight Analytics:"));
 
-        var unlabelled = score(works(GraphCases.HOLDS, null, text), ALL,
+        var unlabeled = score(works(GraphCases.HOLDS, null, text), ALL,
                 worksAt(held, slot(works(GraphCases.HOLDS, null, text), "2019", ExtractionPipeline.FROM)));
-        assertEquals(new GraphEvalScorer.ClassTally(1, 0, 1, 0, null), unlabelled.point().time(),
+        assertEquals(new GraphEvalScorer.ClassTally(1, 0, 1, 0, null), unlabeled.point().time(),
                 "a value where gold has none is wrong");
 
         var missing = score(works(GraphCases.HOLDS, "2019/..", text), ALL, worksAt(held)).point();

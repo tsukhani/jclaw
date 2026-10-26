@@ -182,7 +182,7 @@ public class ApiGraphEvalController extends Controller {
             }
             var frozen = frozenIds("heldout");
             var kept = loaded.cases().stream().filter(h -> !frozen.contains(String.valueOf(h.memoryId()))).toList();
-            var unsplit = new HeldOut.Loaded(kept, loaded.unlabelled());
+            var unsplit = new HeldOut.Loaded(kept, loaded.unlabeled());
             var options = new GraphEvalHarness.DevOptions(guide(), agreedSeed, agreedShare,
                     Adjudications.DEFAULT_CHECK_SHARE, loaded.cases().size() - kept.size());
             var verdicts = verdicts(root().resolve(Adjudications.HELDOUT_FILE));
