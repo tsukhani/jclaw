@@ -75,6 +75,7 @@ class RestartProgressScriptTest extends UnitTest {
             case " $* " in
                 *" utils.RestartNarrator "*)
                     printf 'narrator %s\\n' "$*" >> "$STUB_CALLS"
+                    printf '%s\\n' "$$" > "$STUB_NARRATOR_JVM"
                     if [ -n "${STUB_FAKE_NARRATOR:-}" ]; then
                         prev=""; for a in "$@"; do [ "$prev" = --pid-file ] && pidfile="${a#W:}"; prev="$a"; done
                         printf '%s\\nbound\\n' "$$" > "$pidfile"
@@ -89,9 +90,15 @@ class RestartProgressScriptTest extends UnitTest {
             echo "play $1" >> "$STUB_CALLS"
             case "$1" in
                 stop)
-                    # The narrator writes its pid file as it starts, before it can bind.
+                    # A real stop takes seconds: time for the narrator's JVM to load its classes and write its pid
+                    # file, or to fail and exit. On a loaded host the stub's instant stop outran it.
                     if [ -n "${STUB_AWAIT_NARRATOR:-}" ]; then
-                        for _ in $(seq 1 100); do [ -e "$STUB_PIDFILE" ] && break; sleep 0.1; done
+                        for _ in $(seq 1 100); do [ -s "$STUB_NARRATOR_JVM" ] && break; sleep 0.1; done
+                        jvm=$(cat "$STUB_NARRATOR_JVM" 2>/dev/null || true)
+                        for _ in $(seq 1 100); do
+                            { [ -e "$STUB_PIDFILE" ] || ! kill -0 "$jvm" 2>/dev/null; } && break
+                            sleep 0.1
+                        done
                     fi
                     if [ -e "$STUB_PIDFILE" ]; then echo "stop finds a narrator" >> "$STUB_CALLS"
                     else echo "stop finds no narrator" >> "$STUB_CALLS"; fi
@@ -231,7 +238,7 @@ class RestartProgressScriptTest extends UnitTest {
         Thread.sleep(1100);
         Files.writeString(home.resolve("app/Changed.java"), "class Changed {}\n");
 
-        var run = restart(Map.of("JCLAW_AOT", "off"), false);
+        var run = restart(Map.of("JCLAW_AOT", "off", "STUB_AWAIT_NARRATOR", "1"), false);
         assertEquals(0, run.exit(), run.out());
 
         assertEquals(List.of("stop:Stopping JClaw", "precompile:Precompiling", "spa:Building the web app",
@@ -306,7 +313,7 @@ class RestartProgressScriptTest extends UnitTest {
             jar.putNextEntry(new ZipEntry("utils/Other.class"));
             jar.closeEntry();
         }
-        var run = restart(Map.of("JCLAW_AOT", "off"), false);
+        var run = restart(Map.of("JCLAW_AOT", "off", "STUB_AWAIT_NARRATOR", "1"), false);
 
         assertEquals(0, run.exit(), run.out());
         assertEquals(List.of("stop:Stopping JClaw", "start:Starting JClaw (connecting channels)"), phases());
@@ -443,6 +450,7 @@ class RestartProgressScriptTest extends UnitTest {
         penv.put("STUB_CALLS", tmp.resolve("calls.log").toString());
         penv.put("STUB_PORT", Integer.toString(port));
         penv.put("STUB_PIDFILE", home.resolve("logs/restart-narrator.pid").toString());
+        penv.put("STUB_NARRATOR_JVM", tmp.resolve("narrator-jvm.pid").toString());
         penv.put("STUB_CACHE", home.resolve("build/play/aot/app.aot").toString());
         penv.put("STUB_COOKIE", cookie());
         for (var e : env.entrySet()) {
