@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 
@@ -26,6 +27,8 @@ class WorkspaceSizeGaugeTest extends UnitTest {
         record Call(long bytes, Thread thread, CompletableFuture<Void> release) {}
 
         final AtomicLong size;
+        final AtomicInteger peakConcurrent = new AtomicInteger();
+        private final AtomicInteger running = new AtomicInteger();
         private final List<Call> calls = new ArrayList<>();
         private volatile boolean held;
 
@@ -35,13 +38,18 @@ class WorkspaceSizeGaugeTest extends UnitTest {
 
         @Override
         public long getAsLong() {
-            var call = new Call(size.get(), Thread.currentThread(), new CompletableFuture<>());
-            synchronized (this) {
-                calls.add(call);
-                notifyAll();
+            peakConcurrent.accumulateAndGet(running.incrementAndGet(), Math::max);
+            try {
+                var call = new Call(size.get(), Thread.currentThread(), new CompletableFuture<>());
+                synchronized (this) {
+                    calls.add(call);
+                    notifyAll();
+                }
+                if (held) call.release().join();
+                return call.bytes();
+            } finally {
+                running.decrementAndGet();
             }
-            if (held) call.release().join();
-            return call.bytes();
         }
 
         void hold() {
@@ -162,27 +170,46 @@ class WorkspaceSizeGaugeTest extends UnitTest {
     }
 
     @Test
-    void invalidateRecountsAtOnceAndACountStartedBeforeItCannotOverwriteTheNewer() throws Exception {
+    void aChangeWithNoWalkRunningRecountsAtOnce() throws Exception {
+        var walk = new Walk(100);
+        var gauge = new WorkspaceSizeGauge(walk, MAX_AGE);
+        assertEquals(new Reading(100, false), read(gauge, T0));
+        walk.hold();
+        walk.size.set(80);
+
+        invalidate(gauge, T0.plusSeconds(1));
+        var recount = walk.call(2);
+        assertEquals(new Reading(100, true), read(gauge, T0.plusSeconds(2)), "the last count is served until the recount lands");
+        walk.finish(recount);
+
+        assertEquals(new Reading(80, false), read(gauge, T0.plusSeconds(3)));
+        assertEquals(2, walk.started());
+    }
+
+    @Test
+    void changesDuringAWalkQueueOneRecountAfterItAndNeverASecondWalkAtOnce() throws Exception {
         var walk = new Walk(100);
         var gauge = new WorkspaceSizeGauge(walk, MAX_AGE);
         assertEquals(new Reading(100, false), read(gauge, T0));
         walk.hold();
         walk.size.set(150);
         assertEquals(new Reading(100, true), read(gauge, T0.plus(MAX_AGE)));
-        var beforeDelete = walk.call(2);
+        var running = walk.call(2);
 
         walk.size.set(120);
-        invalidate(gauge, T0.plus(MAX_AGE).plusSeconds(1));
-        var afterDelete = walk.call(3);
-        assertEquals(new Reading(100, true), read(gauge, T0.plus(MAX_AGE).plusSeconds(2)),
-                "the last count is served until the recount lands");
+        for (int i = 1; i <= 10; i++) invalidate(gauge, T0.plus(MAX_AGE).plusSeconds(i));
+        assertEquals(2, walk.started(), "ten deletes during a walk start nothing until it ends");
+        assertEquals(new Reading(100, true), read(gauge, T0.plus(MAX_AGE).plusSeconds(11)));
 
-        walk.finish(afterDelete);
-        assertEquals(new Reading(120, false), read(gauge, T0.plus(MAX_AGE).plusSeconds(3)));
-        walk.finish(beforeDelete);
-        assertEquals(new Reading(120, false), read(gauge, T0.plus(MAX_AGE).plusSeconds(4)),
-                "the count started before the delete is discarded");
-        assertEquals(3, walk.started());
+        walk.finish(running);
+        var followUp = walk.call(3);
+        assertEquals(new Reading(150, true), read(gauge, T0.plus(MAX_AGE).plusSeconds(12)),
+                "the walk that predates the deletes lands, and the one queued behind it is running");
+        walk.finish(followUp);
+
+        assertEquals(new Reading(120, false), read(gauge, T0.plus(MAX_AGE).plusSeconds(13)));
+        assertEquals(3, walk.started(), "one recount for ten deletes");
+        assertEquals(1, walk.peakConcurrent.get(), "never two walks at once");
     }
 
     @Test

@@ -99,7 +99,7 @@ public final class WorkspaceFiles {
         }
     }
 
-    /** Recounts the workspace size at once, so the dashboard figure follows a delete. */
+    /** Recounts the workspace size after a delete, at once or after the count already running. */
     public static void invalidateWorkspaceSize() {
         sizeGauge.invalidate();
     }
