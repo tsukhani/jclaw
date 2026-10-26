@@ -465,7 +465,7 @@ The **Ollama** card is for System One decision models, such as `d1` and `tev1`, 
 | `decision.ollama.models`    | *(unset)* | A JSON array of the selected model names, such as `["tev1"]`.                                     |
 | `decision.ollama.keepAlive` | `-1`      | How long Ollama keeps the selected model loaded. `-1` keeps it until Ollama restarts, `0` unloads it at once, or a number followed by `s`, `m` or `h`, such as `30m`; anything else is refused. |
 
-JClaw loads the classifier's model itself, on a request of its own: at startup, every 30 minutes, when it is chosen, and after a classification times out, because a cold model can take longer to load than the classifier timeout allows. The Ollama card has its own **circuit breaker**, with JEV's thresholds and counting, except that a timeout does not count while a model on the server is still loading. A cloud model never loads on your server, so its timeouts always count.
+JClaw loads the classifier's model itself, on a request of its own: at startup, every 30 minutes, when it is chosen, and after a classification times out, because a cold model can take longer to load than the classifier timeout allows. A cloud model runs on ollama.com, so JClaw never loads it. The Ollama card has its own **circuit breaker**, with JEV's thresholds and counting, except that a timeout does not count while a model on the server is still loading. A cloud model never loads on your server, so its timeouts always count.
 
 #### Ollama's cloud models {#ollama-cloud}
 

@@ -686,7 +686,7 @@ class ExtractionPipelineTest extends UnitTest {
                 sent.add(chain.request());
                 var path = chain.request().url().encodedPath();
                 var json = "{\"done\":true}";
-                if (path.equals("/api/ps")) {
+                if (path.equals("/api/ps") || path.equals("/api/tags")) {
                     json = "{\"models\":[{\"name\":\"tev1:latest\"}]}";
                 } else if (!path.equals("/api/generate")) {
                     var buffer = new Buffer();

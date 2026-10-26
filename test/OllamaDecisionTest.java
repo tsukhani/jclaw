@@ -330,7 +330,22 @@ class OllamaDecisionTest extends UnitTest {
         var verdict = withOllama(cloud, () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "clef:cloud", 0.9, 1));
         assertEquals("the Ollama clef:cloud classifier failed (Ollama did not answer within 1 s)", verdict.reason());
         assertEquals(1, OllamaDecision.breaker().stats().failures(), "ollama.com timing out is not a model loading here");
-        withOllama(cloud, () -> OllamaDecision.pin(BASE, "clef:cloud")).get(10, TimeUnit.SECONDS);
+        assertEquals(0, requestsTo("/api/generate"), "a cloud model is never loaded here, so nothing is sent to load it");
+    }
+
+    @Test
+    void aCloudModelIsNeverPinnedAndALocalOneStillIs() throws Exception {
+        ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
+        var server = serverWith(List.of(), chain -> reply(chain, 200, CLOUD_TAGS));
+        assertFalse(withOllama(server, () -> OllamaDecision.pin(BASE, "clef:cloud")).get(5, TimeUnit.SECONDS));
+        assertFalse(withOllama(server, () -> OllamaDecision.pinAfresh(BASE, "clef:cloud")));
+        assertEquals(0, requestsTo("/api/generate"));
+
+        assertTrue(withOllama(server, () -> OllamaDecision.pin(BASE, "d1")).get(5, TimeUnit.SECONDS));
+        var tagsFails = serverWith(List.of(), chain -> reply(chain, 500, "{}"));
+        assertTrue(withOllama(tagsFails, () -> OllamaDecision.pin(BASE, "clef:cloud")).get(5, TimeUnit.SECONDS),
+                "a model is pinned as before unless the server says it runs elsewhere");
+        assertEquals(2, requestsTo("/api/generate"));
     }
 
     @Test
@@ -391,11 +406,10 @@ class OllamaDecisionTest extends UnitTest {
         ConfigService.delete(OllamaDecision.KEEP_ALIVE_KEY);
         var loaded = withOllama(chain -> reply(chain, 200, "{\"done\":true}"), () -> OllamaDecision.pin(BASE + "/", "tev1"));
         assertTrue(loaded.get(10, TimeUnit.SECONDS));
-        assertEquals(1, requests.size());
-        var request = requests.getFirst();
-        assertEquals("POST", request.method());
-        assertEquals(BASE + "/api/generate", request.url().toString());
-        assertNull(request.header("Authorization"), "Ollama takes no key");
+        assertEquals(List.of("GET /api/tags", "POST /api/generate"),
+                requests.stream().map(r -> r.method() + " " + r.url().encodedPath()).toList(), "where it runs is asked first");
+        assertEquals(BASE + "/api/generate", requests.getLast().url().toString());
+        assertTrue(requests.stream().allMatch(r -> r.header("Authorization") == null), "Ollama takes no key");
         assertEquals(0, OllamaDecision.breaker().stats().samples(), "a load is no decision, so the breaker never sees it");
     }
 
@@ -443,7 +457,7 @@ class OllamaDecisionTest extends UnitTest {
         var loaded = withOllama(chain -> reply(chain, 200, "{\"done\":true}"),
                 () -> RouterClassifier.keepOllamaModelLoaded(ollamaPolicy()));
         assertTrue(loaded.get(10, TimeUnit.SECONDS));
-        assertEquals(OllamaDecision.baseUrl() + "/api/generate", requests.getFirst().url().toString());
+        assertEquals(OllamaDecision.baseUrl() + "/api/generate", requests.getLast().url().toString());
         assertEquals("tev1", JsonParser.parseString(bodies.getFirst()).getAsJsonObject().get("model").getAsString());
 
         requests.clear();

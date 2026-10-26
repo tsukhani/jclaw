@@ -55,7 +55,7 @@ public final class OllamaDecision {
     private static final String LOCAL_BASE_URL_KEY = "provider.ollama-local.baseUrl";
     private static final String DEFAULT_BASE_URL = "http://localhost:11434";
     private static final long TAGS_TIMEOUT_SECONDS = 5;
-    /** Asked only after a timeout, on the turn's own thread; a healthy server answers in microseconds. */
+    /** Asked on the caller's thread, a turn's after a timeout among them; a healthy server answers in microseconds. */
     private static final long PS_TIMEOUT_SECONDS = 1;
     /** Until Ollama restarts: the classifier is consulted on every routed turn, and a cold tev1 took 19 s. */
     private static final String DEFAULT_KEEP_ALIVE = "-1";
@@ -126,8 +126,8 @@ public final class OllamaDecision {
      * off at its timeout can leave a cold model unloaded on every turn; this request has its own, longer timeout. It
      * is no decision, so it stays outside the provider's breaker.
      *
-     * @return whether the model loaded: already false when nothing was sent, and the running pin's outcome while one
-     *         for the same server and model is in flight
+     * @return whether the model loaded: already false when nothing was sent, as for a model {@code /api/tags} says runs
+     *         on ollama.com, and the running pin's outcome while one for the same server and model is in flight
      */
     public static CompletableFuture<Boolean> pin(String baseUrl, String model) {
         var body = new JsonObject();
@@ -144,6 +144,8 @@ public final class OllamaDecision {
         } catch (SecurityException | IllegalArgumentException _) {
             return CompletableFuture.completedFuture(false);
         }
+        // A cloud model never loads here; the request would only reach ollama.com.
+        if (runsInCloud(base, model)) return CompletableFuture.completedFuture(false);
         var key = base + " " + model;
         var pinning = new CompletableFuture<Boolean>();
         var running = PINNING.putIfAbsent(key, pinning);
@@ -210,11 +212,16 @@ public final class OllamaDecision {
         } catch (IOException | JsonParseException | IllegalArgumentException | IllegalStateException | ClassCastException _) {
             return false;
         }
+        return !runsInCloud(base, model);
+    }
+
+    /** Whether {@code /api/tags} at {@code base} says {@code model} runs on ollama.com; false when it cannot tell. */
+    private static boolean runsInCloud(String base, String model) {
         try {
             var entry = listed(base, model, PS_TIMEOUT_SECONDS);
-            return entry == null || !runsInCloud(entry);
+            return entry != null && runsInCloud(entry);
         } catch (IOException | JsonParseException | IllegalArgumentException | IllegalStateException | ClassCastException _) {
-            return true;
+            return false;
         }
     }
 
