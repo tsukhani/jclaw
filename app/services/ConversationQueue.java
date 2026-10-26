@@ -1,15 +1,28 @@
 package services;
 
 import agents.TurnCancellation;
+import com.google.gson.reflect.TypeToken;
 import models.Agent;
+import models.ChannelType;
+import models.Conversation;
+import models.PendingInbound;
 import org.jspecify.annotations.Nullable;
+import play.db.jpa.JPA;
+import utils.GsonHolder;
 
+import java.lang.reflect.Type;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
 
 /**
  * Per-conversation message queue that serializes agent processing.
@@ -19,6 +32,9 @@ import java.util.concurrent.atomic.AtomicLong;
  * - "queue" (default): FIFO, process one at a time
  * - "collect": Batch pending messages into a single prompt
  * - "interrupt": Cancel in-flight via {@link #cancellationFlag(Long)}, queue new message for drain
+ *
+ * A message queued from an external channel is also kept in a {@link PendingInbound} row until its
+ * USER row is appended, so a restart re-queues it (JCLAW-1521).
  */
 public class ConversationQueue {
 
@@ -37,11 +53,19 @@ public class ConversationQueue {
      *                       because the enqueue/drain boundary drops call arguments.
      * @param attachments    JCLAW-1514: the staged files the message arrived with, finalized
      *                       onto the drained turn's USER row
+     * @param pendingId      JCLAW-1521: the {@link PendingInbound} row that keeps the message across
+     *                       a restart, consumed with its USER row; null when it has none
      */
     public record QueuedMessage(String text, String channelType, String peerId, Agent agent,
-                                boolean skipUserAppend, List<AttachmentService.Input> attachments) {
+                                boolean skipUserAppend, List<AttachmentService.Input> attachments,
+                                @Nullable Long pendingId) {
         public QueuedMessage {
             attachments = List.copyOf(attachments);
+        }
+
+        public QueuedMessage(String text, String channelType, String peerId, Agent agent,
+                             boolean skipUserAppend, List<AttachmentService.Input> attachments) {
+            this(text, channelType, peerId, agent, skipUserAppend, attachments, null);
         }
 
         public QueuedMessage(String text, String channelType, String peerId, Agent agent) {
@@ -56,7 +80,17 @@ public class ConversationQueue {
                              @Nullable List<AttachmentService.Input> attachments) {
             this(text, channelType, peerId, agent, false, attachments == null ? List.of() : attachments);
         }
+
+        private QueuedMessage withPendingId(@Nullable Long id) {
+            return new QueuedMessage(text, channelType, peerId, agent, skipUserAppend, attachments, id);
+        }
     }
+
+    /** Channels that acknowledge a message to the platform before JClaw stores it, so a queued one is kept in a row. */
+    public static final Set<String> EXTERNAL_CHANNELS =
+            Set.of(ChannelType.TELEGRAM.value, ChannelType.SLACK.value, ChannelType.WHATSAPP.value);
+
+    private static final Type ATTACHMENT_LIST = new TypeToken<List<AttachmentService.Input>>() {}.getType();
 
     static class QueueState {
         final ArrayDeque<QueuedMessage> pending = new ArrayDeque<>();
@@ -126,6 +160,7 @@ public class ConversationQueue {
         // log below — never hold the ingress lock across that I/O.
         boolean interrupted;
         boolean droppedOverflow = false;
+        @Nullable RuntimeException storeFailure = null;
         AtomicBoolean interruptedFlag = state.cancelled;
         synchronized (state) {
             state.mode = mode;
@@ -139,21 +174,37 @@ public class ConversationQueue {
             }
 
             interrupted = "interrupt".equals(mode);
+            var dropped = new ArrayList<QueuedMessage>();
             if (interrupted) {
                 // Signal the in-flight processor to cancel, then queue this message
                 // so drain() will pick it up after the current run finishes.
                 interruptedFlag = state.cancelled;
                 interruptedFlag.set(true);
+                dropped.addAll(state.pending);
                 state.pending.clear();
-                state.pending.addLast(message);
-            } else {
-                // Queue the message (queue and collect modes)
-                if (state.pending.size() >= MAX_QUEUE_SIZE) {
-                    state.pending.pollFirst(); // Drop oldest
-                    droppedOverflow = true;
-                }
-                state.pending.addLast(message);
+            } else if (state.pending.size() >= MAX_QUEUE_SIZE) {
+                // Queue and collect modes: drop the oldest
+                var oldest = state.pending.pollFirst();
+                if (oldest != null) dropped.add(oldest);
+                droppedOverflow = true;
             }
+            // Written under the lock, so no drain can take the message before its row commits.
+            var queued = message;
+            discardPending(pendingIdsOf(dropped));
+            if (isStored(message)) {
+                try {
+                    queued = message.withPendingId(insertPending(conversationId, message));
+                } catch (RuntimeException e) {
+                    storeFailure = e;
+                }
+            }
+            state.pending.addLast(queued);
+        }
+
+        if (storeFailure != null) {
+            EventLogger.warn(QUEUE, message.agent().name, message.channelType(),
+                    "Queued message for conversation %d not stored; a restart drops it: %s"
+                            .formatted(conversationId, storeFailure.getMessage()));
         }
 
         if (interrupted) {
@@ -214,6 +265,7 @@ public class ConversationQueue {
             }
             // A channel turn's flag is the conversation's, and the stale drain never clears it: renew it.
             if (stopped == state.cancelled) state.cancelled = new AtomicBoolean(false);
+            discardPending(pendingIdsOf(List.copyOf(state.pending)));
             state.pending.clear();
             state.generation = GENERATIONS.incrementAndGet();
             state.finishProcessing();
@@ -402,6 +454,63 @@ public class ConversationQueue {
     /** Unfenced {@link #releaseOwnership(Long, long)} against the current generation; tests only. */
     public static void releaseOwnership(Long conversationId) {
         releaseOwnership(conversationId, currentGeneration(conversationId));
+    }
+
+    /** Drops the conversation's in-memory state as a restart does, its owner and pending messages included; tests only. */
+    public static void forgetForTest(Long conversationId) {
+        queues.remove(conversationId);
+    }
+
+    /** The rows of {@code messages} that carry one. */
+    public static List<Long> pendingIdsOf(List<QueuedMessage> messages) {
+        return messages.stream().map(QueuedMessage::pendingId).filter(Objects::nonNull).toList();
+    }
+
+    /**
+     * Delete the rows of messages that will never run, so a restart cannot resurrect them. A failure is
+     * logged, not thrown: the message is already gone from the queue.
+     */
+    public static void discardPending(Collection<Long> pendingIds) {
+        if (pendingIds.isEmpty()) return;
+        try {
+            Tx.run(() -> PendingInbound.deleteByIds(pendingIds));
+        } catch (RuntimeException e) {
+            EventLogger.warn(QUEUE, "Stored message(s) %s not deleted; a restart re-queues them: %s"
+                    .formatted(pendingIds, e.getMessage()));
+        }
+    }
+
+    /** The queued message a stored row holds, carrying the row's id so the drain consumes it. */
+    public static QueuedMessage restore(PendingInbound row) {
+        List<AttachmentService.Input> attachments = row.attachments == null
+                ? List.of() : GsonHolder.GSON.fromJson(row.attachments, ATTACHMENT_LIST);
+        return new QueuedMessage(row.text, row.channelType, row.peerId, row.agent, false, attachments, row.id);
+    }
+
+    private static boolean isStored(QueuedMessage message) {
+        return message.pendingId() == null && !message.skipUserAppend() && message.agent().id != null
+                && EXTERNAL_CHANNELS.contains(message.channelType());
+    }
+
+    private static Long insertPending(Long conversationId, QueuedMessage message) {
+        Supplier<Long> insert = () -> Tx.run(() -> {
+            var row = new PendingInbound();
+            row.conversation = JPA.em().getReference(Conversation.class, conversationId);
+            row.agent = JPA.em().getReference(Agent.class, message.agent().id);
+            row.channelType = message.channelType();
+            row.peerId = message.peerId();
+            row.text = message.text();
+            row.attachments = message.attachments().isEmpty() ? null : GsonHolder.GSON.toJson(message.attachments());
+            row.save();
+            return row.id;
+        });
+        if (!JPA.isInsideTransaction()) return insert.get();
+        // A caller's transaction commits after the lock is released, when a drain may already have run the message.
+        try {
+            return CompletableFuture.supplyAsync(insert, r -> Thread.ofVirtual().start(r)).join();
+        } catch (CompletionException e) {
+            throw e.getCause() instanceof RuntimeException cause ? cause : e;
+        }
     }
 
     /**

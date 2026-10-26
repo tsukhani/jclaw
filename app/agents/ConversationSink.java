@@ -2,6 +2,7 @@ package agents;
 
 import models.Conversation;
 import models.MessageAttachment;
+import models.PendingInbound;
 import models.VideoGenerationJob;
 import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
@@ -61,12 +62,13 @@ public class ConversationSink implements AgentExecutionSink {
     private final boolean fenced;
     private final long generation;
     private final @Nullable AtomicBoolean turnCancel;
+    private final List<Long> pendingIds;
     /** Sticky: once a commit is refused, every later write of this turn is counted, not made. */
     private volatile boolean discarding;
     private final AtomicInteger droppedRows = new AtomicInteger();
 
     public ConversationSink(Conversation conversation) {
-        this(conversation, false, 0, null);
+        this(conversation, false, 0, null, List.of());
     }
 
     /**
@@ -74,11 +76,20 @@ public class ConversationSink implements AgentExecutionSink {
      * {@code generation} and {@code turnCancel} (when non-null) is unset.
      */
     public ConversationSink(Conversation conversation, long generation, @Nullable AtomicBoolean turnCancel) {
-        this(conversation, true, generation, turnCancel);
+        this(conversation, true, generation, turnCancel, List.of());
+    }
+
+    /**
+     * A fenced sink whose user-message append also deletes {@code pendingIds}, the stored rows of the
+     * queued messages it carries (JCLAW-1521).
+     */
+    public ConversationSink(Conversation conversation, long generation, @Nullable AtomicBoolean turnCancel,
+                            List<Long> pendingIds) {
+        this(conversation, true, generation, turnCancel, pendingIds);
     }
 
     private ConversationSink(Conversation conversation, boolean fenced, long generation,
-                             @Nullable AtomicBoolean turnCancel) {
+                             @Nullable AtomicBoolean turnCancel, List<Long> pendingIds) {
         if (conversation == null) {
             throw new IllegalArgumentException("conversation must not be null");
         }
@@ -86,6 +97,7 @@ public class ConversationSink implements AgentExecutionSink {
         this.fenced = fenced;
         this.generation = generation;
         this.turnCancel = turnCancel;
+        this.pendingIds = List.copyOf(pendingIds);
     }
 
     /**
@@ -132,13 +144,18 @@ public class ConversationSink implements AgentExecutionSink {
     @Override
     public void appendUserMessage(String content,
                                   @Nullable List<AttachmentService.Input> attachments) {
-        if (dropping()) return;
+        if (dropping()) {
+            // The stop that refused this row dropped the message; a restart must not run it.
+            ConversationQueue.discardPending(pendingIds);
+            return;
+        }
         var managed = ConversationService.findById(conversation.id);
         if (managed == null) {
             warnSkipped("user");
             return;
         }
         ConversationService.appendUserMessage(managed, content, attachments);
+        PendingInbound.deleteByIds(pendingIds);
     }
 
     @Override

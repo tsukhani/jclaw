@@ -301,7 +301,7 @@ public class AgentRunner {
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
-        return runAfterAcquire(agent, conversation, userMessage, attachments, false, generation, true, true);
+        return runAfterAcquire(agent, conversation, userMessage, attachments, false, generation, true, true, List.of());
     }
 
     /**
@@ -320,7 +320,8 @@ public class AgentRunner {
      */
     public static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage) {
         return runAfterAcquire(agent, conversation, userMessage, null, false,
-                ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id), true);
+                ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id), true,
+                List.of());
     }
 
     /**
@@ -336,7 +337,8 @@ public class AgentRunner {
     public static RunResult runInParentConversation(Agent agent, Conversation conversation, String task) {
         // A parent on a conversation nothing owns (a task fire's spawn) has no stop to fence against.
         return runAfterAcquire(agent, conversation, task, null, false,
-                ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id), false);
+                ConversationQueue.currentGeneration(conversation.id), ConversationQueue.isBusy(conversation.id), false,
+                List.of());
     }
 
     /**
@@ -351,12 +353,14 @@ public class AgentRunner {
      * @param attachments    the drained messages' staged files, finalized onto the USER row
      * @param skipUserAppend true to run without persisting {@code userMessage}
      * @param generation     the queue ownership generation the drain transferred
+     * @param pendingIds     the drained messages' stored rows, deleted with the USER-row append (JCLAW-1521)
      * @return the run outcome
      */
     static RunResult runWithOwnedQueue(Agent agent, Conversation conversation, String userMessage,
                                        List<AttachmentService.Input> attachments, boolean skipUserAppend,
-                                       long generation) {
-        return runAfterAcquire(agent, conversation, userMessage, attachments, skipUserAppend, generation, true, true);
+                                       long generation, List<Long> pendingIds) {
+        return runAfterAcquire(agent, conversation, userMessage, attachments, skipUserAppend, generation, true, true,
+                pendingIds);
     }
 
     /**
@@ -393,7 +397,7 @@ public class AgentRunner {
         if (generation == ConversationQueue.NOT_ACQUIRED) {
             return new RunResult(QUEUED_MESSAGE_RESPONSE, conversation);
         }
-        return runAfterAcquire(agent, conversation, "", null, true, generation, true, true);
+        return runAfterAcquire(agent, conversation, "", null, true, generation, true, true, List.of());
     }
 
     /**
@@ -624,10 +628,11 @@ public class AgentRunner {
         });
     }
 
+    @SuppressWarnings("java:S107") // the drained turn's inputs, its ownership, and its stored rows
     private static RunResult runAfterAcquire(Agent agent, Conversation conversation, String userMessage,
                                              @Nullable List<AttachmentService.Input> attachments,
                                              boolean skipUserAppend, long generation, boolean fenced,
-                                             boolean releases) {
+                                             boolean releases, List<Long> pendingIds) {
         final Long conversationId = conversation.id;
         // JCLAW-21: every persistence write inside the runner routes
         // through this sink. ConversationSink keeps existing chat
@@ -636,7 +641,7 @@ public class AgentRunner {
         // to write into task_run_message. Constructed at the boundary
         // where AgentRunner takes responsibility for the conversation.
         // Fenced on the acquired generation, so an inline child's rows in a stopped parent conversation drop.
-        final var sink = fenced ? new ConversationSink(conversation, generation, null)
+        final var sink = fenced ? new ConversationSink(conversation, generation, null, pendingIds)
                 : new ConversationSink(conversation);
         // Non-streaming callers (background jobs, webhook follow-ups) have
         // no pre-runner queue-accept timestamp, so queue_wait is naturally

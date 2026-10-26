@@ -3,14 +3,21 @@ package jobs;
 import channels.TelegramChannel;
 import models.Conversation;
 import models.TelegramBinding;
+import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import play.db.jpa.NoTransaction;
 import play.jobs.Job;
 import play.jobs.OnApplicationStart;
 import services.EventLogger;
+import services.InboundRecoverySweep;
 import services.Tx;
 
+import java.lang.management.ManagementFactory;
+import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -31,24 +38,47 @@ import java.util.stream.Collectors;
  * that Telegram no longer knows about (e.g., user deleted the chat) just
  * produces a logged warning and we continue.
  *
- * <p>Runs AFTER {@link DefaultConfigJob} (both {@code @OnApplicationStart};
- * Play's jobs don't guarantee order, but both depend only on JPA being
- * ready, which is the precondition Play satisfies before any
- * {@code @OnApplicationStart} runs).
+ * <p>JCLAW-1521 widened it into the boot sweep: after the placeholders,
+ * {@link InboundRecoverySweep} sends the same note to every other channel
+ * turn the restart cut off and re-queues the stored messages that never
+ * started. The cutoff is the JVM's start, so nothing this process wrote is
+ * touched.
+ *
+ * <p>Runs after {@link DefaultConfigJob} and the priority-0 jobs that
+ * register tools and MCP servers, because a re-queued message runs a turn.
+ * {@code @NoTransaction} so each write commits on its own, before the
+ * re-queued turns that write the same conversations start.
  */
-@OnApplicationStart
+@OnApplicationStart(priority = 50)
+@NoTransaction
 public class TelegramStreamingRecoveryJob extends Job<Void> {
 
     private static final String EVENT_CATEGORY_CHANNEL = "channel";
     private static final String CHANNEL_TELEGRAM = "telegram";
 
     /** User-facing text edited into each orphaned placeholder. */
-    static final String INTERRUPT_NOTE =
-            "This response was interrupted — please send your message again.";
+    public static final String INTERRUPT_NOTE = InboundRecoverySweep.INTERRUPT_NOTE;
 
     @Override
     public void doJob() {
-        recoverAll();
+        var runtime = ManagementFactory.getRuntimeMXBean();
+        // jclaw.sh stops a training JVM right after its first answered request: a re-queued turn would die mid-call.
+        if (isAotTrainingRun(runtime.getInputArguments())) return;
+        sweep(Instant.ofEpochMilli(runtime.getStartTime()));
+    }
+
+    /** Whether these JVM options record the AOT cache, as {@code play aot-gen} starts its training run. */
+    public static boolean isAotTrainingRun(List<String> jvmArgs) {
+        return jvmArgs.stream().anyMatch(arg -> arg.startsWith("-XX:AOTCacheOutput=") || arg.equals("-XX:AOTMode=record"));
+    }
+
+    /**
+     * The boot sweep, which tests run with a cutoff of their own.
+     *
+     * @param bootCutoff placeholders and rows from before it belong to a process that no longer runs
+     */
+    public static InboundRecoverySweep.Outcome sweep(Instant bootCutoff) {
+        return InboundRecoverySweep.run(bootCutoff, recoverPlaceholders(bootCutoff));
     }
 
     /**
@@ -56,9 +86,15 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
      * without waiting for a JVM restart.
      */
     public static void recoverAll() {
-        List<Conversation> orphans = Tx.run(() -> Conversation.<Conversation>find(
-                "activeStreamMessageId IS NOT NULL").fetch());
-        if (orphans.isEmpty()) return;
+        recoverPlaceholders(null);
+    }
+
+    /** Edit every orphaned placeholder from before {@code cutoff} (any, when null); returns the conversations edited. */
+    private static Set<Long> recoverPlaceholders(@Nullable Instant cutoff) {
+        List<Conversation> orphans = Tx.run(() -> cutoff == null
+                ? Conversation.<Conversation>find("activeStreamMessageId IS NOT NULL").fetch()
+                : Conversation.<Conversation>find("activeStreamMessageId IS NOT NULL AND updatedAt < ?1", cutoff).fetch());
+        if (orphans.isEmpty()) return Set.of();
 
         EventLogger.info(EVENT_CATEGORY_CHANNEL, null, CHANNEL_TELEGRAM,
                 "Recovery: %d orphaned streaming placeholder(s) found".formatted(orphans.size()));
@@ -69,9 +105,10 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         // below treats the same as before (no enabled binding → skip).
         Map<Long, String> tokensByAgentId = Tx.run(() -> tokensByAgentId(TelegramBinding.findAllEnabled()));
 
+        var edited = new HashSet<Long>();
         for (var orphan : orphans) {
             try {
-                recoverOne(orphan, tokensByAgentId);
+                if (recoverOne(orphan, tokensByAgentId)) edited.add(orphan.id);
             } catch (Exception e) {
                 // Per-row failures must not stop the batch. Most commonly the
                 // user deleted the chat / message and Telegram 400s us.
@@ -81,6 +118,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
                                 .formatted(orphan.id, orphan.activeStreamMessageId, e.getMessage()));
             }
         }
+        return edited;
     }
 
     /**
@@ -93,7 +131,8 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
                 .collect(Collectors.toMap(b -> b.agent.id, b -> b.botToken, (first, _) -> first));
     }
 
-    private static void recoverOne(Conversation orphan, Map<Long, String> tokensByAgentId)
+    /** Returns whether the placeholder now carries the note. */
+    private static boolean recoverOne(Conversation orphan, Map<Long, String> tokensByAgentId)
             throws TelegramApiException {
         // Clear the checkpoint first in a separate transaction. If the
         // editMessageText below fails, we still want the column cleared so
@@ -113,7 +152,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
             }
         });
 
-        if (messageId == null || chatId == null || agent == null) return;
+        if (messageId == null || chatId == null || agent == null) return false;
 
         // Resolve the bot token from the pre-fetched enabled-binding map.
         // A missing entry means the agent has no enabled binding — the
@@ -125,7 +164,7 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
             EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
                     "Recovery: skipping orphan for conversation %d — no enabled binding with a readable bot token"
                             .formatted(convId));
-            return;
+            return false;
         }
 
         TelegramChannel.editMessageText(botToken, chatId, messageId, INTERRUPT_NOTE);
@@ -133,5 +172,6 @@ public class TelegramStreamingRecoveryJob extends Job<Void> {
         EventLogger.info(EVENT_CATEGORY_CHANNEL, agent.name, CHANNEL_TELEGRAM,
                 "Recovery: interrupted-note written to orphan messageId=%d for conversation %d"
                         .formatted(messageId, convId));
+        return true;
     }
 }

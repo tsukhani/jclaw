@@ -5,6 +5,7 @@ import services.ConversationService;
 import services.EventLogger;
 import services.Tx;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -83,14 +84,23 @@ public final class QueueDrainOrchestrator {
      */
     static void processQueueDrain(Long conversationId, long generation) {
         // JCLAW-117: drain() now keeps processing=true when it returns a
-        // non-empty list — ownership transfers to this call. The virtual
-        // thread below must either re-drain on success (runAfterAcquire's
+        // non-empty list — ownership transfers to this call. The drain
+        // thread runOwned starts must either re-drain on success (runAfterAcquire's
         // finally will re-invoke processQueueDrain, and a later empty drain
         // releases) or explicitly releaseOwnership on early-exit paths
         // (findById returned null, or run threw before finally could fire).
         var drained = ConversationQueue.drain(conversationId, generation);
         if (drained.isEmpty()) return;
+        runOwned(conversationId, generation, drained);
+    }
 
+    /**
+     * Run {@code messages} on a drain thread and send the reply on their channel. The caller holds the
+     * conversation at {@code generation} and hands it to the run, whose end drains or releases it: the
+     * messages {@link #processQueueDrain} drained, or a stored message the boot sweep re-queued (JCLAW-1521).
+     */
+    public static void runOwned(Long conversationId, long generation, List<ConversationQueue.QueuedMessage> messages) {
+        var drained = List.copyOf(messages);
         startDrainThread(() -> {
             // JCLAW-273: a yield-resume's content is already a persisted announce row,
             // so it must not be re-appended. Dropping it from the combined block leaves
@@ -100,6 +110,7 @@ public final class QueueDrainOrchestrator {
             boolean skipUserAppend = appendable.isEmpty();
             var combined = skipUserAppend ? "" : ConversationQueue.formatCollectedMessages(appendable);
             var attachments = appendable.stream().flatMap(m -> m.attachments().stream()).toList();
+            var pendingIds = ConversationQueue.pendingIdsOf(appendable);
             var msg = drained.getFirst(); // channel info is the same for all queued messages
             boolean runStarted = false;
             try {
@@ -109,14 +120,16 @@ public final class QueueDrainOrchestrator {
                     return;
                 }
                 runStarted = true;
-                // JCLAW-117: queue ownership was transferred to us by drain()
-                // above — use the owned-queue variant to avoid re-acquire.
+                // JCLAW-117: the caller transferred queue ownership to this run —
+                // use the owned-queue variant to avoid re-acquire.
                 var result = AgentRunner.runWithOwnedQueue(msg.agent(), conversation, combined,
-                        attachments, skipUserAppend, generation);
+                        attachments, skipUserAppend, generation, pendingIds);
                 AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
             } catch (Exception e) {
                 EventLogger.error("queue", msg.agent().name, msg.channelType(),
                         "Failed to process queued message: %s".formatted(e.getMessage()));
+                // Dropped as before rather than retried at every boot; a row the USER append consumed is already gone.
+                ConversationQueue.discardPending(pendingIds);
                 if (!runStarted) {
                     // Exception before run() — release so we don't wedge the queue.
                     // If runWithOwnedQueue started and threw, its own finally ran
