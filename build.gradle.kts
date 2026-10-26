@@ -312,7 +312,7 @@ dependencies {
     // JCLAW-1149: the javac plugin host, and the nullness checker that runs inside it.
     // Both are compile-only tool dependencies — nothing here reaches the dist.
     errorprone("com.google.errorprone:error_prone_core:2.51.0")
-    errorprone("com.uber.nullaway:nullaway:0.14.2")
+    errorprone("com.uber.nullaway:nullaway:0.14.3")
 
     // JCLAW-1156: @MustBeClosed itself. Unlike the two above this one is referenced by
     // app/ and test/ sources, so it has to be a real compile dependency rather than a
