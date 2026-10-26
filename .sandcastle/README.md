@@ -79,14 +79,14 @@ branch on the next start.
 ### Sandboxes (the devcontainer image)
 
 One Docker container per story, and one for the planner, created by Sandcastle from `jclaw-devcontainer:local`. That
-image is built from `.devcontainer/Dockerfile`, the same one the dev container and Jenkins use: JDK 25, Node 26, pnpm,
+image is built from `.devcontainer/Dockerfile`, the same one the dev container uses: JDK 25, Node 26, pnpm,
 uv, Claude Code and the Play fork. The story's worktree is mounted at `/home/agent/workspace`, and Claude Code runs
 there as the unprivileged user `agent`.
 
 **Why it is necessary.** The agent runs code it wrote itself or downloaded, steered by ticket text anyone with Jira
 access can edit. A container keeps that code off your Mac. A fresh container per story means parallel stories cannot
 collide on ports, the test database or files. Sharing the dev container's image means a green gate here is green in
-your dev container and in CI. It also means one toolchain to maintain, where a separate factory image would drift.
+your dev container. It also means one toolchain to maintain, where a separate factory image would drift.
 
 **How it is locked down:**
 - **The clone's `.git` is read-only**, apart from what a commit writes: objects, the `agent/` branches and the
@@ -181,7 +181,7 @@ it. The label works before the story is built or after, and `no-afk-merge` exemp
 - **Your checkout is never disturbed.** The rebase and the merge happen in a throwaway worktree of the clone, and your
   `main` only fast-forwards. If you have a local change on a file the merge touches, a merge or rebase in progress,
   or `main` moved meanwhile, the factory waits and tries again at the next poll.
-- **What it refuses:** a branch it did not build, a brief that did not validate or has an unmet criterion, a branch
+- **What it refuses:** a brief that did not validate or has an unmet criterion, a branch
   that changed since it was offered, a conflict with `main`, a red re-gate, and any change to a file under
   "(!) Runs on your Mac once merged", which a human must read. A refusal comments on the ticket, leaves the story in
   Review, and takes `afk-merge` off the story (or adds `no-afk-merge` when the label came from the epic), so nothing
@@ -305,7 +305,7 @@ Prerequisites: Docker Desktop running, Node 24 or newer, pnpm 12 or newer, a JCl
 
 On first start the harness clones your checkout into `~/.jclaw-factory/jclaw`, creates the gateway, and seeds the
 sandboxes' Gradle cache from `~/.gradle`. Without that cache, each sandbox downloads its dependencies through the
-gateway. The clone's `main` then follows yours at every poll, through an amend or rebase as well, since the factory
+gateway. The clone's `main` then follows yours, through an amend or rebase as well, since the factory
 never commits to it. Re-run the installer after moving the checkout or changing your Node install, because the agent records both
 paths.
 

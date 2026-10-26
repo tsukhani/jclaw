@@ -177,7 +177,7 @@ This runs `play autotest` (backend JUnit + functional tests), `pnpm test` (front
 
 ```
  backend  : PASSED  (47 classes, 26s)
- frontend : PASSED  Tests  199 passed (199) (5s)
+ frontend : PASSED  (40 files, 199 tests, 5s)
  stylelint: PASSED  (3s)
  lint     : PASSED  (4s)
  typecheck: PASSED  (8s)

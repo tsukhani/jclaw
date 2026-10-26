@@ -19,7 +19,7 @@ The architectural style is **service-oriented with a static-method convention** 
 | Framework | Play Framework | 1.13.x (custom fork `tsukhani/play1`, exact patch in `.play-version`) | Established convention in the org; fast hot-reload; no Spring weight. Fork adds JDK 25, Jakarta Persistence, HTTP/2+HTTP/3. |
 | Language | Java | 25 (`java.source=25`) | Virtual threads used across task execution and LLM streaming. |
 | ORM | JPA via Hibernate | bundled | `play.db.jpa.Model` superclass; `jpa.ddl=update` in both dev and prod; Caffeine L2 + query cache (JCLAW-205). |
-| DB (dev) | H2 file | `jdbc:h2:file:./data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE` | Persists across restarts; MySQL mode for fewer surprises when switching to Postgres. |
+| DB (dev) | H2 file | `jdbc:h2:retry:./data/jclaw;MODE=MYSQL;AUTO_SERVER=TRUE` | Persists across restarts; MySQL mode for fewer surprises when switching to Postgres. |
 | DB (prod) | PostgreSQL (template) | — | Production migration path. Template commented in `application.conf`. |
 | Pool | HikariCP (Play-bundled) | dev 5–20, prod 5–64 | Prod pool raised to 64 (chat streams hold a JPA connection for the SSE wait). |
 | Outbound HTTP | **OkHttp 5** | `okhttp-jvm` 5 + `okhttp-sse` | Single outbound stack via `utils.HttpFactories`; virtual-thread dispatcher; pluggable DNS for SSRF. No `java.net.http.HttpClient` in `app/`. |
@@ -144,7 +144,7 @@ Agent-behaviour datasets in `evals/suites/<id>.json` with deterministic pass cri
 
 ## Cross-cutting concerns
 
-- **Auth** — Cookie-session via `AuthCheck @Before` is the primary gate; the in-process `jclaw_api` tool authenticates with a Bearer `ApiToken`. Webhooks exempt themselves by path prefix. Missing/invalid session returns **401**; genuine authorization failures return **403**.
+- **Auth** — Cookie-session via `AuthCheck @Before` is the primary gate; the in-process `jclaw_api` tool authenticates with a Bearer `ApiToken`. Webhook controllers carry no `AuthCheck`. Missing/invalid session returns **401**; genuine authorization failures return **403**.
 - **Transactions** — `services.Tx.run(...)` wraps `JPA.withTransaction` and no-ops if already inside a transaction. Always re-fetch entities after a nested `Tx.run` to avoid detached instances.
 - **Logging** — `log4j2.xml` (dev) / `log4j2-prod.xml` (prod) / `log4j2-test.xml` (test). Structured application events written to the `event_log` table via `EventLogger`.
 - **Metrics** — JVM-local `HdrHistogram` buckets keyed by segment (reset on JVM restart, by design); durable cost aggregated from persisted `Message.usageJson`.

@@ -23,9 +23,8 @@ code.
 
 ## What we do welcome
 
-- **Bug reports** — a minimal reproduction, your platform, JClaw version
-  (`jclaw status`), and relevant log excerpts from `logs/` make bugs fixable
-  fast.
+- **Bug reports** — a minimal reproduction, your platform, JClaw version,
+  and relevant log excerpts from `logs/` make bugs fixable fast.
 - **Feature requests and design discussion** — describe the problem and the
   use case rather than a proposed implementation.
 - **Security reports** — please do **not** open a public issue. Email

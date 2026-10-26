@@ -90,7 +90,7 @@ For long-running async work where the parent eventually needs the child's reply,
 4. When the child terminates, JClaw delivers the child's reply back as the parent's next user-role message and resumes the parent's loop. The parent picks up the conversation seamlessly with the child's output as fresh user input.
 
 :::note
-Without `subagent_yield`, the result arrives as an announce card in the conversation. On Telegram, Slack or WhatsApp it also arrives as a message in the chat. The parent reads it as something it already said, so it can talk about the result later, but it does not act on it by itself. With yield, the announce card is the parent's next input. Use yield when you want the parent to keep working with the result.
+Without `subagent_yield`, web chat shows the result in the subagent list. On Telegram, Slack or WhatsApp it also arrives as a message in the chat. The parent reads it as something it already said, so it can talk about the result later, but it does not act on it by itself. With yield, the announce card is the parent's next input. Use yield when you want the parent to keep working with the result.
 :::
 
 **Groups and guests.** A background result reaches the chat word for word, before the parent sees it. So `async=true` runs in the background only when the owner reads the chat alone: web chat, or the owner's private chat on a channel. In a group, or in a chat with anyone other than the owner, the child runs in the foreground instead. The parent gets the reply with a `note` and writes the answer itself. A `tasks` batch still runs in parallel there. If a background run fails anywhere except the owner's private chat, the chat gets "A background task did not finish. Ask me if you want the details." instead of the error.
@@ -362,7 +362,7 @@ By default, a coding harness runs with the operator's own account permissions. I
 * **Linux** wraps it in `bwrap`. The visible filesystem is built from nothing, so secrets are absent rather than merely denied. Only the session directory is writable, and only the harness's declared state paths (its own config, for example `~/.claude`) are bound back. JClaw's own folders are hidden too, even when JClaw is installed outside your home folder.
 * **Windows** is supported through **WSL2** (it uses the Linux path). Native Windows and WSL1 have no sandbox.
 
-The sandbox **fails closed**. If it is enabled where no mechanism is available (native Windows, WSL1, or a WSL2 kernel with unprivileged user namespaces disabled), the run is aborted with an actionable error rather than launched unsandboxed. The **acp.sandbox** control says when this host lacks `sandbox-exec` or `bwrap` (it cannot detect a `bwrap` whose namespaces are disabled). Network egress stays open; the harness needs its API. Off by default. See the JCLAW-671 spike for the measured confinement results and limitations.
+The sandbox **fails closed**. If it is enabled where no mechanism is available (native Windows, WSL1, or a WSL2 kernel with unprivileged user namespaces disabled), the run is aborted with an actionable error rather than launched unsandboxed. The **acp.sandbox** control says when this host lacks `sandbox-exec` or `bwrap` (it cannot detect a `bwrap` whose namespaces are disabled). Network egress stays open; the harness needs its API. Off by default.
 
 ## Where to go next
 

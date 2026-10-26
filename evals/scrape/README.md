@@ -48,7 +48,7 @@ managed-challenge. Every entry now carries all three:
 
 They are genuinely independent. CloudFront in front does **not** mean CloudFront is blocking —
 `cloudflare/served` is 20% of the web on its own. `abundent.academy` is `none/served/spa`;
-`twitter.com` is `cloudflare/served/spa`; `nih.gov` is `cloudflare/challenge`.
+`twitter.com` is `cloudflare/served/ssr`; `nih.gov` is `cloudflare/challenge`.
 
 `vendor: none` means *no vendor this probe can fingerprint*. Plenty of WAFs stay quiet, so treat it
 as an upper bound on unprotected, never a guarantee.
@@ -115,7 +115,7 @@ receive nothing. This is what the known-zero check verifies: a URL that always c
 score 0%, not 60%.
 
 **`min_chars` is derived only when the origin served us** — a quarter of observed visible text,
-floor 50, ceiling 500. A blanket 600 scored `example.com` (198 extracted characters, the canonical
+floor 50, ceiling 300. A blanket 600 scored `example.com` (198 extracted characters, the canonical
 known-one) as blocked. But for a *gated* entry the observation **is the gate**, so deriving a floor
 from it let a 75-character gate page pass — `outschool.com` did exactly that. Those get a fixed
 bar of 500 instead.
@@ -126,15 +126,6 @@ genuinely small page (142 / 559).
 **`expect_title`** is captured only for served origins and is deliberately **not** gated —
 Readability and the markdown conversion do not reliably preserve it, so gating would manufacture
 failures that say nothing about access. Reported as a secondary signal.
-
-## What the runtime classifier cannot see
-
-Readability strips scripts, so by the time a page reaches `BlockClassifier` the technical markers
-are gone. A pure-JS gate and a client-rendered SPA both extract to nothing and both land as
-`THIN_CONTENT`.
-
-The corpus axes are the disambiguator — read reason **× stratum**, never reason alone. JCLAW-1086
-gives the classifier the raw response and removes the ambiguity at source.
 
 ## The tier is relative to the probe client
 

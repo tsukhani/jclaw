@@ -20,7 +20,7 @@ That is the whole story. The rest of this section is the detail behind each axis
 | **LLM at fire time?**            | Yes: that is the whole point.                                                       | Yes: runs the full agent loop against a fresh task run (not a conversation).           | **No**: the fire path skips the LLM entirely.                                   |
 | **Lives across server restarts?**| No (in-flight runs die with the JVM).                                              | Yes (recurring schedules survive).                                                     | Yes.                                                                       |
 | **Where does the output land?**  | Inline block, the child's own conversation, or (for `async`) the chat's subagent list (an announce card only when the parent waits with `subagent_yield`). | The run's trace on the [Tasks](/tasks) page (expand the task's row); never the [Conversations](/conversations) page; optional `delivery` channel for the final message. | Top-right toast (web) or 🔔-prefixed Telegram message; never enters chat history. |
-| **Visible to the LLM next turn?**| Yes: the reply comes back into the parent (or via `subagent_yield`); an `async` run the parent never yields on stays out of its context. | **No**: the trace is stored on the task run, not in any conversation's history.        | **No**: invisible by design.                                               |
+| **Visible to the LLM next turn?**| Yes: the reply comes back into the parent (or via `subagent_yield`); an `async` run it never yields on returns as its own past reply. | **No**: the trace is stored on the task run, not in any conversation's history.        | **No**: invisible by design.                                               |
 
 ## The load-bearing distinction
 
@@ -31,7 +31,7 @@ That is the whole story. The rest of this section is the detail behind each axis
 
 Every other difference between tasks and reminders falls out of that one choice: cascade-delete behavior, toast vs run-trace surface, the 🔔 prefix on Telegram, and the fact that reminders never enter LLM context on the next turn.
 
-The subagent's "axis" is different. It is not about *when*. Subagents always fire as part of the current turn (the `async` variant just lets the parent keep working in parallel). It is about *what context the work runs in*: a child conversation, a child agent, a child tool set, a child reply. That reply can either come back to the parent (`subagent_yield`) or surface only to *you*, in the chat's subagent list.
+The subagent's "axis" is different. It is not about *when*. Subagents always fire as part of the current turn (the `async` variant just lets the parent keep working in parallel). It is about *what context the work runs in*: a child conversation, a child agent, a child tool set, a child reply. That reply can either come back to the parent (`subagent_yield`) or land in the chat's subagent list.
 
 ## Choosing in practice
 

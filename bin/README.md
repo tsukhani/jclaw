@@ -23,7 +23,7 @@ without the toolchain checks. Both emit one JSON document: an array of records.
 
 The command parses, it does not add builds. It runs `./gradlew compileTestJava` — with
 `--tests`, `play autotest` as well — and reads javac's output plus the xunit reports in
-`test-result/`. Parsing 514 reports costs a few milliseconds against a compile measured
+`test-result/`. Parsing ~750 reports costs a few milliseconds against a compile measured
 in seconds and a suite measured in minutes.
 
 ### Record schema
@@ -41,7 +41,7 @@ in seconds and a suite measured in minutes.
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `kind` | `"compile"` \| `"test"` \| `"arch"` | Which of the three sources reported it |
-| `file` | string \| null | Repo-relative path where it can be fixed |
+| `file` | string \| null | Repo-relative path (arch: may be bare) |
 | `line` | number \| null | 1-based line in that file |
 | `message` | string | What is wrong, self-contained |
 | `fix` | string | Present only when the compiler suggested one |

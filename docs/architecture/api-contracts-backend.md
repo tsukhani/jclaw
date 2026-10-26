@@ -1,6 +1,6 @@
 # API Contracts — Backend
 
-Every HTTP surface the Play backend exposes, from `conf/routes` (the single source of truth) and the controllers in `app/controllers/`. **304 method-specific routes across 68 controllers** (140 GET, 103 POST, 38 DELETE, 21 PUT, 1 PATCH, 1 WS), plus two `*` wildcard fallbacks.
+Every HTTP surface the Play backend exposes, from `conf/routes` (the single source of truth) and the controllers in `app/controllers/`. **315 method-specific routes across 68 controllers** (145 GET, 108 POST, 39 DELETE, 21 PUT, 1 PATCH, 1 WS), plus two `*` wildcard fallbacks.
 
 Play 1.x maps each route to a `public static void` method on a controller; the method signature *is* the request contract. Path params in `{braces}` bind by name; everything else arrives as query or form params. Responses are JSON via `renderJSON` unless noted. The backend serves `:9000` (and `:9443` when HTTPS is enabled); the frontend reaches it same-origin at `/api/*` in production and through the Nitro dev-proxy in development.
 
@@ -92,7 +92,7 @@ The **config store is the live source for operator settings** — not `conf/appl
 { "agentId": 12, "message": "Draft a release note.", "conversationId": 345 }
 ```
 
-**Streaming event contract.** `/api/chat/stream` emits eight event types, consumed by `frontend/composables/useChatStream.ts`:
+**Streaming event contract.** `/api/chat/stream` emits seven event types, consumed by `frontend/composables/useChatStream.ts`:
 
 | Event | Meaning |
 |---|---|
@@ -101,7 +101,6 @@ The **config store is the live source for operator settings** — not `conf/appl
 | `reasoning` | Incremental thinking-mode content, rendered separately from `token` |
 | `tool_call` | A tool invocation began |
 | `status` | Progress line (e.g. a long-running tool) |
-| `queued` | The turn is waiting behind another on the same conversation |
 | `complete` | Terminal success |
 | `error` | Terminal failure |
 

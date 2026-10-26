@@ -1,6 +1,6 @@
 # Frontend Component Inventory
 
-The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for its base UI (auto-imported from `frontend/components/ui/`), with a layer of feature components on top. Pages compose these rather than inlining everything. **182 components total: 74 UI primitives + 108 feature components**, across 26 pages, 47 composables and 43 utility modules.
+The frontend uses a **shadcn-nuxt component library on Reka UI primitives** for its base UI (auto-imported from `frontend/components/ui/`), with a layer of feature components on top. Pages compose these rather than inlining everything. **187 components total: 74 UI primitives + 113 feature components**, across 26 pages, 50 composables and 44 utility modules.
 
 ## UI primitives (`frontend/components/ui/`)
 
@@ -18,20 +18,20 @@ Variants are composed with `class-variance-authority` + `tailwind-merge` (`compo
 
 ## Feature components
 
-108 in seven families:
+113 in seven families:
 
 | Family | Count | Scope |
 |---|---|---|
 | `components/` (root) | 30 | Cross-page components — the table below |
-| `components/settings/` | 51 | One panel per Settings section, registered in `sections.ts` |
-| `components/chat/` | 19 | Chat-surface pieces split out of `chat.vue` (JCLAW-690) |
+| `components/settings/` | 53 | One panel per Settings section, registered in `sections.ts` |
+| `components/chat/` | 22 | Chat-surface pieces split out of `chat.vue` (JCLAW-690) |
 | `components/prompts/`, `components/guide/` | 3 | Prompt dialog + the user-guide renderer |
 
 ### Settings panels (`components/settings/`)
 
 36 panels, each rendered by `pages/settings.vue` from the grouped registry in `sections.ts` (groups: System, Providers, Audio, Image, Video, Agents & Automation, Memory, Security):
 
-`Chat` · `ImageCaption` · `ImageGen` · `Logging` · `Malware` · `MemoryEmbeddings` · `MemoryLimits` · `MemoryReranker` · `Ocr` · `Password` · `Performance` · `Printers` · `Providers` · `Restart` · `Search` · `Shell` · `Skills` · `Speech` · `Subagents` · `Tasks` · `Timezone` · `Transcription` · `Uploads` · `VideoGen` · `VideoInterp`, plus `UnmanagedBanner`.
+`Chat` · `ImageCaption` · `ImageGen` · `Logging` · `Malware` · `MemoryEmbeddings` · `MemoryLimits` · `MemoryReranker` · `Ocr` · `Performance` · `Printers` · `Providers` · `Search` · `Shell` · `Skills` · `Speech` · `Subagents` · `Tasks` · `Timezone` · `Transcription` · `Uploads` · `VideoGen` · `VideoInterp`, plus `UnmanagedBanner`.
 
 Section **ids are stable across renames** — `memory` still addresses the panel now titled "Embeddings" because bookmarks and deep links point at it.
 
@@ -70,7 +70,7 @@ Section **ids are stable across renames** — `memory` still addresses the panel
 
 ## Composables (`frontend/composables/`)
 
-~47 — the `useState`-backed state + data layer (no Pinia):
+~50 — the `useState`-backed state + data layer (no Pinia):
 
 | Composable | Role |
 |---|---|
@@ -96,11 +96,11 @@ Section **ids are stable across renames** — `memory` still addresses the panel
 
 | Middleware | Behavior |
 |---|---|
-| `auth.global.ts` | Runs on every nav except `/login` and `/setup-password`; routes to `/setup-password` (no admin password set) or `/login` (unauthenticated) via `useAuth`. |
+| `auth.global.ts` | Runs on every nav; routes to `/setup-password` (no admin password set) or `/login` (unauthenticated) via `useAuth`. |
 
 ## Utilities (`frontend/utils/`)
 
-~43 pure helpers: `format.ts` (date/number/byte), `usage-cost.ts` (token→cost), `tool-calls.ts` + `display-message-filter.ts` (message rendering), `thinking.ts` + `thinking-lock.ts` (reasoning UI), `schedule.ts` + `calendar.ts` + `task-steps.ts` (scheduling), `linkify.ts` + `markdown-links.ts` (link handling), `video-job.ts` and `latency-rows.ts`.
+~44 pure helpers: `format.ts` (date/number/byte), `usage-cost.ts` (token→cost), `tool-calls.ts` + `display-message-filter.ts` (message rendering), `thinking.ts` + `thinking-lock.ts` (reasoning UI), `schedule.ts` + `calendar.ts` + `task-steps.ts` (scheduling), `linkify.ts` + `markdown-links.ts` (link handling), `video-job.ts` and `latency-rows.ts`.
 
 ## Types (`frontend/types/`)
 
@@ -110,7 +110,7 @@ Section **ids are stable across renames** — `memory` still addresses the panel
 
 ## Test coverage
 
-~208 Vitest specs under `frontend/test/` exercise composables and page-level logic under the **`jsdom`** environment (`test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Playwright E2E under `frontend/tests/e2e/` drives the booted stack through the browser.
+~212 Vitest specs under `frontend/test/` exercise composables and page-level logic under the **`jsdom`** environment (`test/setup.ts` polyfills `matchMedia`, `scrollIntoView`, `DataTransfer`). Playwright E2E under `frontend/tests/e2e/` drives the booted stack through the browser.
 
 ## Intentional choices
 

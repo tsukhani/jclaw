@@ -36,9 +36,9 @@ You can also **promote** an agent-specific skill back into the global library by
 
 ### Creating a skill
 
-Skills are not written on this page. Two ways to get one:
+Skills are not written on this page. Ways to get one:
 
-- **Browse catalog**: the button above the Global Skills column opens the importable-skills catalogs: static ones (the GitHub/Mastra index, with search, sort and category facets) and the dynamic ClawHub registry (search plus paging). **Import** pulls a skill straight into **Global Skills** in one click. The skill keeps its own name, description, license and files; JClaw adds the tools it needs.
+- **Browse catalog**: the button at the top of the page opens the importable-skills catalogs: static ones (the GitHub/Mastra index, with search, sort and category facets) and the dynamic ClawHub registry (search plus paging). **Import** pulls a skill straight into **Global Skills** in one click. The skill keeps its own name, description, license and files; JClaw adds the tools it needs.
 - **Import zip**: the button beside **Browse catalog** takes a skill zip, either one exported from JClaw or a skill built for Claude. It runs the same checks as a catalog import, and the skill keeps its files where they are. If **Global Skills** already has a skill of that name, the page asks before replacing it. An upload older than the version in the library is refused.
 - **Author it** with the built-in **skill-creator** skill: ask an agent (in [Chat](/chat)) to make a skill, and it writes one into that agent's workspace. A skill has a **Name** (short identifier), a **Description** (shown in the library), and **Content** (the markdown body the agent reads when it uses the skill). Once it is good, drag it from the agent's column to **Global Skills** to promote it for reuse.
 
@@ -112,7 +112,7 @@ JClaw surfaces that difference rather than hiding it. When a job goes out over r
 
 These options are **IPP-only**. They travel as RFC 8011 job-template attributes, and the byte-stream backends have nowhere to put them. If a job asks for double-sided and then falls back to raw socket or LPD, it prints single-sided; the tool says so explicitly rather than letting you discover it from the paper.
 
-:::caution Printing is physical and irreversible
+:::gotcha Printing is physical and irreversible
 Paper comes out of a device in someone's room and there is no undo. The tool never guesses a target. `print` goes to the printer the agent names, or to the default saved in [Settings → Printers](/guide#settings-printers), and refuses when there is neither. The tool is **off by default for every agent**. Turn it on deliberately, per agent, on the [Agents](/agents) page.
 :::
 

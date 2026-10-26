@@ -35,7 +35,7 @@ An illustrative case, not one in the committed set:
   nothing else; a second-label file has the same root.
 - `userMd` is a USER.md header declaring the owner, read by the same `WorkspaceFiles` parse
   the live owner name uses. The committed owner is the synthetic Avery Lin.
-- A case holds `id`, `tags`, `text`, `entities`, `relations`, `negatives`, and optionally
+- A case holds `id`, `tags`, `text`, `entities`, `relations`, and optionally `negatives`,
   `capturedAt` (overrides the root's) and `dates`. `id` is unique. `text` is stored verbatim as
   one memory of the requested agent for the run, snapshotted, checked and deleted afterwards.
 - `dates` lists `{span, value}`: `span` verbatim in the text, `value` an EDTF string, or `null`
@@ -79,7 +79,7 @@ An illustrative case, not one in the committed set:
 - `tags` are from `weekday-time`, `role`, `everyday-object`, `descriptive-phrase`,
   `reversed-direction`, `employer-tool` (the hard negatives), `plain`, `guest`, and the v3 tags
   `ended`, `negated`, `unasserted`, `dated` (a stratum) and `guest-about-owner` (always beside
-  `guest`). The v3 tags are not hard negatives yet, so the per-tag floor does not cover them.
+  `guest`). The per-tag floor covers `ended`, `negated`, `unasserted` and `dated` too.
 
 Labels are checked for syntax and verbatim spans only, never against `TemporalExpressions` or
 the valence lexicon: a date value the normalizer would not produce, or a valence the lexicon
@@ -90,7 +90,7 @@ The set is relabelled to GUIDE v3 (JCLAW-1373).
 `services.grapheval.GraphCases` refuses a set that breaks the key, mention, type, relation,
 status, qualifier, date, negative, tag or operator-mention rules, naming the case; `GraphCasesConformanceTest` checks
 the operator count and the guest rules, and fails the build on a refusal or on a missed
-composition target: at least 120 cases, 12-17% beginning "The user", at least 60% beginning the
+composition target: at least 317 cases, 12-17% beginning "The user", at least 60% beginning the
 owner's name, every case owner-voiced (one of those two or subjectless) or `guest`, at least 6
 guest cases with one opening "A guest", a mean length of 17-23 words, at least 12 cases per
 hard-negative tag and at least half carrying one, at least 420 non-noise gold records, every
@@ -921,7 +921,7 @@ and answers UNKNOWN before its stamp.
 
 **Operator spot-check.** `sequence-label-checks.json` holds 30 lineage records
 (`lineage:<later>:<earlier>:<lineage>`) and 40 probe records (keyed like the disagreements
-above, but drawn from every probe), each with verdict `pending`.
+above, but drawn from every probe), each judged `agree`.
 - **Sampling rule.** Within each kind, sort every record in `sequences.json` ascending by the
   SHA-256 hex of `"11:" + record` (the seed, a colon, the record) and take the first k.
 - **Judging.** The operator replaces each `pending` with `agree` or `disagree`, or redraws at

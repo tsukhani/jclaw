@@ -29,9 +29,9 @@ Everything that explains the code is documentation: the Markdown, the comments a
 | Kind | Where | Read by | Must agree with | Handling |
 |---|---|---|---|---|
 | Javadoc | `/** */` in `app/` and `test/`, including `package-info.java` | maintainers, IDE hovers | the declaration it documents; every `{@link}` resolves | fix + gate |
-| Code comments | `//` and `/* */` in Java, TypeScript, Vue, CSS; `<!-- -->` in templates | maintainers | the code beside them, and any twin they say they mirror | fix + gate |
+| Code comments | `//` and `/* */` in Java, JavaScript, TypeScript, Vue, CSS; `<!-- -->` in templates | maintainers | the code beside them, and any twin they say they mirror | fix + gate |
 | Python comments and docstrings | `sidecar/**/*.py` | maintainers | the endpoints, flags and defaults in that sidecar | fix + gate |
-| Script comments | `jclaw.sh`, `install.sh`, `install.ps1`, `bin/*.sh`, `docker-entrypoint.sh`, `.githooks/*` | maintainers | the script | fix + gate |
+| Script comments | `jclaw.sh`, `install.sh`, `install.ps1`, `bin/*.sh`, `.sandcastle/*.sh`, `docker-*.sh`, `.githooks/*` | maintainers | the script | fix + gate |
 | Config and build comments | `conf/application.conf` (the record for every unseeded key), `conf/routes`, `build.gradle.kts`, `Dockerfile`, `docker-compose.yml`, `Jenkinsfile`, `Jenkinsfile.renovate`, `renovate.json5`, `frontend/nuxt.config.ts`, `.gitignore`, `.distignore` | maintainers, operators editing `conf/` | the code that reads the key, its default, the build | fix + gate |
 
 ## Text that ships as behaviour
@@ -44,7 +44,7 @@ Everything that explains the code is documentation: the Markdown, the comments a
 | API summaries | `@Operation` and `@RequestBody` text in `app/controllers` | models through `jclaw_api` discover, the OpenAPI spec | the route | report |
 | Prompt text | prompt builders such as `SystemPromptAssembler`, slash-command help in `app/slash` | models, chat users | runtime behaviour | report |
 | Local skills | `skills/*/SKILL.md` and their references, except the seven upstream imports | models | the tools and paths a skill names | report |
-| Factory prompts | `.sandcastle/prompts/*.md` | factory agents | the factory's phases | report |
+| Factory prompts | `.sandcastle/prompts/*.md`, `.sandcastle/bmad/bmad-build-auto.toml` | factory agents | the factory's phases | report |
 | Eval prose | `description` and `rubric` in `evals/suites/*.json` | people scoring a run | the cases; both are outside the suite fingerprint | report |
 | Test-enforced rationale | `@AgentAccess(reason = …)`, ArchUnit `because(…)` | maintainers | what bounds the route; the rule | report; never edit a `because(…)`, which keys the frozen store |
 

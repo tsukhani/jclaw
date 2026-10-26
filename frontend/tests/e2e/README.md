@@ -40,14 +40,14 @@ and the eval suites.
 | Area | Spec | Notes |
 | --- | --- | --- |
 | UAT-1 Authentication | `auth.uat.spec.ts` | Runs unauthenticated; session gate, bad password, sign-out |
-| UAT-2 Read-side API contract | `api-contract.uat.spec.ts` | 38 endpoints + 404 shape + SPA fallback |
+| UAT-2 Read-side API contract | `api-contract.uat.spec.ts` | 39 endpoints + 404 shape + SPA fallback |
 | UAT-3 Navigation | `navigation.uat.spec.ts` | Sidebar routing, deep links, command palette |
 | UAT-4 Agent lifecycle | `agents.uat.spec.ts` | Create/read/update/delete + 409 conflict paths; agent type: a service agent has no USER.md or BOOTSTRAP.md, and the editor's switch asks before deleting them |
 | UAT-5 Prompts library | `prompts.uat.spec.ts` | Create via API, UI for search/filter/edit/delete |
 | UAT-6 Tasks & reminders | `tasks.uat.spec.ts` | Read-only over the live schedule |
 | UAT-7 Memories | `memories.uat.spec.ts` | Importance save answered by a stub; writes nothing |
 | UAT-8 Conversations | `conversations.uat.spec.ts` | List, filter, transcript, subagent runs |
-| UAT-9 Settings | `settings.uat.spec.ts` | All 26 panels mount |
+| UAT-9 Settings | `settings.uat.spec.ts` | All 36 panels mount |
 | UAT-10 Capability surface | `skills-tools.uat.spec.ts` | Skills, tools, per-agent grant round-trip |
 | UAT-11 Channels | `channels.uat.spec.ts` | Bindings; webhooks stay un-gated |
 | UAT-12 Dashboard | `dashboard.uat.spec.ts` | Four panels, metrics endpoints, logs |
@@ -82,14 +82,7 @@ and the eval suites.
 ## Known-failing accessibility baseline
 
 `accessibility.uat.spec.ts` carries a `KNOWN_VIOLATIONS` map so the suite
-catches *new* violations without being permanently red. It currently holds one
-real defect:
-
-- **`/agents` — `nested-interactive` (serious, WCAG 4.1.2).** Each agent row is
-  a `<div role="button" tabindex="0">` containing real `<button>`s (enable
-  toggle, thinking pill, delete). Screen readers announce the row as a single
-  control and the inner buttons can become unreachable. Fix by demoting the row
-  to a non-interactive container with an explicit open affordance.
+catches *new* violations without being permanently red. It is currently empty.
 
 The test also fails if a baselined rule *stops* firing, so the entry cannot rot
 after the markup is fixed — delete it then.

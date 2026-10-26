@@ -10,7 +10,7 @@ jclaw/
 │   │   ├── Webhook*Controller.java  # Inbound webhooks — exempted from auth, verified per-channel.
 │   │   ├── AuthCheck.java        # Play @Before interceptor — session cookie + Bearer ApiToken.
 │   │   └── Application.java      # SPA fallback (serves public/spa/index.html for unknown routes).
-│   ├── models/                   # JPA entities extending play.db.jpa.Model (~36 entities).
+│   ├── models/                   # JPA entities extending play.db.jpa.Model (~38 entities).
 │   │   ├── Agent, AgentBinding   # Agent config + channel→agent routing bindings.
 │   │   ├── Conversation, Message, MessageAttachment, SessionCompaction  # Chat history + media + summaries.
 │   │   ├── Task, TaskRun, TaskRunMessage  # Scheduling + run history + transcripts.
@@ -21,7 +21,7 @@ jclaw/
 │   │   ├── Notification, SubagentRun, VideoGenerationJob, ToolApprovalGrant  # Reminders, subagents, async jobs, grants.
 │   │   ├── EventLog, LatencyMetric, CompressionMetric  # Audit log + metrics.
 │   │   └── MessageRole, ChannelType, …  # String-backed enums.
-│   ├── agents/                   # Agent orchestration layer (~41 classes).
+│   ├── agents/                   # Agent orchestration layer (~43 classes).
 │   │   ├── AgentRouter.java      # 3-tier routing: peer → channel → main.
 │   │   ├── AgentRunner.java      # Prompt assembly + LLM call + tool loop (cap via chat.maxToolRounds).
 │   │   ├── SystemPromptAssembler.java  # Builds the final system prompt.
@@ -35,7 +35,7 @@ jclaw/
 │   │   ├── ProviderRegistry.java # Config-backed provider set (60s refresh).
 │   │   ├── TokenUsageEstimator.java  # JTokkit counting, Caffeine-memoized.
 │   │   └── LlmTypes.java         # ChatMessage, ToolDef, ChatRequest/Response, Usage.
-│   ├── mcp/                      # Model Context Protocol client (~16 classes).
+│   ├── mcp/                      # Model Context Protocol client (~20 classes).
 │   │   ├── McpClient.java        # JSON-RPC state machine.
 │   │   ├── McpStdioTransport, McpStreamableHttpTransport, McpConnectionManager
 │   │   └── McpToolAdapter.java   # Bridges discovered MCP tools into agents.ToolRegistry.
@@ -56,7 +56,7 @@ jclaw/
 │   │   ├── *CleanupJob, *FlushJob # event-log / latency / browser / queue cleanup.
 │   │   ├── OllamaLocalProbeJob, LmStudioProbeJob, TesseractProbeJob  # Reachability probes.
 │   │   └── ShutdownJob           # Commits + closes Lucene, drains executors on stop.
-│   ├── channels/                 # Messaging adapters (~82 classes).
+│   ├── channels/                 # Messaging adapters (~83 classes).
 │   │   ├── Channel.java (iface), ChannelRegistry
 │   │   ├── Slack* (HTTP webhook + Socket Mode), Telegram* (polling + webhook)
 │   │   ├── WhatsApp* (Cloud API) + WhatsAppCobalt* (WhatsApp-Web via it.auties.whatsapp)
@@ -66,11 +66,11 @@ jclaw/
 │   │   ├── ConfigService, ConversationService, ConversationQueue, SessionCompactor, SubagentRegistry
 │   │   ├── search/               # LuceneIndexer + DirectLuceneMessageSearchRepository (Lucene 10).
 │   │   ├── transcription/, caption/, imagegen/, videogen/, video/  # Media subsystems + sidecar managers.
-│   │   ├── compression/, catalog/, scanners/  # Compression, tool/task catalogs, malware scanners.
+│   │   ├── compression/, catalog/, scanners/  # Compression, skill catalogs, malware scanners.
 │   │   ├── TaskSchedulingService, TaskExecutionHandler, ReminderDispatcher  # db-scheduler integration.
 │   │   ├── NotificationBus (SSE fan-out), EventLogger, LatencyMetricRecorder
 │   │   └── LoadTestRunner, LoadTestHarness
-│   ├── utils/                    # Cross-cutting utilities (~53).
+│   ├── utils/                    # Cross-cutting utilities (~55).
 │   │   ├── HttpFactories         # Single OkHttp 5 provisioning (llmStreaming/llmSingleShot/general).
 │   │   ├── SsrfGuard, GsonHolder, JpqlFilter, LatencyStats, LatencyTrace
 │   │   └── VirtualThreads, WebhookUtil, TokenCoalescer
@@ -91,12 +91,12 @@ jclaw/
 │   ├── components/
 │   │   ├── ui/                   # 74 shadcn-nuxt / Reka UI primitives.
 │   │   └── *.vue, guide/         # 31 feature components (DataTable, ChatContextMeter, GuideRenderer, …).
-│   ├── composables/              # ~47 (useAuth, useEventBus, useApiParsed, useApiMutation, useTheme, …).
+│   ├── composables/              # ~50 (useAuth, useEventBus, useApiParsed, useApiMutation, useTheme, …).
 │   ├── plugins/                  # theme.client.ts (pre-paint theme), axe.client.ts (dev a11y).
 │   ├── middleware/auth.global.ts # Routes to /login or /setup-password based on auth state.
 │   ├── types/                    # api.ts (wire types) + schemas.ts (Zod) + ambient .d.ts.
 │   ├── utils/                    # Pure helpers (format, usage-cost, tool-calls, schedule, …).
-│   ├── test/                     # Vitest unit tests (~208 files).
+│   ├── test/                     # Vitest unit tests (~212 files).
 │   ├── tests/e2e/, playwright.config.ts  # Playwright E2E harness.
 │   ├── vitest.config.ts          # jsdom env.
 │   ├── nuxt.config.ts, components.json, eslint.config.mjs, stylelint.config.mjs

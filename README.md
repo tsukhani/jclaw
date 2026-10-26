@@ -147,7 +147,7 @@ Then tell your first agent to use that provider:
 
 ### 4. Say hello
 
-Open **Chat** and send a message to the **main** agent.
+Open **Chats** and send a message to the **main** agent.
 
 The first time you sign in, JClaw offers you a short tour of the app.
 The **User Guide**, under **Help** in the sidebar, explains every page.

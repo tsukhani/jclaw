@@ -15,7 +15,6 @@ does move, nothing compares across the change without saying so.
 evals/
   schema/eval-suite.schema.json   the format contract (what authors read)
   suites/<id>.json                the datasets (what the runner reads)
-  reports/                        run output — gitignored
 ```
 
 ## Running it
@@ -227,7 +226,7 @@ The runner scores whatever produced the responses; the file is the contract.
       "toolResults": { "web_fetch": ["The transfer lasted 209 days."] },
       "llmCalls": 2
     },
-    "distractor-is-not-repeated": {
+    "cites-the-chunk-it-used": {
       "error": "provider unreachable"
     }
   }
@@ -325,8 +324,8 @@ So the agent you point capture at is a safety boundary, not just a label.
 from `main` as a starting point.
 
 **Every tool is opt-in for it.** An ordinary agent starts with the full tool set
-and the operator switches things off; `__evaltest__` starts with nothing and the
-operator switches things *on*, in the agent editor, per suite. That inversion
+and the operator switches things off; `__evaltest__` starts with nothing and
+capture switches on what each suite declares. That inversion
 lives in `ToolRegistry.computeDisabledTools` alongside the same rule that makes
 `generate_image` and `generate_video` opt-in, and it holds for tools added to the
 registry later — which seeding disabled rows at provisioning would not.
@@ -337,10 +336,6 @@ anyway, and it *ran* — because per-agent tool config was consulted only when
 building the tool list sent to the model. `ToolRegistry.execute` now refuses a
 native tool the agent has not been granted (JCLAW-883). MCP tools keep their own
 execution gate, the `AgentSkillAllowedTool` allowlist, and are not double-gated.
-
-The practical consequence: a fresh `__evaltest__` fails every `tool_called` check
-until you grant the tools that suite needs. That is the safe direction to be
-wrong in, and the failure names the missing tool.
 
 ### Calibration comes from the suite
 
@@ -371,12 +366,11 @@ configured yourself and your configuration is left alone; the cases then fail
 naming the tool that was missing, which is the right outcome for an agent this
 code does not own.
 
-You can still adjust it by hand — tools and MCP servers in the agent editor,
-skills through the per-agent skill config — but the next sweep will reset the tool
-grants to what the suite declares. Unlike `__loadtest__` it is deliberately **not**
-in `ApiAgentsController.isReservedName`: reserved rows are hidden from every
-user-facing API, and being able to inspect and adjust this one in the UI is the
-point. It is a conventional name with a safe default, not a hidden internal row.
+You can still adjust it by hand through the agents API, but the next sweep will
+reset the tool grants to what the suite declares. Unlike `__loadtest__` it is
+deliberately **not** in `ApiAgentsController.isReservedName`: reserved rows are
+hidden from every user-facing API, and deleting this one is how a sweep is cleaned
+up. It is hidden only from the agent list.
 
 Granting `task_manager` means the reminder case creates a real scheduled task on
 every sweep. That is the suite doing its job — and it is why the cleanup below
@@ -476,10 +470,10 @@ a question phrased through the relation. Gold is the *target* row — the one th
 question cannot reach — not the relation row, which the question's own words already
 find.
 
-The pairing keys on rare shared tokens rather than on capitalisation on purpose. The
-second-hop leg seeds itself from `JpaMemoryStore.entityNames`, a capitalisation rule,
-so generating gold that way would select for pairs the hop can already bridge and
-report the hop's own heuristic back as a score — the same trap the coverage mode's
+The pairing keys on rare shared tokens rather than on capitalisation on purpose.
+Retrieval-key generation seeds on `JpaMemoryStore.entityNames`, a capitalisation rule,
+so generating gold that way would select for pairs the keys already link and
+report the keys' own heuristic back as a score — the same trap the coverage mode's
 note describes for lexical clustering.
 
 Expect bridge numbers well below generic ones, and read them separately. Measured on
@@ -491,8 +485,7 @@ Two things worth knowing before reading a bridge result:
 
 - **A small corpus hides the defect.** Both legs are capped at the recall limit, so on
   a corpus smaller than that cap the vector leg returns *everything* and the gold
-  arrives without any bridging. `MemorySecondHopTest` pads its fixture for exactly this
-  reason — its first version passed with the second hop disabled.
+  arrives without any bridging.
 - **Relative scores cannot say "nothing here is relevant."** `ReciprocalRankFusion.fuse`
   divides every fused score by the top one, so the best hit is `1.0` however far away it
   is. A memory scoring relevance 1.0 is the *least bad* candidate, not a good one.

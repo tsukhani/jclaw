@@ -71,13 +71,13 @@ irm https://raw.githubusercontent.com/tsukhani/jclaw/main/install.ps1 | iex
 
 The installer does these steps:
 
-1. It downloads `jclaw-bundle.zip` from the latest GitHub Release. This self-contained bundle
-   holds everything JClaw needs.
-2. It checks the download. [How the installer checks the download](#how-the-installer-checks-the-download)
-   tells you what it checks.
-3. It looks for Java 25 or later with the `jdk.incubator.vector` module. If it finds none, or the
+1. It looks for Java 25 or later with the `jdk.incubator.vector` module. If it finds none, or the
    Java it finds lacks the module, it offers to download Java for you. It puts a self-contained
    Zulu JRE 25 into `~/.jclaw/jre`.
+2. It downloads `jclaw-bundle.zip` from the latest GitHub Release. This self-contained bundle
+   holds everything JClaw needs.
+3. It checks the download. [How the installer checks the download](#how-the-installer-checks-the-download)
+   tells you what it checks.
 4. It unpacks the bundle into `~/.jclaw`.
 5. It starts JClaw on <http://localhost:9000>.
 
@@ -346,7 +346,7 @@ choco install tesseract
 ```
 
 On Windows, the UB Mannheim installer (the `winget` line) does not add Tesseract to `PATH`. JClaw
-then gets no text from images, and it shows no error. To fix this, set `ocr.tesseract.path` in
+then gets no text from images. To fix this, set `ocr.tesseract.path` in
 `conf/application.conf` to the folder that holds `tesseract.exe`, for example
 `C:\Program Files\Tesseract-OCR`. Do not set it to the `.exe` file itself.
 
@@ -386,7 +386,7 @@ ollama pull qwen2.5
 Then add the model to JClaw:
 
 1. Go to **Settings → Providers → LLM Providers**.
-2. On the `ollama-local` row, open **Manage models**.
+2. On the Ollama Local row, open **Manage models**.
 3. Add the model. Run **Discover Models** against `http://localhost:11434/v1`, or use the
    **Add model** form. The form asks for the ID, display name, context window and max tokens.
 4. On the **Agents** page, open an agent and set its **Default Provider** to `ollama-local`.
@@ -412,7 +412,7 @@ LM Studio is a desktop app. To set it up:
 Then add the model to JClaw:
 
 1. Go to **Settings → Providers → LLM Providers**.
-2. On the `lm-studio` row, open **Manage models**.
+2. On the LM Studio row, open **Manage models**.
 3. Add the model. Run **Discover Models** against `http://localhost:1234/v1`, or use the
    **Add model** form.
 4. On the **Agents** page, open an agent and set its **Default Provider** to `lm-studio`.
