@@ -656,11 +656,50 @@ class OllamaDecisionTest extends UnitTest {
               {"name":"tev1:latest","remote_host":"","capabilities":["decision"]}
             ]}""";
 
+    /** Answers {@code /api/tags} with {@code tags}, and {@code /api/show} with the model's entry in {@code shows}, else 404. */
+    private static Answer listingWithShows(String tags, Map<String, String> shows) {
+        return chain -> {
+            if (!chain.request().url().encodedPath().equals("/api/show")) return reply(chain, 200, tags);
+            var buffer = new Buffer();
+            chain.request().body().writeTo(buffer);
+            var model = JsonParser.parseString(buffer.readUtf8()).getAsJsonObject().get("model").getAsString();
+            var show = shows.get(model);
+            return show == null ? reply(chain, 404, "{\"error\":\"model not found\"}") : reply(chain, 200, show);
+        };
+    }
+
     @Test
-    void statusListsCloudDecisionModelsApartFromTheOnesThatRunOnTheServer() {
-        var status = withOllama(chain -> reply(chain, 200, CLOUD_TAGS), () -> OllamaDecision.status(BASE));
-        assertEquals(new OllamaDecision.Status(BASE, true, null, List.of("d1:latest", "tev1:latest"), List.of("clef:cloud")),
-                status);
+    void statusListsCloudModelsApartAndGivesEachModelsContextFromItsModelfileElseTheModel() {
+        var shows = Map.of(
+                "d1:latest", "{\"parameters\":\"num_ctx                        16384\",\"model_info\":{\"lfm2.context_length\":32768}}",
+                "clef:cloud", "{\"model_info\":{\"qwen35.context_length\":65536}}");
+        var status = withOllama(listingWithShows(CLOUD_TAGS, shows), () -> OllamaDecision.status(BASE));
+        assertEquals(new OllamaDecision.Status(BASE, true, null, List.of("d1:latest", "tev1:latest"), List.of("clef:cloud"),
+                Map.of("d1:latest", 16384, "clef:cloud", 65536)), status, "tev1's show answered 404, so it has no context");
+        var asked = requests.stream().filter(r -> r.url().encodedPath().equals("/api/show")).toList();
+        assertEquals(List.of("POST", "POST", "POST"), asked.stream().map(Request::method).toList());
+        assertEquals(List.of("{\"model\":\"d1:latest\"}", "{\"model\":\"tev1:latest\"}", "{\"model\":\"clef:cloud\"}"),
+                bodies.subList(0, 3));
+    }
+
+    @Test
+    void aContextTheServerDoesNotStateAsAPositiveWholeNumberIsLeftOut() {
+        var tags = """
+                {"models":[
+                  {"name":"a:latest","capabilities":["decision"]},
+                  {"name":"b:latest","capabilities":["decision"]},
+                  {"name":"c:latest","capabilities":["decision"]},
+                  {"name":"d:latest","capabilities":["decision"]}
+                ]}""";
+        var shows = Map.of(
+                "a:latest", "{\"parameters\":\"temperature 0.1\",\"model_info\":{\"x.context_length\":\"big\"}}",
+                "b:latest", "{\"parameters\":\"num_ctx 0\",\"model_info\":{\"x.context_length\":8192}}",
+                "c:latest", "{\"model_info\":{\"x.context_length\":-1}}",
+                "d:latest", "<html>not ollama</html>");
+        var status = withOllama(listingWithShows(tags, shows), () -> OllamaDecision.status(BASE));
+        assertTrue(status.reachable());
+        assertEquals(List.of("a:latest", "b:latest", "c:latest", "d:latest"), status.models());
+        assertEquals(Map.of("b:latest", 8192), status.contextTokens(), "a num_ctx of 0 pins nothing, so the model's own is used");
     }
 
     @Test
@@ -704,7 +743,7 @@ class OllamaDecisionTest extends UnitTest {
         assertNull(DecisionSettings.rejectionFor(OllamaDecision.BASE_URL_KEY, address), "the write check lets it through");
         var status = withOllama(chain -> reply(chain, 200, TAGS), () -> OllamaDecision.status(address));
         assertTrue(requests.isEmpty());
-        assertEquals(new OllamaDecision.Status(address, false, "not a usable address", List.of(), List.of()), status);
+        assertEquals(new OllamaDecision.Status(address, false, "not a usable address", List.of(), List.of(), Map.of()), status);
     }
 
     @Test
@@ -728,7 +767,7 @@ class OllamaDecisionTest extends UnitTest {
             var status = withOllama(chain -> reply(chain, 200, TAGS), () -> OllamaDecision.status(base));
             assertTrue(status.reachable(), () -> base + ": " + status.error());
         }
-        assertEquals(4, requests.size());
+        assertEquals(4, requestsTo("/api/tags"));
     }
 
     // --- a model's digest (JCLAW-1368) --------------------------------------------------------

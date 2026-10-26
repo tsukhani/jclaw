@@ -72,17 +72,17 @@ async function saveAddress() {
 
 const selectedModels = computed(() => parseDecisionModels(configValue(OLLAMA_MODELS)))
 // A selected model the server no longer lists stays visible, so it can be cleared.
-const modelGroups = computed(() => {
-  const installed = ollama.value?.models ?? []
+const modelChoices = computed(() => {
+  const local = ollama.value?.models ?? []
   const cloud = ollama.value?.cloudModels ?? []
-  const local = [
-    ...installed.map(name => ({ name, installed: true })),
-    ...selectedModels.value.filter(m => !installed.includes(m) && !cloud.includes(m)).map(name => ({ name, installed: false })),
-  ]
+  const context = ollama.value?.contextTokens ?? {}
+  const listed = (name: string, isCloud: boolean) => ({ name, installed: true, cloud: isCloud, tokens: context[name] })
   return [
-    { id: 'local', heading: 'On this server', cloud: false, models: local },
-    { id: 'cloud', heading: 'On ollama.com', cloud: true, models: cloud.map(name => ({ name, installed: true })) },
-  ].filter(g => g.models.length > 0)
+    ...local.map(name => listed(name, false)),
+    ...cloud.map(name => listed(name, true)),
+    ...selectedModels.value.filter(m => !local.includes(m) && !cloud.includes(m))
+      .map(name => ({ name, installed: false, cloud: false, tokens: undefined })),
+  ]
 })
 
 async function toggleModel(name: string, box: HTMLInputElement) {
@@ -650,7 +650,12 @@ function playClip(audio: HTMLAudioElement | undefined) {
         <p data-testid="decision-ollama-privacy">
           Decision models such as d1 and tev1, served by your own Ollama server. They answer the same questions
           JEV does. A model that runs on this server keeps what it is sent there, so no third party sees or keeps
-          it. A cloud model, listed separately below, runs on ollama.com instead. The Model Router's classifier
+          it. One marked cloud runs on ollama.com instead: read
+          <NuxtLink
+            to="/guide#settings-ollama-cloud"
+            class="text-fg-strong underline"
+            data-testid="decision-ollama-cloud-link"
+          >Ollama's cloud models</NuxtLink> in the user guide before you tick one. The Model Router's classifier
           sends the first 4000 characters of each prompt to the model it uses.
         </p>
       </div>
@@ -721,69 +726,40 @@ function playClip(audio: HTMLAudioElement | undefined) {
               {{ ollama.error }}
             </p>
             <p
-              v-else-if="ollama && modelGroups.length === 0"
+              v-else-if="ollama && modelChoices.length === 0"
               class="text-xs text-fg-muted"
               data-testid="decision-ollama-no-models"
             >
               No decision models installed; pull one with <code>ollama pull tev1</code>.
             </p>
-            <div
-              v-for="group in modelGroups"
-              :key="group.id"
-              role="group"
-              :aria-labelledby="`decision-ollama-${group.id}-heading`"
-              class="space-y-1"
-              :class="{ 'border-l-2 border-amber-400/60 pl-2': group.cloud }"
-              :data-testid="`decision-ollama-${group.id}`"
+            <label
+              v-for="m in modelChoices"
+              :key="m.name"
+              class="flex flex-wrap items-center gap-2 text-sm text-fg-strong"
+              :for="`decision-ollama-model-${m.name}`"
+              :data-testid="`decision-ollama-model-${m.name}`"
             >
-              <p
-                :id="`decision-ollama-${group.id}-heading`"
-                class="text-xs font-medium text-fg-muted"
-                :data-testid="`decision-ollama-${group.id}-heading`"
+              <input
+                :id="`decision-ollama-model-${m.name}`"
+                type="checkbox"
+                :checked="selectedModels.includes(m.name)"
+                :disabled="saving || lockedByRouter(m.name)"
+                @change="toggleModel(m.name, $event.target as HTMLInputElement)"
               >
-                {{ group.heading }}
-              </p>
-              <p
-                v-if="group.cloud"
-                class="text-xs text-amber-700 dark:text-amber-400"
-                data-testid="decision-ollama-cloud-warning"
-              >
-                These run on ollama.com, not on your server. What they are sent, such as the first 4000 characters
-                of each prompt the Model Router classifies, leaves this machine for Ollama, which says it does not
-                train on it. Ollama bills each request by its input tokens, which needs a paid plan or usage
-                credits, and your server must run Ollama 0.40.5 or later, signed in to ollama.com.
-              </p>
-              <label
-                v-for="m in group.models"
-                :key="m.name"
-                class="flex items-center gap-2 text-sm text-fg-strong"
-                :for="`decision-ollama-model-${m.name}`"
-                :data-testid="`decision-ollama-model-${m.name}`"
-              >
-                <input
-                  :id="`decision-ollama-model-${m.name}`"
-                  type="checkbox"
-                  :checked="selectedModels.includes(m.name)"
-                  :disabled="saving || lockedByRouter(m.name)"
-                  @change="toggleModel(m.name, $event.target as HTMLInputElement)"
-                >
-                <span class="font-mono">{{ m.name }}</span>
-                <span
-                  v-if="group.cloud"
-                  class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
-                >cloud</span>
-                <span
-                  v-if="!m.installed"
-                  class="text-xs text-fg-muted"
-                >not installed</span>
-              </label>
-            </div>
+              <!-- The spaces are what a screen reader hears between name, context and pill; interpolated, as Vue trims a template's leading whitespace. -->
+              <span class="font-mono">{{ m.name }}</span><template v-if="m.tokens">{{ ' ' }}<span class="text-xs text-fg-muted">{{ contextLabel(m.tokens) }}</span></template><template v-if="m.cloud">{{ ' ' }}<span class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1">cloud</span></template>
+              <span
+                v-if="!m.installed"
+                class="text-xs text-fg-muted"
+              >not installed</span>
+            </label>
             <p
-              v-if="modelGroups.length > 0"
+              v-if="modelChoices.length > 0"
               class="text-xs text-fg-muted"
               data-testid="decision-ollama-selection"
             >
-              Only a ticked model can be the Model Router's classifier, and the one it is using cannot be unticked.
+              Each takes that many tokens per request; a longer prompt is refused, not cut. Only a ticked model can
+              be the Model Router's classifier, and the one it is using cannot be unticked.
             </p>
           </div>
         </div>

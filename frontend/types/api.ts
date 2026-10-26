@@ -544,6 +544,8 @@ export interface OllamaDecisionStatus {
   models: string[]
   /** Decision models the server hands to ollama.com (Ollama 0.40.5 and later), kept out of `models`. */
   cloudModels: string[]
+  /** By model, how many tokens one request may hold: the Modelfile's num_ctx, else the model's own; absent when unstated. */
+  contextTokens: Record<string, number>
 }
 
 /** GET /api/decision/laya: the Laya decision server and what it reports of itself (JCLAW-1447). */

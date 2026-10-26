@@ -23,8 +23,10 @@ import utils.SsrfGuard;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
@@ -62,6 +64,8 @@ public final class OllamaDecision {
     private static final String KEEP_ALIVE_FIELD = "keep_alive";
     private static final Pattern DURATION = Pattern.compile("-1|0|\\d+(\\.\\d+)?[smh]");
     private static final Pattern NO_RESIDENCY = Pattern.compile("0+(\\.0+)?[smh]?");
+    /** The num_ctx line in {@code /api/show}'s {@code parameters}, which lists one parameter per line. */
+    private static final Pattern NUM_CTX = Pattern.compile("(?m)^num_ctx\\s+(\\d{1,9})\\s*$");
     /** A cold load from disk took 19 s; the pin must outlast it, unlike the classifier's own call. */
     private static final long PIN_TIMEOUT_SECONDS = 120;
     /** Ollama answered {@code ollama stop}'s unload in 8 ms; the slack covers one queued behind a load. */
@@ -73,10 +77,11 @@ public final class OllamaDecision {
 
     /**
      * The server's decision models, or why they could not be read: {@code models} run on it, {@code cloudModels} are
-     * the ones it hands to ollama.com.
+     * the ones it hands to ollama.com, and {@code contextTokens} is how many tokens one request to each may hold, for
+     * the models whose context the server states.
      */
     public record Status(String baseUrl, boolean reachable, @Nullable String error, List<String> models,
-                         List<String> cloudModels) {}
+                         List<String> cloudModels, Map<String, Integer> contextTokens) {}
 
     /** The operator's address, else the Ollama Local LLM provider's server without its {@code /v1}. */
     public static String baseUrl() {
@@ -332,16 +337,49 @@ public final class OllamaDecision {
         }
         var call = HttpFactories.generalGuarded().newCall(request);
         call.timeout().timeout(TAGS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        List<String> local;
+        List<String> cloud;
         try (var response = call.execute()) {
             // Status only: the body comes from a server whose address the operator chose (JCLAW-778).
             if (!response.isSuccessful()) return unreachable(base, "HTTP " + response.code() + " from /api/tags");
             var tags = JsonParser.parseString(response.body().string());
-            return new Status(base, true, null, decisionModels(tags, model -> !runsInCloud(model)),
-                    decisionModels(tags, OllamaDecision::runsInCloud));
+            local = decisionModels(tags, model -> !runsInCloud(model));
+            cloud = decisionModels(tags, OllamaDecision::runsInCloud);
         } catch (JsonParseException | IllegalStateException | ClassCastException _) {
             return unreachable(base, "/api/tags did not answer with Ollama's model list");
         } catch (IOException e) {
             return unreachable(base, "not reachable (" + e.getClass().getSimpleName() + ")");
+        }
+        var context = new LinkedHashMap<String, Integer>();
+        for (var name : local) putContext(context, base, name);
+        for (var name : cloud) putContext(context, base, name);
+        return new Status(base, true, null, local, cloud, context);
+    }
+
+    /** Adds how many tokens one request to {@code model} may hold: its Modelfile's num_ctx, else the model's own. */
+    private static void putContext(Map<String, Integer> context, String base, String model) {
+        try {
+            var show = show(base, model).getAsJsonObject();
+            var parameters = show.get("parameters");
+            // Ollama refuses a request over num_ctx rather than cutting it (v0.35.0), so a pinned one is the limit.
+            var pinned = parameters != null && parameters.isJsonPrimitive() ? NUM_CTX.matcher(parameters.getAsString()) : null;
+            int tokens = pinned != null && pinned.find() ? Integer.parseInt(pinned.group(1)) : 0;
+            if (tokens <= 0) tokens = ModelCatalogParser.extractOllamaContextLength(show);
+            if (tokens > 0) context.put(model, tokens);
+        } catch (IOException | JsonParseException | IllegalStateException | ClassCastException | NumberFormatException _) {
+            // A model whose show cannot be read is listed without a context.
+        }
+    }
+
+    private static JsonElement show(String base, String model) throws IOException {
+        var body = new JsonObject();
+        body.addProperty("model", model);
+        var request = new Request.Builder().url(base + "/api/show").post(RequestBody.create(body.toString(), JSON)).build();
+        var call = HttpFactories.generalGuarded().newCall(request);
+        call.timeout().timeout(TAGS_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        try (var response = call.execute()) {
+            if (!response.isSuccessful()) throw new IOException("HTTP " + response.code() + " from /api/show");
+            return JsonParser.parseString(response.body().string());
         }
     }
 
@@ -430,7 +468,7 @@ public final class OllamaDecision {
     }
 
     private static Status unreachable(String base, @Nullable String error) {
-        return new Status(base, false, error, List.of(), List.of());
+        return new Status(base, false, error, List.of(), List.of(), Map.of());
     }
 
     private static String trimSlash(String url) {

@@ -32,9 +32,14 @@ export function tickedLayaCheckpoints(raw: string): LayaCheckpoint[] {
   return LAYA_CHECKPOINTS.filter(c => ticked.includes(c.name))
 }
 
+/** A context as the UI words it, such as `1,024 tokens`. */
+export function contextLabel(tokens: number): string {
+  return `${tokens.toLocaleString('en-US')} tokens`
+}
+
 /** A checkpoint's context as the UI words it, such as `1,024 tokens`. */
 export function layaContext(checkpoint: LayaCheckpoint): string {
-  return `${checkpoint.contextTokens.toLocaleString('en-US')} tokens`
+  return contextLabel(checkpoint.contextTokens)
 }
 
 export interface LayaLimit {

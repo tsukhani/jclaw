@@ -35,6 +35,7 @@ class GuardedTierCallersTest extends UnitTest {
             "services.decision.JevApi.send",
             "services.decision.OllamaDecision.status",
             "services.decision.OllamaDecision.get",
+            "services.decision.OllamaDecision.show",
             "services.decision.OllamaDecision.pin",
             "services.decision.OllamaDecision.unload",
             "services.decision.LayaDecision.status",
