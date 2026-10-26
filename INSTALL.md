@@ -214,6 +214,8 @@ Docker Compose is the simplest way to run JClaw on a server for everyday use. Th
 - It serves JClaw on port **9000** (HTTP) and port **9443** (HTTPS, over TCP and UDP).
 - It keeps `data/`, `logs/`, `workspace/`, `skills/` and `certs/` on the host, so your settings and
   conversations survive a restart. `certs/` holds the generated secret and the TLS files.
+- It sets `restart: unless-stopped`. **Restart** under **Settings → System → Maintenance** stops the
+  container, and this restart policy starts it again. A plain `docker run` needs `--restart unless-stopped`.
 
 ```bash
 # Start in the background

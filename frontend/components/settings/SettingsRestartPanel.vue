@@ -113,6 +113,15 @@ async function toggleAotCache() {
               Checking restart availability…
             </template>
           </div>
+          <div
+            v-if="preflight?.container"
+            class="text-xs text-fg-muted mt-0.5"
+            data-testid="restart-container-note"
+          >
+            In a container, Restart stops the container, and it starts again only if the container has
+            a restart policy. JClaw's Docker Compose file sets <code>restart: unless-stopped</code>; a
+            plain <code>docker run</code> needs <code>--restart unless-stopped</code>.
+          </div>
         </div>
         <button
           :disabled="busy || !preflight?.available"

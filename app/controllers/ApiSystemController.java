@@ -57,12 +57,14 @@ public class ApiSystemController extends Controller {
      * @param aotCacheStatus     jclaw.sh's line about how the last start used the
      *                           cache, or null before any start wrote one
      * @param aotCacheStatusAt   when that line was written (ISO-8601), or null
+     * @param container          true inside a container, where a restart stops the
+     *                           container and only its restart policy starts it again
      */
     public record RestartPreflight(boolean available, @Nullable String unavailableReason, String mode,
                                    boolean backendOnly, boolean rebuildExpected,
                                    long runningTasks, int activeSubagentRuns,
                                    boolean aotCacheEnabled, @Nullable String aotCacheStatus,
-                                   @Nullable String aotCacheStatusAt) {}
+                                   @Nullable String aotCacheStatusAt, boolean container) {}
 
     /**
      * GET /api/system/restart — what a restart would do and what it would
@@ -81,7 +83,8 @@ public class ApiSystemController extends Controller {
                 plan.backendOnly(), plan.rebuildExpected(),
                 TaskRun.count("status = ?1", TaskRun.Status.RUNNING),
                 SubagentRegistry.activeRunIds().size(),
-                aot.enabled(), aot.lastStatus(), aotAt == null ? null : aotAt.toString())));
+                aot.enabled(), aot.lastStatus(), aotAt == null ? null : aotAt.toString(),
+                JavaRuntimeService.environment().container())));
     }
 
     /**

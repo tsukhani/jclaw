@@ -15,6 +15,7 @@ export interface RestartPreflight {
   aotCacheEnabled: boolean
   aotCacheStatus: string | null
   aotCacheStatusAt: string | null
+  container: boolean
 }
 
 /** Human summary of what this restart interrupts, for the confirm dialog. */

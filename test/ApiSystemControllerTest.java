@@ -179,6 +179,17 @@ class ApiSystemControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"aotCacheStatusAt\":\""), body);
     }
 
+    @Test
+    void preflightSaysWhetherThisInstanceRunsInAContainer() throws IOException {
+        login();
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", true));
+        assertTrue(json(GET("/api/system/restart")).get("container").getAsBoolean());
+
+        JavaRuntimeService.setEnvironmentForTest(builtIn("25.0.4", false));
+        assertFalse(json(GET("/api/system/restart")).get("container").getAsBoolean());
+        assertEquals(0, spawned.size());
+    }
+
     // --- Upgrade ---
 
     @Test

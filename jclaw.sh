@@ -2539,12 +2539,24 @@ do_reset() {
     fi
 }
 
+# The line of java -version carrying the version: "Picked up …" notices, JVM warnings and a -javaagent's log lines can precede it (JF-30).
+java_version_line() {
+    java -version 2>&1 | grep -m1 -E ' version "' || true
+}
+
 # Verify Java 25+ is available. Required for Play backend (compile, run, test).
 check_java() {
-    local java_version
-    java_version=$(java -version 2>&1 | head -1 | grep -oE '"[0-9]+'| tr -d '"')
-    if [[ -z "$java_version" ]]; then
+    local line java_version
+    if ! command -v java >/dev/null 2>&1; then
         echo "Error: Java not found. JDK 25+ is required."
+        exit 1
+    fi
+    line=$(java_version_line)
+    java_version=$(printf '%s\n' "$line" | grep -oE '"[0-9]+' | tr -d '"' || true)
+    if [[ -z "$java_version" ]]; then
+        line=$(java -version 2>&1 | grep -v -E '^(NOTE: )?Picked up ' | head -1 || true)
+        echo "Error: $(command -v java) -version printed no version: $line"
+        echo "       JDK 25+ is required."
         exit 1
     fi
     if [[ "$java_version" -lt 25 ]]; then
@@ -2735,7 +2747,7 @@ do_setup() {
     check_prereqs
     # Print in the same dependency-graph order as check_prereqs runs them:
     # foundational toolchains first, then the wrappers/tools that ride them.
-    echo "    Java:     $(java -version 2>&1 | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+    echo "    Java:     $(java_version_line | sed -E 's/.*"([^"]+)".*/\1/')"
     echo "    Node:     $(node -v)"
     echo "    Play:     $(command -v play)"
     echo "    pnpm:     $(pnpm -v 2>/dev/null || echo 'present')"

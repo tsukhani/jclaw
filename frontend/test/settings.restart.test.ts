@@ -103,6 +103,7 @@ function available(over: Record<string, unknown> = {}) {
     aotCacheEnabled: true,
     aotCacheStatus: null,
     aotCacheStatusAt: null,
+    container: false,
     ...over,
   }
 }
@@ -161,6 +162,26 @@ describe('SettingsRestartPanel — availability', () => {
     await flushPromises()
 
     expect(c.text()).toContain('backend only')
+  })
+
+  it('says in a container that only a restart policy starts the container again', async () => {
+    preflight = available({ container: true })
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.find('[data-testid="restart-container-note"]').text()).toBe(
+      'In a container, Restart stops the container, and it starts again only if the container has '
+      + 'a restart policy. JClaw\'s Docker Compose file sets restart: unless-stopped; a plain docker run '
+      + 'needs --restart unless-stopped.',
+    )
+  })
+
+  it('shows no container note outside a container', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+
+    expect(c.text()).toContain('Mode: PROD')
+    expect(c.find('[data-testid="restart-container-note"]').exists()).toBe(false)
   })
 
   it('flags a source checkout as maybe-recompiling, with no duration claim', async () => {

@@ -308,6 +308,8 @@ Once JClaw answers, the panel shows the channels it runs, for example **Channels
 
 While no JClaw is running, `jclaw.sh` runs a small stand-in on JClaw's own port (and on 9443 when HTTPS is on). It answers only this list of steps, and only to your signed-in session. Every other request gets an error until JClaw is back. When the stand-in cannot run, for example in Docker or when Java cannot start it, the panel shows **Waiting for the backend to come back… (12s)** instead, and the restart itself is not affected.
 
+In a container, Restart stops the container, and the panel says it **starts again only if the container has a restart policy**: the Docker Compose file sets `restart: unless-stopped`, and a plain `docker run` needs `--restart unless-stopped`.
+
 Two details worth knowing:
 
 - **In dev mode** only the Play backend is restarted. The Nuxt dev server on port 3000 keeps running; bouncing it would kill the very server that rendered the page you clicked from.
