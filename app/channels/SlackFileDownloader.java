@@ -1,6 +1,7 @@
 package channels;
 
 import models.MessageAttachment;
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import org.jspecify.annotations.Nullable;
@@ -15,7 +16,6 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -32,11 +32,12 @@ import java.util.UUID;
  *
  * <p>Security: the download URL arrives inside the (HMAC-verified) event payload,
  * so defense-in-depth gates it through {@link SsrfGuard#assertSafeScheme(URI)} +
- * the {@link SsrfGuard#SAFE_DNS} resolver AND an explicit Slack-host allowlist
- * before the bot token is attached or any byte is read. Redirects are followed
- * manually (one hop) so a 302 can't bounce past those gates; the
- * {@code Authorization} header is dropped on a cross-origin hop (Slack CDN URLs
- * are pre-signed, so the token is both unnecessary and a leak risk there).
+ * the {@link SsrfGuard#SAFE_DNS} resolver AND an allowlist of Slack's file hosts,
+ * checked on the parsed {@link HttpUrl} that is then sent, before the bot token is
+ * attached or any byte is read. Redirects are followed manually (one hop) so a 302
+ * can't bounce past those gates; the {@code Authorization} header is dropped on a
+ * cross-origin hop (Slack CDN URLs are pre-signed, so the token is both unnecessary
+ * and a leak risk there).
  *
  * <p>Size cap: 20 MiB, matching {@link TelegramFileDownloader#MAX_FILE_BYTES}.
  */
@@ -51,10 +52,12 @@ public final class SlackFileDownloader {
     private static final String AUDIO_SUBTYPE = "slack_audio";
     private static final String VIDEO_PREFIX = "video/";
 
-    /** Slack file hosts: the URL (and any redirect target) must resolve to one of
-     *  these before we attach the bot token or stream bytes. */
-    private static final List<String> SLACK_HOST_SUFFIXES =
-            List.of(".slack.com", ".slack-edge.com", ".slack-files.com");
+    /** The host {@code url_private_download} names. Only file hosts are admitted: {@code slack.com}
+     *  serves the Web API, where a bearer attached on a host check alone is a confused deputy. */
+    private static final String FILE_HOST = "files.slack.com";
+
+    /** Slack's file CDN, the other host a download may start on or redirect to. */
+    private static final String CDN_HOST_SUFFIX = ".slack-edge.com";
 
     /**
      * SSRF-hardened client — the shared recipe from {@link StagedDownload#newSsrfClient()}
@@ -134,31 +137,33 @@ public final class SlackFileDownloader {
 
     /**
      * GET {@code url} (optionally with the Bearer token) and stream the body into
-     * {@code stagedPath} via {@link StagedDownload}. Validates scheme + Slack-host
-     * before the request is built. A 3xx is followed once: the redirect target is
-     * re-validated, and the token is dropped on a cross-origin hop. Returns
-     * {@link FetchOk} with the response content-type + on-disk size, else a failure /
-     * size variant.
+     * {@code stagedPath} via {@link StagedDownload}. Validates scheme + Slack file host
+     * on the parsed URL before that same URL is requested. A 3xx is followed once: the
+     * redirect target is re-validated, and the token is dropped on a cross-origin hop.
+     * Returns {@link FetchOk} with the response content-type + on-disk size, else a
+     * failure / size variant.
      */
     private static FetchResult fetchToStaging(String url, String botToken,
                                               Path stagedPath, boolean withAuth, int redirectsLeft) {
-        final URI uri;
+        var parsed = HttpUrl.parse(url);
+        if (parsed == null) {
+            return new FetchFailed("unsafe url: not an http(s) URL");
+        }
         try {
-            uri = URI.create(url);
-            SsrfGuard.assertSafeScheme(uri);
+            SsrfGuard.assertSafeScheme(parsed.uri());
         } catch (Exception e) {
             return new FetchFailed("unsafe url: " + e.getMessage());
         }
-        if (!isSlackHost(uri.getHost())) {
-            return new FetchFailed("refusing non-Slack host: " + uri.getHost());
+        if (!isSlackFileHost(parsed.host())) {
+            return new FetchFailed("refusing non-file host: " + parsed.host());
         }
-        var builder = new Request.Builder().url(url).get();
+        var builder = new Request.Builder().url(parsed).get();
         if (withAuth) {
             builder.header("Authorization", "Bearer " + botToken);
         }
         return switch (StagedDownload.fetch(DOWNLOAD_CLIENT, builder.build(), stagedPath)) {
             case StagedDownload.Redirect(_, String loc) ->
-                    followRedirect(uri, loc, botToken, stagedPath, withAuth, redirectsLeft);
+                    followRedirect(parsed, loc, botToken, stagedPath, withAuth, redirectsLeft);
             case StagedDownload.HttpError(int code) -> new FetchFailed("download HTTP " + code);
             case StagedDownload.Failed(String message) -> new FetchFailed("download: " + message);
             case StagedDownload.TooBig(long size) -> new FetchSize(size);
@@ -176,10 +181,11 @@ public final class SlackFileDownloader {
 
     /**
      * Follow a single Slack CDN redirect. Re-validates the target through
-     * {@link #fetchToStaging} and drops the bot token on a cross-origin hop (e.g.
-     * files.slack.com → *.slack-edge.com), where the CDN URL is pre-signed.
+     * {@link #fetchToStaging} and drops the bot token on a cross-origin hop (another
+     * host, scheme or port, e.g. files.slack.com → *.slack-edge.com), where the CDN URL
+     * is pre-signed.
      */
-    private static FetchResult followRedirect(URI from, String loc, String botToken,
+    private static FetchResult followRedirect(HttpUrl from, String loc, String botToken,
                                               Path stagedPath, boolean withAuth, int redirectsLeft) {
         if (redirectsLeft <= 0) {
             return new FetchFailed("too many redirects");
@@ -187,9 +193,12 @@ public final class SlackFileDownloader {
         if (loc == null || loc.isBlank()) {
             return new FetchFailed("redirect without Location");
         }
-        boolean sameHost = from.getHost() != null
-                && from.getHost().equalsIgnoreCase(URI.create(loc).getHost());
-        return fetchToStaging(loc, botToken, stagedPath, sameHost && withAuth, redirectsLeft - 1);
+        var to = HttpUrl.parse(loc);
+        boolean sameOrigin = to != null
+                && to.scheme().equals(from.scheme())
+                && to.host().equals(from.host())
+                && to.port() == from.port();
+        return fetchToStaging(loc, botToken, stagedPath, sameOrigin && withAuth, redirectsLeft - 1);
     }
 
     /**
@@ -218,19 +227,8 @@ public final class SlackFileDownloader {
         return (semi >= 0 ? contentType.substring(0, semi) : contentType).trim();
     }
 
-    private static boolean isSlackHost(String host) {
-        if (host == null) {
-            return false;
-        }
-        String h = host.toLowerCase(Locale.ROOT);
-        if (h.equals("slack.com")) {
-            return true;
-        }
-        for (var suffix : SLACK_HOST_SUFFIXES) {
-            if (h.endsWith(suffix)) {
-                return true;
-            }
-        }
-        return false;
+    /** {@code host} comes from {@link HttpUrl}, which has already lowercased it. */
+    private static boolean isSlackFileHost(String host) {
+        return host.equals(FILE_HOST) || host.endsWith(CDN_HOST_SUFFIX);
     }
 }

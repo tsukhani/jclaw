@@ -84,6 +84,18 @@ class SlackFileDownloaderTest extends UnitTest {
                 .build();
     }
 
+    private static Response redirect(Request req, String location) {
+        return new Response.Builder().request(req).protocol(Protocol.HTTP_1_1)
+                .code(302).message("Found")
+                .header("Location", location)
+                .body(ResponseBody.create("".getBytes(), MediaType.parse("text/plain")))
+                .build();
+    }
+
+    private List<String> urlsSeen() {
+        return seen.stream().map(r -> r.url().toString()).toList();
+    }
+
     private static SlackPendingFile file(String url, String name, String mime, long size, String subtype) {
         return new SlackPendingFile("F1", url, name, mime, size, subtype);
     }
@@ -152,8 +164,111 @@ class SlackFileDownloaderTest extends UnitTest {
                 file("https://evil.example.com/files/photo.png", "photo.png", "image/png", 10, null),
                 agent.name);
 
-        assertTrue(result instanceof SlackFileDownloader.DownloadFailed, "non-Slack host → DownloadFailed, got: " + result);
+        assertEquals(new SlackFileDownloader.DownloadFailed("refusing non-file host: evil.example.com"), result);
         assertTrue(seen.isEmpty(), "must refuse the host before attaching the token / opening a socket");
+    }
+
+    @Test
+    void aSlackEdgeUrlDownloadsWithTheBearer() throws Exception {
+        var agent = AgentService.create("sk-dl-edge", "openrouter", "gpt-4.1");
+        var payload = "edge-bytes".getBytes();
+        install(req -> ok200(req, payload, "image/png"));
+
+        var result = SlackFileDownloader.download("xoxb-t",
+                file("https://files.slack-edge.com/files-pri/T0/F6/photo.png", "photo.png", "image/png", payload.length, null),
+                agent.name);
+
+        assertTrue(result instanceof SlackFileDownloader.Ok, "a *.slack-edge.com file → Ok, got: " + result);
+        assertEquals(List.of("https://files.slack-edge.com/files-pri/T0/F6/photo.png"), urlsSeen());
+        assertEquals("Bearer xoxb-t", seen.get(0).header("Authorization"));
+    }
+
+    @Test
+    void theWebApiOriginIsRefusedWithNoRequestSent() throws Exception {
+        var agent = AgentService.create("sk-dl-webapi", "openrouter", "gpt-4.1");
+        install(req -> ok200(req, "{\"ok\":true}".getBytes(), "image/png"));
+
+        var result = SlackFileDownloader.download("xoxb-t",
+                file("https://slack.com/api/users.list", "users.png", "image/png", 10, null), agent.name);
+
+        assertEquals(new SlackFileDownloader.DownloadFailed("refusing non-file host: slack.com"), result);
+        assertEquals(List.of(), urlsSeen(), "the bot token must never reach a Web API method");
+    }
+
+    @Test
+    void aWorkspaceSubdomainIsRefusedWithNoRequestSent() throws Exception {
+        var agent = AgentService.create("sk-dl-workspace", "openrouter", "gpt-4.1");
+        install(req -> ok200(req, "{\"ok\":true}".getBytes(), "image/png"));
+
+        var result = SlackFileDownloader.download("xoxb-t",
+                file("https://acme.slack.com/api/auth.test", "auth.png", "image/png", 10, null), agent.name);
+
+        assertEquals(new SlackFileDownloader.DownloadFailed("refusing non-file host: acme.slack.com"), result);
+        assertEquals(List.of(), urlsSeen());
+    }
+
+    @Test
+    void aLookAlikeOfAFileHostIsRefusedWithNoRequestSent() throws Exception {
+        var agent = AgentService.create("sk-dl-lookalike", "openrouter", "gpt-4.1");
+        install(req -> ok200(req, "x".getBytes(), "image/png"));
+
+        for (var host : List.of("files.acme.slack.com", "files.slack.com.evil.example", "evilslack-edge.com")) {
+            var result = SlackFileDownloader.download("xoxb-t",
+                    file("https://" + host + "/files-pri/T0/F7/x.png", "x.png", "image/png", 10, null), agent.name);
+
+            assertEquals(new SlackFileDownloader.DownloadFailed("refusing non-file host: " + host), result);
+        }
+        assertEquals(List.of(), urlsSeen());
+    }
+
+    @Test
+    void aRedirectToTheWebApiOriginIsRefusedWithoutASecondRequest() throws Exception {
+        var agent = AgentService.create("sk-dl-redir-api", "openrouter", "gpt-4.1");
+        install(req -> req.url().host().equals("files.slack.com")
+                ? redirect(req, "https://slack.com/api/users.list")
+                : ok200(req, "{\"ok\":true}".getBytes(), "image/png"));
+
+        var result = SlackFileDownloader.download("xoxb-t",
+                file("https://files.slack.com/files-pri/T0/F8/x.png", "x.png", "image/png", 10, null), agent.name);
+
+        assertEquals(new SlackFileDownloader.DownloadFailed("refusing non-file host: slack.com"), result);
+        assertEquals(List.of("https://files.slack.com/files-pri/T0/F8/x.png"), urlsSeen());
+    }
+
+    @Test
+    void aSameOriginRedirectKeepsTheBearer() throws Exception {
+        var agent = AgentService.create("sk-dl-redir-same", "openrouter", "gpt-4.1");
+        var payload = "moved".getBytes();
+        install(req -> req.url().encodedPath().endsWith("/old.png")
+                ? redirect(req, "https://files.slack.com/files-pri/T0/F9/new.png")
+                : ok200(req, payload, "image/png"));
+
+        var result = SlackFileDownloader.download("xoxb-t",
+                file("https://files.slack.com/files-pri/T0/F9/old.png", "old.png", "image/png", payload.length, null),
+                agent.name);
+
+        assertTrue(result instanceof SlackFileDownloader.Ok, "same-origin redirect → Ok, got: " + result);
+        assertEquals(List.of("https://files.slack.com/files-pri/T0/F9/old.png",
+                "https://files.slack.com/files-pri/T0/F9/new.png"), urlsSeen());
+        assertEquals("Bearer xoxb-t", seen.get(1).header("Authorization"));
+    }
+
+    @Test
+    void aRedirectThatDowngradesToHttpDropsTheBearer() throws Exception {
+        var agent = AgentService.create("sk-dl-redir-http", "openrouter", "gpt-4.1");
+        var payload = "plain".getBytes();
+        install(req -> req.url().isHttps()
+                ? redirect(req, "http://files.slack.com/files-pri/T0/F10/x.png")
+                : ok200(req, payload, "image/png"));
+
+        var result = SlackFileDownloader.download("xoxb-t",
+                file("https://files.slack.com/files-pri/T0/F10/x.png", "x.png", "image/png", payload.length, null),
+                agent.name);
+
+        assertTrue(result instanceof SlackFileDownloader.Ok, "→ Ok, got: " + result);
+        assertEquals(List.of("https://files.slack.com/files-pri/T0/F10/x.png",
+                "http://files.slack.com/files-pri/T0/F10/x.png"), urlsSeen());
+        assertNull(seen.get(1).header("Authorization"), "the bot token must not cross to cleartext");
     }
 
     @Test

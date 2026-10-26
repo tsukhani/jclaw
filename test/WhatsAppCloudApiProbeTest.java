@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import utils.HttpFactories;
 
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
@@ -55,10 +56,24 @@ class WhatsAppCloudApiProbeTest extends UnitTest {
         var request = recorded.get();
         assertEquals("Bearer tok-good", request.header("Authorization"),
                 "probe must attach the Bearer token");
-        assertTrue(request.url().toString().contains("123456"),
-                "probe must GET the phone-number-id path: " + request.url());
-        assertTrue(request.url().toString().contains("verified_name"),
-                "probe must request the verified_name field: " + request.url());
+        assertEquals("graph.invalid", request.url().host());
+        assertEquals(List.of("v21.0", "123456"), request.url().pathSegments());
+        assertEquals("fields=verified_name,code_verification_status,display_phone_number",
+                request.url().encodedQuery());
+    }
+
+    @Test
+    void aPhoneNumberIdThatIsNotDigitsFailsWithoutARequest() {
+        for (var id : List.of("../me/accounts", "123456?fields=access_token", "%2e%2e/me",
+                "123456/../../me", "phone-123")) {
+            var result = withCannedResponse(200, "{\"verified_name\":\"Acme Corp\"}",
+                    () -> WhatsAppCloudApiProbe.probe(id, "tok", BASE));
+
+            assertEquals(new WhatsAppCloudApiProbe.Failed(
+                            "phoneNumberId must be Meta's numeric Phone number ID (digits only)"), result,
+                    "phoneNumberId " + id + " went out as " + recorded.get());
+        }
+        assertEquals(0, calls.get(), "a non-numeric phoneNumberId must be refused before any HTTP call");
     }
 
     @Test

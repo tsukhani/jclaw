@@ -4,6 +4,7 @@ import com.google.gson.JsonParser;
 import it.auties.whatsapp.model.info.ChatMessageInfo;
 import models.MessageAttachment;
 import models.WhatsAppBinding;
+import okhttp3.HttpUrl;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import org.jspecify.annotations.Nullable;
@@ -27,6 +28,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * Downloads inbound WhatsApp media into the agent's staging dir, returning
@@ -55,6 +57,9 @@ public final class WhatsAppMediaDownloader {
     private static final Duration META_TIMEOUT = Duration.ofSeconds(15);
     private static final String LOG_CATEGORY = "channel";
     private static final String CHANNEL_WHATSAPP = "whatsapp";
+
+    /** Graph media ids are numeric; anything else could steer the Bearer lookup off {@code /{mediaId}}. */
+    private static final Pattern MEDIA_ID = Pattern.compile("[0-9]+");
 
     /** WhatsApp media CDN hosts — the {@code /{mediaId}} lookup returns a URL that
      *  must resolve under one of these before we attach the token or stream bytes. */
@@ -130,6 +135,11 @@ public final class WhatsAppMediaDownloader {
                                                       String agentName, String apiBase) {
         var mediaId = pending.mediaId();
         if (mediaId == null || mediaId.isBlank()) return null;
+        if (!MEDIA_ID.matcher(mediaId).matches()) {
+            EventLogger.warn(LOG_CATEGORY, agentName, CHANNEL_WHATSAPP,
+                    "Cloud-API media: refusing a media id that is not all digits");
+            return null;
+        }
 
         var cdnUrl = resolveCdnUrl(token, mediaId, apiBase, agentName);
         if (cdnUrl == null) return null;
@@ -173,7 +183,7 @@ public final class WhatsAppMediaDownloader {
      */
     private static @Nullable String resolveCdnUrl(String token, String mediaId, String apiBase, String agentName) {
         try {
-            var url = apiBase + mediaId;
+            var url = HttpUrl.get(apiBase).newBuilder().addPathSegment(mediaId).build();
             var req = new Request.Builder()
                     .url(url)
                     .header(HttpKeys.AUTHORIZATION, HttpKeys.BEARER_PREFIX + token)

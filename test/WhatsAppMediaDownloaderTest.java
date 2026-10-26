@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Test;
 import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
+import utils.HttpFactories;
 import utils.SsrfGuard;
 
 import java.io.IOException;
@@ -29,6 +30,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Unit coverage for {@link WhatsAppMediaDownloader}'s Cloud-API branch (JCLAW-446).
@@ -104,18 +106,18 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         graph.enqueue(new MockResponse.Builder()
                 .code(200)
                 .body("{\"url\":\"https://mmg.whatsapp.net/d/abc.enc\","
-                        + "\"mime_type\":\"image/jpeg\",\"id\":\"MEDIA-1\"}")
+                        + "\"mime_type\":\"image/jpeg\",\"id\":\"1001\"}")
                 .build());
         // Step 2: the CDN byte fetch (interceptor-stubbed).
         installCdnClient(req -> cdnOk(req, payload, "image/jpeg"));
 
         var input = WhatsAppMediaDownloader.downloadOne(
-                "tok", media("MEDIA-1", "image/jpeg", null), agent.name,
+                "tok", media("1001", "image/jpeg", null), agent.name,
                 graph.url("/v21.0/").toString());
 
         assertNotNull(input, "two-step download should produce an Input");
         assertEquals("image/jpeg", input.mimeType());
-        assertEquals("whatsapp-MEDIA-1", input.originalFilename(),
+        assertEquals("whatsapp-1001", input.originalFilename(),
                 "no filename → synthesised from the media id");
         // The metadata request carried the Bearer token.
         var metaReq = graph.takeRequest();
@@ -139,7 +141,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         installCdnClient(req -> { throw new AssertionError("must refuse before any CDN request"); });
 
         var input = WhatsAppMediaDownloader.downloadOne(
-                "tok", media("MEDIA-2", "image/jpeg", null), agent.name,
+                "tok", media("1002", "image/jpeg", null), agent.name,
                 graph.url("/v21.0/").toString());
 
         assertNull(input, "a non-CDN host must abort the download");
@@ -153,7 +155,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         installCdnClient(req -> { throw new AssertionError("no CDN request on metadata failure"); });
 
         var input = WhatsAppMediaDownloader.downloadOne(
-                "tok", media("MEDIA-3", "image/jpeg", null), agent.name,
+                "tok", media("1003", "image/jpeg", null), agent.name,
                 graph.url("/v21.0/").toString());
 
         assertNull(input);
@@ -171,7 +173,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         installCdnClient(req -> cdnOk(req, payload, "application/pdf"));
 
         var input = WhatsAppMediaDownloader.downloadOne(
-                "tok", media("MEDIA-DOC", "application/pdf", "invoice.pdf"), agent.name,
+                "tok", media("1004", "application/pdf", "invoice.pdf"), agent.name,
                 graph.url("/v21.0/").toString());
 
         assertNotNull(input);
@@ -220,7 +222,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
     @Test
     void downloadAllCloudApiWithoutATokenStagesNothing() {
         var binding = cloudBinding(null);
-        var msg = msgWithMedia(List.of(media("MEDIA-X", "image/jpeg", null)));
+        var msg = msgWithMedia(List.of(media("1015", "image/jpeg", null)));
         services.EventLogger.clear();
         var logged = services.EventLogger.captureForTest(() -> {
             assertTrue(WhatsAppMediaDownloader.downloadAll(binding, msg, "wa-dl-notoken").isEmpty(),
@@ -257,19 +259,19 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         installCdnClient(req -> { throw new AssertionError("no CDN request without a CDN url"); });
         var apiBase = graph.url("/v21.0/").toString();
 
-        graph.enqueue(new MockResponse.Builder().code(200).body("{\"id\":\"MEDIA-4\"}").build());
+        graph.enqueue(new MockResponse.Builder().code(200).body("{\"id\":\"1005\"}").build());
         assertNull(WhatsAppMediaDownloader.downloadOne(
-                        "tok", media("MEDIA-4", "image/jpeg", null), agent.name, apiBase),
+                        "tok", media("1005", "image/jpeg", null), agent.name, apiBase),
                 "metadata without a url key must abort the part");
 
         graph.enqueue(new MockResponse.Builder().code(200).body("{\"url\":null}").build());
         assertNull(WhatsAppMediaDownloader.downloadOne(
-                        "tok", media("MEDIA-5", "image/jpeg", null), agent.name, apiBase),
+                        "tok", media("1006", "image/jpeg", null), agent.name, apiBase),
                 "a JSON-null url must abort the part");
 
         graph.enqueue(new MockResponse.Builder().code(200).body("{\"url\":\"   \"}").build());
         assertNull(WhatsAppMediaDownloader.downloadOne(
-                        "tok", media("MEDIA-6", "image/jpeg", null), agent.name, apiBase),
+                        "tok", media("1007", "image/jpeg", null), agent.name, apiBase),
                 "a blank url must abort the part");
         assertTrue(seen.isEmpty(), "the CDN client must never fire for an unusable url");
     }
@@ -281,7 +283,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         graph.enqueue(new MockResponse.Builder().code(200).body("not-json{").build());
 
         assertNull(WhatsAppMediaDownloader.downloadOne(
-                        "tok", media("MEDIA-7", "image/jpeg", null), agent.name,
+                        "tok", media("1008", "image/jpeg", null), agent.name,
                         graph.url("/v21.0/").toString()),
                 "a Gson parse failure must be caught and mapped to a skipped part, not thrown");
         assertTrue(seen.isEmpty());
@@ -297,7 +299,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         dead.close(); // nothing listening → connect fails fast
 
         assertNull(WhatsAppMediaDownloader.downloadOne(
-                        "tok", media("MEDIA-8", "image/jpeg", null), agent.name, deadBase),
+                        "tok", media("1009", "image/jpeg", null), agent.name, deadBase),
                 "a connection failure on the metadata leg must be caught, not thrown");
         assertTrue(seen.isEmpty());
     }
@@ -314,7 +316,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         installCdnClient(req -> cdnResponse(req, 500, "cdn exploded".getBytes()));
 
         assertNull(WhatsAppMediaDownloader.downloadOne(
-                "tok", media("MEDIA-9", "image/jpeg", null), agent.name,
+                "tok", media("1010", "image/jpeg", null), agent.name,
                 graph.url("/v21.0/").toString()));
         assertEquals(1, seen.size(), "the CDN leg was attempted exactly once");
         assertStagingEmpty(agent.name);
@@ -330,7 +332,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         installFailingCdnClient("simulated mid-stream I/O failure");
 
         assertNull(WhatsAppMediaDownloader.downloadOne(
-                        "tok", media("MEDIA-10", "image/jpeg", null), agent.name,
+                        "tok", media("1011", "image/jpeg", null), agent.name,
                         graph.url("/v21.0/").toString()),
                 "an I/O failure while streaming must be caught and mapped to a skipped part");
         assertStagingEmpty(agent.name);
@@ -348,7 +350,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         installCdnClient(req -> cdnOk(req, big, "video/mp4"));
 
         assertNull(WhatsAppMediaDownloader.downloadOne(
-                        "tok", media("MEDIA-BIG", "video/mp4", null), agent.name,
+                        "tok", media("1012", "video/mp4", null), agent.name,
                         graph.url("/v21.0/").toString()),
                 "a payload over the 20 MiB cap must be dropped");
         assertStagingEmpty(agent.name);
@@ -366,7 +368,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         installCdnClient(req -> cdnOk(req, "img".getBytes(), "image/jpeg"));
 
         var input = WhatsAppMediaDownloader.downloadOne(
-                "tok", media("MEDIA-P", "image/jpeg; charset=utf-8", null), agent.name,
+                "tok", media("1013", "image/jpeg; charset=utf-8", null), agent.name,
                 graph.url("/v21.0/").toString());
 
         assertNotNull(input);
@@ -385,7 +387,7 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         installCdnClient(req -> cdnOk(req, "blob".getBytes(), "application/octet-stream"));
 
         var input = WhatsAppMediaDownloader.downloadOne(
-                "tok", media("MEDIA-NM", null, null), agent.name,
+                "tok", media("1014", null, null), agent.name,
                 graph.url("/v21.0/").toString());
 
         assertNotNull(input);
@@ -405,6 +407,44 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
                 graph.url("/v21.0/").toString()));
         assertEquals(0, graph.getRequestCount(), "the Graph metadata leg must never fire");
         assertTrue(seen.isEmpty());
+    }
+
+    // ── media id shape (JCLAW-1024) ──
+
+    @Test
+    void aDigitsOnlyMediaIdIsLookedUpAsOnePathSegment() throws Exception {
+        var agent = AgentService.create("wa-dl-digits", "openrouter", "gpt-4.1");
+        var payload = "jpeg".getBytes();
+        installCdnClient(req -> cdnOk(req, payload, "image/jpeg"));
+
+        var input = withGraph(CDN_LOOKUP, () -> WhatsAppMediaDownloader.downloadOne(
+                "tok", media("1037543291543636", "image/jpeg", null), agent.name, GRAPH_BASE));
+
+        assertNotNull(input, "a numeric media id must still download");
+        assertEquals(List.of("https://graph.facebook.com/v21.0/1037543291543636"), graphUrls());
+        assertEquals(List.of("v21.0", "1037543291543636"), graphSeen.get(0).url().pathSegments());
+        assertEquals("Bearer tok", graphSeen.get(0).header("Authorization"));
+        assertEquals(payload.length, input.sizeBytes());
+    }
+
+    @Test
+    void aMediaIdThatIsNotDigitsIsRefusedWithNoRequestSent() throws Exception {
+        var agent = AgentService.create("wa-dl-badid", "openrouter", "gpt-4.1");
+        installCdnClient(req -> cdnOk(req, "jpeg".getBytes(), "image/jpeg"));
+
+        for (var id : List.of("../me/accounts?fields=access_token", "1037543291543636?fields=access_token",
+                "%2e%2e/me/accounts", "1037543291543636/../../me", "1037543291543636%2F..%2F..%2Fme")) {
+            var logged = services.EventLogger.captureForTest(() -> {
+                var input = withGraph(CDN_LOOKUP, () -> WhatsAppMediaDownloader.downloadOne(
+                        "tok", media(id, "image/jpeg", null), agent.name, GRAPH_BASE));
+                assertNull(input, "media id " + id + " must be refused; Graph saw " + graphUrls());
+            });
+
+            assertEquals(List.of(), graphUrls(), "no Graph request for media id " + id);
+            assertEquals(List.of("Cloud-API media: refusing a media id that is not all digits"),
+                    logged.stream().map(services.EventLogger.Captured::message).toList());
+        }
+        assertTrue(seen.isEmpty(), "the CDN client must never fire for a refused id");
     }
 
     // ── WhatsApp-Web (Cobalt) branch ──
@@ -432,6 +472,29 @@ class WhatsAppMediaDownloaderTest extends UnitTest {
         } finally {
             handles.remove(binding.id);
         }
+    }
+
+    // ── helpers (media id shape) ──
+
+    private static final String GRAPH_BASE = "https://graph.facebook.com/v21.0/";
+    private static final String CDN_LOOKUP = "{\"url\":\"https://mmg.whatsapp.net/d/abc.enc\"}";
+
+    private final List<Request> graphSeen = new ArrayList<>();
+
+    /** Run {@code call} with the Graph metadata leg answered by {@code body} through the HttpFactories seam. */
+    private <T> T withGraph(String body, Supplier<T> call) {
+        Interceptor canned = chain -> {
+            graphSeen.add(chain.request());
+            return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                    .code(200).message("OK")
+                    .body(ResponseBody.create(body, MediaType.parse("application/json")))
+                    .build();
+        };
+        return HttpFactories.callWith(new OkHttpClient.Builder().addInterceptor(canned).build(), call);
+    }
+
+    private List<String> graphUrls() {
+        return graphSeen.stream().map(r -> r.url().toString()).toList();
     }
 
     // ── helpers (dispatch tests) ──
