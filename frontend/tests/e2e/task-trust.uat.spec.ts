@@ -39,6 +39,9 @@ async function expandTask(page: Page, task: TaskRow) {
 }
 
 test.describe('UAT tasks trust', () => {
+  // The tasks list re-reads after the trust write, so a stubOrigin route.fetch() can still be in flight at teardown.
+  test.afterEach(({ page }) => page.unrouteAll({ behavior: 'ignoreErrors' }))
+
   test('an unrecorded origin offers Trust, and confirming it records the operator origin', async ({ page }) => {
     const task = await uniquelyNamedTask(page)
     test.skip(!task, 'the instance has no uniquely named task to stand in for an untrusted one')

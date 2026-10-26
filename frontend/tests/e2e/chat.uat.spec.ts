@@ -69,6 +69,9 @@ async function stubConversation(page: Page, agent: Agent, id: number, checklist:
 }
 
 test.describe('UAT-15 chat', () => {
+  // The sidebar re-reads the conversation list during a turn, so a stubConversation route.fetch() can still be in flight at teardown.
+  test.afterEach(({ page }) => page.unrouteAll({ behavior: 'ignoreErrors' }))
+
   test('chat page renders its composer and controls', async ({ page }) => {
     await gotoPage(page, '/chat')
     await expect(page.getByPlaceholder('Send a message...')).toBeVisible()
