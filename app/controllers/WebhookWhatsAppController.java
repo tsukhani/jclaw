@@ -143,12 +143,7 @@ public class WebhookWhatsAppController extends Controller {
             return;
         }
 
-        for (var status : WhatsAppCloudApiParser.parseStatuses(payload)) {
-            if (status.failed()
-                    && InboundEventDedup.firstSeen("wa-status:" + status.messageId() + ":failed")) {
-                recordFailedStatus(binding, status);
-            }
-        }
+        recordFailedStatuses(binding, payload);
 
         var now = AppClock.now();
         var signature = signatureHeader.value();
@@ -210,6 +205,15 @@ public class WebhookWhatsAppController extends Controller {
             return null;
         }
         return WhatsAppChannel.verifySignature(b.appSecret, rawBody, signature) ? b : null;
+    }
+
+    private static void recordFailedStatuses(WhatsAppBinding binding, JsonObject payload) {
+        for (var status : WhatsAppCloudApiParser.parseStatuses(payload)) {
+            if (status.failed()
+                    && InboundEventDedup.firstSeen("wa-status:" + status.messageId() + ":failed")) {
+                recordFailedStatus(binding, status);
+            }
+        }
     }
 
     /** JCLAW-1411: Meta could not deliver a reply; statuses touch no conversation state. */

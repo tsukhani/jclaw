@@ -261,7 +261,7 @@ class InboundRecoverySweepTest extends UnitTest {
     }
 
     @Test
-    void aWebChatConversationGetsNoNote() throws Exception {
+    void aWebChatConversationGetsNoNote() {
         var agent = persistAgent();
         var convo = persistConversation(agent, "web", "admin");
         appendUserRow(convo, "draft my reply");
@@ -275,7 +275,7 @@ class InboundRecoverySweepTest extends UnitTest {
     }
 
     @Test
-    void aTurnFromAfterTheCutoffGetsNoNote() throws Exception {
+    void aTurnFromAfterTheCutoffGetsNoNote() {
         var agent = persistAgent();
         var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
         appendUserRow(convo, "still thinking about it");
@@ -287,7 +287,7 @@ class InboundRecoverySweepTest extends UnitTest {
     }
 
     @Test
-    void afterALongOutageOnlyARequestFromTheHourBeforeTheStopGetsTheNote() throws Exception {
+    void afterALongOutageOnlyARequestFromTheHourBeforeTheStopGetsTheNote() {
         assertEquals(Duration.ofHours(1), InboundRecoverySweep.NOTE_LOOKBACK, "a restart notes only the hour before the stop");
         var agent = persistAgent();
         // Web chat is never noted, so its row only marks when the previous run last wrote.
@@ -313,7 +313,7 @@ class InboundRecoverySweepTest extends UnitTest {
     }
 
     @Test
-    void aDeliveredReportIsNoRequestAndGetsNoNote() throws Exception {
+    void aDeliveredReportIsNoRequestAndGetsNoNote() {
         var agent = persistAgent();
         var convo = persistConversation(agent, "telegram", "tg-1521-" + UUID.randomUUID());
         appendUserRow(convo, "here is what the child found");

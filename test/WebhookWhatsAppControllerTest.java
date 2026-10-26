@@ -842,7 +842,7 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
             if (!ids.isEmpty() || System.nanoTime() > deadline) return ids;
             try {
                 Thread.sleep(50);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
                 return ids;
             }

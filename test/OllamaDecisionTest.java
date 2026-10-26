@@ -325,7 +325,7 @@ class OllamaDecisionTest extends UnitTest {
     }
 
     @Test
-    void aCloudModelsTimeoutCountsAgainstTheBreakerAndLoadsNothingToWaitFor() throws Exception {
+    void aCloudModelsTimeoutCountsAgainstTheBreakerAndLoadsNothingToWaitFor() {
         var cloud = serverWith(List.of("snowflake-arctic-embed:latest"), listingThenHanging(CLOUD_TAGS));
         var verdict = withOllama(cloud, () -> JevRouterClassifier.classifyWithOllama(PROMPT, BASE, "clef:cloud", 0.9, 1));
         assertEquals("the Ollama clef:cloud classifier failed (Ollama did not answer within 1 s)", verdict.reason());

@@ -14,7 +14,7 @@ final class WhatsAppGraphIds {
 
     private WhatsAppGraphIds() {}
 
-    private static final Pattern NODE_ID = Pattern.compile("[0-9]+");
+    private static final Pattern NODE_ID = Pattern.compile("\\d+");
 
     static final String PHONE_NUMBER_ID_REFUSED = "phoneNumberId must be Meta's numeric Phone number ID (digits only)";
 
