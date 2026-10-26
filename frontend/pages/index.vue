@@ -103,8 +103,8 @@ const { data: conversationCount, error: conversationCountError } = useLazyAsyncD
 // workspace/main/ unnoticed; this line makes such growth visible on the
 // dashboard. bytes = -1 (walk failed) hides the line rather than lying, which
 // is also what the card shows while the walk is still in flight.
-const { data: workspaceStats } = useLazyFetch<{ bytes: number }>('/api/workspace/stats',
-  { default: () => ({ bytes: -1 }) })
+const { data: workspaceStats, refresh: refreshWorkspaceStats } = useLazyFetch<{ bytes: number, counting: boolean }>(
+  '/api/workspace/stats', { default: () => ({ bytes: -1, counting: false }) })
 const workspaceBytes = computed(() => workspaceStats.value?.bytes ?? -1)
 /** Number and adaptive unit split apart: the card shows the value big and names the unit in the label. */
 const workspaceSize = computed(() => splitSize(Math.max(0, workspaceBytes.value)))
@@ -305,6 +305,8 @@ onMounted(() => {
     if (activityView.value === 'scrapes') refreshScrapeJobs()
     if (activityView.value === 'coding') refreshCodingRuns()
     chatCostRef.value?.refresh()
+    // The server answers with its last count and says when a newer one is running (JF-35); re-read until it lands.
+    if (workspaceStats.value?.counting) refreshWorkspaceStats()
     // Keep the per-status task counts in lockstep with the rest of the
     // dashboard's 5 s tick. Mostly cheap (3 indexed COUNT queries),
     // and an operator watching the dashboard during a task fire wants

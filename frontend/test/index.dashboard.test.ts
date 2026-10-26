@@ -11,7 +11,13 @@ import Index from '~/pages/index.vue'
  * /api/videogen/jobs/recent and renders a job-status table with a "see in conversation" deep-link.
  */
 
-function setupApi(opts?: { events?: unknown[], videoJobs?: unknown[], latency?: unknown, workspaceBytes?: number }) {
+function setupApi(opts?: {
+  events?: unknown[]
+  videoJobs?: unknown[]
+  latency?: unknown
+  workspaceBytes?: number
+  workspaceStats?: () => unknown
+}) {
   registerEndpoint('/api/agents', () => [])
   registerEndpoint('/api/channels/active', () => ({ count: 0, channelTypes: [] }))
   registerEndpoint('/api/tasks', () => [])
@@ -19,12 +25,29 @@ function setupApi(opts?: { events?: unknown[], videoJobs?: unknown[], latency?: 
   registerEndpoint('/api/metrics/latency/rows', () => opts?.latency ?? ({ since: '', channels: [], segments: {} }))
   registerEndpoint('/api/logs', () => ({ events: opts?.events ?? [] }))
   registerEndpoint('/api/videogen/jobs/recent', () => opts?.videoJobs ?? [])
-  registerEndpoint('/api/workspace/stats', () => ({ bytes: opts?.workspaceBytes ?? 2048 }))
+  registerEndpoint('/api/workspace/stats',
+    opts?.workspaceStats ?? (() => ({ bytes: opts?.workspaceBytes ?? 2048, counting: false })))
 }
 
 // The Chat Cost / Compression sections own their own fetches; stub them so the test only exercises
 // the Recent Activity panel.
 const STUBS = { ChatCostSection: true, ChatCompressionSection: true }
+
+// A poll's round trip needs a macrotask turn of its own beyond the one that dispatched it.
+async function settle() {
+  for (let i = 0; i < 4; i++) await flushPromises()
+}
+
+// The 5 s tick refreshes Chat Cost too, so a test that advances it needs a stub with the refresh the page calls.
+const TICKING_STUBS = {
+  ...STUBS,
+  ChatCostSection: defineComponent({
+    setup(_, { expose }) {
+      expose({ refresh: async () => {} })
+      return () => h('div')
+    },
+  }),
+}
 
 describe('Dashboard — Recent Activity video toggle (JCLAW-236)', () => {
   beforeEach(() => clearNuxtData())
@@ -86,14 +109,7 @@ describe('Dashboard — Recent Activity scrapes view (JCLAW-1273)', () => {
           runtimeSeconds: 40, interruptions: 0, egress: null, createdAt: '2026-09-22T10:00:00Z', startedAt: null, completedAt: null,
         }]
       })
-      // The 5 s tick refreshes Chat Cost too, so its stub needs the refresh the page calls.
-      const costStub = defineComponent({
-        setup(_, { expose }) {
-          expose({ refresh: async () => {} })
-          return () => h('div')
-        },
-      })
-      const c = await mountSuspended(Index, { global: { stubs: { ...STUBS, ChatCostSection: costStub } } })
+      const c = await mountSuspended(Index, { global: { stubs: TICKING_STUBS } })
       await flushPromises()
       vi.advanceTimersByTime(5000)
       await flushPromises()
@@ -232,6 +248,37 @@ describe('Dashboard — workspace disk footprint line', () => {
     await flushPromises()
 
     expect(c.find('[data-testid="workspace-size"]').exists()).toBe(false)
+  })
+
+  it('re-reads on the 5 s tick while a recount runs, shows the new count without a reload, then stops', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    try {
+      const answers = [{ bytes: 2048, counting: true }, { bytes: 2048, counting: true }, { bytes: 4096, counting: false }]
+      let calls = 0
+      setupApi({ workspaceStats: () => answers[Math.min(calls++, answers.length - 1)] })
+      const c = await mountSuspended(Index, { global: { stubs: TICKING_STUBS } })
+      await flushPromises()
+      const value = () => c.find('[data-testid="workspace-size-value"]').text()
+      expect(value()).toBe('2.0')
+
+      vi.advanceTimersByTime(5000)
+      await settle()
+      expect(calls).toBe(2)
+      expect(value()).toBe('2.0')
+
+      vi.advanceTimersByTime(5000)
+      await settle()
+      expect(calls).toBe(3)
+      expect(value()).toBe('4.0')
+
+      vi.advanceTimersByTime(10000)
+      await settle()
+      expect(calls).toBe(3)
+      c.unmount()
+    }
+    finally {
+      vi.useRealTimers()
+    }
   })
 })
 

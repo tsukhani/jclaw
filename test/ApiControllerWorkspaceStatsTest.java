@@ -12,8 +12,8 @@ import java.nio.file.Path;
 /**
  * GET /api/workspace/stats — the dashboard's workspace-disk-footprint line.
  * Session-gated (unlike its sibling /api/status health check). The endpoint reads
- * {@link WorkspaceFiles#workspaceSizeBytes}, so the positive-total case below covers
- * the memoized path end to end; {@link WorkspaceFiles#directorySizeBytes} is the walk
+ * {@link WorkspaceFiles#workspaceSize}, so the positive-total case below covers
+ * the counted path end to end; {@link WorkspaceFiles#directorySizeBytes} is the walk
  * underneath it, whose sum/absent/never-throw contract is pinned against a temp tree.
  */
 class ApiControllerWorkspaceStatsTest extends FunctionalTest {
@@ -47,6 +47,9 @@ class ApiControllerWorkspaceStatsTest extends FunctionalTest {
         // and not a hardcoded 0.
         assertTrue(json.get("bytes").getAsLong() > 0,
                 "workspace/ exists with content, so bytes must be positive: " + json);
+        // Whether a recount is running depends on what other classes did to the shared gauge;
+        // WorkspaceSizeGaugeTest pins its meaning, this pins that the page receives it.
+        assertTrue(json.get("counting").getAsJsonPrimitive().isBoolean(), "counting must be a boolean: " + json);
     }
 
     @Test

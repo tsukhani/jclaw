@@ -13,7 +13,7 @@ The [Dashboard](/) is the first thing you see after signing in. Five stat cards 
 
 | Card | What it shows |
 | --- | --- |
-| **Agents** | Two sub-stats: **Active** (enabled agents / total agents) and **Size**, labeled with its unit, such as **Size (in GB)**. Size is the disk footprint of the agents' shared workspace. It turns amber past 10 GB, so a runaway file shows up without a shell. |
+| **Agents** | Two sub-stats: **Active** (enabled agents / total agents) and **Size**, labeled with its unit, such as **Size (in GB)**. Size is the disk footprint of the agents' shared workspace. It turns amber past 10 GB, so a runaway file shows up without a shell. JClaw counts it again at most once a minute: until the new count is ready, the card shows the last one, then updates by itself. |
 | **Conversations** | A cumulative count of all conversations. Labeled **Total**. |
 | **Channels** | The number of channel types that have at least one enabled binding. Telegram, Slack and WhatsApp each count once, however many bindings they have. The in-app web chat is deliberately excluded, so the number matches the cards on [Channels](/channels). |
 | **Tasks** | Three sub-stats side by side: **Active** (recurring `CRON` / `INTERVAL` in steady state), **Running** (currently firing), **Pending** (`SCHEDULED` / `IMMEDIATE` waiting). |

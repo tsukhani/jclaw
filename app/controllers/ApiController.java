@@ -118,10 +118,11 @@ public class ApiController extends Controller {
     }
 
     /**
-     * @param bytes total on-disk size of the workspace root, or {@code -1}
-     *              when the walk failed (permissions, concurrent deletion)
+     * @param bytes    total on-disk size of the workspace root as last counted, or {@code -1}
+     *                 when no walk has succeeded (permissions, concurrent deletion)
+     * @param counting a newer count is running to replace {@code bytes}; read again shortly
      */
-    public record WorkspaceStatsResponse(long bytes) {}
+    public record WorkspaceStatsResponse(long bytes, boolean counting) {}
 
     /** Session-gated, unlike {@link #status()} — the health check stays public. */
     @Before(only = {"workspaceStats"})
@@ -133,6 +134,7 @@ public class ApiController extends Controller {
     @Operation(summary = "Total on-disk size of the agent workspace root, for the dashboard's runaway-growth line")
     @AgentAccess(OPEN)
     public static void workspaceStats() {
-        renderJSON(GSON.toJson(new WorkspaceStatsResponse(WorkspaceFiles.workspaceSizeBytes())));
+        var size = WorkspaceFiles.workspaceSize();
+        renderJSON(GSON.toJson(new WorkspaceStatsResponse(size.bytes(), size.counting())));
     }
 }

@@ -56,36 +56,23 @@ public final class WorkspaceFiles {
                     .maximumSize(500)
                     .build());
 
-    /**
-     * 60 s is negligible against the runaway growth the
-     * dashboard card this feeds exists to catch, and it collapses a revisit storm —
-     * {@link Cache#get} runs the loader once per concurrent miss, not once per caller.
-     */
-    private static final Cache<String, Long> sizeCache = Caches.named(
-            "workspace-size",
-            CacheConfig.newBuilder()
-                    .expireAfterWrite(Duration.ofSeconds(60))
-                    .maximumSize(4)
-                    .build());
+    /** 60 s is negligible against the runaway growth the dashboard card this feeds exists to catch. */
+    private static final WorkspaceSizeGauge sizeGauge =
+            new WorkspaceSizeGauge(() -> directorySizeBytes(workspaceRoot()), Duration.ofSeconds(60));
 
     public static Path workspaceRoot() {
         var root = Play.configuration.getProperty("jclaw.workspace.path", "workspace");
         return Path.of(root);
     }
 
-    /**
-     * Recursive byte size of the workspace root, memoized for 60 s: the walk stats every
-     * file (~600 ms over 66k files) and the dashboard re-reads it on every visit.
-     * A failed walk (-1) is not memoized — a transient IOException must not blind the
-     * runaway-growth card for a minute.
-     */
-    public static long workspaceSizeBytes() {
-        var root = workspaceRoot();
-        var cached = sizeCache.get(root.toString(), _ -> {
-            var bytes = directorySizeBytes(root);
-            return bytes >= 0 ? bytes : null;
-        });
-        return cached != null ? cached : -1;
+    /** Recursive byte size of the workspace root as last counted; see {@link WorkspaceSizeGauge}. */
+    public static WorkspaceSizeGauge.Reading workspaceSize() {
+        return sizeGauge.read();
+    }
+
+    /** Starts a count without waiting for it, so the dashboard's first visit after boot finds a size. */
+    public static void countWorkspaceSize() {
+        sizeGauge.refresh();
     }
 
     /**
@@ -112,9 +99,9 @@ public final class WorkspaceFiles {
         }
     }
 
-    /** Drops the memoized workspace size so the dashboard figure follows a delete at once. */
+    /** Recounts the workspace size at once, so the dashboard figure follows a delete. */
     public static void invalidateWorkspaceSize() {
-        sizeCache.invalidateAll();
+        sizeGauge.invalidate();
     }
 
     private static final String USER_MD = "USER.md";
