@@ -3,11 +3,13 @@ package channels;
 import agents.AgentRunner;
 import models.Agent;
 import models.DeliveredMessage;
+import models.WhatsAppAcceptedMessage;
 import models.WhatsAppBinding;
 import models.WhatsAppTransport;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
+import utils.AppClock;
 
 import java.util.Objects;
 
@@ -41,18 +43,30 @@ public final class WhatsAppInbound {
      * dispatch the bound agent off-thread. Duplicate, reaction, and gate-rejected
      * messages are handled/dropped here. {@code binding}'s simple columns are read
      * directly (works on a detached entity from the socket/webhook thread); the
-     * lazy agent association is re-resolved on the virtual thread.
+     * lazy agent association is re-resolved on the virtual thread. Call it outside a
+     * transaction: a duplicate leaves the transaction it runs in rollback-only.
      */
     public static void dispatchMessage(WhatsAppBinding binding, WhatsAppInboundMessage msg) {
         if (binding == null || msg == null) return;
 
-        // Drop redelivered events (Meta retries the webhook; a reconnecting socket
-        // can replay) so the agent processes each message exactly once.
-        if (!InboundEventDedup.firstSeen(msg.messageId())) {
+        // The claim commits only after the hand-off, so a crash before the hand-off leaves
+        // Meta's redelivery unclaimed rather than dropped (JCLAW-1520).
+        if (!Boolean.TRUE.equals(Tx.run(() -> claimAndHandOff(binding, msg)))) {
             EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
                     "Duplicate WhatsApp event %s dropped".formatted(msg.messageId()));
-            return;
         }
+    }
+
+    private static boolean claimAndHandOff(WhatsAppBinding binding, WhatsAppInboundMessage msg) {
+        // An id-less event cannot be deduped; dropping it would be worse than processing it twice.
+        if (!msg.messageId().isBlank() && !WhatsAppAcceptedMessage.claim(msg.messageId(), AppClock.now())) {
+            return false;
+        }
+        handOff(binding, msg);
+        return true;
+    }
+
+    private static void handOff(WhatsAppBinding binding, WhatsAppInboundMessage msg) {
         // Reactions take their own path (routing them to the agent is out of scope here).
         if (msg.type() == WhatsAppInboundMessage.MessageType.REACTION) {
             dispatchReaction(binding, msg);

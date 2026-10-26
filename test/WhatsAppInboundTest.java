@@ -2,6 +2,7 @@ import channels.WhatsAppInbound;
 import channels.WhatsAppInboundMessage;
 import models.Agent;
 import models.DeliveredMessage;
+import models.WhatsAppAcceptedMessage;
 import models.WhatsAppBinding;
 import models.WhatsAppTransport;
 import org.junit.jupiter.api.Test;
@@ -250,12 +251,110 @@ class WhatsAppInboundTest extends UnitTest {
         }
     }
 
-    private static <T> T commitInFreshTx(Supplier<T> block) {
+    // ── JCLAW-1520: the id is claimed in a table that outlives a restart ──
+
+    private static WhatsAppInboundMessage cloudDm(String id, String from) {
+        return new WhatsAppInboundMessage(
+                id, from, from, WhatsAppInboundMessage.CHAT_DIRECT, "PN-INBOUND",
+                WhatsAppInboundMessage.MessageType.TEXT, "hi", null, null, List.of(),
+                true, null, null);
+    }
+
+    private static String uniqueId() {
+        return "wamid.inbound-" + System.nanoTime();
+    }
+
+    /** Runs {@code body} with a disabled Cloud-API binding, so a served message stops before any agent turn. */
+    private static void withDisabledCloudBinding(java.util.function.Consumer<WhatsAppBinding> body) {
+        var name = "wa-claim-" + System.nanoTime();
+        var agent = commitInFreshTx(() -> AgentService.create(name, "test-provider", "test-model"));
+        var binding = commitInFreshTx(() -> {
+            var b = new WhatsAppBinding();
+            b.transport = WhatsAppTransport.CLOUD_API;
+            b.agent = Agent.findById(agent.id);
+            b.enabled = false;
+            b.save();
+            return b;
+        });
+        try {
+            body.accept(binding);
+        } finally {
+            commitInFreshTx(() -> {
+                WhatsAppBinding b = WhatsAppBinding.findById(binding.id);
+                if (b != null) b.delete();
+                Agent a = Agent.findById(agent.id);
+                if (a != null) AgentService.delete(a);
+                return null;
+            });
+        }
+    }
+
+    /** What dispatching {@code msg} logged, called outside a transaction as the webhook and the socket call it. */
+    private static List<String> dispatched(WhatsAppBinding binding, WhatsAppInboundMessage msg) {
+        return outsideTx(() -> EventLogger.captureForTest(() -> WhatsAppInbound.dispatchMessage(binding, msg)))
+                .stream().map(EventLogger.Captured::message).toList();
+    }
+
+    private static boolean isRecorded(String id) {
+        return commitInFreshTx(() -> WhatsAppAcceptedMessage.isRecorded(id));
+    }
+
+    @Test
+    void aRedeliveredMessageIsServedOnceAndThenDropped() {
+        withDisabledCloudBinding(binding -> {
+            var id = uniqueId();
+            var m = cloudDm(id, "15550001111");
+
+            assertEquals(List.of("Message received from 15550001111 in 15550001111"), dispatched(binding, m));
+            assertTrue(isRecorded(id));
+            assertEquals(List.of("Duplicate WhatsApp event " + id + " dropped"), dispatched(binding, m));
+        });
+    }
+
+    @Test
+    void anIdClaimedBeforeARestartIsStillDropped() {
+        // A claim committed by an earlier process: nothing in this one's memory has seen the id.
+        withDisabledCloudBinding(binding -> {
+            var id = uniqueId();
+            commitInFreshTx(() -> WhatsAppAcceptedMessage.claim(id, java.time.Instant.now()));
+
+            assertEquals(List.of("Duplicate WhatsApp event " + id + " dropped"),
+                    dispatched(binding, cloudDm(id, "15550002222")));
+        });
+    }
+
+    @Test
+    void aMessageWithoutAnIdIsServedEveryTime() {
+        withDisabledCloudBinding(binding -> {
+            var m = cloudDm("", "15550003333");
+
+            assertEquals(List.of("Message received from 15550003333 in 15550003333"), dispatched(binding, m));
+            assertEquals(List.of("Message received from 15550003333 in 15550003333"), dispatched(binding, m));
+            assertFalse(isRecorded(""));
+        });
+    }
+
+    @Test
+    void aHandOffThatFailsLeavesTheIdUnclaimedSoTheRedeliveryIsServed() {
+        withDisabledCloudBinding(binding -> {
+            var id = uniqueId();
+            // An unsaved WhatsApp-Web binding has no id, so the hand-off's binding lookup throws.
+            var unsaved = new WhatsAppBinding();
+            unsaved.transport = WhatsAppTransport.WHATSAPP_WEB;
+
+            assertThrows(RuntimeException.class, () -> dispatched(unsaved, cloudDm(id, "15550004444")));
+            assertFalse(isRecorded(id), "the claim commits with the hand-off, never ahead of it");
+            assertEquals(List.of("Message received from 15550004444 in 15550004444"),
+                    dispatched(binding, cloudDm(id, "15550004444")));
+        });
+    }
+
+    private static <T> T outsideTx(Supplier<T> block) {
         var ref = new AtomicReference<T>();
         var err = new AtomicReference<Throwable>();
         var t = Thread.ofPlatform().start(() -> {
             try {
-                ref.set(Tx.run(block::get));
+                ref.set(block.get());
             } catch (Throwable ex) {
                 err.set(ex);
             }
@@ -268,5 +367,9 @@ class WhatsAppInboundTest extends UnitTest {
         }
         if (err.get() != null) throw new RuntimeException(err.get());
         return ref.get();
+    }
+
+    private static <T> T commitInFreshTx(Supplier<T> block) {
+        return outsideTx(() -> Tx.run(block::get));
     }
 }

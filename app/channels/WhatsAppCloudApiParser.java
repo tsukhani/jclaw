@@ -19,8 +19,8 @@ import static channels.WhatsAppInboundMessage.MessageType;
  * {@link WhatsAppInbound}; this class only reshapes the Graph JSON into the
  * transport-agnostic record both transports share.
  *
- * <p>It reads {@code entry[0].changes[0].value.messages[0]} and maps each Cloud-API
- * message type:
+ * <p>It reads every message under every {@code entry[].changes[].value} (JCLAW-1520) and maps
+ * each Cloud-API message type:
  * <ul>
  *   <li>{@code text} → {@link MessageType#TEXT} ({@code text.body}).</li>
  *   <li>{@code image}/{@code video}/{@code audio}/{@code document}/{@code sticker}
@@ -41,8 +41,8 @@ import static channels.WhatsAppInboundMessage.MessageType;
  * {@link WhatsAppInboundMessage#CHAT_DIRECT} and {@code botMentioned} is always
  * {@code true} (a DM to a business number is implicitly addressed). The
  * {@code phoneNumberId} comes from {@code value.metadata.phone_number_id}; the
- * sender display name from {@code value.contacts[0].profile.name}; the quoted
- * message id from {@code message.context.id}.
+ * sender display name from the {@code value.contacts[]} entry whose {@code wa_id} is the
+ * sender, else the first; the quoted message id from {@code message.context.id}.
  *
  * <p>{@link #parseStatuses} reads {@code value.statuses} — every entry, not just the first —
  * into {@link WhatsAppDeliveryStatus} records (JCLAW-1411).
@@ -67,30 +67,40 @@ public final class WhatsAppCloudApiParser {
     private record Envelope(String messageId, String from, @Nullable String phoneNumberId,
                             @Nullable String senderName, @Nullable String quotedId) {}
 
+    /** One parsed user message and the {@code timestamp} Meta stamped on it, null when absent or unparseable. */
+    public record Received(WhatsAppInboundMessage message, @Nullable Instant sentAt) {}
+
     /**
-     * Parse the first user message out of a Cloud-API webhook payload, or
-     * {@code null} when the payload carries no parseable user message (status
-     * updates, empty changes, unsupported types). Never throws on a malformed
-     * payload — a missing/odd field yields {@code null} rather than an exception.
+     * Every parseable user message in a Cloud-API webhook payload, across every entry, change and
+     * message, in order; empty when it carries none (status updates, unsupported types). Never
+     * throws: a malformed entry, change or message is skipped without dropping its siblings.
      */
-    public static @Nullable WhatsAppInboundMessage parse(JsonObject payload) {
+    public static List<Received> parse(JsonObject payload) {
+        var out = new ArrayList<Received>();
+        for (var value : values(payload)) {
+            var messages = value.get("messages");
+            if (messages == null || !messages.isJsonArray()) continue;
+            for (var el : messages.getAsJsonArray()) {
+                var received = receivedOrNull(value, el);
+                if (received != null) out.add(received);
+            }
+        }
+        return out;
+    }
+
+    private static @Nullable Received receivedOrNull(JsonObject value, JsonElement el) {
         try {
-            return parseInternal(payload);
+            if (!el.isJsonObject()) return null;
+            var msg = el.getAsJsonObject();
+            var parsed = parseMessage(value, msg);
+            return parsed == null ? null : new Received(parsed, epochSeconds(optStringQuietly(msg, "timestamp")));
         } catch (RuntimeException _) {
-            // Defensive: any unexpected shape collapses to "no message" rather
-            // than propagating — the webhook must still fast-ack.
+            // One malformed message must not drop its siblings.
             return null;
         }
     }
 
-    private static @Nullable WhatsAppInboundMessage parseInternal(JsonObject payload) {
-        var value = firstValue(payload);
-        if (value == null) return null;
-
-        var messages = value.has("messages") ? value.getAsJsonArray("messages") : null;
-        if (messages == null || messages.isEmpty()) return null;
-
-        var msg = messages.get(0).getAsJsonObject();
+    private static @Nullable WhatsAppInboundMessage parseMessage(JsonObject value, JsonObject msg) {
         var type = JsonArgs.optNonBlankString(msg, "type");
         if (type == null) return null;
 
@@ -99,7 +109,7 @@ public final class WhatsAppCloudApiParser {
         if (messageId == null || from == null) return null;
 
         var phoneNumberId = metadataPhoneNumberId(value);
-        var senderName = contactName(value);
+        var senderName = contactName(value, from);
         var quotedId = quotedMessageId(msg);
         var envelope = new Envelope(messageId, from, phoneNumberId, senderName, quotedId);
 
@@ -312,6 +322,22 @@ public final class WhatsAppCloudApiParser {
 
     // ── payload navigation helpers ──
 
+    /** Every {@code entry[].changes[].value} object, in order; a malformed hop is skipped. */
+    private static List<JsonObject> values(JsonObject payload) {
+        var out = new ArrayList<JsonObject>();
+        var entries = payload.get("entry");
+        if (entries == null || !entries.isJsonArray()) return out;
+        for (var entry : entries.getAsJsonArray()) {
+            var changes = entry.isJsonObject() ? entry.getAsJsonObject().get("changes") : null;
+            if (changes == null || !changes.isJsonArray()) continue;
+            for (var change : changes.getAsJsonArray()) {
+                var value = change.isJsonObject() ? change.getAsJsonObject().get("value") : null;
+                if (value != null && value.isJsonObject()) out.add(value.getAsJsonObject());
+            }
+        }
+        return out;
+    }
+
     /** {@code entry[0].changes[0].value}, or null when absent. */
     private static @Nullable JsonObject firstValue(JsonObject payload) {
         if (payload == null || !payload.has("entry")) return null;
@@ -331,12 +357,18 @@ public final class WhatsAppCloudApiParser {
         return JsonArgs.optNonBlankString(value.getAsJsonObject("metadata"), "phone_number_id");
     }
 
-    /** {@code value.contacts[0].profile.name} — the sender's display name. */
-    private static @Nullable String contactName(JsonObject value) {
+    /** The display name of the {@code value.contacts[]} entry whose {@code wa_id} is {@code from}, else of the first. */
+    private static @Nullable String contactName(JsonObject value, String from) {
         if (!value.has("contacts")) return null;
         var contacts = value.getAsJsonArray("contacts");
         if (contacts.isEmpty()) return null;
         var contact = contacts.get(0).getAsJsonObject();
+        for (var el : contacts) {
+            if (el.isJsonObject() && from.equals(optStringQuietly(el.getAsJsonObject(), "wa_id"))) {
+                contact = el.getAsJsonObject();
+                break;
+            }
+        }
         if (!contact.has("profile")) return null;
         return JsonArgs.optNonBlankString(contact.getAsJsonObject("profile"), "name");
     }

@@ -57,7 +57,6 @@ public class WhatsAppChannel implements Channel {
     private static final String KEY_ENTRY = "entry";
     private static final String KEY_CHANGES = "changes";
     private static final String KEY_MESSAGES = "messages";
-    private static final String KEY_TIMESTAMP = "timestamp";
 
     public record WhatsAppConfig(String phoneNumberId, String accessToken,
                                  @Nullable String appSecret, @Nullable String verifyToken) {
@@ -573,48 +572,30 @@ public class WhatsAppChannel implements Channel {
 
     // --- HMAC-SHA256 signature verification ---
 
-    /** JCLAW-784 (VULN-012): replay acceptance window in seconds. A message whose
-     *  Cloud-API timestamp is further than this from now is treated as stale.
-     *  Mirrors Slack's 5-minute signed-timestamp window. */
-    public static final long REPLAY_WINDOW_SECONDS = 300;
+    /**
+     * JCLAW-1520: how far an unseen Cloud-API message's timestamp may be from now and still be
+     * accepted — Meta's redelivery horizon, so a retry after an outage is caught by its id rather
+     * than refused by its age. Meta's documented behavior, not measured here: "Meta retries delivery
+     * with decreasing frequency until the request succeeds, for up to 7 days"
+     * (developers.facebook.com/docs/whatsapp/cloud-api/guides/set-up-webhooks, read 2026-10-26).
+     */
+    public static final long REPLAY_WINDOW_SECONDS = Duration.ofDays(7).toSeconds();
+
+    /** An accepted message older than this, JCLAW-784's original window, is logged as delayed. */
+    public static final long DELAYED_AFTER_SECONDS = 300;
+
+    /** How far ahead of now a timestamp may run: clock skew only, so no body outlives its pruned id. */
+    public static final long CLOCK_SKEW_SECONDS = 300;
 
     /**
-     * VULN-012 freshness guard: true when {@code payload}'s first message carries a
-     * {@code timestamp} within {@link #REPLAY_WINDOW_SECONDS} of {@code now}. The
-     * Cloud-API HMAC covers only the body (no timestamp), so a captured signed body
-     * could otherwise be replayed forever; this bounds the window the way Slack's
-     * signed-timestamp check does. A missing / unparseable timestamp fails closed
-     * (not fresh) — a legitimate Cloud-API inbound message always carries one.
+     * VULN-012 freshness guard: true when {@code sentAt} is at most {@link #REPLAY_WINDOW_SECONDS}
+     * old and at most {@link #CLOCK_SKEW_SECONDS} ahead of {@code now}. The Cloud-API HMAC covers
+     * only the body, so this bounds how long a captured signed body stays replayable once its id has
+     * been pruned.
      */
-    public static boolean isFreshTimestamp(JsonObject payload, Instant now) {
-        var ts = extractMessageTimestamp(payload);
-        if (ts == null) return false;
-        try {
-            long epochSeconds = Long.parseLong(ts.trim());
-            return Math.abs(now.getEpochSecond() - epochSeconds) <= REPLAY_WINDOW_SECONDS;
-        } catch (NumberFormatException _) {
-            return false;
-        }
-    }
-
-    /** {@code entry[0].changes[0].value.messages[0].timestamp}, or null when absent.
-     *  Defensive against any missing hop so a malformed payload yields null (stale)
-     *  rather than throwing. */
-    private static @Nullable String extractMessageTimestamp(JsonObject payload) {
-        if (payload == null || !payload.has(KEY_ENTRY)) return null;
-        var entries = payload.getAsJsonArray(KEY_ENTRY);
-        if (entries.isEmpty()) return null;
-        var entry = entries.get(0).getAsJsonObject();
-        if (!entry.has(KEY_CHANGES)) return null;
-        var changes = entry.getAsJsonArray(KEY_CHANGES);
-        if (changes.isEmpty()) return null;
-        var value = changes.get(0).getAsJsonObject().getAsJsonObject("value");
-        if (value == null || !value.has(KEY_MESSAGES)) return null;
-        var messages = value.getAsJsonArray(KEY_MESSAGES);
-        if (messages.isEmpty()) return null;
-        var msg = messages.get(0).getAsJsonObject();
-        return msg.has(KEY_TIMESTAMP) && !msg.get(KEY_TIMESTAMP).isJsonNull()
-                ? msg.get(KEY_TIMESTAMP).getAsString() : null;
+    public static boolean isFreshTimestamp(Instant sentAt, Instant now) {
+        long age = now.getEpochSecond() - sentAt.getEpochSecond();
+        return age <= REPLAY_WINDOW_SECONDS && age >= -CLOCK_SKEW_SECONDS;
     }
 
     public static boolean verifySignature(String appSecret, String rawBody, String signatureHeader) {

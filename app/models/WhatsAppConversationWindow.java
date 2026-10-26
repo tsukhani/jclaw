@@ -53,7 +53,7 @@ public class WhatsAppConversationWindow extends Model {
     /**
      * Upsert the window for {@code (bindingId, peerId)} to {@code at}. Must run
      * inside a JPA transaction. Idempotent — advances an existing row's timestamp,
-     * inserts a new one otherwise.
+     * never moves it back, and inserts a new row otherwise.
      */
     public static void recordInbound(Long bindingId, String peerId, Instant at) {
         if (bindingId == null || peerId == null || peerId.isBlank() || at == null) {
@@ -68,6 +68,9 @@ public class WhatsAppConversationWindow extends Model {
             existing = new WhatsAppConversationWindow();
             existing.binding = owner;
             existing.peerId = peerId;
+        } else if (!at.isAfter(existing.lastUserMessageAt)) {
+            // A late redelivery of an older message must not close a window a newer one opened.
+            return;
         }
         existing.lastUserMessageAt = at;
         existing.save();

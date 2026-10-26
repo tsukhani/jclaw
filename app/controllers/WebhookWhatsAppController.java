@@ -5,16 +5,23 @@ import channels.WhatsAppChannel;
 import channels.WhatsAppCloudApiParser;
 import channels.WhatsAppDeliveryStatus;
 import channels.WhatsAppInbound;
+import channels.WhatsAppInboundMessage;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import models.WhatsAppAcceptedMessage;
 import models.WhatsAppBinding;
 import models.WhatsAppConversationWindow;
 import models.WhatsAppTransport;
+import play.db.jpa.NoTransaction;
 import play.mvc.Controller;
 import play.mvc.Http;
 import services.EventLogger;
+import services.Tx;
 import utils.AppClock;
 import utils.WebhookUtil;
+
+import java.time.Instant;
+import java.util.ArrayList;
 
 import static controllers.AgentAccess.Level.OPERATOR_ONLY;
 
@@ -28,7 +35,7 @@ import static controllers.AgentAccess.Level.OPERATOR_ONLY;
  *
  * <p>The controller does no business logic: it verifies the request (HMAC for POST,
  * token match for GET), parses via {@link WhatsAppCloudApiParser}, records the 24h
- * customer-service window (JCLAW-447), and hands the normalized message to
+ * customer-service window (JCLAW-447), and hands each normalized message to
  * {@link WhatsAppInbound#dispatchMessage} — the single inbound seam that owns
  * dedup, the access gate, media staging, and agent dispatch. It returns {@code ok()}
  * immediately (fast-ack) so Meta doesn't retry; dispatch runs off-thread inside the
@@ -69,11 +76,13 @@ public class WebhookWhatsAppController extends Controller {
      * POST — inbound message notifications. Routes to the binding by
      * {@code phone_number_id}, verifies the {@code X-Hub-Signature-256} HMAC against
      * that binding's {@code appSecret} (fail-closed per JCLAW-16 when the secret is
-     * absent), parses, records the 24h window, dispatches, and fast-acks.
+     * absent), parses, records the 24h window, dispatches, and fast-acks. Runs outside a
+     * request transaction, so each message's id claim commits on its own (JCLAW-1520).
      */
     @SuppressWarnings("java:S2259")
     @AgentAccess(value = OPERATOR_ONLY,
             reason = "inbound provider callback, authenticated by Meta's X-Hub-Signature-256")
+    @NoTransaction
     public static void webhook() {
         // JCLAW-783: pre-auth ingress gate, keyed on the source IP (the routing id
         // is only in the parsed body, so it can't key the limiter pre-parse).
@@ -104,7 +113,7 @@ public class WebhookWhatsAppController extends Controller {
         }
 
         var phoneNumberId = WhatsAppCloudApiParser.extractPhoneNumberId(payload);
-        var binding = WhatsAppBinding.findByPhoneNumberId(phoneNumberId);
+        var binding = Tx.run(() -> WhatsAppBinding.findByPhoneNumberId(phoneNumberId));
         if (binding == null || !binding.enabled
                 || binding.transport != WhatsAppTransport.CLOUD_API) {
             // Unknown / disabled / non-Cloud-API target: ack (no retry) but do nothing.
@@ -135,33 +144,50 @@ public class WebhookWhatsAppController extends Controller {
             }
         }
 
-        var msg = WhatsAppCloudApiParser.parse(payload);
-        if (msg == null) {
-            // Status-only payload or unsupported type — nothing to dispatch.
-            ok();
-            return;
+        var now = AppClock.now();
+        var accepted = new ArrayList<Accepted>();
+        for (var received : WhatsAppCloudApiParser.parse(payload)) {
+            var msg = received.message();
+            if (!binding.phoneNumberId.equals(msg.phoneNumberId())) {
+                // The signature names this binding's app; a message for another number is not its to dispatch.
+                EventLogger.warn(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
+                        "WhatsApp message %s for phone number %s skipped in a webhook for binding %d"
+                                .formatted(msg.messageId(), msg.phoneNumberId(), binding.id));
+                continue;
+            }
+            if (Boolean.TRUE.equals(Tx.run(() -> WhatsAppAcceptedMessage.isRecorded(msg.messageId())))) {
+                EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
+                        "Duplicate WhatsApp event %s dropped".formatted(msg.messageId()));
+                continue;
+            }
+            // JCLAW-784 (VULN-012): the HMAC covers only the body, so an unseen id is accepted only within
+            // Meta's redelivery window. A legitimate message always carries a timestamp; a missing one fails closed.
+            var sentAt = received.sentAt();
+            if (sentAt == null || !WhatsAppChannel.isFreshTimestamp(sentAt, now)) {
+                EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_WHATSAPP,
+                        "Webhook rejected: stale/replayed timestamp for binding " + binding.id);
+                unauthorized("Stale request");
+                return;
+            }
+            var ageSeconds = now.getEpochSecond() - sentAt.getEpochSecond();
+            if (ageSeconds > WhatsAppChannel.DELAYED_AFTER_SECONDS) {
+                EventLogger.info(CATEGORY_CHANNEL, null, CHANNEL_WHATSAPP,
+                        "Delayed WhatsApp message %s accepted %d s after it was sent"
+                                .formatted(msg.messageId(), ageSeconds));
+            }
+            // Meta's 24h window runs from the customer's send, so a late redelivery must not reopen it at receipt.
+            accepted.add(new Accepted(msg, sentAt.isAfter(now) ? now : sentAt));
         }
 
-        // JCLAW-784 (VULN-012): the Cloud-API HMAC covers only the body — no
-        // timestamp — so a captured signed body can be replayed indefinitely. Bound
-        // the replay window on the per-message timestamp (mirrors Slack's
-        // signed-timestamp check), enforced here in the authenticated path and independent
-        // of InboundEventDedup (which only drops exact-id repeats, not resigned or
-        // cache-evicted replays).
-        if (!WhatsAppChannel.isFreshTimestamp(payload, AppClock.now())) {
-            EventLogger.warn(EventLogger.WEBHOOK_SIGNATURE_FAILURE, null, CHANNEL_WHATSAPP,
-                    "Webhook rejected: stale/replayed timestamp for binding " + binding.id);
-            unauthorized("Stale request");
+        for (var a : accepted) {
+            // JCLAW-447: reactions still open the 24h window — the user touched the conversation.
+            Tx.run(() -> WhatsAppConversationWindow.recordInbound(binding.id, a.message().from(), a.sentAt()));
+            WhatsAppInbound.dispatchMessage(binding, a.message());
         }
-
-        // JCLAW-447: record the 24h customer-service window on the request thread's
-        // transaction (a tiny upsert; commits with the request). Reactions still
-        // open the window — the user touched the conversation.
-        WhatsAppConversationWindow.recordInbound(binding.id, msg.from(), AppClock.now());
-
-        WhatsAppInbound.dispatchMessage(binding, msg);
         ok();
     }
+
+    private record Accepted(WhatsAppInboundMessage message, Instant sentAt) {}
 
     /** JCLAW-1411: Meta could not deliver a reply; statuses touch no conversation state. */
     private static void recordFailedStatus(WhatsAppBinding binding, WhatsAppDeliveryStatus status) {
@@ -175,9 +201,9 @@ public class WebhookWhatsAppController extends Controller {
         EventLogger.warn(CATEGORY_CHANNEL, String.valueOf(binding.agent.id), CHANNEL_WHATSAPP,
                 "WhatsApp reply to %s was not delivered (%s)".formatted(
                         status.recipientId() != null ? status.recipientId() : "unknown recipient", detail));
-        WhatsAppBinding.recordDeliveryFailure(binding.id,
+        Tx.run(() -> WhatsAppBinding.recordDeliveryFailure(binding.id,
                 status.timestamp() != null ? status.timestamp() : AppClock.now(),
-                status.errorCode(), status.errorTitle());
+                status.errorCode(), status.errorTitle()));
     }
 
     private static String firstNonNull(String a, String b) {

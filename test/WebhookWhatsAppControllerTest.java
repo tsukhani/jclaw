@@ -535,16 +535,267 @@ class WebhookWhatsAppControllerTest extends FunctionalTest {
         }
     }
 
-    // ── JCLAW-784 (VULN-012): replay window on the per-message timestamp ──
+    // ── JCLAW-784 (VULN-012) / JCLAW-1520: replay window on the per-message timestamp, dedup by wamid ──
+
+    // The request runs on the functional-test executor, which an AppClock binding does not reach,
+    // so every offset below is minutes or days from the real clock, never seconds.
+    private static long secondsAgo(long seconds) {
+        return java.time.Instant.now().getEpochSecond() - seconds;
+    }
+
+    private static final long EIGHT_DAYS = java.time.Duration.ofDays(8).toSeconds();
+
+    private static String uniqueSender() {
+        return "1555" + (System.nanoTime() % 10_000_000_000L);
+    }
+
+    private static String textMessage(String wamid, String from, long sentEpochSecond) {
+        return "{\"from\":\"%s\",\"id\":\"%s\",\"timestamp\":\"%d\",\"type\":\"text\",\"text\":{\"body\":\"hi\"}}"
+                .formatted(from, wamid, sentEpochSecond);
+    }
+
+    private static String change(String phoneNumberId, String... messages) {
+        return "{\"value\":{\"metadata\":{\"phone_number_id\":\"" + phoneNumberId
+                + "\"},\"messages\":[" + String.join(",", messages) + "]}}";
+    }
+
+    private static String messagesBody(String... messages) {
+        return "{\"entry\":[{\"changes\":[" + change(PHONE_NUMBER_ID, messages) + "]}]}";
+    }
+
+    private static final java.util.List<String> INBOUND_LINES = java.util.List.of("Message received from ",
+            "Duplicate WhatsApp event ", "Delayed WhatsApp message ", "WhatsApp message ");
+
+    /** The inbound lines naming any of {@code tokens}, a sender or a wamid, logged while {@code body} was posted, signed. */
+    private static java.util.List<String> loggedWhilePosting(String body, int expectedStatus, String... tokens) {
+        return EventLogger.captureMatchingForTest(
+                        e -> INBOUND_LINES.stream().anyMatch(e.message()::startsWith)
+                                && java.util.Arrays.stream(tokens).anyMatch(t -> e.message().contains(t + " ")),
+                        _ -> assertEquals(expectedStatus, postWithSig(body, sign(body)).status.intValue()))
+                .stream().map(EventLogger.Captured::message).toList();
+    }
+
+    private static String served(String sender) {
+        return "Message received from " + sender + " in " + sender;
+    }
+
+    private static String duplicate(String wamid) {
+        return "Duplicate WhatsApp event " + wamid + " dropped";
+    }
+
+    private static void recordAccepted(String wamid) {
+        commitInFreshTx(() -> models.WhatsAppAcceptedMessage.claim(wamid, java.time.Instant.now()));
+    }
+
+    private static boolean isRecorded(String wamid) {
+        return commitInFreshTx(() -> models.WhatsAppAcceptedMessage.isRecorded(wamid));
+    }
 
     @Test
-    void postRejectsStaleTimestamp() {
-        // A correctly-signed body whose per-message timestamp is outside the replay
-        // window is rejected with 401, even though the HMAC (which covers only the
-        // body) verifies. This bounds indefinite replay of a captured signed body.
+    void anUnseenMessageOutsideTheSevenDayWindowIsRefusedAndNotRecorded() {
+        // The HMAC covers only the body, so a captured signed body whose id was pruned stays refused.
         seedBinding(APP_SECRET);
-        var body = textPayload(String.valueOf(java.time.Instant.now().getEpochSecond() - 3600));
+        var wamid = uniqueWamid();
+        var from = uniqueSender();
+        var body = messagesBody(textMessage(wamid, from, secondsAgo(EIGHT_DAYS)));
+
         var response = postWithSig(body, sign(body));
+
         assertEquals(401, response.status.intValue());
+        assertEquals("Basic realm=\"Stale request\"", response.getHeader("WWW-Authenticate"));
+        assertFalse(isRecorded(wamid));
+    }
+
+    @Test
+    void anUnseenMessageStampedTenMinutesAheadIsRefusedAndNotRecorded() {
+        seedBinding(APP_SECRET);
+        var wamid = uniqueWamid();
+        var body = messagesBody(textMessage(wamid, uniqueSender(), secondsAgo(-600)));
+
+        var response = postWithSig(body, sign(body));
+
+        assertEquals(401, response.status.intValue());
+        assertEquals("Basic realm=\"Stale request\"", response.getHeader("WWW-Authenticate"));
+        assertFalse(isRecorded(wamid));
+    }
+
+    @Test
+    void anUnseenMessageWithNoTimestampIsRefused() {
+        seedBinding(APP_SECRET);
+        var from = uniqueSender();
+        var body = messagesBody("{\"from\":\"" + from + "\",\"id\":\"" + uniqueWamid()
+                + "\",\"type\":\"text\",\"text\":{\"body\":\"hi\"}}");
+
+        assertEquals(java.util.List.of(), loggedWhilePosting(body, 401, from));
+    }
+
+    @Test
+    void anUnseenMessageTenMinutesLateIsDispatchedAndLoggedAsDelayed() {
+        seedBinding(APP_SECRET);
+        var wamid = uniqueWamid();
+        var from = uniqueSender();
+        var body = messagesBody(textMessage(wamid, from, secondsAgo(600)));
+
+        var logged = loggedWhilePosting(body, 200, wamid, from);
+
+        assertEquals(2, logged.size(), logged::toString);
+        assertTrue(logged.get(0).matches("Delayed WhatsApp message " + java.util.regex.Pattern.quote(wamid)
+                + " accepted 60[0-9] s after it was sent"), logged.get(0));
+        assertEquals(served(from), logged.get(1));
+        assertTrue(isRecorded(wamid));
+    }
+
+    @Test
+    void anUnseenMessageSixDaysLateIsDispatched() {
+        seedBinding(APP_SECRET);
+        var wamid = uniqueWamid();
+        var from = uniqueSender();
+        var body = messagesBody(textMessage(wamid, from, secondsAgo(java.time.Duration.ofDays(6).toSeconds())));
+
+        var logged = loggedWhilePosting(body, 200, from);
+
+        assertEquals(java.util.List.of(served(from)), logged);
+    }
+
+    @Test
+    void aMessageFourMinutesOldIsDispatchedWithoutADelayLine() {
+        seedBinding(APP_SECRET);
+        var wamid = uniqueWamid();
+        var from = uniqueSender();
+        var body = messagesBody(textMessage(wamid, from, secondsAgo(240)));
+
+        assertEquals(java.util.List.of(served(from)), loggedWhilePosting(body, 200, wamid, from));
+    }
+
+    @Test
+    void aMessageWhoseIdIsAlreadyRecordedIsAnsweredAndNotDispatched() {
+        // Recorded by an earlier process: this one's in-memory InboundEventDedup has never seen the id.
+        seedBinding(APP_SECRET);
+        var wamid = uniqueWamid();
+        var from = uniqueSender();
+        recordAccepted(wamid);
+        var body = messagesBody(textMessage(wamid, from, secondsAgo(0)));
+
+        assertEquals(java.util.List.of(duplicate(wamid)), loggedWhilePosting(body, 200, wamid, from));
+    }
+
+    @Test
+    void aRecordedIdIsAnsweredBeforeItsAgeIsChecked() {
+        seedBinding(APP_SECRET);
+        var wamid = uniqueWamid();
+        var from = uniqueSender();
+        recordAccepted(wamid);
+        var body = messagesBody(textMessage(wamid, from, secondsAgo(EIGHT_DAYS)));
+
+        assertEquals(java.util.List.of(duplicate(wamid)), loggedWhilePosting(body, 200, wamid, from));
+    }
+
+    @Test
+    void theSameBodyPostedTwiceIsDispatchedOnce() {
+        seedBinding(APP_SECRET);
+        var wamid = uniqueWamid();
+        var from = uniqueSender();
+        var body = messagesBody(textMessage(wamid, from, secondsAgo(0)));
+
+        assertEquals(java.util.List.of(served(from)), loggedWhilePosting(body, 200, wamid, from));
+        assertEquals(java.util.List.of(duplicate(wamid)), loggedWhilePosting(body, 200, wamid, from));
+    }
+
+    @Test
+    void twoMessagesUnderOneChangeAreBothDispatchedAndEachDedupedOnItsOwnId() {
+        seedBinding(APP_SECRET);
+        var idA = uniqueWamid();
+        var idB = uniqueWamid();
+        var idC = uniqueWamid();
+        var a = uniqueSender();
+        var b = uniqueSender();
+        var c = uniqueSender();
+        var first = messagesBody(textMessage(idA, a, secondsAgo(0)), textMessage(idB, b, secondsAgo(0)));
+
+        assertEquals(java.util.List.of(served(a), served(b)), loggedWhilePosting(first, 200, idA, idB, a, b));
+
+        var second = messagesBody(textMessage(idA, a, secondsAgo(0)), textMessage(idC, c, secondsAgo(0)));
+        assertEquals(java.util.List.of(duplicate(idA), served(c)), loggedWhilePosting(second, 200, idA, idC, a, c));
+    }
+
+    @Test
+    void oneStaleMessageRefusesTheWholeBodyAndDispatchesNothing() {
+        seedBinding(APP_SECRET);
+        var fresh = uniqueWamid();
+        var a = uniqueSender();
+        var b = uniqueSender();
+        var body = messagesBody(textMessage(fresh, a, secondsAgo(0)), textMessage(uniqueWamid(), b, secondsAgo(EIGHT_DAYS)));
+
+        assertEquals(java.util.List.of(), loggedWhilePosting(body, 401, a, b));
+        assertFalse(isRecorded(fresh), "a refused body is redelivered whole, so none of it is claimed");
+    }
+
+    private static java.time.Instant windowStart(Long bindingId, String from) {
+        return commitInFreshTx(() -> WhatsAppConversationWindow.findRow(bindingId, from).lastUserMessageAt);
+    }
+
+    private static boolean windowOpen(Long bindingId, String from) {
+        return commitInFreshTx(() -> WhatsAppConversationWindow.isWithinWindow(bindingId, from, java.time.Instant.now()));
+    }
+
+    @Test
+    void aMessageSentThirtyHoursAgoLeavesTheServiceWindowClosed() {
+        // Meta's 24h window runs from when the customer sent the message, not from when the redelivery arrived.
+        var bindingId = seedBinding(APP_SECRET);
+        var from = uniqueSender();
+        var sent = secondsAgo(java.time.Duration.ofHours(30).toSeconds());
+        var body = messagesBody(textMessage(uniqueWamid(), from, sent));
+
+        assertEquals(java.util.List.of(served(from)), loggedWhilePosting(body, 200, from));
+
+        assertEquals(java.time.Instant.ofEpochSecond(sent), windowStart(bindingId, from));
+        assertFalse(windowOpen(bindingId, from));
+    }
+
+    @Test
+    void aLateRedeliveryNeverMovesTheWindowBehindANewerMessage() {
+        var bindingId = seedBinding(APP_SECRET);
+        var from = uniqueSender();
+        var freshSent = secondsAgo(60);
+        var fresh = messagesBody(textMessage(uniqueWamid(), from, freshSent));
+        assertIsOk(postWithSig(fresh, sign(fresh)));
+
+        var late = messagesBody(textMessage(uniqueWamid(), from, secondsAgo(java.time.Duration.ofHours(30).toSeconds())));
+        assertIsOk(postWithSig(late, sign(late)));
+
+        assertEquals(java.time.Instant.ofEpochSecond(freshSent), windowStart(bindingId, from));
+        assertTrue(windowOpen(bindingId, from));
+    }
+
+    @Test
+    void aMessageStampedAheadOfTheClockOpensTheWindowNoLaterThanItsReceipt() {
+        var bindingId = seedBinding(APP_SECRET);
+        var from = uniqueSender();
+        var body = messagesBody(textMessage(uniqueWamid(), from, secondsAgo(-240)));
+
+        var before = java.time.Instant.now();
+        assertIsOk(postWithSig(body, sign(body)));
+        var after = java.time.Instant.now();
+
+        var start = windowStart(bindingId, from);
+        assertFalse(start.isBefore(before.minusMillis(1)), () -> before + " > " + start);
+        assertFalse(start.isAfter(after.plusMillis(1)), () -> start + " > " + after);
+    }
+
+    @Test
+    void aMessageForAnotherPhoneNumberIsSkippedAndTheBindingsOwnIsDispatched() {
+        var bindingId = seedBinding(APP_SECRET);
+        var ours = uniqueSender();
+        var theirs = uniqueSender();
+        var otherId = uniqueWamid();
+        var body = "{\"entry\":[{\"changes\":[" + change(PHONE_NUMBER_ID, textMessage(uniqueWamid(), ours, secondsAgo(0)))
+                + "," + change("PN-OTHER", textMessage(otherId, theirs, secondsAgo(0))) + "]}]}";
+
+        var logged = loggedWhilePosting(body, 200, ours, otherId);
+
+        assertEquals(java.util.List.of(
+                "WhatsApp message " + otherId + " for phone number PN-OTHER skipped in a webhook for binding " + bindingId,
+                served(ours)), logged);
+        assertFalse(isRecorded(otherId));
     }
 }

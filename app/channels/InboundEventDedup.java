@@ -12,7 +12,8 @@ import java.time.Duration;
  * Slack retries when it doesn't see a 200 within ~3 s, Meta's WhatsApp Cloud API
  * retries its webhook, and a reconnecting socket can replay recent messages — so
  * the same message can arrive several times. Keyed by a caller-supplied identity
- * (Slack: {@code channel:ts} / {@code event_id}; WhatsApp: the message id), this
+ * (Slack: {@code channel:ts} / {@code event_id}; WhatsApp: a failed delivery status — its
+ * messages dedup in {@link models.WhatsAppAcceptedMessage}, which outlives a restart), this
  * records the first sighting and reports later ones as duplicates, so the agent
  * processes each message exactly once.
  *

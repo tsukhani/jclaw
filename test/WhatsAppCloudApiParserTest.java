@@ -21,6 +21,13 @@ class WhatsAppCloudApiParserTest extends UnitTest {
         return JsonParser.parseString(s).getAsJsonObject();
     }
 
+    /** The one message {@code payload} carries, or null when it carries none. */
+    private static WhatsAppInboundMessage parseOnly(JsonObject payload) {
+        var all = WhatsAppCloudApiParser.parse(payload);
+        assertTrue(all.size() <= 1, () -> "expected at most one message: " + all);
+        return all.isEmpty() ? null : all.getFirst().message();
+    }
+
     /** Wrap a single message object in the full entry/changes/value envelope. */
     private static JsonObject envelope(String messageJson) {
         return json("""
@@ -35,7 +42,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void parsesTextMessageWithCloudApiInvariants() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.TEXT","timestamp":"1","type":"text","text":{"body":"hello there"}}
                 """));
         assertNotNull(msg);
@@ -53,7 +60,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void parsesImageWithCaptionIntoPendingMedia() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.IMG","timestamp":"1","type":"image",
                  "image":{"id":"MEDIA-9","mime_type":"image/jpeg","sha256":"x","caption":"a cat"}}
                 """));
@@ -70,7 +77,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void parsesDocumentCapturesFilename() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.DOC","timestamp":"1","type":"document",
                  "document":{"id":"MEDIA-DOC","mime_type":"application/pdf","filename":"invoice.pdf","caption":"see attached"}}
                 """));
@@ -82,7 +89,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void parsesVoiceNoteAudioFlagsVoiceNote() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.PTT","timestamp":"1","type":"audio",
                  "audio":{"id":"MEDIA-PTT","mime_type":"audio/ogg; codecs=opus","voice":true}}
                 """));
@@ -94,7 +101,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void parsesNonVoiceAudioWithoutVoiceFlag() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.AUD","timestamp":"1","type":"audio",
                  "audio":{"id":"MEDIA-AUD","mime_type":"audio/mpeg"}}
                 """));
@@ -104,7 +111,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void parsesLocation() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.LOC","timestamp":"1","type":"location",
                  "location":{"latitude":51.5007,"longitude":-0.1246,"name":"Big Ben","address":"London"}}
                 """));
@@ -123,7 +130,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
      */
     @Test
     void reactionWithoutATargetIsDropped() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.RXN3","timestamp":"1","type":"reaction",
                  "reaction":{"emoji":"\\uD83D\\uDC4D"}}
                 """));
@@ -132,7 +139,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void parsesReaction() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.RXN","timestamp":"1","type":"reaction",
                  "reaction":{"message_id":"wamid.TARGET","emoji":"\\uD83D\\uDC4D"}}
                 """));
@@ -146,7 +153,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
     @Test
     void parsesReactionRemovalAsBlankEmoji() {
         // A removed reaction omits the emoji field.
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.RXN2","timestamp":"1","type":"reaction",
                  "reaction":{"message_id":"wamid.TARGET"}}
                 """));
@@ -156,7 +163,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void parsesInteractiveButtonReplyAsTextWithTitle() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.BTN","timestamp":"1","type":"interactive",
                  "interactive":{"type":"button_reply","button_reply":{"id":"opt_yes","title":"Yes please"}}}
                 """));
@@ -167,7 +174,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void parsesInteractiveListReplyAsTextWithTitle() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.LST","timestamp":"1","type":"interactive",
                  "interactive":{"type":"list_reply","list_reply":{"id":"row1","title":"Option One","description":"d"}}}
                 """));
@@ -178,7 +185,7 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void capturesQuotedMessageIdFromContext() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.REPLY","timestamp":"1","type":"text",
                  "context":{"from":"15550100","id":"wamid.QUOTED"},"text":{"body":"replying"}}
                 """));
@@ -196,12 +203,12 @@ class WhatsAppCloudApiParserTest extends UnitTest {
                   "statuses":[{"id":"wamid.X","status":"delivered","recipient_id":"447900000001"}]
                 }}]}]}
                 """);
-        assertNull(WhatsAppCloudApiParser.parse(status), "a status callback has no user message");
+        assertNull(parseOnly(status), "a status callback has no user message");
     }
 
     @Test
     void unsupportedTypeReturnsNull() {
-        var msg = WhatsAppCloudApiParser.parse(envelope("""
+        var msg = parseOnly(envelope("""
                 {"from":"447900000001","id":"wamid.SYS","timestamp":"1","type":"system",
                  "system":{"body":"user changed number"}}
                 """));
@@ -210,8 +217,8 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void malformedPayloadReturnsNullInsteadOfThrowing() {
-        assertNull(WhatsAppCloudApiParser.parse(json("{}")));
-        assertNull(WhatsAppCloudApiParser.parse(json("{\"entry\":[]}")));
+        assertNull(parseOnly(json("{}")));
+        assertNull(parseOnly(json("{\"entry\":[]}")));
     }
 
     @Test
@@ -361,6 +368,101 @@ class WhatsAppCloudApiParserTest extends UnitTest {
 
     @Test
     void parseStillIgnoresAStatusPayload() {
-        assertNull(WhatsAppCloudApiParser.parse(json(META_FAILED_EXAMPLE)));
+        assertNull(parseOnly(json(META_FAILED_EXAMPLE)));
+    }
+
+    // ── JCLAW-1520: every entry, change and message, each with its own timestamp ──
+
+    private static String text(String id, String from, String timestamp) {
+        return """
+                {"from":"%s","id":"%s","timestamp":"%s","type":"text","text":{"body":"body of %s"}}
+                """.formatted(from, id, timestamp, id);
+    }
+
+    private static String change(String phoneNumberId, String... messages) {
+        return """
+                {"field":"messages","value":{"messaging_product":"whatsapp",
+                  "metadata":{"phone_number_id":"%s"},"messages":[%s]}}
+                """.formatted(phoneNumberId, String.join(",", messages));
+    }
+
+    private static JsonObject entries(String... changesPerEntry) {
+        var entries = java.util.Arrays.stream(changesPerEntry)
+                .map(changes -> "{\"id\":\"WABA\",\"changes\":[" + changes + "]}").toList();
+        return json("{\"object\":\"whatsapp_business_account\",\"entry\":[" + String.join(",", entries) + "]}");
+    }
+
+    private static java.util.List<String> ids(java.util.List<WhatsAppCloudApiParser.Received> received) {
+        return received.stream().map(r -> r.message().messageId()).toList();
+    }
+
+    @Test
+    void everyMessageUnderOneChangeIsParsedInOrderWithItsOwnTimestamp() {
+        var received = WhatsAppCloudApiParser.parse(envelope(
+                text("wamid.A", "447900000001", "1751142000") + "," + text("wamid.B", "447900000002", "1751142060")));
+
+        assertEquals(java.util.List.of("wamid.A", "wamid.B"), ids(received));
+        assertEquals(Instant.ofEpochSecond(1751142000L), received.get(0).sentAt());
+        assertEquals(Instant.ofEpochSecond(1751142060L), received.get(1).sentAt());
+        assertEquals("body of wamid.B", received.get(1).message().text());
+        assertEquals("447900000002", received.get(1).message().from());
+    }
+
+    @Test
+    void messagesUnderEveryChangeAndEveryEntryAreParsedWithTheirOwnPhoneNumberId() {
+        var received = WhatsAppCloudApiParser.parse(entries(
+                change("PNID-1", text("wamid.E0C0", "1", "10")) + "," + change("PNID-2", text("wamid.E0C1", "2", "20")),
+                change("PNID-3", text("wamid.E1C0", "3", "30"))));
+
+        assertEquals(java.util.List.of("wamid.E0C0", "wamid.E0C1", "wamid.E1C0"), ids(received));
+        assertEquals(java.util.List.of("PNID-1", "PNID-2", "PNID-3"),
+                received.stream().map(r -> r.message().phoneNumberId()).toList());
+    }
+
+    @Test
+    void aMissingOrUnparseableTimestampIsCarriedAsNull() {
+        var received = WhatsAppCloudApiParser.parse(envelope("""
+                {"from":"447900000001","id":"wamid.NOTS","type":"text","text":{"body":"a"}},
+                {"from":"447900000001","id":"wamid.BADTS","timestamp":"soon","type":"text","text":{"body":"b"}}
+                """));
+
+        assertEquals(java.util.List.of("wamid.NOTS", "wamid.BADTS"), ids(received));
+        assertNull(received.get(0).sentAt());
+        assertNull(received.get(1).sentAt());
+    }
+
+    @Test
+    void aMalformedOrUnsupportedMessageDoesNotDropItsSiblings() {
+        var received = WhatsAppCloudApiParser.parse(envelope("""
+                "not an object",
+                %s,
+                {"from":"447900000001","id":"wamid.SYS","timestamp":"1","type":"system","system":{"body":"x"}},
+                {"from":"447900000001","id":"wamid.NOTYPE","timestamp":"1"},
+                {"from":"447900000001","id":"wamid.BADLOC","timestamp":"1","type":"location","location":{"latitude":"north","longitude":1}},
+                %s
+                """.formatted(text("wamid.OK1", "447900000001", "1"), text("wamid.OK2", "447900000001", "2"))));
+
+        assertEquals(java.util.List.of("wamid.OK1", "wamid.OK2"), ids(received));
+    }
+
+    @Test
+    void aMalformedEntryOrChangeDoesNotDropTheNextOne() {
+        var payload = json("""
+                {"entry":["nope",{"changes":"nope"},{"changes":["nope",{"value":"nope"},%s]}]}
+                """.formatted(change("PNID-1", text("wamid.LAST", "1", "1"))));
+
+        assertEquals(java.util.List.of("wamid.LAST"), ids(WhatsAppCloudApiParser.parse(payload)));
+    }
+
+    @Test
+    void eachSenderTakesTheContactNameCarryingTheirWaIdAndAnUnmatchedOneTheFirst() {
+        var received = WhatsAppCloudApiParser.parse(json("""
+                {"entry":[{"changes":[{"value":{"metadata":{"phone_number_id":"PNID-1"},
+                  "contacts":[{"profile":{"name":"Ada"},"wa_id":"111"},{"profile":{"name":"Grace"},"wa_id":"222"}],
+                  "messages":[%s,%s,%s]}}]}]}
+                """.formatted(text("wamid.G", "222", "1"), text("wamid.A", "111", "1"), text("wamid.X", "333", "1"))));
+
+        assertEquals(java.util.List.of("Grace", "Ada", "Ada"),
+                received.stream().map(r -> r.message().senderDisplayName()).toList());
     }
 }
