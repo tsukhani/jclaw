@@ -780,7 +780,7 @@ describe('Settings page — Decision Providers', () => {
       const portrait = component.find('[data-testid="decision-baseten-portrait"]')
       expect(portrait.attributes('src')).toBe('/bass.webp')
       expect(portrait.attributes('alt')).toBe('')
-      expect([portrait.attributes('width'), portrait.attributes('height')]).toEqual(['200', '268'])
+      expect([portrait.attributes('width'), portrait.attributes('height')]).toEqual(['235', '200'])
       const play = component.find('[data-testid="decision-baseten-play"]')
       expect(play.find('[data-testid="decision-baseten-portrait"]').exists()).toBe(true)
       expect(play.element.nextElementSibling?.nextElementSibling?.getAttribute('data-testid')).toBe('decision-baseten-about')

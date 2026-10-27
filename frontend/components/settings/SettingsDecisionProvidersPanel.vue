@@ -809,8 +809,8 @@ function playClip(audio: HTMLAudioElement | undefined) {
           <img
             src="/bass.webp"
             alt=""
-            width="200"
-            height="268"
+            width="235"
+            height="200"
             class="block h-[3lh] w-auto select-none"
             data-testid="decision-baseten-portrait"
           >
