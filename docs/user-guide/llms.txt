@@ -1,0 +1,23 @@
+# JClaw User Guide
+
+> JClaw is a workbench for building, running, and watching AI agents. These files are its user guide, one Markdown file per section, in the order the app shows them.
+
+The JClaw app shows the same text on its User Guide page. The pages are written for that page, so their links point into the app. A link such as `/guide#tasks-cron-syntax` names a section of the guide: the part after `#` starts with a file name below (`tasks`), and the rest is that file's heading (`## Cron syntax`), or the `{#id}` written after it. Other links that start with `/`, such as `/chat` or `/settings`, are screens in the JClaw app.
+
+## User guide
+
+- [Getting Started](getting-started.md): what JClaw is, your first five minutes, the sidebar, and the Guided Tour
+- [Chat](chat.md): picking an agent, sending messages, attachments, voice mode, slash commands, tool calls, exports, and coding runs
+- [Prompts](prompts.md): the Prompts Library of saved prompts, shared by all agents
+- [Agents](agents.md): the main agent and custom agents, and setting an agent's model, system prompt, tools, skills, and MCP servers
+- [Conversations & Channels](conversations-and-channels.md): searching and exporting conversations, and connecting agents to Slack, Telegram, and WhatsApp
+- [Subagents](subagents.md): child agents an agent starts during a turn, their spawn and context modes, external coding harnesses, and sandboxing
+- [Scrapes](scrapes.md): reading a website to a chosen depth, inside a chat turn or as a background scrape
+- [Tasks](tasks.md): agent work that runs later or on a schedule, cron syntax, timezones, retention, and task runs
+- [Reminders](reminders.md): scheduled messages delivered word for word, with no model call
+- [Subagents, Tasks, or Reminders?](subagents-tasks-reminders.md): how the three compare, and which one to choose
+- [Skills, Tools & MCP Servers](skills-tools-mcp.md): the three ways to give an agent new capabilities
+- [Apps](apps.md): small static web apps JClaw hosts, and their `app.json` manifest
+- [Settings](settings.md): every section of the Settings page, from providers to security; the longest file
+- [Memories](memory.md): how agents capture facts after each turn, recall them later, and how to tune that
+- [Logs & Dashboard](logs-and-dashboard.md): the Dashboard home page, the Logs page, and the sidebar status pip

@@ -21,6 +21,7 @@ Everything that explains the code is documentation: the Markdown, the comments a
 | Documentation catalog | `docs/README.md` (this page) | maintainers, docs sweeps | the tree: every tracked doc file matches a row | fix |
 | Contribution guide | `CONTRIBUTING.md` | contributors | the workflow and hooks; its policy lines are rules, not claims | fix facts, report policy |
 | User guide | `docs/user-guide/*.md` | operators in the app, agents through `jclaw_docs` | the `.vue` source for every on-screen string, `app/` for behaviour | fix |
+| Guide index for agents | `docs/user-guide/llms.txt` | agents, wherever the guide is published | the guide pages its notes summarize; titles and order are `sections.ts`, pinned by `frontend/test/llms-txt.test.ts` | fix |
 | Component READMEs | `sidecar/*/README.md`, `bin/README.md`, `evals/README.md`, `evals/*/README.md`, `evals/graph/GUIDE.md`, `frontend/tests/e2e/README.md`, `.sandcastle/README.md` | maintainers | the component's code; `bin/README.md` and `evals/README.md` are format contracts | fix |
 | Architecture snapshot | `docs/architecture/*.md`, except plan documents such as `jclaw-agentic-refactor.md` | maintainers | the code; nothing regenerates it | facts only |
 

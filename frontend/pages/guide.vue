@@ -7,8 +7,8 @@
  * The TOC's active highlight follows scroll position via
  * IntersectionObserver.
  *
- * Sections are sourced from `components/guide/sections.ts`. Adding a new
- * section is one .md file + one entry there — this page doesn't change.
+ * Sections are sourced from `components/guide/sections.ts`, which lists the
+ * steps for adding one — this page doesn't change.
  * The page hits no /api endpoints; content is bundled at build time via
  * Vite's `?raw` markdown imports.
  *

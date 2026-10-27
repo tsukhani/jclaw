@@ -8,9 +8,10 @@
  *
  * Adding a new section:
  *
- *   1. Write `docs/user-guide/<your-section>.md`.
+ *   1. Write `docs/user-guide/<id>.md`, named after the section's `id`, which `llms.txt` links it by.
  *   2. Import its `?raw` content here and append a `GuideSection` entry.
- *   3. Done. `pages/guide.vue` iterates this array; no other plumbing.
+ *   3. List it in `docs/user-guide/llms.txt` at the same position; `test/llms-txt.test.ts` fails until you do.
+ *      `pages/guide.vue` iterates this array; no other plumbing.
  *
  * The `id` field is the URL-fragment prefix every anchor in that section
  * gets namespaced with (e.g. `id: 'subagents'` + `## Spawn modes` →
