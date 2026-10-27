@@ -135,7 +135,23 @@ Run this from the **worktree**, against its own dev server, so the primary tree'
 
    **Sweep several widths, not one.** Overflow is viewport-dependent in both directions: on the 2026-09-10 run the settings page was clean at 1280px and had four offenders at 820px, while two others appeared only at 640px. Cover a wide desktop, a narrow desktop and a tablet width (1440 / 820 / 640) in addition to the 320px emulation, across every page **and** every `?section=` of Settings — sections mount one at a time, so an unopened panel is unmeasured.
 
+   **The sweep above sees `<main>` only, so sweep what sits outside it as well:** the header, the sidebar and every pop-up. On 2026-10-27 the header pushed the theme switcher and the GitHub link past the viewport at 320px on all 61 URLs, and on 14 at 400px, while the `<main>` sweep reported every page clean. Run this on `document.querySelector('header')` at every width, on the sidebar once it is opened (closed below lg it is `invisible`, which the filter skips), and on each dialog, menu and popover once it is open, the command palette included:
+   ```js
+   (root) => {
+     const vw = document.documentElement.clientWidth;
+     const offscreen = [...root.querySelectorAll('a[href], button, input, select, [role=button]')]
+       .filter(el => el.checkVisibility())
+       .map(el => ({ el, r: el.getBoundingClientRect() }))
+       .filter(({ r }) => r.width && (r.right > vw + 0.5 || r.left < -0.5))
+       .map(({ el, r }) => ({ name: (el.getAttribute('aria-label') || el.title || el.innerText).trim().slice(0, 30),
+         left: Math.round(r.left), right: Math.round(r.right) }));
+     return { offscreen, overflow: root.scrollWidth - root.clientWidth };
+   }
+   ```
+   Also check every fixed or absolute `aria-hidden` element with text against the controls it overlaps: a decorative overlay is exempt from contrast, not from covering a button. Validate on a planted button positioned past the right edge of the header.
+
 6. Check that a visible focus indicator appears on keyboard focus, and measure its contrast against the adjacent surface (≥ 3:1). Note that scripted `.focus()` does not always trigger `:focus-visible`, so a computed-style diff shows an indicator *exists*, not that it clears 3:1.
+   **Measure the shadow layer that is drawn.** Tailwind v4 puts transparent placeholder layers ahead of a `ring-*` in `box-shadow`, so taking its first colour reads `rgba(0, 0, 0, 0)` and scores every ring as opaque black: 21:1 on white, so no light-theme ring can fail. Split the layers, keep those with alpha > 0 and a spread or blur > 0, and measure that colour. Plant one probe per measurement path (an outline ring and a shadow ring), because a probe on one path does not exercise the other.
 
 7. **Trigger error states — a sweep of each page as it loads never sees them.** A component that renders only on failure is absent from the DOM until something fails, so it stays unmeasured on a page that otherwise reads clean. Find the renderers with `grep -rl "<ApiErrorAlert" frontend/` rather than trusting a list, and trigger each one:
    - **Prefer a read-only call that fails for real.** Settings → LLM Providers → *Discover models* on a provider that isn't running locally (vllm, llama-cpp) returns a genuine 502 and changes nothing.
