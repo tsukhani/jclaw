@@ -640,7 +640,7 @@ final class SubagentAcpRunner {
     }
 
     /** JCLAW-709: a coding run is "trusted" for sandbox purposes only when its origin is
-     *  the operator's own web chat — the same boundary {@link #enforceChannelApproval}
+     *  the operator's own web chat or voice mode — the same boundary {@link #enforceChannelApproval}
      *  uses. JCLAW-1021: a parentless run records no origin, and an unrecorded origin is
      *  not the operator, so the untrusted-only sandbox mode
      *  ({@code subagent.acp.sandbox=untrusted}) now confines it too. */

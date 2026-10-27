@@ -106,8 +106,15 @@ class TaskFireOriginTrustTest extends FunctionalTest {
     }
 
     @Test
+    void voiceIsTheOperatorAsWebIs() {
+        // JF-148: a voice session starts only from the operator's signed-in web session.
+        assertEquals(Trust.OPERATOR, ChannelOriginTrust.classify("voice"));
+        assertTrue(ChannelOriginTrust.isOperatorOrigin("voice"));
+    }
+
+    @Test
     void namedChannelsStayUntrusted() {
-        for (var channel : List.of("telegram", "slack", "whatsapp", "email")) {
+        for (var channel : List.of("telegram", "slack", "whatsapp", "app", "email")) {
             assertEquals(Trust.UNTRUSTED_CHANNEL, ChannelOriginTrust.classify(channel), channel);
             assertFalse(ChannelOriginTrust.isOperatorOrigin(channel), channel);
         }
@@ -328,11 +335,76 @@ class TaskFireOriginTrustTest extends FunctionalTest {
     void jclawApiStampsTheCallingTurnsOrigin() {
         var agent = unboundAgent("stamp-origin-web");
         var webConversation = conversationId(agent, WEB, null);
+        var telegramConversation = conversationId(agent, "telegram", "owner-dm");
 
         assertEquals(WEB, ToolContext.withConversation(webConversation, () -> stampedOrigin(agent)));
-        assertEquals("telegram", DangerousActionGate.withFireOrigin("telegram", () -> stampedOrigin(agent)),
-                "inside an untrusted fire the fire's origin is the floor, and that is what gets stamped");
-        assertNull(stampedOrigin(agent), "a turn with no origin stamps nothing, which reads as UNKNOWN");
+        assertEquals("telegram", DangerousActionGate.withOwnerInitiated(true,
+                        () -> ToolContext.withConversation(telegramConversation, () -> stampedOrigin(agent))),
+                "the owner's own Telegram turn is stamped telegram, so a task it writes fires with no web trust");
+        assertEquals(WEB, DangerousActionGate.withFireOrigin(WEB, () -> stampedOrigin(agent)),
+                "a fire of the operator's task stamps its origin");
+    }
+
+    // ── JF-148: a task made where the owner reads alone keeps jclaw_api; another turn's edit clears that ──
+
+    @Test
+    void aGuestsPatchClearsTheOwnersMark() {
+        var agent = unboundAgent("owner-mark-guest");
+        var taskId = persistTask(agent, "owner-mark-guest-task", "telegram", Boolean.TRUE);
+        var guestDm = conversationId(agent, "telegram", "5151");
+
+        var result = DangerousActionGate.withOwnerInitiated(false, () -> ToolContext.withConversation(guestDm,
+                () -> new TaskTool().execute(repointPatch("owner-mark-guest-task"), managed(agent))));
+
+        assertTrue(result.startsWith("Task '"), "the patch must have applied; got: " + result);
+        assertNull(ownerReadsAloneOf(taskId));
+    }
+
+    @Test
+    void theOwnersOwnPatchKeepsTheMarkAndNeverSetsOne() {
+        var agent = unboundAgent("owner-mark-owner");
+        var marked = persistTask(agent, "owner-mark-owner-task", "telegram", Boolean.TRUE);
+        var unmarked = persistTask(agent, "owner-mark-owner-bare", "telegram", null);
+        var ownerDm = conversationId(agent, "telegram", "4242");
+
+        var results = DangerousActionGate.withOwnerInitiated(true, () -> ToolContext.withConversation(ownerDm,
+                () -> List.of(new TaskTool().execute(repointPatch("owner-mark-owner-task"), managed(agent)),
+                        new TaskTool().execute(repointPatch("owner-mark-owner-bare"), managed(agent)))));
+
+        assertTrue(results.stream().allMatch(r -> r.startsWith("Task '")), "both patches applied: " + results);
+        assertEquals(Boolean.TRUE, ownerReadsAloneOf(marked));
+        assertNull(ownerReadsAloneOf(unmarked), "an edit never sets the mark");
+    }
+
+    @Test
+    void theOperatorsRestTaskIsMarked() {
+        var agent = unboundAgent("owner-mark-rest-operator");
+        login();
+
+        var taskId = createTaskViaApi(newRequest(), agent, "owner-mark-rest-operator-task");
+
+        assertEquals(Boolean.TRUE, ownerReadsAloneOf(taskId));
+    }
+
+    @Test
+    void anAgentsRestTaskIsMarkedOnlyWhenItsCallWasStamped() {
+        var agent = unboundAgent("owner-mark-rest-agent");
+
+        var stamped = asAgent(() -> createTaskViaApi(agentRequestFromTheOwnersDm(), agent, "owner-mark-stamped"));
+        var unstamped = asAgent(() -> createTaskViaApi(agentRequestFrom("telegram"), agent, "owner-mark-unstamped"));
+
+        assertEquals(Boolean.TRUE, ownerReadsAloneOf(stamped));
+        assertNull(ownerReadsAloneOf(unstamped));
+    }
+
+    @Test
+    void anUnstampedRestPatchClearsTheMark() {
+        var agent = unboundAgent("owner-mark-rest-patch");
+        var taskId = persistTask(agent, "owner-mark-rest-patch-task", "telegram", Boolean.TRUE);
+
+        assertIsOk(asAgent(() -> patchViaApi(agentRequestFrom("telegram"), taskId)));
+
+        assertNull(ownerReadsAloneOf(taskId));
     }
 
     @Test
@@ -433,6 +505,14 @@ class TaskFireOriginTrustTest extends FunctionalTest {
         return request;
     }
 
+    /** A bearer request as {@code JClawApiTool} builds it on the owner's own Telegram DM turn. */
+    private static Http.Request agentRequestFromTheOwnersDm() {
+        var request = agentRequestFrom("telegram");
+        request.headers.put(RequestPrincipal.CALLER_OWNER_READS_ALONE_HEADER,
+                new Http.Header(RequestPrincipal.CALLER_OWNER_READS_ALONE_HEADER, "true"));
+        return request;
+    }
+
     /** A bearer request stamped with the calling turn's {@code origin}, exactly as {@code JClawApiTool} builds it. */
     private static Http.Request agentRequestFrom(String origin) {
         var request = agentRequest();
@@ -516,9 +596,25 @@ class TaskFireOriginTrustTest extends FunctionalTest {
 
     /** A committed Task for {@code agent} with {@code originChannel} already recorded. */
     private Long persistTask(Agent agent, String name, String originChannel) {
+        return persistTask(agent, name, originChannel, null);
+    }
+
+    /** {@link #persistTask(Agent, String, String)} with {@link Task#ownerReadsAlone} recorded as {@code mark}. */
+    private Long persistTask(Agent agent, String name, String originChannel, Boolean mark) {
         return commitInFreshTx(() -> {
             Agent owner = Agent.findById(agent.id);
-            return newTask(owner, name, originChannel).id;
+            var task = newTask(owner, name, originChannel);
+            task.ownerReadsAlone = mark;
+            task.save();
+            return task.id;
+        });
+    }
+
+    /** {@link Task#ownerReadsAlone} as it stands, read as {@link #originChannelOf} reads the origin. */
+    private static Boolean ownerReadsAloneOf(Long taskId) {
+        return Tx.run(() -> {
+            Task task = Task.findById(taskId);
+            return task == null ? null : task.ownerReadsAlone;
         });
     }
 

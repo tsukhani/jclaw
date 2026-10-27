@@ -285,6 +285,80 @@ class AgentRunnerCompactionTest extends UnitTest {
                 "assistant reply for the compaction-triggering turn must be persisted exactly once");
     }
 
+    @Test
+    void aCompactedTurnTheOwnerDoesNotReadAloneIsStillNotToldAboutJclawApi() throws Exception {
+        // JF-148: the rebuild after compaction assembles the prompt again, so it must leave jclaw_api out again.
+        var chatPrompts = new java.util.concurrent.CopyOnWriteArrayList<String>();
+        startLlmServer(exchange -> {
+            var body = new String(exchange.getRequestBody().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            var summarizing = body.contains("You are compressing a conversation");
+            if (!summarizing) {
+                chatPrompts.add(com.google.gson.JsonParser.parseString(body).getAsJsonObject()
+                        .getAsJsonArray("messages").get(0).getAsJsonObject().get("content").getAsString());
+            }
+            LlmReplyFixture.send(exchange, simpleResponse(summarizing ? "SUMMARY-OF-OLDER-TURNS" : "Reply after compaction."));
+        });
+        configureTinyContextProvider();
+        ConfigService.set("chat.compactionReserveTokens", "200");
+        ConfigService.set("chat.compactionReserveTokensFloor", "100");
+        ConfigService.set("chat.compactionMinTurns", "4");
+        ConfigService.set("chat.compactionKeepMessages", "2");
+
+        var agent = createAgent("compaction-jf148-agent", "test-provider", "test-model");
+        var grant = new models.AgentToolConfig();
+        grant.agent = agent;
+        grant.toolName = "jclaw_api";
+        grant.enabled = true;
+        grant.save();
+        // The Tool Catalog section is written only for an agent with a skill.
+        var skill = services.AgentService.workspacePath(agent.name).resolve("skills").resolve("notes");
+        java.nio.file.Files.createDirectories(skill);
+        java.nio.file.Files.writeString(skill.resolve("SKILL.md"), "---\nname: notes\ndescription: Keep notes\n---\n# Notes\n");
+        var app = seededConversation(agent, "app", "an-app");
+        var web = seededConversation(agent, "web", "u-jf148");
+        JPA.em().getTransaction().commit();
+        JPA.em().getTransaction().begin();
+        agents.ToolRegistry.invalidateDisabledToolsCache(agent);
+        agents.SkillLoader.clearCache();
+
+        ToolRegistrySync.withCanonicalTools(() -> {
+            runOnVirtualThread(agent, app, "What's next?");
+            runOnVirtualThread(agent, web, "What's next?");
+        });
+
+        assertEquals(2, chatPrompts.size(), "one chat call per turn: " + chatPrompts.size());
+        for (var prompt : chatPrompts) {
+            assertTrue(prompt.contains("SUMMARY-OF-OLDER-TURNS"), "each chat call carries the rebuilt prompt");
+        }
+        var fromWeb = catalogTools(chatPrompts.get(1));
+        assertTrue(fromWeb.contains("jclaw_api"), "control: the operator's compacted turn is told about it: " + fromWeb);
+        var expected = new java.util.TreeSet<>(fromWeb);
+        expected.remove("jclaw_api");
+        assertEquals(expected, catalogTools(chatPrompts.get(0)), "a hosted app's compacted turn");
+    }
+
+    private static Conversation seededConversation(Agent agent, String channel, String peerId) {
+        var convo = ConversationService.create(agent, channel, peerId);
+        var bigBlock = "x".repeat(2000);
+        for (int i = 1; i <= 4; i++) {
+            ConversationService.appendUserMessage(convo, "u" + i + " " + bigBlock);
+            ConversationService.appendAssistantMessage(convo, "a" + i + " " + bigBlock, null);
+        }
+        return convo;
+    }
+
+    /** The tool names in {@code prompt}'s Tool Catalog section. */
+    private static java.util.Set<String> catalogTools(String prompt) {
+        int start = prompt.indexOf("## Tool Catalog");
+        assertTrue(start >= 0, "the prompt must carry a Tool Catalog section for this check to mean anything");
+        int end = prompt.indexOf("\n## ", start + 1);
+        var names = new java.util.TreeSet<String>();
+        var rows = java.util.regex.Pattern.compile("(?m)^\\| `([A-Za-z0-9_.-]+)` \\|")
+                .matcher(prompt.substring(start, end < 0 ? prompt.length() : end));
+        while (rows.find()) names.add(rows.group(1));
+        return names;
+    }
+
     // ===== Helpers =====
 
     private Agent createAgent(String name, String provider, String model) {

@@ -341,9 +341,11 @@ public class SystemPromptAssembler {
         }
 
         // 4. Skills
-        var skills = SkillLoader.loadSkills(agent.name);
+        var effectiveDisabled = disabledTools != null ? disabledTools : ToolRegistry.loadDisabledTools(agent);
+        var skills = SkillLoader.loadSkills(agent.name).stream()
+                .filter(s -> !ToolRegistry.needsOnlyWithheldOwnerTools(s.tools(), effectiveDisabled))
+                .toList();
         if (!skills.isEmpty()) {
-            var effectiveDisabled = disabledTools != null ? disabledTools : ToolRegistry.loadDisabledTools(agent);
             var skillAccess = SkillLoader.SkillAccess.of(effectiveDisabled);
             b.startSection("Skills");
             b.sb.append("\n");

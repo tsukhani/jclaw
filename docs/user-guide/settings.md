@@ -957,14 +957,18 @@ This setting is a **fallback, not a replacement for the approval prompt**. When 
 
 | Who sent the turn | `allow` | `ask` | `deny` |
 |--------|---------|-------|--------|
-| You (the web UI, or a Telegram/Slack message the channel proves is yours) | Runs. | Sends a confirmation to the agent's bound Telegram DM. | Refused. |
+| You (the web UI or its voice mode, or a Telegram/Slack message the channel proves is yours) | Runs. | Sends a confirmation to the agent's bound Telegram DM. | Refused. |
 | Someone else, on a channel that can reach you | Prompted in that chat. | Prompted in that chat. | Prompted in that chat. |
 | Someone else with no way to ask (WhatsApp, a binding that cannot prompt, or a task whose origin was never recorded) | Refused. | Sends a confirmation to the bound Telegram DM; refused if there is none. | Refused. |
+
+A Slack binding with no owner saved cannot prove that a message is yours, so there your own messages count as someone else's. If JClaw restarts while a message of yours is still waiting its turn, it runs after the restart as someone else's message.
+
+The agent has the `jclaw_api` tool only on your own turns where you alone read the reply: the web UI, its voice mode, and your own Telegram or Slack DM. On someone else's turn it does not have the tool at all, so their messages cannot read JClaw's API through it, and cannot write through it either. Your own message in a Telegram group or a Slack channel does not get it either, because everyone there reads the reply.
 
 :::gotcha
 `allow` only ever loosens **your own** turns. Someone else on a channel that can reach you is prompted either way, and one that cannot fails closed under both `allow` and `deny`, so raising the setting cannot weaken it. Only `ask` gives an unaskable origin any route through, and only by confirming with you first.
 
-Separately, an agent you have granted a standing approval for a tool runs it with no prompt on your own turns (the web UI, or a Telegram/Slack message the channel proves is yours). JClaw checks that standing grant before this policy, and the grant overrides this policy. So if an agent stopped asking you, a grant is why, not this setting. A standing grant never covers someone else's turn, which is prompted or refused as the table above says.
+Separately, an agent you have granted a standing approval for a tool runs it with no prompt on your own turns (the web UI or its voice mode, or a Telegram/Slack message the channel proves is yours). JClaw checks that standing grant before this policy, and the grant overrides this policy. So if an agent stopped asking you, a grant is why, not this setting. A standing grant never covers someone else's turn, which is prompted or refused as the table above says.
 
 JClaw creates a standing grant when you tap **✓ Always** on an approval prompt, and it lasts until you revoke it. Tap it only for a tool you are content for that agent to run on your behalf without asking.
 :::
@@ -981,7 +985,7 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on each
 | `shell.defaultTimeoutSeconds`  | 120     | Wall-clock budget for a command whose call sets no timeout (1 s to `shell.maxTimeoutSeconds` in the panel). A call may set its own, capped at `shell.maxTimeoutSeconds` (600). A command the agent runs in the background has no timeout; its lifetime applies instead. |
 | `shell.maxTimeoutSeconds`      | 600     | The longest timeout a call may set; JClaw cuts a longer one to this. Has no row in the panel; set it with `POST /api/config`. |
 | `shell.maxOutputBytes`         | 102400  | How much of a command's output reaches the agent (100 KB); the rest is cut, with a note giving the full length. Has no row in the panel; set it with `POST /api/config`. |
-| `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Set it with the **sandbox** control: *Off*, *Untrusted channels only* or *Every run*. JClaw refuses a save of any other value. When this host has no `sandbox-exec` (macOS) or `bwrap` (Linux), the control says so: with the key on, runs are then refused rather than run unconfined. |
+| `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat or voice mode). Set it with the **sandbox** control: *Off*, *Untrusted channels only* or *Every run*. JClaw refuses a save of any other value. When this host has no `sandbox-exec` (macOS) or `bwrap` (Linux), the control says so: with the key on, runs are then refused rather than run unconfined. |
 | `shell.sandbox.network`        | `allow` | Whether a run that `shell.sandbox` confines can use the network: `allow` or `deny`. Set it with the **sandbox.network** control: *Allow* or *Deny*. With *Deny*, a confined command cannot connect anywhere, not even to this machine, so it cannot send your files out. Coding harnesses keep their network, because they need their model's API. JClaw refuses a save of any other value. It does nothing while `shell.sandbox` is off. |
 | `shell.backgroundLifetimeHours` | 24     | How many hours a program a shell command left running in the background may run. Every 10 minutes, JClaw stops the ones that have run longer. `0` never stops one. |
 

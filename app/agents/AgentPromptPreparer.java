@@ -109,8 +109,9 @@ final class AgentPromptPreparer {
             trace.mark(LatencyTrace.PROLOGUE_CONV_RESOLVED);
             trace.agentId(AgentRunner.agentIdOf(agent));
 
+            var ownerReadsAlone = DangerousActionGate.ownerReadsAlone(conv.id, conv.channelType, conv.peerId);
             var assembled = SystemPromptAssembler.assemble(agent, userMessage,
-                    ToolRegistry.fencedDisabled(agent, TaskToolPolicy.allowListOf(conv.enabledToolNames)),
+                    ToolRegistry.turnDisabled(agent, TaskToolPolicy.allowListOf(conv.enabledToolNames), ownerReadsAlone),
                     conv.channelType, queryEmbedding, conv);
             // JCLAW-38: re-inject the latest compaction summary (if any)
             // into the system prompt so the LLM keeps continuity with
@@ -138,8 +139,8 @@ final class AgentPromptPreparer {
 
             // Conversation-aware overload: native tools and each MCP
             // server's handle always ship.
-            var tools = TaskToolPolicy.restrictSubagent(
-                    ToolRegistry.getToolDefsForAgent(agent, conv), conv.enabledToolNames, agent.name);
+            var tools = ToolRegistry.forTurn(TaskToolPolicy.restrictSubagent(
+                    ToolRegistry.getToolDefsForAgent(agent, conv), conv.enabledToolNames, agent.name), ownerReadsAlone);
 
             EventLogger.info("llm", agent.name, conv.channelType,
                     "Calling %s / %s".formatted(primary.config().name(), ModelResolver.effectiveModelId(agent, conv)));
@@ -229,8 +230,10 @@ final class AgentPromptPreparer {
             var convo = Objects.requireNonNull(ConversationService.findById(conversation.id),
                     "conversation disappeared mid-turn");
             // A conversation that carries a tool list is described by it, in the prompt as in the request.
-            var fenced = ToolRegistry.fencedDisabled(agent, TaskToolPolicy.allowListOf(convo.enabledToolNames));
-            var disabledTools = fenced != null ? fenced : ToolRegistry.loadDisabledTools(agent);
+            var ownerReadsAlone = DangerousActionGate.ownerReadsAlone(convo.id, convo.channelType, convo.peerId);
+            var turnDisabled = ToolRegistry.turnDisabled(agent, TaskToolPolicy.allowListOf(convo.enabledToolNames),
+                    ownerReadsAlone);
+            var disabledTools = turnDisabled != null ? turnDisabled : ToolRegistry.loadDisabledTools(agent);
             var promptChannel = channelType != null ? channelType : convo.channelType;
             var assembled0 = SystemPromptAssembler.assemble(agent, userMessage, disabledTools, promptChannel,
                     queryEmbedding, convo);
@@ -241,8 +244,8 @@ final class AgentPromptPreparer {
             var hydration = MessageHydrator.buildMessages(sysPrompt, convo);
             // Conversation-aware overload: applies the loadtest-agent
             // short-circuit.
-            var toolDefs = TaskToolPolicy.restrictSubagent(
-                    ToolRegistry.getToolDefsForAgent(agent, convo), convo.enabledToolNames, agent.name);
+            var toolDefs = ToolRegistry.forTurn(TaskToolPolicy.restrictSubagent(
+                    ToolRegistry.getToolDefsForAgent(agent, convo), convo.enabledToolNames, agent.name), ownerReadsAlone);
             return new PreparedPrologue(assembled0, hydration.messages(), toolDefs, disabledTools,
                     hydration.audioBearers(), hydration.imageBearers(), hydration.videoBearers());
         });

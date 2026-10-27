@@ -348,6 +348,15 @@ public class Task extends TimestampedModel {
     public String originChannel;
 
     /**
+     * JF-148: true when the task was created on a turn where the owner reads the reply alone
+     * ({@code DangerousActionGate.ownerReadsAlone}), so every fire is offered {@code jclaw_api}
+     * whatever {@link #originChannel} says. Set only at creation; an edit from any other turn
+     * clears it and nothing sets it later. Null means not recorded.
+     */
+    @Column(name = "owner_reads_alone")
+    public Boolean ownerReadsAlone;
+
+    /**
      * JCLAW-304: mirror this row into the Lucene full-text index under
      * {@link services.search.LuceneIndexer.Scope#TASK} as a virtual
      * document combining {@link #name} and {@link #description}. Same

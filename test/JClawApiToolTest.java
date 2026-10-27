@@ -1,5 +1,7 @@
+import agents.DangerousActionGate;
 import agents.ToolContext;
 import controllers.RequestPrincipal;
+import models.Agent;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import okhttp3.Protocol;
@@ -9,13 +11,17 @@ import okhttp3.ResponseBody;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
+import services.AgentService;
+import services.ConversationService;
 import tools.JClawApiTool;
 import utils.HttpFactories;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.SortedSet;
 import java.util.TreeSet;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 /**
  * Unit coverage for {@link JClawApiTool}'s argument parsing, its refusal of unnormalized
@@ -30,14 +36,23 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@code OPERATOR_ONLY} or undeclared action is refused. These tests run the real route-table
  * scan (UnitTest boots Play, so {@code Router.routes} is populated and controllers carry their
  * runtime annotations).
+ *
+ * <p>JF-148: a call is refused unless the turn is the owner's, so every other test makes its call as one.
  */
 class JClawApiToolTest extends UnitTest {
+
+    private static final String NOT_THE_OWNERS_TURN = "jclaw_api is not available in a conversation the owner didn't start.";
 
     private static JClawApiTool tool;
 
     @BeforeAll
     static void setup() {
         tool = new JClawApiTool();
+    }
+
+    /** The call on an owner-initiated turn, which every check below assumes. */
+    private static String asOwner(String argsJson, Agent agent) {
+        return DangerousActionGate.withOwnerInitiated(true, () -> tool.execute(argsJson, agent));
     }
 
     // ==================== argument validation ====================
@@ -52,28 +67,28 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void rejectsMalformedJson() {
-        var result = tool.execute("this is not json", null);
+        var result = asOwner("this is not json", null);
         assertTrue(result.startsWith("Error: arguments are not valid JSON"),
                 "expected JSON-parse error; got: " + result);
     }
 
     @Test
     void rejectsMissingMethod() {
-        var result = tool.execute("{\"path\":\"/api/agents\"}", null);
+        var result = asOwner("{\"path\":\"/api/agents\"}", null);
         assertTrue(result.startsWith("Error: both 'method' and 'path' are required"),
                 "got: " + result);
     }
 
     @Test
     void rejectsMissingPath() {
-        var result = tool.execute("{\"method\":\"GET\"}", null);
+        var result = asOwner("{\"method\":\"GET\"}", null);
         assertTrue(result.startsWith("Error: both 'method' and 'path' are required"),
                 "got: " + result);
     }
 
     @Test
     void rejectsUnknownMethod() {
-        var result = tool.execute(
+        var result = asOwner(
                 "{\"method\":\"OPTIONS\",\"path\":\"/api/agents\"}", null);
         assertTrue(result.contains("method must be one of"),
                 "got: " + result);
@@ -83,7 +98,7 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void rejectsNonApiPath() {
-        var result = tool.execute(
+        var result = asOwner(
                 "{\"method\":\"GET\",\"path\":\"/somewhere-else\"}", null);
         assertTrue(result.contains("path must start with /api/"),
                 "got: " + result);
@@ -95,7 +110,7 @@ class JClawApiToolTest extends UnitTest {
     void blocksChatSendPath() {
         // Recursion guard: a chat agent calling /api/chat/send to send
         // another chat would invoke itself. Refused regardless of method.
-        var result = tool.execute(
+        var result = asOwner(
                 "{\"method\":\"POST\",\"path\":\"/api/chat/send\"," +
                 "\"body\":{\"agentId\":1,\"message\":\"hi\"}}", null);
         assertTrue(result.contains("is not callable through jclaw_api"),
@@ -106,7 +121,7 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void blocksAuthLoginPath() {
-        var result = tool.execute(
+        var result = asOwner(
                 "{\"method\":\"POST\",\"path\":\"/api/auth/login\"," +
                 "\"body\":{\"username\":\"admin\",\"password\":\"x\"}}", null);
         assertTrue(result.contains("/api/auth/"),
@@ -115,7 +130,7 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void blocksWebhookPath() {
-        var result = tool.execute(
+        var result = asOwner(
                 "{\"method\":\"POST\",\"path\":\"/api/webhooks/telegram/x/y\"}", null);
         assertTrue(result.contains("/api/webhooks/"),
                 "webhook endpoints must be blocked; got: " + result);
@@ -123,7 +138,7 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void blocksEventsPath() {
-        var result = tool.execute(
+        var result = asOwner(
                 "{\"method\":\"GET\",\"path\":\"/api/events\"}", null);
         assertTrue(result.contains("/api/events"),
                 "events SSE must be blocked; got: " + result);
@@ -131,14 +146,14 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void blocksBindingsPath() {
-        var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/bindings\"}", null);
+        var result = asOwner("{\"method\":\"GET\",\"path\":\"/api/bindings\"}", null);
         assertTrue(result.contains("/api/bindings"),
                 "bindings (comms routing) must be refused; got: " + result);
     }
 
     @Test
     void blocksTelegramBindingsPath() {
-        var result = tool.execute(
+        var result = asOwner(
                 "{\"method\":\"GET\",\"path\":\"/api/channels/telegram/bindings\"}", null);
         assertTrue(result.contains("is not callable through jclaw_api"),
                 "telegram bindings (bot tokens) must stay refused; got: " + result);
@@ -146,21 +161,21 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void blocksTailscalePath() {
-        var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/tailscale\"}", null);
+        var result = asOwner("{\"method\":\"GET\",\"path\":\"/api/tailscale\"}", null);
         assertTrue(result.contains("/api/tailscale"),
                 "tailscale (infra config) must be refused; got: " + result);
     }
 
     @Test
     void blocksLogsPath() {
-        var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/logs\"}", null);
+        var result = asOwner("{\"method\":\"GET\",\"path\":\"/api/logs\"}", null);
         assertTrue(result.contains("/api/logs"),
                 "logs (secret leak) must be refused; got: " + result);
     }
 
     @Test
     void blocksLoadtestPath() {
-        var result = tool.execute("{\"method\":\"POST\",\"path\":\"/api/metrics/loadtest\"}", null);
+        var result = asOwner("{\"method\":\"POST\",\"path\":\"/api/metrics/loadtest\"}", null);
         assertTrue(result.contains("/api/metrics/loadtest"),
                 "load-test harness (resource abuse) must be refused; got: " + result);
     }
@@ -176,7 +191,7 @@ class JClawApiToolTest extends UnitTest {
      */
     @Test
     void aDotSegmentCannotWalkOutOfAWildcardRouteIntoAnOperatorOnlyRoute() {
-        var result = tool.execute(
+        var result = asOwner(
                 "{\"method\":\"GET\",\"path\":\"/api/skills/x/files/../../../logs\"}", null);
         assertTrue(result.startsWith("Error:"), "the traversal must be refused; got: " + result);
         assertFalse(result.startsWith("HTTP "),
@@ -191,7 +206,7 @@ class JClawApiToolTest extends UnitTest {
      */
     @Test
     void aPercentEncodedDotSegmentIsGatedOnTheResolvedPath() {
-        var result = tool.execute(
+        var result = asOwner(
                 "{\"method\":\"GET\",\"path\":\"/api/skills/x/files/%2e%2e/%2e%2e/%2e%2e/logs\"}", null);
         assertTrue(result.contains("/api/logs"),
                 "the resolved path must be what the gate sees; got: " + result);
@@ -204,13 +219,13 @@ class JClawApiToolTest extends UnitTest {
         // Measured on okhttp-jvm-5.5.0: a backslash parses as '/', and '#' truncates the rest
         // of the URL including the query. '//' is not collapsed, but it is a path the router
         // and the gate can read differently, so it is refused with them.
-        assertTrue(tool.execute("{\"method\":\"GET\",\"path\":\"/api/skills\\\\x/files\"}", null)
+        assertTrue(asOwner("{\"method\":\"GET\",\"path\":\"/api/skills\\\\x/files\"}", null)
                         .contains("backslash"),
                 "a backslash resolves to a path separator and must be refused");
-        assertTrue(tool.execute("{\"method\":\"GET\",\"path\":\"/api/status#/../logs\"}", null)
+        assertTrue(asOwner("{\"method\":\"GET\",\"path\":\"/api/status#/../logs\"}", null)
                         .contains("'#'"),
                 "a '#' truncates the URL and must be refused");
-        assertTrue(tool.execute("{\"method\":\"GET\",\"path\":\"/api//memories\"}", null)
+        assertTrue(asOwner("{\"method\":\"GET\",\"path\":\"/api//memories\"}", null)
                         .contains("empty path segment"),
                 "an empty path segment must be refused");
     }
@@ -219,7 +234,7 @@ class JClawApiToolTest extends UnitTest {
      *  fire on a {@code //} or a dot inside a parameter value. */
     @Test
     void aQueryStringInThePathIsNotMistakenForATraversal() {
-        var result = tool.execute(
+        var result = asOwner(
                 "{\"method\":\"GET\",\"path\":\"/api/config?url=https://example.com/..\"}", null);
         assertFalse(result.contains("cannot be invoked through jclaw_api -- pass the resolved path"),
                 "the query string is not part of the path; got: " + result);
@@ -231,12 +246,15 @@ class JClawApiToolTest extends UnitTest {
     void aCallFromAChatNamesTheChatAndShowsTheRoutesNoteToTheModel() {
         var sent = new AtomicReference<Request>();
         var client = canned(sent, "End your turn now.");
+        // JF-148: the chat must exist, since whether the owner reads it alone is read off it.
+        var agent = AgentService.create("jf148-api-" + java.util.UUID.randomUUID(), "openrouter", "gpt-4.1");
+        var chat = ConversationService.create(agent, "web", null).id;
 
-        var result = HttpFactories.callWith(client, () -> ToolContext.withConversation(42L,
-                () -> tool.execute("{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\"}", null)));
+        var result = HttpFactories.callWith(client, () -> ToolContext.withConversation(chat,
+                () -> asOwner("{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\"}", null)));
 
         assertEquals("HTTP 200\nNote: End your turn now.\n{\"id\":5}", result);
-        assertEquals("42", sent.get().header(RequestPrincipal.CALLER_CONVERSATION_HEADER));
+        assertEquals(String.valueOf(chat), sent.get().header(RequestPrincipal.CALLER_CONVERSATION_HEADER));
     }
 
     @Test
@@ -245,10 +263,26 @@ class JClawApiToolTest extends UnitTest {
         var client = canned(sent, null);
 
         var result = HttpFactories.callWith(client,
-                () -> tool.execute("{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\"}", null));
+                () -> asOwner("{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\"}", null));
 
         assertEquals("HTTP 200\n{\"id\":5}", result);
         assertNull(sent.get().header(RequestPrincipal.CALLER_CONVERSATION_HEADER));
+    }
+
+    /** A task run of a task recorded with {@code origin} and {@code ownerReadsAlone}, in the ambient transaction. */
+    private static Long taskRun(Agent agent, String origin, Boolean ownerReadsAlone) {
+        var task = new models.Task();
+        task.agent = agent;
+        task.name = "jf148-api-task-" + java.util.UUID.randomUUID();
+        task.type = models.Task.Type.IMMEDIATE;
+        task.status = models.Task.initialStatusFor(models.Task.Type.IMMEDIATE);
+        task.originChannel = origin;
+        task.ownerReadsAlone = ownerReadsAlone;
+        task.save();
+        var run = new models.TaskRun();
+        run.task = task;
+        run.save();
+        return run.id;
     }
 
     private static OkHttpClient canned(AtomicReference<Request> sent, String note) {
@@ -266,13 +300,83 @@ class JClawApiToolTest extends UnitTest {
         return new OkHttpClient.Builder().addInterceptor(reply).build();
     }
 
+    // ==================== JF-148: only on a turn the owner started ====================
+
+    @Test
+    void aTurnTheOwnerDidNotStartIsRefusedBeforeAnyRequestIsSent() {
+        var agent = AgentService.create("jf148-api-" + java.util.UUID.randomUUID(), "openrouter", "gpt-4.1");
+        var whatsapp = ConversationService.create(agent, "whatsapp", "15550001111").id;
+        var telegram = ConversationService.create(agent, "telegram", "5151").id;
+        var telegramGroup = ConversationService.create(agent, "telegram", "-100200").id;
+        var slackChannel = ConversationService.create(agent, "slack", "C123").id;
+        var slackDm = ConversationService.create(agent, "slack", "D123").id;
+        var app = ConversationService.create(agent, "app", "an-app").id;
+        var guestsTaskRun = taskRun(agent, "telegram", null);
+
+        for (var call : List.of("{\"method\":\"GET\",\"path\":\"/api/tasks\"}",
+                "{\"method\":\"POST\",\"path\":\"/api/tasks/5/run\"}", "{\"action\":\"discover\"}")) {
+            var guests = new LinkedHashMap<String, Supplier<String>>();
+            guests.put("WhatsApp", () -> ToolContext.withConversation(whatsapp, () -> tool.execute(call, agent)));
+            guests.put("a non-owner's Telegram DM", () -> DangerousActionGate.withOwnerInitiated(false,
+                    () -> ToolContext.withConversation(telegram, () -> tool.execute(call, agent))));
+            guests.put("the owner in a Telegram group", () -> DangerousActionGate.withOwnerInitiated(true,
+                    () -> ToolContext.withConversation(telegramGroup, () -> tool.execute(call, agent))));
+            guests.put("the owner in a Slack channel", () -> DangerousActionGate.withOwnerInitiated(true,
+                    () -> ToolContext.withConversation(slackChannel, () -> tool.execute(call, agent))));
+            // SlackInbound binds owner-initiated only against a saved owner, so with none it binds nothing.
+            guests.put("a Slack DM on a binding with no owner saved",
+                    () -> ToolContext.withConversation(slackDm, () -> tool.execute(call, agent)));
+            guests.put("a hosted app", () -> ToolContext.withConversation(app, () -> tool.execute(call, agent)));
+            guests.put("a fire of a task a guest set up", () -> DangerousActionGate.withFireOrigin("telegram",
+                    () -> ToolContext.withScope(null, guestsTaskRun, () -> tool.execute(call, agent))));
+            guests.put("no turn at all", () -> tool.execute(call, agent));
+            guests.forEach((who, turn) -> {
+                var sent = new AtomicReference<Request>();
+                var result = HttpFactories.callWith(canned(sent, null), turn);
+                assertEquals(NOT_THE_OWNERS_TURN, result, who + ", " + call);
+                assertNull(sent.get(), who + ", " + call + ": no request may leave");
+            });
+        }
+    }
+
+    @Test
+    void theOwnersTurnsStillReachTheApi() {
+        var agent = AgentService.create("jf148-api-" + java.util.UUID.randomUUID(), "openrouter", "gpt-4.1");
+        var web = ConversationService.create(agent, "web", null).id;
+        var voice = ConversationService.create(agent, "voice", "admin").id;
+        var telegram = ConversationService.create(agent, "telegram", "4242").id;
+        var slack = ConversationService.create(agent, "slack", "D456").id;
+        var ownersTaskRun = taskRun(agent, "telegram", Boolean.TRUE);
+        var call = "{\"method\":\"GET\",\"path\":\"/api/tasks\"}";
+
+        var owners = new LinkedHashMap<String, Supplier<String>>();
+        owners.put("web chat", () -> ToolContext.withConversation(web, () -> tool.execute(call, agent)));
+        owners.put("voice", () -> ToolContext.withConversation(voice, () -> tool.execute(call, agent)));
+        owners.put("the owner's Telegram DM", () -> DangerousActionGate.withOwnerInitiated(true,
+                () -> ToolContext.withConversation(telegram, () -> tool.execute(call, agent))));
+        owners.put("the owner's Slack DM", () -> DangerousActionGate.withOwnerInitiated(true,
+                () -> ToolContext.withConversation(slack, () -> tool.execute(call, agent))));
+        owners.put("a fire of a task the operator set up", () -> DangerousActionGate.withFireOrigin("web",
+                () -> tool.execute(call, agent)));
+        owners.put("a fire of a task the owner made in their DM", () -> DangerousActionGate.withFireOrigin("telegram",
+                () -> ToolContext.withScope(null, ownersTaskRun, () -> tool.execute(call, agent))));
+        owners.forEach((who, turn) -> {
+            var sent = new AtomicReference<Request>();
+            assertEquals("HTTP 200\n{\"id\":5}", HttpFactories.callWith(canned(sent, null), turn), who);
+            assertEquals("/api/tasks", sent.get().url().encodedPath(), who);
+            // A task the call creates is marked as made where the owner reads alone; a fire has no chat to say so.
+            assertEquals(who.startsWith("a fire") ? null : "true",
+                    sent.get().header(RequestPrincipal.CALLER_OWNER_READS_ALONE_HEADER), who);
+        });
+    }
+
     // ==================== call gate ====================
 
     @Test
     void callAllowsAnOpenEndpoint() {
         // /api/status declares OPEN, so execute proceeds past the gate to the HTTP
         // call (which then errors at the socket in the unit JVM).
-        var result = tool.execute("{\"method\":\"GET\",\"path\":\"/api/status\"}", null);
+        var result = asOwner("{\"method\":\"GET\",\"path\":\"/api/status\"}", null);
         assertFalse(result.contains("is not callable"),
                 "OPEN /api/status must be callable; got: " + result);
     }
@@ -281,7 +385,7 @@ class JClawApiToolTest extends UnitTest {
     void callRejectsAnOperatorOnlyEndpoint() {
         // DELETE /api/conversations (bulk wipe) is OPERATOR_ONLY -- refused even
         // though GET /api/conversations is callable.
-        var result = tool.execute("{\"method\":\"DELETE\",\"path\":\"/api/conversations\"}", null);
+        var result = asOwner("{\"method\":\"DELETE\",\"path\":\"/api/conversations\"}", null);
         assertTrue(result.contains("is not callable"),
                 "OPERATOR_ONLY endpoint must be refused; got: " + result);
     }
@@ -356,7 +460,7 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void discoverUsesOperationSummaryAndBodyHint() {
-        var out = tool.execute("{\"action\":\"discover\"}", null);
+        var out = asOwner("{\"action\":\"discover\"}", null);
         assertTrue(out.contains("/api/agents"), "agents endpoint missing: " + out);
         assertTrue(out.toLowerCase().contains("list agents"), "@Operation summary missing: " + out);
         assertTrue(out.contains("/api/mcp-servers"), "mcp-servers endpoint missing: " + out);
@@ -369,14 +473,14 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void discoverIncludesOpenEndpoints() {
-        var out = tool.execute("{\"action\":\"discover\"}", null);
+        var out = asOwner("{\"action\":\"discover\"}", null);
         assertTrue(out.contains("/api/status"), "OPEN /api/status must be discovered: " + out);
         assertTrue(out.contains("/api/tasks"), "OPEN /api/tasks must be discovered: " + out);
     }
 
     @Test
     void discoverExcludesOperatorOnlyAndCatchAll() {
-        var out = tool.execute("{\"action\":\"discover\"}", null);
+        var out = asOwner("{\"action\":\"discover\"}", null);
         assertFalse(out.contains("/api/chat"), "operator-only /api/chat leaked: " + out);
         assertFalse(out.contains("/api/auth"), "operator-only /api/auth leaked: " + out);
         assertFalse(out.contains("/api/tailscale"), "operator-only /api/tailscale leaked: " + out);
@@ -386,7 +490,7 @@ class JClawApiToolTest extends UnitTest {
 
     @Test
     void discoverFilterNarrowsResults() {
-        var out = tool.execute("{\"action\":\"discover\",\"filter\":\"mcp-servers\"}", null);
+        var out = asOwner("{\"action\":\"discover\",\"filter\":\"mcp-servers\"}", null);
         assertTrue(out.contains("/api/mcp-servers"), "mcp-servers endpoint missing under filter: " + out);
         assertFalse(out.contains("/api/agents"), "filter=mcp-servers should exclude agents: " + out);
     }
@@ -611,7 +715,7 @@ class JClawApiToolTest extends UnitTest {
     /** What {@code discover} actually advertises, which is what an agent can act on. */
     private static SortedSet<String> callableSurface() {
         var found = new TreeSet<String>();
-        for (var line : tool.execute("{\"action\":\"discover\"}", null).split("\n")) {
+        for (var line : asOwner("{\"action\":\"discover\"}", null).split("\n")) {
             var trimmed = line.strip();
             if (!trimmed.startsWith("- ")) continue;
             var cols = trimmed.substring(2).strip().split("\\s+");

@@ -1,6 +1,7 @@
 package channels;
 
 import agents.AgentRunner;
+import agents.DangerousActionGate;
 import models.Agent;
 import org.jspecify.annotations.Nullable;
 import org.telegram.telegrambots.meta.api.objects.Update;
@@ -204,11 +205,16 @@ public final class TelegramReactionNotifier {
                 ownerTelegramUserId, reaction.chatType(), chatId, null);
         EventLogger.info(LOG_CATEGORY, agent.name, LOG_SOURCE,
                 "Reaction notification (mode=%s): %s".formatted(mode, eventText));
+        // JF-148: bound as TelegramInboundTurn binds a message, so the owner's own reaction runs as the owner's turn.
+        final boolean ownerInitiated = ownerTelegramUserId.equals(reaction.reactorId());
         Thread.ofVirtual().name("telegram-reaction").start(() -> {
             try {
-                AgentRunner.processInboundForAgent(agent, LOG_SOURCE, peerId, eventText,
-                        (_, response) -> TelegramChannel.forToken(botToken).sendText(
-                                chatId, response, agent));
+                DangerousActionGate.withOwnerInitiated(ownerInitiated, () -> {
+                    AgentRunner.processInboundForAgent(agent, LOG_SOURCE, peerId, eventText,
+                            (_, response) -> TelegramChannel.forToken(botToken).sendText(
+                                    chatId, response, agent));
+                    return null;
+                });
             } catch (Exception e) {
                 EventLogger.error(LOG_CATEGORY, agent.name, LOG_SOURCE,
                         "Reaction dispatch error: %s".formatted(e.getMessage()));

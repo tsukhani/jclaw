@@ -218,7 +218,7 @@ async function stopProcess(pid: number) {
               label="About sandbox"
               content-class="w-72 font-mono"
             >
-              Confines what exec can write to the agent's workspace, and the audio ffmpeg runs to the temp directory, with the host's OS sandbox (sandbox-exec on macOS, bwrap on Linux). Untrusted channels only leaves the operator's own web chat unconfined.
+              Confines what exec can write to the agent's workspace, and the audio ffmpeg runs to the temp directory, with the host's OS sandbox (sandbox-exec on macOS, bwrap on Linux). Untrusted channels only leaves the operator's own web chat and voice mode unconfined.
             </InfoTip>
           </span>
           <div class="flex-1 min-w-0 space-y-1">

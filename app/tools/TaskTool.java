@@ -480,9 +480,16 @@ public class TaskTool implements ToolRegistry.Tool {
         // JCLAW-1021: a fire has no conversation, so the channel that asked for the task
         // is the only provenance its dangerous-tool gate will ever have. Record it now.
         task.originChannel = callerOrigin();
+        task.ownerReadsAlone = callerOwnerReadsAlone() ? Boolean.TRUE : null;
 
         task.save();
         return task;
+    }
+
+    /** JF-148: whether this call's turn is a chat where the owner reads the reply alone; a fire has no chat. */
+    private static boolean callerOwnerReadsAlone() {
+        var conversationId = ToolContext.conversationId();
+        return conversationId != null && DangerousActionGate.ownerReadsAlone(conversationId);
     }
 
     /**
@@ -499,7 +506,8 @@ public class TaskTool implements ToolRegistry.Tool {
      * JCLAW-1021: a patch rewrites the description — which IS the fire's user prompt — plus
      * its tools and model, so a turn weaker than the recorded origin repoints the
      * task's provenance at itself. Trust may fall on mutation; it must never rise, and only
-     * the operator origin is permissive, so that is the only fall worth recording.
+     * the operator origin is permissive, so that is the only fall worth recording. JF-148: the
+     * same patch from a turn the owner does not read alone clears {@link Task#ownerReadsAlone}.
      */
     private static void downgradeOrigin(Task task) {
         var patchOrigin = callerOrigin();
@@ -507,6 +515,7 @@ public class TaskTool implements ToolRegistry.Tool {
                 && !ChannelOriginTrust.isOperatorOrigin(patchOrigin)) {
             task.originChannel = patchOrigin;
         }
+        if (!callerOwnerReadsAlone()) task.ownerReadsAlone = null;
     }
 
     /** Parse the optional {@code schedule} shorthand into a spec, or null when absent. Throws

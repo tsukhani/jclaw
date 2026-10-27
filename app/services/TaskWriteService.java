@@ -75,10 +75,12 @@ public final class TaskWriteService {
      *                      only layer that can tell an operator request from an agent's
      *                      {@code jclaw_api} call; {@code null} records no provenance and
      *                      fails closed at fire time.
+     * @param ownerReadsAlone whether the turn that asked is one where the owner reads the reply alone,
+     *                      which keeps {@code jclaw_api} on every fire (JF-148)
      */
     public static Task persistNewTask(JsonObject body, Agent agent, String name,
                                       ScheduleShorthandParser.ScheduleSpec spec,
-                                      @Nullable String originChannel) {
+                                      @Nullable String originChannel, boolean ownerReadsAlone) {
         var t = new Task();
         t.agent = agent;
         t.name = name;
@@ -124,6 +126,7 @@ public final class TaskWriteService {
         // A fire runs with no conversation, so this is the only provenance the
         // dangerous-tool gate will ever have for the task (JCLAW-1021).
         t.originChannel = originChannel;
+        t.ownerReadsAlone = ownerReadsAlone ? Boolean.TRUE : null;
 
         t.save();
         return t;

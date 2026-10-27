@@ -254,7 +254,8 @@ public class ApiTasksController extends Controller {
         rejectInvalidTimezone(body);
 
         var origin = RequestPrincipal.callerOrigin();
-        var saved = Tx.run(() -> TaskWriteService.persistNewTask(body, agent, name, spec, origin));
+        var ownerReadsAlone = RequestPrincipal.callerOwnerReadsAlone();
+        var saved = Tx.run(() -> TaskWriteService.persistNewTask(body, agent, name, spec, origin, ownerReadsAlone));
 
         TaskSchedulingService.register(saved);
 
@@ -436,6 +437,8 @@ public class ApiTasksController extends Controller {
                 && !ChannelOriginTrust.isOperatorOrigin(patchOrigin)) {
             task.originChannel = patchOrigin;
         }
+        // JF-148: likewise, only a turn where the owner reads alone keeps the task's jclaw_api; none sets it.
+        if (!RequestPrincipal.callerOwnerReadsAlone()) task.ownerReadsAlone = null;
 
         task.save();
         // A zone change moves future fire times as surely as a schedule change does:

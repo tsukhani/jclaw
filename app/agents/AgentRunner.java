@@ -547,10 +547,30 @@ public class AgentRunner {
         stubConv.modelIdOverride = modelId;
     }
 
-    /** A task fire from prologue to persisted reply, against {@code stubConv}; see {@link #runForTask}. */
+    /**
+     * A task fire from prologue to persisted reply, against {@code stubConv}; see {@link #runForTask}.
+     *
+     * <p>JCLAW-1021: the loop runs with no conversation id, so the dangerous-tool gate has nothing to read an
+     * origin from. Hand it the channel recorded on the Task at creation; an unrecorded one stays null and the
+     * gate fails closed. JF-148: the prompt and the tool list are built inside that binding too, since what
+     * {@link #fireOffersOwnerTools} answers depends on it.
+     */
     private static ToolCallLoopRunner.LoopOutcome runTaskTurn(Agent agent, String userPrompt, AgentExecutionSink sink,
                                                               @Nullable Set<String> allowedTools,
                                                               @Nullable String taskName, Conversation stubConv) {
+        // JCLAW-414: a task fire is the one path that can be operator-canceled
+        // mid-run; hand the TaskRun id to the loop so its checkpoints can poll
+        // the cancel flag. null for any non-task sink (no-op checkpoint).
+        Long taskRunId = (sink instanceof TaskRunSink trs) ? trs.taskRunId() : null;
+        return DangerousActionGate.withFireOrigin(taskFireOrigin(taskRunId), () ->
+                runTaskTurnInFire(agent, userPrompt, sink, allowedTools, taskName, stubConv, taskRunId));
+    }
+
+    private static ToolCallLoopRunner.LoopOutcome runTaskTurnInFire(Agent agent, String userPrompt,
+                                                                    AgentExecutionSink sink,
+                                                                    @Nullable Set<String> allowedTools,
+                                                                    @Nullable String taskName, Conversation stubConv,
+                                                                    @Nullable Long taskRunId) {
         // The fire path runs on db-scheduler's virtual-thread carrier with
         // no inherited JPA Tx — the chat path inherits one from the
         // [agent-stream] thread's request-scoped context, but Tasks have no
@@ -562,10 +582,12 @@ public class AgentRunner {
         // letting the assembler / tool-registry stay tx-agnostic.
         record Prelude(SystemPromptAssembler.AssembledPrompt assembled, List<ToolDef> tools) {
         }
+        var ownerTools = fireOffersOwnerTools(taskRunId);
         var prelude = Tx.run(() -> new Prelude(
-                SystemPromptAssembler.assemble(agent, userPrompt, ToolRegistry.fencedDisabled(agent, allowedTools), null),
-                TaskToolPolicy.restrict(ToolRegistry.getToolDefsForAgent(agent),
-                        allowedTools, taskName, agent.name)));
+                SystemPromptAssembler.assemble(agent, userPrompt,
+                        ToolRegistry.turnDisabled(agent, allowedTools, ownerTools), null),
+                ToolRegistry.forTurn(TaskToolPolicy.restrict(ToolRegistry.getToolDefsForAgent(agent),
+                        allowedTools, taskName, agent.name), ownerTools)));
         var assembled = prelude.assembled();
         var tools = prelude.tools();
 
@@ -591,18 +613,9 @@ public class AgentRunner {
                         primary.config().name(),
                         ModelResolver.effectiveModelId(agent, stubConv)));
 
-        // JCLAW-414: a task fire is the one path that can be operator-canceled
-        // mid-run; hand the TaskRun id to the loop so its checkpoints can poll
-        // the cancel flag. null for any non-task sink (no-op checkpoint).
-        Long taskRunId = (sink instanceof TaskRunSink trs) ? trs.taskRunId() : null;
-        // JCLAW-1021: the loop below runs with no conversation id, so the dangerous-tool
-        // gate has nothing to read an origin from. Hand it the channel recorded on the
-        // Task at creation; an unrecorded one stays null and the gate fails closed.
-        final var loopMessages = messages;
-        var outcome = DangerousActionGate.withFireOrigin(taskFireOrigin(taskRunId), () ->
-                ToolCallLoopRunner.callWithToolLoop(
-                        agent, stubConv, null, loopMessages, tools, primary, fallback,
-                        new ArrayList<>(), new ArrayList<>(), sink, taskRunId)); // fires carry no attachments
+        var outcome = ToolCallLoopRunner.callWithToolLoop(
+                agent, stubConv, null, messages, tools, primary, fallback,
+                new ArrayList<>(), new ArrayList<>(), sink, taskRunId); // fires carry no attachments
 
         final var response = outcome.content();
         final var truncated = outcome.truncated();
@@ -624,6 +637,20 @@ public class AgentRunner {
         return Tx.run(() -> {
             TaskRun run = TaskRun.findById(taskRunId);
             return run == null || run.task == null ? null : run.task.originChannel;
+        });
+    }
+
+    /**
+     * JF-148: whether a fire of {@code taskRunId}'s task is offered the owner-only tools ({@code jclaw_api}): the
+     * fire's origin is the operator's, or the task was made where the owner read the reply alone
+     * ({@link models.Task#ownerReadsAlone}). Read inside the fire's {@link DangerousActionGate#withFireOrigin}.
+     */
+    public static boolean fireOffersOwnerTools(@Nullable Long taskRunId) {
+        if (DangerousActionGate.operatorTurn(null)) return true;
+        if (taskRunId == null) return false;
+        return Tx.run(() -> {
+            TaskRun run = TaskRun.findById(taskRunId);
+            return run != null && run.task != null && Boolean.TRUE.equals(run.task.ownerReadsAlone);
         });
     }
 

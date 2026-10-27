@@ -66,6 +66,14 @@ describe('TaskPermissions', () => {
     expect(pill.attributes('title')).toMatch(/operator origin/i)
   })
 
+  it('marks a voice origin as the operator origin, as the backend classifies it', async () => {
+    const c = await mount(null, 'voice')
+    const pill = c.find('[data-testid="task-origin-pill"]')
+    expect(pill.text()).toBe('voice')
+    expect(pill.attributes('title')).toBe(
+      'Operator origin — dangerous tools resolve by the Tool Approvals policy instead of failing closed.')
+  })
+
   it('shows an inbound channel origin as untrusted', async () => {
     const c = await mount(null, 'telegram')
     const pill = c.find('[data-testid="task-origin-pill"]')
@@ -84,8 +92,10 @@ describe('TaskPermissions', () => {
   })
 
   it('offers no Trust once the task already has the operator origin', async () => {
-    const c = await mount(null, 'web')
-    expect(c.find('[data-testid="task-origin-trust"]').exists()).toBe(false)
+    for (const origin of ['web', 'voice']) {
+      const c = await mount(null, origin)
+      expect(c.find('[data-testid="task-origin-trust"]').exists(), origin).toBe(false)
+    }
   })
 
   it('shows a pinned model as provider and id', async () => {

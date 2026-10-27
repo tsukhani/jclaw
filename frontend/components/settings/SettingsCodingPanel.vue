@@ -531,7 +531,7 @@ async function saveAcpModel(value: string) {
               label="About acp.sandbox"
               content-class="w-72 font-mono"
             >
-              Confines the coding harness's writes to its session directory with the host's OS sandbox (sandbox-exec on macOS, bwrap on Linux). Untrusted channels only leaves runs from the operator's own web chat unconfined.
+              Confines the coding harness's writes to its session directory with the host's OS sandbox (sandbox-exec on macOS, bwrap on Linux). Untrusted channels only leaves runs from the operator's own web chat and voice mode unconfined.
             </InfoTip>
           </span>
           <div class="flex-1 min-w-0 space-y-1">

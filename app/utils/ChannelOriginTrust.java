@@ -7,7 +7,8 @@ import org.jspecify.annotations.Nullable;
  * the operator's own trusted surface or from an untrusted external channel peer.
  *
  * <p>Trust is three-valued. {@link Trust#OPERATOR} is the local web UI
- * ({@value #WEB}) — the operator driving the agent directly. Every named inbound
+ * ({@value #WEB}) and its voice mode ({@value #VOICE}), which needs the same
+ * signed-in session — the operator driving the agent directly. Every named inbound
  * channel (telegram, slack, whatsapp, and any future channel) is an
  * {@link Trust#UNTRUSTED_CHANNEL} external party whose messages must never silently
  * authorize a dangerous, unsandboxed action. An absent origin is
@@ -25,17 +26,23 @@ import org.jspecify.annotations.Nullable;
  * origin trust through this one classifier so the two can never disagree — a
  * disagreement was the root of VULN-001, where the gate treated {@code whatsapp} as
  * an off-channel {@code allow} while the sandbox already treated it as untrusted.
- * Default-untrusted (anything not explicitly {@value #WEB}) means a new inbound
- * channel is fail-safe until it is deliberately granted a trust level.
+ * Default-untrusted (anything not explicitly {@value #WEB} or {@value #VOICE}) means a
+ * new inbound channel is fail-safe until it is deliberately granted a trust level.
  */
 public final class ChannelOriginTrust {
 
-    /** The operator's own web UI — the only origin that carries operator trust. */
+    /** The operator's own web UI — one of the two origins that carry operator trust. */
     public static final String WEB = "web";
+
+    /**
+     * Voice mode, the other. Like web chat it needs the operator's signed-in session. A hosted app
+     * ({@code app}) needs the session too, but its bundle writes the message text, so it is not trusted.
+     */
+    public static final String VOICE = "voice";
 
     /** How much authority an origin carries. Only {@link #OPERATOR} is permissive. */
     public enum Trust {
-        /** The operator's own surface (the web UI). */
+        /** The operator's own surface (the web UI and its voice mode). */
         OPERATOR,
         /** A named inbound channel peer — an external party. */
         UNTRUSTED_CHANNEL,
@@ -55,7 +62,7 @@ public final class ChannelOriginTrust {
         if (origin == null || origin.isBlank()) {
             return Trust.UNKNOWN;
         }
-        return WEB.equals(origin) ? Trust.OPERATOR : Trust.UNTRUSTED_CHANNEL;
+        return WEB.equals(origin) || VOICE.equals(origin) ? Trust.OPERATOR : Trust.UNTRUSTED_CHANNEL;
     }
 
     /**

@@ -395,13 +395,13 @@ public final class ToolCallLoopRunner {
 
     /**
      * The reply that ends a turn whose call failed. A context-window refusal shows the operator its
-     * template; a channel reader keeps the generic reply, since the template names the provider and
-     * the model (see {@link utils.ChannelErrorTemplates}).
+     * template in web chat; a channel reader keeps the generic reply, since the template names the provider and
+     * the model (see {@link utils.ChannelErrorTemplates}), and so does voice, which reads its markdown aloud.
      */
     private static String providerErrorReply(Exception e, Conversation conversation) {
         var refusal = ContextWindowManager.contextWindowRefusal(e);
         var channel = conversation.channelType;
-        if (refusal == null || (channel != null && !ChannelOriginTrust.isOperatorOrigin(channel))) {
+        if (refusal == null || (channel != null && !ChannelOriginTrust.WEB.equals(channel))) {
             return PROVIDER_ERROR_REPLY;
         }
         return ErrorRendering.RICH.render(LlmErrorTemplates.forFailure(refusal.failure()));

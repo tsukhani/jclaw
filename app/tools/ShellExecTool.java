@@ -99,7 +99,7 @@ import java.util.stream.Collectors;
  *
  * <p>JCLAW-1153: the tri-state {@code shell.sandbox} — {@code false} (shipped
  * default) | {@code true} (confine every run) | {@code untrusted} (confine only
- * runs whose origin channel is not the operator's own web chat) — launches the
+ * runs whose origin channel is not the operator's own web chat or voice mode) — launches the
  * command through {@link HarnessSandbox}, the same macOS Seatbelt / Linux bwrap
  * profile builders the coding harness uses, granting writes to the agent's
  * resolved workspace root and nothing else.

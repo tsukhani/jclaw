@@ -58,7 +58,7 @@ import java.util.function.Supplier;
  * reach the gate — it returns {@link Decision#PROCEED} before any I/O.
  *
  * <p>JCLAW-777 / VULN-001: the permissive {@code allow} default applies only to a
- * <em>trusted operator origin</em> — the web UI ({@link utils.ChannelOriginTrust}).
+ * <em>trusted operator origin</em> — the web UI or its voice mode ({@link utils.ChannelOriginTrust}).
  * An <em>untrusted external channel peer</em> (whatsapp, or a telegram/slack turn
  * that fell through with no usable approval binding) has no interactive surface and
  * no authenticated caller, so it fails <em>closed</em> at the off-channel fallback
@@ -116,7 +116,7 @@ public final class DangerousActionGate {
     /**
      * JCLAW-423: policy for a dangerous tool dispatched on a channel with no
      * interactive approval surface (not Telegram/Slack). {@code allow}
-     * (default) runs it ungated on a <em>trusted operator origin</em> (the web UI),
+     * (default) runs it ungated on a <em>trusted operator origin</em> (the web UI or voice),
      * preserving the pre-423 behavior; {@code deny} fails closed;
      * JCLAW-709 {@code ask} routes the confirmation to the agent's bound Telegram
      * DM (fail-closed if there is none). An explicit standing grant still proceeds
@@ -197,13 +197,25 @@ public final class DangerousActionGate {
 
     /**
      * Whether only the owner reads what this turn sends to the conversation: an operator turn (the
-     * channel's owner, or web chat) in a chat that is not a group, where the owner asks but every
-     * member reads. The spawn-time and send-time checks both read this one (JCLAW-1604, JCLAW-1603).
+     * channel's owner, web chat or voice) in a chat that is not a group, where the owner asks but every
+     * member reads. The spawn-time and send-time checks both read this one (JCLAW-1604, JCLAW-1603), and
+     * so does the offer of {@code jclaw_api} (JF-148).
      */
     public static boolean ownerReadsAlone(Long conversationId, String channelType, @Nullable String peerId) {
         return operatorTurn(conversationId)
                 && (peerId == null || !Boolean.TRUE.equals(SystemPromptAssembler.isGroupChat(channelType, peerId)));
     }
+
+    /** {@link #ownerReadsAlone(Long, String, String)} read off the stored conversation; false when it is gone. */
+    public static boolean ownerReadsAlone(Long conversationId) {
+        var chat = Tx.run(() -> {
+            Conversation c = Conversation.findById(conversationId);
+            return c == null ? null : new Chat(c.channelType, c.peerId);
+        });
+        return chat != null && ownerReadsAlone(conversationId, chat.channelType(), chat.peerId());
+    }
+
+    private record Chat(String channelType, @Nullable String peerId) {}
 
     private static boolean operatorTurn(boolean ownerInitiated, @Nullable String origin) {
         return ownerInitiated || ChannelOriginTrust.classify(origin) == ChannelOriginTrust.Trust.OPERATOR;
@@ -357,7 +369,7 @@ public final class DangerousActionGate {
      * on that same floor: no
      * recorded provenance is a gap, not operator authority. The permissive
      * {@code allow} default applies only to the <em>trusted operator origin</em> (the
-     * web UI — see {@link ChannelOriginTrust#classify}), where it preserves the
+     * web UI or voice — see {@link ChannelOriginTrust#classify}), where it preserves the
      * pre-JCLAW-423 behavior. {@code deny} fails closed on any origin; JCLAW-709
      * {@code ask} routes a confirmation to the agent's bound Telegram DM (fail-closed
      * if there is none).
@@ -381,7 +393,7 @@ public final class DangerousActionGate {
             return Decision.ABORT;
         }
 
-        // Trusted operator origin (the web UI): honor the configured policy — the
+        // Trusted operator origin (the web UI or voice): honor the configured policy — the
         // default "allow" preserves the pre-JCLAW-423 behavior.
         if ("deny".equalsIgnoreCase(policy)) {
             EventLogger.warn(LOG_CATEGORY, agent.name, chan,

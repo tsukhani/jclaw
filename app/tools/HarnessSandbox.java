@@ -65,8 +65,8 @@ public final class HarnessSandbox {
      *       operator's coding runs stay fast and unconfined).</li>
      *   <li>{@code true} — sandbox EVERY acp run.</li>
      *   <li>{@code untrusted} — JCLAW-709: sandbox only runs whose ORIGIN is not
-     *       the operator's own web chat (inbound Telegram/Slack, the prompt-
-     *       injection surface), leaving the operator's web runs unconfined.</li>
+     *       the operator's own web chat or voice mode (inbound Telegram/Slack, the
+     *       prompt-injection surface), leaving the operator's own runs unconfined.</li>
      * </ul>
      */
     public static final String ACP_SANDBOX_KEY = "subagent.acp.sandbox";

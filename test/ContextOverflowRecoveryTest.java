@@ -132,6 +132,19 @@ class ContextOverflowRecoveryTest extends UnitTest {
     }
 
     @Test
+    void aVoiceTurnHearsTheGenericReplyWhenTheWindowRefusesTwice() throws Exception {
+        // JF-148: voice is the operator's, but it reads the reply aloud, so it gets no markdown template.
+        var calls = new CopyOnWriteArrayList<String>();
+        var primary = serve("primary", calls, refusal(), refusal());
+        var provider = provider("primary", primary);
+
+        var outcome = runSyncLoop(provider, null, "voice");
+
+        assertEquals(GENERIC_REPLY, outcome.content());
+        assertEquals(List.of("primary", "primary"), calls);
+    }
+
+    @Test
     void aSyncRoundRefusedForAnotherReasonKeepsTheGenericReplyAndIsNotRetried() throws Exception {
         var calls = new CopyOnWriteArrayList<String>();
         var primary = serve("primary", calls, otherClientError(), text("never sent"));

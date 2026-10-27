@@ -1,5 +1,6 @@
 package tools;
 
+import agents.AgentRunner;
 import agents.DangerousActionGate;
 import agents.ToolAction;
 import agents.ToolContext;
@@ -72,6 +73,9 @@ import java.util.Set;
 public class JClawApiTool implements ToolRegistry.Tool {
 
     public static final String TOOL_NAME = "jclaw_api";
+
+    /** JF-148: what a call gets on a turn the tool is not offered on. */
+    private static final String NOT_AN_OWNER_TURN = "jclaw_api is not available in a conversation the owner didn't start.";
 
     private static final String KEY_ACTION = "action";
     private static final String ACTION_CALL = "call";
@@ -206,6 +210,15 @@ public class JClawApiTool implements ToolRegistry.Tool {
 
     @Override
     public String execute(String argsJson, Agent agent) {
+        // Not offered on such a turn either; this is the net for a site that offers it anyway. A fire has no
+        // conversation, so its task decides.
+        var turnConversationId = ToolContext.conversationId();
+        var ownerReadsAlone = turnConversationId != null && DangerousActionGate.ownerReadsAlone(turnConversationId);
+        var offered = turnConversationId != null ? ownerReadsAlone
+                : AgentRunner.fireOffersOwnerTools(ToolContext.taskRunId());
+        if (!offered) {
+            return NOT_AN_OWNER_TURN;
+        }
         JsonObject args;
         try {
             args = JsonParser.parseString(argsJson).getAsJsonObject();
@@ -270,6 +283,10 @@ public class JClawApiTool implements ToolRegistry.Tool {
         var conversationId = ToolContext.conversationId();
         if (conversationId != null) {
             requestBuilder.header(RequestPrincipal.CALLER_CONVERSATION_HEADER, String.valueOf(conversationId));
+        }
+        // JF-148: a task this call creates keeps jclaw_api on its fires only when it was asked for where the owner reads alone.
+        if (ownerReadsAlone) {
+            requestBuilder.header(RequestPrincipal.CALLER_OWNER_READS_ALONE_HEADER, "true");
         }
 
         RequestBody body = requestBodyFor(method, args);

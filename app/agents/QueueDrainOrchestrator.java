@@ -101,44 +101,57 @@ public final class QueueDrainOrchestrator {
      */
     public static void runOwned(Long conversationId, long generation, List<ConversationQueue.QueuedMessage> messages) {
         var drained = List.copyOf(messages);
-        startDrainThread(() -> {
-            // JCLAW-273: a yield-resume's content is already a persisted announce row,
-            // so it must not be re-appended. Dropping it from the combined block leaves
-            // a mixed drain appending only the real inputs; when it is the whole drain
-            // there is nothing to append and the run skips the append entirely.
-            var appendable = drained.stream().filter(m -> !m.skipUserAppend()).toList();
-            boolean skipUserAppend = appendable.isEmpty();
-            var combined = skipUserAppend ? "" : ConversationQueue.formatCollectedMessages(appendable);
-            var attachments = appendable.stream().flatMap(m -> m.attachments().stream()).toList();
-            var pendingIds = ConversationQueue.pendingIdsOf(appendable);
-            var msg = drained.getFirst(); // channel info is the same for all queued messages
-            boolean runStarted = false;
-            try {
-                var conversation = Tx.run(() -> ConversationService.findById(conversationId));
-                if (conversation == null) {
-                    ConversationQueue.releaseOwnership(conversationId, generation);
-                    return;
-                }
-                runStarted = true;
-                // JCLAW-117: the caller transferred queue ownership to this run —
-                // use the owned-queue variant to avoid re-acquire.
-                var result = AgentRunner.runWithOwnedQueue(msg.agent(), conversation, combined,
-                        attachments, skipUserAppend, generation, pendingIds);
-                AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
-            } catch (Exception e) {
-                EventLogger.error("queue", msg.agent().name, msg.channelType(),
-                        "Failed to process queued message: %s".formatted(e.getMessage()));
-                // Dropped as before rather than retried at every boot; a row the USER append consumed is already gone.
-                ConversationQueue.discardPending(pendingIds);
-                if (!runStarted) {
-                    // Exception before run() — release so we don't wedge the queue.
-                    // If runWithOwnedQueue started and threw, its own finally ran
-                    // processQueueDrain which will observe pending and release
-                    // ownership correctly on the empty path.
-                    ConversationQueue.releaseOwnership(conversationId, generation);
-                }
+        startDrainThread(() -> DangerousActionGate.withOwnerInitiated(ownerInitiated(drained), () -> {
+            runDrained(conversationId, generation, drained);
+            return null;
+        }));
+    }
+
+    /**
+     * JF-148: the drain thread inherits no trust, so the turn is the owner's only when every message it
+     * runs was enqueued on one of the owner's turns; a collect-mode batch holding a guest's runs as theirs.
+     */
+    public static boolean ownerInitiated(List<ConversationQueue.QueuedMessage> drained) {
+        return !drained.isEmpty() && drained.stream().allMatch(ConversationQueue.QueuedMessage::ownerInitiated);
+    }
+
+    private static void runDrained(Long conversationId, long generation, List<ConversationQueue.QueuedMessage> drained) {
+        // JCLAW-273: a yield-resume's content is already a persisted announce row,
+        // so it must not be re-appended. Dropping it from the combined block leaves
+        // a mixed drain appending only the real inputs; when it is the whole drain
+        // there is nothing to append and the run skips the append entirely.
+        var appendable = drained.stream().filter(m -> !m.skipUserAppend()).toList();
+        boolean skipUserAppend = appendable.isEmpty();
+        var combined = skipUserAppend ? "" : ConversationQueue.formatCollectedMessages(appendable);
+        var attachments = appendable.stream().flatMap(m -> m.attachments().stream()).toList();
+        var pendingIds = ConversationQueue.pendingIdsOf(appendable);
+        var msg = drained.getFirst(); // channel info is the same for all queued messages
+        boolean runStarted = false;
+        try {
+            var conversation = Tx.run(() -> ConversationService.findById(conversationId));
+            if (conversation == null) {
+                ConversationQueue.releaseOwnership(conversationId, generation);
+                return;
             }
-        });
+            runStarted = true;
+            // JCLAW-117: the caller transferred queue ownership to this run —
+            // use the owned-queue variant to avoid re-acquire.
+            var result = AgentRunner.runWithOwnedQueue(msg.agent(), conversation, combined,
+                    attachments, skipUserAppend, generation, pendingIds);
+            AgentRunner.dispatchToChannel(msg.agent(), msg.channelType(), msg.peerId(), result.response());
+        } catch (Exception e) {
+            EventLogger.error("queue", msg.agent().name, msg.channelType(),
+                    "Failed to process queued message: %s".formatted(e.getMessage()));
+            // Dropped as before rather than retried at every boot; a row the USER append consumed is already gone.
+            ConversationQueue.discardPending(pendingIds);
+            if (!runStarted) {
+                // Exception before run() — release so we don't wedge the queue.
+                // If runWithOwnedQueue started and threw, its own finally ran
+                // processQueueDrain which will observe pending and release
+                // ownership correctly on the empty path.
+                ConversationQueue.releaseOwnership(conversationId, generation);
+            }
+        }
     }
 
     /**

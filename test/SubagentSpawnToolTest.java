@@ -1116,6 +1116,56 @@ class SubagentSpawnToolTest extends UnitTest {
         assertEquals(calling.id, childConv.parentConversation.id);
     }
 
+    @Test
+    void aSubagentIsOfferedJclawApiOnlyWhenTheOwnerReadsTheSpawningTurnAlone() throws Exception {
+        // JF-148: the child's conversation takes the parent's channel and peer, and its thread the parent turn's
+        // owner flag, so neither a guest nor a group reaches the tool one hop out.
+        var requestTools = new CopyOnWriteArrayList<java.util.Set<String>>();
+        startLlmServer(exchange -> {
+            var body = JsonParser.parseString(new String(exchange.getRequestBody().readAllBytes(),
+                    java.nio.charset.StandardCharsets.UTF_8)).getAsJsonObject();
+            var tools = new java.util.TreeSet<String>();
+            if (body.has("tools")) {
+                for (var tool : body.getAsJsonArray("tools")) {
+                    tools.add(tool.getAsJsonObject().getAsJsonObject("function").get("name").getAsString());
+                }
+            }
+            requestTools.add(tools);
+            LlmReplyFixture.send(exchange, simpleResponse("done."));
+        });
+        configureProvider();
+        var parent = createAgent("p-jclaw-api", "spawn-provider", "test-model");
+        var grant = new AgentToolConfig();
+        grant.agent = parent;
+        grant.toolName = "jclaw_api";
+        grant.enabled = true;
+        grant.save();
+        var web = ConversationService.create(parent, "web", "u-jclaw-api");
+        var ownerDm = ConversationService.create(parent, "telegram", "4242");
+        var group = ConversationService.create(parent, "telegram", "-100200");
+        var guestDm = ConversationService.create(parent, "telegram", "5151");
+        commitAndReopen();
+        ToolRegistry.invalidateDisabledToolsCache(parent);
+        // The parent's own agent, granted the tool; a fresh child is never granted it.
+        var spawn = "{\"task\":\"look it up\",\"agentId\":" + parent.id + "}";
+
+        ToolRegistrySync.withCanonicalTools(() -> {
+            invokeOnVirtualThreadInConversation(parent.id, web.id, spawn, false);
+            invokeOnVirtualThreadInConversation(parent.id, ownerDm.id, spawn, true);
+            invokeOnVirtualThreadInConversation(parent.id, group.id, spawn, true);
+            invokeOnVirtualThreadInConversation(parent.id, guestDm.id, spawn, false);
+        });
+
+        assertEquals(4, requestTools.size(), "one model call per child: " + requestTools);
+        var fromWeb = requestTools.get(0);
+        assertTrue(fromWeb.contains("jclaw_api"), "spawned from web chat: " + fromWeb);
+        assertEquals(fromWeb, requestTools.get(1), "spawned from the owner's own Telegram DM");
+        var expected = new java.util.TreeSet<>(fromWeb);
+        expected.remove("jclaw_api");
+        assertEquals(expected, requestTools.get(2), "spawned from the owner's message in a Telegram group");
+        assertEquals(expected, requestTools.get(3), "spawned from a guest's Telegram turn");
+    }
+
     /** {@link #invokeOnVirtualThread} with the conversation bound the way ParallelToolExecutor binds a chat turn's. */
     private String invokeOnVirtualThreadInConversation(Long parentAgentId, Long conversationId, String argsJson)
             throws Exception {

@@ -1,11 +1,17 @@
+import agents.ConversationSink;
 import agents.DangerousActionGate;
 import agents.DangerousActionGate.Decision;
+import agents.ParallelToolExecutor;
 import agents.QueueDrainOrchestrator;
 import agents.ToolRegistry;
 import channels.TelegramApprovalCallback;
 import channels.TelegramApprovalService;
 import channels.TelegramChannel;
+import llm.LlmTypes.ChatMessage;
+import llm.LlmTypes.FunctionCall;
+import llm.LlmTypes.ToolCall;
 import models.Agent;
+import models.Conversation;
 import models.TelegramBinding;
 import models.ToolApprovalGrant;
 import org.junit.jupiter.api.AfterEach;
@@ -15,12 +21,17 @@ import play.test.Fixtures;
 import play.test.UnitTest;
 import services.AgentService;
 import services.ConfigService;
+import services.ConversationQueue;
 import services.ConversationService;
 import services.Tx;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Pattern;
 
 /**
@@ -622,8 +633,10 @@ class DangerousActionGateTest extends UnitTest {
         var web = webConvId(agent);
         var telegram = telegramConvId(agent);
         var whatsapp = whatsappConvId(agent);
+        var voice = commitInFreshTx(() -> ConversationService.create((Agent) Agent.findById(agent.id), "voice", "admin").id);
 
         assertTrue(DangerousActionGate.operatorTurn(web), "web, unbound");
+        assertTrue(DangerousActionGate.operatorTurn(voice), "voice, unbound: it needs the operator's session");
         assertTrue(DangerousActionGate.withOwnerInitiated(true, () -> DangerousActionGate.operatorTurn(telegram)),
                 "telegram, owner-initiated");
         assertFalse(DangerousActionGate.withOwnerInitiated(false, () -> DangerousActionGate.operatorTurn(telegram)),
@@ -789,6 +802,91 @@ class DangerousActionGateTest extends UnitTest {
                 TelegramApprovalCallback.Decision.DENY, TG_USER);
         assertEquals(Decision.ABORT, verdict.get(2, TimeUnit.SECONDS),
                 "a drained message must be gated on its own sender, not the finished turn's");
+    }
+
+    @Test
+    void aDrainedBatchIsTheOwnersOnlyWhenEveryMessageInItIs() {
+        // JF-148: each message records the turn it was enqueued on, and the drain rebinds that.
+        var agent = unboundAgent("gate-drain-batch");
+        var owners = DangerousActionGate.withOwnerInitiated(true,
+                () -> new ConversationQueue.QueuedMessage("mine", "telegram", TG_USER, agent));
+        var guests = new ConversationQueue.QueuedMessage("theirs", "telegram", "-100", agent);
+
+        assertTrue(QueueDrainOrchestrator.ownerInitiated(List.of(owners)));
+        assertFalse(QueueDrainOrchestrator.ownerInitiated(List.of(guests)));
+        assertFalse(QueueDrainOrchestrator.ownerInitiated(List.of(owners, guests)),
+                "a collect-mode batch with a guest's message in it is the guest's turn");
+        assertFalse(QueueDrainOrchestrator.ownerInitiated(List.of()), "an empty drain is nobody's turn");
+    }
+
+    @Test
+    void aMessageRestoredAfterARestartDrainsAsAGuests() {
+        // JF-148: the stored row records no sender, so the owner's own message replayed at boot fails safe.
+        var row = new models.PendingInbound();
+        row.agent = unboundAgent("gate-drain-restored");
+        row.channelType = "telegram";
+        row.peerId = TG_USER;
+        row.text = "sent before the restart";
+
+        var restored = DangerousActionGate.withOwnerInitiated(true, () -> ConversationQueue.restore(row));
+
+        assertEquals("sent before the restart", restored.text());
+        assertFalse(restored.ownerInitiated());
+    }
+
+    // ── JF-148: a call for a tool the turn was not offered never reaches the gate. ──
+
+    @Test
+    void aCallForAToolTheTurnWasNotOfferedSendsTheOwnerNoPrompt() throws Exception {
+        var agent = boundAgent("gate-not-offered");
+        var convId = telegramConvId(agent);
+
+        var refusal = "Error: Tool 'danger_tool' is not enabled for this agent. Do not retry it — "
+                + "use only the tools listed in your request.";
+        var logged = new java.util.concurrent.atomic.AtomicReference<String>();
+        var events = services.EventLogger.captureMatchingForTest(
+                e -> agent.name.equals(e.agentId()) && e.message().startsWith("Tool '" + DANGEROUS_TOOL + "' returned"),
+                _ -> {
+                    try {
+                        logged.set(dispatchAsGuest(agent, convId, Set.of(SAFE_TOOL)).get(5, TimeUnit.SECONDS));
+                    } catch (Exception e) {
+                        throw new AssertionError(e);
+                    }
+                });
+
+        assertEquals(refusal, logged.get());
+        assertEquals(0, server.countRequests("sendMessage"), "the owner must not be asked about a tool the turn never had");
+        assertEquals(List.of("Tool '" + DANGEROUS_TOOL + "' returned: " + refusal),
+                events.stream().map(services.EventLogger.Captured::message).toList(),
+                "the refusal is logged as any result is");
+
+        // Control: the same guest's call, offered the tool, does ask.
+        var offered = dispatchAsGuest(agent, convId, Set.of(SAFE_TOOL, DANGEROUS_TOOL));
+        TelegramApprovalService.resolve(awaitPromptAndExtractId(), TelegramApprovalCallback.Decision.DENY, TG_USER);
+        assertEquals(DangerousActionGate.abortResult(DANGEROUS_TOOL), offered.get(5, TimeUnit.SECONDS));
+    }
+
+    /** One {@code danger_tool} call dispatched as a guest's turn does it, offered {@code offered}; the tool message's text. */
+    private CompletableFuture<String> dispatchAsGuest(Agent agent, Long convId, Set<String> offered) {
+        var reply = new CompletableFuture<String>();
+        Thread.ofVirtual().start(() -> {
+            try {
+                var conversation = Tx.run(() -> (Conversation) Conversation.findById(convId));
+                var messages = new ArrayList<ChatMessage>();
+                DangerousActionGate.withOwnerInitiated(false, () -> {
+                    ParallelToolExecutor.executeToolsParallel(
+                            List.of(new ToolCall("c1", "function",
+                                    new FunctionCall(DANGEROUS_TOOL, "{\"command\":\"echo guest\"}"))),
+                            agent, convId, messages, null, null, null, new AtomicBoolean(false),
+                            new ConversationSink(conversation), offered);
+                    return null;
+                });
+                reply.complete((String) messages.getFirst().content());
+            } catch (Throwable t) {
+                reply.completeExceptionally(t);
+            }
+        });
+        return reply;
     }
 
     @Test

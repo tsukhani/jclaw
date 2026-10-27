@@ -502,6 +502,12 @@ public class ToolRegistry {
         return offered != null && !offered.contains(toolName);
     }
 
+    /** The refusal {@link #executeRich} gives a registered tool the turn did not offer, or null when it was offered. */
+    public static @Nullable ToolResult notOfferedRefusal(@Nullable String toolName, @Nullable Set<String> offered) {
+        if (!tools.containsKey(toolName) || !notOffered(toolName, offered)) return null;
+        return ToolResult.refused(notEnabledError(toolName), ToolResult.Outcome.NOT_ENABLED);
+    }
+
     /** Phrased so the model stops rather than retrying, and without enumerating what it cannot see. */
     private static String notEnabledError(@Nullable String toolName) {
         return ("Error: Tool '%s' is not enabled for this agent. Do not retry it — "
@@ -528,8 +534,9 @@ public class ToolRegistry {
             return ToolResult.refused("Error: Unknown tool '%s'".formatted(toolName),
                     ToolResult.Outcome.UNKNOWN_TOOL);
         }
-        if (notOffered(toolName, offered)) {
-            return ToolResult.refused(notEnabledError(toolName), ToolResult.Outcome.NOT_ENABLED);
+        var unoffered = notOfferedRefusal(toolName, offered);
+        if (unoffered != null) {
+            return unoffered;
         }
         // Defense-in-depth: validate the args JSON is parseable BEFORE invoking the
         // tool. When the LLM hits its output-token budget mid-tool-call, the
@@ -592,6 +599,37 @@ public class ToolRegistry {
             if (!allowed.contains(tool.name())) disabled.add(tool.name());
         }
         return disabled;
+    }
+
+    /**
+     * The disabled set a turn's system prompt is assembled with: {@link #fencedDisabled}, widened by the
+     * {@link #OPERATOR_TURN_ONLY} tools when {@code ownerReadsAlone} is false (JF-148). Null when neither
+     * applies, which leaves the assembler on the agent's own set. Pair it with {@link #forTurn} on the
+     * turn's tool definitions, so the prompt and the request name the same tools.
+     *
+     * @param ownerReadsAlone {@link DangerousActionGate#ownerReadsAlone(Long, String, String)} for a chat turn,
+     *                        {@link AgentRunner#fireOffersOwnerTools} for a task fire
+     */
+    public static @Nullable Set<String> turnDisabled(Agent agent, @Nullable Set<String> allowed, boolean ownerReadsAlone) {
+        var fenced = fencedDisabled(agent, allowed);
+        if (ownerReadsAlone) return fenced;
+        var disabled = new HashSet<>(fenced != null ? fenced : loadDisabledTools(agent));
+        disabled.addAll(OPERATOR_TURN_ONLY);
+        return disabled;
+    }
+
+    /** {@code defs} less the {@link #OPERATOR_TURN_ONLY} tools when {@code ownerReadsAlone} is false (JF-148). */
+    public static List<ToolDef> forTurn(List<ToolDef> defs, boolean ownerReadsAlone) {
+        if (ownerReadsAlone) return defs;
+        return defs.stream().filter(d -> !OPERATOR_TURN_ONLY.contains(d.function().name())).toList();
+    }
+
+    /**
+     * Whether a skill declaring {@code tools} needs nothing but {@link #OPERATOR_TURN_ONLY} tools that
+     * {@code disabled} withholds, so a turn assembled with {@code disabled} leaves the skill out (JF-148).
+     */
+    public static boolean needsOnlyWithheldOwnerTools(@Nullable List<String> tools, Set<String> disabled) {
+        return tools != null && !tools.isEmpty() && tools.stream().allMatch(t -> OPERATOR_TURN_ONLY.contains(t) && disabled.contains(t));
     }
 
     /** Get tool definitions filtered by agent's tool configuration. */
@@ -736,6 +774,13 @@ public class ToolRegistry {
      *  recorded for the eval agent. An explicit enable row still wins, so granting it to a
      *  purpose-built agent stays a single click. */
     private static final String JCLAW_API_TOOL = "jclaw_api";
+
+    /**
+     * JF-148: tools a turn is offered only where the owner reads the reply alone, whatever the agent was
+     * granted. {@code jclaw_api} reaches JClaw's whole agent-callable API, and only its writes wait for
+     * approval, so a guest's message could otherwise drive its reads, and a group would read the result.
+     */
+    private static final Set<String> OPERATOR_TURN_ONLY = Set.of(JCLAW_API_TOOL);
 
     /** JCLAW-1065: reads conversation history beyond the current turn, so it sits
      *  with the other cross-turn-reach tools rather than defaulting on. */

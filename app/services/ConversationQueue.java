@@ -1,5 +1,6 @@
 package services;
 
+import agents.DangerousActionGate;
 import agents.TurnCancellation;
 import com.google.gson.reflect.TypeToken;
 import models.Agent;
@@ -55,17 +56,21 @@ public class ConversationQueue {
      *                       onto the drained turn's USER row
      * @param pendingId      JCLAW-1521: the {@link PendingInbound} row that keeps the message across
      *                       a restart, consumed with its USER row; null when it has none
+     * @param ownerInitiated JF-148: {@link DangerousActionGate#ownerInitiated} where the message was
+     *                       enqueued, which its drained turn runs under. A row a restart restores has
+     *                       none recorded, so it drains as a guest's.
      */
     public record QueuedMessage(String text, String channelType, String peerId, Agent agent,
                                 boolean skipUserAppend, List<AttachmentService.Input> attachments,
-                                @Nullable Long pendingId) {
+                                @Nullable Long pendingId, boolean ownerInitiated) {
         public QueuedMessage {
             attachments = List.copyOf(attachments);
         }
 
         public QueuedMessage(String text, String channelType, String peerId, Agent agent,
                              boolean skipUserAppend, List<AttachmentService.Input> attachments) {
-            this(text, channelType, peerId, agent, skipUserAppend, attachments, null);
+            this(text, channelType, peerId, agent, skipUserAppend, attachments, null,
+                    DangerousActionGate.ownerInitiated());
         }
 
         public QueuedMessage(String text, String channelType, String peerId, Agent agent) {
@@ -82,7 +87,7 @@ public class ConversationQueue {
         }
 
         private QueuedMessage withPendingId(@Nullable Long id) {
-            return new QueuedMessage(text, channelType, peerId, agent, skipUserAppend, attachments, id);
+            return new QueuedMessage(text, channelType, peerId, agent, skipUserAppend, attachments, id, ownerInitiated);
         }
     }
 
@@ -522,7 +527,7 @@ public class ConversationQueue {
     public static QueuedMessage restore(PendingInbound row) {
         List<AttachmentService.Input> attachments = row.attachments == null
                 ? List.of() : GsonHolder.GSON.fromJson(row.attachments, ATTACHMENT_LIST);
-        return new QueuedMessage(row.text, row.channelType, row.peerId, row.agent, false, attachments, row.id);
+        return new QueuedMessage(row.text, row.channelType, row.peerId, row.agent, false, attachments, row.id, false);
     }
 
     private static boolean isStored(QueuedMessage message) {

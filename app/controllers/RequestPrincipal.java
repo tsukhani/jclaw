@@ -54,6 +54,13 @@ public final class RequestPrincipal {
      */
     public static final String CALLER_CONVERSATION_HEADER = "x-jclaw-caller-conversation";
 
+    /**
+     * Header {@code JClawApiTool} stamps {@code true} on a call from a turn where the owner reads the reply alone
+     * ({@code DangerousActionGate.ownerReadsAlone}), absent otherwise, so a task it creates records that (JF-148).
+     * Honored only on an agent-originated request.
+     */
+    public static final String CALLER_OWNER_READS_ALONE_HEADER = "x-jclaw-caller-owner-reads-alone";
+
     /** Response header a route sets to tell the calling agent what to do next; {@code JClawApiTool} shows it to the model. */
     public static final String AGENT_NOTE_HEADER = "x-jclaw-agent-note";
 
@@ -86,6 +93,19 @@ public final class RequestPrincipal {
         var header = request.headers.get(CALLER_ORIGIN_HEADER);
         var raw = header == null ? null : header.value();
         return raw == null || raw.isBlank() ? null : raw.trim();
+    }
+
+    /**
+     * Whether the turn behind this request is one where the owner reads the reply alone (JF-148): true for the
+     * operator's own session; for an agent-originated request, only when its tool call stamped
+     * {@link #CALLER_OWNER_READS_ALONE_HEADER}. False outside a request.
+     */
+    public static boolean callerOwnerReadsAlone() {
+        var request = Http.Request.current();
+        if (request == null) return false;
+        if (!isAgentOriginated()) return true;
+        var header = request.headers.get(CALLER_OWNER_READS_ALONE_HEADER);
+        return header != null && "true".equals(header.value());
     }
 
     /**

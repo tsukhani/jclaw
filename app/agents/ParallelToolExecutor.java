@@ -101,6 +101,12 @@ public final class ParallelToolExecutor {
                                 displayArgs.length() > 200
                                         ? displayArgs.substring(0, 200) + "..."
                                         : displayArgs));
+        // JF-148: ahead of the gate, so a call for a tool the turn was not offered never asks the owner to approve it.
+        var unoffered = ToolRegistry.notOfferedRefusal(rawName, offeredTools);
+        if (unoffered != null) {
+            logResult(agent, displayName, unoffered.text());
+            return unoffered;
+        }
         // JCLAW-382: gate sensitive/irreversible actions through
         // DangerousActionGate. No-op for non-dangerous tools — it returns
         // PROCEED before any I/O. Uses the raw (wire-format) name so the
@@ -120,12 +126,15 @@ public final class ParallelToolExecutor {
         // ToolContext, set on this tool's own VT.
         var result = ToolContext.withScope(conversationId, taskRunId, cancelled, turnCancel,
                 () -> ToolRegistry.executeRich(rawName, rawArgs, agent, offeredTools));
-        var text = result.text();
+        logResult(agent, displayName, result.text());
+        return result;
+    }
+
+    private static void logResult(Agent agent, @Nullable String displayName, String text) {
         var resultPreview = text.length() > 200
                 ? text.substring(0, 200) + "... (%d chars)".formatted(text.length()) : text;
         EventLogger.info("tool", agent.name, null,
                 "Tool '%s' returned: %s".formatted(displayName, resultPreview));
-        return result;
     }
 
     private record McpCallDisplay(@Nullable String name, String args) {}
