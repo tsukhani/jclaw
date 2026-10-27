@@ -164,7 +164,8 @@ public class ApiMcpServersController extends Controller {
     @SuppressWarnings("java:S2259")
     @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = McpServerService.View.class)))
     @RequestBody(required = true, content = @Content(schema = @Schema(implementation = McpServerRequest.class)))
-    @Operation(summary = "Update an MCP server by id; it reconnects automatically")
+    @Operation(summary = "Update an MCP server by id; omitted fields keep their values, env and headers change "
+            + "only the keys sent (a null value removes one), and it reconnects automatically")
     @AgentAccess(value = OPEN,
             reason = "same seam as create; a STDIO command is main-only (JCLAW-1270); offerViewToolsEverywhere is operator-only")
     public static void update(Long id) {
@@ -204,15 +205,13 @@ public class ApiMcpServersController extends Controller {
             row.protocolSwitchReason = null;
             row.probeTimedOutAt = null;
         }
-        // configJson rebuild: any of (transport, command, args, env, url, headers)
-        // appearing in the body triggers a fresh compose. Cheaper than diffing.
         if (touchesTransportConfig(body)) {
             // Guarded on the row's transport rather than the body's: a body that omits
             // `transport` but carries a new `command` rewrites what an existing STDIO server
             // executes, which is the same authority as creating one.
             requireMainForStdio(row.transport);
             restoreMaskedSecrets(body, priorConfig);
-            row.configJson = McpServerService.composeConfigJson(row.transport, body);
+            row.configJson = McpServerService.mergeConfigJson(row.transport, row.configJson, body);
             row.probeTimedOutAt = null;
         }
         try {

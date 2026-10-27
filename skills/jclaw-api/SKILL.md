@@ -3,7 +3,7 @@ name: jclaw-api
 description: >-
   Operate JClaw itself from chat — list/create/update agents, add or test MCP servers, read config. Use whenever the user asks to change JClaw's own configuration rather than perform an external task.
 metadata:
-  version: "1.1.1"
+  version: "1.1.2"
   author: Tarun Sukhani
   jclaw-icon: "⚙️"
   jclaw-tools: jclaw_api
@@ -31,7 +31,7 @@ The tool returns `HTTP <status>\n<body>` so you can read both. A 4xx response us
 These staples don't need a discover round-trip first; run `action="discover"` for anything else.
 
 - **Agents** — `GET /api/agents` (list); `POST /api/agents` body `name`, `modelProvider`, `modelId` (create); `PUT /api/agents/{id}` (update).
-- **MCP servers** — `POST /api/mcp-servers` body `name`, `enabled`, `transport` (`STDIO` or `HTTP`), then `command`/`args`/`env` or `url`/`headers`; confirm it boots with `POST /api/mcp-servers/{id}/test`.
+- **MCP servers** — `POST /api/mcp-servers` body `name`, `enabled`, `transport` (`STDIO` or `HTTP`), then `command`/`args`/`env` or `url`/`headers`; confirm it boots with `POST /api/mcp-servers/{id}/test`. `PUT /api/mcp-servers/{id}` changes only what it carries: send just the fields to change, and in `env`/`headers` just the keys to change, with `null` to remove one.
 - **Config** — `GET /api/config` (all, masked) or `GET /api/config/{key}`.
 
 ## Off-limits

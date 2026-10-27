@@ -25,6 +25,9 @@ interface FormState {
   url: string
   headerRows: KeyValueRow[]
   protocol: McpServer['protocol']
+  // The server merges env and headers by key, so a saved key the form dropped must be sent as null.
+  savedEnvKeys: string[]
+  savedHeaderKeys: string[]
 }
 
 const editing = ref<FormState | null>(null)
@@ -98,6 +101,8 @@ function blankForm(): FormState {
     url: '',
     headerRows: [{ key: '', value: '' }],
     protocol: 'AUTOMATIC',
+    savedEnvKeys: [],
+    savedHeaderKeys: [],
   }
 }
 
@@ -128,6 +133,8 @@ function formFromServer(s: McpServer): FormState {
     url: s.url || '',
     headerRows,
     protocol: s.protocol ?? 'AUTOMATIC',
+    savedEnvKeys: Object.keys(s.env || {}),
+    savedHeaderKeys: Object.keys(s.headers || {}),
   }
 }
 
@@ -152,11 +159,14 @@ function cancelEdit() {
   saveError.value = null
 }
 
-function rowsToMap(rows: KeyValueRow[]): Record<string, string> {
-  const out: Record<string, string> = {}
+function rowsToMap(rows: KeyValueRow[], savedKeys: string[]): Record<string, string | null> {
+  const out: Record<string, string | null> = {}
   for (const r of rows) {
     // An untouched secret goes back as its mask, which the server swaps for the stored value.
     if (r.key.trim()) out[r.key.trim()] = r.value === '' && isSavedSecret(r) ? r.savedMask! : r.value
+  }
+  for (const key of savedKeys) {
+    if (!(key in out)) out[key] = null
   }
   return out
 }
@@ -172,11 +182,11 @@ function buildPayload(form: FormState) {
   if (form.transport === 'STDIO') {
     base.command = form.command.trim()
     base.args = form.argsRaw.split('\n').map(s => s.trim()).filter(s => s.length > 0)
-    base.env = rowsToMap(form.envRows)
+    base.env = rowsToMap(form.envRows, form.savedEnvKeys)
   }
   else {
     base.url = form.url.trim()
-    base.headers = rowsToMap(form.headerRows)
+    base.headers = rowsToMap(form.headerRows, form.savedHeaderKeys)
   }
   return base
 }

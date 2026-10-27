@@ -257,6 +257,32 @@ public final class McpServerService {
         return cfg.toString();
     }
 
+    /**
+     * The {@code configJson} after an update, applied as a JSON Merge Patch (RFC 7386) over the stored one: a field
+     * the body omits keeps its value and a null clears it, and env and headers change only the keys the body names,
+     * a null value removing that key. A secret the caller never sends is therefore never lost.
+     */
+    public static String mergeConfigJson(McpServer.Transport transport, String storedConfigJson, JsonObject body) {
+        var merged = Objects.requireNonNullElseGet(parseConfig(storedConfigJson), JsonObject::new);
+        for (var field : List.of("command", "args", "url")) {
+            if (body.has(field)) merged.add(field, body.get(field));
+        }
+        for (var field : List.of("env", "headers")) {
+            if (!body.has(field)) continue;
+            if (!(body.get(field) instanceof JsonObject patch)) {
+                merged.remove(field);
+                continue;
+            }
+            var values = merged.get(field) instanceof JsonObject stored ? stored : new JsonObject();
+            for (var entry : patch.entrySet()) {
+                if (entry.getValue().isJsonNull()) values.remove(entry.getKey());
+                else values.add(entry.getKey(), entry.getValue());
+            }
+            merged.add(field, values);
+        }
+        return composeConfigJson(transport, merged);
+    }
+
     private static void composeStdioConfig(JsonObject body, JsonObject cfg) {
         copyStringProperty(body, cfg, "command");
         copyJsonArray(body, cfg, "args");
@@ -289,13 +315,8 @@ public final class McpServerService {
     /** Inverse of {@link #composeConfigJson}: parse the row's stored JSON
      *  into form-ready fields so the admin UI can pre-populate inputs. */
     public static TransportConfig explodeConfigJson(McpServer.Transport transport, String configJson) {
-        if (configJson == null || configJson.isBlank()) return TransportConfig.empty();
-        JsonObject cfg;
-        try {
-            cfg = JsonParser.parseString(configJson).getAsJsonObject();
-        } catch (RuntimeException _) {
-            return TransportConfig.empty();
-        }
+        var cfg = parseConfig(configJson);
+        if (cfg == null) return TransportConfig.empty();
         return switch (transport) {
             case STDIO -> new TransportConfig(
                     optionalString(cfg, "command"),
@@ -307,6 +328,16 @@ public final class McpServerService {
                     optionalString(cfg, "url"),
                     optionalStringMap(cfg, "headers"));
         };
+    }
+
+    /** The stored config as an object, or null when it is blank or not a JSON object. */
+    private static @Nullable JsonObject parseConfig(String configJson) {
+        if (configJson == null || configJson.isBlank()) return null;
+        try {
+            return JsonParser.parseString(configJson).getAsJsonObject();
+        } catch (RuntimeException _) {
+            return null;
+        }
     }
 
     // ==================== runtime sync ====================

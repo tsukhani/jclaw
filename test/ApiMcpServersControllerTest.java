@@ -308,6 +308,40 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         assertStatus(400, copied);
     }
 
+    // ==================== an update merges over the stored config ====================
+
+    @Test
+    void aPutWithoutEnvKeepsTheServersEnvSecrets() {
+        login();
+        var id = created("""
+                {"name":"no-env","enabled":false,"transport":"STDIO","command":"node","args":["v1.js"],
+                 "env":{"API_KEY":"sk-real-secret","NODE_ENV":"production"}}
+                """).get("id").getAsLong();
+
+        assertIsOk(PUT("/api/mcp-servers/" + id, "application/json",
+                "{\"name\":\"no-env-v2\",\"command\":\"node\",\"args\":[\"v2.js\"]}"));
+
+        assertEquals("""
+                {"command":"node","args":["v2.js"],"env":{"API_KEY":"sk-real-secret","NODE_ENV":"production"}}""",
+                storedConfig(id, "no-env-v2"));
+    }
+
+    @Test
+    void aPutChangesAndRemovesOnlyTheEnvKeysItNames() {
+        login();
+        var id = created("""
+                {"name":"env-keys","enabled":false,"transport":"STDIO","command":"node",
+                 "env":{"API_KEY":"sk-real-secret","NODE_ENV":"production","DEBUG":"1"}}
+                """).get("id").getAsLong();
+
+        assertIsOk(PUT("/api/mcp-servers/" + id, "application/json",
+                "{\"name\":\"env-keys-v2\",\"command\":\"node\",\"env\":{\"NODE_ENV\":\"test\",\"DEBUG\":null}}"));
+
+        assertEquals("""
+                {"command":"node","env":{"API_KEY":"sk-real-secret","NODE_ENV":"test"}}""",
+                storedConfig(id, "env-keys-v2"));
+    }
+
     // ==================== JCLAW-388: requiresApproval flag round-trip ====================
 
     @Test

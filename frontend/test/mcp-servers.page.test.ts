@@ -251,7 +251,33 @@ describe('MCP Servers page', () => {
 
     await c.find('form').trigger('submit')
     await vi.waitFor(() => expect(putBody).toBeTruthy())
-    expect(putBody!.headers).toEqual({ 'Authorization': 'Bearer new', 'X-Plan': '' })
+    // The server merges headers by key, so the old name goes as null or it would stay beside the new one.
+    expect(putBody!.headers).toEqual({ 'Authorization': 'Bearer new', 'X-Plan': '', 'X-Tier': null })
+  })
+
+  it('sends a removed env variable as null and keeps the others as they were', async () => {
+    setupApi([server({ env: { GITHUB_TOKEN: 'ghp_****', NODE_ENV: 'production' } })])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    await clickText(c, 'Edit')
+
+    await c.findAll('button[aria-label="Remove env var"]')[1]!.trigger('click')
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(putBody).toBeTruthy())
+    expect(putBody!.env).toEqual({ GITHUB_TOKEN: 'ghp_****', NODE_ENV: null })
+  })
+
+  it('sends every saved env variable as null once all of them are removed', async () => {
+    setupApi([server({ env: { GITHUB_TOKEN: 'ghp_****', NODE_ENV: 'production' } })])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    await clickText(c, 'Edit')
+
+    await c.findAll('button[aria-label="Remove env var"]')[1]!.trigger('click')
+    await c.findAll('button[aria-label="Remove env var"]')[0]!.trigger('click')
+    await c.find('form').trigger('submit')
+    await vi.waitFor(() => expect(putBody).toBeTruthy())
+    expect(putBody!.env).toEqual({ GITHUB_TOKEN: null, NODE_ENV: null })
   })
 
   it('offers view tools on every channel only when the add form\'s box is ticked', async () => {
