@@ -17,7 +17,7 @@ import java.util.regex.Pattern;
 
 /**
  * The SPA staleness gate in {@code jclaw.sh} decides whether a restart rebuilds the bundle, and
- * it decides from the mtimes of the tracked files under a fixed set of roots. A build input outside those roots is
+ * it decides from a record of the files under a fixed set of roots. A build input outside those roots is
  * invisible to it, so an edit ships nothing while the gate reports "up to date": the guide's
  * markdown was exactly that until JCLAW-1178. This pins that every import escaping
  * {@code frontend/} resolves under a root the gate probes.
@@ -25,7 +25,7 @@ import java.util.regex.Pattern;
 class SpaBuildInputsConformanceTest extends UnitTest {
 
     /** The pathspecs the gate hands `git ls-files`, i.e. the roots it probes for staleness. */
-    private static final Pattern GATE_ROOTS_LINE = Pattern.compile("ls-files -z -- ([^\n]*)");
+    private static final Pattern GATE_ROOTS_LINE = Pattern.compile("ls-files -z[^\n]*? -- ([^\n]*)");
     private static final Pattern PATHSPEC = Pattern.compile("[A-Za-z0-9_./-]+");
 
     /** A static import whose specifier climbs out of its own directory. */
