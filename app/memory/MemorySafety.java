@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 import java.util.function.IntUnaryOperator;
@@ -212,10 +213,102 @@ public final class MemorySafety {
         return cp >= 0xE0100 && cp <= 0xE01EF;
     }
 
-    private static int ideographicVariants(String text) {
-        // Every code point this counts is outside the BMP, so text without a surrogate pair has none.
-        if (text.chars().noneMatch(c -> Character.isHighSurrogate((char) c))) return 0;
-        return (int) text.codePoints().filter(MemorySafety::isIdeographicVariant).count();
+    // Scripts whose spelling needs a zero-width joiner or non-joiner between its letters.
+    private static final Set<Character.UnicodeScript> JOINING_SCRIPTS = EnumSet.of(
+            Character.UnicodeScript.ARABIC, Character.UnicodeScript.SYRIAC, Character.UnicodeScript.NKO,
+            Character.UnicodeScript.DEVANAGARI, Character.UnicodeScript.BENGALI, Character.UnicodeScript.GURMUKHI,
+            Character.UnicodeScript.GUJARATI, Character.UnicodeScript.ORIYA, Character.UnicodeScript.TAMIL,
+            Character.UnicodeScript.TELUGU, Character.UnicodeScript.KANNADA, Character.UnicodeScript.MALAYALAM,
+            Character.UnicodeScript.SINHALA, Character.UnicodeScript.KHMER, Character.UnicodeScript.MYANMAR,
+            Character.UnicodeScript.TIBETAN, Character.UnicodeScript.MONGOLIAN);
+
+    /**
+     * What the allowances need to know about the whole text, counted in one pass. Each allowed invisible
+     * character stays fewer than the letters it serves, so a run of them cannot become a channel.
+     */
+    private record TextFacts(int ideographicVariants, int letters, int joiningLetters, int rightToLeftLetters,
+                             int mongolianLetters, int softHyphens, int scriptJoiners, int bidiMarks,
+                             int mongolianSelectors) {
+        static TextFacts of(String text) {
+            int variants = 0;
+            int letters = 0;
+            int joining = 0;
+            int rightToLeft = 0;
+            int mongolian = 0;
+            int softHyphens = 0;
+            int joiners = 0;
+            int marks = 0;
+            int selectors = 0;
+            for (int i = 0; i < text.length(); ) {
+                int cp = text.codePointAt(i);
+                if (Character.isLetter(cp)) {
+                    letters++;
+                    var script = Character.UnicodeScript.of(cp);
+                    if (JOINING_SCRIPTS.contains(script)) joining++;
+                    if (script == Character.UnicodeScript.MONGOLIAN) mongolian++;
+                    if (isRightToLeft(cp)) rightToLeft++;
+                } else if (isIdeographicVariant(cp)) {
+                    variants++;
+                } else if (cp == 0x00AD) {
+                    softHyphens++;
+                } else if ((cp == 0x200C || cp == 0x200D) && !isEmojiJoiner(text, i)) {
+                    joiners++;
+                } else if (isBidiMark(cp)) {
+                    marks++;
+                } else if (cp >= 0x180B && cp <= 0x180F) {
+                    selectors++;
+                }
+                i += Character.charCount(cp);
+            }
+            return new TextFacts(variants, letters, joining, rightToLeft, mongolian, softHyphens, joiners, marks,
+                    selectors);
+        }
+    }
+
+    // The nearest strongly directional character within 16 code points on the line, skipping neutrals, or -1.
+    private static int nearestStrong(String text, int index, boolean forward) {
+        int at = index;
+        for (int steps = 0; steps < 16; steps++) {
+            if (forward) {
+                at += Character.charCount(text.codePointAt(at));
+                if (at >= text.length()) return -1;
+            } else {
+                if (at == 0) return -1;
+                at -= Character.charCount(text.codePointBefore(at));
+            }
+            int cp = text.codePointAt(at);
+            if (cp == '\n') return -1;
+            byte direction = Character.getDirectionality(cp);
+            if (direction == Character.DIRECTIONALITY_LEFT_TO_RIGHT || isRightToLeft(cp)) return cp;
+        }
+        return -1;
+    }
+
+    private static boolean touchesRightToLeft(String text, int index) {
+        int before = nearestStrong(text, index, false);
+        int after = nearestStrong(text, index, true);
+        return (before >= 0 && isRightToLeft(before)) || (after >= 0 && isRightToLeft(after));
+    }
+
+    private static boolean isRightToLeft(int cp) {
+        byte direction = Character.getDirectionality(cp);
+        return direction == Character.DIRECTIONALITY_RIGHT_TO_LEFT
+                || direction == Character.DIRECTIONALITY_RIGHT_TO_LEFT_ARABIC;
+    }
+
+    private static boolean isBidiMark(int cp) {
+        return cp == 0x200E || cp == 0x200F || cp == 0x061C;
+    }
+
+    private static boolean betweenLettersOfAJoiningScript(String text, int index) {
+        if (index == 0 || index + 1 >= text.length()) return false;
+        var before = Character.UnicodeScript.of(text.codePointBefore(index));
+        return JOINING_SCRIPTS.contains(before) && before == Character.UnicodeScript.of(text.codePointAt(index + 1));
+    }
+
+    private static boolean betweenLetters(String text, int index) {
+        return index > 0 && index + 1 < text.length()
+                && Character.isLetter(text.codePointBefore(index)) && Character.isLetter(text.codePointAt(index + 1));
     }
 
     private static boolean isTag(int cp) {
@@ -245,15 +338,31 @@ public final class MemorySafety {
     }
 
     /**
-     * Whether the invisible character at {@code index} is a use of it that shows something: a joiner inside an
-     * emoji, a presentation selector on an emoji, a variant selector on an ideograph, or a recommended flag.
+     * Whether the invisible character at {@code index} is a use of it that writing needs: a joiner inside an emoji
+     * or between letters of a script that spells with one, a bidi mark in right-to-left text, a soft hyphen inside a
+     * word, a selector on the emoji, ideograph or Mongolian letter it styles, or a recommended flag.
      */
-    private static boolean isVisibleUse(String text, int index, int ideographicVariants) {
+    private static boolean isVisibleUse(String text, int index, TextFacts facts) {
         int cp = text.codePointAt(index);
-        if (cp == 0x200D) return isEmojiJoiner(text, index);
+        if (cp == 0x200C || cp == 0x200D) {
+            if (cp == 0x200D && isEmojiJoiner(text, index)) return true;
+            return betweenLettersOfAJoiningScript(text, index) && facts.scriptJoiners() * 2 <= facts.joiningLetters();
+        }
+        // One mark at a time, beside right-to-left text: a run of them carries bits, and no ordering problem needs two.
+        if (isBidiMark(cp)) {
+            return (index == 0 || !isBidiMark(text.codePointBefore(index))) && touchesRightToLeft(text, index)
+                    && facts.bidiMarks() * 2 <= facts.rightToLeftLetters();
+        }
+        if (cp == 0x00AD) return betweenLetters(text, index) && facts.softHyphens() * 3 <= facts.letters();
+        if (cp >= 0x180B && cp <= 0x180F) {
+            if (index == 0) return false;
+            int before = text.codePointBefore(index);
+            return Character.isLetter(before) && Character.UnicodeScript.of(before) == Character.UnicodeScript.MONGOLIAN
+                    && facts.mongolianSelectors() <= facts.mongolianLetters();
+        }
         if (cp == 0xFE0E || cp == 0xFE0F) return index > 0 && isPresentationBase(text, index, cp);
         if (isIdeographicVariant(cp)) {
-            return ideographicVariants <= MAX_IDEOGRAPHIC_VARIANTS && index > 0
+            return facts.ideographicVariants() <= MAX_IDEOGRAPHIC_VARIANTS && index > 0
                     && Character.isIdeographic(text.codePointBefore(index));
         }
         return isTag(cp) && inSubdivisionFlag(text, index);
@@ -261,9 +370,10 @@ public final class MemorySafety {
 
     private static boolean hasInvisibleChars(String text) {
         var matcher = INVISIBLE_CHARS.matcher(text);
-        int variants = ideographicVariants(text);
+        TextFacts facts = null;
         while (matcher.find()) {
-            if (!isVisibleUse(text, matcher.start(), variants)) return true;
+            if (facts == null) facts = TextFacts.of(text);
+            if (!isVisibleUse(text, matcher.start(), facts)) return true;
         }
         return false;
     }
@@ -299,16 +409,21 @@ public final class MemorySafety {
     /** The text the phrase rules read, and where each of its chars came from in the text. */
     private record Folded(String text, IntUnaryOperator start, IntUnaryOperator end) {}
 
-    // Fullwidth and other compatibility forms read as the letters they show, so a fullwidth "cat" cannot dodge a
-    // rule. Folding code point by code point keeps a map back to the original, for a match's position.
+    // Fullwidth and other compatibility forms read as the letters they show, and the invisible characters writing
+    // may hold are dropped, so neither a fullwidth "cat" nor a soft hyphen inside "ignore" dodges a rule. Folding
+    // code point by code point keeps a map back to the original, for a match's position.
     private static Folded fold(String text) {
-        if (Normalizer.isNormalized(text, Normalizer.Form.NFKC)) return new Folded(text, i -> i, i -> i);
+        if (Normalizer.isNormalized(text, Normalizer.Form.NFKC) && !INVISIBLE_CHARS.matcher(text).find()) {
+            return new Folded(text, i -> i, i -> i);
+        }
+        var invisible = INVISIBLE_CHARS.matcher("");
         var folded = new StringBuilder(text.length());
         int[] starts = new int[text.length() + 16];
         int[] ends = new int[text.length() + 16];
         for (int i = 0; i < text.length(); ) {
             int next = i + Character.charCount(text.codePointAt(i));
-            var piece = Normalizer.normalize(text.substring(i, next), Normalizer.Form.NFKC);
+            var original = text.substring(i, next);
+            var piece = invisible.reset(original).matches() ? "" : Normalizer.normalize(original, Normalizer.Form.NFKC);
             for (int k = 0; k < piece.length(); k++) {
                 if (folded.length() == starts.length) {
                     starts = Arrays.copyOf(starts, starts.length * 2);
@@ -358,9 +473,10 @@ public final class MemorySafety {
         if (text == null || text.isBlank()) return List.of();
         var found = new ArrayList<InjectionMatch>();
         var invisible = INVISIBLE_CHARS.matcher(text);
-        int variants = ideographicVariants(text);
+        TextFacts facts = null;
         while (invisible.find()) {
-            if (!isVisibleUse(text, invisible.start(), variants)) {
+            if (facts == null) facts = TextFacts.of(text);
+            if (!isVisibleUse(text, invisible.start(), facts)) {
                 found.add(new InjectionMatch(INVISIBLE_RULE, invisible.start(), invisible.end()));
             }
         }
