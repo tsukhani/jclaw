@@ -203,7 +203,7 @@ public final class ToolCallLoopRunner {
                     audioBearers, imageBearers, audioState, visionState);
 
             var roundOutcome = handleSyncRoundResponse(attempt.okResponse(), agent, conversation, conversationId, primary,
-                    fallback, currentMessages, tools, sink, round, taskRunId);
+                    fallback, currentMessages, tools, sink, round, taskRunId, overflow);
             if (roundOutcome != null) return roundOutcome;
         }
 
@@ -219,7 +219,7 @@ public final class ToolCallLoopRunner {
                                                List<ChatMessage> currentMessages,
                                                ContextWindowManager.OverflowBudget overflow, int maxRounds) {
         logRoundCap(agent, conversation.channelType, maxRounds);
-        var view = new ArrayList<>(sendView(currentMessages, agent, conversation, primary, null, overflow));
+        var view = sendView(currentMessages, agent, conversation, primary, null, overflow);
         var closing = retrySyncSynthesis(agent, conversation, primary, fallback, view, null, CLOSING_NUDGE);
         return closing != null
                 ? new LoopOutcome(closing.content() + ROUND_CAP_NOTE, closing.truncated())
@@ -500,35 +500,37 @@ public final class ToolCallLoopRunner {
      * Sync twin of {@link #recoverEmptyReply} (JCLAW-1203): a first reply that hit the output
      * cap with no content spent the budget reasoning, so retry with reasoning off, then on
      * the fallback model, before reporting the cut. A failing retry call is logged and
-     * treated as empty rather than aborting the turn.
+     * treated as empty rather than aborting the turn. {@code base} is the turn's history within
+     * its overflow budget.
      */
     @SuppressWarnings("java:S107")
     private static LoopOutcome recoverEmptySyncReply(Agent agent, Conversation conversation, LlmProvider primary,
                                                      LlmProvider.@Nullable Fallback fallback,
-                                                     ArrayList<ChatMessage> currentMessages,
+                                                     List<ChatMessage> base,
                                                      @Nullable List<ToolDef> tools, @Nullable String finishReason) {
         EventLogger.warn("llm", agent.name, conversation.channelType,
                 "Reply stopped with no content on the first call (finish_reason=%s) — retrying with reasoning off"
                         .formatted(finishReason));
-        var answered = retrySyncSynthesis(agent, conversation, primary, fallback, currentMessages, tools, ANSWER_NUDGE);
+        var answered = retrySyncSynthesis(agent, conversation, primary, fallback, base, tools, ANSWER_NUDGE);
         return answered != null ? answered : new LoopOutcome("*[The model stopped before writing an answer. "
                 + "Try again with thinking off or a larger output budget.]*", true);
     }
 
     /**
      * Sync twin of {@link #retryEmptyContinuation} (JCLAW-1199): a subagent runs on this path, and an
-     * empty reply after tool calls would otherwise end its run COMPLETED with no answer.
+     * empty reply after tool calls would otherwise end its run COMPLETED with no answer. {@code base} is
+     * the turn's history within its overflow budget.
      */
     @SuppressWarnings("java:S107")
     private static LoopOutcome recoverEmptySyncContinuation(Agent agent, Conversation conversation, LlmProvider primary,
                                                             LlmProvider.@Nullable Fallback fallback,
-                                                            ArrayList<ChatMessage> currentMessages,
+                                                            List<ChatMessage> base,
                                                             @Nullable List<ToolDef> tools, int round,
                                                             @Nullable String finishReason) {
         EventLogger.warn("llm", agent.name, conversation.channelType,
                 "Empty continuation after tool calls in round %d (finish_reason=%s) — retrying with synthesis nudge, reasoning off"
                         .formatted(round + 1, finishReason));
-        var answered = retrySyncSynthesis(agent, conversation, primary, fallback, currentMessages, tools, SYNTHESIS_NUDGE);
+        var answered = retrySyncSynthesis(agent, conversation, primary, fallback, base, tools, SYNTHESIS_NUDGE);
         return answered != null ? answered : new LoopOutcome("*[The model returned no synthesis after tool calls. "
                 + "Tool results are in the conversation history above — try rephrasing your request or switching to a larger model.]*");
     }
@@ -537,9 +539,9 @@ public final class ToolCallLoopRunner {
     @SuppressWarnings("java:S107")
     private static @Nullable LoopOutcome retrySyncSynthesis(Agent agent, Conversation conversation, LlmProvider primary,
                                                             LlmProvider.@Nullable Fallback fallback,
-                                                            ArrayList<ChatMessage> currentMessages,
+                                                            List<ChatMessage> base,
                                                             @Nullable List<ToolDef> tools, String nudge) {
-        var retryMessages = new ArrayList<>(currentMessages);
+        var retryMessages = new ArrayList<>(base);
         retryMessages.add(ChatMessage.user(nudge));
         var modelId = Objects.requireNonNull(
                 ModelResolver.effectiveModelId(agent, conversation), NO_MODEL_CONFIGURED);
@@ -593,7 +595,8 @@ public final class ToolCallLoopRunner {
                                                        ArrayList<ChatMessage> currentMessages,
                                                        @Nullable List<ToolDef> tools,
                                                        AgentExecutionSink sink, int round,
-                                                       @Nullable Long taskRunId) {
+                                                       @Nullable Long taskRunId,
+                                                       ContextWindowManager.OverflowBudget overflow) {
         var choice = response.choices().getFirst();
         var assistantMsg = choice.message();
         var assistantToolCalls = assistantMsg.toolCalls();
@@ -608,14 +611,16 @@ public final class ToolCallLoopRunner {
                         conversation.channelType, choice.finishReason(), currentMessages, tools);
                 var text = MessageHydrator.contentAsString(assistantMsg.content());
                 if (text == null || text.isBlank()) {
-                    return recoverEmptySyncReply(agent, conversation, primary, fallback, currentMessages, tools,
+                    return recoverEmptySyncReply(agent, conversation, primary, fallback,
+                            overflow.apply(currentMessages, agent, conversation, primary, tools), tools,
                             choice.finishReason());
                 }
                 return new LoopOutcome(text, true);
             }
             var text = MessageHydrator.contentAsString(assistantMsg.content());
             if (round > 0 && text.isBlank()) {
-                return recoverEmptySyncContinuation(agent, conversation, primary, fallback, currentMessages, tools,
+                return recoverEmptySyncContinuation(agent, conversation, primary, fallback,
+                        overflow.apply(currentMessages, agent, conversation, primary, tools), tools,
                         round, choice.finishReason());
             }
             return new LoopOutcome(text);
@@ -906,9 +911,9 @@ public final class ToolCallLoopRunner {
     /**
      * Recovery for a stream {@link #refusedForLength}: the same list on the fallback when the
      * primary refused it, since the fallback's window may be larger, then the list trimmed to the
-     * turn's overflow budget, once per turn, through the normal path. The streamed failover covers
-     * only an open breaker, so the fallback is asked here. Returns the last attempt, which may be
-     * refused still, or null when the turn was canceled while waiting.
+     * turn's overflow budget, once per turn, through the normal path and again on the fallback when
+     * the primary refuses that too, as the sync path's failover does. Returns the last attempt, which
+     * may be refused still, or null when the turn was canceled while waiting.
      */
     static LlmProvider.@Nullable StreamAccumulator recoverOverflowedStream(StreamingTurnContext ctx,
                                                                          List<ChatMessage> sent,
@@ -926,25 +931,10 @@ public final class ToolCallLoopRunner {
                                                                                   @Nullable String note,
                                                                                   LlmProvider.StreamAccumulator refused)
             throws InterruptedException {
-        var refusal = refusedForLength(refused);
-        if (refusal == null) return refused;
+        if (refusedForLength(refused) == null) return refused;
         var sent = withNote(view, note);
-        var attempt = refused;
-        var fallback = ctx.fallback();
-        var failure = refusal.failure();
-        if (fallback != null && fallback.coversFor(ctx.provider()) && failure != null
-                && failure.provider().equals(ctx.provider().config().name())) {
-            EventLogger.warn("llm", ctx.agent().name, ctx.channelType(),
-                    "Failing over from %s to %s / %s: the request is longer than the context window"
-                            .formatted(failure.provider(), fallback.provider().config().name(), fallback.modelId()));
-            var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(),
-                    sent, ctx.tools());
-            attempt = fallback.provider().chatStreamAccumulate(fallback.modelId(), sent, ctx.tools(),
-                    ctx.cb().onToken(), ctx.cb().onReasoning(), maxTokens, ctx.thinkingMode(), ctx.channelType());
-            if (!CancellationManager.awaitAccumulatorOrCancel(attempt, ctx.isCancelled(), ctx.agent(),
-                    ctx.channelType(), ctx.cb())) return null;
-            if (refusedForLength(attempt) == null) return attempt;
-        }
+        var attempt = onFallbackIfPrimaryRefused(ctx, sent, refused);
+        if (attempt == null || refusedForLength(attempt) == null) return attempt;
         var trimmed = ctx.overflow().trimForRetry(view, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools());
         if (trimmed == null) return attempt;
         var resend = withNote(trimmed, note);
@@ -953,12 +943,40 @@ public final class ToolCallLoopRunner {
                 ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
         var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(),
                 resend, ctx.tools());
-        var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), fallback, modelId, resend,
+        var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.fallback(), modelId, resend,
                 ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(), maxTokens, ctx.thinkingMode(),
                 ctx.channelType());
         if (!CancellationManager.awaitAccumulatorOrCancel(retry, ctx.isCancelled(), ctx.agent(),
                 ctx.channelType(), ctx.cb())) return null;
-        return retry;
+        return onFallbackIfPrimaryRefused(ctx, resend, retry);
+    }
+
+    /**
+     * {@code acc}, unless the primary refused it for length and the agent's fallback is another model: then
+     * {@code messages} on the fallback, or null when the turn was canceled while waiting. The streamed
+     * failover covers only an open breaker, so the fallback is asked here.
+     */
+    private static LlmProvider.@Nullable StreamAccumulator onFallbackIfPrimaryRefused(StreamingTurnContext ctx,
+                                                                                     List<ChatMessage> messages,
+                                                                                     LlmProvider.StreamAccumulator acc)
+            throws InterruptedException {
+        var refusal = refusedForLength(acc);
+        var failure = refusal != null ? refusal.failure() : null;
+        var fallback = ctx.fallback();
+        if (failure == null || fallback == null || !fallback.coversFor(ctx.provider())
+                || !failure.provider().equals(ctx.provider().config().name())) {
+            return acc;
+        }
+        EventLogger.warn("llm", ctx.agent().name, ctx.channelType(),
+                "Failing over from %s to %s / %s: the request is longer than the context window"
+                        .formatted(failure.provider(), fallback.provider().config().name(), fallback.modelId()));
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(),
+                messages, ctx.tools());
+        var attempt = fallback.provider().chatStreamAccumulate(fallback.modelId(), messages, ctx.tools(),
+                ctx.cb().onToken(), ctx.cb().onReasoning(), maxTokens, ctx.thinkingMode(), ctx.channelType());
+        if (!CancellationManager.awaitAccumulatorOrCancel(attempt, ctx.isCancelled(), ctx.agent(),
+                ctx.channelType(), ctx.cb())) return null;
+        return attempt;
     }
 
     /**
@@ -1034,8 +1052,8 @@ public final class ToolCallLoopRunner {
         EventLogger.warn("llm", ctx.agent().name, null,
                 "Empty continuation after tool calls in round %d (%s) — retrying with synthesis nudge, reasoning off"
                         .formatted(round + 1, describeEmpty(empty)));
-        var recovery = retrySynthesis(ctx, currentMessages, ctx.tools(), SYNTHESIS_NUDGE, SYNTHESIS_STATUS,
-                priorContent, round);
+        var recovery = retrySynthesis(ctx, withinBudget(ctx, currentMessages), ctx.tools(), SYNTHESIS_NUDGE,
+                SYNTHESIS_STATUS, priorContent, round);
         if (recovery.cancelled() != null) return recovery.cancelled();
         if (recovery.content() != null) return withImages(ctx, recovery.content());
 
@@ -1079,7 +1097,12 @@ public final class ToolCallLoopRunner {
         EventLogger.warn("llm", ctx.agent().name, ctx.channelType(),
                 "Reply stopped with no content on the first call (%s) — retrying with reasoning off"
                         .formatted(describeEmpty(empty)));
-        return retrySynthesis(ctx, messages, ctx.tools(), ANSWER_NUDGE, SYNTHESIS_STATUS, "", 0);
+        return retrySynthesis(ctx, withinBudget(ctx, messages), ctx.tools(), ANSWER_NUDGE, SYNTHESIS_STATUS, "", 0);
+    }
+
+    /** {@code messages} trimmed to the turn's overflow budget once a refusal set one, so a retry is not refused again. */
+    private static List<ChatMessage> withinBudget(StreamingTurnContext ctx, List<ChatMessage> messages) {
+        return ctx.overflow().apply(messages, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools());
     }
 
     /** What the reader sees when every retry of a first call came back empty. */

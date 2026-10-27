@@ -60,9 +60,15 @@ class ContextOverflowRecoveryTest extends UnitTest {
     private static final String SYSTEM = "You are terse.";
     private static final String CURRENT = "Current question?";
     private static final String SHORT_ANSWER = "Short answer.";
-    private static final String OLDEST = "Oldest question about the harbour. ".repeat(400);
+    /** Large enough that dropping it alone meets the retry budget beside a streamed turn's full system prompt. */
+    private static final String OLDEST = "Oldest question about the harbour. ".repeat(2000);
     private static final String GENERIC_REPLY =
             "I'm sorry, I encountered an error communicating with the AI provider. Please try again.";
+    /** The current-time block a streamed turn sends after the question, whose text changes each minute. */
+    private static final String CLOCK = "user:<current time>";
+    private static final String ANSWER_NUDGE = "Write the full answer now as markdown. Keep any reasoning brief.";
+    private static final String SYNTHESIS_NUDGE = "Synthesize the final response for me now using the tool results "
+            + "above. Do not call any more tools. Write the full answer as markdown.";
 
     private final List<HttpServer> servers = new ArrayList<>();
     private final List<String> providers = new ArrayList<>();
@@ -182,6 +188,34 @@ class ContextOverflowRecoveryTest extends UnitTest {
                 "assistant->tc1", "tool<-tc1"), sent(primary.bodies.get(2)));
     }
 
+    @Test
+    void aSyncEmptyReplyAfterARecoveryIsRetriedWithinTheBudget() throws Exception {
+        var calls = new CopyOnWriteArrayList<String>();
+        var primary = serve("primary", calls, refusal(), emptyReply("length"), text("Answer within the budget."));
+        var provider = provider("primary", primary);
+
+        var outcome = runSyncLoop(provider, null, "web");
+
+        assertEquals("Answer within the budget.", outcome.content());
+        assertEquals(List.of("primary", "primary", "primary"), calls);
+        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT, "user:" + ANSWER_NUDGE),
+                sent(primary.bodies.get(2)), "the retry leaves out what the provider refused");
+    }
+
+    @Test
+    void aSyncEmptyContinuationAfterARecoveryIsRetriedWithinTheBudget() throws Exception {
+        var calls = new CopyOnWriteArrayList<String>();
+        var primary = serve("primary", calls, refusal(), toolCall("tc1"), text(""), text("Answer within the budget."));
+        var provider = provider("primary", primary);
+
+        var outcome = runSyncLoop(provider, null, "web");
+
+        assertEquals("Answer within the budget.", outcome.content());
+        assertEquals(List.of("primary", "primary", "primary", "primary"), calls);
+        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
+                "assistant->tc1", "tool<-tc1", "user:" + SYNTHESIS_NUDGE), sent(primary.bodies.get(3)));
+    }
+
     // ─── streaming continuation rounds ───────────────────────────────────────
 
     @Test
@@ -240,6 +274,50 @@ class ContextOverflowRecoveryTest extends UnitTest {
     }
 
     @Test
+    void aStreamedTrimmedListThePrimaryRefusesIsSentToTheFallback() throws Exception {
+        var calls = new CopyOnWriteArrayList<String>();
+        var primary = serve("primary", calls, refusal(), refusal(), text("never sent"));
+        var secondary = serve("fallback", calls, refusal(), text("The fallback took the trimmed list."));
+
+        var result = runContinuation(provider("primary", primary), provider("fallback", secondary));
+
+        assertEquals("The fallback took the trimmed list.", result);
+        assertEquals(List.of("primary", "fallback", "primary", "fallback"), calls);
+        var trimmed = List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
+                "assistant->tc1", "tool<-tc1");
+        assertEquals(trimmed, sent(primary.bodies.get(1)));
+        assertEquals(trimmed, sent(secondary.bodies.get(1)));
+    }
+
+    @Test
+    void aStreamedContinuationBothModelsRefuseTrimmedEndsTheTurnWithTheContextWindowMessage() throws Exception {
+        var calls = new CopyOnWriteArrayList<String>();
+        var primary = serve("primary", calls, refusal(), refusal(), text("never sent"));
+        var secondary = serve("fallback", calls, refusal(), refusal(), text("never sent"));
+        var fallback = provider("fallback", secondary);
+
+        var thrown = assertThrows(LlmProvider.LlmException.class,
+                () -> runContinuation(provider("primary", primary), fallback));
+
+        assertEquals(contextWindowMessage(fallback.config().name()),
+                ApiChatController.webErrorFrame(thrown).get("content"), "the last model asked refused it");
+        assertEquals(List.of("primary", "fallback", "primary", "fallback"), calls);
+    }
+
+    @Test
+    void aStreamedEmptyContinuationAfterARecoveryIsRetriedWithinTheBudget() throws Exception {
+        var calls = new CopyOnWriteArrayList<String>();
+        var primary = serve("primary", calls, refusal(), text(""), text("Answer within the budget."));
+
+        var result = runContinuation(provider("primary", primary), null);
+
+        assertEquals("Answer within the budget.", result);
+        assertEquals(List.of("primary", "primary", "primary"), calls);
+        assertEquals(List.of("system:" + SYSTEM, "assistant:" + SHORT_ANSWER, "user:" + CURRENT,
+                "assistant->tc1", "tool<-tc1", "user:" + SYNTHESIS_NUDGE), sent(primary.bodies.get(2)));
+    }
+
+    @Test
     void aStreamedContinuationRefusedForAnotherReasonKeepsTodaysSynthesisRetry() throws Exception {
         var calls = new CopyOnWriteArrayList<String>();
         var primary = serve("primary", calls, otherClientError(), otherClientError());
@@ -269,10 +347,29 @@ class ContextOverflowRecoveryTest extends UnitTest {
         assertNull(harness.error.get(), () -> "unexpected error: " + harness.error.get());
         assertEquals("Answer after trimming.", harness.completed.get());
         assertEquals(List.of("primary", "primary"), calls);
-        assertTrue(primary.bodies.get(0).contains("Oldest question about the harbour"));
-        assertFalse(primary.bodies.get(1).contains("Oldest question about the harbour"),
-                "the retry drops the oldest history");
-        assertTrue(primary.bodies.get(1).contains(CURRENT), "and keeps the question being answered");
+        assertEquals(List.of("user:" + OLDEST, "assistant:" + SHORT_ANSWER, "user:" + CURRENT, CLOCK),
+                sentAfterSystem(primary.bodies.get(0)));
+        assertEquals(List.of("assistant:" + SHORT_ANSWER, "user:" + CURRENT, CLOCK),
+                sentAfterSystem(primary.bodies.get(1)), "the retry drops the oldest history and keeps the question");
+        assertTrue(primary.bodies.get(1).length() < primary.bodies.get(0).length(),
+                "the retried request is smaller than the refused one");
+    }
+
+    @Test
+    void aFirstStreamedEmptyReplyAfterARecoveryIsRetriedWithinTheBudget() throws Exception {
+        var calls = new CopyOnWriteArrayList<String>();
+        var primary = serve("primary", calls, refusal(), emptyReply("length"), text("Answer within the budget."));
+        var name = register("primary", primary);
+        var convo = seededConversation(persistAgent(name, null));
+
+        var harness = stream(convo);
+
+        assertTrue(harness.terminated.await(60, TimeUnit.SECONDS), "the turn must end");
+        assertNull(harness.error.get(), () -> "unexpected error: " + harness.error.get());
+        assertEquals("Answer within the budget.", harness.completed.get());
+        assertEquals(List.of("primary", "primary", "primary"), calls);
+        assertEquals(List.of("assistant:" + SHORT_ANSWER, "user:" + CURRENT, CLOCK, "user:" + ANSWER_NUDGE),
+                sentAfterSystem(primary.bodies.get(2)), "the retry leaves out what the provider refused");
     }
 
     @Test
@@ -428,6 +525,13 @@ class ContextOverflowRecoveryTest extends UnitTest {
                  "usage":{"prompt_tokens":10,"completion_tokens":5}}""".formatted(content));
     }
 
+    /** A reply with no content and no tool call, as when reasoning spent the whole output budget. */
+    private static Reply emptyReply(String finishReason) {
+        return new Reply(200, """
+                {"choices":[{"index":0,"message":{"role":"assistant","content":""},"finish_reason":"%s"}],
+                 "usage":{"prompt_tokens":10,"completion_tokens":5}}""".formatted(finishReason));
+    }
+
     private static Reply toolCall(String id) {
         return new Reply(200, """
                 {"choices":[{"index":0,"message":{"role":"assistant","content":"","tool_calls":[{"id":"%s",\
@@ -529,7 +633,10 @@ class ContextOverflowRecoveryTest extends UnitTest {
         return convo;
     }
 
-    /** Each message as {@code role:content}, a tool-call turn as {@code assistant->ids}, a result as {@code tool<-id}. */
+    /**
+     * Each message as {@code role:content}, a tool-call turn as {@code assistant->ids}, a result as {@code tool<-id},
+     * and the injected wall-clock block as {@link #CLOCK}.
+     */
     private static List<String> sent(String body) {
         var out = new ArrayList<String>();
         for (var element : JsonParser.parseString(body).getAsJsonObject().getAsJsonArray("messages")) {
@@ -544,10 +651,18 @@ class ContextOverflowRecoveryTest extends UnitTest {
                 out.add("tool<-" + m.get("tool_call_id").getAsString());
             } else {
                 var content = m.get("content");
-                out.add(role + ":" + (content != null && content.isJsonPrimitive() ? content.getAsString() : ""));
+                var text = content != null && content.isJsonPrimitive() ? content.getAsString() : "";
+                out.add(text.contains("## Current Date and Time") ? CLOCK : role + ":" + text);
             }
         }
         return out;
+    }
+
+    /** {@link #sent} without the leading system prompt, which a streamed turn assembles in full. */
+    private static List<String> sentAfterSystem(String body) {
+        var all = sent(body);
+        assertTrue(all.getFirst().startsWith("system:"), () -> "the request opens with the system prompt: " + all);
+        return all.subList(1, all.size());
     }
 
     // ─── drivers ─────────────────────────────────────────────────────────────
