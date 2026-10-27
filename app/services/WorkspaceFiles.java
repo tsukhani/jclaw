@@ -289,7 +289,7 @@ public final class WorkspaceFiles {
 
     /**
      * Maximum {@link models.Agent#parentAgent} hops walked by
-     * {@link #resolveWorkspaceOwnerName} before bailing. A cycle in the
+     * {@link #workspaceOwnerName} before bailing. A cycle in the
      * parent chain shouldn't be possible — the FK is set exactly once at
      * spawn time and never re-pointed — but defense in depth keeps a
      * corrupted DB from spinning the thread forever.
@@ -324,13 +324,7 @@ public final class WorkspaceFiles {
     private static String resolveWorkspaceOwnerName(String agentName) {
         return Tx.run(() -> {
             var agent = (Agent) Agent.find("name = ?1", agentName).first();
-            if (agent == null) return agentName;
-            if (agent.parentAgent == null) return agentName;
-            var cursor = agent.parentAgent;
-            for (int hops = 0; cursor.parentAgent != null && hops < MAX_PARENT_WALK_DEPTH; hops++) {
-                cursor = cursor.parentAgent;
-            }
-            return cursor.name;
+            return agent == null ? agentName : workspaceOwnerName(agent);
         });
     }
 
