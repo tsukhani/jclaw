@@ -269,7 +269,7 @@ class AgentSystemTest extends UnitTest {
 
         SkillLoader.clearCache();
         var skills = SkillLoader.loadSkills("xml-agent");
-        var xml = SkillLoader.formatSkillsXml(skills);
+        var xml = SkillLoader.formatSkillsXml(skills, true);
         assertTrue(xml.contains("<available_skills>"));
         assertTrue(xml.contains("<name>research</name>"));
         assertTrue(xml.contains("Deep web research with citations"));
@@ -358,7 +358,7 @@ class AgentSystemTest extends UnitTest {
     @Test
     void formatSkillsXmlReturnsEmptyStringForEmptyList() {
         // Early-return branch at line 303 of SkillLoader.
-        assertEquals("", SkillLoader.formatSkillsXml(java.util.List.of()));
+        assertEquals("", SkillLoader.formatSkillsXml(java.util.List.of(), true));
     }
 
     @Test
@@ -460,7 +460,7 @@ class AgentSystemTest extends UnitTest {
             skills.add(new SkillLoader.SkillInfo(
                     "skill-" + i, bigDesc, java.nio.file.Path.of("/tmp/skill-" + i)));
         }
-        var xml = SkillLoader.formatSkillsXml(skills);
+        var xml = SkillLoader.formatSkillsXml(skills, true);
         assertTrue(xml.startsWith("<available_skills>"),
                 "envelope opens correctly: " + xml.substring(0, Math.min(60, xml.length())));
         assertTrue(xml.endsWith("</available_skills>"),
@@ -482,7 +482,7 @@ class AgentSystemTest extends UnitTest {
                 java.util.List.of("filesystem"), true, "1.0.0",
                 java.util.List.of("ls", "cat"), "alice", "🎉",
                 java.util.List.of());
-        var xml = SkillLoader.formatSkillsXml(java.util.List.of(skill));
+        var xml = SkillLoader.formatSkillsXml(java.util.List.of(skill), true);
         assertTrue(xml.contains("rich-skill"));
         assertTrue(xml.contains("🎉"), "icon must surface: " + xml);
         assertTrue(xml.contains("filesystem"), "tools must surface: " + xml);

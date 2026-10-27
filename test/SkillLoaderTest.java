@@ -1,4 +1,5 @@
 import agents.SkillLoader;
+import agents.SkillLoader.SkillAccess;
 import agents.SkillLoader.SkillInfo;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
@@ -6,6 +7,7 @@ import play.test.UnitTest;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Branch coverage for {@link SkillLoader}'s pure parsing / classification /
@@ -164,12 +166,12 @@ class SkillLoaderTest extends UnitTest {
 
     @Test
     void formatSkillsXmlEmptyReturnsEmptyString() {
-        assertEquals("", SkillLoader.formatSkillsXml(List.of()));
+        assertEquals("", SkillLoader.formatSkillsXml(List.of(), true));
     }
 
     @Test
     void formatSkillsXmlWrapsSkillWithDefaultIcon() {
-        var xml = SkillLoader.formatSkillsXml(List.of(new SkillInfo("alpha", "does alpha", LOC)));
+        var xml = SkillLoader.formatSkillsXml(List.of(new SkillInfo("alpha", "does alpha", LOC)), true);
         assertTrue(xml.startsWith("<available_skills>"), xml);
         assertTrue(xml.contains("<name>alpha</name>"), xml);
         assertTrue(xml.contains("<description>does alpha</description>"), xml);
@@ -183,9 +185,114 @@ class SkillLoaderTest extends UnitTest {
         // over budget → the formatter rebuilds with compact (description-less)
         // entries.
         var huge = "d".repeat(31_000);
-        var xml = SkillLoader.formatSkillsXml(List.of(new SkillInfo("bulky", huge, LOC)));
+        var xml = SkillLoader.formatSkillsXml(List.of(new SkillInfo("bulky", huge, LOC)), true);
         assertTrue(xml.contains("<name>bulky</name>"), "the skill still appears");
         assertFalse(xml.contains("<description>"), "compact entries omit the description");
+    }
+
+    @Test
+    void formatSkillsXmlLeavesTheLocationOutWhenAsked() {
+        var skill = new SkillInfo("alpha", "does alpha", Path.of("skills/alpha/SKILL.md"));
+        assertEquals("""
+                <available_skills>
+                  <skill>
+                    <name>alpha</name>
+                    <icon>🎯</icon>
+                    <description>does alpha</description>
+                    <location>skills/alpha/SKILL.md</location>
+                  </skill>
+                </available_skills>""", SkillLoader.formatSkillsXml(List.of(skill), true));
+        assertEquals("""
+                <available_skills>
+                  <skill>
+                    <name>alpha</name>
+                    <icon>🎯</icon>
+                    <description>does alpha</description>
+                  </skill>
+                </available_skills>""", SkillLoader.formatSkillsXml(List.of(skill), false));
+    }
+
+    @Test
+    void compactEntriesKeepTheLocationWhenAsked() {
+        var xml = SkillLoader.formatSkillsXml(List.of(new SkillInfo("bulky", "d".repeat(31_000), LOC)), true);
+        assertEquals("<available_skills>\n  <skill>\n    <name>bulky</name>\n    <icon>🎯</icon>\n"
+                + "    <location>SKILL.md</location>\n  </skill>\n</available_skills>", xml);
+    }
+
+    @Test
+    void compactEntriesLeaveTheLocationOutWhenAsked() {
+        var xml = SkillLoader.formatSkillsXml(List.of(new SkillInfo("bulky", "d".repeat(31_000), LOC)), false);
+        assertEquals("<available_skills>\n  <skill>\n    <name>bulky</name>\n    <icon>🎯</icon>\n  </skill>\n</available_skills>",
+                xml);
+    }
+
+    // ─── skill access (JF-146) ───────────────────────────────────────────────
+
+    @Test
+    void theAccessIsTheFirstReadingToolTheTurnHas() {
+        assertEquals(SkillAccess.FILESYSTEM, SkillAccess.of(Set.of()));
+        assertEquals(SkillAccess.FILESYSTEM, SkillAccess.of(Set.of("skill_read")));
+        assertEquals(SkillAccess.SKILL_READ, SkillAccess.of(Set.of("filesystem")));
+        assertEquals(SkillAccess.NONE, SkillAccess.of(Set.of("filesystem", "skill_read")));
+    }
+
+    @Test
+    void onlyFilesystemAccessShowsLocations() {
+        assertTrue(SkillAccess.FILESYSTEM.showsLocation());
+        assertFalse(SkillAccess.SKILL_READ.showsLocation());
+        assertFalse(SkillAccess.NONE.showsLocation());
+    }
+
+    @Test
+    void withFilesystemTheInstructionsAreUnchanged() {
+        assertEquals("""
+                ## Skills (mandatory)
+                Before replying: scan <available_skills> <description> entries.
+                - If exactly one skill clearly applies: read its SKILL.md at <location> with the filesystem tool's readFile action, then follow it.
+                - If multiple could apply: choose the most specific one, then read/follow it.
+                - If platform-specific variants exist (e.g., mac vs linux): select the variant matching the current platform from the Environment section.
+                - If the request involves multiple skills: select the skill matching the primary action (the first or most important verb), not secondary follow-up actions.
+                - Match by intent, not exact wording. A skill applies when the goal falls within the skill's domain, even if the description includes details the request did not mention. Example: a request to "recommend a restaurant" matches a skill described as "restaurants in City X" — the skill's specifics are implementation details, not prerequisites.
+                - If none clearly apply: do not read any SKILL.md.
+                - **Skill authoring is always routed through skill-creator.** If you're asked to create, update, modify, edit, rename, refactor, fix, or change a skill (anything under `skills/<name>/`), the applicable skill is `skill-creator` — regardless of whether it's mentioned by name. Read `skill-creator`'s SKILL.md first and follow its workflow. Never edit files under `skills/<name>/` directly via the filesystem tool without going through skill-creator.
+                - **When you're asked what skills you have:** render a markdown table with header `| Skill | Description |`, one row per skill, where the Skill cell is `<icon> **<name>**` (icon from `<available_skills>` `<icon>` element) and the Description cell is the skill's `<description>`.
+                - **When you're asked what tools you have:** present them grouped by the `###` category headings in the Tool Catalog (System / Files / Web / Utilities), each category followed by its own `| Tool | Purpose |` markdown table. Do not mention tools that are not in the Tool Catalog — those are internal and should stay hidden from your answer.
+                Constraints: never read more than one skill up front; only read after selecting.
+                """, SkillLoader.skillMatchingInstructions(SkillAccess.FILESYSTEM));
+    }
+
+    @Test
+    void withSkillReadTheInstructionsNameItAndNeverFilesystem() {
+        assertEquals("""
+                ## Skills (mandatory)
+                Before replying: scan <available_skills> <description> entries.
+                - If exactly one skill clearly applies: read its SKILL.md by calling `skill_read` with the skill's <name>, then follow it.
+                - `skill_read` returns only SKILL.md. When a skill points to other files, say you cannot open them rather than guess what they hold.
+                - If multiple could apply: choose the most specific one, then read/follow it.
+                - If platform-specific variants exist (e.g., mac vs linux): select the variant matching the current platform from the Environment section.
+                - If the request involves multiple skills: select the skill matching the primary action (the first or most important verb), not secondary follow-up actions.
+                - Match by intent, not exact wording. A skill applies when the goal falls within the skill's domain, even if the description includes details the request did not mention. Example: a request to "recommend a restaurant" matches a skill described as "restaurants in City X" — the skill's specifics are implementation details, not prerequisites.
+                - If none clearly apply: do not read any SKILL.md.
+                - **When you're asked what skills you have:** render a markdown table with header `| Skill | Description |`, one row per skill, where the Skill cell is `<icon> **<name>**` (icon from `<available_skills>` `<icon>` element) and the Description cell is the skill's `<description>`.
+                - **When you're asked what tools you have:** present them grouped by the `###` category headings in the Tool Catalog (System / Files / Web / Utilities), each category followed by its own `| Tool | Purpose |` markdown table. Do not mention tools that are not in the Tool Catalog — those are internal and should stay hidden from your answer.
+                Constraints: never read more than one skill up front; only read after selecting.
+                """, SkillLoader.skillMatchingInstructions(SkillAccess.SKILL_READ));
+    }
+
+    @Test
+    void withNeitherToolTheInstructionsSayToWorkFromTheDescriptions() {
+        assertEquals("""
+                ## Skills (mandatory)
+                Before replying: scan <available_skills> <description> entries.
+                You have no tool that opens a skill's SKILL.md, so work from each skill's <description> alone. When a description does not say enough to do the task, say so rather than guess.
+                - If exactly one skill clearly applies: follow its <description>.
+                - If multiple could apply: choose the most specific one.
+                - If platform-specific variants exist (e.g., mac vs linux): select the variant matching the current platform from the Environment section.
+                - If the request involves multiple skills: select the skill matching the primary action (the first or most important verb), not secondary follow-up actions.
+                - Match by intent, not exact wording. A skill applies when the goal falls within the skill's domain, even if the description includes details the request did not mention. Example: a request to "recommend a restaurant" matches a skill described as "restaurants in City X" — the skill's specifics are implementation details, not prerequisites.
+                - **When you're asked what skills you have:** render a markdown table with header `| Skill | Description |`, one row per skill, where the Skill cell is `<icon> **<name>**` (icon from `<available_skills>` `<icon>` element) and the Description cell is the skill's `<description>`.
+                - **When you're asked what tools you have:** present them grouped by the `###` category headings in the Tool Catalog (System / Files / Web / Utilities), each category followed by its own `| Tool | Purpose |` markdown table. Do not mention tools that are not in the Tool Catalog — those are internal and should stay hidden from your answer.
+                """, SkillLoader.skillMatchingInstructions(SkillAccess.NONE));
     }
 
     // ─── parseSkillFile (disk) ───────────────────────────────────────────────

@@ -161,12 +161,12 @@ class ApiToolsControllerTest extends FunctionalTest {
         assertTrue(body.contains("\"name\":\"datetime\",\"description\""),
                 "sanity: the listing should include a default-ON native tool");
 
-        // The bug this pins: these four are hidden from the model unless a row
+        // The bug this pins: these tools are hidden from the model unless a row
         // explicitly enables them, but the endpoint used to re-derive "native
         // tools are on" and report them enabled. The agent editor then showed a
         // ticked box for a tool the agent could not call. Found in JCLAW-911 UAT.
         for (var optIn : java.util.List.of("printer", "generate_image",
-                "generate_video", "generate_audio", "memory")) {
+                "generate_video", "generate_audio", "memory", "skill_read")) {
             var idx = body.indexOf("\"name\":\"" + optIn + "\"");
             assertTrue(idx >= 0, optIn + " should appear in the listing: " + body);
             var entry = body.substring(idx, Math.min(body.length(), idx + 4000));
@@ -201,6 +201,15 @@ class ApiToolsControllerTest extends FunctionalTest {
                 "main must get the memory tool without being granted it");
         assertFalse(enabledIn(getContent(GET("/api/agents/" + other + "/tools")), "memory"),
                 "a non-main agent must have to opt in");
+    }
+
+    @Test
+    void skillReadIsOffForMainToo() {
+        // JF-146: filesystem already reads every skill, so no agent gets skill_read unasked.
+        login();
+        var main = createAgent(models.Agent.MAIN_AGENT_NAME);
+
+        assertFalse(enabledIn(getContent(GET("/api/agents/" + main + "/tools")), "skill_read"));
     }
 
     @Test

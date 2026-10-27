@@ -57,7 +57,7 @@ See [Skills, Tools & MCP Servers](/guide#skills-tools-mcp) for the full catalog.
 
 ### Skills
 
-Skills are reusable instruction bundles you published on the [Skills](/skills) page. Attaching a skill to an agent lists its name and description in the agent's system prompt. The agent reads the skill itself when a task calls for it. Use skills for capabilities you want to reuse across multiple agents: a coding style guide, a research methodology, an output format, a persona.
+Skills are reusable instruction bundles you published on the [Skills](/skills) page. Attaching a skill to an agent lists its name and description in the agent's system prompt. The agent reads the skill itself when a task calls for it. To read it, the agent needs the `filesystem` tool. If you keep `filesystem` off for this agent, turn on `skill_read` instead, which reads a skill and nothing else. With neither tool, the agent works from the skill descriptions alone. See [Reading skills](/guide#skills-tools-mcp-reading-skills). Use skills for capabilities you want to reuse across multiple agents: a coding style guide, a research methodology, an output format, a persona.
 
 Skills can also contribute to the agent's effective shell allowlist (see "Shell Allowlist" below).
 

@@ -47,7 +47,7 @@ class SkillIconTest extends UnitTest {
     @Test
     void defaultIconAppearsWhenSkillHasNone() {
         var info = new SkillLoader.SkillInfo("plain", "no icon", Paths.get("plain/SKILL.md"));
-        var xml = SkillLoader.formatSkillsXml(java.util.List.of(info));
+        var xml = SkillLoader.formatSkillsXml(java.util.List.of(info), true);
         assertTrue(xml.contains("<icon>" + SkillLoader.DEFAULT_SKILL_ICON + "</icon>"),
                 "default 🎯 icon substituted into skill XML when frontmatter omits it");
     }
@@ -58,7 +58,7 @@ class SkillIconTest extends UnitTest {
                 "sky-blue", "Explain why the sky is blue", Paths.get("sky-blue/SKILL.md"),
                 java.util.List.of(), false, "0.0.0",
                 java.util.List.of(), "", "🧠", java.util.List.of());
-        var xml = SkillLoader.formatSkillsXml(java.util.List.of(info));
+        var xml = SkillLoader.formatSkillsXml(java.util.List.of(info), true);
         assertTrue(xml.contains("<icon>🧠</icon>"));
         assertFalse(xml.contains(SkillLoader.DEFAULT_SKILL_ICON));
     }

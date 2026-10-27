@@ -313,6 +313,130 @@ class SystemPromptAssemblerTest extends UnitTest {
     }
 
     // =====================
+    // JF-146: the skill-reading step follows the turn's tools
+    // =====================
+
+    private static final String SKILL_ENTRY_HEAD = """
+              <skill>
+                <name>reader-skill</name>
+                <icon>🎯</icon>
+                <description>A skill seeded for the reading-step tests</description>
+            """;
+    private static final String SKILL_LOCATION = "    <location>skills/reader-skill/SKILL.md</location>\n";
+
+    private Agent agentWithSkill(String name) throws Exception {
+        var agent = newAgent(name);
+        var skillDir = AgentService.workspacePath(agent.name).resolve("skills").resolve("reader-skill");
+        Files.createDirectories(skillDir);
+        Files.writeString(skillDir.resolve("SKILL.md"), """
+                ---
+                name: reader-skill
+                description: A skill seeded for the reading-step tests
+                ---
+                Body.
+                """);
+        agents.SkillLoader.clearCache();
+        return agent;
+    }
+
+    private static void setTool(Agent agent, String tool, boolean enabled) {
+        var row = new models.AgentToolConfig();
+        row.agent = agent;
+        row.toolName = tool;
+        row.enabled = enabled;
+        row.save();
+        agents.ToolRegistry.invalidateDisabledToolsCache(agent);
+    }
+
+    /** The Skills section: the instructions through the end of the skills XML. */
+    private static String skillsSection(String prompt) {
+        var end = "</available_skills>";
+        return prompt.substring(prompt.indexOf("## Skills (mandatory)"), prompt.indexOf(end) + end.length());
+    }
+
+    private static String expectedSkillsSection(agents.SkillLoader.SkillAccess access) {
+        return agents.SkillLoader.skillMatchingInstructions(access) + "\n<available_skills>\n" + SKILL_ENTRY_HEAD
+                + (access.showsLocation() ? SKILL_LOCATION : "") + "  </skill>\n</available_skills>";
+    }
+
+    @Test
+    void withFilesystemTheAgentReadsTheSkillAtItsLocation() throws Exception {
+        var agent = agentWithSkill("spa-skill-access-fs");
+
+        var prompt = SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt();
+
+        assertEquals(expectedSkillsSection(agents.SkillLoader.SkillAccess.FILESYSTEM), skillsSection(prompt));
+    }
+
+    @Test
+    void withSkillReadAndNoFilesystemTheAgentIsToldToCallSkillRead() throws Exception {
+        var agent = agentWithSkill("spa-skill-access-read");
+        setTool(agent, "filesystem", false);
+        setTool(agent, "skill_read", true);
+
+        var section = skillsSection(SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt());
+
+        assertEquals(expectedSkillsSection(agents.SkillLoader.SkillAccess.SKILL_READ), section);
+        assertTrue(section.contains("calling `skill_read` with the skill's <name>"), section);
+        assertFalse(section.contains("<location>"), section);
+        assertFalse(section.contains("filesystem"), section);
+    }
+
+    @Test
+    void withNeitherToolTheAgentWorksFromTheDescriptions() throws Exception {
+        var agent = agentWithSkill("spa-skill-access-none");
+        setTool(agent, "filesystem", false);
+
+        var section = skillsSection(SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt());
+
+        assertEquals(expectedSkillsSection(agents.SkillLoader.SkillAccess.NONE), section);
+        assertTrue(section.contains("You have no tool that opens a skill's SKILL.md"), section);
+        assertFalse(section.contains("<location>"), section);
+        assertFalse(section.contains("filesystem"), section);
+        assertFalse(section.contains("skill_read"), section);
+    }
+
+    @Test
+    void aTaskFenceNarrowsTheReadingStepButCannotGrantATool() throws Exception {
+        var granted = agentWithSkill("spa-skill-access-fence");
+        setTool(granted, "skill_read", true);
+        var notGranted = agentWithSkill("spa-skill-access-fence-off");
+
+        // fencedDisabled walks the registered tools, so it needs the canonical set, not another class's stub.
+        ToolRegistrySync.withCanonicalTools(() -> {
+            assertEquals(expectedSkillsSection(agents.SkillLoader.SkillAccess.FILESYSTEM),
+                    fencedSkillsSection(granted, Set.of("filesystem", "skill_read")));
+            assertEquals(expectedSkillsSection(agents.SkillLoader.SkillAccess.SKILL_READ),
+                    fencedSkillsSection(granted, Set.of("skill_read")));
+            assertEquals(expectedSkillsSection(agents.SkillLoader.SkillAccess.NONE),
+                    fencedSkillsSection(granted, Set.of("web_fetch")));
+            assertEquals(expectedSkillsSection(agents.SkillLoader.SkillAccess.NONE),
+                    fencedSkillsSection(notGranted, Set.of("skill_read")),
+                    "a task listing skill_read cannot turn it on for an agent that has it off");
+        });
+    }
+
+    private static String fencedSkillsSection(Agent agent, Set<String> allowed) {
+        var fence = agents.ToolRegistry.fencedDisabled(agent, allowed);
+        return skillsSection(SystemPromptAssembler.assemble(agent, null, fence, "web").systemPrompt());
+    }
+
+    @Test
+    void theBreakdownSizesEachSkillAsThePromptWritesIt() throws Exception {
+        var withLocation = agentWithSkill("spa-skill-access-bd-fs");
+        var withoutLocation = agentWithSkill("spa-skill-access-bd-read");
+        setTool(withoutLocation, "filesystem", false);
+        setTool(withoutLocation, "skill_read", true);
+
+        var full = SKILL_ENTRY_HEAD + SKILL_LOCATION + "  </skill>\n";
+        var bare = SKILL_ENTRY_HEAD + "  </skill>\n";
+        assertEquals(List.of(full.length()), SystemPromptAssembler.breakdown(withLocation, null, "web").skills()
+                .stream().map(SystemPromptAssembler.PromptBreakdown.Entry::chars).toList());
+        assertEquals(List.of(bare.length()), SystemPromptAssembler.breakdown(withoutLocation, null, "web").skills()
+                .stream().map(SystemPromptAssembler.PromptBreakdown.Entry::chars).toList());
+    }
+
+    // =====================
     // Channel guidance
     // =====================
 

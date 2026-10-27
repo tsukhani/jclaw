@@ -222,16 +222,18 @@ public class SystemPromptAssembler {
      */
     public static PromptBreakdown breakdown(Agent agent, @Nullable String userMessage, String channelType) {
         var builder = new SectionedBuilder();
-        var skills = buildPrompt(agent, userMessage, builder, null, channelType);
+        var disabledTools = ToolRegistry.loadDisabledTools(agent);
+        var skills = buildPrompt(agent, userMessage, builder, disabledTools, channelType);
         var sectionEntries = builder.finish().stream()
                 .map(s -> new PromptBreakdown.Entry(s.name, s.chars, approxTokens(s.chars)))
                 .toList();
 
         // Per-skill sizes. Reuse SkillLoader.formatSkillEntry so the numbers exactly
         // match the bytes that show up inside the <available_skills> block.
+        var withLocation = SkillLoader.SkillAccess.of(disabledTools).showsLocation();
         var skillEntries = new ArrayList<PromptBreakdown.Entry>();
         for (var skill : skills) {
-            var entry = SkillLoader.formatSkillEntry(skill, true);
+            var entry = SkillLoader.formatSkillEntry(skill, true, withLocation);
             skillEntries.add(new PromptBreakdown.Entry(
                     skill.name(), entry.length(), approxTokens(entry.length())));
         }
@@ -340,18 +342,19 @@ public class SystemPromptAssembler {
         // 4. Skills
         var skills = SkillLoader.loadSkills(agent.name);
         if (!skills.isEmpty()) {
+            var effectiveDisabled = disabledTools != null ? disabledTools : ToolRegistry.loadDisabledTools(agent);
+            var skillAccess = SkillLoader.SkillAccess.of(effectiveDisabled);
             b.startSection("Skills");
             b.sb.append("\n");
-            b.sb.append(SkillLoader.SKILL_MATCHING_INSTRUCTIONS);
+            b.sb.append(SkillLoader.skillMatchingInstructions(skillAccess));
             b.sb.append("\n");
-            b.sb.append(SkillLoader.formatSkillsXml(skills));
+            b.sb.append(SkillLoader.formatSkillsXml(skills, skillAccess.showsLocation()));
             b.sb.append("\n");
 
             // Inject the live tool catalog so skills (especially skill-creator) can reference
             // the authoritative set of tool names instead of hardcoding them in SKILL.md files.
             // Filtered per-agent so the LLM never sees (and therefore never picks) tools that
             // are disabled for this specific agent — skill-creator can trust every name here.
-            var effectiveDisabled = disabledTools != null ? disabledTools : ToolRegistry.loadDisabledTools(agent);
             var catalog = ToolCatalog.formatCatalogForPrompt(effectiveDisabled);
             if (!catalog.isEmpty()) {
                 b.startSection("Tool Catalog");

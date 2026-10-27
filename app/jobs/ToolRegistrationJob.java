@@ -27,6 +27,7 @@ import tools.MessageTool;
 import tools.PlaywrightBrowserTool;
 import tools.PrinterTool;
 import tools.ShellExecTool;
+import tools.SkillReadTool;
 import tools.SubagentSpawnTool;
 import tools.SubagentYieldTool;
 import tools.TaskTool;
@@ -69,6 +70,7 @@ public class ToolRegistrationJob extends Job<Void> {
         // compression is enabled and has left a retrieval marker.
         toolList.add(new CcrRetrieveTool());
         toolList.add(new UserGuideTool());
+        toolList.add(new SkillReadTool());
         toolList.add(new CheckListTool());
         // JCLAW-919: recall is why this exists — prompt assembly queries memory once per
         // turn, so a fact the opening message missed is otherwise unreachable. Its store

@@ -334,9 +334,10 @@ public class SkillLoader {
     }
 
     /**
-     * Format skills as XML for injection into system prompt.
+     * Format skills as XML for injection into system prompt. {@code withLocation} writes each
+     * entry's workspace path, which only the {@code filesystem} tool can open.
      */
-    public static String formatSkillsXml(List<SkillInfo> skills) {
+    public static String formatSkillsXml(List<SkillInfo> skills, boolean withLocation) {
         if (skills.isEmpty()) return "";
 
         var sb = new StringBuilder();
@@ -345,13 +346,13 @@ public class SkillLoader {
         int totalChars = 0;
 
         for (var skill : skills) {
-            var entry = formatSkillEntry(skill, true);
+            var entry = formatSkillEntry(skill, true, withLocation);
             if (totalChars + entry.length() > MAX_SKILLS_CHARS) {
                 sb.setLength(0);
                 sb.append("<available_skills>\n");
                 totalChars = 0;
                 for (var s : skills) {
-                    var compactEntry = formatSkillEntry(s, false);
+                    var compactEntry = formatSkillEntry(s, false, withLocation);
                     if (totalChars + compactEntry.length() > MAX_SKILLS_CHARS) break;
                     sb.append(compactEntry);
                     totalChars += compactEntry.length();
@@ -366,23 +367,72 @@ public class SkillLoader {
         return sb.toString();
     }
 
-    /**
-     * System prompt instructions for skill matching.
-     */
-    public static final String SKILL_MATCHING_INSTRUCTIONS = """
+    /** How the turn's tools let the agent open a listed skill's SKILL.md (JF-146). */
+    public enum SkillAccess {
+        /** The {@code filesystem} tool's readFile, at each entry's {@code <location>}. */
+        FILESYSTEM,
+        /** The {@code skill_read} tool, by the skill's name. */
+        SKILL_READ,
+        /** Neither tool: the agent works from the descriptions. */
+        NONE;
+
+        /** Read off the same disabled set the Tool Catalog is filtered by. */
+        public static SkillAccess of(Set<String> disabledTools) {
+            if (!disabledTools.contains("filesystem")) return FILESYSTEM;
+            return disabledTools.contains("skill_read") ? NONE : SKILL_READ;
+        }
+
+        /** Only readFile takes a path, so only then does an entry carry one. */
+        public boolean showsLocation() {
+            return this == FILESYSTEM;
+        }
+    }
+
+    private static final String SKILLS_HEADING = """
             ## Skills (mandatory)
             Before replying: scan <available_skills> <description> entries.
-            - If exactly one skill clearly applies: read its SKILL.md at <location> with the filesystem tool's readFile action, then follow it.
-            - If multiple could apply: choose the most specific one, then read/follow it.
+            """;
+    private static final String CHOOSING_A_SKILL = """
             - If platform-specific variants exist (e.g., mac vs linux): select the variant matching the current platform from the Environment section.
             - If the request involves multiple skills: select the skill matching the primary action (the first or most important verb), not secondary follow-up actions.
             - Match by intent, not exact wording. A skill applies when the goal falls within the skill's domain, even if the description includes details the request did not mention. Example: a request to "recommend a restaurant" matches a skill described as "restaurants in City X" — the skill's specifics are implementation details, not prerequisites.
-            - If none clearly apply: do not read any SKILL.md.
+            """;
+    private static final String SKILL_AUTHORING = """
             - **Skill authoring is always routed through skill-creator.** If you're asked to create, update, modify, edit, rename, refactor, fix, or change a skill (anything under `skills/<name>/`), the applicable skill is `skill-creator` — regardless of whether it's mentioned by name. Read `skill-creator`'s SKILL.md first and follow its workflow. Never edit files under `skills/<name>/` directly via the filesystem tool without going through skill-creator.
+            """;
+    private static final String LISTING_SKILLS_AND_TOOLS = """
             - **When you're asked what skills you have:** render a markdown table with header `| Skill | Description |`, one row per skill, where the Skill cell is `<icon> **<name>**` (icon from `<available_skills>` `<icon>` element) and the Description cell is the skill's `<description>`.
             - **When you're asked what tools you have:** present them grouped by the `###` category headings in the Tool Catalog (System / Files / Web / Utilities), each category followed by its own `| Tool | Purpose |` markdown table. Do not mention tools that are not in the Tool Catalog — those are internal and should stay hidden from your answer.
+            """;
+    private static final String CHOOSE_BEFORE_READING = """
+            - If multiple could apply: choose the most specific one, then read/follow it.
+            """;
+    private static final String READ_NONE_UNLESS_ONE_APPLIES = """
+            - If none clearly apply: do not read any SKILL.md.
+            """;
+    private static final String READ_ONE_SKILL = """
             Constraints: never read more than one skill up front; only read after selecting.
             """;
+
+    /** System prompt instructions for skill matching, naming only a tool {@code access} says the turn has. */
+    public static String skillMatchingInstructions(SkillAccess access) {
+        return switch (access) {
+            case FILESYSTEM -> SKILLS_HEADING
+                    + "- If exactly one skill clearly applies: read its SKILL.md at <location> with the filesystem tool's readFile action, then follow it.\n"
+                    + CHOOSE_BEFORE_READING + CHOOSING_A_SKILL + READ_NONE_UNLESS_ONE_APPLIES
+                    + SKILL_AUTHORING + LISTING_SKILLS_AND_TOOLS + READ_ONE_SKILL;
+            case SKILL_READ -> SKILLS_HEADING
+                    + "- If exactly one skill clearly applies: read its SKILL.md by calling `skill_read` with the skill's <name>, then follow it.\n"
+                    + "- `skill_read` returns only SKILL.md. When a skill points to other files, say you cannot open them rather than guess what they hold.\n"
+                    + CHOOSE_BEFORE_READING + CHOOSING_A_SKILL + READ_NONE_UNLESS_ONE_APPLIES
+                    + LISTING_SKILLS_AND_TOOLS + READ_ONE_SKILL;
+            case NONE -> SKILLS_HEADING
+                    + "You have no tool that opens a skill's SKILL.md, so work from each skill's <description> alone. When a description does not say enough to do the task, say so rather than guess.\n"
+                    + "- If exactly one skill clearly applies: follow its <description>.\n"
+                    + "- If multiple could apply: choose the most specific one.\n"
+                    + CHOOSING_A_SKILL + LISTING_SKILLS_AND_TOOLS;
+        };
+    }
 
     // --- Internal ---
 
@@ -636,7 +686,7 @@ public class SkillLoader {
      * can measure per-skill char sizes for its introspection breakdown without
      * re-implementing the wire format.
      */
-    static String formatSkillEntry(SkillInfo skill, boolean full) {
+    static String formatSkillEntry(SkillInfo skill, boolean full, boolean withLocation) {
         var sb = new StringBuilder();
         sb.append("  <skill>\n");
         sb.append("    <name>").append(skill.name()).append("</name>\n");
@@ -645,7 +695,9 @@ public class SkillLoader {
         if (full) {
             sb.append("    <description>").append(skill.description()).append("</description>\n");
         }
-        sb.append("    <location>").append(skill.location() != null ? skill.location() : "").append("</location>\n");
+        if (withLocation) {
+            sb.append("    <location>").append(skill.location() != null ? skill.location() : "").append("</location>\n");
+        }
         if (skill.tools() != null && !skill.tools().isEmpty()) {
             sb.append("    <tools>").append(String.join(", ", skill.tools())).append("</tools>\n");
         }

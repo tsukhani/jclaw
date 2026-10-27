@@ -718,6 +718,9 @@ public class ToolRegistry {
      *  physical world — paper leaves a device in someone's room and no undo exists. If
      *  spending a few cents on an image warrants opt-in, so does that. */
     private static final String PRINTER_TOOL = "printer";
+    /** JF-146: {@code skill_read} is default-OFF for every agent (opt-in). {@code filesystem} already reads every
+     *  skill, so it is only of use to an agent the operator kept off {@code filesystem}. */
+    private static final String SKILL_READ_TOOL = "skill_read";
     /** JCLAW-919: {@code memory} follows the {@code jclaw_api} main/non-main split rather
      *  than the blanket opt-in above. Its {@code forget} action hard-deletes rows with no
      *  undo, which is why a non-main agent has to be granted it — but main is the operator's
@@ -772,10 +775,11 @@ public class ToolRegistry {
 
     /**
      * Tools every agent has to be granted explicitly. Each constant above carries the
-     * reason it is on this list — cost, latency, or an action with no undo.
+     * reason it is on this list — cost, latency, an action with no undo, or no use beside
+     * {@code filesystem}.
      */
     private static final List<String> OPT_IN_FOR_EVERY_AGENT = List.of(
-            GENERATE_IMAGE_TOOL, GENERATE_VIDEO_TOOL, GENERATE_AUDIO_TOOL, PRINTER_TOOL);
+            GENERATE_IMAGE_TOOL, GENERATE_VIDEO_TOOL, GENERATE_AUDIO_TOOL, PRINTER_TOOL, SKILL_READ_TOOL);
 
     /**
      * Tools main holds by default and every other agent has to be granted. The split is

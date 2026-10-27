@@ -14,7 +14,7 @@ Each page is a catalog. The actual binding of "which agent gets which capability
 
 ## Skills
 
-A skill is a chunk of markdown: instructions, examples, a methodology. An agent reads it when a task calls for it. Its system prompt lists each attached skill's name and description, not the body. Use skills for capabilities you want to reuse across multiple agents:
+A skill is a chunk of markdown: instructions, examples, a methodology. An agent reads it when a task calls for it. Its system prompt lists each attached skill's name and description, not the body. To read the body, the agent needs the `filesystem` tool or the `skill_read` tool (see [Reading skills](#skills-tools-mcp-reading-skills)). Use skills for capabilities you want to reuse across multiple agents:
 
 - A coding style guide.
 - A research methodology ("always cite, always cross-check").
@@ -89,6 +89,22 @@ When `exec`, `filesystem`, `web_fetch` or `web_scrape` fails, the agent gets the
 :::note Why is this not just one page?
 Tools are a *catalog*, and binding tools to agents is an *agent* concern. Keeping them on separate pages means the catalog stays clean as your roster of agents grows.
 :::
+
+### Reading skills
+
+An agent reads a skill's `SKILL.md` with the `filesystem` tool. That tool also writes files, so you may keep it off for some agents, such as one that talks to customers. Such an agent still sees the names and descriptions of its skills, but it cannot open them.
+
+Turn on `skill_read` for that agent instead. It does one thing: given the name of a skill attached to the agent, it returns that skill's `SKILL.md`. It cannot open any other file in the skill's folder, it reads only the skills listed in the agent's system prompt, and it cannot write anything. A `SKILL.md` longer than 40,000 characters is cut there, and the reply says how much was shown.
+
+The agent's system prompt follows the tools it has:
+
+- With `filesystem`, the agent is told to read the skill with `filesystem`.
+- With `skill_read` and no `filesystem`, the agent is told to call `skill_read` with the skill's name.
+- With neither, the agent is told it cannot open its skills, so it works from their descriptions.
+
+A scheduled task with a tool list follows the same rule, using only the tools on both the task's list and the agent's. The list can only take tools away, so it cannot turn on `skill_read` for an agent that has it off.
+
+`skill_read` is **off by default for every agent**, the main agent included. An agent that has `filesystem` does not need it.
 
 ### Printing
 
