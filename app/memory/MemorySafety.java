@@ -123,7 +123,11 @@ public final class MemorySafety {
     }
 
     /** Hyphenated names, so text quoting one (a prompt marker, an alert) does not match its own pattern. */
-    private record InjectionRule(String name, Pattern pattern, String hint) {}
+    private record InjectionRule(String name, Pattern pattern, String hint, @Nullable Pattern after) {
+        InjectionRule(String name, Pattern pattern, String hint) {
+            this(name, pattern, hint, null);
+        }
+    }
 
     /**
      * Injection/exfiltration shapes, adapted from the Hermes memory content
@@ -148,13 +152,13 @@ public final class MemorySafety {
                     Pattern.compile("(?i)\\bact\\s+as\\s+(?:if|though)\\s+you\\s+(?:have\\s+no|don'?t\\s+have)\\s+(?:restrictions|limits|rules)\\b"),
                     "Name the limits the agent keeps, rather than saying it has none."),
             // exfiltration: fetch tools shipping a credential variable off-box
-            new InjectionRule("credential-exfiltration",
-                    Pattern.compile("(?i)\\b(?:curl|wget)\\s[^\\n]*\\$\\{?\\w*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)"),
-                    "Leave out commands that send a key or token with curl or wget."),
+            new InjectionRule("credential-exfiltration", Pattern.compile("(?i)\\b(?:curl|wget)\\s"),
+                    "Leave out commands that send a key or token with curl or wget.",
+                    Pattern.compile("(?i)\\$\\{?\\w*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)")),
             // reading credential files
-            new InjectionRule("credential-file-read",
-                    Pattern.compile("(?i)\\bcat\\s[^\\n]*(?:\\.env\\b|credentials|\\.netrc\\b|\\.pgpass\\b|\\.npmrc\\b|\\.pypirc\\b)"),
-                    "Name the file in words, such as \"the .netrc file\", without the cat command."),
+            new InjectionRule("credential-file-read", Pattern.compile("(?i)\\bcat\\s"),
+                    "Name the file in words, such as \"the .netrc file\", without the cat command.",
+                    Pattern.compile("(?i)(?:\\.env\\b|credentials|\\.netrc\\b|\\.pgpass\\b|\\.npmrc\\b|\\.pypirc\\b)")),
             // SSH persistence / key access
             new InjectionRule("ssh-authorized-keys", Pattern.compile("(?i)authorized_keys"),
                     "Write \"the SSH keys file\" in place of the file's name."),
@@ -169,9 +173,11 @@ public final class MemorySafety {
      * human reviewer (Trojan-Source, and since 2025 tag- and selector-encoded
      * instructions). {@link #isVisibleUse} lets through the uses that do show something.
      */
+    // Unicode's Default_Ignorable_Code_Point set, written out: java.util.regex has no property for it.
     private static final Pattern INVISIBLE_CHARS = Pattern.compile(
-            "[\\u00AD\\u034F\\u115F\\u1160\\u180E\\u200B\\u200C\\u200D\\u2060-\\u2064\\u202A-\\u202E"
-                    + "\\u2066-\\u2069\\u3164\\uFE00-\\uFE0F\\uFEFF\\uFFA0\\x{E0000}-\\x{E007F}\\x{E0100}-\\x{E01EF}]");
+            "[\\u00AD\\u034F\\u061C\\u115F\\u1160\\u17B4\\u17B5\\u180B-\\u180F\\u200B-\\u200F\\u202A-\\u202E"
+                    + "\\u2060-\\u206F\\u3164\\uFE00-\\uFE0F\\uFEFF\\uFFA0\\uFFF0-\\uFFF8\\x{1BCA0}-\\x{1BCA3}"
+                    + "\\x{1D173}-\\x{1D17A}\\x{E0000}-\\x{E0FFF}]");
     private static final int BLACK_FLAG = 0x1F3F4;
     private static final int CANCEL_TAG = 0xE007F;
     // The subdivision flags Unicode recommends: England, Scotland, Wales. Any other tag run could carry text.
@@ -194,6 +200,14 @@ public final class MemorySafety {
         return joinsAfter && Character.isExtendedPictographic(text.codePointAt(index + 1));
     }
 
+    // A pictograph takes either presentation; a digit, # or * only the emoji one, as the start of a keycap.
+    private static boolean isPresentationBase(String text, int index, int selector) {
+        int base = text.codePointBefore(index);
+        if (Character.isExtendedPictographic(base)) return true;
+        boolean keycapBase = (base >= '0' && base <= '9') || base == '#' || base == '*';
+        return keycapBase && selector == 0xFE0F && index + 1 < text.length() && text.charAt(index + 1) == 0x20E3;
+    }
+
     private static boolean isIdeographicVariant(int cp) {
         return cp >= 0xE0100 && cp <= 0xE01EF;
     }
@@ -211,9 +225,11 @@ public final class MemorySafety {
     // A subdivision flag, England's for one, is a black flag, its code in tag letters, and the cancel tag.
     private static boolean inSubdivisionFlag(String text, int index) {
         int start = index;
-        while (start > 0) {
+        // Bounded, so a long tag run costs each of its characters a few steps, not a walk to its start.
+        for (int walked = 0; start > 0; walked++) {
             int before = text.codePointBefore(start);
             if (!isTag(before) || before == CANCEL_TAG) break;
+            if (walked == 6) return false;
             start -= Character.charCount(before);
         }
         if (start == 0 || text.codePointBefore(start) != BLACK_FLAG) return false;
@@ -235,7 +251,7 @@ public final class MemorySafety {
     private static boolean isVisibleUse(String text, int index, int ideographicVariants) {
         int cp = text.codePointAt(index);
         if (cp == 0x200D) return isEmojiJoiner(text, index);
-        if (cp == 0xFE0E || cp == 0xFE0F) return index > 0 && Character.isEmoji(text.codePointBefore(index));
+        if (cp == 0xFE0E || cp == 0xFE0F) return index > 0 && isPresentationBase(text, index, cp);
         if (isIdeographicVariant(cp)) {
             return ideographicVariants <= MAX_IDEOGRAPHIC_VARIANTS && index > 0
                     && Character.isIdeographic(text.codePointBefore(index));
@@ -250,6 +266,34 @@ public final class MemorySafety {
             if (!isVisibleUse(text, matcher.start(), variants)) return true;
         }
         return false;
+    }
+
+    /**
+     * Each match of {@code rule}, as {@code [start, end)}. A rule with an {@code after} pattern matches from the
+     * first command word on a line to the last credential after it on that line, as a greedy {@code [^\n]*} gap
+     * would, but in two linear passes: a gap pattern backtracks from every command word to the end of its line.
+     */
+    private static List<int[]> matchesOf(InjectionRule rule, String text) {
+        var found = new ArrayList<int[]>();
+        var matcher = rule.pattern().matcher(text).useTransparentBounds(true);
+        var afterPattern = rule.after();
+        if (afterPattern == null) {
+            while (matcher.find()) found.add(new int[]{matcher.start(), matcher.end()});
+            return found;
+        }
+        var after = afterPattern.matcher(text).useTransparentBounds(true);
+        for (int lineStart = 0; lineStart < text.length(); ) {
+            int newline = text.indexOf('\n', lineStart);
+            int lineEnd = newline < 0 ? text.length() : newline;
+            if (matcher.region(lineStart, lineEnd).find()) {
+                int lastEnd = -1;
+                after.region(matcher.end(), lineEnd);
+                while (after.find()) lastEnd = after.end();
+                if (lastEnd >= 0) found.add(new int[]{matcher.start(), lastEnd});
+            }
+            lineStart = lineEnd + 1;
+        }
+        return found;
     }
 
     /** The text the phrase rules read, and where each of its chars came from in the text. */
@@ -301,7 +345,7 @@ public final class MemorySafety {
         if (hasInvisibleChars(text)) return INVISIBLE_RULE;
         var folded = fold(text).text();
         for (var rule : INJECTION_RULES) {
-            if (rule.pattern().matcher(folded).find()) return rule.name();
+            if (!matchesOf(rule, folded).isEmpty()) return rule.name();
         }
         return null;
     }
@@ -322,10 +366,9 @@ public final class MemorySafety {
         }
         var folded = fold(text);
         for (var rule : INJECTION_RULES) {
-            var matcher = rule.pattern().matcher(folded.text());
-            while (matcher.find()) {
-                found.add(new InjectionMatch(rule.name(), folded.start().applyAsInt(matcher.start()),
-                        folded.end().applyAsInt(matcher.end())));
+            for (var span : matchesOf(rule, folded.text())) {
+                found.add(new InjectionMatch(rule.name(), folded.start().applyAsInt(span[0]),
+                        folded.end().applyAsInt(span[1])));
             }
         }
         found.sort(Comparator.comparingInt(InjectionMatch::start).thenComparingInt(InjectionMatch::end));
