@@ -90,6 +90,9 @@ public class PrinterTool implements ToolRegistry.Tool {
     }
 
     @Override
+    public String serializationGroup() { return ToolRegistry.WORKSPACE_GROUP; }
+
+    @Override
     public List<ToolAction> actions() {
         return List.of(
                 new ToolAction(ACTION_DISCOVER, "Find printers on the local network over mDNS/Bonjour"),

@@ -76,6 +76,9 @@ public class DocumentsTool implements ToolRegistry.Tool {
     public String name() { return "documents"; }
 
     @Override
+    public String serializationGroup() { return ToolRegistry.WORKSPACE_GROUP; }
+
+    @Override
     public String category() { return "Files"; }
 
     @Override

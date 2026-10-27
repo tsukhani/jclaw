@@ -54,6 +54,9 @@ public class FileSystemTools implements ToolRegistry.Tool {
     public String name() { return "filesystem"; }
 
     @Override
+    public String serializationGroup() { return ToolRegistry.WORKSPACE_GROUP; }
+
+    @Override
     public String category() { return "Files"; }
 
     @Override

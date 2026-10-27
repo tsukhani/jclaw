@@ -132,6 +132,8 @@ public class AppInstallTool implements ToolRegistry.Tool {
     /** File I/O — not safe to race with other calls in the same round. */
     @Override public boolean parallelSafe() { return false; }
 
+    @Override public String serializationGroup() { return ToolRegistry.WORKSPACE_GROUP; }
+
     /** JCLAW-773: {@code install} publishes agent-authored HTML/JS under {@code public/apps/},
      *  which {@code Application.appAsset} serves at {@code /apps/…} — the same origin as the
      *  cookie-authed SPA and {@code /api}, under no Content-Security-Policy — so it must route

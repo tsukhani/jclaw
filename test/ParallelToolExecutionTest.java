@@ -1,6 +1,8 @@
 import agents.AgentExecutionSink;
 import agents.AgentRunner;
 import agents.ConversationSink;
+import agents.DangerousActionGate;
+import agents.ParallelToolExecutor;
 import agents.ToolContext;
 import agents.ToolRegistry;
 import jakarta.persistence.EntityManager;
@@ -15,12 +17,20 @@ import org.junit.jupiter.api.Test;
 import play.db.jpa.JPA;
 import play.test.Fixtures;
 import play.test.UnitTest;
+import services.AgentService;
+import services.ConfigService;
 import services.ConversationService;
 import services.SubagentRegistry;
 import services.Tx;
+import tools.FileSystemTools;
+import tools.ShellExecTool;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +51,7 @@ import java.util.concurrent.atomic.AtomicReference;
 class ParallelToolExecutionTest extends UnitTest {
 
     private static final long TOOL_SLEEP_MS = 300;
+    private static final String WORKSPACE_AGENT = "parallel-workspace-test";
 
     private AtomicInteger concurrentExecutions;
     private AtomicInteger peakConcurrency;
@@ -488,6 +499,50 @@ class ParallelToolExecutionTest extends UnitTest {
 
         assertEquals(List.of("p1", "p2", "p3", "l1"),
                 messages.stream().map(ChatMessage::toolCallId).toList());
+    }
+
+    @Test
+    void aCommandAndAFileAppendInOneMessageRunInDeclaredOrder() throws Exception {
+        // exec sleeps before it appends, so a filesystem append scheduled beside it would land first.
+        ShellSandboxSync.acquire();
+        try {
+            ConfigService.set("shell.allowlist", "echo,sleep");
+            ToolRegistry.publish(List.of(new ShellExecTool(), new FileSystemTools()));
+            long[] ids = Tx.run(() -> {
+                var created = AgentService.create(WORKSPACE_AGENT, "test", "test");
+                var conv = ConversationService.create(created, "web", "tester");
+                return new long[]{created.id, conv.id};
+            });
+            var agent = (Agent) Agent.findById(ids[0]);
+            var conv = (Conversation) Tx.run(() -> ConversationService.findById(ids[1]));
+            var calls = List.of(
+                    new ToolCall("run", "function", new FunctionCall("exec",
+                            "{\"command\":\"sleep 0.5 && echo first >> order.txt\",\"why\":\"test\"}")),
+                    new ToolCall("edit", "function", new FunctionCall("filesystem",
+                            "{\"action\":\"appendFile\",\"path\":\"order.txt\",\"content\":\"second\\n\"}")));
+
+            // An owner turn, so exec passes the approval gate as it does in the operator's own chat.
+            DangerousActionGate.withOwnerInitiated(true, () -> {
+                ParallelToolExecutor.executeToolsParallel(calls, agent, ids[1], new ArrayList<>(),
+                        null, null, null, new AtomicBoolean(false), new ConversationSink(conv), null);
+                return null;
+            });
+
+            assertEquals("first\nsecond\n",
+                    Files.readString(AgentService.workspacePath(WORKSPACE_AGENT).resolve("order.txt")));
+        } finally {
+            ShellSandboxSync.release();
+            deleteDir(AgentService.workspacePath(WORKSPACE_AGENT));
+        }
+    }
+
+    private static void deleteDir(Path dir) {
+        if (!Files.exists(dir)) return;
+        try (var paths = Files.walk(dir)) {
+            paths.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+        } catch (IOException _) {
+            // best effort: a leftover workspace only affects this class's next run
+        }
     }
 
     @Test

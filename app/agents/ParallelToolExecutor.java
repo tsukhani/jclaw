@@ -48,7 +48,9 @@ import static utils.GsonHolder.GSON;
  *   {@code serializationGroup()} to return a shared key — for instance
  *   {@code subagent_spawn} and {@code subagent_yield} both return
  *   {@code "subagent_lifecycle"} so yield can't read before spawn has
- *   committed its SubagentRun row. The JCLAW-80 fix in spirit: the LLM's
+ *   committed its SubagentRun row, and the tools that take a workspace file
+ *   share {@link ToolRegistry#WORKSPACE_GROUP} so {@code exec} sees what
+ *   {@code filesystem} just wrote. The JCLAW-80 fix in spirit: the LLM's
  *   declared call order is the authoritative contract for stateful tools.</li>
  *   <li><b>Across serialization groups</b> (whether safe or unsafe):
  *   always parallel. Groups touch disjoint state by construction, so

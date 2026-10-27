@@ -185,6 +185,9 @@ public class ShellExecTool implements ToolRegistry.Tool {
     public String name() { return "exec"; }
 
     @Override
+    public String serializationGroup() { return ToolRegistry.WORKSPACE_GROUP; }
+
+    @Override
     public String category() { return "System"; }
 
     /** JCLAW-382: shell execution is the prototypical sensitive, irreversible

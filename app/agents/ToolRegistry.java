@@ -36,6 +36,10 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class ToolRegistry {
 
+    /** {@link Tool#serializationGroup()} key for tools whose input is a workspace file the model names: such a
+     *  call can read what an earlier call in the same message wrote, so they run in declared order. */
+    public static final String WORKSPACE_GROUP = "workspace";
+
     /**
      * JCLAW-170: rich tool output used by {@link #executeRich}.
      *
@@ -294,7 +298,8 @@ public class ToolRegistry {
          *  SubagentRun row that spawn just inserted, so they must serialize
          *  even when the LLM emits both in one assistant message. Both
          *  return the same {@code "subagent_lifecycle"} key from this
-         *  method, forcing them onto one serial queue. */
+         *  method, forcing them onto one serial queue. The workspace is the
+         *  other shared state: see {@link ToolRegistry#WORKSPACE_GROUP}. */
         default @Nullable String serializationGroup() {
             return parallelSafe() ? null : name();
         }
