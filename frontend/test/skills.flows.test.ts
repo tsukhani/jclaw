@@ -415,6 +415,28 @@ describe('Skills page — view-skill flow (read-only viewer)', () => {
     expect(component.find('.prose-skill pre').attributes('tabindex')).toBe('0')
   })
 
+  it('cannot be tricked into live markup by "<pre>" inside an attribute value', async () => {
+    registerEndpoint('/api/skills/web-search/files', () => ({
+      files: [{ path: 'SKILL.md', isText: true }],
+      tools: [],
+      commands: [],
+      author: '',
+    }))
+    registerEndpoint('/api/skills/web-search/files/SKILL.md', () => ({
+      content: '# Web Search\n\n<a title="<pre><img src=x onerror=alert(1)>">link</a>',
+    }))
+    setupApi()
+    const component = await mountSuspended(Skills)
+    await flushPromises()
+
+    const webSearchRow = component.findAll('.group').find(r => r.text().includes('web-search'))
+    await webSearchRow!.find('button[title="View skill"]').trigger('click')
+    await vi.waitFor(() => expect(component.find('.prose-skill a').exists()).toBe(true))
+
+    expect(component.find('.prose-skill img').exists()).toBe(false)
+    expect(component.find('.prose-skill a').attributes('title')).toBe('<pre><img src=x onerror=alert(1)>')
+  })
+
   it('returns to the skills list when the Back button is clicked in the viewer', async () => {
     registerEndpoint('/api/skills/code-review/files', () => ({
       files: [{ path: 'SKILL.md', isText: true }],
