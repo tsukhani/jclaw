@@ -1,4 +1,5 @@
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import models.Agent;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
@@ -15,6 +16,9 @@ import tools.HarnessSandbox;
 import tools.ShellExecTool;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
+import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -31,6 +35,7 @@ import java.util.UUID;
 class ShellExecSandboxTest extends UnitTest {
 
     private static final String AGENT = "shell-sandbox-agent";
+    private static final String NETWORK_KEY = HarnessSandbox.SHELL_NETWORK_KEY;
 
     private ShellExecTool tool;
     private Agent agent;
@@ -47,6 +52,7 @@ class ShellExecSandboxTest extends UnitTest {
 
     @AfterEach
     void teardown() {
+        ConfigService.set(NETWORK_KEY, "");
         ShellSandboxSync.release();
     }
 
@@ -212,6 +218,47 @@ class ShellExecSandboxTest extends UnitTest {
             }
         } finally {
             for (var s : sentinels) Files.deleteIfExists(s);
+        }
+    }
+
+    /** Runs exec, sandboxed under {@code network}, connecting to {@code server} and writing in the workspace; returns its output. */
+    private String connectFromTheSandbox(ServerSocket server, String network) {
+        ConfigService.set("shell.allowlist", "nc,echo,cat");
+        // Set right before the run: another class's table wipe can clear a key.
+        ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
+        ConfigService.set(NETWORK_KEY, network);
+        var args = new JsonObject();
+        args.addProperty("command", ("/usr/bin/nc -z -w 2 127.0.0.1 %d 2>/dev/null && echo NET_CONNECTED || echo NET_BLOCKED; "
+                + "echo inside > kept.txt; cat kept.txt").formatted(server.getLocalPort()));
+        var result = tool.execute(args.toString(), agent);
+        return JsonParser.parseString(result).getAsJsonObject().get("output").getAsString();
+    }
+
+    /**
+     * With the network denied, a confined exec cannot reach even a loopback server, so it cannot ship
+     * the workspace out with curl or python; the workspace stays writable.
+     */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void networkDenyRefusesALoopbackConnectionAndKeepsTheWorkspaceWritable() throws IOException {
+        try (var server = new ServerSocket(0, 5, InetAddress.getLoopbackAddress())) {
+            assertEquals("NET_BLOCKED\ninside", connectFromTheSandbox(server, "deny"));
+            server.setSoTimeout(500);
+            assertThrows(SocketTimeoutException.class, server::accept, "no connection may reach the server");
+            assertEquals("inside\n", Files.readString(AgentService.workspacePath(AGENT).resolve("kept.txt")));
+        }
+    }
+
+    /** With the network allowed, the same confined run reaches the server, as before the key existed. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void networkAllowKeepsTheLoopbackConnection() throws IOException {
+        try (var server = new ServerSocket(0, 5, InetAddress.getLoopbackAddress())) {
+            assertEquals("NET_CONNECTED\ninside", connectFromTheSandbox(server, "allow"));
+            server.setSoTimeout(5_000);
+            try (var accepted = server.accept()) {
+                assertEquals(InetAddress.getLoopbackAddress(), accepted.getInetAddress());
+            }
         }
     }
 

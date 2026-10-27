@@ -126,7 +126,8 @@ class HarnessSandboxTest extends UnitTest {
     void linuxBindsTheWriteRootAfterTheHomeTmpfs() {
         var home = System.getProperty("user.home");
         var writeRoot = Path.of(home, "workspace", "agent").toFile();
-        var argv = HarnessSandbox.linuxArgv(List.of("/bin/sh", "-c", "true"), writeRoot, List.of("/opt/state"));
+        var argv = HarnessSandbox.linuxArgv(List.of("/bin/sh", "-c", "true"), writeRoot, List.of("/opt/state"),
+                HarnessSandbox.ACP_SANDBOX_KEY);
 
         int homeTmpfs = indexOfPair(argv, "--tmpfs", home);
         assertTrue(homeTmpfs >= 0, "the $HOME tmpfs is missing, argv=" + argv);
@@ -135,6 +136,48 @@ class HarnessSandboxTest extends UnitTest {
         assertTrue(indexOfPair(argv, "--ro-bind-try", SandboxHiddenRoots.canonical("/opt/state").toString()) > homeTmpfs,
                 "allowances must follow the $HOME tmpfs, argv=" + argv);
         assertEquals(List.of("/bin/sh", "-c", "true"), argv.subList(argv.size() - 3, argv.size()));
+    }
+
+    /**
+     * Deny unshares the network for a native tool's run and changes nothing else, while allow, blank and
+     * a coding harness (the key the adapter overload passes) keep it: the harness needs its model API.
+     */
+    @Test
+    void linuxUnsharesTheNetworkOnlyForANativeToolRunUnderDeny() {
+        ShellSandboxSync.acquire();
+        try {
+            var command = List.of("/bin/sh", "-c", "true");
+            var root = session.toFile();
+            var harnessAllowances = new ClaudeAdapter().sandboxAllowances();
+            var open = HarnessSandbox.linuxArgv(command, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY);
+            var harness = HarnessSandbox.linuxArgv(command, root, harnessAllowances, HarnessSandbox.ACP_SANDBOX_KEY);
+            assertFalse(open.contains("--unshare-net"), "blank means allow, argv=" + open);
+            assertFalse(harness.contains("--unshare-net"), "argv=" + harness);
+
+            ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, "allow");
+            assertEquals(open, HarnessSandbox.linuxArgv(command, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY));
+
+            ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, "deny");
+            var cut = new java.util.ArrayList<>(open);
+            cut.add(1, "--unshare-net");
+            assertEquals(cut, HarnessSandbox.linuxArgv(command, root, List.of(), HarnessSandbox.SHELL_SANDBOX_KEY));
+            assertEquals(harness, HarnessSandbox.linuxArgv(command, root, harnessAllowances, HarnessSandbox.ACP_SANDBOX_KEY),
+                    "a coding harness keeps the network under deny");
+        } finally {
+            ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, "");
+            ShellSandboxSync.release();
+        }
+    }
+
+    /** The Seatbelt network deny is one rule, added only when asked; every file rule is unchanged. */
+    @Test
+    void macProfileDeniesTheNetworkOnlyWhenAsked() {
+        var root = SandboxHiddenRoots.canonical(session).resolve("jclaw");
+        var writeRoot = root.resolve("workspace/main").toFile();
+        var open = HarnessSandbox.macosProfile(writeRoot, List.of(), "/Users/operator", stateOf(root), false);
+        assertFalse(open.contains("(deny network*)"), open);
+        assertEquals(open.replace("(allow default)\n", "(allow default)\n(deny network*)\n"),
+                HarnessSandbox.macosProfile(writeRoot, List.of(), "/Users/operator", stateOf(root), true));
     }
 
     private static int indexOfPair(List<String> argv, String flag, String value) {
@@ -161,7 +204,7 @@ class HarnessSandboxTest extends UnitTest {
         for (var root : List.of(home.resolve("jclaw"), base.resolve("opt/jclaw"))) {
             var writeRoot = root.resolve("workspace/main");
             var argv = HarnessSandbox.linuxArgv(List.of("/bin/sh", "-c", "true"), writeRoot.toFile(),
-                    List.of(".claude"), home.toString(), stateOf(root));
+                    List.of(".claude"), home.toString(), stateOf(root), false);
 
             int homeTmpfs = indexOfPair(argv, "--tmpfs", home.toString());
             assertTrue(homeTmpfs >= 0, "the $HOME tmpfs is missing, argv=" + argv);
@@ -180,7 +223,7 @@ class HarnessSandboxTest extends UnitTest {
     void linuxHidesStateInsideAnAncestorWriteRoot() {
         var root = SandboxHiddenRoots.canonical(session).resolve("jclaw");
         var argv = HarnessSandbox.linuxArgv(List.of("true"), root.toFile(), List.of(), "/home/operator",
-                stateOf(root));
+                stateOf(root), false);
         int bind = indexOfPair(argv, "--bind", root.toString());
         assertTrue(bind >= 0, "argv=" + argv);
         for (var hidden : stateOf(root)) {
@@ -196,7 +239,7 @@ class HarnessSandboxTest extends UnitTest {
         var writeRoot = root.resolve("data/coding/run");
         var allowance = root.resolve("conf/extra");
         var argv = HarnessSandbox.linuxArgv(List.of("true"), writeRoot.toFile(), List.of(allowance.toString()),
-                "/home/operator", stateOf(root));
+                "/home/operator", stateOf(root), false);
         assertTrue(indexOfPair(argv, "--bind", writeRoot.toString())
                         > indexOfPair(argv, "--tmpfs", root.resolve("data").toString()),
                 "argv=" + argv);
@@ -220,7 +263,7 @@ class HarnessSandboxTest extends UnitTest {
         var hidden = HarnessSandbox.linuxHiddenRoots(backups, List.of(root.resolve("certs"), backups));
         assertTrue(Files.isDirectory(backups), "the backup directory must be created");
         assertEquals(List.of(backups), hidden, "a missing root that is not the backup directory gets no tmpfs");
-        var argv = HarnessSandbox.linuxArgv(List.of("true"), session.toFile(), List.of(), "/home/operator", hidden);
+        var argv = HarnessSandbox.linuxArgv(List.of("true"), session.toFile(), List.of(), "/home/operator", hidden, false);
         assertTrue(indexOfPair(argv, "--tmpfs", backups.toString()) >= 0, "argv=" + argv);
 
         var blocked = Files.writeString(session.resolve("a-file"), "x").resolve("backups");
@@ -240,7 +283,7 @@ class HarnessSandboxTest extends UnitTest {
         var link = Files.createSymbolicLink(session.resolve("link"), real.getParent());
         var throughLink = link.resolve("jclaw");
         var argv = HarnessSandbox.linuxArgv(List.of("true"), throughLink.toFile(),
-                List.of(throughLink.resolve("workspace").toString()), "/home/operator", stateOf(real));
+                List.of(throughLink.resolve("workspace").toString()), "/home/operator", stateOf(real), false);
 
         int bind = indexOfPair(argv, "--bind", real.toString());
         assertTrue(bind >= 0, "the write root must be bound at its canonical path, argv=" + argv);
@@ -256,7 +299,7 @@ class HarnessSandboxTest extends UnitTest {
     /** The production argv hides this install's own state directories at their canonical paths. */
     @Test
     void linuxProductionArgvHidesThisInstallsState() {
-        var argv = HarnessSandbox.linuxArgv(List.of("true"), session.toFile(), List.of());
+        var argv = HarnessSandbox.linuxArgv(List.of("true"), session.toFile(), List.of(), HarnessSandbox.ACP_SANDBOX_KEY);
         var appRoot = Play.applicationPath.toPath();
         assertTrue(Files.isDirectory(appRoot.resolve("conf")), "a checkout always has conf/");
         for (var dir : List.of("data", "certs", "conf", "logs")) {
@@ -289,7 +332,7 @@ class HarnessSandboxTest extends UnitTest {
         var root = SandboxHiddenRoots.canonical(session).resolve("jclaw");
         var writeRoot = root.resolve("data/coding/run");
         var profile = HarnessSandbox.macosProfile(writeRoot.toFile(),
-                List.of(".claude", root.resolve("workspace").toString()), "/Users/operator", stateOf(root));
+                List.of(".claude", root.resolve("workspace").toString()), "/Users/operator", stateOf(root), false);
 
         int lastWriteGrant = profile.indexOf("(allow file-write* (subpath \"" + root.resolve("workspace") + "\"))");
         int denyData = profile.indexOf("(deny file-read* file-write* (subpath \"" + root.resolve("data") + "\"))");
@@ -304,7 +347,7 @@ class HarnessSandboxTest extends UnitTest {
         assertFalse(profile.contains("(allow file-read* file-write* (subpath \"" + root.resolve("workspace") + "\"))"),
                 "a grant outside the hidden roots needs no reopen: " + profile);
 
-        var ancestor = HarnessSandbox.macosProfile(root.toFile(), List.of(), "/Users/operator", stateOf(root));
+        var ancestor = HarnessSandbox.macosProfile(root.toFile(), List.of(), "/Users/operator", stateOf(root), false);
         assertFalse(ancestor.contains("(allow file-read* file-write* (subpath \"" + root + "\"))"),
                 "a write root above data/ must not reopen it: " + ancestor);
     }
@@ -326,11 +369,11 @@ class HarnessSandboxTest extends UnitTest {
         assertEquals(data.resolve("runs/other"), SandboxHiddenRoots.beneath(data.resolve("runs/other").toString(), hidden));
 
         var profile = HarnessSandbox.macosProfile(data.toFile(), List.of(data.resolve("runs").toString()),
-                "/Users/operator", hidden);
+                "/Users/operator", hidden, false);
         assertFalse(profile.contains("(allow file-read* file-write* (subpath \"" + data + "\"))"), profile);
         assertFalse(profile.contains("(allow file-read* file-write* (subpath \"" + data.resolve("runs") + "\"))"), profile);
 
-        var argv = HarnessSandbox.linuxArgv(List.of("true"), data.toFile(), List.of(), "/home/operator", hidden);
+        var argv = HarnessSandbox.linuxArgv(List.of("true"), data.toFile(), List.of(), "/home/operator", hidden, false);
         int bind = indexOfPair(argv, "--bind", data.toString());
         int tmpfs = indexOfPair(argv, "--tmpfs", data.toString());
         assertTrue(bind >= 0 && bind < tmpfs,
@@ -445,6 +488,27 @@ class HarnessSandboxTest extends UnitTest {
         if (!Files.exists(dir)) return;
         try (var walk = Files.walk(dir)) {
             walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> p.toFile().delete());
+        }
+    }
+
+    /** On macOS too, deny reaches a native tool's profile through {@link HarnessSandbox#wrap} but never a harness's. */
+    @Test
+    @EnabledOnOs(OS.MAC)
+    void macDeniesTheNetworkToANativeToolRunButNotToAHarness() {
+        ShellSandboxSync.acquire();
+        try {
+            // Set right before the wraps: another class's table wipe can clear a key.
+            ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "true");
+            ConfigService.set(HarnessSandbox.ACP_SANDBOX_KEY, "true");
+            ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, "deny");
+            var nativeProfile = HarnessSandbox.wrap(List.of("true"), session.toFile(), List.of(),
+                    HarnessSandbox.SHELL_SANDBOX_KEY, false).get(2);
+            var harnessProfile = HarnessSandbox.wrap(List.of("true"), session.toFile(), new ClaudeAdapter(), false).get(2);
+            assertTrue(nativeProfile.contains("(deny network*)\n"), nativeProfile);
+            assertFalse(harnessProfile.contains("(deny network*)"), harnessProfile);
+        } finally {
+            ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, "");
+            ShellSandboxSync.release();
         }
     }
 

@@ -109,6 +109,9 @@ import java.util.stream.Collectors;
  * fails on every path outside the workspace. Metacharacter gating remains
  * explicitly not the defense — filesystem confinement is.
  *
+ * <p>{@code shell.sandbox.network=deny} also takes the confined run's network,
+ * so a command that can read the workspace cannot send it anywhere.
+ *
  * <p>It fails closed: with the flag on and no usable sandbox mechanism (native
  * Windows, or a host missing {@code sandbox-exec}/{@code bwrap}), the launch
  * throws {@link HarnessSandbox.SandboxUnavailableException} and the run aborts

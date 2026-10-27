@@ -320,6 +320,17 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
+    void theShellNetworkKeyAcceptsOnlyAllowOrDeny() {
+        var key = HarnessSandbox.SHELL_NETWORK_KEY;
+        for (var value : List.of("allow", "deny", "DENY", " Allow ", "")) {
+            assertAccepted(key, value);
+        }
+        for (var value : List.of("denied", "block", "off", "false", "true", "untrusted")) {
+            assertRefused(key + " must be 'allow' or 'deny' (any case); blank means allow.", key, value);
+        }
+    }
+
+    @Test
     void theCodingRunParentIsAnAbsolutePathOrOneUnderHome() {
         for (var value : List.of("", "~", "~/coding-runs", "/tmp/jclaw-coding-runs")) {
             assertAccepted(SubagentSpawnTool.ACP_WORKDIR_KEY, value);

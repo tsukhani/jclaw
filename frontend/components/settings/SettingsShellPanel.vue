@@ -18,7 +18,7 @@ const { configData, saving, refresh } = useSettingsConfig()
 // Shell allowlist + timeouts remain operator-tunable below.
 
 // Shell execution config
-const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.maxTimeoutSeconds', 'shell.maxOutputBytes', 'shell.sandbox', 'shell.backgroundLifetimeHours'] as const
+const SHELL_KEYS = ['shell.allowlist', 'shell.defaultTimeoutSeconds', 'shell.maxTimeoutSeconds', 'shell.maxOutputBytes', 'shell.sandbox', 'shell.sandbox.network', 'shell.backgroundLifetimeHours'] as const
 
 const shellConfig = computed(() => {
   const entries = configData.value?.entries ?? []
@@ -34,6 +34,7 @@ const shellConfig = computed(() => {
     maxTimeout: map.get('shell.maxTimeoutSeconds') ?? '600',
     maxOutput: map.get('shell.maxOutputBytes') ?? '102400',
     sandbox: sandboxChoice(map.get('shell.sandbox')),
+    network: networkChoice(map.get('shell.sandbox.network')),
     lifetime: map.get('shell.backgroundLifetimeHours') ?? '24',
   }
 })
@@ -42,6 +43,11 @@ const shellConfig = computed(() => {
 function sandboxChoice(raw: string | undefined): string {
   const v = (raw ?? '').trim().toLowerCase()
   return v === 'true' || v === 'untrusted' ? v : 'false'
+}
+
+// Only deny cuts the network at run time, so anything else shows Allow.
+function networkChoice(raw: string | undefined): string {
+  return (raw ?? '').trim().toLowerCase() === 'deny' ? 'deny' : 'allow'
 }
 
 // Lazy: the backend probes the sandbox binary, which must not suspend the panel.
@@ -105,7 +111,8 @@ async function stopProcess(pid: number) {
       Allowlist and timeout for the shell tool. Per-agent enable/disable
       lives on the Tools page; this section configures the shared
       execution policy. <span class="font-mono">sandbox</span> confines what a
-      command can write to the agent's workspace.
+      command can write to the agent's workspace, and
+      <span class="font-mono">sandbox.network</span> can take away its network.
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
@@ -238,6 +245,33 @@ async function stopProcess(pid: number) {
             >
               This host has no sandbox mechanism ({{ sandboxData.reason }}). With this on, runs are refused rather than run unconfined.
             </p>
+          </div>
+        </div>
+        <!-- Sandbox network -->
+        <div class="px-4 py-2.5 flex max-sm:flex-wrap items-start gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 flex items-center gap-1.5 pt-1">
+            sandbox.network
+            <InfoTip
+              label="About sandbox.network"
+              content-class="w-72 font-mono"
+            >
+              Whether a run the sandbox confines can use the network. Deny cuts every connection, even to this machine, so a command cannot send the workspace out. Coding harnesses keep theirs. Does nothing while sandbox is Off.
+            </InfoTip>
+          </span>
+          <div class="flex-1 min-w-0">
+            <select
+              :value="shellConfig.network"
+              aria-label="Shell sandbox network"
+              class="w-full px-2 py-1 bg-muted border border-input text-sm text-fg-strong font-mono focus:outline-hidden"
+              @change="saveShellField('shell.sandbox.network', ($event.target as HTMLSelectElement).value)"
+            >
+              <option value="allow">
+                Allow
+              </option>
+              <option value="deny">
+                Deny
+              </option>
+            </select>
           </div>
         </div>
         <!-- Background lifetime -->

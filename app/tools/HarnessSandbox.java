@@ -46,8 +46,9 @@ import java.util.Locale;
  * supported mechanism (native Windows, WSL1) or its binary is missing from PATH,
  * {@link #wrap} throws — the caller aborts the run rather than launching unsandboxed.
  *
- * <p>Network egress stays open (the harness needs its API); a deny+allowlist
- * variant is future work, noted in the JCLAW-671 spike.
+ * <p>A coding harness keeps the network, since it needs its model API. A native tool's run loses it
+ * under {@link #SHELL_NETWORK_KEY}{@code =deny}: bwrap's {@code --unshare-net}, or a Seatbelt
+ * {@code (deny network*)}, which refuses local Unix sockets too because no confined tool needs one.
  *
  * <p>JCLAW-1153: the same two profile builders also confine native tools that
  * spawn processes, under their own tri-state key — see {@link #SHELL_SANDBOX_KEY}
@@ -79,6 +80,13 @@ public final class HarnessSandbox {
      * writes to the agent workspace where a harness run writes to a session dir.
      */
     public static final String SHELL_SANDBOX_KEY = "shell.sandbox";
+
+    /**
+     * {@code shell.sandbox.network} — {@code allow} (also absent or blank) or {@code deny}. Read only for a
+     * run confined under {@link #SHELL_SANDBOX_KEY}: a native tool needs no network, and with it a guest's
+     * {@code exec} could send the workspace out.
+     */
+    public static final String SHELL_NETWORK_KEY = "shell.sandbox.network";
 
     private static final String BWRAP = "bwrap";
     private static final String SANDBOX_EXEC = "sandbox-exec";
@@ -172,8 +180,9 @@ public final class HarnessSandbox {
     /**
      * JCLAW-1153: wrap {@code argv} for a caller that has no {@link HarnessAdapter} —
      * a native tool that spawns a process. Identical to the adapter overload except
-     * that the extra write grants come from {@code allowances} directly and the
-     * tri-state is read from {@code configKey}.
+     * that the extra write grants come from {@code allowances} directly, the
+     * tri-state is read from {@code configKey}, and under {@link #SHELL_SANDBOX_KEY}
+     * {@link #SHELL_NETWORK_KEY} can cut the network.
      *
      * @param writeRoot   the one directory the process may write to (plus the
      *                    profile's fixed temp/dev grants). For a shell run this is
@@ -192,11 +201,11 @@ public final class HarnessSandbox {
         var os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
         if (os.contains("mac") || os.contains("darwin")) {
             requireBinary(SANDBOX_EXEC, configKey);
-            return macos(argv, writeRoot, allowances);
+            return macos(argv, writeRoot, allowances, configKey);
         }
         if (os.contains("linux")) {
             requireBinary(BWRAP, configKey);
-            return linuxArgv(argv, writeRoot, allowances);
+            return linuxArgv(argv, writeRoot, allowances, configKey);
         }
         throw new SandboxUnavailableException(
                 ("%s is enabled but this platform (%s) has no supported sandbox "
@@ -226,14 +235,27 @@ public final class HarnessSandbox {
                 : new Availability(false, binary, "'%s' is not available: %s".formatted(binary, missing.reason()));
     }
 
+    /** Whether a run confined under {@code configKey} loses the network: only a native tool's, and only on {@code deny}. */
+    private static boolean deniesNetwork(String configKey) {
+        return configKey.equals(SHELL_SANDBOX_KEY)
+                && "deny".equalsIgnoreCase(ConfigService.get(SHELL_NETWORK_KEY, "").strip());
+    }
+
     /**
-     * The refusal for a write of {@code value} to one of the two sandbox keys, or null when the key is
-     * neither or the value is one {@link #scope(String)} reads as intended.
+     * The refusal for a write of {@code value} to one of the sandbox keys, or null when the key is none of
+     * them or the value is one its reader understands as intended.
      */
     public static @Nullable String rejectionFor(String key, @Nullable String value) {
-        if (!key.equals(SHELL_SANDBOX_KEY) && !key.equals(ACP_SANDBOX_KEY)) return null;
+        if (!key.equals(SHELL_SANDBOX_KEY) && !key.equals(ACP_SANDBOX_KEY) && !key.equals(SHELL_NETWORK_KEY)) {
+            return null;
+        }
         if (value == null || value.isBlank()) return null;
         var v = value.strip();
+        if (key.equals(SHELL_NETWORK_KEY)) {
+            return v.equalsIgnoreCase("allow") || v.equalsIgnoreCase("deny")
+                    ? null
+                    : key + " must be 'allow' or 'deny' (any case); blank means allow.";
+        }
         if (v.equalsIgnoreCase("false") || v.equalsIgnoreCase("true") || v.equalsIgnoreCase("untrusted")) {
             return null;
         }
@@ -260,9 +282,9 @@ public final class HarnessSandbox {
         }
     }
 
-    private static List<String> macos(List<String> argv, File session, List<String> allowances) {
+    private static List<String> macos(List<String> argv, File session, List<String> allowances, String configKey) {
         var profile = macosProfile(session, allowances, System.getProperty("user.home", ""),
-                SandboxHiddenRoots.current());
+                SandboxHiddenRoots.current(), deniesNetwork(configKey));
         var out = new ArrayList<String>();
         out.add("sandbox-exec");
         out.add("-p");
@@ -277,8 +299,10 @@ public final class HarnessSandbox {
      * it even inside a grant above it), a grant beneath one is reopened after that, and the
      * {@code $HOME} secrets come last so no reopen can reach them.
      */
-    public static String macosProfile(File writeRoot, List<String> allowances, String home, List<Path> hidden) {
+    public static String macosProfile(File writeRoot, List<String> allowances, String home, List<Path> hidden,
+                                      boolean denyNetwork) {
         var sb = new StringBuilder("(version 1)\n(allow default)\n");
+        if (denyNetwork) sb.append("(deny network*)\n");
         sb.append("(deny file-write* (subpath \"/\"))\n");
         sb.append(writeAllow(writeRoot.getAbsolutePath()));
         sb.append(writeAllow("/private/tmp"));
@@ -305,14 +329,14 @@ public final class HarnessSandbox {
     }
 
     /**
-     * The Linux argv, public so a test can pin the mount order on any host. bwrap applies
-     * mounts in argument order and a tmpfs over an ancestor hides every earlier bind beneath
-     * it, so the {@code $HOME} tmpfs must precede the write-root bind: the workspace lives
-     * under {@code $HOME} on every non-container install.
+     * The Linux argv for a run confined under {@code configKey}, public so a test can pin the mount
+     * order and the network choice on any host. bwrap applies mounts in argument order and a tmpfs
+     * over an ancestor hides every earlier bind beneath it, so the {@code $HOME} tmpfs must precede
+     * the write-root bind: the workspace lives under {@code $HOME} on every non-container install.
      */
-    public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances) {
+    public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances, String configKey) {
         return linuxArgv(argv, writeRoot, allowances, System.getProperty("user.home", ""),
-                linuxHiddenRoots(DatabaseService.backupsDir(), SandboxHiddenRoots.current()));
+                linuxHiddenRoots(DatabaseService.backupsDir(), SandboxHiddenRoots.current()), deniesNetwork(configKey));
     }
 
     /**
@@ -331,16 +355,17 @@ public final class HarnessSandbox {
     }
 
     /**
-     * {@link #linuxArgv(List, File, List)} with the home and hidden roots given. Each
+     * {@link #linuxArgv(List, File, List, String)} with the home, hidden roots and network choice given. Each
      * {@code hidden} root gets a tmpfs after the grants outside it, so an ancestor write root
      * cannot re-expose it, and before the grants beneath it. Every grant is bound at its
      * canonical path, where the tmpfs mounts go, so one reached through a symlink cannot show a
      * hidden root at a path its tmpfs does not cover.
      */
     public static List<String> linuxArgv(List<String> argv, File writeRoot, List<String> allowances,
-                                         String home, List<Path> hidden) {
-        var out = new ArrayList<String>(List.of(
-                BWRAP,
+                                         String home, List<Path> hidden, boolean denyNetwork) {
+        var out = new ArrayList<String>(List.of(BWRAP));
+        if (denyNetwork) out.add("--unshare-net");
+        out.addAll(List.of(
                 "--ro-bind", "/", "/",
                 "--dev", "/dev",
                 "--tmpfs", "/tmp",

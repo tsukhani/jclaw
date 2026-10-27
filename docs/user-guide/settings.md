@@ -984,6 +984,7 @@ Allowlist and timeout for the shell tool. Per-agent enable/disable lives on each
 | `shell.maxTimeoutSeconds`      | 600     | The longest timeout a call may set; JClaw cuts a longer one to this. Has no row in the panel; set it with `POST /api/config`. |
 | `shell.maxOutputBytes`         | 102400  | How much of a command's output reaches the agent (100 KB); the rest is cut, with a note giving the full length. Has no row in the panel; set it with `POST /api/config`. |
 | `shell.sandbox`                | `false` | OS-level confinement for the processes tools spawn: `false`, `true` (confine every run), or `untrusted` (confine only runs whose origin channel is not your own web chat). Set it with the **sandbox** control: *Off*, *Untrusted channels only* or *Every run*. JClaw refuses a save of any other value. When this host has no `sandbox-exec` (macOS) or `bwrap` (Linux), the control says so: with the key on, runs are then refused rather than run unconfined. |
+| `shell.sandbox.network`        | `allow` | Whether a run that `shell.sandbox` confines can use the network: `allow` or `deny`. Set it with the **sandbox.network** control: *Allow* or *Deny*. With *Deny*, a confined command cannot connect anywhere, not even to this machine, so it cannot send your files out. Coding harnesses keep their network, because they need their model's API. JClaw refuses a save of any other value. It does nothing while `shell.sandbox` is off. |
 | `shell.backgroundLifetimeHours` | 24     | How many hours a program a shell command left running in the background may run. Every 10 minutes, JClaw stops the ones that have run longer. `0` never stops one. |
 
 ### Running in the background
@@ -1003,6 +1004,8 @@ The allowlist is the safety floor for shell access, and the seeded list is broad
 :::
 
 `shell.sandbox` covers `exec`, `diarize_audio`'s ffmpeg extraction, and the ffmpeg transcode of an audio attachment on its way to a model. On macOS the process runs under `sandbox-exec`: writes are denied outside the agent's workspace and the system temp directories (the two ffmpeg runs get only their temp directory), and reads of `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.config/gcloud`, `~/.kube` and `~/.netrc` are refused. JClaw's own `data`, `certs`, `conf` and `logs` folders and its backup folder can be neither read nor written. On Linux it runs under `bwrap`, which builds the visible filesystem from nothing, so those secrets and JClaw's folders are absent rather than denied.
+
+With `shell.sandbox.network` set to `deny`, the process also has no network. On macOS, `sandbox-exec` refuses every connection it tries to open. On Linux, `bwrap` gives it a network of its own with nothing else in it.
 
 :::gotcha
 The sandbox bounds **reach**, not grammar: the allowlist above is unchanged, so `echo hi; rm -rf ~/Documents` still passes it and still runs both statements; the `rm` now fails on every path outside the workspace. It also fails closed. With the key on and no mechanism on the host (native Windows, or a machine missing `sandbox-exec`/`bwrap`), JClaw refuses the run rather than launching it unconfined.

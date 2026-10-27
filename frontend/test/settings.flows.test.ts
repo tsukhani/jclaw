@@ -1307,10 +1307,10 @@ describe('Settings page — Shell Execution', () => {
     expect(String(hit!.value)).toBe('60')
   })
 
-  function withShellSandbox(value: string) {
+  function withShellSandbox(value: string, key = 'shell.sandbox') {
     registerEndpoint('/api/config', {
       method: 'GET',
-      handler: () => ({ entries: [...defaultConfigEntries(), { key: 'shell.sandbox', value, updatedAt: '2026-10-06T10:00:00Z' }] }),
+      handler: () => ({ entries: [...defaultConfigEntries(), { key, value, updatedAt: '2026-10-06T10:00:00Z' }] }),
     })
   }
 
@@ -1346,6 +1346,39 @@ describe('Settings page — Shell Execution', () => {
     await flushPromises()
 
     expect(captured).toContainEqual({ key: 'shell.sandbox', value: 'true' })
+  })
+
+  it('shows Allow for an unset or unknown shell.sandbox.network, and Deny for a saved deny', async () => {
+    setupDefaultApi()
+    let component = await mountSettingsSection('shell')
+    expect(component.find<HTMLSelectElement>('select[aria-label="Shell sandbox network"]').element.value).toBe('allow')
+
+    clearNuxtData()
+    withShellSandbox(' DENY ', 'shell.sandbox.network')
+    component = await mountSettingsSection('shell')
+    expect(component.find<HTMLSelectElement>('select[aria-label="Shell sandbox network"]').element.value).toBe('deny')
+
+    clearNuxtData()
+    withShellSandbox('block', 'shell.sandbox.network')
+    component = await mountSettingsSection('shell')
+    expect(component.find<HTMLSelectElement>('select[aria-label="Shell sandbox network"]').element.value).toBe('allow')
+  })
+
+  it('POSTs shell.sandbox.network=deny when Deny is chosen, and allow when Allow is', async () => {
+    const captured: Array<{ key?: string, value?: string }> = []
+    setupDefaultApi({ capturePost: b => captured.push(b) })
+    const component = await mountSettingsSection('shell')
+    const select = component.find('select[aria-label="Shell sandbox network"]')
+
+    await select.setValue('deny')
+    await flushPromises()
+    await select.setValue('allow')
+    await flushPromises()
+
+    expect(captured.filter(b => b.key === 'shell.sandbox.network')).toEqual([
+      { key: 'shell.sandbox.network', value: 'deny' },
+      { key: 'shell.sandbox.network', value: 'allow' },
+    ])
   })
 
   it('says when the host has no sandbox mechanism, and only then', async () => {
