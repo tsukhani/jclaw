@@ -892,7 +892,7 @@ Anything missing downloads the first time an agent uses the browser: the officia
 
 ## Tasks
 
-Four knobs for the [Tasks](/guide#tasks) subsystem:
+Five knobs for the [Tasks](/guide#tasks) subsystem:
 
 | Key                       | Default | Meaning                                                                                                |
 |---------------------------|---------|--------------------------------------------------------------------------------------------------------|
@@ -900,6 +900,7 @@ Four knobs for the [Tasks](/guide#tasks) subsystem:
 | `defaultTimezone`         | *(unset)* | IANA timezone applied to `CRON` / `SCHEDULED` tasks that do not specify their own. Unset, tasks follow the [Timezone](#settings-timezone) setting (`app.timezone`); set it only to run tasks in a different zone. Per-task `timezone` overrides this. `INTERVAL` / `IMMEDIATE` ignore timezone entirely.                |
 | `fireIdleSeconds`         | 600     | How long one task run may go without doing anything. Work done by the subagents it is waiting on counts. When it elapses JClaw cancels the run, so a stuck run cannot go on forever. `0` turns the limit off. |
 | `fireMaxDurationSeconds`  | 1800    | Longest one task run may take, however busy. When it elapses JClaw cancels the run. `0` turns the limit off. |
+| `pauseAfterFailedOccurrences` | 0   | Pause a recurring task when this many of its scheduled runs fail in a row. A run counts as failed only after its retries give up. A run that completes starts the count again, and so does **Resume**. You get one alert when a task is paused, and the [Tasks](/tasks) page shows why under its name. `0` turns this off. |
 
 The retention TTL is also shown next to the [Tasks](/tasks) page title, so auto-deletes do not surprise you.
 

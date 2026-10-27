@@ -1292,6 +1292,14 @@ function zoneForTaskRender(task: Task): string | undefined {
                   />
                   {{ task.name }}
                 </button>
+                <p
+                  v-if="displayStatus(task) === 'PAUSED' && task.pauseReason"
+                  data-testid="pause-reason"
+                  class="mt-0.5 text-xs text-amber-700 dark:text-amber-400 break-words line-clamp-3"
+                  :title="task.pauseReason"
+                >
+                  {{ task.pauseReason }}
+                </p>
               </td>
               <td class="px-4 py-2.5 text-fg-muted font-mono text-xs">
                 {{ task.type }}

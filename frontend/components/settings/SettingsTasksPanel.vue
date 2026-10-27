@@ -77,6 +77,8 @@ async function saveTasksField(configKey: string, value: string) {
       (tasks retained forever). <span class="font-mono">fireIdleSeconds</span>
       cuts a run that has done nothing for that long, and
       <span class="font-mono">fireMaxDurationSeconds</span> bounds how long a single run may take.
+      <span class="font-mono">pauseAfterFailedOccurrences</span> pauses a recurring task whose
+      scheduled runs keep failing.
     </p>
     <div class="bg-surface-elevated border border-border">
       <div class="divide-y divide-border">
@@ -213,6 +215,15 @@ async function saveTasksField(configKey: string, value: string) {
           :min="0"
           label-width="w-48"
           tip="Longest one task run may take, in seconds, however busy. When it elapses the run is cancelled, with the subagents it is waiting on. 0 turns the limit off."
+        />
+        <SettingsConfigField
+          config-key="tasks.pauseAfterFailedOccurrences"
+          label="pauseAfterFailedOccurrences"
+          kind="number"
+          fallback="0"
+          :min="0"
+          label-width="w-48"
+          tip="Pause a recurring task when this many of its scheduled runs fail in a row. A run counts as failed only after its retries give up. A run that completes starts the count again, and so does Resume. You get one alert when a task is paused. 0 turns this off."
         />
       </div>
       <ApiErrorAlert

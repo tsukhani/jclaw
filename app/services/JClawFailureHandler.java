@@ -25,7 +25,8 @@ import java.time.Instant;
  *   mark the Task {@link Task.Status#FAILED} and stop the
  *   db-scheduler row — except on a recurring Task, where they end only
  *   the occurrence: the row moves to the next one with a full retry
- *   budget.</li>
+ *   budget, and the task is paused once {@link #PAUSE_AFTER_KEY}
+ *   occurrences have failed in a row.</li>
  * </ul>
  *
  * <h2>Why policy is in its own static method</h2>
@@ -59,6 +60,9 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      * {@code length-1} the failure is permanent.
      */
     static final long[] BACKOFF_SECONDS = {30, 60, 5 * 60, 15 * 60, 60 * 60};
+
+    /** Settings &gt; Tasks: failed scheduled runs in a row that pause a recurring task. Unset or 0 turns it off. */
+    public static final String PAUSE_AFTER_KEY = "tasks.pauseAfterFailedOccurrences";
 
     /**
      * Outcome of {@link #decide}: retry at the carried instant (transient + retry budget
@@ -150,8 +154,9 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
     public static Decision decide(Long jclawTaskId, @Nullable Throwable throwable) {
         boolean isTransient = TransientErrorClassifier.isTransient(throwable);
         String errorMessage = describeError(throwable);
+        int pauseAfter = ConfigService.getInt(PAUSE_AFTER_KEY, 0);
 
-        var outcome = Tx.run(() -> mutateAndDecide(jclawTaskId, isTransient, errorMessage));
+        var outcome = Tx.run(() -> mutateAndDecide(jclawTaskId, isTransient, errorMessage, pauseAfter));
         if (outcome == null) {
             EventLogger.warn("task", null, null,
                     "JClawFailureHandler: Task id %d disappeared mid-fire; failing"
@@ -165,6 +170,12 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
                             "Task '%s' transient failure %d/%d, retry in %ds: %s"
                                     .formatted(outcome.taskName(), r.newRetryCount(),
                                             outcome.budget(), outcome.backoffSecs(), errorMessage));
+            case Decision.NextOccurrence(Instant _, String reason) when outcome.paused() -> {
+                recordFailure(outcome, reason, errorMessage,
+                        "; paused after %d failed runs in a row".formatted(outcome.failedOccurrences()));
+                OperatorAlerts.onTaskPaused(outcome.task(), outcome.agentName(), outcome.failedOccurrences(),
+                        reason, errorMessage);
+            }
             case Decision.NextOccurrence(Instant next, String reason) -> {
                 recordFailure(outcome, reason, errorMessage, "; next occurrence at " + next);
                 OperatorAlerts.onOccurrenceFailed(outcome.task(), outcome.agentName(), reason, errorMessage, next);
@@ -195,7 +206,8 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      */
     private record DecideOutcome(Decision decision, Task task, @Nullable TaskRun runForLifecycle,
                                  String taskName, @Nullable String agentName,
-                                 int budget, long backoffSecs, int attempts) {}
+                                 int budget, long backoffSecs, int attempts,
+                                 int failedOccurrences, boolean paused) {}
 
     /**
      * Single read+write step run inside one transaction: load the Task,
@@ -205,7 +217,8 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
      * event — all against the same persistence context. Returns {@code null}
      * when the Task row is gone.
      */
-    private static @Nullable DecideOutcome mutateAndDecide(Long jclawTaskId, boolean isTransient, String errorMessage) {
+    private static @Nullable DecideOutcome mutateAndDecide(Long jclawTaskId, boolean isTransient, String errorMessage,
+                                                           int pauseAfter) {
         var task = (Task) Task.findById(jclawTaskId);
         if (task == null) return null;
 
@@ -230,7 +243,7 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
             }
             task.save();
             return new DecideOutcome(new Decision.Reschedule(nextRunAt, newRetryCount),
-                    task, null, task.name, agentName, budget, backoffSecs, newRetryCount);
+                    task, null, task.name, agentName, budget, backoffSecs, newRetryCount, task.failedOccurrences, false);
         }
 
         // Permanent OR transient-but-exhausted
@@ -242,17 +255,27 @@ public final class JClawFailureHandler implements FailureHandler<Void> {
             task.retryCount = 0;
             task.lastError = errorMessage;
             task.nextRunAt = next;
+            task.failedOccurrences++;
             if (task.status == Task.Status.RUNNING) task.status = Task.Status.ACTIVE;
             task.save();
+            // The row still moves on: a paused task's fires are skipped, so resume keeps its cadence.
+            boolean pause = pauseAfter > 0 && task.failedOccurrences >= pauseAfter;
+            if (pause) TaskSchedulingService.pause(task.id, pauseReason(task.failedOccurrences, reason, errorMessage));
             return new DecideOutcome(new Decision.NextOccurrence(next, reason), task, runForLifecycle,
-                    task.name, agentName, budget, 0L, currentRetry + 1);
+                    task.name, agentName, budget, 0L, currentRetry + 1, task.failedOccurrences, pause);
         }
 
         task.status = Task.Status.FAILED;
         task.lastError = errorMessage;
         task.save();
         return new DecideOutcome(new Decision.Fail(reason), task, runForLifecycle,
-                task.name, agentName, budget, 0L, currentRetry + 1);
+                task.name, agentName, budget, 0L, currentRetry + 1, task.failedOccurrences, false);
+    }
+
+    /** What the Tasks page shows for a task this handler paused. */
+    private static String pauseReason(int failedRuns, String reason, String errorMessage) {
+        return "Paused after %d scheduled runs in a row failed. Last error (%s): %s"
+                .formatted(failedRuns, reason, errorMessage);
     }
 
     private static String describeError(@Nullable Throwable throwable) {

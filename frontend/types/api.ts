@@ -855,6 +855,8 @@ export interface Task {
   nextRunAt: string | null
   retryCount: number
   maxRetries: number
+  /** Why JClaw paused the task after failed runs; null when it is not paused or was paused by hand. */
+  pauseReason?: string | null
   /**
    * JCLAW-414: id of this task's currently-RUNNING TaskRun, or null when none
    * is in flight. Drives the Actions column's Run-now ↔ Cancel-run icon swap.

@@ -27,6 +27,7 @@ interface TaskFixture {
   retryCount: number
   maxRetries: number
   runningRunId: number | null
+  pauseReason?: string | null
 }
 
 function task(over: Partial<TaskFixture> & { id: number, name: string }): TaskFixture {
@@ -74,6 +75,32 @@ describe('Tasks page — paused state', () => {
 
     expect(statusPills(component)).toContain('PAUSED')
     expect(statusPills(component)).not.toContain('ACTIVE')
+  })
+
+  it('shows why JClaw paused a task after its runs kept failing', async () => {
+    const reason = 'Paused after 3 scheduled runs in a row failed. Last error (permanent error): HTTP 401 Unauthorized'
+    registerTaskMounts([task({ id: 40, name: 'morning-briefing', paused: true, pauseReason: reason })])
+    const component = await mountSuspended(Tasks)
+    await flushPromises()
+
+    expect(component.find('[data-testid="pause-reason"]').text()).toBe(reason)
+  })
+
+  it('shows no reason for a task paused by hand', async () => {
+    registerTaskMounts([task({ id: 41, name: 'hand-paused', paused: true, pauseReason: null })])
+    const component = await mountSuspended(Tasks)
+    await flushPromises()
+
+    expect(statusPills(component)).toContain('PAUSED')
+    expect(component.find('[data-testid="pause-reason"]').exists()).toBe(false)
+  })
+
+  it('hides a pause reason left on a task that is no longer paused', async () => {
+    registerTaskMounts([task({ id: 42, name: 'resumed-elsewhere', paused: false, pauseReason: 'Paused after 3 scheduled runs in a row failed. Last error (permanent error): boom' })])
+    const component = await mountSuspended(Tasks)
+    await flushPromises()
+
+    expect(component.find('[data-testid="pause-reason"]').exists()).toBe(false)
   })
 
   it('leaves the status untouched for an unpaused task', async () => {

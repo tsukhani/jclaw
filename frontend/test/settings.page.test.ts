@@ -494,6 +494,25 @@ describe('Settings page — rows for settings moved out of application.conf', ()
     expect(component.find('[data-testid="config-field-tasks.fireMaxDurationSeconds"]').text()).toContain('1800')
   })
 
+  it('shows failed-run pausing off until set, and saves a count', async () => {
+    let posted: { key?: string, value?: string } | null = null
+    stubConfig((body) => {
+      posted = body
+    })
+    registerEndpoint('/api/timezones', () => ({ timezones: ['UTC'], default: 'UTC', appDefault: 'UTC' }))
+    const component = await mountSettingsSection('tasks')
+    const row = component.find('[data-testid="config-field-tasks.pauseAfterFailedOccurrences"]')
+
+    expect(row.find('span.flex-1').text()).toBe('0')
+    await row.find('button[title="Edit"]').trigger('click')
+    await flushPromises()
+    await row.find('input').setValue('3')
+    await row.find('button[title="Save"]').trigger('click')
+    await flushPromises()
+
+    expect(posted).toEqual({ key: 'tasks.pauseAfterFailedOccurrences', value: '3' })
+  })
+
   it('pins the primary provider from the providers the registry lists', async () => {
     let posted: { key?: string, value?: string } | null = null
     stubConfig((body) => {

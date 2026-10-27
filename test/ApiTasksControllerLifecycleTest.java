@@ -1,3 +1,5 @@
+import com.google.gson.JsonParser;
+import models.Task;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -6,7 +8,10 @@ import org.junit.jupiter.params.provider.ValueSource;
 import play.test.Fixtures;
 import play.test.FunctionalTest;
 import services.EventLogger;
+import services.Tx;
 
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 /**
@@ -52,6 +57,26 @@ class ApiTasksControllerLifecycleTest extends FunctionalTest {
                 """.formatted(agentId, name, schedule));
         assertIsOk(resp);
         return Long.parseLong(extractId(getContent(resp)));
+    }
+
+    private static <T> T commitInFreshTx(Supplier<T> block) {
+        var ref = new AtomicReference<T>();
+        var err = new AtomicReference<Throwable>();
+        var t = Thread.ofPlatform().start(() -> {
+            try {
+                ref.set(Tx.run(block::get));
+            } catch (Throwable ex) {
+                err.set(ex);
+            }
+        });
+        try {
+            t.join();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        }
+        if (err.get() != null) throw new RuntimeException(err.get());
+        return ref.get();
     }
 
     private static String extractId(String json) {
@@ -120,6 +145,33 @@ class ApiTasksControllerLifecycleTest extends FunctionalTest {
         assertIsOk(POST("/api/tasks/" + taskId + "/pause", "application/json", ""));
         var resp = POST("/api/tasks/" + taskId + "/resume", "application/json", "");
         assertIsOk(resp);
+    }
+
+    @Test
+    void resumeClearsTheFailedRunCountAndThePauseReason() {
+        var agentId = seedAgent();
+        var taskId = seedTask(agentId, "paused-by-failures", "every 1h");
+        commitInFreshTx(() -> {
+            var t = (Task) Task.findById(taskId);
+            t.failedOccurrences = 3;
+            t.paused = true;
+            t.pauseReason = "Paused after 3 scheduled runs in a row failed. Last error (permanent error): boom";
+            t.save();
+            return null;
+        });
+
+        var resp = POST("/api/tasks/" + taskId + "/resume", "application/json", "");
+
+        assertIsOk(resp);
+        var body = JsonParser.parseString(getContent(resp)).getAsJsonObject();
+        assertFalse(body.get("paused").getAsBoolean());
+        assertEquals(0, body.get("failedOccurrences").getAsInt());
+        assertTrue(body.get("pauseReason").isJsonNull(), body::toString);
+        var stored = commitInFreshTx(() -> {
+            var t = (Task) Task.findById(taskId);
+            return t.failedOccurrences + ":" + t.paused + ":" + t.pauseReason;
+        });
+        assertEquals("0:false:null", stored);
     }
 
     // --- reenable ---

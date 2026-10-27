@@ -390,6 +390,7 @@ public class ConfigService {
             atLeast(EventLogCleanupJob.CONFIG_KEY, 1, " must be a whole number of days, at least 1."),
             atLeast(TaskFireDeadline.MAX_DURATION_KEY, 0, " must be a whole number of seconds; 0 turns the limit off."),
             atLeast(TaskFireDeadline.IDLE_KEY, 0, " must be a whole number of seconds; 0 turns the limit off."),
+            atLeast(JClawFailureHandler.PAUSE_AFTER_KEY, 0, " must be a whole number of failed runs; 0 turns pausing off."),
             atLeast(BackgroundProcesses.LIFETIME_KEY, 0, " must be a whole number of hours; 0 never stops a process."),
             configuredProvider(ProviderRegistry.PRIMARY_PROVIDER_KEY),
             under(VoiceSettings.PREFIX, VoiceSettings::rejectionFor),

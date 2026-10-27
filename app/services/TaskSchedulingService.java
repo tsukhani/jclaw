@@ -390,21 +390,28 @@ public final class TaskSchedulingService {
      * Task would have fired anyway.
      */
     public static void pause(Long taskId) {
+        pause(taskId, null);
+    }
+
+    /** {@link #pause(Long)}, recording why JClaw paused the task for the Tasks page; null for a pause by hand. */
+    public static void pause(Long taskId, @Nullable String reason) {
         Objects.requireNonNull(taskId, PARAM_TASK_ID);
         Tx.run(() -> {
             var task = (Task) Task.findById(taskId);
             if (task == null) return null;
             task.paused = true;
+            task.pauseReason = reason;
             task.save();
             EventLogger.info("task",
                     task.agent != null ? task.agent.name : null, null,
-                    "Task '%s' paused".formatted(task.name));
+                    "Task '%s' paused%s".formatted(task.name, reason != null ? ": " + reason : ""));
             return null;
         });
     }
 
     /**
-     * Flip {@link Task#paused} to false. Companion to {@link #pause}.
+     * Flip {@link Task#paused} to false, and start the count of failed runs in a row again, so a
+     * task paused for failing is not paused anew by its next failure. Companion to {@link #pause}.
      * A recurring Task's {@code scheduled_tasks} row survived the pause
      * (the handler self-rescheduled through it), so clearing the flag is
      * all it needs. A one-shot's may not have — see
@@ -416,6 +423,8 @@ public final class TaskSchedulingService {
             var t = (Task) Task.findById(taskId);
             if (t == null) return null;
             t.paused = false;
+            t.failedOccurrences = 0;
+            t.pauseReason = null;
             t.save();
             EventLogger.info("task",
                     t.agent != null ? t.agent.name : null, null,

@@ -91,7 +91,8 @@ public class ApiTasksController extends Controller {
                             // JCLAW-1062: the recorded provenance of this task. Read-only —
                             // it decides fire-time trust, and a null reads as UNKNOWN and
                             // fails closed, which the Tasks page surfaces rather than hides.
-                            String originChannel) {
+                            String originChannel,
+                            int failedOccurrences, @Nullable String pauseReason) {
         static TaskView of(Task t) {
             return of(t, null, null);
         }
@@ -134,7 +135,8 @@ public class ApiTasksController extends Controller {
                     // (falls back through Config / conf / JVM default).
                     TimezoneResolver.resolve(t).getId(),
                     runningRunId,
-                    t.originChannel);
+                    t.originChannel,
+                    t.failedOccurrences, t.pauseReason);
         }
 
     }

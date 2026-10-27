@@ -23,9 +23,10 @@ import java.util.function.Consumer;
 
 /**
  * Messages to the operator, on a channel they chose, when unattended work fails (JCLAW-1279): a
- * circuit breaker opening or recovering, a recurring task's occurrence failing for good, an MCP server
- * moved to the handshake protocol, stored credentials that do not decrypt at boot, and a persona file
- * left out of an agent's prompt because it matched a prompt-injection rule.
+ * circuit breaker opening or recovering, a recurring task's occurrence failing for good or pausing the
+ * task after too many in a row, an MCP server moved to the handshake protocol, stored credentials that
+ * do not decrypt at boot, and a persona file left out of an agent's prompt because it matched a
+ * prompt-injection rule.
  *
  * <p>{@link #KEY} holds the destination as a delivery spec ({@code telegram:<chat id>}), sent
  * through the main agent's bindings. Unset, nothing is decided and nothing is sent. The decision
@@ -55,6 +56,7 @@ public final class OperatorAlerts {
     private static final Map<String, Instant> LAST_ANNOUNCED = new HashMap<>();
     private static final List<Consumer<String>> LISTENERS = new CopyOnWriteArrayList<>();
     private static final List<Consumer<String>> PERSONA_LISTENERS = new CopyOnWriteArrayList<>();
+    private static final List<Consumer<String>> TASK_LISTENERS = new CopyOnWriteArrayList<>();
 
     /** The SHA-256 of the content last reported per {@code agent/file}, cleared when the file is next seen clean. */
     private static final Map<String, String> WITHHELD_PERSONA_FILES = new ConcurrentHashMap<>();
@@ -114,9 +116,8 @@ public final class OperatorAlerts {
     }
 
     public static String mcpProtocolSwitchAlert(String serverName, String reason) {
-        var shortReason = reason.length() > MAX_ERROR_CHARS ? reason.substring(0, MAX_ERROR_CHARS) + "…" : reason;
         return ("JClaw alert: MCP server '%s' was moved to the Handshake protocol: %s. It stays there until its"
-                + " Protocol is set back to Automatic on the MCP Servers page.").formatted(serverName, shortReason);
+                + " Protocol is set back to Automatic on the MCP Servers page.").formatted(serverName, shorten(reason));
     }
 
     /**
@@ -185,16 +186,43 @@ public final class OperatorAlerts {
     /** Called when an occurrence of a recurring task fails for good and the task moves on to {@code next}. */
     public static void onOccurrenceFailed(Task task, @Nullable String agentName, String reason, String error,
                                           Instant next) {
-        if (destination() == null) return;
-        send(occurrenceAlert(task.name, agentName, reason, error, next.atZone(TimezoneResolver.resolve(task))));
+        announceTask(occurrenceAlert(task.name, agentName, reason, error, next.atZone(TimezoneResolver.resolve(task))));
     }
 
     public static String occurrenceAlert(String taskName, @Nullable String agentName, String reason, String error,
                                          ZonedDateTime next) {
-        var shortError = error.length() > MAX_ERROR_CHARS ? error.substring(0, MAX_ERROR_CHARS) + "…" : error;
         return "JClaw alert: task '%s'%s failed (%s): %s. It runs again at %s."
-                .formatted(taskName, agentName != null ? " (agent " + agentName + ")" : "", reason, shortError,
-                        NEXT_RUN.format(next));
+                .formatted(taskName, agentLabel(agentName), reason, shorten(error), NEXT_RUN.format(next));
+    }
+
+    /** Sent in place of {@link #onOccurrenceFailed} when the failed occurrence paused the task. */
+    public static void onTaskPaused(Task task, @Nullable String agentName, int failedRuns, String reason, String error) {
+        announceTask(pauseAlert(task.name, agentName, failedRuns, reason, error));
+    }
+
+    public static String pauseAlert(String taskName, @Nullable String agentName, int failedRuns, String reason,
+                                    String error) {
+        return ("JClaw alert: task '%s'%s failed (%s): %s. It has failed %d scheduled runs in a row, so it is paused"
+                + " until it is resumed on the Tasks page.")
+                .formatted(taskName, agentLabel(agentName), reason, shorten(error), failedRuns);
+    }
+
+    /** Test-only: the task alerts any thread decides while {@code body} runs, whether or not a destination is set. */
+    public static List<String> captureTaskAlertsForTest(Runnable body) {
+        return capture(TASK_LISTENERS, body);
+    }
+
+    private static void announceTask(String text) {
+        for (var listener : TASK_LISTENERS) listener.accept(text);
+        send(text);
+    }
+
+    private static String agentLabel(@Nullable String agentName) {
+        return agentName != null ? " (agent " + agentName + ")" : "";
+    }
+
+    private static String shorten(String text) {
+        return text.length() > MAX_ERROR_CHARS ? text.substring(0, MAX_ERROR_CHARS) + "…" : text;
     }
 
     /** Why {@code value} cannot be the alert destination, or null when it can. Blank turns alerts off. */

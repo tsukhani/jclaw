@@ -183,6 +183,16 @@ class ConfigServiceWriteRulesTest extends UnitTest {
     }
 
     @Test
+    void thePauseAfterFailedRunsCountMustBeAWholeNumberOfZeroOrMore() {
+        var expected = "tasks.pauseAfterFailedOccurrences must be a whole number of failed runs; 0 turns pausing off.";
+        assertRefused(expected, "tasks.pauseAfterFailedOccurrences", "-1");
+        assertRefused(expected, "tasks.pauseAfterFailedOccurrences", "three");
+        assertRefused(expected, "tasks.pauseAfterFailedOccurrences", "");
+        assertAccepted("tasks.pauseAfterFailedOccurrences", "0");
+        assertAccepted("tasks.pauseAfterFailedOccurrences", "1");
+    }
+
+    @Test
     void aPrimaryOrAcpProviderMustBeConfigured() {
         assertRefused("Provider 'jclaw1402-none' is not configured. llm.primaryProvider must name a provider "
                 + "from Settings > LLM Providers.", "llm.primaryProvider", "jclaw1402-none");
