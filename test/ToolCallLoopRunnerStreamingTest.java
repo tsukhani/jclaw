@@ -385,12 +385,12 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
         }
     }
 
-    // Streaming: truncation mid-tool-call. Covers lines 334-344.
+    // Streaming: a continuation cut off mid-tool-call, then cut off again after the one resend.
     @Test
-    void streamingTruncationWithPendingToolCallsReturnsTruncationHint() throws Exception {
+    void aStreamedContinuationCutOffTwiceEndsWithTheTruncationHint() throws Exception {
         streamingServer = new MockWebServer();
         streamingServer.start();
-        streamingServer.enqueue(sseResponse("""
+        var cutOff = """
                 data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"content":"Partial here..."}}]}
 
                 data: {"id":"r","object":"chat.completion.chunk","model":"x","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"trunc","type":"function","function":{"name":"noop_stream","arguments":"{\\"action\\":\\"now"}}]}}]}
@@ -399,7 +399,9 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
 
                 data: [DONE]
 
-                """));
+                """;
+        streamingServer.enqueue(sseResponse(cutOff));
+        streamingServer.enqueue(sseResponse(cutOff));
 
         var provider = openAiProviderForStreamingServer("trunc-stream");
         var agent = persistAgent("trunc-stream-agent");
@@ -423,8 +425,13 @@ class ToolCallLoopRunnerStreamingTest extends UnitTest {
                 provider, cb, "low", 0, new AtomicBoolean(false), trace, turnUsage,
                 collectedImages, "web", new ConversationSink(convo));
 
-        assertTrue(result.contains("truncated") || result.contains("smaller steps"),
-                "Streaming truncation guard should surface the hint, got: " + result);
+        assertEquals("Partial here...\n\n*[Response was truncated before the next tool call could complete. "
+                + "Try breaking the task into smaller steps.]*", result);
+        assertEquals(2, streamingServer.getRequestCount(), "the continuation, then one resend");
+        streamingServer.takeRequest();
+        var resend = streamingServer.takeRequest().getBody().utf8();
+        assertFalse(resend.contains("\"trunc\""), "the cut-off call stays out of the resend");
+        assertTrue(resend.contains("Split its content across smaller calls"), "the resend carries the note");
     }
 
     // Streaming: empty continuation + retry with nudge returns content.

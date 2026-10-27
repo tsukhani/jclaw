@@ -429,14 +429,31 @@ final class StreamingAgentRunner {
         // across every round (matches the frontend's live measurement).
         UsageMetricsBuilder.addRoundAndReport(turnUsage, accumulator, cb);
 
-        // Check for truncated response (max tokens hit mid-tool-call)
-        if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason()) && !accumulator.toolCalls().isEmpty()) {
+        // JCLAW-104: the image collector lives at turn scope (not per recursion level) so a screenshot
+        // captured mid-chain still reaches buildImagePrefix when the final synthesis happens in round N.
+        var turn = new ToolCallLoopRunner.StreamingTurnContext(agent, conversation, conversation.id, tools, primary,
+                fallback, cb, thinkingMode, isCancelled, trace, turnUsage, new ArrayList<>(), channelType, sink, overflow);
+        if (ToolCallLoopRunner.isCutOffToolCall(accumulator)) {
+            var resent = new ArrayList<>(messages);
+            accumulator = ToolCallLoopRunner.resendCutOffStream(turn, resent, accumulator, 0);
+            if (accumulator == null) {
+                CancellationManager.checkCancelled(isCancelled, agent, channelType, cb);
+                return;
+            }
+            messages = resent;
+            if (accumulator.error() != null) {
+                cb.onError().accept(accumulator.error());
+                return;
+            }
+        }
+
+        // A second cut-off in the turn (max tokens hit mid-tool-call): the call is not run.
+        if (ToolCallLoopRunner.isCutOffToolCall(accumulator)) {
             persistAndCompleteTruncatedToolCall(accumulator.content(), agent, channelType, trace, sink, cb);
             return;
         }
 
-        var post = runPostAccumulatorToolLoop(accumulator, agent, conversation, primary, fallback, channelType, messages, tools,
-                cb, thinkingMode, isCancelled, trace, turnUsage, sink, overflow);
+        var post = runPostAccumulatorToolLoop(accumulator, turn, messages);
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
@@ -621,20 +638,9 @@ final class StreamingAgentRunner {
      * Post round-1 processing: detect the empty-toolCalls truncation case, then drive
      * the tool-call loop if the model produced tool calls.
      */
-    @SuppressWarnings("java:S107") // mirrors the orchestration state of streamLlmLoop
     private static StreamingPostAccumulator runPostAccumulatorToolLoop(LlmProvider.StreamAccumulator accumulator,
-                                                                        Agent agent, Conversation conversation,
-                                                                        LlmProvider primary,
-                                                                        LlmProvider.@Nullable Fallback fallback,
-                                                                        @Nullable String channelType,
-                                                                        List<ChatMessage> messages,
-                                                                        @Nullable List<ToolDef> tools,
-                                                                        AgentRunner.StreamingCallbacks cb,
-                                                                        @Nullable String thinkingMode,
-                                                                        AtomicBoolean isCancelled, LatencyTrace trace,
-                                                                        LlmProvider.TurnUsage turnUsage,
-                                                                        AgentExecutionSink sink,
-                                                                        ContextWindowManager.OverflowBudget overflow) {
+                                                                        ToolCallLoopRunner.StreamingTurnContext turn,
+                                                                        List<ChatMessage> messages) {
         var content = accumulator.content();
 
         // JCLAW-291: detect the empty-toolCalls truncation case — a plain
@@ -645,34 +651,22 @@ final class StreamingAgentRunner {
         boolean replyTruncated = TruncationDiagnostics.isTruncationFinish(accumulator.finishReason())
                 && accumulator.toolCalls().isEmpty();
         if (replyTruncated) {
-            TruncationDiagnostics.logEmptyToolCallsTruncation("streamLlmLoop", agent, conversation, primary,
-                    channelType, accumulator.finishReason(), messages, tools);
+            TruncationDiagnostics.logEmptyToolCallsTruncation("streamLlmLoop", turn.agent(), turn.conversation(),
+                    turn.provider(), turn.channelType(), accumulator.finishReason(), messages, turn.tools());
         }
         if (replyTruncated && (content == null || content.isBlank())) {
             // JCLAW-1203: nothing to mark — the output budget went to reasoning. Recover as an
             // empty continuation would; only when every retry is empty report the cut.
-            var ctx = new ToolCallLoopRunner.StreamingTurnContext(
-                    agent, conversation, conversation.id, tools, primary, fallback,
-                    cb, thinkingMode, isCancelled, trace, turnUsage, new ArrayList<>(), channelType, sink, overflow);
-            var recovery = ToolCallLoopRunner.recoverEmptyReply(ctx, messages, accumulator);
+            var recovery = ToolCallLoopRunner.recoverEmptyReply(turn, messages, accumulator);
             if (recovery.cancelled() != null) return new StreamingPostAccumulator(recovery.cancelled(), false);
             if (recovery.content() != null) return new StreamingPostAccumulator(recovery.content(), recovery.truncated());
-            var note = ToolCallLoopRunner.emptyReplyDiagnostic(ctx);
-            cb.onToken().accept(note);
+            var note = ToolCallLoopRunner.emptyReplyDiagnostic(turn);
+            turn.cb().onToken().accept(note);
             return new StreamingPostAccumulator(note, true);
         }
 
-        // Handle tool calls if present. JCLAW-104: the image collector lives
-        // at turn scope (not per recursion level) so a screenshot captured
-        // mid-chain — say in round 1 — still reaches buildImagePrefix when
-        // the final synthesis happens in round N.
-        var turnImages = new ArrayList<String>();
         if (!accumulator.toolCalls().isEmpty()) {
-            var ctx = new ToolCallLoopRunner.StreamingTurnContext(
-                    agent, conversation, conversation.id, tools, primary, fallback,
-                    cb, thinkingMode, isCancelled, trace, turnUsage, turnImages, channelType, sink, overflow);
-            content = ToolCallLoopRunner.handleToolCallsStreaming(
-                    ctx, messages, accumulator.toolCalls(), content, 0);
+            content = ToolCallLoopRunner.handleToolCallsStreaming(turn, messages, accumulator.toolCalls(), content, 0);
         }
         return new StreamingPostAccumulator(content, replyTruncated);
     }
@@ -721,8 +715,8 @@ final class StreamingAgentRunner {
     }
 
     /**
-     * Streaming-side truncated-tool-call handler: emit a truncation marker,
-     * persist the truncated content, and fire the terminal complete
+     * Streaming-side truncated-tool-call handler, for a first round cut off again after its resend:
+     * emit a truncation marker, persist the truncated content, and fire the terminal complete
      * callback. Persist BEFORE the terminal frame so the assistant
      * message is committed by the time the SSE closes / HTTP response
      * completes.

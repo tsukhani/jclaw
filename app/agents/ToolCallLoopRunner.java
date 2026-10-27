@@ -48,7 +48,8 @@ import java.util.stream.Collectors;
  * <ul>
  *   <li><b>Owned</b>: round dispatch, JCLAW-291 cooperative-cancel
  *   checkpoints, JCLAW-165 audio-format retry in the sync path, the
- *   empty-continuation synthesis-nudge retry,
+ *   empty-continuation synthesis-nudge retry, the once-per-turn resend of a
+ *   tool call cut off at the output limit,
  *   JCLAW-273 yield-on-success detection.</li>
  *   <li><b>Delegated</b>: token estimation
  *   ({@link ContextWindowManager}), model resolution
@@ -148,7 +149,7 @@ public final class ToolCallLoopRunner {
     }
 
     /** {@link #callWithToolLoop} with the round cap passed in, so a test need not change the shared config key. */
-    @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is the single-use audio-format (JCLAW-165) / image-format (JCLAW-216) retry
+    @SuppressWarnings({"java:S107", "java:S127"}) // S107: internal tool-loop dispatcher; S127: round-- in body is the single-use audio-format (JCLAW-165) / image-format (JCLAW-216) retry and the single cut-off resend
     static LoopOutcome callWithToolLoop(Agent agent, Conversation conversation,
                                          @Nullable Long conversationId,
                                          List<ChatMessage> messages, List<ToolDef> tools,
@@ -169,6 +170,7 @@ public final class ToolCallLoopRunner {
         var audioState = new AudioRetryState(!supportsAudioInitially && !audioBearers.isEmpty());
         var visionState = new VisionRetryState(); // JCLAW-216: single-shot image-format-rejection retry
         var overflow = new ContextWindowManager.OverflowBudget();
+        boolean cutOffResent = false;
 
         for (int round = 0; round < maxRounds; round++) {
             // JCLAW-291: cooperative-cancel checkpoint at the top of each
@@ -186,6 +188,13 @@ public final class ToolCallLoopRunner {
                 continue;
             }
             if (attempt.terminal() != null) return attempt.terminal();
+            if (!cutOffResent && isCutOffToolCall(attempt.okResponse())) {
+                cutOffResent = true;
+                appendSplitNudge(agent, conversation.channelType,
+                        attempt.okResponse().choices().getFirst().finishReason(), round, currentMessages);
+                round--;  // the cut-off call ran no tools, so sending again does not use a tool round
+                continue;
+            }
 
             logRoundZeroPassthroughOutcomes(round, agent, conversation, primary,
                     audioBearers, imageBearers, audioState, visionState);
@@ -212,6 +221,30 @@ public final class ToolCallLoopRunner {
         return closing != null
                 ? new LoopOutcome(closing.content() + ROUND_CAP_NOTE, closing.truncated())
                 : new LoopOutcome(ROUND_CAP_REPLY);
+    }
+
+    /** True when the round's response stopped at the output limit while writing a tool call. */
+    private static boolean isCutOffToolCall(ChatResponse response) {
+        var choice = response.choices().getFirst();
+        var calls = choice.message().toolCalls();
+        return TruncationDiagnostics.isTruncationFinish(choice.finishReason()) && calls != null && !calls.isEmpty();
+    }
+
+    /** True when the streamed response stopped at the output limit while writing a tool call. */
+    static boolean isCutOffToolCall(LlmProvider.StreamAccumulator acc) {
+        return TruncationDiagnostics.isTruncationFinish(acc.finishReason()) && !acc.toolCalls().isEmpty();
+    }
+
+    /**
+     * Appends {@link #CUT_OFF_NUDGE} for the turn's one resend of a cut-off call. The call itself is never
+     * added: its arguments are an incomplete JSON fragment, which a provider may refuse in the history.
+     */
+    private static void appendSplitNudge(Agent agent, @Nullable String channel, @Nullable String finishReason,
+                                         int round, List<ChatMessage> messages) {
+        EventLogger.warn("llm", agent.name, channel,
+                "Response stopped at the output limit (finish_reason=%s) while writing a tool call in round %d — not running it; asking the model to split it"
+                        .formatted(finishReason, round + 1));
+        messages.add(ChatMessage.user(CUT_OFF_NUDGE));
     }
 
     private static void logRoundCap(Agent agent, @Nullable String channel, int maxRounds) {
@@ -573,7 +606,7 @@ public final class ToolCallLoopRunner {
             return new LoopOutcome(text);
         }
 
-        // Check for truncated response (max tokens hit mid-tool-call)
+        // A second cut-off in the turn (max tokens hit mid-tool-call): its arguments are incomplete, so it is not run.
         if (TruncationDiagnostics.isTruncationFinish(choice.finishReason())) {
             EventLogger.warn("llm", agent.name, null,
                     "Response truncated (finish_reason=length) with pending tool calls — skipping execution of incomplete tool arguments");
@@ -659,7 +692,8 @@ public final class ToolCallLoopRunner {
      * <p>{@code collectedImages} is the JCLAW-104 turn-scope image accumulator —
      * the SAME list threads through every recursion level so images captured in an
      * early round still reach the final {@code buildImagePrefix} call. {@code overflow}
-     * is turn-scoped the same way, shared with round 1.
+     * and {@code cutOffResent} (set once the turn has sent a cut-off tool call again) are
+     * turn-scoped the same way, shared with round 1.
      */
     // Visible (public) for ToolCallLoopRunnerStreamingTest in the default package
     public record StreamingTurnContext(Agent agent, Conversation conversation,
@@ -670,7 +704,22 @@ public final class ToolCallLoopRunner {
                                        AtomicBoolean isCancelled, LatencyTrace trace,
                                        LlmProvider.TurnUsage turnUsage, List<String> collectedImages,
                                        @Nullable String channelType, AgentExecutionSink sink,
-                                       ContextWindowManager.OverflowBudget overflow) {
+                                       ContextWindowManager.OverflowBudget overflow,
+                                       AtomicBoolean cutOffResent) {
+
+        /** A context for a turn that has not yet sent a cut-off tool call again. */
+        @SuppressWarnings("java:S107") // the record's components less the resend flag
+        public StreamingTurnContext(Agent agent, Conversation conversation, @Nullable Long conversationId,
+                                    @Nullable List<ToolDef> tools, LlmProvider provider,
+                                    LlmProvider.@Nullable Fallback fallback,
+                                    AgentRunner.StreamingCallbacks cb, @Nullable String thinkingMode,
+                                    AtomicBoolean isCancelled, LatencyTrace trace,
+                                    LlmProvider.TurnUsage turnUsage, List<String> collectedImages,
+                                    @Nullable String channelType, AgentExecutionSink sink,
+                                    ContextWindowManager.OverflowBudget overflow) {
+            this(agent, conversation, conversationId, tools, provider, fallback, cb, thinkingMode, isCancelled,
+                    trace, turnUsage, collectedImages, channelType, sink, overflow, new AtomicBoolean());
+        }
 
         /** A context for a turn with no overflow budget yet. */
         @SuppressWarnings("java:S107") // the record's components less the budget
@@ -736,56 +785,19 @@ public final class ToolCallLoopRunner {
         EventLogger.info("llm", ctx.agent().name, null,
                 "Streaming round %d: continuing LLM call after tool results".formatted(round + 1));
 
-        // Continue with streaming after tool results. JCLAW-108: effective
-        // model id honors conversation override, same as the round-1 call.
-        var effectiveModelIdForCall = Objects.requireNonNull(
-                ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
-        var sendMessages = sendView(currentMessages, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools(),
-                ctx.overflow());
-        // Recompute max_tokens against the grown message list so the clamp
-        // tightens as the tool loop accumulates history.
-        var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), sendMessages, ctx.tools());
-        // JCLAW-1184: secondary-aware like round 1, so a breaker that opened between rounds
-        // routes the continuation instead of erroring the turn.
-        var accumulator = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.fallback(),
-                effectiveModelIdForCall, sendMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
-                maxTokens, ctx.thinkingMode(), ctx.channelType());
-
+        LlmProvider.StreamAccumulator accumulator;
         try {
-            if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, ctx.isCancelled(), ctx.agent(), null, ctx.cb()))
-                return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
+            accumulator = streamContinuation(ctx, currentMessages);
+            if (accumulator != null) accumulator = resendCutOffStream(ctx, currentMessages, accumulator, round);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
-            return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
+            accumulator = null;
         }
+        if (accumulator == null) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
 
-        if (ctx.isCancelled().get()) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
-
-        // Only a length refusal is surfaced here; any other failed continuation falls through to the
-        // empty-continuation retries below.
-        if (refusedForLength(accumulator) != null) {
-            try {
-                var recovered = recoverOverflowedStream(ctx, sendMessages, accumulator);
-                if (recovered == null) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
-                var refusal = refusedForLength(recovered);
-                // Thrown, so the turn ends through onError and each transport renders it for its own reader.
-                if (refusal != null) throw refusal;
-                accumulator = recovered;
-            } catch (InterruptedException _) {
-                Thread.currentThread().interrupt();
-                return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
-            }
-        }
-
-        // Fold this round's usage into the turn-level cumulative (JCLAW-76).
-        // Runs regardless of whether the round resolves to more tool calls,
-        // truncation, synthesis, or empty-retry — every round contributes.
-        UsageMetricsBuilder.addRoundAndReport(ctx.turnUsage(), accumulator, ctx.cb());
-
-        // Truncation guard: if the model hit max_tokens mid-tool-call, the tool arguments
-        // will be an incomplete JSON fragment. Instead of dispatching it,
-        // surface a clear message so the LLM can retry with a more concise approach.
-        if (TruncationDiagnostics.isTruncationFinish(accumulator.finishReason()) && !accumulator.toolCalls().isEmpty()) {
+        // A second cut-off in the turn: the tool arguments are an incomplete JSON fragment, so the call is
+        // not run and the reader is told why.
+        if (isCutOffToolCall(accumulator)) {
             return handleTruncatedToolCallAccumulator(accumulator, ctx.agent(), ctx.cb(), round);
         }
 
@@ -809,6 +821,60 @@ public final class ToolCallLoopRunner {
         return MessageDeduplicator.buildImagePrefix(ctx.collectedImages(), accumulator.content())
                 + accumulator.content()
                 + MessageDeduplicator.buildDownloadSuffix(ctx.collectedImages(), accumulator.content(), ctx.channelType());
+    }
+
+    /**
+     * One streamed call on {@code messages} after tool results or a cut-off: the round's view, the turn's
+     * failover and overflow recovery, and its usage folded into the turn's whatever it resolves to
+     * (JCLAW-76). Null when the turn was canceled while waiting. A context-window refusal the recovery
+     * cannot clear is thrown, so the turn ends through onError and each transport renders it for its own
+     * reader; any other failed call is returned to the caller.
+     */
+    private static LlmProvider.@Nullable StreamAccumulator streamContinuation(StreamingTurnContext ctx,
+                                                                               List<ChatMessage> messages)
+            throws InterruptedException {
+        // JCLAW-108: the effective model id honors the conversation override, same as the round-1 call.
+        var modelId = Objects.requireNonNull(
+                ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
+        var sendMessages = sendView(messages, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools(),
+                ctx.overflow());
+        // Recompute max_tokens against the grown message list so the clamp
+        // tightens as the tool loop accumulates history.
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), sendMessages, ctx.tools());
+        // JCLAW-1184: secondary-aware like round 1, so a breaker that opened between rounds
+        // routes the continuation instead of erroring the turn.
+        var accumulator = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), ctx.fallback(),
+                modelId, sendMessages, ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(),
+                maxTokens, ctx.thinkingMode(), ctx.channelType());
+        if (!CancellationManager.awaitAccumulatorOrCancel(accumulator, ctx.isCancelled(), ctx.agent(), null, ctx.cb())
+                || ctx.isCancelled().get()) {
+            return null;
+        }
+        if (refusedForLength(accumulator) != null) {
+            var recovered = recoverOverflowedStream(ctx, sendMessages, accumulator);
+            if (recovered == null) return null;
+            var refusal = refusedForLength(recovered);
+            if (refusal != null) throw refusal;
+            accumulator = recovered;
+        }
+        UsageMetricsBuilder.addRoundAndReport(ctx.turnUsage(), accumulator, ctx.cb());
+        return accumulator;
+    }
+
+    /**
+     * The turn's one resend of a streamed call that {@link #isCutOffToolCall(LlmProvider.StreamAccumulator)
+     * stopped at the output limit while writing a tool call}: the call stays out of {@code messages} and {@link #CUT_OFF_NUDGE} is
+     * appended. Returns {@code acc} unchanged when it was not cut off or the turn already resent once,
+     * else the resend, or null when the turn was canceled while waiting.
+     */
+    static LlmProvider.@Nullable StreamAccumulator resendCutOffStream(StreamingTurnContext ctx,
+                                                                       List<ChatMessage> messages,
+                                                                       LlmProvider.StreamAccumulator acc, int round)
+            throws InterruptedException {
+        if (!isCutOffToolCall(acc) || !ctx.cutOffResent().compareAndSet(false, true)) return acc;
+        appendSplitNudge(ctx.agent(), ctx.channelType(), acc.finishReason(), round, messages);
+        ctx.cb().onStatus().accept(CUT_OFF_STATUS);
+        return streamContinuation(ctx, messages);
     }
 
     /**
@@ -869,7 +935,7 @@ public final class ToolCallLoopRunner {
      * incomplete tool-call to the user via {@code cb.onToken} and return
      * the LoopOutcome content. Used when {@code finish_reason=length}
      * with non-empty {@code toolCalls} (the model ran out of output
-     * budget mid-arguments-JSON).
+     * budget mid-arguments-JSON) and the turn has already resent once.
      */
     private static String handleTruncatedToolCallAccumulator(LlmProvider.StreamAccumulator accumulator,
                                                               Agent agent,
@@ -902,6 +968,16 @@ public final class ToolCallLoopRunner {
 
     /** Follows a closing answer, so the reader knows the work stopped short. */
     private static final String ROUND_CAP_NOTE = "\n\n*[This turn stopped at the tool-round limit.]*";
+
+    /**
+     * Sent once per turn after a response stopped at the output limit mid tool call. Raising the limit is no
+     * remedy: {@link ContextWindowManager#effectiveMaxTokens} already asks for the model's own maximum.
+     */
+    private static final String CUT_OFF_NUDGE = "Your last response stopped at the output limit while it was "
+            + "writing a tool call, so the call was not run. Split its content across smaller calls: for example, "
+            + "writeFile with the first part, then appendFile for each further part.";
+
+    private static final String CUT_OFF_STATUS = "Asking the model to split a tool call cut off at the output limit...";
 
     private static final String SYNTHESIS_STATUS = "Synthesizing response (retry)...";
 
