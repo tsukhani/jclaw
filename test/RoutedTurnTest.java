@@ -22,7 +22,7 @@ class RoutedTurnTest extends UnitTest {
 
     private static RouteDecision decision(Target fallback) {
         return new RouteDecision(TaskClass.CHAT, ReasoningEffort.LOW, PRIMARY, fallback, List.of("no task markers"), List.of(),
-                false, false, false);
+                false, false, false, null);
     }
 
     private static Agent routerAgent() {
@@ -116,5 +116,13 @@ class RoutedTurnTest extends UnitTest {
         assertEquals("z-ai/glm-5.3-flash", json.get("model").getAsString());
         assertTrue(json.get("failover").getAsBoolean());
         assertFalse(json.has("downshifted"), "a flag that did not happen is absent, not false");
+        assertFalse(json.has("classifierMs"), "the keyword rules took no classifier time");
+    }
+
+    @Test
+    void theRouteJsonCarriesTheClassifiersTime() {
+        var timed = new RouteDecision(TaskClass.CHAT, ReasoningEffort.LOW, PRIMARY, FALLBACK, List.of("classified by x"),
+                List.of(), false, false, false, 412L);
+        assertEquals(412L, timed.toJson(PRIMARY, false).get("classifierMs").getAsLong());
     }
 }

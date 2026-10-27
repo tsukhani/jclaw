@@ -15,10 +15,11 @@ import java.util.List;
  * @param downshifted a prepaid provider's usage pushed this class onto the chat list
  * @param sticky      the previous turn's model was kept to preserve its prompt cache
  * @param relaxed     every candidate was filtered out, so filters were dropped rather than fail the turn
+ * @param classifierMs how long the prompt classifier took, or null when the keyword rules decided alone
  */
 public record RouteDecision(TaskClass taskClass, ReasoningEffort effort, Target primary, @Nullable Target fallback,
                             List<String> signals, List<String> skipped,
-                            boolean downshifted, boolean sticky, boolean relaxed) {
+                            boolean downshifted, boolean sticky, boolean relaxed, @Nullable Long classifierMs) {
 
     /** A concrete provider and model. */
     public record Target(String provider, String modelId) {
@@ -61,6 +62,7 @@ public record RouteDecision(TaskClass taskClass, ReasoningEffort effort, Target 
         if (downshifted) json.addProperty("downshifted", true);
         if (sticky) json.addProperty("sticky", true);
         if (failover) json.addProperty("failover", true);
+        if (classifierMs != null) json.addProperty("classifierMs", classifierMs);
         return json;
     }
 }

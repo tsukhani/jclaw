@@ -63,5 +63,16 @@ describe('route display helpers (JCLAW-1222)', () => {
     expect(text).toContain('actions: send, schedule')
     expect(text).not.toContain('reasoning effort')
     expect(routeDescription({ ...route, thinkingMode: 'high' })).toContain('high reasoning effort')
+    expect(text).not.toContain('latency')
+  })
+
+  it('ends with how long the classifier took to decide', () => {
+    const classified = { class: 'chat', provider: 'ollama-cloud', model: 'glm-5.3-flash', thinkingMode: 'low',
+      reason: 'classified by Baseten elephant-1 (chat 0.68)', classifierMs: 412 }
+    expect(routeDescription(classified)).toBe('Auto router: Chat → ollama-cloud/glm-5.3-flash · low reasoning effort'
+      + ' · classified by Baseten elephant-1 (chat 0.68) · classifier latency 412 ms')
+    expect(routeDescription({ ...classified, classifierMs: 999 })).toMatch(/classifier latency 999 ms$/)
+    expect(routeDescription({ ...classified, classifierMs: 1000 })).toMatch(/classifier latency 1\.00 s$/)
+    expect(routeDescription({ ...classified, classifierMs: 0 })).toMatch(/classifier latency 0 ms$/)
   })
 })

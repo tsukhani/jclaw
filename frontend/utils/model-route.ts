@@ -1,5 +1,5 @@
 import type { Message } from '~/types/api'
-import type { MessageRoute } from '~/utils/usage-cost'
+import { formatNanosDuration, type MessageRoute } from '~/utils/usage-cost'
 
 /** The provider name the backend's ModelRouter.PROVIDER lists the router under. */
 export const ROUTER_PROVIDER = 'router'
@@ -47,5 +47,6 @@ export function routeDescription(route: MessageRoute): string {
   if (route.failover) parts.push('the first choice failed, so its fallback answered')
   if (route.downshifted) parts.push('moved to a lighter model to save subscription credit')
   if (route.reason) parts.push(route.reason)
+  if (route.classifierMs != null) parts.push(`classifier latency ${formatNanosDuration(route.classifierMs * 1e6)}`)
   return parts.join(' · ')
 }

@@ -80,6 +80,8 @@ export interface MessageRoute {
   failover?: boolean
   /** The reasoning effort the routed model ran at; absent when it did not reason. */
   thinkingMode?: string
+  /** How long the prompt classifier took; absent when the keyword rules decided alone. */
+  classifierMs?: number
 }
 
 export interface UsageCostBreakdown {

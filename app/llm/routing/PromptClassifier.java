@@ -30,12 +30,22 @@ import java.util.regex.Pattern;
 public final class PromptClassifier {
 
     /**
-     * @param effort  how hard a reasoning model should think; the class's default unless the classifier model named one
-     * @param signals what matched, for the decision log and the persisted route; never empty
+     * @param effort       how hard a reasoning model should think; the class's default unless the classifier model named one
+     * @param signals      what matched, for the decision log and the persisted route; never empty
+     * @param classifierMs how long the router's classifier took, its call included; null when none was asked
      */
-    public record Classification(TaskClass taskClass, ReasoningEffort effort, List<String> signals) {
+    public record Classification(TaskClass taskClass, ReasoningEffort effort, List<String> signals,
+                                 @Nullable Long classifierMs) {
+        public Classification(TaskClass taskClass, ReasoningEffort effort, List<String> signals) {
+            this(taskClass, effort, signals, null);
+        }
+
         public Classification(TaskClass taskClass, List<String> signals) {
             this(taskClass, taskClass.defaultEffort(), signals);
+        }
+
+        public Classification withClassifierMs(long ms) {
+            return new Classification(taskClass, effort, signals, ms);
         }
     }
 

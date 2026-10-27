@@ -22,6 +22,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
@@ -112,6 +113,14 @@ public final class RouterClassifier {
 
         var classifier = policy.classifier();
         if (classifier == null) return PromptClassifier.classify(message, priorClass, priorToolCalls);
+        long start = System.nanoTime();
+        var classification = ask(classifier, message, priorClass, priorToolCalls, policy, jevKey);
+        return classification.withClassifierMs(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
+    }
+
+    /** {@code classifier}'s class and effort, or the keyword rules' when it cannot give them. */
+    private static Classification ask(Candidate classifier, String message, @Nullable TaskClass priorClass,
+                                      int priorToolCalls, RouterPolicy policy, Supplier<@Nullable String> jevKey) {
         if (RouterPolicy.JEV.equals(classifier.provider())) {
             return orRules(JevRouterClassifier.classify(message, jevKey.get(), policy.jevMinConfidence(),
                     policy.classifierTimeoutSeconds()), message, priorClass, priorToolCalls);

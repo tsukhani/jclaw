@@ -80,7 +80,7 @@ class ModelResolverThinkingTest extends UnitTest {
         router.modelProvider = "router";
         router.modelId = "auto";
         var decision = new RouteDecision(TaskClass.CHAT, effort, new Target(PROVIDER, modelId), null,
-                List.of("test"), List.of(), false, false, false);
+                List.of("test"), List.of(), false, false, false, null);
         return RoutedTurn.callWith(decision, conv,
                 () -> ModelResolver.resolveThinkingMode(router, conv, ProviderRegistry.get(PROVIDER)));
     }

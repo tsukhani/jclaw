@@ -2,6 +2,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import llm.LlmResilience;
 import llm.ProviderRegistry;
+import llm.routing.ModelRouter;
 import llm.routing.ReasoningEffort;
 import llm.routing.RouterClassifier;
 import llm.routing.RouterPolicy;
@@ -21,6 +22,7 @@ import services.ConfigService;
 import utils.CircuitBreakers;
 import utils.HttpFactories;
 
+import java.io.InterruptedIOException;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -153,6 +155,26 @@ class RouterClassifierTest extends UnitTest {
                 () -> RouterClassifier.classify(PROMPT, null, 0, withClassifier()));
         assertEquals(TaskClass.AGENTIC, c.taskClass());
         assertFalse(c.signals().getFirst().startsWith("classified by"));
+        assertNotNull(c.classifierMs(), "the failed call still cost the turn its time");
+    }
+
+    @Test
+    void theClassifiersTimeCoversItsCall() {
+        var c = HttpFactories.callWith(canned(200, completion("reasoning"), 80),
+                () -> RouterClassifier.classify(PROMPT, null, 0, withClassifier()));
+        assertTrue(c.classifierMs() != null && c.classifierMs() >= 80, () -> "classifierMs=" + c.classifierMs());
+    }
+
+    @Test
+    void theRouteCarriesTheClassifiersTimeIntoItsJson() {
+        var request = new ModelRouter.RouteRequest(PROMPT, null, null, 0, 0, false, false, false);
+        var decision = HttpFactories.callWith(canned(200, completion("chat"), 80),
+                () -> ModelRouter.route(request, withClassifier()));
+        assertNotNull(decision);
+        assertTrue(decision.classifierMs() != null && decision.classifierMs() >= 80,
+                () -> "classifierMs=" + decision.classifierMs());
+        assertEquals(decision.classifierMs().longValue(),
+                decision.toJson(decision.primary(), false).get("classifierMs").getAsLong());
     }
 
     @Test
@@ -161,6 +183,7 @@ class RouterClassifierTest extends UnitTest {
                 () -> RouterClassifier.classify("yes please", TaskClass.REASONING, 0, withClassifier()));
         assertEquals(TaskClass.REASONING, c.taskClass());
         assertTrue(requests.isEmpty(), "a bare acknowledgement must not cost a model call");
+        assertNull(c.classifierMs());
     }
 
     @Test
@@ -169,6 +192,7 @@ class RouterClassifierTest extends UnitTest {
                 () -> RouterClassifier.classify(PROMPT, null, 0, withoutClassifier()));
         assertEquals(TaskClass.AGENTIC, c.taskClass());
         assertTrue(requests.isEmpty());
+        assertNull(c.classifierMs());
     }
 
     @Test
@@ -198,13 +222,23 @@ class RouterClassifierTest extends UnitTest {
         return body.toString();
     }
 
-    /** Records each outgoing request body, then answers with the canned response. */
     private OkHttpClient canned(int code, String body) {
+        return canned(code, body, 0);
+    }
+
+    /** Records each outgoing request body, then answers with the canned response after {@code delayMs}. */
+    private OkHttpClient canned(int code, String body, long delayMs) {
         Interceptor canned = chain -> {
             var request = chain.request();
             var sink = new Buffer();
             if (request.body() != null) request.body().writeTo(sink);
             requests.add(sink.readUtf8());
+            try {
+                Thread.sleep(delayMs);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new InterruptedIOException();
+            }
             return new Response.Builder()
                     .request(request)
                     .protocol(Protocol.HTTP_1_1)

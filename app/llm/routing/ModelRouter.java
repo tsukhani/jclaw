@@ -89,7 +89,8 @@ public final class ModelRouter {
         if (!policy.available()) return null;
         var classification = RouterClassifier.classify(
                 request.userMessage(), request.priorClass(), request.priorToolCalls(), policy);
-        return select(policy, classification.taskClass(), classification.effort(), classification.signals(), request);
+        return select(policy, classification.taskClass(), classification.effort(), classification.signals(),
+                classification.classifierMs(), request);
     }
 
     /**
@@ -105,7 +106,7 @@ public final class ModelRouter {
         if (!policy.available()) return null;
         var request = new RouteRequest("", null, null, 0, 0, false, false, false);
         var decision = select(policy, TaskClass.CHAT, TaskClass.CHAT.defaultEffort(),
-                List.of("call outside a chat turn"), request);
+                List.of("call outside a chat turn"), null, request);
         return decision != null ? decision.primary() : null;
     }
 
@@ -158,7 +159,8 @@ public final class ModelRouter {
     }
 
     private static @Nullable RouteDecision select(RouterPolicy policy, TaskClass taskClass, ReasoningEffort effort,
-                                                  List<String> signals, RouteRequest request) {
+                                                  List<String> signals, @Nullable Long classifierMs,
+                                                  RouteRequest request) {
         var skipped = new ArrayList<String>();
         var own = resolve(policy.candidates(taskClass), skipped);
         var chat = resolve(policy.candidates(TaskClass.CHAT), new ArrayList<>());
@@ -187,7 +189,7 @@ public final class ModelRouter {
                 .map(Choice::target)
                 .orElse(null);
         return new RouteDecision(taskClass, effort, primary.target(), fallback, signals,
-                List.copyOf(new LinkedHashSet<>(skipped)), eligible.downshifted(), sticky, relaxed);
+                List.copyOf(new LinkedHashSet<>(skipped)), eligible.downshifted(), sticky, relaxed, classifierMs);
     }
 
     /**
