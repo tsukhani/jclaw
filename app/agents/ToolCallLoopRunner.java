@@ -11,7 +11,10 @@ import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import tools.SubagentYieldTool;
+import utils.ChannelOriginTrust;
+import utils.ErrorRendering;
 import utils.LatencyTrace;
+import utils.LlmErrorTemplates;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -72,6 +75,8 @@ public final class ToolCallLoopRunner {
     /** Passthrough-outcome tag for the audio/image structured logs (AudioRetryStrategy / ImageRetryStrategy). */
     private static final String OUTCOME_ERROR = "error";
     private static final String NO_MODEL_CONFIGURED = "agent has no model configured";
+    private static final String PROVIDER_ERROR_REPLY =
+            "I'm sorry, I encountered an error communicating with the AI provider. Please try again.";
 
     /**
      * The tool names this turn actually put in front of the model, for the dispatch
@@ -147,6 +152,7 @@ public final class ToolCallLoopRunner {
         var supportsAudioInitially = modelInfoForOutcome != null && modelInfoForOutcome.supportsAudio();
         var audioState = new AudioRetryState(!supportsAudioInitially && !audioBearers.isEmpty());
         var visionState = new VisionRetryState(); // JCLAW-216: single-shot image-format-rejection retry
+        var overflow = new ContextWindowManager.OverflowBudget();
 
         for (int round = 0; round < AgentRunner.maxToolRounds(); round++) {
             // JCLAW-291: cooperative-cancel checkpoint at the top of each
@@ -156,7 +162,8 @@ public final class ToolCallLoopRunner {
             AgentRunner.checkSubagentCancel(conversation);
             AgentRunner.checkTaskRunCancel(taskRunId);  // JCLAW-414: task-fire cancel
             var attempt = invokeOneRound(agent, conversation, primary, fallback, effectiveModelId, thinkingMode,
-                    currentMessages, tools, audioBearers, imageBearers, audioState, visionState, supportsAudioInitially);
+                    currentMessages, tools, audioBearers, imageBearers, audioState, visionState, supportsAudioInitially,
+                    overflow);
             if (attempt.retry()) {
                 currentMessages = attempt.retryMessages();
                 round--;  // re-issue this round with the rewritten messages (gated by audio/vision retryAttempted)
@@ -234,19 +241,19 @@ public final class ToolCallLoopRunner {
                                                 List<VisionAudioAssembler.AudioBearer> audioBearers,
                                                 List<VisionAudioAssembler.ImageBearer> imageBearers,
                                                 AudioRetryState audioState, VisionRetryState visionState,
-                                                boolean supportsAudioInitially) {
+                                                boolean supportsAudioInitially,
+                                                ContextWindowManager.OverflowBudget overflow) {
         // JCLAW-465: compress tool outputs — including this turn's, appended
         // inside the loop — right before the call. Ephemeral view: the caller's
         // currentMessages keeps the originals for retries, yield detection and
         // the next round's appends.
-        var sendMessages = CompressionPipeline.compress(
-                ToolResultPruner.prune(currentMessages, agent, conversation), agent, conversation);
-        // Recompute per-round so the clamp tracks the growing history.
-        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, sendMessages, tools);
+        var sendMessages = overflow.apply(CompressionPipeline.compress(
+                ToolResultPruner.prune(currentMessages, agent, conversation), agent, conversation),
+                agent, conversation, primary, tools);
         ChatResponse response;
         try {
-            response = LlmProvider.chatStreamedWithFailover(primary, fallback, effectiveModelId, sendMessages, tools,
-                    maxTokens, thinkingMode, conversation.channelType);
+            response = sendRound(agent, conversation, primary, fallback, effectiveModelId, thinkingMode,
+                    sendMessages, tools, overflow);
         } catch (Exception e) {
             var retryOutcome = handleLlmCallException(e, agent, conversation, primary, audioBearers, imageBearers,
                     audioState, visionState, supportsAudioInitially, currentMessages);
@@ -258,6 +265,53 @@ public final class ToolCallLoopRunner {
             return RoundAttempt.terminal(new LoopOutcome("No response received from the AI provider."));
         }
         return RoundAttempt.ok(response);
+    }
+
+    /**
+     * One round's call, failover included. A context-length refusal that still surfaces after the
+     * failover is resent once per turn, trimmed to the turn's overflow budget; a second refusal
+     * propagates.
+     */
+    @SuppressWarnings("java:S107") // the round's call surface plus the turn's overflow budget
+    private static ChatResponse sendRound(Agent agent, Conversation conversation, LlmProvider primary,
+                                          LlmProvider.@Nullable Fallback fallback, String modelId,
+                                          @Nullable String thinkingMode, List<ChatMessage> sendMessages,
+                                          List<ToolDef> tools, ContextWindowManager.OverflowBudget overflow) {
+        // Recompute per-round so the clamp tracks the growing history.
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, sendMessages, tools);
+        try {
+            return LlmProvider.chatStreamedWithFailover(primary, fallback, modelId, sendMessages, tools,
+                    maxTokens, thinkingMode, conversation.channelType);
+        } catch (LlmProvider.LlmException e) {
+            if (ContextWindowManager.contextWindowRefusal(e) == null) throw e;
+            var trimmed = overflow.trimForRetry(sendMessages, agent, conversation, primary, tools);
+            if (trimmed == null) throw e;
+            logOverflowRetry(agent, conversation.channelType, sendMessages, trimmed);
+            var retryMaxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, trimmed, tools);
+            return LlmProvider.chatStreamedWithFailover(primary, fallback, modelId, trimmed, tools,
+                    retryMaxTokens, thinkingMode, conversation.channelType);
+        }
+    }
+
+    private static void logOverflowRetry(Agent agent, @Nullable String channel, List<ChatMessage> refused,
+                                         List<ChatMessage> trimmed) {
+        EventLogger.warn("llm", agent.name, channel,
+                "The provider refused the request as longer than the context window; resending it once with %d of %d messages"
+                        .formatted(trimmed.size(), refused.size()));
+    }
+
+    /**
+     * The reply that ends a turn whose call failed. A context-window refusal shows the operator its
+     * template; a channel reader keeps the generic reply, since the template names the provider and
+     * the model (see {@link utils.ChannelErrorTemplates}).
+     */
+    private static String providerErrorReply(Exception e, Conversation conversation) {
+        var refusal = ContextWindowManager.contextWindowRefusal(e);
+        var channel = conversation.channelType;
+        if (refusal == null || (channel != null && !ChannelOriginTrust.isOperatorOrigin(channel))) {
+            return PROVIDER_ERROR_REPLY;
+        }
+        return ErrorRendering.RICH.render(LlmErrorTemplates.forFailure(refusal.failure()));
     }
 
     /**
@@ -346,8 +400,7 @@ public final class ToolCallLoopRunner {
             ImageRetryStrategy.logImagePassthroughOutcome(agent, conversation, primary, OUTCOME_ERROR,
                     AudioRetryStrategy.shortErrorTag(e));
         }
-        return LlmCallExceptionOutcome.terminal(new LoopOutcome(
-                "I'm sorry, I encountered an error communicating with the AI provider. Please try again."));
+        return LlmCallExceptionOutcome.terminal(new LoopOutcome(providerErrorReply(e, conversation)));
     }
 
     /**
@@ -560,7 +613,8 @@ public final class ToolCallLoopRunner {
      *
      * <p>{@code collectedImages} is the JCLAW-104 turn-scope image accumulator —
      * the SAME list threads through every recursion level so images captured in an
-     * early round still reach the final {@code buildImagePrefix} call.
+     * early round still reach the final {@code buildImagePrefix} call. {@code overflow}
+     * is turn-scoped the same way, shared with round 1.
      */
     // Visible (public) for ToolCallLoopRunnerStreamingTest in the default package
     public record StreamingTurnContext(Agent agent, Conversation conversation,
@@ -570,7 +624,22 @@ public final class ToolCallLoopRunner {
                                        AgentRunner.StreamingCallbacks cb, @Nullable String thinkingMode,
                                        AtomicBoolean isCancelled, LatencyTrace trace,
                                        LlmProvider.TurnUsage turnUsage, List<String> collectedImages,
-                                       @Nullable String channelType, AgentExecutionSink sink) {}
+                                       @Nullable String channelType, AgentExecutionSink sink,
+                                       ContextWindowManager.OverflowBudget overflow) {
+
+        /** A context for a turn with no overflow budget yet. */
+        @SuppressWarnings("java:S107") // the record's components less the budget
+        public StreamingTurnContext(Agent agent, Conversation conversation, @Nullable Long conversationId,
+                                    @Nullable List<ToolDef> tools, LlmProvider provider,
+                                    LlmProvider.@Nullable Fallback fallback,
+                                    AgentRunner.StreamingCallbacks cb, @Nullable String thinkingMode,
+                                    AtomicBoolean isCancelled, LatencyTrace trace,
+                                    LlmProvider.TurnUsage turnUsage, List<String> collectedImages,
+                                    @Nullable String channelType, AgentExecutionSink sink) {
+            this(agent, conversation, conversationId, tools, provider, fallback, cb, thinkingMode, isCancelled,
+                    trace, turnUsage, collectedImages, channelType, sink, new ContextWindowManager.OverflowBudget());
+        }
+    }
 
     static String handleToolCallsStreaming(StreamingTurnContext ctx, List<ChatMessage> messages,
                                            List<ToolCall> toolCalls, String priorContent, int round) {
@@ -624,8 +693,9 @@ public final class ToolCallLoopRunner {
                 ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
         // JCLAW-465: compress tool outputs (incl. this turn's) before the
         // continuation call. Ephemeral — currentMessages keeps the originals.
-        var sendMessages = CompressionPipeline.compress(
-                ToolResultPruner.prune(currentMessages, ctx.agent(), ctx.conversation()), ctx.agent(), ctx.conversation());
+        var sendMessages = ctx.overflow().apply(CompressionPipeline.compress(
+                ToolResultPruner.prune(currentMessages, ctx.agent(), ctx.conversation()), ctx.agent(), ctx.conversation()),
+                ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools());
         // Recompute max_tokens against the grown message list so the clamp
         // tightens as the tool loop accumulates history.
         var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(), sendMessages, ctx.tools());
@@ -644,6 +714,22 @@ public final class ToolCallLoopRunner {
         }
 
         if (ctx.isCancelled().get()) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
+
+        // Only a length refusal is surfaced here; any other failed continuation falls through to the
+        // empty-continuation retries below.
+        if (refusedForLength(accumulator) != null) {
+            try {
+                var recovered = recoverOverflowedStream(ctx, sendMessages, accumulator);
+                if (recovered == null) return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
+                var refusal = refusedForLength(recovered);
+                // Thrown, so the turn ends through onError and each transport renders it for its own reader.
+                if (refusal != null) throw refusal;
+                accumulator = recovered;
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+                return CancellationManager.cancelledReturn(priorContent, ctx.collectedImages(), ctx.channelType(), ctx.cb(), ctx.agent(), round);
+            }
+        }
 
         // Fold this round's usage into the turn-level cumulative (JCLAW-76).
         // Runs regardless of whether the round resolves to more tool calls,
@@ -676,6 +762,59 @@ public final class ToolCallLoopRunner {
         return MessageDeduplicator.buildImagePrefix(ctx.collectedImages(), accumulator.content())
                 + accumulator.content()
                 + MessageDeduplicator.buildDownloadSuffix(ctx.collectedImages(), accumulator.content(), ctx.channelType());
+    }
+
+    /**
+     * The context-length refusal that ended {@code acc} before it produced any output, else null.
+     * Once output has reached the reader, a resend would repeat it.
+     */
+    static LlmProvider.@Nullable LlmException refusedForLength(LlmProvider.StreamAccumulator acc) {
+        if (!acc.content().isEmpty() || !acc.toolCalls().isEmpty() || acc.reasoningChars() > 0) return null;
+        return ContextWindowManager.contextWindowRefusal(acc.error());
+    }
+
+    /**
+     * Recovery for a stream {@link #refusedForLength}: the same list on the fallback when the
+     * primary refused it, since the fallback's window may be larger, then the list trimmed to the
+     * turn's overflow budget, once per turn, through the normal path. The streamed failover covers
+     * only an open breaker, so the fallback is asked here. Returns the last attempt, which may be
+     * refused still, or null when the turn was canceled while waiting.
+     */
+    static LlmProvider.@Nullable StreamAccumulator recoverOverflowedStream(StreamingTurnContext ctx,
+                                                                         List<ChatMessage> sent,
+                                                                         LlmProvider.StreamAccumulator refused)
+            throws InterruptedException {
+        var refusal = refusedForLength(refused);
+        if (refusal == null) return refused;
+        var attempt = refused;
+        var fallback = ctx.fallback();
+        var failure = refusal.failure();
+        if (fallback != null && fallback.coversFor(ctx.provider()) && failure != null
+                && failure.provider().equals(ctx.provider().config().name())) {
+            EventLogger.warn("llm", ctx.agent().name, ctx.channelType(),
+                    "Failing over from %s to %s / %s: the request is longer than the context window"
+                            .formatted(failure.provider(), fallback.provider().config().name(), fallback.modelId()));
+            var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(),
+                    sent, ctx.tools());
+            attempt = fallback.provider().chatStreamAccumulate(fallback.modelId(), sent, ctx.tools(),
+                    ctx.cb().onToken(), ctx.cb().onReasoning(), maxTokens, ctx.thinkingMode(), ctx.channelType());
+            if (!CancellationManager.awaitAccumulatorOrCancel(attempt, ctx.isCancelled(), ctx.agent(),
+                    ctx.channelType(), ctx.cb())) return null;
+            if (refusedForLength(attempt) == null) return attempt;
+        }
+        var trimmed = ctx.overflow().trimForRetry(sent, ctx.agent(), ctx.conversation(), ctx.provider(), ctx.tools());
+        if (trimmed == null) return attempt;
+        logOverflowRetry(ctx.agent(), ctx.channelType(), sent, trimmed);
+        var modelId = Objects.requireNonNull(
+                ModelResolver.effectiveModelId(ctx.agent(), ctx.conversation()), NO_MODEL_CONFIGURED);
+        var maxTokens = ContextWindowManager.effectiveMaxTokens(ctx.agent(), ctx.conversation(), ctx.provider(),
+                trimmed, ctx.tools());
+        var retry = LlmProvider.chatStreamAccumulateWithFailover(ctx.provider(), fallback, modelId, trimmed,
+                ctx.tools(), ctx.cb().onToken(), ctx.cb().onReasoning(), maxTokens, ctx.thinkingMode(),
+                ctx.channelType());
+        if (!CancellationManager.awaitAccumulatorOrCancel(retry, ctx.isCancelled(), ctx.agent(),
+                ctx.channelType(), ctx.cb())) return null;
+        return retry;
     }
 
     /**

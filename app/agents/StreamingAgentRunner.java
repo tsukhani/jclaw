@@ -375,13 +375,15 @@ final class StreamingAgentRunner {
         // A routed turn fails over by promotion below, which moves the whole turn; the provider-level
         // failover would switch this one call and leave the rest of the turn on the model that refused.
         var routed = RoutedTurn.current(conversation);
+        var roundOneFallback = routed != null ? null : fallback;
+        var overflow = new ContextWindowManager.OverflowBudget();
         // Round-1 stream, with a transient-5xx retry and (JCLAW) an audio-format-rejection →
         // Whisper-transcript re-stream. When the audio fallback fires it rewrites the message to the
         // transcript and returns it, so the tool-call continuation loop below reuses the rewritten
         // (no-longer-audio) messages rather than re-sending the rejected audio.
         var round1 = streamRound1WithAudioFallback(primary, effectiveModelIdForCall, messages, tools, cb,
                 maxTokens, thinkingMode, channelType, isCancelled, agent, conversation, prepared, supportsAudioForStream,
-                routed != null ? null : fallback);
+                roundOneFallback);
         if (round1 == null) return; // canceled mid-stream
         var accumulator = round1.accumulator();
         messages = round1.messages();
@@ -398,10 +400,20 @@ final class StreamingAgentRunner {
             maxTokens = ContextWindowManager.effectiveMaxTokens(agent, conversation, primary, messages, tools);
             modelInfo = ModelResolver.resolveModelInfo(agent, conversation, primary).orElse(null);
             fallback = ModelResolver.fallbackFor(agent, conversation);
+            roundOneFallback = fallback;
             accumulator = streamFirstRoundWithRetry(primary, effectiveModelIdForCall, messages, tools, cb,
                     maxTokens, thinkingMode, channelType, isCancelled, agent, fallback);
             if (accumulator == null) return; // canceled mid-stream
             if (accumulator.error() != null) SubscriptionUsage.noteFailure(accumulator.error());
+        }
+
+        // After a routed turn's promotion, so the next-best model's window is tried before anything is trimmed.
+        if (ToolCallLoopRunner.refusedForLength(accumulator) != null) {
+            var ctx = new ToolCallLoopRunner.StreamingTurnContext(agent, conversation, conversation.id, tools,
+                    primary, roundOneFallback, cb, thinkingMode, isCancelled, trace, turnUsage, new ArrayList<>(),
+                    channelType, sink, overflow);
+            accumulator = ToolCallLoopRunner.recoverOverflowedStream(ctx, messages, accumulator);
+            if (accumulator == null) return; // canceled mid-stream
         }
 
         // The AUDIO_PASSTHROUGH_OUTCOME log already fired inside the helper; here we only surface a
@@ -424,7 +436,7 @@ final class StreamingAgentRunner {
         }
 
         var post = runPostAccumulatorToolLoop(accumulator, agent, conversation, primary, fallback, channelType, messages, tools,
-                cb, thinkingMode, isCancelled, trace, turnUsage, sink);
+                cb, thinkingMode, isCancelled, trace, turnUsage, sink, overflow);
 
         if (CancellationManager.checkCancelled(isCancelled, agent, channelType, cb)) return;
 
@@ -621,7 +633,8 @@ final class StreamingAgentRunner {
                                                                         @Nullable String thinkingMode,
                                                                         AtomicBoolean isCancelled, LatencyTrace trace,
                                                                         LlmProvider.TurnUsage turnUsage,
-                                                                        AgentExecutionSink sink) {
+                                                                        AgentExecutionSink sink,
+                                                                        ContextWindowManager.OverflowBudget overflow) {
         var content = accumulator.content();
 
         // JCLAW-291: detect the empty-toolCalls truncation case — a plain
@@ -640,7 +653,7 @@ final class StreamingAgentRunner {
             // empty continuation would; only when every retry is empty report the cut.
             var ctx = new ToolCallLoopRunner.StreamingTurnContext(
                     agent, conversation, conversation.id, tools, primary, fallback,
-                    cb, thinkingMode, isCancelled, trace, turnUsage, new ArrayList<>(), channelType, sink);
+                    cb, thinkingMode, isCancelled, trace, turnUsage, new ArrayList<>(), channelType, sink, overflow);
             var recovery = ToolCallLoopRunner.recoverEmptyReply(ctx, messages, accumulator);
             if (recovery.cancelled() != null) return new StreamingPostAccumulator(recovery.cancelled(), false);
             if (recovery.content() != null) return new StreamingPostAccumulator(recovery.content(), recovery.truncated());
@@ -657,7 +670,7 @@ final class StreamingAgentRunner {
         if (!accumulator.toolCalls().isEmpty()) {
             var ctx = new ToolCallLoopRunner.StreamingTurnContext(
                     agent, conversation, conversation.id, tools, primary, fallback,
-                    cb, thinkingMode, isCancelled, trace, turnUsage, turnImages, channelType, sink);
+                    cb, thinkingMode, isCancelled, trace, turnUsage, turnImages, channelType, sink, overflow);
             content = ToolCallLoopRunner.handleToolCallsStreaming(
                     ctx, messages, accumulator.toolCalls(), content, 0);
         }

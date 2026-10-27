@@ -11,6 +11,7 @@ import models.MessageRole;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
+import utils.LlmErrorTemplates;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -309,7 +310,7 @@ public final class ContextWindowManager {
         // and the model truncates with finish_reason=length on plain replies.
         // Reservation is capped at half the window so tiny-context models don't
         // get trimmed to nothing.
-        int reservation = Math.min(RESERVED_OUTPUT_TOKENS, contextWindow / 2);
+        int reservation = reservationFor(contextWindow);
         int trimTarget = contextWindow - reservation;
 
         if (estimatedTokens <= trimTarget) return new Trimmed(messages, 0);
@@ -320,7 +321,8 @@ public final class ContextWindowManager {
         // instead of dropping entire history turns. Cheaper and preserves
         // conversational structure — drop-oldest is the fallback below.
         var truncationResult = truncateOversizedToolResults(messages, providerName, modelId, modelMatched,
-                trimTarget, estimatedTokens, agent);
+                trimTarget, estimatedTokens, agent,
+                ConfigService.getInt(TOOL_TRUNCATE_PRESERVE_RECENT_KEY, DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT));
         if (truncationResult != null) {
             if (truncationResult.adjustedEstimate() <= trimTarget) {
                 // Truncating tool results alone got us under the budget.
@@ -355,6 +357,157 @@ public final class ContextWindowManager {
             return new Trimmed(trimmed, dropCount);
         }
         return new Trimmed(messages, 0);
+    }
+
+    private static int reservationFor(int contextWindow) {
+        return Math.min(RESERVED_OUTPUT_TOKENS, contextWindow / 2);
+    }
+
+    // ─── Recovery from a context-length refusal ─────────────────────────────
+
+    /**
+     * Share of the refused request's estimate, capped at the trim target, that the retry aims at.
+     * The prologue already trimmed to that estimate and it said the list fit, so aiming at it
+     * again would drop nothing.
+     */
+    static final double OVERFLOW_RETRY_SHARE = 0.75;
+
+    /**
+     * One turn's answer to a provider refusing a request as longer than its context window: unset
+     * until the first refusal, then the prompt-token budget the retry and every later round of the
+     * turn are trimmed to. Set once, so a turn resends a refused request at most once.
+     */
+    public static final class OverflowBudget {
+        private @Nullable Integer tokens;
+
+        /** {@code messages} trimmed to the budget once a refusal set one, else unchanged. */
+        List<ChatMessage> apply(List<ChatMessage> messages, Agent agent, Conversation conv,
+                                LlmProvider provider, @Nullable List<ToolDef> tools) {
+            var budget = tokens;
+            if (budget == null) return messages;
+            var trimmed = trimToBudget(messages, agent, conv, provider, tools, budget);
+            return trimmed != null ? trimmed : messages;
+        }
+
+        /**
+         * Sets the budget from {@code refused} and returns that list trimmed to it; null when this
+         * turn already spent its retry or nothing could be removed.
+         */
+        @Nullable List<ChatMessage> trimForRetry(List<ChatMessage> refused, Agent agent, Conversation conv,
+                                                 LlmProvider provider, @Nullable List<ToolDef> tools) {
+            if (tokens != null) return null;
+            int budget = overflowBudget(refused, agent, conv, provider, tools);
+            tokens = budget;
+            return trimToBudget(refused, agent, conv, provider, tools, budget);
+        }
+    }
+
+    /** {@code t} when it is a provider's refusal of a request longer than the model's context window, else null. */
+    static LlmProvider.@Nullable LlmException contextWindowRefusal(@Nullable Throwable t) {
+        if (t instanceof LlmProvider.LlmException e && e.failure() instanceof LlmErrorTemplates.Failure f
+                && f.remedy() == LlmErrorTemplates.Remedy.CONTEXT_WINDOW_EXCEEDED) {
+            return e;
+        }
+        return null;
+    }
+
+    /** {@link #OVERFLOW_RETRY_SHARE} of the smaller of {@code refused}'s estimate and the window's trim target. */
+    static int overflowBudget(List<ChatMessage> refused, Agent agent, Conversation conv,
+                              LlmProvider provider, @Nullable List<ToolDef> tools) {
+        int estimate = adjustedPromptTokens(providerNameFor(provider), modelIdFor(agent, conv, provider),
+                estimateProviderPromptTokens(agent, conv, provider, refused, tools));
+        var modelInfo = ModelResolver.resolveModelInfo(agent, conv, provider).orElse(null);
+        int ceiling = modelInfo != null && modelInfo.contextWindow() > 0
+                ? modelInfo.contextWindow() - reservationFor(modelInfo.contextWindow())
+                : estimate;
+        return (int) (Math.min(estimate, ceiling) * OVERFLOW_RETRY_SHARE);
+    }
+
+    /**
+     * {@code messages} cut to {@code budget} estimated tokens: oversized tool results truncated
+     * first, recent ones included, then the oldest messages after the first dropped, each tool call
+     * with its results. The latest user turn — its run of consecutive user messages, the clock block
+     * among them — and the final message or call-and-results group always stay. Null when the list
+     * already fits or nothing could be removed.
+     */
+    static @Nullable List<ChatMessage> trimToBudget(List<ChatMessage> messages, Agent agent, Conversation conv,
+                                                    LlmProvider provider, @Nullable List<ToolDef> tools,
+                                                    int budget) {
+        var modelId = modelIdFor(agent, conv, provider);
+        var providerName = providerNameFor(provider);
+        var rawEstimate = estimateProviderPromptTokens(agent, conv, provider, messages, tools);
+        int estimate = adjustedPromptTokens(providerName, modelId, rawEstimate);
+        if (estimate <= budget) return null;
+        boolean modelMatched = rawEstimate.modelMatched();
+
+        // The result that overflowed the window is usually the newest, so none is preserved here.
+        var truncation = truncateOversizedToolResults(messages, providerName, modelId, modelMatched,
+                budget, estimate, agent, 0);
+        var working = truncation != null ? truncation.messages() : messages;
+        int total = truncation != null ? truncation.adjustedEstimate() : estimate;
+
+        int n = working.size();
+        int finalGroup = finalGroupStart(working);
+        int latestUser = latestUserIndex(working);
+        int userTurnStart = latestUser;
+        while (userTurnStart > 1 && MessageRole.USER.value.equals(working.get(userTurnStart - 1).role())) {
+            userTurnStart--;
+        }
+        var dropped = new boolean[n];
+        int dropCount = 0;
+        int i = 1;
+        while (i < finalGroup && total > budget) {
+            int end = groupEnd(working, i);
+            if (i < userTurnStart || i > latestUser) {
+                for (int j = i; j < end; j++) {
+                    int raw = TokenUsageEstimator.estimateMessage(modelId, working.get(j)).tokens();
+                    total -= adjustedMessageTokens(raw, modelMatched, providerName, modelId);
+                    dropped[j] = true;
+                }
+                dropCount += end - i;
+            }
+            i = end;
+        }
+        if (truncation == null && dropCount == 0) return null;
+        if (dropCount > 0) {
+            EventLogger.warn("llm", agent.name, null,
+                    "Dropped %d message(s) to resend a request the provider refused as too long (budget=%d, estimated=%d, post-trim=%d)"
+                            .formatted(dropCount, budget, estimate, total));
+        }
+        var kept = new ArrayList<ChatMessage>(n - dropCount);
+        for (int j = 0; j < n; j++) {
+            if (!dropped[j]) kept.add(working.get(j));
+        }
+        return kept;
+    }
+
+    /** Index just past the group starting at {@code start}: an assistant tool-call turn owns the results after it. */
+    private static int groupEnd(List<ChatMessage> messages, int start) {
+        int end = start + 1;
+        if (isToolCallTurn(messages.get(start))) {
+            while (end < messages.size() && MessageRole.TOOL.value.equals(messages.get(end).role())) end++;
+        }
+        return end;
+    }
+
+    /** Where the last message's group starts: its tool-call turn when the list ends on tool results. */
+    private static int finalGroupStart(List<ChatMessage> messages) {
+        int last = messages.size() - 1;
+        int start = last;
+        while (start > 0 && MessageRole.TOOL.value.equals(messages.get(start).role())) start--;
+        return start == last || isToolCallTurn(messages.get(start)) ? start : start + 1;
+    }
+
+    private static int latestUserIndex(List<ChatMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            if (MessageRole.USER.value.equals(messages.get(i).role())) return i;
+        }
+        return -1;
+    }
+
+    private static boolean isToolCallTurn(ChatMessage message) {
+        var calls = message.toolCalls();
+        return MessageRole.ASSISTANT.value.equals(message.role()) && calls != null && !calls.isEmpty();
     }
 
     // ─── Tool-result truncation ─────────────────────────────────────────────
@@ -402,21 +555,18 @@ public final class ContextWindowManager {
      * tokenizations to O(n + candidates × avg_message) — meaningful when
      * the prompt is large and there are multiple oversized tool results.
      *
-     * <p>Always preserves tool results in the last
-     * {@link #DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT} messages regardless of
-     * size — recency wins over size for the model's immediate context.
+     * <p>Preserves tool results in the last {@code preserveRecent} messages
+     * regardless of size — recency wins over size for the model's immediate context.
      */
     private record Candidate(int index, int contentLength) {
     }
 
     private static @Nullable TruncationOutcome truncateOversizedToolResults(
             List<ChatMessage> messages, @Nullable String providerName, @Nullable String modelId,
-            boolean modelMatched, int trimTarget, int estimatedTokens, Agent agent) {
+            boolean modelMatched, int trimTarget, int estimatedTokens, Agent agent, int preserveRecent) {
         int minChars = ConfigService.getInt(TOOL_TRUNCATE_MIN_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_MIN_CHARS);
         int keepHead = ConfigService.getInt(TOOL_TRUNCATE_KEEP_HEAD_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_KEEP_HEAD_CHARS);
         int keepTail = ConfigService.getInt(TOOL_TRUNCATE_KEEP_TAIL_CHARS_KEY, DEFAULT_TOOL_TRUNCATE_KEEP_TAIL_CHARS);
-        int preserveRecent = ConfigService.getInt(TOOL_TRUNCATE_PRESERVE_RECENT_KEY,
-                DEFAULT_TOOL_TRUNCATE_PRESERVE_RECENT);
 
         var candidates = collectCandidates(messages, minChars, preserveRecent);
         if (candidates.isEmpty()) return null;
