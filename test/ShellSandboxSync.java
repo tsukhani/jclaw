@@ -15,8 +15,8 @@ import java.util.concurrent.locks.ReentrantLock;
  * assertions passing, because they write inside the workspace the sandbox grants —
  * the flake surfaces only on the tests that reach outside it, and rarely.
  *
- * <p>{@link #acquire()} also clears the key, so each test starts from the shipped
- * {@code false} default rather than inheriting the previous test's tri-state.
+ * <p>{@link #acquire()} also clears the keys, so each test starts from the shipped
+ * {@code false} and {@code allow} defaults rather than inheriting the previous test's tri-state.
  */
 public final class ShellSandboxSync {
 
@@ -29,6 +29,7 @@ public final class ShellSandboxSync {
         LOCK.lock();
         try {
             ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "");
+            ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, "");
         } catch (RuntimeException e) {
             LOCK.unlock();
             throw e;
@@ -44,6 +45,7 @@ public final class ShellSandboxSync {
     public static void release() {
         try {
             ConfigService.set(HarnessSandbox.SHELL_SANDBOX_KEY, "");
+            ConfigService.set(HarnessSandbox.SHELL_NETWORK_KEY, "");
         } finally {
             if (LOCK.isHeldByCurrentThread()) {
                 LOCK.unlock();

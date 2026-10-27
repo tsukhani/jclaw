@@ -81,6 +81,8 @@ A **Service** agent has no `USER.md` or `BOOTSTRAP.md`. Its tab strip shows only
 
 The platform reads these files on every turn when the system prompt is assembled. A 30-second cache holds them, and saving invalidates it at the moment you save. So an edit takes effect on the agent's next turn, without a conversation reset or a restart.
 
+The agent can edit these files itself, so each one is checked for prompt injection before it goes into the prompt. A file that matches a rule, such as an instruction to ignore earlier instructions or a hidden character, is left out. The prompt has one line in its place: `[SOUL.md was withheld from this prompt: it matched the prompt-injection rule "...".]`, with the file's name and the rule. The file stays on disk, and [Alerts](/guide#settings-alerts) tell you about it. Fix or clear the file, and it goes back into the prompt on the next turn.
+
 ### Workspace manager
 
 Below the editor, once the agent has been saved, the **Workspace** panel lists everything on disk under this agent's workspace. That includes whatever the agent has written, not only the five files above:

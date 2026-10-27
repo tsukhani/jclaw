@@ -652,7 +652,7 @@ up an authority it was never granted fails `play autotest` with a `because` clau
 naming the capability.
 
 **Test-only seams** are the mirror image of a capability, and `CapabilityRulesTest`
-holds them too: twelve methods `app/` may never call, enforced by
+holds them too: fourteen methods `app/` may never call, enforced by
 `noAppClassCallsATestOnlySeam`, with `everyScopedValueSeamInAppIsOnTheList` failing the build on a
 `public static *ForTest` method that binds a `ScopedValue` and is not on it. Each binds a `ScopedValue` for the dynamic extent of
 one call — `SsrfGuard.permitOriginForTest` (any http(s) IP-literal origin, so a
@@ -667,8 +667,9 @@ start, the browser tool's and a stealth render's, JCLAW-1288), `EventLogger.capt
 (the events the thread records, which concurrent classes' `clear()` and table wipes cannot reach)
 `EventLogger.captureMatchingForTest` (events any thread records that the caller's predicate
 matches, for a background-thread logger; listener-based, not a `ScopedValue`) and
-`OperatorAlerts.captureMcpAlertsForTest` (the MCP protocol-switch alerts any thread decides, with
-or without a destination set; listener-based too).
+`OperatorAlerts.captureMcpAlertsForTest`, `capturePersonaAlertsForTest` and `captureTaskAlertsForTest`
+(the MCP protocol-switch, withheld persona-file and failed-task alerts any thread decides, with or
+without a destination set; listener-based too).
 A binding reaches everything that runs inside it, which is why production never takes
 one: every URL screened, every request sent, every time read. The rule also asserts
 each named seam still exists, so a rename fails it rather than leaving it guarding
@@ -774,7 +775,9 @@ operator's own web chat):
 
 They are separate on purpose: confining a coding harness is not the same operator decision as
 confining every shell command. Neither key is seeded into the Config DB — an absent key already
-means "off", so both are documented in `conf/application.conf` and left unset.
+means "off", so both are documented in `conf/application.conf` and left unset. A third,
+`shell.sandbox.network` (`allow`, the default, or `deny`), cuts the network of a run `shell.sandbox`
+confines (`--unshare-net`; `(deny network*)`) and never reaches a coding harness, which needs its model's API.
 
 **Both fail closed.** With a key on and no mechanism (native Windows; a host missing
 `sandbox-exec`/`bwrap`), `HarnessSandbox.wrap` throws `SandboxUnavailableException` and the caller

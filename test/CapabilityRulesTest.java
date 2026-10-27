@@ -616,7 +616,8 @@ class CapabilityRulesTest extends UnitTest {
             "utils.AppClock", Set.of("runWith", "callWith"),
             "tools.PlaywrightBrowserTool", Set.of("callWithFailingScreenForTest"),
             "services.EventLogger", Set.of("captureForTest", "captureMatchingForTest"),
-            "services.OperatorAlerts", Set.of("captureMcpAlertsForTest"));
+            "services.OperatorAlerts",
+            Set.of("captureMcpAlertsForTest", "capturePersonaAlertsForTest", "captureTaskAlertsForTest"));
 
     private static final DescribedPredicate<JavaAccess<?>> TEST_SEAM_ACCESS = seamAccess(TEST_SEAMS);
 
