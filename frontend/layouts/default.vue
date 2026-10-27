@@ -690,7 +690,7 @@ const navGroups: NavGroup[] = [
     <!-- Main -->
     <div class="flex-1 flex flex-col min-w-0">
       <!-- Top bar -->
-      <header class="h-14 flex items-center justify-between px-4 bg-surface-elevated border-b border-fg-muted/40 shrink-0">
+      <header class="h-14 max-sm:h-auto max-sm:py-2 flex max-sm:flex-wrap items-center justify-between max-sm:gap-y-2 px-4 bg-surface-elevated border-b border-fg-muted/40 shrink-0">
         <!-- Left: hamburger + breadcrumb -->
         <div class="flex items-center gap-3">
           <button
@@ -705,7 +705,7 @@ const navGroups: NavGroup[] = [
             />
           </button>
           <nav
-            class="text-sm"
+            class="text-sm max-sm:[overflow-wrap:anywhere]"
             aria-label="Breadcrumb"
           >
             <NuxtLink
@@ -734,9 +734,9 @@ const navGroups: NavGroup[] = [
         </div>
 
         <!-- Right: search + theme toggle + GitHub stars -->
-        <div class="flex items-center gap-3 min-w-0">
+        <div class="flex items-center gap-3 min-w-0 max-sm:w-full">
           <button
-            class="w-64 min-w-0 flex items-center justify-between pl-3 pr-2.5 py-1.5
+            class="w-64 max-sm:w-auto max-sm:flex-1 min-w-0 flex items-center justify-between pl-3 pr-2.5 py-1.5
                    bg-transparent border border-fg-muted/40 rounded-lg text-sm
                    text-neutral-600 dark:text-neutral-400
                    hover:border-ring transition-colors cursor-pointer"

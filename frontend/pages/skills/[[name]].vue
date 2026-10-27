@@ -764,7 +764,13 @@ const isMarkdownFile = computed(() => activeFile.value?.endsWith('.md') ?? false
 
 const renderedMarkdown = computed(() => {
   if (!isMarkdownFile.value || !fileContent.value) return ''
-  return DOMPurify.sanitize(marked.parse(fileContent.value) as string)
+  const clean = DOMPurify.sanitize(marked.parse(fileContent.value) as string, { RETURN_DOM_FRAGMENT: true })
+  // A code block wider than the pane scrolls sideways; tabindex lets a keyboard reach that scroll (WCAG 2.1.1).
+  // Set on the sanitized elements: a text edit of the HTML would also match "<pre>" inside an attribute value.
+  for (const pre of clean.querySelectorAll('pre')) pre.setAttribute('tabindex', '0')
+  const holder = document.createElement('div')
+  holder.append(clean)
+  return holder.innerHTML
 })
 
 // The viewer follows the route and the file list; a slow load for the previous skill or file

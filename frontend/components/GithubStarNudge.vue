@@ -42,6 +42,9 @@ function placeAtAnchor() {
   // against that would park the arrow in the top-left corner pointing at
   // nothing, so treat it as "no anchor" and stay hidden.
   if (r.width === 0 && r.height === 0) return false
+  // Below sm the label lands on the page's own controls, and an off-screen pill leaves it pointing at nothing:
+  // keep the one showing for a wider visit.
+  if (window.innerWidth < 640 || r.left < 0 || r.right > window.innerWidth) return false
 
   // Anchoring by `right` rather than `left` means the label can be any width
   // — the container grows leftward and the arrow tip stays put.
