@@ -8,6 +8,7 @@ trees. Nothing here ships in a `play dist` tarball.
 | `diagnostics.mjs` | Build and test failures as one JSON array — see below |
 | `diagnostics.test.mjs` | Its parser tests: `node --test bin/diagnostics.test.mjs` |
 | `coverage-blend.mjs` | SonarQube-style blended coverage from `jacoco.xml` + `lcov.info` |
+| `llms-full.mjs` | Writes the gitignored `docs/user-guide/llms-full.txt`, the guide's `llms.txt` followed by every page it lists: `node bin/llms-full.mjs`. Tested in `frontend/test/llms-txt.test.ts` |
 | `jacocoagent.jar`, `jacococli.jar` | JaCoCo, invoked by the coverage workflow |
 
 ## diagnostics.mjs

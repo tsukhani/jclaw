@@ -33,6 +33,9 @@ certs/*
 .env.local
 .env.*.local
 
+# The whole user guide in one file, built by bin/llms-full.mjs wherever the guide is published.
+docs/user-guide/llms-full.txt
+
 # Play Framework runtime files
 tmp/
 logs/
