@@ -3,6 +3,7 @@ package services.search;
 import models.TaskRunMessage;
 
 import java.io.IOException;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -108,6 +109,15 @@ public interface MessageSearchRepository {
      * from rank position.
      */
     default List<ScoredId> searchMemoryIds(String agentId, String query, int limit) throws IOException {
+        return searchMemoryIds(agentId, query, limit, List.of());
+    }
+
+    /**
+     * As {@link #searchMemoryIds(String, String, int)}, never matching an id in {@code excludeIds}
+     * (JF-147): excluded before ranking, so {@code limit} fills with the rest.
+     */
+    default List<ScoredId> searchMemoryIds(String agentId, String query, int limit, Collection<Long> excludeIds)
+            throws IOException {
         return List.of();
     }
 

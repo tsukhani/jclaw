@@ -13,6 +13,7 @@ import memory.MemoryStoreFactory;
 import models.Agent;
 import models.Conversation;
 import models.Memory;
+import models.MemoryScope;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 import services.AgentService;
@@ -483,7 +484,8 @@ public class SystemPromptAssembler {
         // 11. Recalled memories — per-turn-variable, placed past the cache
         // boundary so updating it never invalidates the cacheable prefix.
         b.startSection("Relevant Memories");
-        boolean recalledFromOthers = appendMemories(b.sb, agent, userMessage, coreMemoryIds, queryEmbedding);
+        boolean recalledFromOthers = appendMemories(b.sb, agent, userMessage, coreMemoryIds, queryEmbedding,
+                MemoryScope.of(conversation));
         // JF-136: a memory resting on someone else's words reaches the model as surely as a page a tool fetched.
         if (conversation != null && conversation.id != null && (coreBlock.fromOthers() || recalledFromOthers)) {
             ConversationService.markReadOutsideContent(conversation.id);
@@ -930,16 +932,18 @@ public class SystemPromptAssembler {
 
     /**
      * As the three-arg form, with the query embedding already computed OUTSIDE the caller's
-     * transaction (JCLAW-960). {@code null} leaves the store to embed inline.
+     * transaction (JCLAW-960). {@code null} leaves the store to embed inline. Both forms recall
+     * as a read with no chat behind it, so no guest's memory is in the result (JF-147).
      */
     public static RecallResult recall(String agentId, String query, Set<String> excludeIds,
                                       float @Nullable [] queryEmbedding) {
-        return recall(agentId, query, excludeIds, queryEmbedding, 0);
+        return recall(agentId, query, excludeIds, queryEmbedding, 0, MemoryScope.NONE);
     }
 
     /**
      * As the four-arg form, with {@code limitOverride} replacing {@code memory.recall.limit}
-     * for this call (JCLAW-969). Zero or negative means "use the configured limit".
+     * for this call (JCLAW-969), over the memories visible in {@code scope} (JF-147). Zero or
+     * negative means "use the configured limit".
      *
      * <p>Exists so an agent asking {@code memory} for more results can actually get
      * them: the tool used to apply its {@code limit} as a {@code stream().limit(n)} AFTER
@@ -948,24 +952,25 @@ public class SystemPromptAssembler {
      * caller that has already decided on a number is entitled to it.
      */
     public static RecallResult recall(String agentId, String query, Set<String> excludeIds,
-                                      float @Nullable [] queryEmbedding, int limitOverride) {
+                                      float @Nullable [] queryEmbedding, int limitOverride, MemoryScope scope) {
         long startNs = System.nanoTime();
         try {
-            return recallTimed(agentId, query, excludeIds, queryEmbedding, limitOverride);
+            return recallTimed(agentId, query, excludeIds, queryEmbedding, limitOverride, scope);
         } finally {
             LatencyTrace.recordMemoryRecall((System.nanoTime() - startNs) / 1_000_000L);
         }
     }
 
     private static RecallResult recallTimed(String agentId, String query, Set<String> excludeIds,
-                                            float @Nullable [] queryEmbedding, int limitOverride) {
+                                            float @Nullable [] queryEmbedding, int limitOverride,
+                                            MemoryScope scope) {
         int recallLimit = limitOverride > 0
                 ? limitOverride
                 : ConfigService.getInt("memory.recall.limit", 10);
         // Over-fetch so core-memory exclusion and the importance re-rank still
         // yield a full set.
         // Partition on the immutable agent id, not the mutable name (JCLAW-531).
-        var hits = MemoryStoreFactory.get().search(agentId, query, recallLimit * 2, queryEmbedding);
+        var hits = MemoryStoreFactory.get().search(agentId, query, recallLimit * 2, queryEmbedding, scope);
 
         double relWeight = ConfigService.getDouble("memory.recall.relevanceWeight", 0.7);
         double impWeight = ConfigService.getDouble("memory.recall.importanceWeight", 0.3);
@@ -1022,12 +1027,13 @@ public class SystemPromptAssembler {
      * Fails closed: once any recalled text is in the prompt, a failure counts as such a memory.
      */
     private static boolean appendMemories(StringBuilder sb, Agent agent, @Nullable String userMessage,
-                                          Set<String> excludeIds, float @Nullable [] queryEmbedding) {
+                                          Set<String> excludeIds, float @Nullable [] queryEmbedding,
+                                          MemoryScope scope) {
         if (userMessage == null || userMessage.isBlank()) return false;
 
         boolean appended = false;
         try {
-            var top = recall(String.valueOf(agent.id), userMessage, excludeIds, queryEmbedding).selected();
+            var top = recall(String.valueOf(agent.id), userMessage, excludeIds, queryEmbedding, 0, scope).selected();
             if (top.isEmpty()) return false;
             var ids = top.stream().map(e -> Long.valueOf(e.id())).toList();
             boolean fromOthers = Memory.countFromOthersAmong(ids) > 0;

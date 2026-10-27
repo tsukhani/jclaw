@@ -1,8 +1,10 @@
 package memory;
 
+import models.MemoryScope;
 import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -134,6 +136,17 @@ public interface MemoryStore {
     }
 
     /**
+     * As {@link #search(String, String, int, float[])}, over the memories visible in {@code scope}
+     * (JF-147). Filtered inside the search, so {@code limit} still fills. A backend that records no
+     * guest provenance has nothing to filter. The search, neighbor and match forms that take no
+     * scope read as {@link MemoryScope#NONE}.
+     */
+    default List<MemoryEntry> search(String agentId, String query, int limit, float @Nullable [] queryEmbedding,
+            MemoryScope scope) {
+        return search(agentId, query, limit, queryEmbedding);
+    }
+
+    /**
      * JCLAW-922: ids of the agent's memories whose embedding is at least
      * {@code minCosine} similar to {@code text} — the semantic leg of capture-time
      * dedup, catching a restatement that shares no wording with what it restates.
@@ -154,6 +167,24 @@ public interface MemoryStore {
     }
 
     /**
+     * As {@link #semanticNeighbors(String, String, String, int, double)}, over the memories visible in
+     * {@code scope}; null reads every row.
+     */
+    default List<Long> semanticNeighbors(String agentId, String text, @Nullable String retrievalKey,
+            int limit, double minCosine, @Nullable MemoryScope scope) {
+        return semanticNeighbors(agentId, text, retrievalKey, limit, minCosine);
+    }
+
+    /**
+     * As the scoped form, with {@code Memory.guestIdsOutside} for {@code scope} already loaded by a
+     * caller that looks up many candidates in one pass.
+     */
+    default List<Long> semanticNeighbors(String agentId, String text, @Nullable String retrievalKey,
+            int limit, double minCosine, MemoryScope scope, Collection<Long> hiddenGuestIds) {
+        return semanticNeighbors(agentId, text, retrievalKey, limit, minCosine, scope);
+    }
+
+    /**
      * Memories within {@code minCosine} of {@code query}, embedded as a <em>query</em> —
      * prefix included, no retrieval key — rather than as a statement (JCLAW-942).
      *
@@ -166,6 +197,15 @@ public interface MemoryStore {
      */
     default List<Long> semanticMatchesForQuery(String agentId, String query, int limit, double minCosine) {
         return List.of();
+    }
+
+    /**
+     * As {@link #semanticMatchesForQuery(String, String, int, double)}, over the memories visible in
+     * {@code scope}; null reads every row, which only an operator's forget may.
+     */
+    default List<Long> semanticMatchesForQuery(String agentId, String query, int limit, double minCosine,
+            @Nullable MemoryScope scope) {
+        return semanticMatchesForQuery(agentId, query, limit, minCosine);
     }
 
     /**

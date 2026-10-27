@@ -241,6 +241,96 @@ class MemoryProvenanceTest extends UnitTest {
         assertEquals(0, dependents(List.of(a, d1, d2)), "no verification or derivation row may outlive its memory");
     }
 
+    // ─── JF-147: the chat a memory came from ─────────────────────────────────
+
+    private static MemoryProvenance guestIn(Long conversationId) {
+        return new MemoryProvenance(conversationId, null, MemoryProvenance.guest("whatsapp"),
+                MemoryAuthorType.GUEST_TURN, List.of());
+    }
+
+    private List<String> recalled(String query, models.MemoryScope scope) {
+        return agents.SystemPromptAssembler.recall(aid(), query, java.util.Set.of(), null, 10, scope).selected()
+                .stream().map(memory.MemoryStore.MemoryEntry::text).toList();
+    }
+
+    @Test
+    void aWriteFromAChatRecordsItsChannelAndPeerWhoeverWroteIt() {
+        var conv = ConversationService.create(agent, "telegram", "-100555");
+
+        var operators = row(storeWith("The user lives in Porto", MemoryProvenance.extractor("m1").withSource(conv.id, null)));
+        var guests = row(storeWith("The user rents a kayak", guestIn(conv.id)));
+        var unsourced = row(storeWith("The nightly build is green", MemoryProvenance.extractor("m1")));
+
+        assertEquals(List.of("telegram", "-100555"), List.of(operators.sourceChannel, operators.sourcePeer));
+        assertEquals(List.of("telegram", "-100555"), List.of(guests.sourceChannel, guests.sourcePeer));
+        assertNull(unsourced.sourceChannel);
+        assertNull(unsourced.sourcePeer);
+    }
+
+    /** A guest row as a store written before JF-147 holds it: its chat named, its channel and peer not. */
+    private Long preScopeGuestRow(String text, Long conversationId) {
+        var id = Long.parseLong(storeWith(text, guestIn(conversationId)));
+        play.db.jpa.JPA.em().createQuery("UPDATE Memory m SET m.sourceChannel = NULL, m.sourcePeer = NULL WHERE m.id = :id")
+                .setParameter("id", id).executeUpdate();
+        play.db.jpa.JPA.em().clear();
+        return id;
+    }
+
+    @Test
+    void anOldGuestRowIsBackfilledThenRecalledForItsPeerOnly() {
+        var a = ConversationService.create(agent, "whatsapp", "60111");
+        var b = ConversationService.create(agent, "whatsapp", "60222");
+        var id = preScopeGuestRow("The guest keeps a kayak by the lake", a.id);
+        assertEquals(List.of(), recalled("kayak", models.MemoryScope.of(a)), "precondition: visible nowhere unfilled");
+
+        assertEquals(1, Memory.backfillGuestScope());
+
+        Memory filled = Memory.findById(id);
+        assertEquals(List.of("whatsapp", "60111"), List.of(filled.sourceChannel, filled.sourcePeer));
+        assertEquals(List.of("The guest keeps a kayak by the lake"), recalled("kayak", models.MemoryScope.of(a)));
+        assertEquals(List.of(), recalled("kayak", models.MemoryScope.of(b)));
+        assertEquals(List.of(), recalled("kayak", models.MemoryScope.NONE));
+    }
+
+    @Test
+    void aSecondBackfillChangesNothing() {
+        var a = ConversationService.create(agent, "whatsapp", "60111");
+        var id = preScopeGuestRow("The guest keeps a kayak by the lake", a.id);
+        assertEquals(1, Memory.backfillGuestScope());
+        Memory once = Memory.findById(id);
+        var after = List.of(once.sourceChannel, once.sourcePeer, String.valueOf(once.updatedAt));
+
+        assertEquals(0, Memory.backfillGuestScope());
+
+        Memory twice = Memory.findById(id);
+        assertEquals(after, List.of(twice.sourceChannel, twice.sourcePeer, String.valueOf(twice.updatedAt)));
+    }
+
+    @Test
+    void anOrphanGuestRowIsRecalledNowhereAndNeverLoadedAsCore() {
+        var gone = ConversationService.create(agent, "whatsapp", "60111");
+        var orphaned = preScopeGuestRow("The guest keeps a kayak by the lake", gone.id);
+        var unsourced = Long.parseLong(MemoryStoreFactory.get().storeDeferred(aid(), "The guest rents a kayak shed",
+                "core", 0.95, null, guestIn(null)));
+        var em = play.db.jpa.JPA.em();
+        em.createQuery("UPDATE Memory m SET m.category = 'core', m.importance = 0.95 WHERE m.id = :id")
+                .setParameter("id", orphaned).executeUpdate();
+        em.createQuery("DELETE FROM Conversation c WHERE c.id = :id").setParameter("id", gone.id).executeUpdate();
+        em.clear();
+
+        assertEquals(0, Memory.backfillGuestScope(), "a row whose chat is gone has nothing to be filled from");
+
+        // The same peer's next chat, a chat with no peer, and no chat at all.
+        for (var scope : List.of(models.MemoryScope.of(gone), new models.MemoryScope("whatsapp", null),
+                models.MemoryScope.NONE)) {
+            assertEquals(List.of(), recalled("kayak", scope), scope::toString);
+        }
+        assertEquals(List.of(), Memory.findCore(aid(), 0.0, 10));
+        assertEquals(java.util.Set.of(orphaned, unsourced),
+                Memory.findByAgent(aid()).stream().map(m -> m.id).collect(java.util.stream.Collectors.toSet()),
+                "both rows are still stored and listed");
+    }
+
     @Test
     void aConversationWithNoUserMessageHasNoSourceMessage() {
         var conv = ConversationService.create(agent, "web", "u-provenance-empty");

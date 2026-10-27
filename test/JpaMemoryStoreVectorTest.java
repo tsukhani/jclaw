@@ -352,4 +352,83 @@ class JpaMemoryStoreVectorTest extends UnitTest {
             services.ConfigService.delete(JpaMemoryStore.KEY_RECALL_MIN_COSINE);
         }
     }
+
+    // --- JF-147: another customer's memories are excluded before ranking ---
+
+    private static final int FILL = 3;
+
+    /**
+     * {@code FILL + 1} of one customer's memories that outrank {@code FILL} visible ones on every
+     * leg — more of the query's words, nearer vectors, lower ids — then a search for another
+     * customer's chat, returning the texts it recalled and the texts it should have.
+     */
+    private java.util.List<java.util.Set<String>> fillCase(MemoryStore searched, String agentName, String query) {
+        var agent = agentId(agentName);
+        var owner = (models.Agent) models.Agent.findById(Long.valueOf(agent));
+        var first = services.ConversationService.create(owner, "whatsapp", "60111");
+        var other = services.ConversationService.create(owner, "whatsapp", "60222");
+        var vectors = new java.util.HashMap<String, float[]>();
+        vectors.put(query, new float[] {1f, 0f, 0f, 0f});
+        for (int i = 0; i <= FILL; i++) {
+            var text = "widget gadget sprocket order %d from the first customer".formatted(i);
+            vectors.put(text, new float[] {1f, 0.01f * i, 0f, 0f});
+        }
+        var visible = new java.util.HashSet<String>();
+        for (int i = 0; i < FILL; i++) {
+            var text = "widget order %d the shop knows".formatted(i);
+            vectors.put(text, new float[] {0.8f, 0.6f, 0f, 0f});
+            visible.add(text);
+        }
+        JpaMemoryStore.setEmbedderForTest(vectors::get);
+        for (int i = 0; i <= FILL; i++) {
+            var id = searched.storeDeferred(agent, "widget gadget sprocket order %d from the first customer".formatted(i),
+                    "fact", 0.6, null, new memory.MemoryProvenance(first.id, null, memory.MemoryProvenance.guest("whatsapp"),
+                            models.MemoryAuthorType.GUEST_TURN, java.util.List.of()));
+            searched.embedStored(id);
+        }
+        for (var text : visible) searched.store(agent, text, "fact", 0.6);
+
+        var hits = searched.search(agent, query, FILL, null, models.MemoryScope.of(other));
+        return java.util.List.of(hits.stream().map(MemoryStore.MemoryEntry::text)
+                .collect(java.util.stream.Collectors.toSet()), visible);
+    }
+
+    @Test
+    void bothLuceneLegsFillTheLimitPastAnotherCustomersCloserMemories() {
+        services.search.MessageSearchTestHooks.setRepository(
+                new services.search.DirectLuceneMessageSearchRepository());
+        try {
+            var outcome = fillCase(store, "vec-guest-fill-lucene", "widget gadget sprocket");
+            assertEquals(outcome.get(1), outcome.get(0));
+        } finally {
+            services.search.MessageSearchTestHooks.setRepository(null);
+        }
+    }
+
+    @Test
+    void theKeywordLegAloneFillsTheLimitPastAnotherCustomersBetterMatches() {
+        services.search.MessageSearchTestHooks.setRepository(
+                new services.search.DirectLuceneMessageSearchRepository());
+        try {
+            var outcome = fillCase(new JpaMemoryStore(false, false), "vec-guest-fill-keyword", "widget gadget sprocket");
+            assertEquals(outcome.get(1), outcome.get(0));
+        } finally {
+            services.search.MessageSearchTestHooks.setRepository(null);
+        }
+    }
+
+    @Test
+    void theVectorLegAloneFillsTheLimitPastAnotherCustomersNearerMemories() {
+        // No stored text shares a word with the query, so the keyword leg returns nothing.
+        var outcome = fillCase(store, "vec-guest-fill-vector", NONSENSE_QUERY);
+        assertEquals(outcome.get(1), outcome.get(0));
+    }
+
+    @Test
+    void theLikeFallbackFillsTheLimitPastAnotherCustomersEarlierMemories() {
+        // No search backend installed: keyword recall is the substring scan, which reads in id order.
+        services.search.MessageSearchTestHooks.setRepository(null);
+        var outcome = fillCase(new JpaMemoryStore(false, false), "vec-guest-fill-like", "widget");
+        assertEquals(outcome.get(1), outcome.get(0));
+    }
 }

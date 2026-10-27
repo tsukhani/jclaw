@@ -3,6 +3,7 @@ package memory;
 import llm.LlmTypes.ChatMessage;
 import models.Agent;
 import models.Memory;
+import models.MemoryAuthorType;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.Tx;
@@ -143,13 +144,14 @@ public final class MemoryKeyBackfillService {
                 .stream().map(m -> new Row(m.id, m.text, m.retrievalKey)).toList());
     }
 
-    /** Deterministic pass: no model call, so it lands even if the keying pass never runs. */
+    /** Deterministic pass: no model call, so it lands even if the keying pass never runs. Never a guest's row (JF-147). */
     private static void promoteIdentityFacts(List<Row> rows) {
         for (var row : rows) {
             if (!MemoryIdentityClass.isIdentity(row.text())) continue;
             Tx.run(() -> {
                 Memory m = Memory.findById(row.id());
-                if (m == null || MemoryCategory.CORE.label.equals(m.category)) return;
+                if (m == null || MemoryCategory.CORE.label.equals(m.category)
+                        || m.authorType == MemoryAuthorType.GUEST_TURN) return;
                 m.category = MemoryCategory.CORE.label;
                 m.importance = Math.max(m.importance,
                         MemoryCategory.defaultImportanceFor(MemoryCategory.CORE.label));

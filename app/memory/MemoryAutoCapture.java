@@ -12,8 +12,10 @@ import llm.ReplyJson;
 import llm.routing.ModelRouter;
 import models.Agent;
 import models.ChannelType;
+import models.Conversation;
 import models.Memory;
 import models.MemoryAuthorType;
+import models.MemoryScope;
 import models.Message;
 import models.MessageRole;
 import org.jspecify.annotations.Nullable;
@@ -514,8 +516,10 @@ public final class MemoryAutoCapture {
         // fewer memories whenever a batch contained duplicates.
         int maxCandidates = ConfigService.getInt("memory.autocapture.maxCandidates", 25);
         List<Candidate> parsed = dedupeWithinBatch(parseCandidates(raw));
-        // The owner's name lives on USER.md's Name line, never in memory; a guest's turn cannot set it.
+        // The owner's name lives on USER.md's Name line, never in memory; a guest's turn cannot set it,
+        // nor write the core tier, which loads into every chat (JF-147).
         if (provenance.authorType() != MemoryAuthorType.GUEST_TURN) parsed = takeOwnerName(agentName, raw, parsed);
+        else parsed = parsed.stream().map(MemoryAutoCapture::belowCore).toList();
         if (parsed.size() > maxCandidates) {
             EventLogger.warn(EVENT_CATEGORY, agentName, null,
                     "Extractor returned %d candidates; capping at %d".formatted(parsed.size(), maxCandidates));
@@ -602,9 +606,13 @@ public final class MemoryAutoCapture {
             // One turn corroborates a stored row at most once, across both dedup tiers.
             var corroborated = new HashSet<Long>();
             boolean mayCorroborate = provenance.mayCorroborate();
-            var semanticDupes = semanticDuplicateIndices(agentKey, agentName, ranked, corroborated, mayCorroborate);
+            var scope = Tx.run(() -> writeScope(provenance));
+            // Loaded once for every candidate's lookups in both dedup tiers.
+            var hidden = Tx.run(() -> hiddenGuestIds(agentKey, scope));
+            var semanticDupes = semanticDuplicateIndices(agentKey, agentName, ranked, corroborated, mayCorroborate,
+                    scope, hidden);
             var plan = Tx.run(() -> plan(agentKey, ranked, maxPerTurn, dupThreshold, dedupScan, semanticDupes,
-                    corroborated, mayCorroborate));
+                    corroborated, mayCorroborate, scope, hidden));
             if (plan.overflow() > 0) {
                 EventLogger.info(EVENT_CATEGORY, agentName, null,
                         ("Turn yielded more than the %d-memory per-turn cap — %d lower-importance "
@@ -629,6 +637,27 @@ public final class MemoryAutoCapture {
                     ranked.size() - storedIds.size(), null));
         } finally {
             lock.unlock();
+        }
+    }
+
+    private static Candidate belowCore(Candidate c) {
+        return MemoryCategory.CORE.label.equals(c.category())
+                ? new Candidate(c.text(), MemoryCategory.FACT.label, c.importance(), c.retrievalKey())
+                : c;
+    }
+
+    /** What this turn's candidates are compared against: see {@link MemoryScope#forWrite}. Must run inside a transaction. */
+    private static MemoryScope writeScope(MemoryProvenance provenance) {
+        var sourceId = provenance.sourceConversationId();
+        Conversation source = sourceId == null ? null : Conversation.findById(sourceId);
+        return MemoryScope.forWrite(provenance.authorType(), source);
+    }
+
+    private static List<Long> hiddenGuestIds(String agentKey, MemoryScope scope) {
+        try {
+            return Memory.guestIdsOutside(Long.valueOf(agentKey.strip()), scope);
+        } catch (NumberFormatException _) {
+            return List.of();
         }
     }
 
@@ -736,7 +765,8 @@ public final class MemoryAutoCapture {
      */
     private static Set<Integer> semanticDuplicateIndices(String agentKey, String agentName,
                                                          List<Candidate> candidates, Set<Long> corroborated,
-                                                         boolean mayCorroborate) {
+                                                         boolean mayCorroborate, MemoryScope scope,
+                                                         List<Long> hiddenGuestIds) {
         if (!ConfigService.getBoolean("memory.autocapture.dedup.semantic.enabled", true)) return Set.of();
         double minCosine = ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90);
         int limit = ConfigService.getInt("memory.autocapture.dedup.semanticLimit", 5);
@@ -744,7 +774,7 @@ public final class MemoryAutoCapture {
         var out = new HashSet<Integer>();
         for (int i = 0; i < candidates.size(); i++) {
             var matches = store.semanticNeighbors(agentKey, candidates.get(i).text(),
-                    candidates.get(i).retrievalKey(), limit, minCosine);
+                    candidates.get(i).retrievalKey(), limit, minCosine, scope, hiddenGuestIds);
             if (matches.isEmpty()) continue;
             out.add(i);
             if (mayCorroborate && corroborated.add(matches.getFirst())) {
@@ -776,11 +806,14 @@ public final class MemoryAutoCapture {
      * — Lucene FTS or the DB LIKE fallback). Deliberate: {@code MemoryStore.search}
      * would embed the query, and this method runs inside the plan transaction where
      * a blocking HTTP call must never happen.
+     *
+     * <p>Both legs keep to {@code scope} (JF-147), so a turn's candidates meet only the rows it may
+     * dedup against or supersede.
      */
     private static ConsolidationPlan plan(String agentKey, List<Candidate> candidates,
                                           int maxPerTurn, double dupThreshold, int dedupScan,
                                           Set<Integer> semanticDupes, Set<Long> corroborated,
-                                          boolean mayCorroborate) {
+                                          boolean mayCorroborate, MemoryScope scope, List<Long> hiddenGuestIds) {
         double shortlistMin = ConfigService.getDouble("memory.consolidation.shortlist.minJaccard", 0.2);
         int shortlistCap = ConfigService.getInt("memory.consolidation.shortlist.maxPerCandidate", 5);
         // 0.82, not 0.85: swept against a 1248-row store, 0.82 catches 10 restatement
@@ -799,11 +832,11 @@ public final class MemoryAutoCapture {
         int retrievalLimit = ConfigService.getInt("memory.autocapture.dedup.retrievalLimit", 25);
 
         var pool = new LinkedHashMap<Long, Memory>();
-        for (var m : Memory.findByAgent(agentKey, dedupScan)) {
+        for (var m : Memory.findByAgent(agentKey, dedupScan, scope)) {
             pool.put(m.id, m);
         }
         for (var c : candidates) {
-            for (var hit : Memory.searchByTextScored(agentKey, c.text(), retrievalLimit)) {
+            for (var hit : Memory.searchByTextScored(agentKey, c.text(), retrievalLimit, scope, hiddenGuestIds)) {
                 pool.putIfAbsent(hit.memory().id, hit.memory());
             }
         }
@@ -941,6 +974,12 @@ public final class MemoryAutoCapture {
                 }
                 Memory old = Memory.findById(ex.id());
                 if (old == null || old.supersededAt != null) continue;
+                if (guestOverNonGuest(provenance, old)) {
+                    EventLogger.info(EVENT_CATEGORY, agentName, null,
+                            ("Kept memory %d instead of superseding it with %d — a guest's turn never "
+                                    + "replaces a memory that is not a guest's").formatted(ex.id(), newId));
+                    continue;
+                }
                 old.supersede(newId);
                 EventLogger.info(EVENT_CATEGORY, agentName, null,
                         "Memory %d superseded by %d: \"%s\" → \"%s\""
@@ -948,6 +987,11 @@ public final class MemoryAutoCapture {
             }
         }
         return storedIds;
+    }
+
+    /** A guest's view includes the operator's rows; the guest may restate one but never retire it (JF-147). */
+    private static boolean guestOverNonGuest(MemoryProvenance provenance, Memory old) {
+        return provenance.authorType() == MemoryAuthorType.GUEST_TURN && old.authorType != MemoryAuthorType.GUEST_TURN;
     }
 
     /**

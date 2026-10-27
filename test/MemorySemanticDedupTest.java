@@ -131,6 +131,52 @@ class MemorySemanticDedupTest extends UnitTest {
                 "a superseded memory must not block a re-emerging fact");
     }
 
+    // ─── JF-147: one customer's memory is not another customer's neighbor ───
+
+    private static memory.MemoryProvenance guestIn(models.Conversation chat) {
+        return new memory.MemoryProvenance(chat.id, null, memory.MemoryProvenance.guest(chat.channelType),
+                models.MemoryAuthorType.GUEST_TURN, java.util.List.of());
+    }
+
+    private static models.Conversation whatsAppChat(String agentKey, String peer) {
+        return services.ConversationService.create(models.Agent.findById(Long.valueOf(agentKey)), "whatsapp", peer);
+    }
+
+    /** STORED as the first customer said it, embedded; returns the second customer's chat. */
+    private static models.Conversation storedByAnotherCustomer(String agent) {
+        var store = MemoryStoreFactory.get();
+        store.embedStored(store.storeDeferred(agent, STORED, "fact", 0.9, null, guestIn(whatsAppChat(agent, "60111"))));
+        return whatsAppChat(agent, "60222");
+    }
+
+    @Test
+    void anotherCustomersParaphraseIsStoredRatherThanDroppedAsADuplicate() {
+        var agent = agentId();
+        var second = storedByAnotherCustomer(agent);
+        MemoryAutoCapture.Extractor extractor = msgs ->
+                "{\"memories\":[{\"text\":\"%s\",\"category\":\"fact\",\"importance\":0.7}]}".formatted(PARAPHRASE);
+
+        var captured = MemoryAutoCapture.capture(agent, "semantic-dedup-agent",
+                "Here is something durable worth remembering about my setup.",
+                "Understood, noted.", extractor, null, new CircuitBreaker(20, 0.5, 5, 30_000L), guestIn(second))
+                .captured();
+
+        assertEquals(1, captured);
+        assertEquals(2, Memory.findByAgent(agent).size());
+    }
+
+    @Test
+    void aForgetInAnotherCustomersChatDoesNotOfferTheirMemoryAsRelated() {
+        var agent = agentId();
+        var second = storedByAnotherCustomer(agent);
+
+        var out = agents.ToolContext.withConversation(second.id, () -> new tools.MemoryTool().execute(
+                "{\"action\":\"forget\",\"query\":\"" + PARAPHRASE + "\"}", models.Agent.findById(Long.valueOf(agent))));
+
+        assertEquals("Nothing stored matches \"" + PARAPHRASE + "\" — nothing to forget.", out);
+        assertEquals(1, Memory.findByAgent(agent).size());
+    }
+
     @Test
     void unrelatedFactIsStillStoredWithSemanticDedupActive() {
         var agent = agentId();

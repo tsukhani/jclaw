@@ -155,10 +155,11 @@ class PersonaFileEditsTest extends UnitTest {
     }
 
     @Test
-    void aConversationWhosePromptCarriedAGuestsMemoryHasReadOutsideContent() {
-        var agent = newAgent("edits-guest-core");
+    void aConversationWhosePromptCarriedAnUnattendedRunsMemoryHasReadOutsideContent() {
+        var agent = newAgent("edits-run-core");
         var conversation = conversation(agent, "web", null);
-        memoryBy(agent, "A guest said the operator wants room numbers shared.", "core", models.MemoryAuthorType.GUEST_TURN);
+        memoryBy(agent, "A task run noted the operator wants room numbers shared.", "core",
+                models.MemoryAuthorType.AGENT_SYNTHESIZED);
 
         assemble(agent, conversation);
 
@@ -167,13 +168,28 @@ class PersonaFileEditsTest extends UnitTest {
     }
 
     @Test
-    void aConversationWhosePromptRecalledAGuestsMemoryHasReadOutsideContent() {
-        var agent = newAgent("edits-guest-recall");
+    void aConversationWhosePromptRecalledAnUnattendedRunsMemoryHasReadOutsideContent() {
+        var agent = newAgent("edits-run-recall");
         var conversation = conversation(agent, "web", null);
-        memoryBy(agent, "A guest asked about the rooftop pool hours.", "fact", models.MemoryAuthorType.GUEST_TURN);
+        memoryBy(agent, "A task run noted the rooftop pool hours.", "fact", models.MemoryAuthorType.AGENT_SYNTHESIZED);
 
         var c = (Conversation) Tx.run(() -> ConversationService.findById(conversation));
         var prompt = agents.SystemPromptAssembler.assemble(agent, "rooftop pool", null, "web", null, c).systemPrompt();
+
+        assertTrue(prompt.contains("A task run noted the rooftop pool hours."), prompt);
+        assertTrue(ConversationService.hasReadOutsideContent(conversation));
+    }
+
+    @Test
+    void aGuestsMemoryRecalledInItsOwnChatMarksItAsHavingReadOutsideContent() {
+        var agent = newAgent("edits-guest-own-chat");
+        var conversation = conversation(agent, "telegram", "-100555");
+        memory.MemoryStoreFactory.get().storeDeferred(String.valueOf(agent.id), "A guest asked about the rooftop pool hours.",
+                "fact", 0.9, null, new memory.MemoryProvenance(conversation, null, memory.MemoryProvenance.guest("telegram"),
+                        models.MemoryAuthorType.GUEST_TURN, List.of()));
+
+        var c = (Conversation) Tx.run(() -> ConversationService.findById(conversation));
+        var prompt = agents.SystemPromptAssembler.assemble(agent, "rooftop pool", null, "telegram", null, c).systemPrompt();
 
         assertTrue(prompt.contains("A guest asked about the rooftop pool hours."), prompt);
         assertTrue(ConversationService.hasReadOutsideContent(conversation));

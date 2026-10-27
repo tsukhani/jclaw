@@ -172,12 +172,89 @@ class SystemPromptCoreMemoryTest extends UnitTest {
                 "a core memory must appear once (in the core block), not again in recall");
     }
 
-    // NB: a positive "recall finds a non-core memory" assertion would depend on
-    // the JVM-global Lucene search dialect being "none" (the LIKE fallback),
-    // which concurrent search-mode tests can flip (JCLAW-428) — that path is
-    // already covered reliably by MemoryStoreTest.storeAndSearch. The exclusion
-    // test above stays robust because the core memory appears exactly once
-    // whether or not recall finds it.
+    // --- JF-147: a guest's memory is recalled only in that guest's own chats ---
+
+    private static final String KAYAK = "MARKER_KAYAK the guest keeps a kayak by the lake";
+
+    private static void guestMemory(Agent agent, models.Conversation from, String text, String category) {
+        memory.MemoryStoreFactory.get().storeDeferred(String.valueOf(agent.id), text, category, 0.9, null,
+                new memory.MemoryProvenance(from.id, null, memory.MemoryProvenance.guest(from.channelType),
+                        models.MemoryAuthorType.GUEST_TURN, java.util.List.of()));
+    }
+
+    private static String promptFor(Agent agent, String userMessage, models.Conversation conversation) {
+        return SystemPromptAssembler.assemble(agent, userMessage, null, conversation.channelType, null, conversation)
+                .systemPrompt();
+    }
+
+    @Test
+    void aGuestsMemoryIsRecalledInTheirNextChatAfterNew() {
+        var agent = newAgent("spa-guest-same");
+        var first = services.ConversationService.create(agent, "whatsapp", "60111");
+        guestMemory(agent, first, KAYAK, "fact");
+
+        var later = slash.Commands.execute(slash.Commands.Command.NEW, agent, "whatsapp", "60111", first, null, false)
+                .conversation();
+
+        assertNotEquals(first.id, later.id, "/new opens a new conversation");
+        assertEquals(1, countOccurrences(promptFor(agent, "kayak", later), "MARKER_KAYAK"));
+    }
+
+    @Test
+    void aGuestsMemoryIsNotRecalledForAnotherCustomer() {
+        var agent = newAgent("spa-guest-other");
+        guestMemory(agent, services.ConversationService.create(agent, "whatsapp", "60111"), KAYAK, "fact");
+
+        var other = services.ConversationService.create(agent, "whatsapp", "60222");
+
+        assertEquals(0, countOccurrences(promptFor(agent, "kayak", other), "MARKER_KAYAK"));
+    }
+
+    @Test
+    void anotherCustomersMemoriesLeaveTheRecallLimitFull() {
+        // Recall over-fetches twice its limit, and the substring fallback reads rows in id order:
+        // seven of another customer's rows ahead of three visible ones would fill that window alone.
+        var agent = newAgent("spa-guest-fill");
+        var a = services.ConversationService.create(agent, "whatsapp", "60111");
+        var b = services.ConversationService.create(agent, "whatsapp", "60222");
+        for (int i = 0; i < 7; i++) guestMemory(agent, a, "widget order %d from the first customer".formatted(i), "fact");
+        var visible = new java.util.HashSet<String>();
+        for (int i = 0; i < 3; i++) {
+            var text = "widget order %d the shop knows".formatted(i);
+            store(agent, text, "fact", 0.6);
+            visible.add(text);
+        }
+
+        var selected = SystemPromptAssembler.recall(String.valueOf(agent.id), "widget order", java.util.Set.of(),
+                null, 3, models.MemoryScope.of(b)).selected();
+
+        assertEquals(visible, selected.stream().map(memory.MemoryStore.MemoryEntry::text)
+                .collect(java.util.stream.Collectors.toSet()));
+        assertEquals(3, selected.size());
+    }
+
+    @Test
+    void theOperatorsChatAndATaskFireRecallNoGuestsMemory() {
+        var agent = newAgent("spa-guest-operator");
+        guestMemory(agent, services.ConversationService.create(agent, "whatsapp", "60111"), KAYAK, "fact");
+
+        var web = services.ConversationService.create(agent, "web", "admin");
+
+        assertEquals(0, countOccurrences(promptFor(agent, "kayak", web), "MARKER_KAYAK"));
+        assertEquals(0, countOccurrences(
+                SystemPromptAssembler.assemble(agent, "kayak", null, null).systemPrompt(), "MARKER_KAYAK"),
+                "a task fire has no conversation");
+    }
+
+    @Test
+    void aGuestsCoreMemoryNeverLoadsAsCoreEvenInTheirOwnChat() {
+        var agent = newAgent("spa-guest-core");
+        var chat = services.ConversationService.create(agent, "whatsapp", "60111");
+        guestMemory(agent, chat, KAYAK, "core");
+
+        assertFalse(promptFor(agent, null, chat).contains("## Core Memories"));
+        assertFalse(SystemPromptAssembler.assemble(agent, null, null, "web").systemPrompt().contains("## Core Memories"));
+    }
 
     // --- JCLAW-976: injected memory text must not forge a section boundary ---
 

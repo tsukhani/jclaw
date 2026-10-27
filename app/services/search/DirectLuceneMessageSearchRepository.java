@@ -18,7 +18,9 @@ import org.apache.lucene.search.MultiTermQuery;
 import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.SearcherManager;
+import org.apache.lucene.search.TermInSetQuery;
 import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.util.BytesRef;
 import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import services.ConfigService;
@@ -27,6 +29,7 @@ import services.Tx;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -229,11 +232,12 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
 
     /** {@inheritDoc} */
     @Override
-    public List<ScoredId> searchMemoryIds(String agentId, String query, int limit) throws IOException {
+    public List<ScoredId> searchMemoryIds(String agentId, String query, int limit, Collection<Long> excludeIds)
+            throws IOException {
         if (query == null || query.isBlank() || agentId == null) return List.of();
         var sm = LuceneIndexer.searcherManager(LuceneIndexer.Scope.MEMORY);
         if (sm == null) return List.of();
-        return normalizeByTop(collectScored(sm, query, agentId, limit, false));
+        return normalizeByTop(collectScored(sm, query, agentId, excludeIds, limit, false));
     }
 
     /**
@@ -254,11 +258,21 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      */
     public static List<ScoredId> searchMemoryIdsByVector(String agentId, float[] queryVector, int k)
             throws IOException {
+        return searchMemoryIdsByVector(agentId, queryVector, k, List.of());
+    }
+
+    /**
+     * As {@link #searchMemoryIdsByVector(String, float[], int)}, never returning an id in
+     * {@code excludeIds} (JF-147). The exclusion rides the pre-filter, so the k nearest are the k
+     * nearest of the rest.
+     */
+    public static List<ScoredId> searchMemoryIdsByVector(String agentId, float[] queryVector, int k,
+                                                         Collection<Long> excludeIds) throws IOException {
         if (agentId == null || queryVector == null || k <= 0) return List.of();
         var sm = LuceneIndexer.searcherManager(LuceneIndexer.Scope.MEMORY);
         if (sm == null) return List.of();
         var q = new KnnFloatVectorQuery(LuceneIndexer.VECTOR_FIELD, queryVector, k,
-                new TermQuery(new Term(LuceneIndexer.AGENT_FIELD, agentId)));
+                excluding(new TermQuery(new Term(LuceneIndexer.AGENT_FIELD, agentId)), excludeIds));
         sm.maybeRefresh();
         var out = new ArrayList<ScoredId>(k);
         try (var leased = new LeasedSearcher(sm)) {
@@ -279,7 +293,17 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
     }
 
     private static List<Long> collectMatchingIds(SearcherManager sm, String query, int limit) throws IOException {
-        return collectScored(sm, query, null, limit, true).stream().map(ScoredId::id).toList();
+        return collectScored(sm, query, null, List.of(), limit, true).stream().map(ScoredId::id).toList();
+    }
+
+    /** {@code query} minus the documents whose id is in {@code excludeIds}. */
+    private static Query excluding(Query query, Collection<Long> excludeIds) {
+        if (excludeIds.isEmpty()) return query;
+        var terms = excludeIds.stream().map(id -> new BytesRef(String.valueOf(id))).toList();
+        return new BooleanQuery.Builder()
+                .add(query, BooleanClause.Occur.MUST)
+                .add(new TermInSetQuery(LuceneIndexer.ID_FIELD, terms), BooleanClause.Occur.MUST_NOT)
+                .build();
     }
 
     /** The index-time analyzer itself, not a matching copy (JCLAW-1052): query tokens have to
@@ -361,10 +385,11 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
      * content query is AND-ed with an exact-match term on
      * {@link LuceneIndexer#AGENT_FIELD}, so only that owner's docs match (the
      * per-agent {@link LuceneIndexer.Scope#MEMORY} scope). A null
-     * {@code agentKey} searches unfiltered.
+     * {@code agentKey} searches unfiltered. No id in {@code excludeIds} matches.
      */
-    private static List<ScoredId> collectScored(SearcherManager sm, String query,
-                                                @Nullable String agentKey, int limit, boolean requireAll) throws IOException {
+    private static List<ScoredId> collectScored(SearcherManager sm, String query, @Nullable String agentKey,
+                                                Collection<Long> excludeIds, int limit, boolean requireAll)
+            throws IOException {
         // Prefix-match each query token (see buildContentQuery) rather than the
         // free-form QueryParser: operators typing free text get partial-word matching,
         // and stray Lucene operator characters can't ParseException the query out from
@@ -379,6 +404,7 @@ public final class DirectLuceneMessageSearchRepository implements MessageSearchR
                             BooleanClause.Occur.MUST)
                     .build();
         }
+        q = excluding(q, excludeIds);
 
         // Refresh the reader so writes from the same Tx (post-commit) are
         // visible. maybeRefresh is cheap when nothing changed.

@@ -32,6 +32,7 @@ import utils.AppClock;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
@@ -142,6 +143,13 @@ public class Memory extends Model {
     /** The user message of that turn. A plain id, like {@link #supersededById}. */
     @Column(name = "source_message_id")
     public Long sourceMessageId;
+
+    /** The source conversation's channel and peer, which decide where a guest's row is visible (JF-147). */
+    @Column(name = "source_channel")
+    public String sourceChannel;
+
+    @Column(name = "source_peer")
+    public String sourcePeer;
 
     /** Who wrote the row: {@code extractor/<modelId>}, {@code human:operator}, {@code guest:<channel>} or {@code process:<id>}. */
     @Column(length = 200)
@@ -373,6 +381,88 @@ public class Memory extends Model {
         return repaired;
     }
 
+    /**
+     * Copy each guest row's channel and peer from its source conversation, for rows written before
+     * JF-147 recorded them; returns how many were filled. Idempotent — a filled row no longer
+     * matches, and a row whose conversation is gone is left visible nowhere.
+     */
+    public static int backfillGuestScope() {
+        int filled = JPA.em().createQuery(
+                        "UPDATE Memory m SET "
+                                + "m.sourceChannel = (SELECT c.channelType FROM Conversation c WHERE c.id = m.sourceConversationId), "
+                                + "m.sourcePeer = (SELECT c.peerId FROM Conversation c WHERE c.id = m.sourceConversationId) "
+                                + "WHERE m.authorType = :guest AND m.sourceChannel IS NULL "
+                                + "AND EXISTS (SELECT 1 FROM Conversation c WHERE c.id = m.sourceConversationId)")
+                .setParameter("guest", MemoryAuthorType.GUEST_TURN)
+                .executeUpdate();
+        if (filled > 0) JPA.em().clear();
+        return filled;
+    }
+
+    /** A query condition and the positional parameters it binds. */
+    public record Clause(String text, List<Object> params) {}
+
+    /**
+     * {@code scope}'s visibility over unqualified fields, its parameters numbered from {@code first}.
+     * {@code <>} on a null author is unknown rather than true, so a pre-provenance row needs its own arm.
+     */
+    private static Clause visibleIn(MemoryScope scope, int first) {
+        if (!scope.admitsGuestRows()) {
+            return new Clause("(authorType IS NULL OR authorType <> ?%d)".formatted(first),
+                    List.of(MemoryAuthorType.GUEST_TURN));
+        }
+        return new Clause("(authorType IS NULL OR authorType <> ?%d OR (sourceChannel = ?%d AND sourcePeer = ?%d))"
+                .formatted(first, first + 1, first + 2),
+                List.of(MemoryAuthorType.GUEST_TURN, scope.channel(), scope.peer()));
+    }
+
+    /**
+     * {@link #visibleIn} for native SQL over the alias {@code m}: an {@code AND} condition to
+     * append, its parameters numbered from {@code first}. Empty for a null scope.
+     */
+    public static Clause visibleSql(@Nullable MemoryScope scope, int first) {
+        if (scope == null) return new Clause("", List.of());
+        var guestFree = "m.author_type IS NULL OR m.author_type <> '" + MemoryAuthorType.GUEST_TURN.name() + "'";
+        if (!scope.admitsGuestRows()) return new Clause(" AND (" + guestFree + ")", List.of());
+        return new Clause(" AND (%s OR (m.source_channel = ?%d AND m.source_peer = ?%d))"
+                .formatted(guestFree, first, first + 1), List.of(scope.channel(), scope.peer()));
+    }
+
+    /**
+     * {@code find(where, params)} narrowed to the rows visible in {@code scope}; a null scope narrows
+     * nothing. The condition goes first so a trailing {@code ORDER BY} in {@code where} stays last.
+     */
+    public static JPAQuery findVisible(@Nullable MemoryScope scope, String where, Object... params) {
+        if (scope == null) return find(where, params);
+        var clause = visibleIn(scope, params.length + 1);
+        var all = new ArrayList<Object>(Arrays.asList(params));
+        all.addAll(clause.params());
+        return find(clause.text() + " AND " + where, all.toArray());
+    }
+
+    /**
+     * The agent's live guest rows {@code scope} must not see, for a search index to exclude before it
+     * ranks, so a top-k is a top-k of visible rows. Empty for a null scope.
+     */
+    public static List<Long> guestIdsOutside(Long agentPk, @Nullable MemoryScope scope) {
+        if (scope == null) return List.of();
+        var where = "m.agent.id = :agent AND m.authorType = :guest AND m.supersededAt IS NULL";
+        if (!scope.admitsGuestRows()) {
+            return JPA.em().createQuery("SELECT m.id FROM Memory m WHERE " + where, Long.class)
+                    .setParameter("agent", agentPk)
+                    .setParameter("guest", MemoryAuthorType.GUEST_TURN)
+                    .getResultList();
+        }
+        return JPA.em().createQuery("SELECT m.id FROM Memory m WHERE " + where
+                        + " AND (m.sourceChannel IS NULL OR m.sourcePeer IS NULL"
+                        + " OR m.sourceChannel <> :channel OR m.sourcePeer <> :peer)", Long.class)
+                .setParameter("agent", agentPk)
+                .setParameter("guest", MemoryAuthorType.GUEST_TURN)
+                .setParameter("channel", scope.channel())
+                .setParameter("peer", scope.peer())
+                .getResultList();
+    }
+
     /** Parse an agent-id string (the partition key callers pass) to its PK, or null when non-numeric. */
     private static Long parsePk(String agentId) {
         if (agentId == null) return null;
@@ -396,9 +486,14 @@ public class Memory extends Model {
     }
 
     public static List<Memory> findByAgent(String agentId, int limit) {
+        return findByAgent(agentId, limit, null);
+    }
+
+    /** As {@link #findByAgent(String, int)}, keeping only the rows visible in {@code scope} (JF-147). */
+    public static List<Memory> findByAgent(String agentId, int limit, @Nullable MemoryScope scope) {
         Long pk = parsePk(agentId);
         if (pk == null) return List.of();
-        return Memory.find("agent.id = ?1 AND supersededAt IS NULL ORDER BY updatedAt DESC", pk)
+        return findVisible(scope, "agent.id = ?1 AND supersededAt IS NULL ORDER BY updatedAt DESC", pk)
                 .fetch(limit);
     }
 
@@ -421,12 +516,14 @@ public class Memory extends Model {
      * <p>Deliberately unfiltered by importance, unlike {@link #findCore}: that method
      * answers "what loads this turn", this one answers "how many core slots are taken". A
      * core memory below the load threshold still holds the category the operator granted,
-     * so counting only the visible ones would let the tier fill up unseen.
+     * so counting only the visible ones would let the tier fill up unseen. A guest's row is not
+     * counted, as {@link #findCore} never loads one.
      */
     public static long countLiveCore(String agentId) {
         Long pk = parsePk(agentId);
         if (pk == null) return 0;
-        return Memory.count("agent.id = ?1 AND category = ?2 AND supersededAt IS NULL", pk, "core");
+        return Memory.count("agent.id = ?1 AND category = ?2 AND supersededAt IS NULL"
+                + " AND (authorType IS NULL OR authorType <> ?3)", pk, "core", MemoryAuthorType.GUEST_TURN);
     }
 
     /**
@@ -435,11 +532,14 @@ public class Memory extends Model {
      * (the caller additionally enforces a token budget). The {@code core}
      * category is matched as a literal to keep this {@code models} class free of
      * a dependency on the {@code memory} package's {@code MemoryCategory}.
+     *
+     * <p>Never a guest's row (JF-147): core loads into every chat, and a guest's row is visible
+     * only in that guest's.
      */
     public static List<Memory> findCore(String agentId, double minImportance, int limit) {
         Long pk = parsePk(agentId);
         if (pk == null) return List.of();
-        return Memory.find(
+        return findVisible(MemoryScope.NONE,
                 "agent.id = ?1 AND category = ?2 AND importance >= ?3 AND supersededAt IS NULL"
                         + " ORDER BY importance DESC, updatedAt DESC",
                 pk, "core", minImportance).fetch(limit);
@@ -477,6 +577,25 @@ public class Memory extends Model {
      * recall then degrades to importance ordering, acceptable for that edge.
      */
     public static List<ScoredMemory> searchByTextScored(String agentId, String query, int limit) {
+        return searchByTextScored(agentId, query, limit, null);
+    }
+
+    /**
+     * As {@link #searchByTextScored(String, String, int)}, over the rows visible in {@code scope}
+     * (JF-147). The index excludes the rest before it ranks, so {@code limit} still fills.
+     */
+    public static List<ScoredMemory> searchByTextScored(String agentId, String query, int limit,
+                                                        @Nullable MemoryScope scope) {
+        return searchByTextScored(agentId, query, limit, scope, null);
+    }
+
+    /**
+     * As {@link #searchByTextScored(String, String, int, MemoryScope)}, with {@code scope}'s
+     * {@link #guestIdsOutside} already loaded by a caller that searches more than once; null loads them here.
+     */
+    public static List<ScoredMemory> searchByTextScored(String agentId, String query, int limit,
+                                                        @Nullable MemoryScope scope,
+                                                        @Nullable Collection<Long> hiddenGuestIds) {
         if (query == null || query.isBlank()) return List.of();
         Long pk = parsePk(agentId);
         if (pk == null) return List.of();
@@ -487,11 +606,12 @@ public class Memory extends Model {
             // test's closed-mode window (JCLAW-737): recall stays on the DB scan
             // there instead of an empty Lucene result, regardless of the
             // process-global activeDialect a concurrent search lane may have set.
-            return likeFallback(pk, query, limit);
+            return likeFallback(pk, query, limit, scope);
         }
         List<MessageSearchRepository.ScoredId> scored;
         try {
-            scored = MessageSearch.searchMemoryIds(agentId, query, limit);
+            var hidden = hiddenGuestIds != null ? hiddenGuestIds : guestIdsOutside(pk, scope);
+            scored = MessageSearch.searchMemoryIds(agentId, query, limit, hidden);
         } catch (IOException e) {
             // Backend initialized but unavailable (index closed, IO error) —
             // degrade to the same LIKE fallback instead of silently recalling
@@ -500,13 +620,13 @@ public class Memory extends Model {
             EventLogger.warn("search", null, null,
                     "Memory search failed for agent %s, using LIKE fallback: %s"
                             .formatted(agentId, e.getMessage()));
-            return likeFallback(pk, query, limit);
+            return likeFallback(pk, query, limit, scope);
         }
         if (scored.isEmpty()) return List.of();
         var ids = scored.stream().map(MessageSearchRepository.ScoredId::id).toList();
         // supersededAt IS NULL: backstop for an index doc whose row was
         // superseded but whose removal hasn't landed yet (JCLAW-525).
-        List<Memory> rows = Memory.find(
+        List<Memory> rows = findVisible(scope,
                 "agent.id = ?1 AND id IN (?2) AND supersededAt IS NULL", pk, ids).fetch();
         var byId = new HashMap<Long, Memory>();
         for (var m : rows) byId.put(m.id, m);
@@ -528,9 +648,11 @@ public class Memory extends Model {
      * terminal fallback must be THIS deterministic SQL scan, never a hop
      * back into the Lucene-preferring search abstraction (whose JVM-global
      * index any concurrent caller can open with different contents).
+     *
+     * <p>Over the rows visible in {@code scope} (JF-147); a null scope keeps every row.
      */
-    public static List<ScoredMemory> likeFallback(Long pk, String query, int limit) {
-        List<Memory> rows = Memory.find(
+    public static List<ScoredMemory> likeFallback(Long pk, String query, int limit, @Nullable MemoryScope scope) {
+        List<Memory> rows = findVisible(scope,
                 "agent.id = ?1 AND LOWER(text) LIKE ?2 AND supersededAt IS NULL",
                 pk, "%" + query.toLowerCase() + "%").fetch(limit);
         return rows.stream().map(m -> new ScoredMemory(m, 1.0)).toList();

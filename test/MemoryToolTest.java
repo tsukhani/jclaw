@@ -264,14 +264,153 @@ class MemoryToolTest extends UnitTest {
     }
 
     @Test
-    void aGuestRestatementDoesNotCorroborate() {
+    void aGuestRestatementDoesNotCorroborateOrQuoteTheOperatorsRow() {
         seed("The user keeps the router upstairs");
         var conv = conversationOn("telegram");
         var out = agents.DangerousActionGate.withOwnerInitiated(false,
                 () -> agents.ToolContext.withConversation(conv.id, () -> call(ROUTER_STORE)));
 
-        assertTrue(out.startsWith("Already remembered"), out);
-        assertEquals(0, corroborations(onlyMemory().id));
+        assertEquals("Already remembered.", out);
+        var owners = onlyMemory();
+        assertEquals(0, corroborations(owners.id));
+        assertEquals(MemoryCategory.FACT.label, owners.category);
+        assertNull(owners.supersededAt);
+    }
+
+    // --- JF-147: a guest's memory stays in that guest's chats, and is never core ---
+
+    private static final String KAYAK_STORE = "{\"action\":\"store\",\"text\":\"The user keeps a kayak by the lake\"}";
+    private static final String KAYAK_RECALL = "{\"action\":\"recall\",\"query\":\"kayak\"}";
+    private static final String NO_KAYAK = "No memories matched \"kayak\".";
+
+    private models.Conversation whatsAppChat(String peer) {
+        var conv = services.ConversationService.create(agent, "whatsapp", peer);
+        services.ConversationService.appendUserMessage(conv, "Please remember this");
+        return conv;
+    }
+
+    private String in(models.Conversation conv, String json) {
+        return agents.ToolContext.withConversation(conv.id, () -> call(json));
+    }
+
+    @Test
+    void aGuestStoreIsAFactWhetherTheCategoryIsUnsetOrCore() {
+        var conv = whatsAppChat("60111");
+
+        assertEquals("Remembered [fact]: The user keeps a kayak by the lake", in(conv, KAYAK_STORE));
+        assertEquals("Remembered [fact]: The user parks in bay four",
+                in(conv, "{\"action\":\"store\",\"text\":\"The user parks in bay four\",\"category\":\"core\"}"));
+
+        var rows = models.Memory.<models.Memory>find("order by id").<models.Memory>fetch();
+        assertEquals(java.util.List.of("fact", "fact"), rows.stream().map(m -> m.category).toList());
+        for (var m : rows) {
+            assertEquals("whatsapp", m.sourceChannel);
+            assertEquals("60111", m.sourcePeer);
+        }
+    }
+
+    @Test
+    void aGuestStoreIsNotRefusedWhenCoreIsFull() {
+        int cap = services.ConfigService.getInt("memory.coreload.maxCount", 20);
+        for (int i = 0; i < cap; i++) {
+            MemoryStoreFactory.get().store(String.valueOf(agent.id),
+                    "Core fact number %d about the user".formatted(i), MemoryCategory.CORE.label, 0.9);
+        }
+
+        assertEquals("Remembered [fact]: The user keeps a kayak by the lake", in(whatsAppChat("60111"), KAYAK_STORE));
+    }
+
+    @Test
+    void aGuestsMemoryIsRecalledOnlyInThatGuestsChats() {
+        var first = whatsAppChat("60111");
+        in(first, KAYAK_STORE);
+        var later = slash.Commands.execute(slash.Commands.Command.NEW, agent, "whatsapp", "60111", first, null, false)
+                .conversation();
+
+        assertTrue(in(later, KAYAK_RECALL).contains("The user keeps a kayak by the lake"), "the same customer after /new");
+        assertEquals(NO_KAYAK, in(whatsAppChat("60222"), KAYAK_RECALL), "another customer");
+        assertEquals(NO_KAYAK, in(services.ConversationService.create(agent, "web", "admin"), KAYAK_RECALL),
+                "the operator's web chat");
+        assertEquals(NO_KAYAK, agents.ToolContext.withScope(null, 77L, () -> call(KAYAK_RECALL)), "a task run");
+    }
+
+    @Test
+    void aGuestsCoreRowsDoNotFillTheOperatorsCoreTier() {
+        int cap = services.ConfigService.getInt("memory.coreload.maxCount", 20);
+        for (int i = 0; i <= cap; i++) {
+            MemoryStoreFactory.get().storeDeferred(String.valueOf(agent.id), "A guest's core note number %d".formatted(i),
+                    MemoryCategory.CORE.label, 0.9, null,
+                    memory.MemoryProvenance.extractor("m", models.MemoryAuthorType.GUEST_TURN));
+        }
+
+        assertEquals("Remembered [core]: The user keeps a kayak by the lake",
+                in(services.ConversationService.create(agent, "web", "admin"), KAYAK_STORE));
+    }
+
+    @Test
+    void theOwnersStoreInAGroupIsTheirOwnRowEvenWhereAGuestSaidTheSame() {
+        var group = services.ConversationService.create(agent, "telegram", "-100555");
+        services.ConversationService.appendUserMessage(group, "Remember that the router is upstairs");
+        agents.DangerousActionGate.withOwnerInitiated(false, () -> in(group, ROUTER_STORE));
+        var guests = onlyMemory();
+
+        var out = agents.DangerousActionGate.withOwnerInitiated(true, () -> in(group, ROUTER_STORE));
+
+        assertEquals("Remembered [core]: The user keeps the router upstairs", out);
+        var owners = onlyMemory();
+        assertEquals(models.MemoryAuthorType.HUMAN_TURN, owners.authorType);
+        assertNotEquals(guests.id, owners.id);
+        models.Memory guestsNow = models.Memory.findById(guests.id);
+        assertEquals(models.MemoryAuthorType.GUEST_TURN, guestsNow.authorType);
+        assertEquals(MemoryCategory.FACT.label, guestsNow.category);
+        assertNull(guestsNow.supersededAt);
+        assertEquals(0, corroborations(guests.id));
+    }
+
+    @Test
+    void theOperatorsForgetFromWebChatDeletesAGuestsMemory() {
+        in(whatsAppChat("60111"), KAYAK_STORE);
+
+        var out = in(services.ConversationService.create(agent, "web", "admin"),
+                "{\"action\":\"forget\",\"query\":\"The user keeps a kayak by the lake\"}");
+
+        assertEquals("Forgot 1 memory(ies):\n- The user keeps a kayak by the lake\n", out);
+        assertEquals(0, MemoryStoreFactory.get().list(String.valueOf(agent.id)).size());
+    }
+
+    @Test
+    void aGuestsForgetNeitherSeesNorDeletesTheOperatorsMemory() {
+        seed("The user keeps the router upstairs");
+
+        var out = in(whatsAppChat("60111"),
+                "{\"action\":\"forget\",\"query\":\"The user keeps the router upstairs\"}");
+
+        assertEquals("Nothing stored matches \"The user keeps the router upstairs\" — nothing to forget.", out);
+        assertEquals(java.util.List.of("The user keeps the router upstairs"),
+                MemoryStoreFactory.get().list(String.valueOf(agent.id)).stream()
+                        .map(memory.MemoryStore.MemoryEntry::text).toList());
+    }
+
+    @Test
+    void aGuestsForgetStillDeletesThatGuestsOwnMemory() {
+        var chat = whatsAppChat("60111");
+        in(chat, KAYAK_STORE);
+
+        var out = in(chat, "{\"action\":\"forget\",\"query\":\"The user keeps a kayak by the lake\"}");
+
+        assertEquals("Forgot 1 memory(ies):\n- The user keeps a kayak by the lake\n", out);
+        assertEquals(0, MemoryStoreFactory.get().list(String.valueOf(agent.id)).size());
+    }
+
+    @Test
+    void anotherCustomersForgetNeitherSeesNorDeletesAGuestsMemory() {
+        in(whatsAppChat("60111"), KAYAK_STORE);
+
+        var out = in(whatsAppChat("60222"),
+                "{\"action\":\"forget\",\"query\":\"The user keeps a kayak by the lake\"}");
+
+        assertEquals("Nothing stored matches \"The user keeps a kayak by the lake\" — nothing to forget.", out);
+        assertEquals(1, MemoryStoreFactory.get().list(String.valueOf(agent.id)).size());
     }
 
     @Test

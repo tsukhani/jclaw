@@ -11,7 +11,7 @@ Capture is automatic. It happens in the background after a turn completes, so it
 3. Each candidate is **deduplicated** against the agent's recent memories. A near-duplicate of something already stored is dropped, not appended.
 4. A **consolidation judge** runs on the same capture model. It compares each new memory with stored ones on the same subject. When the new one replaces an older memory, the judge marks the older one **superseded**. For example, "lives in Porto" supersedes "lives in Berlin". The newer memory always wins. An older one is kept if the newer text would lose its content. If the judge fails, the new memories are simply stored alongside the old.
 
-An explicit instruction takes a different route. The agent's `memory` tool (recall, store, forget) answers "remember that…" and "forget what I told you about…" directly. It reports exactly what it touched. Storing something already known is a no-op, not a second row. This tool is also the only way a `core` memory is created: automatic capture never assigns `core`, and a candidate the extractor labels `core` is demoted to `fact`.
+An explicit instruction takes a different route. The agent's `memory` tool (recall, store, forget) answers "remember that…" and "forget what I told you about…" directly. It reports exactly what it touched. Storing something already known is a no-op, not a second row. A `core` memory comes from this tool, or from capture when a fact says who you are: your name, your family, or where you live or work. Any other candidate the extractor labels `core` is stored as `fact`. A guest's memory is never `core` (see [Memories from guests](#memory-memories-from-guests)).
 
 The core cap (`memory.coreload.maxCount`, default `20`) also applies at storing. Once an agent holds that many core memories, the tool refuses a new one, and the agent asks you instead: store it under another category, or name a core memory to forget first.
 
@@ -25,6 +25,17 @@ Two deterministic guards run on every candidate at write time. They are independ
 - **Prompt injection**: memory text is re-read by the agent in future sessions. So a hostile instruction stored as a "fact" would become persistent. Injection phrasing, exfiltration payloads, and invisible-unicode smuggling are refused wholesale.
 
 A tripped guard drops the whole candidate. Losing one memory is cheaper than persisting a live credential or a hostile directive.
+
+### Memories from guests
+
+A guest is anyone other than you who messages an agent on a channel (see [Who a bot answers](/guide#conversations-and-channels-who-a-bot-answers)). What a guest tells the agent is remembered for that guest's chat only:
+
+- A guest's memory is recalled only in a chat on the same channel with the same person, or in the same group. It is still recalled after `/new`, because the new conversation is with the same person.
+- It is never recalled in your web chat, in another guest's chat, or in a scheduled task.
+- It is never `core`. When a guest asks the agent to remember something, the tool stores it as `fact` and replies "Remembered [fact]: …". Capture stores a guest's facts about who they are as `fact` too.
+- When a guest repeats or contradicts one of your memories, your memory stays as it is.
+
+The [Memories](/memories) page still lists every memory, guests' included, so you can review or delete them there.
 
 ## Categories and importance
 
@@ -46,7 +57,7 @@ Importance drives everything downstream: recall ranking, and whether a `core` me
 Two paths return memories to the agent:
 
 - **Core auto-load**: `core`-category memories at or above the importance threshold (default 0.8) are injected into every session at start. They are capped at 20 entries, a count of whole memories, not a token budget (see [Tuning](#memory-tuning)).
-- **Per-turn recall**: each message triggers a relevance search over the agent's store. The best matches (up to 10) are injected for that turn only. Recalled text is framed to the model as stored reference data, **not** instructions. This is the soft counterpart of the write-time injection guard.
+- **Per-turn recall**: each message triggers a relevance search over the agent's memories. A guest's memories are searched only in that guest's chat. The best matches (up to 10) are injected for that turn only. Recalled text is framed to the model as stored reference data, **not** instructions. This is the soft counterpart of the write-time injection guard.
 
 Recall ranking decays with age. A memory's score fades on a 30-day half-life, counted from when it was last changed or last recalled. Importance stretches the half-life (about 84 days at importance 0.9). Decay bottoms out at a quarter of the score and never deletes anything. An old memory still surfaces when nothing fresher competes.
 

@@ -90,6 +90,20 @@ class CoreMemoryCapMigrationTest extends UnitTest {
     }
 
     @Test
+    void aGuestsCoreRowsTakeNoCoreSlot() {
+        // Rows from before a guest's store was forced to fact (JF-147): never loaded, so never counted.
+        for (int i = 0; i <= cap(); i++) {
+            MemoryStoreFactory.get().storeDeferred(agentId(), "A guest's core note number %d".formatted(i),
+                    MemoryCategory.CORE.label, 0.9, null,
+                    memory.MemoryProvenance.extractor("m", models.MemoryAuthorType.GUEST_TURN));
+        }
+
+        var s = CoreMemoryCapMigration.status(agentId());
+        assertEquals(0L, s.liveCore());
+        assertFalse(s.overCap());
+    }
+
+    @Test
     void theModelsAnswersAreReadAfterLeakedReasoningOrInsideAFence() {
         assertEquals(List.of("preference", "fact"), CoreMemoryCapMigration.parseAnswers(
                 "Memory 0 is a {like}.</think>[\"preference\", \"fact\"]", 2));

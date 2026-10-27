@@ -135,6 +135,57 @@ class MemoryDedupScopeTest extends UnitTest {
         assertEquals(1, corroborations(Memory.findByAgent(agent).getFirst().id));
     }
 
+    // ─── JF-147: a guest's write and the operator's never retire each other ──
+
+    private static memory.MemoryProvenance guestIn(models.Conversation chat) {
+        return new memory.MemoryProvenance(chat.id, null, memory.MemoryProvenance.guest(chat.channelType),
+                models.MemoryAuthorType.GUEST_TURN, java.util.List.of());
+    }
+
+    private static models.Conversation chat(String agentId, String channel, String peer) {
+        return services.ConversationService.create(models.Agent.findById(Long.valueOf(agentId)), channel, peer);
+    }
+
+    @Test
+    void anOperatorRestatingAGuestsFactInTheSameGroupStoresTheirOwnRow() {
+        var agent = agentId("dedup-owner-over-guest");
+        var group = chat(agent, "telegram", "-100555");
+        var stated = "The user drives a Tesla Model Y in Malaysia.";
+        var guestRow = Long.valueOf(MemoryStoreFactory.get().storeDeferred(agent, stated, "fact", 0.7, null,
+                guestIn(group)));
+
+        assertEquals(1, captureAs(agent, stated,
+                memory.MemoryProvenance.extractor("m1", models.MemoryAuthorType.HUMAN_TURN).withSource(group.id, null)));
+
+        var rows = Memory.findByAgent(agent);
+        assertEquals(2, rows.size(), "the operator's statement is stored as the operator's own row");
+        assertEquals(java.util.Set.of(models.MemoryAuthorType.GUEST_TURN, models.MemoryAuthorType.HUMAN_TURN),
+                rows.stream().map(m -> m.authorType).collect(java.util.stream.Collectors.toSet()));
+        assertEquals(0, corroborations(guestRow), "the guest's row is untouched");
+    }
+
+    @Test
+    void aGuestContradictingTheOperatorsFactNeverSupersedesIt() {
+        var agent = agentId("dedup-guest-contradicts");
+        var operatorsRow = Long.valueOf(MemoryStoreFactory.get().store(agent, "The user drives an Xpeng G6", "fact", 0.7));
+        var judged = new java.util.concurrent.atomic.AtomicBoolean();
+        MemoryAutoCapture.Extractor extractor = msgs ->
+                "{\"memories\":[{\"text\":\"The user drives a Volvo EX30 since March\",\"category\":\"fact\",\"importance\":0.7}]}";
+        MemoryAutoCapture.Consolidator consolidator = msgs -> {
+            judged.set(true);
+            return "{\"supersessions\":[{\"new\":0,\"old\":[0]}]}";
+        };
+
+        var result = MemoryAutoCapture.capture(agent, "dedup-agent", "I swapped the Xpeng for a Volvo EX30 in March.",
+                "Noted.", extractor, consolidator, freshBreaker(), guestIn(chat(agent, "whatsapp", "60111")));
+
+        assertEquals(1, result.captured());
+        assertTrue(judged.get(), "precondition: the judge paired the two, so the guard is what kept the row");
+        Memory kept = Memory.findById(operatorsRow);
+        assertNull(kept.supersededAt);
+        assertEquals(2, Memory.findByAgent(agent).size());
+    }
+
     // ─── control: the harness can still store something ──────────────────────
 
     @Test

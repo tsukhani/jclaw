@@ -1,13 +1,16 @@
 package memory;
 
+import jakarta.persistence.Query;
 import jakarta.transaction.Status;
 import jakarta.transaction.Synchronization;
 import llm.LlmProvider;
 import llm.ProviderRegistry;
 import memory.graph.GraphLifecycle;
 import models.Agent;
+import models.Conversation;
 import models.Memory;
 import models.MemoryDerivation;
+import models.MemoryScope;
 import org.hibernate.Session;
 import org.jspecify.annotations.Nullable;
 import play.Play;
@@ -30,6 +33,7 @@ import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
@@ -211,6 +215,12 @@ public class JpaMemoryStore implements MemoryStore {
             memory.actor = provenance.actor();
             memory.authorType = provenance.authorType();
             memory.derived = provenance.derived();
+            var sourceId = provenance.sourceConversationId();
+            Conversation source = sourceId == null ? null : Conversation.findById(sourceId);
+            if (source != null) {
+                memory.sourceChannel = source.channelType;
+                memory.sourcePeer = source.peerId;
+            }
         }
         memory.save();
         for (var input : inputs) {
@@ -281,16 +291,29 @@ public class JpaMemoryStore implements MemoryStore {
      */
     @Override
     public List<MemoryEntry> search(String agentId, String query, int limit, float @Nullable [] queryEmbedding) {
+        return searchIn(agentId, query, limit, queryEmbedding, MemoryScope.NONE);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public List<MemoryEntry> search(String agentId, String query, int limit, float @Nullable [] queryEmbedding,
+            MemoryScope scope) {
+        return searchIn(agentId, query, limit, queryEmbedding, scope);
+    }
+
+    /** Every leg filters on {@code scope} before it ranks (JF-147). */
+    private List<MemoryEntry> searchIn(String agentId, String query, int limit, float @Nullable [] queryEmbedding,
+            MemoryScope scope) {
         if (vectorEnabled) {
             var embedding = queryEmbedding != null ? queryEmbedding : generateQueryEmbedding(query);
             return isPostgres
-                    ? hybridSearch(agentId, query, limit, embedding)
-                    : luceneHybridSearch(agentId, query, limit, embedding);
+                    ? hybridSearch(agentId, query, limit, embedding, scope)
+                    : luceneHybridSearch(agentId, query, limit, embedding, scope);
         }
         if (isPostgres) {
-            return fullTextSearch(agentId, query, limit);
+            return fullTextSearch(agentId, query, limit, scope);
         }
-        return likeSearch(agentId, query, limit);
+        return likeSearch(agentId, query, limit, scope);
     }
 
     /** {@inheritDoc} */
@@ -372,6 +395,25 @@ public class JpaMemoryStore implements MemoryStore {
     @Override
     public List<Long> semanticNeighbors(String agentId, String text, @Nullable String retrievalKey,
             int limit, double minCosine) {
+        return semanticNeighborsIn(agentId, text, retrievalKey, limit, minCosine, MemoryScope.NONE, null);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public List<Long> semanticNeighbors(String agentId, String text, @Nullable String retrievalKey,
+            int limit, double minCosine, @Nullable MemoryScope scope) {
+        return semanticNeighborsIn(agentId, text, retrievalKey, limit, minCosine, scope, null);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public List<Long> semanticNeighbors(String agentId, String text, @Nullable String retrievalKey,
+            int limit, double minCosine, MemoryScope scope, Collection<Long> hiddenGuestIds) {
+        return semanticNeighborsIn(agentId, text, retrievalKey, limit, minCosine, scope, hiddenGuestIds);
+    }
+
+    private List<Long> semanticNeighborsIn(String agentId, String text, @Nullable String retrievalKey,
+            int limit, double minCosine, @Nullable MemoryScope scope, @Nullable Collection<Long> hiddenGuestIds) {
         if (!vectorEnabled || text == null || text.isBlank()) return List.of();
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
@@ -379,8 +421,8 @@ public class JpaMemoryStore implements MemoryStore {
         if (embedding == null) return List.of();
         try {
             return isPostgres
-                    ? pgSemanticNeighbors(pk, embedding, limit, minCosine)
-                    : luceneSemanticNeighbors(agentId, embedding, limit, minCosine);
+                    ? pgSemanticNeighbors(pk, embedding, limit, minCosine, scope)
+                    : luceneSemanticNeighbors(agentId, pk, embedding, limit, minCosine, scope, hiddenGuestIds);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY,
                     "Semantic dedup lookup failed, falling back to lexical only: %s".formatted(e.getMessage()));
@@ -388,13 +430,18 @@ public class JpaMemoryStore implements MemoryStore {
         }
     }
 
-    private List<Long> luceneSemanticNeighbors(String agentId, float[] embedding, int limit, double minCosine)
+    /** A null scope reads every row; null {@code hiddenGuestIds} are loaded here. */
+    private List<Long> luceneSemanticNeighbors(String agentId, Long pk, float[] embedding, int limit,
+            double minCosine, @Nullable MemoryScope scope, @Nullable Collection<Long> hiddenGuestIds)
             throws IOException {
+        // The caller is outside a transaction by contract, because it just embedded.
+        Collection<Long> hidden = hiddenGuestIds != null ? hiddenGuestIds
+                : Tx.run(() -> Memory.guestIdsOutside(pk, scope));
         var out = new ArrayList<Long>();
-        for (var hit : DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit)) {
+        for (var hit : DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit, hidden)) {
             if (2 * hit.score() - 1 >= minCosine) out.add(hit.id());
         }
-        return activeOnly(agentId, out);
+        return activeOnly(agentId, out, scope);
     }
 
     /**
@@ -405,27 +452,29 @@ public class JpaMemoryStore implements MemoryStore {
      * the exact thing JCLAW-525 exists to prevent. Runs in its own short read transaction:
      * the caller is outside one by contract, because it just embedded.
      */
-    private List<Long> activeOnly(String agentId, List<Long> ids) {
+    private List<Long> activeOnly(String agentId, List<Long> ids, @Nullable MemoryScope scope) {
         if (ids.isEmpty()) return ids;
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
-        List<Memory> rows = Tx.run(() -> Memory.find(
+        List<Memory> rows = Tx.run(() -> Memory.findVisible(scope,
                 "agent.id = ?1 AND id IN (?2) AND supersededAt IS NULL", pk, ids).fetch());
         var alive = rows.stream().map(m -> m.id).collect(Collectors.toSet());
         return ids.stream().filter(alive::contains).toList();
     }
 
-    private List<Long> pgSemanticNeighbors(Long pk, float[] embedding, int limit, double minCosine) {
+    private List<Long> pgSemanticNeighbors(Long pk, float[] embedding, int limit, double minCosine,
+            @Nullable MemoryScope scope) {
+        var visible = Memory.visibleSql(scope, 4);
         var sql = """
                 SELECT m.id FROM memory m
                 WHERE m.agent_id = ?1 AND m.embedding IS NOT NULL AND m.superseded_at IS NULL
-                AND 1 - (m.embedding <=> ?2::text::vector) >= ?3
+                AND 1 - (m.embedding <=> ?2::text::vector) >= ?3%s
                 ORDER BY m.embedding <=> ?2::text::vector
-                """;
-        List<?> rows = Tx.run(() -> JPA.em().createNativeQuery(sql)
+                """.formatted(visible.text());
+        List<?> rows = Tx.run(() -> bind(JPA.em().createNativeQuery(sql)
                 .setParameter(1, pk)
                 .setParameter(2, toVectorLiteral(embedding))
-                .setParameter(3, minCosine)
+                .setParameter(3, minCosine), 4, visible)
                 .setMaxResults(limit)
                 .getResultList());
         var ids = new ArrayList<Long>(rows.size());
@@ -523,31 +572,31 @@ public class JpaMemoryStore implements MemoryStore {
      *  and re-entering the search abstraction here made the result depend on
      *  JVM-global Lucene index state (a concurrent test/caller opening the
      *  index flipped recall onto an index missing the rows). */
-    private List<MemoryEntry> sqlLikeSearch(String agentId, String query, int limit) {
+    private List<MemoryEntry> sqlLikeSearch(String agentId, String query, int limit, @Nullable MemoryScope scope) {
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
-        return Memory.likeFallback(pk, query, limit).stream()
+        return Memory.likeFallback(pk, query, limit, scope).stream()
                 .map(s -> toEntry(s.memory(), s.relevance()))
                 .toList();
     }
 
-    private List<MemoryEntry> likeSearch(String agentId, String query, int limit) {
+    private List<MemoryEntry> likeSearch(String agentId, String query, int limit, @Nullable MemoryScope scope) {
         // JCLAW-532: the Lucene-backed scored search carries a real top-normalized
         // relevance score per hit; thread it onto the entry so recall can rank by
         // relevance rather than list position.
-        return Memory.searchByTextScored(agentId, query, limit).stream()
+        return Memory.searchByTextScored(agentId, query, limit, scope).stream()
                 .map(s -> toEntry(s.memory(), s.relevance()))
                 .toList();
     }
 
-    private List<MemoryEntry> fullTextSearch(String agentId, String query, int limit) {
+    private List<MemoryEntry> fullTextSearch(String agentId, String query, int limit, @Nullable MemoryScope scope) {
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
         try {
-            return toEntriesRankScored(pgFtsRows(pk, query, limit));
+            return toEntriesRankScored(pgFtsRows(pk, query, limit, scope));
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY, "PG FTS failed, falling back to LIKE search: %s".formatted(e.getMessage()));
-            return sqlLikeSearch(agentId, query, limit);
+            return sqlLikeSearch(agentId, query, limit, scope);
         }
     }
 
@@ -557,18 +606,25 @@ public class JpaMemoryStore implements MemoryStore {
      * shared by {@link #fullTextSearch} and the hybrid fusion.
      */
     @SuppressWarnings("unchecked")
-    private List<Memory> pgFtsRows(Long pk, String query, int limit) {
+    private List<Memory> pgFtsRows(Long pk, String query, int limit, @Nullable MemoryScope scope) {
+        var visible = Memory.visibleSql(scope, 3);
         var sql = """
                 SELECT m.* FROM memory m
                 WHERE m.agent_id = ?1 AND m.superseded_at IS NULL
-                AND to_tsvector('english', m.text) @@ plainto_tsquery('english', ?2)
+                AND to_tsvector('english', m.text) @@ plainto_tsquery('english', ?2)%s
                 ORDER BY ts_rank(to_tsvector('english', m.text), plainto_tsquery('english', ?2)) DESC
-                """;
-        return JPA.em().createNativeQuery(sql, Memory.class)
+                """.formatted(visible.text());
+        return bind(JPA.em().createNativeQuery(sql, Memory.class)
                 .setParameter(1, pk)
-                .setParameter(2, query)
+                .setParameter(2, query), 3, visible)
                 .setMaxResults(limit)
                 .getResultList();
+    }
+
+    /** Bind {@code clause}'s parameters from position {@code first}. */
+    private static Query bind(Query query, int first, Memory.Clause clause) {
+        for (int i = 0; i < clause.params().size(); i++) query.setParameter(first + i, clause.params().get(i));
+        return query;
     }
 
     /**
@@ -576,21 +632,23 @@ public class JpaMemoryStore implements MemoryStore {
      * cosine-distance operator over the raw column — the exact shape the
      * planner can serve from the HNSW index provisioned in JCLAW-528. Any
      * wrapping expression (the old {@code COALESCE(ts_rank …) * 0.3 + … * 0.7}
-     * weighted sum) forces a sequential scan of every embedding. Test-pinned.
+     * weighted sum) forces a sequential scan of every embedding. Test-pinned. The {@code %s}
+     * takes the scope condition (JF-147), a filter that leaves the {@code ORDER BY} bare.
      */
     public static final String PG_VECTOR_LEG_SQL = """
             SELECT m.id, 1 - (m.embedding <=> ?2::text::vector) AS cos FROM memory m
-            WHERE m.agent_id = ?1 AND m.embedding IS NOT NULL AND m.superseded_at IS NULL
+            WHERE m.agent_id = ?1 AND m.embedding IS NOT NULL AND m.superseded_at IS NULL%s
             ORDER BY m.embedding <=> ?2::text::vector
             """;
 
-    private List<Long> pgVectorIds(Long pk, float[] embedding, int limit) {
+    private List<Long> pgVectorIds(Long pk, float[] embedding, int limit, @Nullable MemoryScope scope) {
         // JCLAW-940: selects the cosine so the leg can be gated on its best hit in Java,
         // matching the Lucene branch. The ORDER BY stays the bare operator the HNSW index
         // serves — only the projection is added, never a wrapping expression.
-        List<?> rows = JPA.em().createNativeQuery(PG_VECTOR_LEG_SQL)
+        var visible = Memory.visibleSql(scope, 3);
+        List<?> rows = bind(JPA.em().createNativeQuery(PG_VECTOR_LEG_SQL.formatted(visible.text()))
                 .setParameter(1, pk)
-                .setParameter(2, toVectorLiteral(embedding))
+                .setParameter(2, toVectorLiteral(embedding)), 3, visible)
                 .setMaxResults(limit)
                 .getResultList();
         if (rows.isEmpty()) return List.of();
@@ -607,6 +665,18 @@ public class JpaMemoryStore implements MemoryStore {
     /** {@inheritDoc} */
     @Override
     public List<Long> semanticMatchesForQuery(String agentId, String query, int limit, double minCosine) {
+        return semanticMatchesIn(agentId, query, limit, minCosine, MemoryScope.NONE);
+    }
+
+    /** {@inheritDoc} */
+    @Override
+    public List<Long> semanticMatchesForQuery(String agentId, String query, int limit, double minCosine,
+            @Nullable MemoryScope scope) {
+        return semanticMatchesIn(agentId, query, limit, minCosine, scope);
+    }
+
+    private List<Long> semanticMatchesIn(String agentId, String query, int limit, double minCosine,
+            @Nullable MemoryScope scope) {
         if (!vectorEnabled || query == null || query.isBlank()) return List.of();
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
@@ -614,8 +684,8 @@ public class JpaMemoryStore implements MemoryStore {
         if (embedding == null) return List.of();
         try {
             return isPostgres
-                    ? pgSemanticNeighbors(pk, embedding, limit, minCosine)
-                    : luceneSemanticNeighbors(agentId, embedding, limit, minCosine);
+                    ? pgSemanticNeighbors(pk, embedding, limit, minCosine, scope)
+                    : luceneSemanticNeighbors(agentId, pk, embedding, limit, minCosine, scope, null);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY,
                     "Semantic query match failed, falling back to lexical only: %s".formatted(e.getMessage()));
@@ -671,25 +741,26 @@ public class JpaMemoryStore implements MemoryStore {
      * the story's shared-contract AC. Degrades hybrid → FTS → LIKE, same as
      * before.
      */
-    private List<MemoryEntry> hybridSearch(String agentId, String query, int limit, float @Nullable [] embedding) {
+    private List<MemoryEntry> hybridSearch(String agentId, String query, int limit, float @Nullable [] embedding,
+            @Nullable MemoryScope scope) {
         Long pk = pkOrNull(agentId);
         if (pk == null) return List.of();
         try {
             if (embedding == null) {
-                return fullTextSearch(agentId, query, limit);
+                return fullTextSearch(agentId, query, limit, scope);
             }
-            List<Memory> keywordLeg = pgFtsRows(pk, query, limit);
-            List<Long> vectorLeg = pgVectorIds(pk, embedding, limit);
+            List<Memory> keywordLeg = pgFtsRows(pk, query, limit, scope);
+            List<Long> vectorLeg = pgVectorIds(pk, embedding, limit, scope);
             if (vectorLeg.isEmpty()) {
                 return toEntriesRankScored(keywordLeg);
             }
             var keywordIds = keywordLeg.stream().map(m -> m.id).toList();
             var preloaded = new HashMap<Long, Memory>();
             for (var m : keywordLeg) preloaded.put(m.id, m);
-            return fuseHydrateRerank(agentId, query, keywordIds, vectorLeg, preloaded, limit);
+            return fuseHydrateRerank(agentId, query, keywordIds, vectorLeg, preloaded, limit, scope);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY_MEMORY, "Hybrid search failed, falling back to FTS: %s".formatted(e.getMessage()));
-            return fullTextSearch(agentId, query, limit);
+            return fullTextSearch(agentId, query, limit, scope);
         }
     }
 
@@ -702,14 +773,16 @@ public class JpaMemoryStore implements MemoryStore {
      * Degrades to FTS-only when the query embedding is unavailable (no provider,
      * embeddings endpoint down) or the KNN leg fails.
      */
-    private List<MemoryEntry> luceneHybridSearch(String agentId, String query, int limit, float @Nullable [] embedding) {
+    private List<MemoryEntry> luceneHybridSearch(String agentId, String query, int limit, float @Nullable [] embedding,
+            @Nullable MemoryScope scope) {
         if (embedding == null) {
-            return likeSearch(agentId, query, limit);
+            return likeSearch(agentId, query, limit, scope);
         }
-        var fts = Memory.searchByTextScored(agentId, query, limit);
+        var hidden = hiddenGuestIds(agentId, scope);
+        var fts = Memory.searchByTextScored(agentId, query, limit, scope, hidden);
         List<ScoredId> knn;
         try {
-            var hits = DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit);
+            var hits = DirectLuceneMessageSearchRepository.searchMemoryIdsByVector(agentId, embedding, limit, hidden);
             double bestCosine = hits.isEmpty() ? -1 : 2 * hits.getFirst().score() - 1;
             knn = vectorLegAboveFloor(bestCosine) ? hits : List.of();
         } catch (IOException e) {
@@ -725,7 +798,13 @@ public class JpaMemoryStore implements MemoryStore {
         var knnIds = knn.stream().map(ScoredId::id).toList();
         var preloaded = new HashMap<Long, Memory>();
         for (var s : fts) preloaded.put(s.memory().id, s.memory());
-        return fuseHydrateRerank(agentId, query, ftsIds, knnIds, preloaded, limit);
+        return fuseHydrateRerank(agentId, query, ftsIds, knnIds, preloaded, limit, scope);
+    }
+
+    /** {@link Memory#guestIdsOutside}, for an agent id that may not parse. */
+    private static List<Long> hiddenGuestIds(String agentId, @Nullable MemoryScope scope) {
+        Long pk = pkOrNull(agentId);
+        return pk == null ? List.of() : Memory.guestIdsOutside(pk, scope);
     }
 
     public static final String KEY_RECALL_MIN_COSINE = "memory.recall.minCosine";
@@ -801,10 +880,10 @@ public class JpaMemoryStore implements MemoryStore {
      */
     private List<MemoryEntry> fuseHydrateRerank(String agentId, String query,
             List<Long> keywordIds, List<Long> vectorIds,
-            HashMap<Long, Memory> preloaded, int limit) {
+            HashMap<Long, Memory> preloaded, int limit, @Nullable MemoryScope scope) {
         var fused = ReciprocalRankFusion.fuse(
                 ConfigService.getInt(KEY_RRF_K, DEFAULT_RECALL_RRF_K), keywordIds, vectorIds);
-        hydrateMissing(agentId, fused, preloaded);
+        hydrateMissing(agentId, fused, preloaded, scope);
 
         // The hydrated shortlist in fused order (stale index ids drop out here).
         var shortlist = new ArrayList<Memory>(fused.size());
@@ -854,16 +933,16 @@ public class JpaMemoryStore implements MemoryStore {
     }
 
     /** Load the fused ids the legs didn't already hydrate, re-bounded to the
-     *  agent (and to non-superseded rows) so a stale/foreign index id can
-     *  never leak another agent's memory into recall. */
+     *  agent (and to non-superseded rows visible in {@code scope}) so a stale/foreign
+     *  index id can never leak another agent's memory into recall. */
     private void hydrateMissing(String agentId, List<ReciprocalRankFusion.Ranked> fused,
-            HashMap<Long, Memory> preloaded) {
+            HashMap<Long, Memory> preloaded, @Nullable MemoryScope scope) {
         var missing = fused.stream().map(ReciprocalRankFusion.Ranked::id)
                 .filter(id -> !preloaded.containsKey(id)).toList();
         if (missing.isEmpty()) return;
         Long pk = pkOrNull(agentId);
         List<Memory> rows = pk == null ? List.of()
-                : Memory.find("agent.id = ?1 AND id IN (?2) AND supersededAt IS NULL",
+                : Memory.findVisible(scope, "agent.id = ?1 AND id IN (?2) AND supersededAt IS NULL",
                         pk, missing).fetch();
         for (var m : rows) preloaded.put(m.id, m);
     }

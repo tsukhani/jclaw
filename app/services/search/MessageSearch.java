@@ -6,6 +6,7 @@ import play.db.DB;
 import services.EventLogger;
 
 import java.io.IOException;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 
@@ -94,11 +95,12 @@ public final class MessageSearch {
      * (the Lucene backend filters on the indexed agent field). Same pre-init
      * no-throw contract as {@link #searchIds}.
      */
-    public static List<MessageSearchRepository.ScoredId> searchMemoryIds(String agentId, String query, int limit)
+    public static List<MessageSearchRepository.ScoredId> searchMemoryIds(String agentId, String query, int limit,
+                                                                         Collection<Long> excludeIds)
             throws IOException {
         var current = repo;
         if (current == null) return List.of();
-        return current.searchMemoryIds(agentId, query, limit);
+        return current.searchMemoryIds(agentId, query, limit, excludeIds);
     }
 
     /**

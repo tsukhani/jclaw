@@ -19,6 +19,7 @@ import models.Agent;
 import models.Conversation;
 import models.Memory;
 import models.MemoryAuthorType;
+import models.MemoryScope;
 import org.jspecify.annotations.Nullable;
 import services.ConfigService;
 import services.EventLogger;
@@ -274,8 +275,8 @@ public class MemoryTool implements ToolRegistry.Tool {
         // Tool dispatch carries no ambient transaction — the streaming chat path is
         // @NoTransaction (JCLAW-199) and multi-call batches run on fresh virtual threads
         // that inherit no JPA context — so every DB touch here opens its own.
-        var selected = Tx.run(() ->
-                SystemPromptAssembler.recall(agentId, query, Set.of(), queryEmbedding, limit).selected());
+        var selected = Tx.run(() -> SystemPromptAssembler.recall(agentId, query, Set.of(), queryEmbedding, limit,
+                turnScope()).selected());
         if (selected.isEmpty()) return "No memories matched \"%s\".".formatted(query);
 
         // Mirrors prompt-assembly recall: an entry that reached the model has genuinely
@@ -324,20 +325,25 @@ public class MemoryTool implements ToolRegistry.Tool {
 
         // Read on the turn's thread: the sender trust is thread-local.
         var provenance = Tx.run(() -> toolProvenance(agent));
-        var existing = sameFact(agentId, text, retrievalKey);
+        boolean guest = provenance.authorType() == MemoryAuthorType.GUEST_TURN;
+        var writeScope = Tx.run(() -> MemoryScope.forWrite(provenance.authorType(), currentConversation()));
+        var existing = sameFact(agentId, text, retrievalKey, writeScope);
         if (!existing.isEmpty()) {
             if (provenance.mayCorroborate()) Tx.run(() -> Memory.corroborate(existing.getFirst().id));
+            // JF-147: the match may be the operator's row, which a guest is never quoted.
+            if (guest) return "Already remembered.";
             return "Already remembered: \"%s\"".formatted(snippet(existing.getFirst().text));
         }
 
         // JCLAW-981: a deliberate "remember that…" IS a core memory — this tool exists only
         // for that instruction, so core is the default rather than fact. An explicit
         // category still wins, which is what lets the operator accept a different bucket
-        // when core is full.
+        // when core is full. A guest's is a fact (JF-147): core loads into every chat.
         var requested = JsonArgs.optString(args, FIELD_CATEGORY);
-        var category = requested == null || requested.isBlank()
+        var chosen = requested == null || requested.isBlank()
                 ? MemoryCategory.CORE.label
                 : MemoryCategory.coerceForStorage(requested);
+        var category = guest && MemoryCategory.CORE.label.equals(chosen) ? MemoryCategory.FACT.label : chosen;
 
         if (MemoryCategory.CORE.label.equals(category)) {
             var full = coreCapReached(agentId);
@@ -389,6 +395,36 @@ public class MemoryTool implements ToolRegistry.Tool {
         var channel = conversation == null ? "unknown" : conversation.channelType;
         return new MemoryProvenance(conversationId, messageId, MemoryProvenance.guest(channel),
                 MemoryAuthorType.GUEST_TURN, List.of());
+    }
+
+    /** The turn's chat, or null outside one (a task run). Must run inside a transaction. */
+    private static @Nullable Conversation currentConversation() {
+        var conversationId = ToolContext.conversationId();
+        return conversationId == null ? null : Conversation.findById(conversationId);
+    }
+
+    /** What this turn may read (JF-147). Must run inside a transaction. */
+    private static MemoryScope turnScope() {
+        return MemoryScope.of(currentConversation());
+    }
+
+    /**
+     * What a forget may reach (JF-147): every row on the operator's turn (a null scope), else what
+     * the turn may read, and on a guest's turn only that guest's own rows.
+     */
+    private record ForgetReach(@Nullable MemoryScope scope, boolean guestRowsOnly) {
+        boolean admits(Memory m) {
+            return !guestRowsOnly || m.authorType == MemoryAuthorType.GUEST_TURN;
+        }
+    }
+
+    /** Must run inside a transaction. */
+    private static ForgetReach forgetReach(Agent agent) {
+        var conversationId = ToolContext.conversationId();
+        if (conversationId != null && DangerousActionGate.operatorTurn(conversationId)) {
+            return new ForgetReach(null, false);
+        }
+        return new ForgetReach(turnScope(), toolProvenance(agent).authorType() == MemoryAuthorType.GUEST_TURN);
     }
 
     private static String requester(MemoryProvenance provenance) {
@@ -497,9 +533,12 @@ public class MemoryTool implements ToolRegistry.Tool {
         var query = JsonArgs.optString(args, FIELD_QUERY, "").strip();
         if (query.isBlank()) return "Error: `query` is required for forget.";
 
-        var matches = sameFact(agentId, query);
+        // Read on the turn's thread: the sender trust is thread-local.
+        var reach = Tx.run(() -> forgetReach(agent));
+        var matches = sameFact(agentId, query, reach.scope()).stream().filter(reach::admits).toList();
         var matchedIds = matches.stream().map(m -> m.id).collect(Collectors.toSet());
-        var related = relatedByMeaning(agentId, query, matchedIds);
+        var related = relatedByMeaning(agentId, query, matchedIds, reach.scope()).stream()
+                .filter(reach::admits).toList();
 
         if (matches.isEmpty()) {
             if (!related.isEmpty()) {
@@ -508,7 +547,7 @@ public class MemoryTool implements ToolRegistry.Tool {
                 for (var m : related) sb.append("- ").append(snippet(m.text)).append('\n');
                 return sb.toString();
             }
-            var near = nearestMiss(agentId, query);
+            var near = nearestMiss(agentId, query, reach);
             return near == null
                     ? "Nothing stored matches \"%s\" — nothing to forget.".formatted(query)
                     : ("Nothing stored matches \"%s\" closely enough to forget. The nearest stored "
@@ -550,8 +589,8 @@ public class MemoryTool implements ToolRegistry.Tool {
      * what a semantic match finds is offered for confirmation by {@link #relatedByMeaning}
      * rather than deleted.
      */
-    private static List<Memory> sameFact(String agentId, String text) {
-        return matching(agentId, text, null,
+    private static List<Memory> sameFact(String agentId, String text, @Nullable MemoryScope scope) {
+        return matching(agentId, text, null, scope,
                 ConfigService.getDouble("memory.forget.match.threshold", FORGET_JACCARD),
                 ConfigService.getDouble("memory.forget.match.containmentThreshold", FORGET_CONTAINMENT));
     }
@@ -567,8 +606,9 @@ public class MemoryTool implements ToolRegistry.Tool {
      * surfacing and wrong to delete, and no floor separates the two classes because they
      * interleave — the article sits above one of the beliefs.
      */
-    private static List<Memory> relatedByMeaning(String agentId, String text, Set<Long> already) {
-        var ids = semanticNeighbors(agentId, text, null);
+    private static List<Memory> relatedByMeaning(String agentId, String text, Set<Long> already,
+            @Nullable MemoryScope scope) {
+        var ids = semanticNeighbors(agentId, text, null, scope);
         if (ids.isEmpty()) return List.of();
         return Tx.run(() -> {
             var out = new ArrayList<Memory>();
@@ -585,8 +625,9 @@ public class MemoryTool implements ToolRegistry.Tool {
      * The store-side question: would capture have called this a duplicate? Keeps capture's
      * own thresholds, so a store cannot create a row capture would have rejected.
      */
-    private static List<Memory> sameFact(String agentId, String text, @Nullable String retrievalKey) {
-        return matching(agentId, text, retrievalKey,
+    private static List<Memory> sameFact(String agentId, String text, @Nullable String retrievalKey,
+            MemoryScope scope) {
+        return matching(agentId, text, retrievalKey, scope,
                 ConfigService.getDouble("memory.autocapture.dedup.threshold", 0.85), 0.82);
     }
 
@@ -602,12 +643,12 @@ public class MemoryTool implements ToolRegistry.Tool {
      * only the lexical query and the hydration take one.
      */
     private static List<Memory> matching(String agentId, String text, @Nullable String retrievalKey,
-            double jaccard, double containment) {
+            @Nullable MemoryScope scope, double jaccard, double containment) {
         // Keyless callers (forget) take the lexical leg only: a semantic hit is topical, and
         // deleting on topic removes neighboring facts the operator did not name.
         var ids = (retrievalKey == null || retrievalKey.isBlank())
                 ? List.<Long>of()
-                : semanticNeighbors(agentId, text, retrievalKey);
+                : semanticNeighbors(agentId, text, retrievalKey, scope);
         return Tx.run(() -> {
             var byId = new LinkedHashMap<Long, Memory>();
             for (var id : ids) {
@@ -615,7 +656,7 @@ public class MemoryTool implements ToolRegistry.Tool {
                 if (m != null && m.supersededAt == null) byId.put(m.id, m);
             }
             var probe = MemorySimilarity.Tokens.of(text);
-            for (var hit : Memory.searchByTextScored(agentId, text, FORGET_LIMIT)) {
+            for (var hit : Memory.searchByTextScored(agentId, text, FORGET_LIMIT, scope)) {
                 var m = hit.memory();
                 if (m.supersededAt != null || byId.containsKey(m.id)) continue;
                 if (MemorySimilarity.isDuplicate(probe, MemorySimilarity.Tokens.of(m.text),
@@ -636,15 +677,15 @@ public class MemoryTool implements ToolRegistry.Tool {
      * word under the floor. Naming the near miss makes the two outcomes distinguishable and
      * gives the operator something to confirm (JCLAW-1049).
      */
-    private static String nearestMiss(String agentId, String text) {
+    private static String nearestMiss(String agentId, String text, ForgetReach reach) {
         double floor = ConfigService.getDouble("memory.forget.nearMiss.minContainment", 0.4);
         return Tx.run(() -> {
             var probe = MemorySimilarity.contentTokens(text);
             String best = null;
             double bestScore = floor;
-            for (var hit : Memory.searchByTextScored(agentId, text, FORGET_LIMIT)) {
+            for (var hit : Memory.searchByTextScored(agentId, text, FORGET_LIMIT, reach.scope())) {
                 var m = hit.memory();
-                if (m.supersededAt != null) continue;
+                if (m.supersededAt != null || !reach.admits(m)) continue;
                 double score = MemorySimilarity.containment(probe, MemorySimilarity.contentTokens(m.text));
                 if (score > bestScore) {
                     bestScore = score;
@@ -676,17 +717,18 @@ public class MemoryTool implements ToolRegistry.Tool {
 
     /** Empty on any failure: no vector backend, no embedding provider, or a lookup error
      *  must not make memory unusable — fail open to the lexical tier, as capture does. */
-    private static List<Long> semanticNeighbors(String agentId, String text, @Nullable String retrievalKey) {
+    private static List<Long> semanticNeighbors(String agentId, String text, @Nullable String retrievalKey,
+            @Nullable MemoryScope scope) {
         var store = MemoryStoreFactory.get();
         try {
             // No key means the caller holds a description rather than a stored statement,
             // which is a query and has to be embedded as one.
             if (retrievalKey == null || retrievalKey.isBlank()) {
                 return store.semanticMatchesForQuery(agentId, text, FORGET_LIMIT,
-                        ConfigService.getDouble("memory.forget.match.cosineThreshold", FORGET_COSINE));
+                        ConfigService.getDouble("memory.forget.match.cosineThreshold", FORGET_COSINE), scope);
             }
             return store.semanticNeighbors(agentId, text, retrievalKey, FORGET_LIMIT,
-                    ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90));
+                    ConfigService.getDouble("memory.autocapture.dedup.cosineThreshold", 0.90), scope);
         } catch (Exception e) {
             EventLogger.warn(EVENT_CATEGORY, "Semantic memory match failed, using lexical only: %s"
                     .formatted(e.getMessage()));

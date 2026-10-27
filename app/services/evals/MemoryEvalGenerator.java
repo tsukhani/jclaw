@@ -8,6 +8,7 @@ import memory.MemorySimilarity;
 import memory.MemoryStoreFactory;
 import models.Agent;
 import models.Memory;
+import models.MemoryScope;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
 import services.SessionCompactor;
@@ -52,7 +53,10 @@ public final class MemoryEvalGenerator {
 
     private static final String EVENT_CATEGORY = "memory";
 
-    /** Every active memory of one agent, oldest first — the corpus a suite samples. */
+    /**
+     * Every active memory of one agent, oldest first — the corpus a suite samples. No guest's row:
+     * eval recall reads as no chat, which never returns one (JF-147).
+     */
     private static final String ACTIVE_MEMORIES_JPQL =
             "agent.id = ?1 AND supersededAt IS NULL ORDER BY id";
 
@@ -81,7 +85,7 @@ public final class MemoryEvalGenerator {
     private record Row(Long id, String text, String retrievalKey, Instant createdAt) {}
 
     private static List<Row> corpus(Agent agent) {
-        return Tx.run(() -> Memory.<Memory>find(ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
+        return Tx.run(() -> Memory.findVisible(MemoryScope.NONE, ACTIVE_MEMORIES_JPQL, agent.id).<Memory>fetch()
                 .stream().map(m -> new Row(m.id, m.text, m.retrievalKey, m.createdAt)).toList());
     }
 

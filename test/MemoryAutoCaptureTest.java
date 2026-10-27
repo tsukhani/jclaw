@@ -266,6 +266,52 @@ class MemoryAutoCaptureTest extends UnitTest {
         assertEquals("Tarun", services.WorkspaceFiles.ownerName(name));
     }
 
+    // ─── JF-147: a guest's turn never writes the core tier ───────────────────
+
+    private String categoryCaptured(String agentName, String text, models.MemoryAuthorType author) {
+        MemoryAutoCapture.Extractor extractor = msgs ->
+                "{\"memories\":[{\"text\":\"" + text + "\",\"category\":\"fact\",\"importance\":0.7}]}";
+        var result = MemoryAutoCapture.capture(agentId(agentName), agentName,
+                "Here is something durable worth remembering: " + text, "Noted.", extractor, null, freshBreaker(),
+                memory.MemoryProvenance.extractor("m", author));
+        assertEquals(1, result.captured(), "precondition: the candidate is stored");
+        return MemoryStoreFactory.get().list(agentId(agentName)).getFirst().category();
+    }
+
+    @Test
+    void aGuestsIdentityFactIsStoredAsAFactNotCore() {
+        assertEquals(MemoryCategory.FACT.label,
+                categoryCaptured("agent-guest-identity", "The user's name is Priya.", models.MemoryAuthorType.GUEST_TURN));
+    }
+
+    @Test
+    void theOwnersIdentityFactIsStillPromotedToCore() {
+        assertEquals(MemoryCategory.CORE.label,
+                categoryCaptured("agent-owner-identity", "The user lives in Porto.", models.MemoryAuthorType.HUMAN_TURN));
+    }
+
+    @Test
+    void theKeyBackfillPromotesTheOwnersIdentityFactButNotAGuests() throws Exception {
+        var agent = new models.Agent();
+        agent.name = "agent-backfill-identity";
+        // No such provider, so the keying pass has no writer and makes no model call.
+        agent.modelProvider = "jf147-unregistered";
+        agent.modelId = "none";
+        agent.save();
+        var key = String.valueOf(agent.id);
+        var owners = Long.valueOf(MemoryStoreFactory.get().store(key, "The user lives in Porto.", "fact", 0.6));
+        var guests = Long.valueOf(MemoryStoreFactory.get().storeDeferred(key, "The user's name is Priya.", "fact", 0.6,
+                null, memory.MemoryProvenance.extractor("m", models.MemoryAuthorType.GUEST_TURN)));
+
+        // The run itself, on this thread: start() forks it onto a thread that sees only committed rows.
+        var run = memory.MemoryKeyBackfillService.class.getDeclaredMethod("run", models.Agent.class);
+        run.setAccessible(true);
+        run.invoke(null, agent);
+
+        assertEquals(MemoryCategory.CORE.label, ((models.Memory) models.Memory.findById(owners)).category);
+        assertEquals(MemoryCategory.FACT.label, ((models.Memory) models.Memory.findById(guests)).category);
+    }
+
     @Test
     void captureSkipsTrivialTurnViaGateWithoutCallingExtractor() {
         MemoryAutoCapture.Extractor extractor = msgs -> {
