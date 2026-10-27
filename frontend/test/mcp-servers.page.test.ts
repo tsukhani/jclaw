@@ -33,10 +33,6 @@ function server(over: Partial<Record<string, unknown>> = {}) {
     lastConnectedAt: null,
     lastDisconnectedAt: null,
     toolCount: 2,
-    tools: [
-      { name: 'create_issue', description: 'Open an issue' },
-      { name: 'list_repos', description: 'List repositories' },
-    ],
     createdAt: null,
     updatedAt: null,
     duplicateOf: null,
@@ -48,6 +44,12 @@ function server(over: Partial<Record<string, unknown>> = {}) {
     ...over,
   }
 }
+
+/** The single-server read, the only one that carries the tools (JF-137). */
+const TOOLS = [
+  { name: 'create_issue', description: 'Open an issue' },
+  { name: 'list_repos', description: 'List repositories' },
+]
 
 /** Mounted alongside ConfirmDialog so confirm() actually resolves — useConfirm holds
  *  module-singleton state and ConfirmDialog is what renders it. */
@@ -61,12 +63,16 @@ let posted: Record<string, unknown> | null = null
 let putBody: Record<string, unknown> | null = null
 let deleted = false
 let testedId: number | null = null
+let detailReads = 0
+let detailFails = false
 
 function setupApi(rows: unknown[]) {
   posted = null
   putBody = null
   deleted = false
   testedId = null
+  detailReads = 0
+  detailFails = false
   registerEndpoint('/api/mcp-servers', {
     handler: async (event) => {
       if (event.method === 'POST') {
@@ -82,6 +88,16 @@ function setupApi(rows: unknown[]) {
       if (event.method === 'DELETE') {
         deleted = true
         return { ok: true }
+      }
+      if (event.method === 'GET') {
+        detailReads++
+        if (detailFails) {
+          const { setResponseStatus } = await import('h3')
+          // A 404, as for a server deleted since the list loaded: $fetch retries a 5xx GET once.
+          setResponseStatus(event, 404)
+          return { error: 'not_found', message: 'MCP server 1 was not found' }
+        }
+        return { ...server(), tools: TOOLS }
       }
       const { readBody } = await import('h3')
       putBody = await readBody(event) as Record<string, unknown>
@@ -131,16 +147,104 @@ describe('MCP Servers page', () => {
     expect(c.text()).not.toContain('create_issue')
   })
 
-  it('expands one server\'s tool list and collapses it again', async () => {
+  it('reads a server\'s tools from its own route only when its tool list is expanded', async () => {
     setupApi([server()])
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+    expect(detailReads).toBe(0)
+
+    await clickLabel(c, 'Show 2 tools for github')
+    expect(detailReads).toBe(1)
+    expect(c.text()).toContain('create_issue')
+    expect(c.text()).toContain('Open an issue')
+    expect(c.text()).toContain('list_repos')
+
+    await clickLabel(c, 'Hide 2 tools for github')
+    expect(c.text()).not.toContain('create_issue')
+    expect(detailReads).toBe(1)
+
+    // Each expand reads afresh: the server may have reconnected with other tools since.
+    await clickLabel(c, 'Show 2 tools for github')
+    expect(detailReads).toBe(2)
+    expect(c.text()).toContain('create_issue')
+  })
+
+  it('says it is loading while the read is pending, then shows the tools', async () => {
+    setupApi([server()])
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    registerEndpoint('/api/mcp-servers/1', async () => {
+      await held
+      return { ...server(), tools: TOOLS }
+    })
     const c = await mountSuspended(McpServers)
     await flushPromises()
 
     await clickLabel(c, 'Show 2 tools for github')
-    expect(c.text()).toContain('create_issue')
-    expect(c.text()).toContain('list_repos')
+    const loading = c.find('[data-testid="mcp-tools-loading"]')
+    expect(loading.attributes('role')).toBe('status')
+    expect(loading.text()).toBe('Loading tools…')
 
-    await clickLabel(c, 'Hide 2 tools for github')
+    release()
+    await vi.waitFor(() => expect(c.text()).toContain('create_issue'))
+    expect(c.find('[data-testid="mcp-tools-loading"]').exists()).toBe(false)
+  })
+
+  it('never lets a slow read for one server fill the list of the next one opened', async () => {
+    setupApi([server(), server({ id: 2, name: 'gitlab', toolCount: 1 })])
+    let release!: () => void
+    const held = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let slowAnswered = false
+    registerEndpoint('/api/mcp-servers/1', async () => {
+      await held
+      slowAnswered = true
+      return { ...server(), tools: TOOLS }
+    })
+    registerEndpoint('/api/mcp-servers/2', () => ({
+      ...server({ id: 2, name: 'gitlab', toolCount: 1 }),
+      tools: [{ name: 'merge_request', description: 'Open a merge request' }],
+    }))
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+
+    await clickLabel(c, 'Show 2 tools for github')
+    await clickLabel(c, 'Show 1 tools for gitlab')
+    await vi.waitFor(() => expect(c.text()).toContain('merge_request'))
+
+    release()
+    await vi.waitFor(() => expect(slowAnswered).toBe(true))
+    // Let the slow response reach the page before asserting it was ignored.
+    await new Promise(resolve => setTimeout(resolve, 50))
+    await flushPromises()
+    expect(c.text()).toContain('merge_request')
+    expect(c.text()).not.toContain('create_issue')
+  })
+
+  it('says so when the opened server advertises no tools any more', async () => {
+    setupApi([server()])
+    registerEndpoint('/api/mcp-servers/1', () => ({ ...server(), toolCount: 0, tools: [] }))
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+
+    await clickLabel(c, 'Show 2 tools for github')
+    expect(c.find('[data-testid="mcp-tools-none"]').text()).toBe('The server advertises no tools right now.')
+  })
+
+  it('shows why a server\'s tools could not be read, inside the expanded row', async () => {
+    setupApi([server()])
+    detailFails = true
+    const c = await mountSuspended(McpServers)
+    await flushPromises()
+
+    await clickLabel(c, 'Show 2 tools for github')
+    await vi.waitFor(() => expect(c.find('[data-testid="api-error"]').exists()).toBe(true))
+    expect(detailReads).toBe(1)
+    expect(c.find('[data-testid="api-error"]').text()).toBe('MCP server 1 was not found')
+    expect(c.find('[data-testid="mcp-tools-loading"]').exists()).toBe(false)
     expect(c.text()).not.toContain('create_issue')
   })
 

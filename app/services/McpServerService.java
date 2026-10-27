@@ -61,9 +61,8 @@ public final class McpServerService {
 
     /**
      * Snapshot of a single advertised tool on an MCP server. Exposed
-     * inside {@link View#tools} so the admin UI can render the
-     * inline-expandable action list under each MCP Servers card —
-     * no separate per-server tools endpoint needed.
+     * inside {@link View#tools}, which only {@code GET /api/mcp-servers/{id}}
+     * returns; the MCP Servers page reads it when a server's tool list is expanded.
      *
      * @param name        tool name from the MCP server's {@code tools/list}
      * @param description tool description from the MCP server
@@ -155,9 +154,34 @@ public final class McpServerService {
         }
     }
 
-    public static List<View> listAll() {
+    /**
+     * One row of the server list: a {@link View} without its {@code tools}, which {@code GET /api/mcp-servers/{id}}
+     * returns. With them the list of 26 servers came to 250,938 characters, past what {@code jclaw_api} hands an agent.
+     */
+    public record Summary(Long id, String name, boolean enabled, boolean requiresApproval,
+                          boolean offerViewToolsEverywhere, String transport,
+                          @Nullable String command, List<String> args, Map<String, String> env,
+                          @Nullable String url, Map<String, String> headers,
+                          String status, String lastError,
+                          @Nullable String lastConnectedAt, @Nullable String lastDisconnectedAt,
+                          int toolCount,
+                          @Nullable String createdAt, @Nullable String updatedAt,
+                          @Nullable String duplicateOf, String protocol,
+                          @Nullable String protocolVersion, @Nullable Integer protocolGeneration,
+                          @Nullable String protocolSwitchedAt, @Nullable String protocolSwitchReason) {
+
+        static Summary of(View v) {
+            return new Summary(v.id(), v.name(), v.enabled(), v.requiresApproval(), v.offerViewToolsEverywhere(),
+                    v.transport(), v.command(), v.args(), v.env(), v.url(), v.headers(), v.status(), v.lastError(),
+                    v.lastConnectedAt(), v.lastDisconnectedAt(), v.toolCount(), v.createdAt(), v.updatedAt(),
+                    v.duplicateOf(), v.protocol(), v.protocolVersion(), v.protocolGeneration(), v.protocolSwitchedAt(),
+                    v.protocolSwitchReason());
+        }
+    }
+
+    public static List<Summary> listAll() {
         var rows = McpServer.<McpServer>find("ORDER BY name ASC").<McpServer>fetch();
-        return rows.stream().map(row -> View.of(row).withDuplicateOf(originalFor(row, rows))).toList();
+        return rows.stream().map(row -> Summary.of(View.of(row).withDuplicateOf(originalFor(row, rows)))).toList();
     }
 
     /**

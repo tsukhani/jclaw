@@ -1,5 +1,5 @@
 import { onBeforeUnmount, onMounted, type Ref } from 'vue'
-import type { McpServer } from '~/types/api'
+import type { McpServerSummary } from '~/types/api'
 
 /** Cadence while a row is mid-handshake — fast enough to read as live. */
 const FAST_POLL_MS = 600
@@ -18,7 +18,7 @@ export interface UseMcpStatusWatcher {
  * handshake and sync its allowlist, so any tidy-looking ceiling gives up mid-connect.
  */
 export function useMcpStatusWatcher(
-  servers: Ref<McpServer[] | null | undefined>,
+  servers: Ref<McpServerSummary[] | null | undefined>,
   refresh: () => Promise<unknown>,
 ): UseMcpStatusWatcher {
   let watching = false

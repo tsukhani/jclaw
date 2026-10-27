@@ -1168,7 +1168,7 @@ export interface CloudUsage {
 
 /**
  * One configured MCP (Model Context Protocol) server, as surfaced by
- * {@code GET /api/mcp-servers}. Transport-specific fields are exploded
+ * {@code GET /api/mcp-servers/{id}}. Transport-specific fields are exploded
  * out of the row's stored configJson so the admin form binds directly:
  * {@code command/args/env} for STDIO, {@code url/headers} for HTTP.
  * Status/lastError/lastConnected* are populated from the runtime
@@ -1201,10 +1201,9 @@ export interface McpServer {
   /**
    * Per-tool details for every action this server currently advertises.
    * Sourced from {@code McpConnectionManager.tools(serverName)} at the
-   * moment of the response — empty for DISCONNECTED servers. Drives the
-   * inline-expandable action list on the MCP Servers page and the
-   * read-only action display under each MCP server toggle on the
-   * agent detail page.
+   * moment of the response — empty for DISCONNECTED servers. Only the
+   * single-server read carries it; the MCP Servers page fetches it when
+   * a row's tool list is expanded.
    */
   tools: McpToolInfo[]
   createdAt: string | null
@@ -1229,6 +1228,9 @@ export interface McpServer {
   protocolSwitchedAt: string | null
   protocolSwitchReason: string | null
 }
+
+/** One row of {@code GET /api/mcp-servers}: a server without its tools (JF-137). */
+export type McpServerSummary = Omit<McpServer, 'tools'>
 
 /** JCLAW-813: a saved prompt in the Prompts Library. The category glyph is a
  *  frontend concern (value → Heroicon), so no icon field travels on the wire. */

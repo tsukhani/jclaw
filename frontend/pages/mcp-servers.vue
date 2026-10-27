@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import type { Breaker, McpServer, McpTestResult } from '~/types/api'
+import type { ApiErrorDetails, Breaker, McpServer, McpServerSummary, McpTestResult, McpToolInfo } from '~/types/api'
 import { isSensitiveKey } from '~/utils/secrets'
 import { ArrowPathIcon, BeakerIcon, BoltIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, TrashIcon, XMarkIcon } from '@heroicons/vue/24/outline'
 
-const { data: servers, refresh } = await useFetch<McpServer[]>('/api/mcp-servers')
+const { data: servers, refresh } = await useFetch<McpServerSummary[]>('/api/mcp-servers')
 const { mutate, error: mutationError } = useApiMutation()
 // The row switch and delete: kept apart from the form's mutation so its error is not shown twice.
 const { mutate: mutateServer, errorDetails: serverError } = useApiMutation()
@@ -39,8 +39,26 @@ const expandedRowId = ref<number | null>(null)
  * affordances.
  */
 const expandedToolsRowId = ref<number | null>(null)
-function toggleToolsExpand(id: number) {
-  expandedToolsRowId.value = expandedToolsRowId.value === id ? null : id
+// JF-137: the list carries no tools, so an expanded row reads its own server's route.
+const expandedTools = ref<McpToolInfo[] | null>(null)
+const expandedToolsError = ref<ApiErrorDetails | null>(null)
+const toolLoads = useLatestRequest()
+async function toggleToolsExpand(id: number) {
+  if (expandedToolsRowId.value === id) {
+    expandedToolsRowId.value = null
+    return
+  }
+  expandedToolsRowId.value = id
+  expandedTools.value = null
+  expandedToolsError.value = null
+  const token = toolLoads.begin()
+  try {
+    const server = await $fetch<McpServer>(`/api/mcp-servers/${id}`)
+    if (toolLoads.isCurrent(token)) expandedTools.value = server.tools
+  }
+  catch (e) {
+    if (toolLoads.isCurrent(token)) expandedToolsError.value = apiErrorDetails(e)
+  }
 }
 const testResult = ref<McpTestResult | null>(null)
 const testResultForId = ref<number | null>(null)
@@ -115,7 +133,7 @@ function isSavedSecret(row: KeyValueRow): boolean {
   return row.savedMask !== undefined && row.key.trim() === row.savedKey
 }
 
-function formFromServer(s: McpServer): FormState {
+function formFromServer(s: McpServerSummary): FormState {
   // The server masks env values with sensitive names and every header value, as ConfigService does.
   const envRows = Object.entries(s.env || {}).map(([key, value]) => isSensitiveKey(key) ? savedSecret(key, value) : { key, value })
   if (envRows.length === 0) envRows.push({ key: '', value: '' })
@@ -145,7 +163,7 @@ function openAddForm() {
   saveError.value = null
 }
 
-function openEditForm(s: McpServer) {
+function openEditForm(s: McpServerSummary) {
   editing.value = formFromServer(s)
   expandedRowId.value = s.id
   clearTestResult()
@@ -215,7 +233,7 @@ async function saveForm() {
   kick()
 }
 
-async function toggleEnabled(s: McpServer) {
+async function toggleEnabled(s: McpServerSummary) {
   await mutateServer<McpServer>(`/api/mcp-servers/${s.id}`, {
     method: 'PUT',
     body: { enabled: !s.enabled },
@@ -232,12 +250,12 @@ const { kick } = useMcpStatusWatcher(servers, refresh)
 const { byName: breakersByName, refresh: refreshBreakers } = useBreakers()
 const expandedBreakerRowId = ref<number | null>(null)
 
-function breakerOf(s: McpServer) {
+function breakerOf(s: McpServerSummary) {
   return breakersByName.value.get(`mcp:${s.name}`)
 }
 
 /** A breaker that is not serving opens its row by itself; a serving one only on request. */
-function breakerRowShown(s: McpServer) {
+function breakerRowShown(s: McpServerSummary) {
   const b = breakerOf(s)
   return !!b && (b.state !== 'CLOSED' || expandedBreakerRowId.value === s.id)
 }
@@ -257,7 +275,7 @@ const breakerAccentClass: Record<Breaker['state'], string> = {
   OPEN: 'border-l-red-500',
 }
 
-async function deleteServer(s: McpServer) {
+async function deleteServer(s: McpServerSummary) {
   const ok = await confirm({
     title: `Delete MCP server "${s.name}"?`,
     message: 'Disconnects the server, removes it from the registry, and clears all per-agent allowlist entries. The action is audited as MCP_TOOL_UNREGISTER and cannot be undone.',
@@ -269,7 +287,7 @@ async function deleteServer(s: McpServer) {
   await refresh()
 }
 
-async function testServer(s: McpServer) {
+async function testServer(s: McpServerSummary) {
   clearTestResultDismissTimer()
   testResult.value = null
   testResultForId.value = s.id
@@ -292,7 +310,7 @@ async function testFromForm() {
     saveError.value = 'Save first, then test connection.'
     return
   }
-  await testServer({ id: editing.value.id } as McpServer)
+  await testServer({ id: editing.value.id } as McpServerSummary)
 }
 
 function formatSwitchedAt(iso: string) {
@@ -827,11 +845,33 @@ function removeHeaderRow(i: number) {
                  toggling; this disclosure exists so the operator can
                  still see what each server advertises (name + LLM
                  description) without diving into the agent edit panel. -->
-            <tr v-if="expandedToolsRowId === server.id && server.tools.length">
+            <!-- The toolCount check closes the row when a refresh finds the server has lost its tools,
+                 which also hides the only button that could close it. -->
+            <tr v-if="expandedToolsRowId === server.id && server.toolCount > 0">
               <td
                 colspan="7"
                 class="bg-muted/30 px-0 py-0"
               >
+                <ApiErrorAlert
+                  v-if="expandedToolsError"
+                  :error="expandedToolsError"
+                  class="m-4"
+                />
+                <p
+                  v-else-if="!expandedTools"
+                  role="status"
+                  class="px-4 py-2.5 text-xs text-fg-muted"
+                  data-testid="mcp-tools-loading"
+                >
+                  Loading tools…
+                </p>
+                <p
+                  v-else-if="expandedTools.length === 0"
+                  class="px-4 py-2.5 text-xs text-fg-muted"
+                  data-testid="mcp-tools-none"
+                >
+                  The server advertises no tools right now.
+                </p>
                 <!-- Tool catalogue: hairline-divided list inside a
                      bordered card. Each entry is name (mono accent) +
                      description (muted body), with a header bar that
@@ -839,18 +879,21 @@ function removeHeaderRow(i: number) {
                      glance whether they're looking at the full set
                      (e.g. 119 google-workspace actions) without
                      scanning to the bottom. -->
-                <div class="border-y border-border">
+                <div
+                  v-else
+                  class="border-y border-border"
+                >
                   <div class="flex items-center justify-between px-4 py-2 bg-muted/40 border-b border-border">
                     <span class="text-[11px] uppercase tracking-wider font-medium text-fg-muted">
                       Tools
                     </span>
                     <span class="text-[11px] font-mono tabular-nums text-fg-muted">
-                      {{ server.tools.length }}
+                      {{ expandedTools.length }}
                     </span>
                   </div>
                   <ol class="divide-y divide-border/60">
                     <li
-                      v-for="(tool, idx) in server.tools"
+                      v-for="(tool, idx) in expandedTools"
                       :key="tool.name"
                       class="grid grid-cols-[2.5rem_1fr] items-baseline gap-x-3 px-4 py-2.5 hover:bg-muted/40 transition-colors"
                     >

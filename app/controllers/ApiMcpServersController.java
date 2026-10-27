@@ -44,9 +44,9 @@ import static utils.GsonHolder.GSON;
  * <p>Ten endpoints:
  *
  * <ul>
- *   <li>{@code GET /api/mcp-servers} — list with merged DB + runtime state</li>
+ *   <li>{@code GET /api/mcp-servers} — list with merged DB + runtime state, without each server's tools</li>
  *   <li>{@code POST /api/mcp-servers} — create + connect-if-enabled</li>
- *   <li>{@code GET /api/mcp-servers/{id}} — single row</li>
+ *   <li>{@code GET /api/mcp-servers/{id}} — single row, with its tools</li>
  *   <li>{@code PUT /api/mcp-servers/{id}} — partial update; reconnect if needed</li>
  *   <li>{@code DELETE /api/mcp-servers/{id}} — disconnect + delete row
  *       (allowlist + tool registry teardown is handled by
@@ -96,8 +96,8 @@ public class ApiMcpServersController extends Controller {
     /** The extra key on a 400 that names the form field it is about. */
     private static final String KEY_FIELD = "field";
 
-    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.View.class))))
-    @Operation(summary = "List MCP servers with status and tool count")
+    @ApiResponse(responseCode = "200", content = @Content(array = @ArraySchema(schema = @Schema(implementation = McpServerService.Summary.class))))
+    @Operation(summary = "List MCP servers with status and tool count; a server's tools come from GET /api/mcp-servers/{id}")
     @AgentAccess(OPEN)
     public static void list() {
         renderJSON(gson.toJson(McpServerService.listAll()));

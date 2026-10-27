@@ -82,6 +82,34 @@ class ApiMcpServersControllerTest extends FunctionalTest {
         assertTrue(content.contains("\"status\""), "status field must be present: " + content);
     }
 
+    @Test
+    void aListRowIsTheSingleReadWithoutItsToolsAndKeepsTheToolCount() throws Exception {
+        // JF-137: with every tool's description, the list of 26 live servers outgrew what jclaw_api returns.
+        login();
+        withViewServer(server -> {
+            // The connect writes its status in the background; read once it has, so both reads see one row.
+            var deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+            while (commitInFreshTx(() -> McpServer.findByName(server).status) != McpServer.Status.CONNECTED) {
+                if (System.nanoTime() > deadline) fail("the CONNECTED status was never stored");
+                Thread.sleep(20);
+            }
+            JsonObject row = null;
+            for (var e : JsonParser.parseString(getContent(GET("/api/mcp-servers"))).getAsJsonArray()) {
+                if (e.getAsJsonObject().get("name").getAsString().equals(server)) row = e.getAsJsonObject();
+            }
+            assertNotNull(row, "the connected server is listed");
+            var single = JsonParser.parseString(getContent(GET("/api/mcp-servers/" + row.get("id").getAsLong())))
+                    .getAsJsonObject();
+
+            var tools = single.remove("tools").getAsJsonArray();
+            assertEquals(single, row, "the list row is the single read without its tools");
+            assertEquals(tools.size(), row.get("toolCount").getAsInt());
+            var first = tools.get(0).getAsJsonObject();
+            assertEquals("search_table", first.get("name").getAsString());
+            assertEquals("Table.", first.get("description").getAsString());
+        });
+    }
+
     // ==================== create ====================
 
     @Test
