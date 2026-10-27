@@ -126,6 +126,13 @@ public class MemoryTool implements ToolRegistry.Tool {
         return "memory";
     }
 
+    // JF-136: a recall or forget can echo stored memories, which can hold what a guest said; only a store does not.
+    @Override
+    public boolean readsOutsideContent(String argsJson, Agent agent) {
+        var args = JsonParser.parseString(argsJson).getAsJsonObject();
+        return !args.has("action") || !ACTION_STORE.equals(args.get("action").getAsString());
+    }
+
     @Override
     public String category() {
         return "Utilities";

@@ -176,6 +176,27 @@ public class ConversationService {
      * all. The {@code refresh} keeps a same-transaction re-read — {@code /model}'s
      * handler, the service tests — from seeing the stale pre-write value.
      */
+    /**
+     * JF-136: record that a tool brought outside text into the conversation. A bulk update, so it does not count
+     * as activity, and once set it stays: an agent edit to a persona file in this conversation then waits for the
+     * operator.
+     */
+    public static void markReadOutsideContent(Long conversationId) {
+        Tx.run(() -> JPA.em().createQuery("UPDATE Conversation c SET c.readOutsideContent = true"
+                        + " WHERE c.id = :id AND c.readOutsideContent = false")
+                .setParameter("id", conversationId).executeUpdate());
+    }
+
+    /** Whether the conversation has read outside text, from the database rather than a cached entity. */
+    public static boolean hasReadOutsideContent(Long conversationId) {
+        return Tx.run(() -> {
+            var flags = JPA.em().createQuery("SELECT c.readOutsideContent FROM Conversation c WHERE c.id = :id",
+                    Boolean.class).setParameter("id", conversationId).getResultList();
+            // A conversation that is gone is no place to trust an edit from.
+            return flags.isEmpty() || flags.getFirst();
+        });
+    }
+
     private static void applyWithoutTouchingActivity(Conversation conversation, Query update) {
         update.setParameter("id", conversation.id).executeUpdate();
         JPA.em().refresh(conversation);

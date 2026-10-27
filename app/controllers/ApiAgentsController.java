@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import models.Agent;
 import models.AgentSkillAllowedTool;
 import models.AgentSkillConfig;
+import models.PersonaFileVersion;
 import org.jspecify.annotations.Nullable;
 import play.libs.MimeTypes;
 import play.mvc.Controller;
@@ -21,6 +22,7 @@ import play.mvc.With;
 import services.AgentService;
 import services.ConfigService;
 import services.LoadTestRunner;
+import services.PersonaFileApprovals;
 import services.WorkspaceFiles;
 import services.compression.TextCompressor;
 import tools.ShellExecTool;
@@ -728,7 +730,7 @@ public class ApiAgentsController extends Controller {
             badRequest();
             throw ApiResponses.unreachable();
         }
-        AgentService.writeWorkspaceFile(agent.name, filename, body.get(KEY_CONTENT).getAsString());
+        AgentService.writeWorkspaceFileAsOperator(agent.name, filename, body.get(KEY_CONTENT).getAsString());
         ApiResponses.ok("filename", filename);
     }
 
@@ -741,6 +743,90 @@ public class ApiAgentsController extends Controller {
     public static void scanWorkspaceFiles(Long id) {
         var agent = requireAgent(id);
         renderJSON(gson.toJson(new WorkspaceScanResponse(SystemPromptAssembler.scanPersonaFiles(agent))));
+    }
+
+    /**
+     * One persona file's approval state (JF-136). The two texts come only while a change waits, for the page's
+     * diff; {@code diskSha256} is what an approve or reject must quote, and {@code undoSha256} is set while the
+     * newest version is an agent edit that applied on its own and can be taken back.
+     */
+    private record PersonaApprovalView(String filename, boolean pending, @Nullable String approvedContent,
+                                       @Nullable String diskContent, String diskSha256, @Nullable String approvedBy,
+                                       @Nullable String approvedAt, @Nullable String undoSha256) {}
+
+    private record PersonaApprovalsResponse(List<PersonaApprovalView> files) {}
+
+    private record PersonaReviewRequest(String sha256) {}
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = PersonaApprovalsResponse.class)))
+    @Operation(summary = "Each persona file's approved version, and the change on disk that waits for approval")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "reads any agent's workspace, including another agent's persona files")
+    public static void personaApprovals(Long id) {
+        var owner = WorkspaceFiles.workspaceOwner(requireAgent(id));
+        var files = WorkspaceFiles.personaFiles(owner).stream().map(filename -> {
+            var disk = PersonaFileApprovals.textOnDisk(owner, filename);
+            var versions = PersonaFileApprovals.latestTwo(owner, filename);
+            var approved = versions.isEmpty() ? null : versions.getFirst();
+            var approvedText = approved == null ? "" : approved.content();
+            boolean pending = !approvedText.equals(disk);
+            var undo = !pending && approved != null && versions.size() == 2
+                    && approved.source() == PersonaFileVersion.Source.AGENT
+                    ? approved.sha256() : null;
+            return new PersonaApprovalView(filename, pending, pending ? approvedText : null, pending ? disk : null,
+                    PersonaFileApprovals.sha256(disk),
+                    approved == null ? null : approved.source().name().toLowerCase(java.util.Locale.ROOT),
+                    approved == null ? null : approved.approvedAt().toString(), undo);
+        }).toList();
+        renderJSON(gson.toJson(new PersonaApprovalsResponse(files)));
+    }
+
+    @SuppressWarnings("java:S2259")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = PersonaReviewRequest.class)))
+    @Operation(summary = "Approve the change on disk to a persona file, as the operator reviewed it")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "approving a persona file makes it standing instructions")
+    public static void approvePersonaFile(Long id, String filename) {
+        reviewPersonaFile(id, filename, PersonaFileApprovals::approvePending);
+    }
+
+    @SuppressWarnings("java:S2259")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = PersonaReviewRequest.class)))
+    @Operation(summary = "Reject the change on disk to a persona file, writing the approved version back")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "rejecting rewrites a persona file on disk")
+    public static void rejectPersonaFile(Long id, String filename) {
+        reviewPersonaFile(id, filename, PersonaFileApprovals::rejectPending);
+    }
+
+    @SuppressWarnings("java:S2259")
+    @RequestBody(required = true, content = @Content(schema = @Schema(implementation = PersonaReviewRequest.class)))
+    @Operation(summary = "Take back an agent edit to a persona file that applied on its own")
+    @AgentAccess(value = OPERATOR_ONLY, reason = "undoing rewrites a persona file on disk")
+    public static void undoPersonaFile(Long id, String filename) {
+        reviewPersonaFile(id, filename, PersonaFileApprovals::undoAgentEdit);
+    }
+
+    private interface PersonaReview {
+        PersonaFileApprovals.Outcome apply(Agent owner, String filename, String seenSha256);
+    }
+
+    private static void reviewPersonaFile(Long id, String filename, PersonaReview review) {
+        var owner = WorkspaceFiles.workspaceOwner(requireAgent(id));
+        if (!WorkspaceFiles.personaFiles(owner).contains(filename)) {
+            notFound();
+            throw ApiResponses.unreachable();
+        }
+        var body = JsonBodyReader.readJsonBody();
+        if (body == null || !body.has("sha256") || body.get("sha256").isJsonNull()) {
+            badRequest();
+            throw ApiResponses.unreachable();
+        }
+        switch (review.apply(owner, filename, body.get("sha256").getAsString())) {
+            case DONE -> ApiResponses.ok("filename", filename);
+            case STALE -> ApiResponses.error(409, ApiResponses.CONFLICT,
+                    "%s changed after you looked at it. Look at it again, then decide.".formatted(filename));
+            case NOTHING_PENDING -> ApiResponses.error(409, ApiResponses.CONFLICT,
+                    "%s has no change to decide on.".formatted(filename));
+        }
     }
 
     // --- Workspace manager endpoints ---

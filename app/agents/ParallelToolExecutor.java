@@ -10,6 +10,7 @@ import models.Agent;
 import models.MessageAttachment;
 import org.jspecify.annotations.Nullable;
 import services.AttachmentService;
+import services.ConversationService;
 import services.EventLogger;
 import services.SubagentRegistry;
 import services.TaskRunRegistry;
@@ -106,6 +107,10 @@ public final class ParallelToolExecutor {
         // gate's dangerous() lookup matches the registered tool.
         if (DangerousActionGate.guard(agent, conversationId, rawName, rawArgs) == DangerousActionGate.Decision.ABORT) {
             return ToolRegistry.ToolResult.text(DangerousActionGate.abortResult(displayName));
+        }
+        // JF-136: the model reads the whole conversation, so once outside text is in it, persona-file edits wait.
+        if (conversationId != null && ToolRegistry.readsOutsideContent(rawName, rawArgs, agent)) {
+            ConversationService.markReadOutsideContent(conversationId);
         }
         // JCLAW-170: use the rich-output path so search-style tools can emit a
         // structured JSON payload alongside the LLM-visible text. Non-rich

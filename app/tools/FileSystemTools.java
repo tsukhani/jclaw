@@ -1,10 +1,14 @@
 package tools;
 
+import agents.PersonaFileEdits;
 import agents.ToolAction;
 import agents.ToolRegistry;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import models.Agent;
+import org.jspecify.annotations.Nullable;
+import services.PersonaFileApprovals;
+import services.WorkspaceFiles;
 import tools.FsSupport.FsOutcome;
 import utils.ToolErrorTemplates;
 
@@ -185,7 +189,54 @@ public class FileSystemTools implements ToolRegistry.Tool {
             if (guardError != null) return FsOutcome.fail(guardError);
         }
 
-        return dispatchAction(action, args, agent, resolved.resolvedTarget());
+        var target = resolved.resolvedTarget();
+        var persona = FsPaths.isMutatingAction(action)
+                ? PersonaFileEdits.personaFile(resolved.resolvedWorkspace(), target) : null;
+        if (persona == null) return dispatchAction(action, args, agent, target);
+        // JF-136: one lock over the read before, the write and the read after, so what is approved is exactly what this
+        // call wrote, and an edit building on a change still waiting for the operator never approves that change.
+        return FsLocks.withLock(target, () -> {
+            var before = PersonaFileEdits.textOnDisk(agent, persona);
+            var outcome = dispatchAction(action, args, agent, target);
+            if (outcome.failed()) return outcome;
+            var note = PersonaFileEdits.afterWrite(agent, persona, ACTION_WRITE_FILE.equals(action), before,
+                    expectedText(action, args, before));
+            return FsOutcome.ok(outcome.text() + "\n\n" + note);
+        });
+    }
+
+    /** The text a write action makes of a file holding {@code before}, or null when it cannot be told. */
+    private static @Nullable String expectedText(String action, JsonObject args, String before) {
+        return switch (action) {
+            case ACTION_WRITE_FILE -> stringArg(args, ARG_CONTENT);
+            case ACTION_APPEND_FILE -> before + stringArg(args, ARG_CONTENT);
+            case ACTION_EDIT_FILE -> args.has(ARG_EDITS) && args.get(ARG_EDITS).isJsonArray()
+                    ? FsTextEditor.edited(before, args.getAsJsonArray(ARG_EDITS)) : null;
+            case ACTION_EDIT_LINES -> args.has(ARG_OPERATIONS) && args.get(ARG_OPERATIONS).isJsonArray()
+                    ? FsLineEditor.edited(before, args.getAsJsonArray(ARG_OPERATIONS)) : null;
+            default -> null;
+        };
+    }
+
+    /**
+     * JF-136: only reading a file brings text into the conversation, and reading a persona file at its approved
+     * version brings nothing the operator has not approved. Writes, edits, patches and listings return summaries.
+     */
+    @Override
+    public boolean readsOutsideContent(String argsJson, Agent agent) {
+        var args = JsonParser.parseString(argsJson).getAsJsonObject();
+        if (!args.has(ARG_ACTION) || !ACTION_READ_FILE.equals(args.get(ARG_ACTION).getAsString())) return false;
+        var resolved = FsPaths.resolveTargetPath(args, agent, ACTION_READ_FILE);
+        if (resolved.error() != null) return false;
+        var target = resolved.resolvedTarget().toAbsolutePath().normalize();
+        var name = target.getFileName();
+        if (name == null || !PersonaFileApprovals.isPersonaFile(name.toString())
+                || !resolved.resolvedWorkspace().toAbsolutePath().normalize().equals(target.getParent())) {
+            return true;
+        }
+        var owner = WorkspaceFiles.workspaceOwner(agent);
+        var approved = PersonaFileApprovals.approved(owner, name.toString());
+        return approved == null || !approved.content().equals(PersonaFileApprovals.textOnDisk(owner, name.toString()));
     }
 
     private FsOutcome dispatchAction(String action, JsonObject args, Agent agent, Path target) {

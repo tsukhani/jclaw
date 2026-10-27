@@ -147,6 +147,7 @@ class ApiAgentsControllerTest extends FunctionalTest {
             "/api/agents/1/shell/effective-allowlist",
             "/api/agents/1/workspace/AGENT.md",
             "/api/agents/1/workspace-scan",
+            "/api/agents/1/workspace-approvals",
             "/api/agents/1/files/AGENT.md"
     })
     void agentGetEndpointRequiresAuth(String url) {
@@ -190,6 +191,102 @@ class ApiAgentsControllerTest extends FunctionalTest {
                 + "{\"filename\":\"USER.md\",\"findings\":[]},"
                 + "{\"filename\":\"BOOTSTRAP.md\",\"findings\":[]},"
                 + "{\"filename\":\"AGENT.md\",\"findings\":[]}]}", getContent(response));
+    }
+
+    @Test
+    void workspaceApprovalsReportEachFileAndAnOperatorSaveAsTheOperators() {
+        login();
+        var id = createAgentInFreshWorkspace("approvals-api");
+        assertIsOk(PUT("/api/agents/" + id + "/workspace/AGENT.md", "application/json", "{\"content\": \"Do work.\"}"));
+
+        var files = approvalFiles(id);
+
+        assertEquals(5, files.size());
+        for (var element : files) {
+            var file = element.getAsJsonObject();
+            assertFalse(file.get("pending").getAsBoolean(), file.toString());
+            assertTrue(file.get("approvedContent").isJsonNull(), file.toString());
+        }
+        assertEquals("operator", fileNamed(files, "AGENT.md").get("approvedBy").getAsString());
+        assertEquals("jclaw", fileNamed(files, "SOUL.md").get("approvedBy").getAsString());
+        assertEquals(services.PersonaFileApprovals.sha256("Do work."), fileNamed(files, "AGENT.md").get("diskSha256").getAsString());
+    }
+
+    @Test
+    void aChangeOnDiskWaitsAndIsApprovedOnlyAsTheOperatorSawIt() throws Exception {
+        login();
+        var id = createAgentInFreshWorkspace("approvals-api-pending");
+        assertIsOk(PUT("/api/agents/" + id + "/workspace/SOUL.md", "application/json", "{\"content\": \"Be kind.\"}"));
+        java.nio.file.Files.writeString(services.AgentService.workspacePath("approvals-api-pending").resolve("SOUL.md"), "Be curious.");
+
+        var soul = fileNamed(approvalFiles(id), "SOUL.md");
+        assertTrue(soul.get("pending").getAsBoolean());
+        assertEquals("Be kind.", soul.get("approvedContent").getAsString());
+        assertEquals("Be curious.", soul.get("diskContent").getAsString());
+
+        var stale = POST("/api/agents/" + id + "/workspace-approvals/SOUL.md/approve", "application/json",
+                "{\"sha256\": \"" + services.PersonaFileApprovals.sha256("Be kind.") + "\"}");
+        assertEquals(409, stale.status.intValue());
+        assertEquals("SOUL.md changed after you looked at it. Look at it again, then decide.",
+                JsonParser.parseString(getContent(stale)).getAsJsonObject().get("message").getAsString());
+
+        assertIsOk(POST("/api/agents/" + id + "/workspace-approvals/SOUL.md/approve", "application/json",
+                "{\"sha256\": \"" + soul.get("diskSha256").getAsString() + "\"}"));
+        var approved = fileNamed(approvalFiles(id), "SOUL.md");
+        assertFalse(approved.get("pending").getAsBoolean());
+        assertEquals("operator", approved.get("approvedBy").getAsString());
+    }
+
+    @Test
+    void rejectingAChangeWritesTheApprovedVersionBack() throws Exception {
+        login();
+        var id = createAgentInFreshWorkspace("approvals-api-reject");
+        assertIsOk(PUT("/api/agents/" + id + "/workspace/SOUL.md", "application/json", "{\"content\": \"Be kind.\"}"));
+        var path = services.AgentService.workspacePath("approvals-api-reject").resolve("SOUL.md");
+        java.nio.file.Files.writeString(path, "Be cruel.");
+
+        assertIsOk(POST("/api/agents/" + id + "/workspace-approvals/SOUL.md/reject", "application/json",
+                "{\"sha256\": \"" + services.PersonaFileApprovals.sha256("Be cruel.") + "\"}"));
+
+        assertEquals("Be kind.", java.nio.file.Files.readString(path));
+        assertFalse(fileNamed(approvalFiles(id), "SOUL.md").get("pending").getAsBoolean());
+    }
+
+    @Test
+    void reviewingAFileThatIsNoPersonaFileIsNotFound() {
+        login();
+        var id = createAgentInFreshWorkspace("approvals-api-other");
+
+        var response = POST("/api/agents/" + id + "/workspace-approvals/notes.md/approve", "application/json",
+                "{\"sha256\": \"x\"}");
+
+        assertEquals(404, response.status.intValue());
+    }
+
+    /** A workspace an earlier run left would be approved as found, so these agents start from none. */
+    private String createAgentInFreshWorkspace(String name) {
+        var dir = services.AgentService.workspacePath(name);
+        if (java.nio.file.Files.exists(dir)) {
+            try (var paths = java.nio.file.Files.walk(dir)) {
+                for (var path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) java.nio.file.Files.delete(path);
+            } catch (java.io.IOException e) {
+                throw new java.io.UncheckedIOException(e);
+            }
+        }
+        return createAgent(name);
+    }
+
+    private com.google.gson.JsonArray approvalFiles(String id) {
+        var response = GET("/api/agents/" + id + "/workspace-approvals");
+        assertIsOk(response);
+        return JsonParser.parseString(getContent(response)).getAsJsonObject().getAsJsonArray("files");
+    }
+
+    private static com.google.gson.JsonObject fileNamed(com.google.gson.JsonArray files, String filename) {
+        for (var file : files) {
+            if (file.getAsJsonObject().get("filename").getAsString().equals(filename)) return file.getAsJsonObject();
+        }
+        throw new AssertionError("no " + filename + " in " + files);
     }
 
     @Test

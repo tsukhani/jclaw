@@ -49,6 +49,12 @@ public class CcrRetrieveTool implements ToolRegistry.Tool {
         return TOOL_NAME;
     }
 
+    // JF-136: the result is JClaw's own state, never text from outside.
+    @Override
+    public boolean readsOutsideContent(String argsJson, Agent agent) {
+        return false;
+    }
+
     @Override
     public String category() {
         return "System";

@@ -1129,7 +1129,7 @@ public class WebScrapeTool implements ToolRegistry.Tool {
             var content = json ? jsonLines(state) : pagesDocument(summary, state, MAX_SAVED_CHARS);
             var host = seed.getHost() == null ? "site" : seed.getHost().replaceAll("[^a-zA-Z0-9.-]", "_");
             var filename = "scrape-%s-%s%s".formatted(host, SAVE_STAMP.format(AppClock.now()), extension);
-            AgentService.writeWorkspaceFile(agent.name, filename, content);
+            AgentService.writeAgentFile(agent.name, filename, content);
             return summary + "Saved %d page%s (%d characters) to workspace file '%s'.\n".formatted(
                     state.pages.size(), state.pages.size() == 1 ? "" : "s", content.length(), filename);
         }

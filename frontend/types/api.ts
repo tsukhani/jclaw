@@ -776,6 +776,27 @@ export interface PersonaFileScan {
   findings: PersonaFinding[]
 }
 
+/**
+ * One persona file of GET /api/agents/:id/workspace-approvals (JF-136). The two texts come only while a change waits,
+ * for the diff; `diskSha256` is what an approve or reject quotes, and `undoSha256` is set while the newest version is
+ * an agent edit that applied on its own.
+ */
+export interface PersonaApproval {
+  filename: string
+  pending: boolean
+  approvedContent: string | null
+  diskContent: string | null
+  diskSha256: string
+  approvedBy: 'operator' | 'agent' | 'jclaw' | 'upgrade' | null
+  approvedAt: string | null
+  undoSha256: string | null
+}
+
+/** Shape returned by GET /api/agents/:id/workspace-approvals. */
+export interface PersonaApprovalsResponse {
+  files: PersonaApproval[]
+}
+
 /** Shape returned by GET /api/agents/:id/workspace-scan. */
 export interface WorkspaceScanResponse {
   files: PersonaFileScan[]

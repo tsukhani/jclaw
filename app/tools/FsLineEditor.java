@@ -44,8 +44,27 @@ final class FsLineEditor {
         }
         var loaded = FsSupport.loadEditableFile(target);
         if (loaded.error() != null) return FsOutcome.fail(loaded.resolvedError());
-        var original = loaded.resolvedContent();
+        var edit = applyOps(loaded.resolvedContent(), opsJson);
+        if (edit.error() != null) return FsOutcome.fail(edit.error());
+        var counts = edit.counts();
+        var joined = edit.text();
 
+        var writeResult = FsWriter.writeFile(target, joined);
+        if (writeResult.failed()) return writeResult;
+
+        var summary = "editLines: %d replace / %d insert / %d delete on %s"
+                .formatted(counts.replaced, counts.inserted, counts.deleted, target.getFileName());
+        EventLogger.info("Files", agent.name, null, summary);
+
+        return FsOutcome.ok("File written successfully: " + target.getFileName()
+                + " (%d replace, %d insert, %d delete)".formatted(counts.replaced, counts.inserted, counts.deleted));
+    }
+
+    private record OpCounts(int replaced, int inserted, int deleted) {}
+
+    private record LineEdit(String text, OpCounts counts, @Nullable ErrorTemplate error) {}
+
+    private static LineEdit applyOps(String original, JsonArray opsJson) {
         // Detect native line ending before splitting so we can preserve it on write.
         var nativeEol = detectLineEnding(original);
         var hadTrailingNewline = original.endsWith("\n") || original.endsWith("\r\n");
@@ -60,7 +79,7 @@ final class FsLineEditor {
         var parsed = new ArrayList<LineOp>();
         for (int i = 0; i < opsJson.size(); i++) {
             var parsedOp = parseLineOpEntry(opsJson.get(i), lineCount, i + 1);
-            if (parsedOp.error != null) return FsOutcome.fail(parsedOp.error);
+            if (parsedOp.error != null) return new LineEdit(original, new OpCounts(0, 0, 0), parsedOp.error);
             parsed.add(parsedOp.op);
         }
 
@@ -72,19 +91,15 @@ final class FsLineEditor {
         if (hadTrailingNewline || (!joined.isEmpty() && !joined.endsWith(nativeEol))) {
             joined = joined + nativeEol;
         }
-
-        var writeResult = FsWriter.writeFile(target, joined);
-        if (writeResult.failed()) return writeResult;
-
-        var summary = "editLines: %d replace / %d insert / %d delete on %s"
-                .formatted(counts.replaced, counts.inserted, counts.deleted, target.getFileName());
-        EventLogger.info("Files", agent.name, null, summary);
-
-        return FsOutcome.ok("File written successfully: " + target.getFileName()
-                + " (%d replace, %d insert, %d delete)".formatted(counts.replaced, counts.inserted, counts.deleted));
+        return new LineEdit(joined, counts, null);
     }
 
-    private record OpCounts(int replaced, int inserted, int deleted) {}
+    /** The text {@code opsJson} makes of {@code original}, as {@link #editLines} writes it, or null when an op fails. */
+    static @Nullable String edited(String original, JsonArray opsJson) {
+        if (opsJson.isEmpty()) return null;
+        var edit = applyOps(original, opsJson);
+        return edit.error() == null ? edit.text() : null;
+    }
 
     /** Parse a single JSON line-op entry, validating shape, startLine type, and bounds. */
     private static ParsedOp parseLineOpEntry(JsonElement entry, int lineCount, int index) {

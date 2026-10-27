@@ -2,6 +2,7 @@ package services;
 
 import com.google.gson.annotations.SerializedName;
 import models.Agent;
+import models.PersonaFileVersion;
 import org.jspecify.annotations.Nullable;
 import play.Play;
 import play.cache.Cache;
@@ -347,11 +348,27 @@ public final class WorkspaceFiles {
 
     /** The agent whose workspace {@code agent} reads: itself, or for a subagent the root of its parent chain. */
     public static String workspaceOwnerName(Agent agent) {
+        return workspaceOwner(agent).name;
+    }
+
+    /** The agent itself, or for a subagent the root of its parent chain: the one whose workspace it reads. */
+    public static Agent workspaceOwner(Agent agent) {
         var cursor = agent;
         for (int hops = 0; cursor.parentAgent != null && hops < MAX_PARENT_WALK_DEPTH; hops++) {
             cursor = cursor.parentAgent;
         }
-        return cursor.name;
+        return cursor;
+    }
+
+    /**
+     * The persona files {@code agent}'s prompt reads, in a deliberate narrative order: SOUL (psyche) → IDENTITY
+     * (who) → USER (for whom) → BOOTSTRAP (init/priming) → AGENT (what to do). A service agent has no owner: a
+     * USER or BOOTSTRAP copy left on disk, or still in the file cache, must not reach its prompt.
+     */
+    public static List<String> personaFiles(Agent agent) {
+        return ownedByServiceAgent(agent)
+                ? List.of("SOUL.md", "IDENTITY.md", "AGENT.md")
+                : List.of("SOUL.md", "IDENTITY.md", USER_MD, BOOTSTRAP_MD, "AGENT.md");
     }
 
     // Each file on its own, so one that cannot be deleted does not keep the other.
@@ -497,7 +514,9 @@ public final class WorkspaceFiles {
 
             ## Continuity
 
-            Each session, I wake up fresh. These files *are* my memory. I read them. I update them. They are how I persist.
+            Each session, I wake up fresh. These files *are* my memory. I read them, and I change them only for what will
+            stay true — a lasting fact, a settled preference, a method that works — never for one conversation's details.
+            They are how I persist.
             """;
 
     /**
@@ -578,8 +597,8 @@ public final class WorkspaceFiles {
      */
     public static @Nullable String ownerName(String agentName) {
         if (ownedByServiceAgent(agentName)) return null;
-        if (!Files.isRegularFile(workspacePath(agentName).resolve(USER_MD))) return null;
-        var text = readWorkspaceFile(agentName, USER_MD);
+        // The approved copy: an agent edit waiting for the operator does not change who the owner is (JF-136).
+        var text = PersonaFileApprovals.promptText(agentName, USER_MD);
         return text == null ? null : ownerNameIn(text);
     }
 
@@ -600,10 +619,8 @@ public final class WorkspaceFiles {
      */
     public static void setOwnerName(String agentName, String name) {
         if (!Files.isDirectory(workspacePath(agentName)) || ownedByServiceAgent(agentName)) return;
-        var current = Files.isRegularFile(workspacePath(agentName).resolve(USER_MD))
-                ? readWorkspaceFile(agentName, USER_MD) : null;
-        var updated = withOwnerName(current == null ? USER_TEMPLATE : current, name);
-        if (!updated.equals(current)) writeWorkspaceFile(agentName, USER_MD, updated);
+        PersonaFileApprovals.applySystemEdit(agentName, USER_MD,
+                text -> withOwnerName(text.isEmpty() ? USER_TEMPLATE : text, name));
     }
 
     /** The value with surrounding Markdown emphasis removed: **Tarun** and _Tarun_ both read as Tarun. */
@@ -651,18 +668,14 @@ public final class WorkspaceFiles {
             removeOwnerFiles(dir, agentName);
             return;
         }
-        var user = Files.isRegularFile(dir.resolve(USER_MD)) ? readWorkspaceFile(agentName, USER_MD) : null;
-        if (user == null) {
-            writeWorkspaceFile(agentName, USER_MD, USER_TEMPLATE);
-        } else if (!NAME_LINE.matcher(headerOf(user)).find()) {
-            writeWorkspaceFile(agentName, USER_MD, afterTitle(user, "Name:\n"));
-        }
-        var bootstrap = Files.isRegularFile(dir.resolve(BOOTSTRAP_MD)) ? readWorkspaceFile(agentName, BOOTSTRAP_MD) : null;
-        if (bootstrap == null || bootstrap.strip().equals(PRE_NAME_BOOTSTRAP_TEMPLATE.strip())) {
-            writeWorkspaceFile(agentName, BOOTSTRAP_MD, BOOTSTRAP_TEMPLATE);
-        } else if (!bootstrap.contains(NAME_STEP_MARKER)) {
-            writeWorkspaceFile(agentName, BOOTSTRAP_MD, afterTitle(bootstrap, NAME_STEP));
-        }
+        PersonaFileApprovals.applySystemEdit(agentName, USER_MD, user -> {
+            if (user.isEmpty()) return USER_TEMPLATE;
+            return NAME_LINE.matcher(headerOf(user)).find() ? user : afterTitle(user, "Name:\n");
+        });
+        PersonaFileApprovals.applySystemEdit(agentName, BOOTSTRAP_MD, bootstrap -> {
+            if (bootstrap.isEmpty() || bootstrap.strip().equals(PRE_NAME_BOOTSTRAP_TEMPLATE.strip())) return BOOTSTRAP_TEMPLATE;
+            return bootstrap.contains(NAME_STEP_MARKER) ? bootstrap : afterTitle(bootstrap, NAME_STEP);
+        });
     }
 
     /**
@@ -674,6 +687,15 @@ public final class WorkspaceFiles {
         if (!Files.isDirectory(dir)) return;
         // Read here, not in the callback: after the commit there is no transaction left to query in.
         boolean serviceAgent = ownedByServiceAgent(agentName);
+        // The templates the callback will write are approved with the switch, so a rolled-back switch approves none.
+        if (!serviceAgent) {
+            if (!Files.exists(dir.resolve(USER_MD))) {
+                PersonaFileApprovals.approve(agentName, USER_MD, USER_TEMPLATE, PersonaFileVersion.Source.JCLAW);
+            }
+            if (!Files.exists(dir.resolve(BOOTSTRAP_MD))) {
+                PersonaFileApprovals.approve(agentName, BOOTSTRAP_MD, BOOTSTRAP_TEMPLATE, PersonaFileVersion.Source.JCLAW);
+            }
+        }
         Tx.afterCommit(() -> {
             if (serviceAgent) {
                 removeOwnerFiles(dir, agentName);
@@ -717,7 +739,7 @@ public final class WorkspaceFiles {
             // published the operator's personal details before JCLAW-910.
             var isDefaultAgent = Agent.MAIN_AGENT_NAME.equals(agentName);
 
-            writeFile(dir.resolve("SOUL.md"), isDefaultAgent ? MAIN_SOUL : """
+            writePersonaFile(agentName, dir, "SOUL.md", isDefaultAgent ? MAIN_SOUL : """
                     # Soul
 
                     <!-- Define the psyche and character of the entity described in IDENTITY.md.
@@ -725,19 +747,19 @@ public final class WorkspaceFiles {
                          executed. Leave blank to skip. -->
                     """, overwrite);
 
-            writeFile(dir.resolve("IDENTITY.md"), isDefaultAgent ? MAIN_IDENTITY : """
+            writePersonaFile(agentName, dir, "IDENTITY.md", isDefaultAgent ? MAIN_IDENTITY : """
                     # Identity
 
                     Name: %s
                     """.formatted(agentName), overwrite);
 
             if (!ownedByServiceAgent(agentName)) {
-                writeFile(dir.resolve(USER_MD), USER_TEMPLATE, overwrite);
+                writePersonaFile(agentName, dir, USER_MD, USER_TEMPLATE, overwrite);
 
-                writeFile(dir.resolve(BOOTSTRAP_MD), BOOTSTRAP_TEMPLATE, overwrite);
+                writePersonaFile(agentName, dir, BOOTSTRAP_MD, BOOTSTRAP_TEMPLATE, overwrite);
             }
 
-            writeFile(dir.resolve("AGENT.md"), """
+            writePersonaFile(agentName, dir, "AGENT.md", """
                     # Agent Instructions
 
                     You are a general-purpose agent, configured by your operator to get real
@@ -757,9 +779,23 @@ public final class WorkspaceFiles {
         }
     }
 
-    private static void writeFile(Path path, String content, boolean overwrite) throws IOException {
+    /** Whether it wrote: an existing file stays as it is unless {@code overwrite}. */
+    private static boolean writeFile(Path path, String content, boolean overwrite) throws IOException {
         if (overwrite || !Files.exists(path)) {
             Files.writeString(path, content);
+            return true;
+        }
+        return false;
+    }
+
+    // A template JClaw writes is approved as written. A file already there, from a workspace an agent of the same
+    // name left, is approved as the upgrade approves one: when it passes the scan and has no approval yet.
+    private static void writePersonaFile(String agentName, Path dir, String filename, String content, boolean overwrite)
+            throws IOException {
+        if (writeFile(dir.resolve(filename), content, overwrite)) {
+            PersonaFileApprovals.approve(agentName, filename, content, PersonaFileVersion.Source.JCLAW);
+        } else {
+            PersonaFileApprovals.approveFoundFile(agentName, filename);
         }
     }
 
@@ -789,12 +825,39 @@ public final class WorkspaceFiles {
         return null;
     }
 
+    /** The text on disk, read past the 30-second cache, which it refreshes; null when missing or unreadable. */
+    public static @Nullable String readWorkspaceFileFresh(String agentName, String filename) {
+        fileCache.invalidate(agentName + "/" + filename);
+        return readWorkspaceFile(agentName, filename);
+    }
+
+    /**
+     * JClaw's own write, from the operator's save or JClaw itself: a persona file it writes is approved (JF-136).
+     * A tool writing for the agent uses {@link #writeAgentFile}, which approves nothing.
+     */
     public static void writeWorkspaceFile(String agentName, String filename, String content) {
+        writeWorkspaceFile(agentName, filename, content, PersonaFileVersion.Source.JCLAW);
+    }
+
+    /** {@link #writeWorkspaceFile(String, String, String)} recording who approved a persona file. */
+    public static void writeWorkspaceFile(String agentName, String filename, String content,
+                                          PersonaFileVersion.Source source) {
+        if (writeAgentFile(agentName, filename, content) && PersonaFileApprovals.isPersonaFile(filename)) {
+            PersonaFileApprovals.approve(agentName, filename, content, source);
+        }
+    }
+
+    /**
+     * A write for the agent, a download or a scrape it saved: approves nothing, so one landing on a persona file
+     * waits for the operator. Whether it wrote.
+     */
+    public static boolean writeAgentFile(String agentName, String filename, String content) {
         try {
             var path = acquireWorkspacePath(agentName, filename);
             Files.createDirectories(path.getParent());
             Files.writeString(path, content);
             fileCache.invalidate(agentName + "/" + filename);
+            return true;
         } catch (SecurityException e) {
             EventLogger.warn(LOG_CATEGORY, "Path traversal blocked for %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));
@@ -802,6 +865,7 @@ public final class WorkspaceFiles {
             EventLogger.error(LOG_CATEGORY, "Failed to write workspace file %s/%s: %s"
                     .formatted(agentName, filename, e.getMessage()));
         }
+        return false;
     }
 
     /**

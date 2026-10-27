@@ -25,6 +25,7 @@ import {
   removeHiddenCharacters,
   withSentinels,
 } from '~/utils/injection-highlight'
+import { lineDiff } from '~/utils/line-diff'
 import type {
   Agent,
   AgentSkill,
@@ -33,6 +34,8 @@ import type {
   ConfigValueResponse,
   CoreMigrationStatus,
   EffectiveAllowlist,
+  PersonaApproval,
+  PersonaApprovalsResponse,
   PersonaFileScan,
   PersonaFinding,
   PromptBreakdown,
@@ -215,6 +218,67 @@ function resetWorkspaceScan() {
   workspaceScanning.value = false
   workspaceScanError.value = ''
   workspaceScanAsked.value = false
+}
+
+// JF-136: each persona file's approved version and the change that waits for the operator, loaded when an agent
+// opens and after every save or decision.
+const personaApprovals = ref<PersonaApproval[]>([])
+const personaApprovalLoads = useLatestRequest()
+const reviewingFile = ref<string | null>(null)
+const { mutate: reviewPersonaFile, error: personaReviewError } = useApiMutation()
+const pendingApprovals = computed(() => personaApprovals.value.filter(f => f.pending))
+const undoableEdits = computed(() => personaApprovals.value.filter(f => f.undoSha256))
+
+function isPending(filename: string): boolean {
+  return personaApprovals.value.some(f => f.filename === filename && f.pending)
+}
+
+async function loadPersonaApprovals() {
+  if (!editing.value) return
+  const agentId = editing.value.id
+  const request = personaApprovalLoads.begin()
+  try {
+    const data = await $fetch<PersonaApprovalsResponse>(`/api/agents/${agentId}/workspace-approvals`)
+    if (personaApprovalLoads.isCurrent(request)) personaApprovals.value = data.files
+  }
+  catch { /* the panel keeps what it showed; the next save or decision loads again */ }
+}
+
+function reviewDiff(file: PersonaApproval) {
+  return lineDiff(file.approvedContent ?? '', file.diskContent ?? '')
+}
+
+function diffLineText(line: { kind: string, text: string }): string {
+  const mark = line.kind === 'added' ? '+ ' : line.kind === 'removed' ? '- ' : '  '
+  return mark + line.text
+}
+
+async function decidePersonaChange(file: PersonaApproval, decision: 'approve' | 'reject' | 'undo') {
+  if (!editing.value) return
+  if (decision === 'reject' && !(await confirm({
+    title: 'Reject the changes',
+    message: `Reject the changes to ${file.filename}? The approved version is written back over them.`,
+    confirmText: 'Reject',
+    variant: 'danger',
+  }))) return
+  if (decision === 'undo' && !(await confirm({
+    title: 'Undo the agent\'s change',
+    message: `Undo the agent's last change to ${file.filename}? The version before it is written back and approved.`,
+    confirmText: 'Undo',
+    variant: 'danger',
+  }))) return
+  const agentId = editing.value.id
+  const sha256 = decision === 'undo' ? file.undoSha256 : file.diskSha256
+  const done = await reviewPersonaFile(`/api/agents/${agentId}/workspace-approvals/${file.filename}/${decision}`,
+    { method: 'POST', body: { sha256 } })
+  await loadPersonaApprovals()
+  if (done === null) return
+  if (reviewingFile.value === file.filename) reviewingFile.value = null
+  // Reject and undo rewrite the file under the editor: show what is there now, unless the operator has unsaved edits.
+  if (decision !== 'approve' && workspaceLoadedTab.value === file.filename && !workspaceDirty.value) {
+    await loadWorkspaceFile(agentId, file.filename)
+  }
+  if (workspaceScan.value) void checkWorkspaceFiles(workspaceScanAsked.value || scanFindingRows.value.length > 0)
 }
 
 /** Deletes the open file's hidden characters in the editor; the operator saves to keep the change. */
@@ -962,6 +1026,9 @@ function editAgent(agent: Agent) {
   mcpError.value = null
   resetWorkspaceScan()
   void checkWorkspaceFiles(false)
+  personaApprovals.value = []
+  reviewingFile.value = null
+  void loadPersonaApprovals()
   loadWorkspaceFile(agent.id, 'AGENT.md')
   loadAgentTools(agent.id)
   loadAgentSkills(agent.id)
@@ -1616,6 +1683,8 @@ async function saveWorkspaceFile() {
   workspaceBaseline.value = saved
   // After a fix, the clean result is the confirmation, so a check that had found something reports.
   if (workspaceScan.value) void checkWorkspaceFiles(workspaceScanAsked.value || scanFindingRows.value.length > 0)
+  // A save is the operator's approval of what they saved.
+  void loadPersonaApprovals()
 }
 
 function cancel() {
@@ -3023,7 +3092,11 @@ const agentKinds = [
               {{ file }}<span
                 v-if="scanFindings(file).length"
                 class="ml-1.5 px-1 rounded-sm bg-danger/15 text-danger"
-              >{{ scanFindings(file).length }}<span class="sr-only">{{ scanFindings(file).length === 1 ? ' prompt-injection match' : ' prompt-injection matches' }}</span></span>
+              >{{ scanFindings(file).length }}<span class="sr-only">{{ scanFindings(file).length === 1 ? ' prompt-injection match' : ' prompt-injection matches' }}</span></span><span
+                v-if="isPending(file)"
+                class="ml-1.5 inline-block w-1.5 h-1.5 rounded-full bg-warning align-middle"
+                title="Changes wait for your approval"
+              ><span class="sr-only"> changes wait for your approval</span></span>
             </button>
           </div>
           <!-- MacDown-style pane toggles: editor, preview, or both (split). At
@@ -3075,6 +3148,79 @@ const agentKinds = [
           </div>
         </div>
         <div
+          v-if="pendingApprovals.length || undoableEdits.length || personaReviewError"
+          class="px-4 py-2 border-b border-border text-xs space-y-2"
+          role="region"
+          aria-label="Changes to these files"
+        >
+          <div
+            v-for="file in pendingApprovals"
+            :key="`pending-${file.filename}`"
+            class="space-y-1"
+          >
+            <div class="flex flex-wrap items-center gap-2">
+              <span class="text-fg-primary">
+                {{ file.filename }} has changes that wait for your approval. Until then the agent keeps the approved version.
+              </span>
+              <button
+                type="button"
+                class="px-2 py-0.5 rounded border border-border text-fg-primary hover:bg-muted transition-colors"
+                :aria-expanded="reviewingFile === file.filename"
+                @click="reviewingFile = reviewingFile === file.filename ? null : file.filename"
+              >
+                {{ reviewingFile === file.filename ? 'Hide changes' : 'Show changes' }}
+              </button>
+              <button
+                type="button"
+                class="px-2 py-0.5 rounded border border-border text-emerald-700 dark:text-emerald-400 hover:bg-muted transition-colors"
+                @click="decidePersonaChange(file, 'approve')"
+              >
+                Approve
+              </button>
+              <button
+                type="button"
+                class="px-2 py-0.5 rounded border border-border text-danger hover:bg-muted transition-colors"
+                @click="decidePersonaChange(file, 'reject')"
+              >
+                Reject
+              </button>
+            </div>
+            <div
+              v-if="reviewingFile === file.filename"
+              class="persona-diff max-h-64 overflow-auto rounded border border-border font-mono"
+              :aria-label="`Changes to ${file.filename}`"
+            >
+              <div
+                v-for="(line, i) in reviewDiff(file)"
+                :key="i"
+                class="px-2 whitespace-pre-wrap"
+                :class="`persona-diff-${line.kind}`"
+                v-text="diffLineText(line)"
+              />
+            </div>
+          </div>
+          <div
+            v-for="file in undoableEdits"
+            :key="`undo-${file.filename}`"
+            class="flex flex-wrap items-center gap-2"
+          >
+            <span class="text-fg-primary">The agent changed {{ file.filename }}, and the change applied on its own.</span>
+            <button
+              type="button"
+              class="px-2 py-0.5 rounded border border-border text-fg-primary hover:bg-muted transition-colors"
+              @click="decidePersonaChange(file, 'undo')"
+            >
+              Undo
+            </button>
+          </div>
+          <p
+            v-if="personaReviewError"
+            class="text-danger"
+          >
+            {{ personaReviewError }}
+          </p>
+        </div>
+        <div
           v-if="workspaceScanShown"
           class="px-4 py-2 border-b border-border text-xs space-y-1"
           role="status"
@@ -3093,7 +3239,7 @@ const agentKinds = [
           </p>
           <template v-else>
             <p class="text-fg-primary">
-              A file with a match is left out of the agent's prompt until it no longer matches.
+              Check each match before you approve a change. Reword approved text that was not meant as an instruction.
             </p>
             <ul>
               <li
@@ -3888,4 +4034,12 @@ html.dark .md-preview a { color: hsl(152 76% 60%); }
   width: 2px;
   background: var(--danger);
 }
+
+/* JF-136: a change that waits for approval, as lines kept, removed and added. */
+.persona-diff-removed {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  text-decoration: line-through;
+}
+
+.persona-diff-added { background: color-mix(in srgb, var(--ok) 18%, transparent); }
 </style>

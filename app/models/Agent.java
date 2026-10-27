@@ -136,6 +136,14 @@ public class Agent extends TimestampedModel {
     public boolean memoryAutocaptureEnabled = true;
 
     /**
+     * JF-136: whether this agent's persona files were approved as they stood when approvals arrived. An agent
+     * created since starts with its templates approved; one from before is seeded the first time JClaw reads them.
+     */
+    @Column(name = "persona_files_seeded", nullable = false)
+    @ColumnDefault("false")
+    public boolean personaFilesSeeded = false;
+
+    /**
      * JCLAW-534: per-agent override for the model that runs memory extraction.
      * Null means "inherit the agent's default model" ({@link #modelProvider} /
      * {@link #modelId}); an operator sets these only to point extraction at a

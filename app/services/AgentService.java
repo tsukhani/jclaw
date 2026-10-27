@@ -150,6 +150,8 @@ public class AgentService {
         // JCLAW-465: content compression defaults on for the main agent, off for
         // custom agents.
         agent.compressionEnabled = agent.isMain();
+        // Its templates are approved as the workspace writes them, so there is nothing older to seed (JF-136).
+        agent.personaFilesSeeded = true;
         agent.save();
 
         if (createWorkspace) {
@@ -430,6 +432,16 @@ public class AgentService {
 
     public static void writeWorkspaceFile(String agentName, String filename, String content) {
         WorkspaceFiles.writeWorkspaceFile(agentName, filename, content);
+    }
+
+    /** The operator's save: a persona file written here is approved as the operator's (JF-136). */
+    public static void writeWorkspaceFileAsOperator(String agentName, String filename, String content) {
+        WorkspaceFiles.writeWorkspaceFile(agentName, filename, content, models.PersonaFileVersion.Source.OPERATOR);
+    }
+
+    /** A file a tool writes for the agent, which approves nothing (see {@link WorkspaceFiles#writeAgentFile}). */
+    public static void writeAgentFile(String agentName, String filename, String content) {
+        WorkspaceFiles.writeAgentFile(agentName, filename, content);
     }
 
 }

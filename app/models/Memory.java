@@ -20,6 +20,7 @@ import memory.graph.GraphLifecycle;
 import org.hibernate.annotations.ColumnDefault;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
+import org.jspecify.annotations.Nullable;
 import play.db.jpa.JPA;
 import play.db.jpa.Model;
 import services.EventLogger;
@@ -31,6 +32,7 @@ import utils.AppClock;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 
@@ -398,6 +400,19 @@ public class Memory extends Model {
         if (pk == null) return List.of();
         return Memory.find("agent.id = ?1 AND supersededAt IS NULL ORDER BY updatedAt DESC", pk)
                 .fetch(limit);
+    }
+
+    /** JF-136: whether a memory of this author rests on someone other than the operator: a guest, an unattended run, a merge. */
+    public static boolean restsOnOthers(@Nullable MemoryAuthorType authorType) {
+        return authorType == MemoryAuthorType.GUEST_TURN || authorType == MemoryAuthorType.AGENT_SYNTHESIZED
+                || authorType == MemoryAuthorType.CONSOLIDATION_DERIVED;
+    }
+
+    /** JF-136: how many of these memories rest on someone other than the operator. */
+    public static long countFromOthersAmong(Collection<Long> ids) {
+        if (ids.isEmpty()) return 0;
+        return Memory.count("id IN (?1) AND authorType IN (?2)", ids, List.of(MemoryAuthorType.GUEST_TURN,
+                MemoryAuthorType.AGENT_SYNTHESIZED, MemoryAuthorType.CONSOLIDATION_DERIVED));
     }
 
     /**

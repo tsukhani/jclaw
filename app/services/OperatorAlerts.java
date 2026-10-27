@@ -25,8 +25,7 @@ import java.util.function.Consumer;
  * Messages to the operator, on a channel they chose, when unattended work fails (JCLAW-1279): a
  * circuit breaker opening or recovering, a recurring task's occurrence failing for good or pausing the
  * task after too many in a row, an MCP server moved to the handshake protocol, stored credentials that
- * do not decrypt at boot, and a persona file left out of an agent's prompt because it matched a
- * prompt-injection rule.
+ * do not decrypt at boot, and a persona file whose changes wait for the operator's approval.
  *
  * <p>{@link #KEY} holds the destination as a delivery spec ({@code telegram:<chat id>}), sent
  * through the main agent's bindings. Unset, nothing is decided and nothing is sent. The decision
@@ -58,8 +57,8 @@ public final class OperatorAlerts {
     private static final List<Consumer<String>> PERSONA_LISTENERS = new CopyOnWriteArrayList<>();
     private static final List<Consumer<String>> TASK_LISTENERS = new CopyOnWriteArrayList<>();
 
-    /** The SHA-256 of the content last reported per {@code agent/file}, cleared when the file is next seen clean. */
-    private static final Map<String, String> WITHHELD_PERSONA_FILES = new ConcurrentHashMap<>();
+    /** The SHA-256 of the pending text last reported per {@code agent/file}, cleared once no change waits. */
+    private static final Map<String, String> PENDING_PERSONA_FILES = new ConcurrentHashMap<>();
 
     private OperatorAlerts() {}
 
@@ -141,29 +140,30 @@ public final class OperatorAlerts {
     }
 
     /**
-     * Called each time a prompt withholds a persona file that matched a prompt-injection rule. Alerts
-     * once per content of that file, so a file left as it is does not alert on every turn.
+     * Called each time a prompt meets a persona file whose text on disk waits for the operator's approval (JF-136).
+     * Alerts once per text of that file, so a change left waiting does not alert on every turn.
      *
-     * @return whether this content had not been reported for the file before
+     * @return whether this text had not been reported for the file before
      */
-    public static boolean onPersonaFileWithheld(String agentName, String filename, String rule, String content) {
+    public static boolean onPersonaFilePending(String agentName, String filename, String content, @Nullable String rule) {
         var hash = sha256(content);
-        if (hash.equals(WITHHELD_PERSONA_FILES.put(agentName + "/" + filename, hash))) return false;
-        var text = personaFileAlert(agentName, filename, rule);
+        if (hash.equals(PENDING_PERSONA_FILES.put(agentName + "/" + filename, hash))) return false;
+        var text = pendingPersonaFileAlert(agentName, filename, rule);
         for (var listener : PERSONA_LISTENERS) listener.accept(text);
         send(text);
         return true;
     }
 
-    /** Called each time a persona file is not withheld, so the same content withheld again later is reported again. */
-    public static void onPersonaFileClean(String agentName, String filename) {
-        WITHHELD_PERSONA_FILES.remove(agentName + "/" + filename);
+    /** Called each time a persona file has no change waiting, so a change that waits again later is reported again. */
+    public static void onPersonaFileSettled(String agentName, String filename) {
+        PENDING_PERSONA_FILES.remove(agentName + "/" + filename);
     }
 
-    public static String personaFileAlert(String agentName, String filename, String rule) {
-        return ("JClaw alert: %s of agent '%s' matched the prompt-injection rule \"%s\" and is left out of its prompt."
-                + " The file is unchanged in the agent's workspace; it is loaded again once it no longer matches.")
-                .formatted(filename, agentName, rule);
+    public static String pendingPersonaFileAlert(String agentName, String filename, @Nullable String rule) {
+        return ("JClaw alert: %s of agent '%s' has changes that wait for your approval on the agent's page. Until"
+                + " then the agent keeps the approved version.%s")
+                .formatted(filename, agentName,
+                        rule == null ? "" : " The changes match the prompt-injection rule \"%s\".".formatted(rule));
     }
 
     /** Test-only: the persona-file alerts any thread decides while {@code body} runs, whether or not a destination is set. */

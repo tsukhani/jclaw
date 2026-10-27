@@ -85,9 +85,9 @@ class SystemPromptAssemblerTest extends UnitTest {
         return AgentService.create(name, "openrouter", "gpt-4.1");
     }
 
-    private void writeWorkspaceFile(String agentName, String filename, String content) throws Exception {
-        var path = AgentService.workspacePath(agentName).resolve(filename);
-        Files.writeString(path, content);
+    // Through JClaw, as the operator's save is, so the file is approved and the prompt carries it (JF-136).
+    private void writeWorkspaceFile(String agentName, String filename, String content) {
+        AgentService.writeWorkspaceFile(agentName, filename, content);
     }
 
     // =====================

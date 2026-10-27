@@ -139,6 +139,10 @@ GET     /api/agents/{id}/files/{<.+>filePath}   ApiAgentsController.serveWorkspa
 PUT     /api/agents/{id}/workspace/{filename}   ApiAgentsController.saveWorkspaceFile
 GET     /api/agents/{id}/workspace-tree         ApiAgentsController.listWorkspaceTree
 GET     /api/agents/{id}/workspace-scan         ApiAgentsController.scanWorkspaceFiles
+GET     /api/agents/{id}/workspace-approvals    ApiAgentsController.personaApprovals
+POST    /api/agents/{id}/workspace-approvals/{filename}/approve  ApiAgentsController.approvePersonaFile
+POST    /api/agents/{id}/workspace-approvals/{filename}/reject   ApiAgentsController.rejectPersonaFile
+POST    /api/agents/{id}/workspace-approvals/{filename}/undo     ApiAgentsController.undoPersonaFile
 DELETE  /api/agents/{id}/workspace-tree/{<.*>path}  ApiAgentsController.deleteWorkspaceEntry
 GET     /api/agents/{id}/workspace-download/{<.+>path}  ApiAgentsController.downloadWorkspaceEntry
 GET     /api/agents/{id}/workspace-backup       ApiAgentsController.backupWorkspace

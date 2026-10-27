@@ -74,6 +74,14 @@ public class Conversation extends TimestampedModel {
     public boolean pinned = false;
 
     /**
+     * JF-136: set once a tool brought outside content into this conversation, and never cleared: the model reads
+     * the whole conversation, so an agent edit to a persona file from here on waits for the operator.
+     */
+    @Column(name = "read_outside_content", nullable = false)
+    @ColumnDefault("false")
+    public boolean readOutsideContent = false;
+
+    /**
      * Streaming checkpoint (JCLAW-95). Set when the Telegram streaming sink
      * sends a placeholder message for this conversation; cleared when the
      * stream seals or errors. Non-null on startup means the prior JVM crashed

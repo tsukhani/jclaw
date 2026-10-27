@@ -282,6 +282,12 @@ public class ToolRegistry {
          *  time: {@link CompressionPipeline} would cut such a list to its first entries. */
         default boolean verbatimResult(String argsJson) { return false; }
 
+        /** JF-136: whether this call brings text from outside the operator and the agent's own state into the
+         *  conversation: a page, a command's output, a server's or another agent's reply. Once one has, an agent
+         *  edit to a persona file in that conversation waits for the operator. Defaults to {@code true}, so a new
+         *  tool counts as outside until it says otherwise. */
+        default boolean readsOutsideContent(String argsJson, Agent agent) { return true; }
+
         /** Serialization-group key for the parallel tool dispatcher. Tools
          *  returning the same non-null key are placed in the same serial
          *  queue and execute in LLM-declared order on a single virtual
@@ -445,6 +451,12 @@ public class ToolRegistry {
     public static boolean isDangerous(@Nullable String toolName, String argsJson) {
         var tool = tools.get(toolName);
         return tool != null && tool.dangerous(argsJson);
+    }
+
+    /** JF-136: {@link Tool#readsOutsideContent} by name; {@code true} for a name no tool has, the safe side. */
+    public static boolean readsOutsideContent(@Nullable String toolName, String argsJson, Agent agent) {
+        var tool = tools.get(toolName);
+        return tool == null || tool.readsOutsideContent(argsJson, agent);
     }
 
     /** JCLAW-170: resolve a tool's semantic icon key by name. Returns the

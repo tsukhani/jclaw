@@ -339,7 +339,7 @@ public class WebFetchTool implements ToolRegistry.Tool {
         var html = new String(fetched.body(), WebExtraction.charsetFor(fetched.contentType()));
         if (html.length() > WebExtraction.MAX_TEXT_LENGTH && agent != null) {
             var filename = URI.create(url).getHost().replaceAll("[^a-zA-Z0-9.-]", "_") + ".html";
-            AgentService.writeWorkspaceFile(agent.name, filename, html);
+            AgentService.writeAgentFile(agent.name, filename, html);
             return "HTML saved to workspace as '%s' (%d characters from %s)"
                     .formatted(filename, html.length(), url);
         }

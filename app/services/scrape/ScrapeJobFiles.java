@@ -48,7 +48,7 @@ public final class ScrapeJobFiles {
     }
 
     static void writePage(String agentName, String path, String content) {
-        AgentService.writeWorkspaceFile(agentName, path, content);
+        AgentService.writeAgentFile(agentName, path, content);
     }
 
     /** The file's absolute path when it exists; null when it does not or would leave the workspace. */

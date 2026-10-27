@@ -2,8 +2,10 @@ package tools;
 
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
+import org.jspecify.annotations.Nullable;
 import tools.FsSupport.EditResult;
 import tools.FsSupport.FsOutcome;
+import utils.ErrorTemplate;
 import utils.ToolErrorTemplates;
 
 import java.nio.file.Path;
@@ -40,19 +42,10 @@ final class FsTextEditor {
         var loaded = FsSupport.loadEditableFile(target);
         if (loaded.error() != null) return FsOutcome.fail(loaded.resolvedError());
 
-        var working = loaded.resolvedContent();
-        var notes = new ArrayList<String>();
-        // Per-batch regex cache: reuses the compiled Pattern across edits that
-        // share the same oldText. Scope is one editFile call; the map is
-        // discarded when this loop returns, so no cross-batch global state.
-        var regexCache = new HashMap<String, Pattern>();
-
-        for (int i = 0; i < editsJson.size(); i++) {
-            var applied = applyEditAtIndex(editsJson.get(i), working, i + 1, regexCache);
-            if (applied.error() != null) return FsOutcome.fail(applied.resolvedError());
-            working = applied.resolvedResult();
-            if (applied.note() != null) notes.add(applied.note());
-        }
+        var batch = applyEdits(loaded.resolvedContent(), editsJson);
+        if (batch.error() != null) return FsOutcome.fail(batch.error());
+        var working = batch.text();
+        var notes = new ArrayList<>(batch.notes());
 
         if (working.equals(loaded.content())) {
             notes.add("(no material change)");
@@ -61,6 +54,31 @@ final class FsTextEditor {
         var writeResult = FsWriter.writeFile(target, working);
         if (writeResult.failed() || notes.isEmpty()) return writeResult;
         return FsOutcome.ok(writeResult.text() + " " + String.join(" ", notes));
+    }
+
+    private record EditBatch(String text, List<String> notes, @Nullable ErrorTemplate error) {}
+
+    private static EditBatch applyEdits(String content, JsonArray editsJson) {
+        var working = content;
+        var notes = new ArrayList<String>();
+        // Per-batch regex cache: reuses the compiled Pattern across edits that
+        // share the same oldText. Scope is one batch; the map is
+        // discarded when this loop returns, so no cross-batch global state.
+        var regexCache = new HashMap<String, Pattern>();
+        for (int i = 0; i < editsJson.size(); i++) {
+            var applied = applyEditAtIndex(editsJson.get(i), working, i + 1, regexCache);
+            if (applied.error() != null) return new EditBatch(working, notes, applied.resolvedError());
+            working = applied.resolvedResult();
+            if (applied.note() != null) notes.add(applied.note());
+        }
+        return new EditBatch(working, notes, null);
+    }
+
+    /** The text {@code editsJson} makes of {@code content}, as {@link #editFile} writes it, or null when an edit fails. */
+    static @Nullable String edited(String content, JsonArray editsJson) {
+        if (editsJson.isEmpty()) return null;
+        var batch = applyEdits(content, editsJson);
+        return batch.error() == null ? batch.text() : null;
     }
 
     private static EditResult applyEditAtIndex(JsonElement entry, String working, int editIndex,

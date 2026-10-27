@@ -1733,7 +1733,7 @@ describe('Agents page — prompt-injection check of the workspace files (JF-130)
       expect(scan.calls.count).toBe(1)
       const status = component.find('[role="status"]')
       expect(status.findAll('p').map((p: { text: () => string }) => p.text())).toEqual([
-        'A file with a match is left out of the agent\'s prompt until it no longer matches.',
+        'Check each match before you approve a change. Reword approved text that was not meant as an instruction.',
       ])
       expect(status.findAll('li button').map((b: { text: () => string }) => b.text()))
         .toEqual(['AGENT.md, line 2: you-are-now, “You are now”'])
@@ -1932,6 +1932,154 @@ describe('Agents page — prompt-injection check of the workspace files (JF-130)
     finally {
       scan.off()
       soul()
+    }
+  })
+})
+
+describe('Agents page — persona-file changes that wait for approval (JF-136)', () => {
+  const approved = (filename: string, by = 'jclaw') => ({
+    filename, pending: false, approvedContent: null, diskContent: null, diskSha256: `sha-${filename}`,
+    approvedBy: by, approvedAt: '2026-10-27T09:00:00Z', undoSha256: null,
+  })
+  const pendingSoul = {
+    filename: 'SOUL.md', pending: true, approvedContent: 'Be kind.', diskContent: 'Be curious.',
+    diskSha256: 'sha-disk', approvedBy: 'jclaw', approvedAt: '2026-10-27T09:00:00Z', undoSha256: null,
+  }
+
+  function stubApprovals(files: unknown[]) {
+    const calls = { count: 0 }
+    const off = registerEndpoint('/api/agents/2/workspace-approvals', () => {
+      calls.count++
+      return { files }
+    })
+    return { calls, off }
+  }
+
+  function stubDecision(filename: string, decision: string) {
+    const bodies: Record<string, unknown>[] = []
+    const off = registerEndpoint(`/api/agents/2/workspace-approvals/${filename}/${decision}`, {
+      method: 'POST',
+      handler: async (event: H3Event) => {
+        const { readBody } = await import('h3')
+        bodies.push(await readBody(event) as Record<string, unknown>)
+        return { status: 'ok', filename }
+      },
+    })
+    return { bodies, off }
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: consumes the Nuxt mount wrapper, as openHelperEdit does.
+  async function mountHelper(): Promise<any> {
+    const component = await mountSuspended(AgentsHarness, { route: '/agents/helper' })
+    await vi.waitFor(() => expect(component.find('textarea').exists()).toBe(true))
+    await flushPromises()
+    return component
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: see mountHelper.
+  function button(component: any, label: string) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- Reason: see mountHelper.
+    return component.findAll('button').find((b: any) => b.text() === label)
+  }
+
+  function dialogButton(label: string) {
+    return [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === label)
+  }
+
+  it('shows a change that waits, with its diff and a mark on its tab, and approves it as reviewed', async () => {
+    setupAgentsApi()
+    const approvals = stubApprovals([pendingSoul, approved('IDENTITY.md'), approved('USER.md'), approved('BOOTSTRAP.md'),
+      approved('AGENT.md')])
+    const approve = stubDecision('SOUL.md', 'approve')
+    try {
+      const component = await mountHelper()
+      const region = () => component.find('[aria-label="Changes to these files"]')
+      await vi.waitFor(() => expect(region().exists()).toBe(true))
+
+      expect(region().find('span').text())
+        .toBe('SOUL.md has changes that wait for your approval. Until then the agent keeps the approved version.')
+      const soulTab = component.findAll('button').find((b: { text: () => string }) => b.text().startsWith('SOUL.md'))
+      expect(soulTab.text()).toBe('SOUL.md changes wait for your approval')
+
+      await button(component, 'Show changes').trigger('click')
+      expect(component.findAll('.persona-diff div').map((d: { text: () => string }) => d.text()))
+        .toEqual(['- Be kind.', '+ Be curious.'])
+
+      await button(component, 'Approve').trigger('click')
+      await vi.waitFor(() => expect(approve.bodies).toEqual([{ sha256: 'sha-disk' }]))
+      await vi.waitFor(() => expect(approvals.calls.count).toBe(2))
+    }
+    finally {
+      approve.off()
+      approvals.off()
+    }
+  })
+
+  it('asks before rejecting, sends nothing when cancelled, and rejects as reviewed when confirmed', async () => {
+    setupAgentsApi()
+    const approvals = stubApprovals([pendingSoul, approved('IDENTITY.md'), approved('USER.md'), approved('BOOTSTRAP.md'),
+      approved('AGENT.md')])
+    const reject = stubDecision('SOUL.md', 'reject')
+    try {
+      const component = await mountHelper()
+      await vi.waitFor(() => expect(button(component, 'Reject')).toBeTruthy())
+
+      await button(component, 'Reject').trigger('click')
+      await vi.waitFor(() => expect(document.body.textContent).toContain(
+        'Reject the changes to SOUL.md? The approved version is written back over them.'))
+      dialogButton('Cancel')!.click()
+      await flushPromises()
+      expect(reject.bodies).toEqual([])
+
+      await button(component, 'Reject').trigger('click')
+      await vi.waitFor(() => expect(dialogButton('Reject') && document.body.textContent?.includes('Reject the changes to SOUL.md')).toBe(true))
+      const confirmButtons = [...document.body.querySelectorAll('[role="dialog"] button')]
+      ;(confirmButtons.find(b => b.textContent?.trim() === 'Reject') as HTMLButtonElement).click()
+      await vi.waitFor(() => expect(reject.bodies).toEqual([{ sha256: 'sha-disk' }]))
+    }
+    finally {
+      reject.off()
+      approvals.off()
+    }
+  })
+
+  it('offers Undo for an agent change that applied on its own, and undoes it as reviewed', async () => {
+    setupAgentsApi()
+    const userMd = { ...approved('USER.md', 'agent'), undoSha256: 'sha-agent-version' }
+    const approvals = stubApprovals([approved('SOUL.md'), approved('IDENTITY.md'), userMd, approved('BOOTSTRAP.md'),
+      approved('AGENT.md')])
+    const undo = stubDecision('USER.md', 'undo')
+    try {
+      const component = await mountHelper()
+      const region = () => component.find('[aria-label="Changes to these files"]')
+      await vi.waitFor(() => expect(region().exists()).toBe(true))
+      expect(region().find('span').text()).toBe('The agent changed USER.md, and the change applied on its own.')
+
+      await button(component, 'Undo').trigger('click')
+      await vi.waitFor(() => expect(document.body.textContent).toContain(
+        'Undo the agent\'s last change to USER.md? The version before it is written back and approved.'))
+      const confirmButtons = [...document.body.querySelectorAll('[role="dialog"] button')]
+      ;(confirmButtons.find(b => b.textContent?.trim() === 'Undo') as HTMLButtonElement).click()
+      await vi.waitFor(() => expect(undo.bodies).toEqual([{ sha256: 'sha-agent-version' }]))
+    }
+    finally {
+      undo.off()
+      approvals.off()
+    }
+  })
+
+  it('shows no panel when every file is approved and nothing can be undone', async () => {
+    setupAgentsApi()
+    const approvals = stubApprovals([approved('SOUL.md'), approved('IDENTITY.md'), approved('USER.md'),
+      approved('BOOTSTRAP.md'), approved('AGENT.md', 'operator')])
+    try {
+      const component = await mountHelper()
+      await vi.waitFor(() => expect(approvals.calls.count).toBe(1))
+      await flushPromises()
+      expect(component.find('[aria-label="Changes to these files"]').exists()).toBe(false)
+    }
+    finally {
+      approvals.off()
     }
   })
 })
