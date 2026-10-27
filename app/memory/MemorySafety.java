@@ -2,11 +2,14 @@ package memory;
 
 import org.jspecify.annotations.Nullable;
 
+import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
+import java.util.function.IntUnaryOperator;
 import java.util.regex.Pattern;
 
 /**
@@ -160,12 +163,21 @@ public final class MemorySafety {
     };
 
     /**
-     * Zero-width characters and bidi override/isolate controls — invisible in
-     * rendered text, so their only plausible role in a memory is smuggling
-     * content past a human reviewer (Trojan-Source-style).
+     * Zero-width and other default-ignorable characters, bidi override/isolate
+     * controls, tag characters and variation selectors — invisible in rendered
+     * text, so their only plausible role in a memory is smuggling content past a
+     * human reviewer (Trojan-Source, and since 2025 tag- and selector-encoded
+     * instructions). {@link #isVisibleUse} lets through the uses that do show something.
      */
-    private static final Pattern INVISIBLE_CHARS =
-            Pattern.compile("[\\u200B\\u200C\\u200D\\u2060\\uFEFF\\u202A-\\u202E\\u2066-\\u2069]");
+    private static final Pattern INVISIBLE_CHARS = Pattern.compile(
+            "[\\u00AD\\u034F\\u115F\\u1160\\u180E\\u200B\\u200C\\u200D\\u2060-\\u2064\\u202A-\\u202E"
+                    + "\\u2066-\\u2069\\u3164\\uFE00-\\uFE0F\\uFEFF\\uFFA0\\x{E0000}-\\x{E007F}\\x{E0100}-\\x{E01EF}]");
+    private static final int BLACK_FLAG = 0x1F3F4;
+    private static final int CANCEL_TAG = 0xE007F;
+    // The subdivision flags Unicode recommends: England, Scotland, Wales. Any other tag run could carry text.
+    private static final Set<String> SUBDIVISION_FLAGS = Set.of("gbeng", "gbsct", "gbwls");
+    // Each ideographic variant can carry a byte, so a text with more than a name's worth is smuggling.
+    private static final int MAX_IDEOGRAPHIC_VARIANTS = 8;
 
     private static final String INVISIBLE_RULE = "invisible-character";
     private static final String INVISIBLE_HINT = "It shows as nothing on screen. Delete it.";
@@ -182,12 +194,91 @@ public final class MemorySafety {
         return joinsAfter && Character.isExtendedPictographic(text.codePointAt(index + 1));
     }
 
-    private static boolean hasInvisibleChars(String text) {
-        var matcher = INVISIBLE_CHARS.matcher(text);
-        while (matcher.find()) {
-            if (!isEmojiJoiner(text, matcher.start())) return true;
+    private static boolean isIdeographicVariant(int cp) {
+        return cp >= 0xE0100 && cp <= 0xE01EF;
+    }
+
+    private static int ideographicVariants(String text) {
+        // Every code point this counts is outside the BMP, so text without a surrogate pair has none.
+        if (text.chars().noneMatch(c -> Character.isHighSurrogate((char) c))) return 0;
+        return (int) text.codePoints().filter(MemorySafety::isIdeographicVariant).count();
+    }
+
+    private static boolean isTag(int cp) {
+        return cp >= 0xE0000 && cp <= CANCEL_TAG;
+    }
+
+    // A subdivision flag, England's for one, is a black flag, its code in tag letters, and the cancel tag.
+    private static boolean inSubdivisionFlag(String text, int index) {
+        int start = index;
+        while (start > 0) {
+            int before = text.codePointBefore(start);
+            if (!isTag(before) || before == CANCEL_TAG) break;
+            start -= Character.charCount(before);
+        }
+        if (start == 0 || text.codePointBefore(start) != BLACK_FLAG) return false;
+        var code = new StringBuilder();
+        for (int i = start; i < text.length(); ) {
+            int cp = text.codePointAt(i);
+            if (cp == CANCEL_TAG) return SUBDIVISION_FLAGS.contains(code.toString());
+            if (!isTag(cp) || code.length() == 6) return false;
+            code.appendCodePoint(cp - 0xE0000);
+            i += Character.charCount(cp);
         }
         return false;
+    }
+
+    /**
+     * Whether the invisible character at {@code index} is a use of it that shows something: a joiner inside an
+     * emoji, a presentation selector on an emoji, a variant selector on an ideograph, or a recommended flag.
+     */
+    private static boolean isVisibleUse(String text, int index, int ideographicVariants) {
+        int cp = text.codePointAt(index);
+        if (cp == 0x200D) return isEmojiJoiner(text, index);
+        if (cp == 0xFE0E || cp == 0xFE0F) return index > 0 && Character.isEmoji(text.codePointBefore(index));
+        if (isIdeographicVariant(cp)) {
+            return ideographicVariants <= MAX_IDEOGRAPHIC_VARIANTS && index > 0
+                    && Character.isIdeographic(text.codePointBefore(index));
+        }
+        return isTag(cp) && inSubdivisionFlag(text, index);
+    }
+
+    private static boolean hasInvisibleChars(String text) {
+        var matcher = INVISIBLE_CHARS.matcher(text);
+        int variants = ideographicVariants(text);
+        while (matcher.find()) {
+            if (!isVisibleUse(text, matcher.start(), variants)) return true;
+        }
+        return false;
+    }
+
+    /** The text the phrase rules read, and where each of its chars came from in the text. */
+    private record Folded(String text, IntUnaryOperator start, IntUnaryOperator end) {}
+
+    // Fullwidth and other compatibility forms read as the letters they show, so a fullwidth "cat" cannot dodge a
+    // rule. Folding code point by code point keeps a map back to the original, for a match's position.
+    private static Folded fold(String text) {
+        if (Normalizer.isNormalized(text, Normalizer.Form.NFKC)) return new Folded(text, i -> i, i -> i);
+        var folded = new StringBuilder(text.length());
+        int[] starts = new int[text.length() + 16];
+        int[] ends = new int[text.length() + 16];
+        for (int i = 0; i < text.length(); ) {
+            int next = i + Character.charCount(text.codePointAt(i));
+            var piece = Normalizer.normalize(text.substring(i, next), Normalizer.Form.NFKC);
+            for (int k = 0; k < piece.length(); k++) {
+                if (folded.length() == starts.length) {
+                    starts = Arrays.copyOf(starts, starts.length * 2);
+                    ends = Arrays.copyOf(ends, ends.length * 2);
+                }
+                starts[folded.length()] = i;
+                ends[folded.length()] = next;
+                folded.append(piece.charAt(k));
+            }
+            i = next;
+        }
+        int[] startOf = starts;
+        int[] endOf = ends;
+        return new Folded(folded.toString(), i -> startOf[i], i -> endOf[i - 1]);
     }
 
     /**
@@ -208,8 +299,9 @@ public final class MemorySafety {
     public static @Nullable String injectionRule(String text) {
         if (text == null || text.isBlank()) return null;
         if (hasInvisibleChars(text)) return INVISIBLE_RULE;
+        var folded = fold(text).text();
         for (var rule : INJECTION_RULES) {
-            if (rule.pattern().matcher(text).find()) return rule.name();
+            if (rule.pattern().matcher(folded).find()) return rule.name();
         }
         return null;
     }
@@ -222,14 +314,19 @@ public final class MemorySafety {
         if (text == null || text.isBlank()) return List.of();
         var found = new ArrayList<InjectionMatch>();
         var invisible = INVISIBLE_CHARS.matcher(text);
+        int variants = ideographicVariants(text);
         while (invisible.find()) {
-            if (!isEmojiJoiner(text, invisible.start())) {
+            if (!isVisibleUse(text, invisible.start(), variants)) {
                 found.add(new InjectionMatch(INVISIBLE_RULE, invisible.start(), invisible.end()));
             }
         }
+        var folded = fold(text);
         for (var rule : INJECTION_RULES) {
-            var matcher = rule.pattern().matcher(text);
-            while (matcher.find()) found.add(new InjectionMatch(rule.name(), matcher.start(), matcher.end()));
+            var matcher = rule.pattern().matcher(folded.text());
+            while (matcher.find()) {
+                found.add(new InjectionMatch(rule.name(), folded.start().applyAsInt(matcher.start()),
+                        folded.end().applyAsInt(matcher.end())));
+            }
         }
         found.sort(Comparator.comparingInt(InjectionMatch::start).thenComparingInt(InjectionMatch::end));
         return found;
