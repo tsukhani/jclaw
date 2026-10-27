@@ -610,7 +610,7 @@ A missing backend prints the install command for the operating system JClaw is r
 
 Installing Tesseract:
 
-| | |
+| System | Install command |
 |---|---|
 | macOS | `brew install tesseract` |
 | Debian/Ubuntu | `apt-get install tesseract-ocr` |

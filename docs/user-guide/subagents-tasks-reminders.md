@@ -12,7 +12,7 @@ That is the whole story. The rest of this section is the detail behind each axis
 
 ## Side by side
 
-|                                  | [Subagent](/guide#subagents)                                                       | [Task](/guide#tasks)                                                                  | [Reminder](/guide#reminders)                                              |
+| Question                         | [Subagent](/guide#subagents)                                                       | [Task](/guide#tasks)                                                                  | [Reminder](/guide#reminders)                                              |
 |----------------------------------|------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------|---------------------------------------------------------------------------|
 | **What's the work?**             | A second LLM turn in a child context: agent reasoning, tool calls, a real reply.   | An agent turn fired in the background: same LLM-driven work, just deferred.          | **No work.** A pre-written message delivered verbatim.                     |
 | **When does it run?**            | Right now (or shortly, via `async`), inside the current conversation's "thinking." | On a schedule: immediate / once at a time / every N / cron.                            | On a schedule (same shapes as a task).                                     |
