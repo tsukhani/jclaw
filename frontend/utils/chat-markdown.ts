@@ -184,13 +184,18 @@ const markdownCache = new Map<string, string>()
 const MARKDOWN_CACHE_MAX = 200
 let cachedLewisVersion = 0
 
-function renderMarkdownInner(text: string, agentId: number | null): string {
-  const html = chatMarked.parse(normalizeMarkdownLinks(text), { renderer: chatRenderer }) as string
-  const sanitized = DOMPurify.sanitize(html, {
+/** The sanitizing pass every rendered message goes through, for a caller that changes the HTML afterwards. */
+export function sanitizeRenderedHtml(html: string): string {
+  return DOMPurify.sanitize(html, {
     // semantics/annotation: KaTeX's MathML carries its TeX there; stripped, the TeX leaks into what a screen reader reads.
     ADD_TAGS: ['img', 'audio', 'video', 'source', 'semantics', 'annotation'],
     ADD_ATTR: ['src', 'controls', 'autoplay', 'download', 'target', 'encoding'],
   })
+}
+
+function renderMarkdownInner(text: string, agentId: number | null): string {
+  const html = chatMarked.parse(normalizeMarkdownLinks(text), { renderer: chatRenderer }) as string
+  const sanitized = sanitizeRenderedHtml(html)
   return agentId == null ? sanitized : rewriteWorkspaceLinks(sanitized, agentId)
 }
 

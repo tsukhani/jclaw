@@ -732,6 +732,17 @@ public class ApiAgentsController extends Controller {
         ApiResponses.ok("filename", filename);
     }
 
+    private record WorkspaceScanResponse(List<SystemPromptAssembler.PersonaFileScan> files) {}
+
+    @ApiResponse(responseCode = "200", content = @Content(schema = @Schema(implementation = WorkspaceScanResponse.class)))
+    @Operation(summary = "Check the workspace files this agent's prompt reads for prompt-injection matches")
+    @AgentAccess(value = OPERATOR_ONLY,
+            reason = "reads any agent's workspace, including another agent's persona files")
+    public static void scanWorkspaceFiles(Long id) {
+        var agent = requireAgent(id);
+        renderJSON(gson.toJson(new WorkspaceScanResponse(SystemPromptAssembler.scanPersonaFiles(agent))));
+    }
+
     // --- Workspace manager endpoints ---
 
     /**

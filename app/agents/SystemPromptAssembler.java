@@ -327,28 +327,13 @@ public class SystemPromptAssembler {
         b.startSection("Role");
         appendRoleSection(b.sb);
 
-        // Workspace files are emitted in a deliberate narrative order: SOUL (psyche) →
-        // IDENTITY (who) → USER (for whom) → BOOTSTRAP (init/priming) → AGENT (what to do).
         // Each section is skipped silently when the file is missing or blank, so an
         // agent that only populates AGENT.md produces the same prompt as before the
         // four persona files were added.
-        b.startSection("SOUL.md");
-        appendPersonaFile(b.sb, agent, "SOUL.md");
-
-        b.startSection("IDENTITY.md");
-        appendPersonaFile(b.sb, agent, "IDENTITY.md");
-
-        // A service agent has no owner: a copy left on disk, or still in the file cache, must not reach its prompt.
-        if (!WorkspaceFiles.ownedByServiceAgent(agent)) {
-            b.startSection("USER.md");
-            appendPersonaFile(b.sb, agent, "USER.md");
-
-            b.startSection("BOOTSTRAP.md");
-            appendPersonaFile(b.sb, agent, "BOOTSTRAP.md");
+        for (var filename : personaFiles(agent)) {
+            b.startSection(filename);
+            appendPersonaFile(b.sb, agent, filename);
         }
-
-        b.startSection("AGENT.md");
-        appendPersonaFile(b.sb, agent, "AGENT.md");
 
         // 4. Skills
         var skills = SkillLoader.loadSkills(agent.name);
@@ -769,13 +754,56 @@ public class SystemPromptAssembler {
                 """);
     }
 
+    /**
+     * The workspace files this agent's prompt reads, in a deliberate narrative order: SOUL (psyche) → IDENTITY
+     * (who) → USER (for whom) → BOOTSTRAP (init/priming) → AGENT (what to do). A service agent has no owner: a
+     * USER or BOOTSTRAP copy left on disk, or still in the file cache, must not reach its prompt.
+     */
+    private static List<String> personaFiles(Agent agent) {
+        return WorkspaceFiles.ownedByServiceAgent(agent)
+                ? List.of("SOUL.md", "IDENTITY.md", "AGENT.md")
+                : List.of("SOUL.md", "IDENTITY.md", "USER.md", "BOOTSTRAP.md", "AGENT.md");
+    }
+
+    // A leading BOM is how some editors save UTF-8, not smuggling; one anywhere else still matches.
+    private static int personaScanStart(String content) {
+        return content.startsWith("\uFEFF") ? 1 : 0;
+    }
+
+    /** One persona file's matches, as {@link #scanPersonaFiles} reports them. */
+    public record PersonaFileScan(String filename, List<PersonaFinding> findings) {}
+
+    /**
+     * A match in a persona file: {@code [start, end)} in UTF-16 units of the file, its 1-based line, the text, and
+     * how to reword it.
+     */
+    public record PersonaFinding(String rule, int start, int end, int line, String text, String hint) {}
+
+    /**
+     * Every prompt-injection match in each file this agent's prompt reads, by the rules that withhold a file,
+     * for the operator to inspect. Alerts and logs nothing: the assembly reports a withheld file.
+     */
+    public static List<PersonaFileScan> scanPersonaFiles(Agent agent) {
+        return personaFiles(agent).stream().map(filename -> {
+            var content = AgentService.readWorkspaceFile(agent.name, filename);
+            if (content == null) return new PersonaFileScan(filename, List.of());
+            int from = personaScanStart(content);
+            var findings = MemorySafety.injectionMatches(content.substring(from)).stream().map(m -> {
+                int start = from + m.start();
+                int end = from + m.end();
+                int line = 1 + (int) content.substring(0, start).chars().filter(c -> c == '\n').count();
+                return new PersonaFinding(m.rule(), start, end, line, content.substring(start, end),
+                        MemorySafety.rewordingHint(m.rule()));
+            }).toList();
+            return new PersonaFileScan(filename, findings);
+        }).toList();
+    }
+
     // The agent can rewrite these files, which the Role section calls authoritative. The marker names only
     // the file and the rule, so a flagged file left as it is keeps the cached prefix byte-identical.
     private static void appendPersonaFile(StringBuilder sb, Agent agent, String filename) {
         var content = AgentService.readWorkspaceFile(agent.name, filename);
-        // A leading BOM is how some editors save UTF-8, not smuggling; one anywhere else still matches.
-        var rule = content == null ? null
-                : MemorySafety.injectionRule(content.startsWith("\uFEFF") ? content.substring(1) : content);
+        var rule = content == null ? null : MemorySafety.injectionRule(content.substring(personaScanStart(content)));
         // A subagent reads its root's files, so the root's name keeps one finding from alerting per subagent.
         var owner = WorkspaceFiles.workspaceOwnerName(agent);
         if (content == null || rule == null) {

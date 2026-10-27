@@ -83,6 +83,8 @@ The platform reads these files on every turn when the system prompt is assembled
 
 The agent can edit these files itself, so each one is checked for prompt injection before it goes into the prompt. A file that matches a rule, such as an instruction to ignore earlier instructions or a hidden character, is left out. The prompt has one line in its place: `[SOUL.md was withheld from this prompt: it matched the prompt-injection rule "...".]`, with the file's name and the rule. The file stays on disk, and [Alerts](/guide#settings-alerts) tell you about it. Fix or clear the file, and it goes back into the prompt on the next turn.
 
+JClaw checks these files each time you open the agent. If one matches, a panel above the editor lists each match with its file, line and rule, and a tip on how to reword it. The tab of a file with a match shows how many it has. The matched text is marked in red in both the editor and the preview, and a hidden character shows as a thin red bar where it sits. Click a match to open its file with the text selected. **Remove hidden characters** deletes the hidden characters from the open file; save the file to keep the change. When you save a file, the files are checked again. To check them again at any time, click **Check files**. If every file is clean, it says "No prompt-injection matches in these files."
+
 ### Workspace manager
 
 Below the editor, once the agent has been saved, the **Workspace** panel lists everything on disk under this agent's workspace. That includes whatever the agent has written, not only the five files above:

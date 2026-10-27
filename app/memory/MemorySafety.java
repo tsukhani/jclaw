@@ -2,7 +2,10 @@ package memory;
 
 import org.jspecify.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -117,7 +120,7 @@ public final class MemorySafety {
     }
 
     /** Hyphenated names, so text quoting one (a prompt marker, an alert) does not match its own pattern. */
-    private record InjectionRule(String name, Pattern pattern) {}
+    private record InjectionRule(String name, Pattern pattern, String hint) {}
 
     /**
      * Injection/exfiltration shapes, adapted from the Hermes memory content
@@ -127,23 +130,33 @@ public final class MemorySafety {
     private static final InjectionRule[] INJECTION_RULES = {
             // prompt-injection phrasing ("ignore all previous instructions", "ignore prior instructions")
             new InjectionRule("ignore-instructions",
-                    Pattern.compile("(?i)\\bignore\\s+(?:previous|all|above|prior|any)(?:\\s+\\w+)?\\s+instructions\\b")),
+                    Pattern.compile("(?i)\\bignore\\s+(?:previous|all|above|prior|any)(?:\\s+\\w+)?\\s+instructions\\b"),
+                    "Say what the agent should do, rather than telling it to ignore other instructions."),
             new InjectionRule("disregard-instructions",
-                    Pattern.compile("(?i)\\bdisregard\\s+(?:your|all|any)\\s+(?:instructions|rules|guidelines)\\b")),
-            new InjectionRule("you-are-now", Pattern.compile("(?i)\\byou\\s+are\\s+now\\s")),
-            new InjectionRule("system-prompt-override", Pattern.compile("(?i)\\bsystem\\s+prompt\\s+override\\b")),
-            new InjectionRule("hide-from-user", Pattern.compile("(?i)\\bdo\\s+not\\s+tell\\s+the\\s+user\\b")),
+                    Pattern.compile("(?i)\\bdisregard\\s+(?:your|all|any)\\s+(?:instructions|rules|guidelines)\\b"),
+                    "Say what the agent should do, rather than telling it to disregard its rules."),
+            new InjectionRule("you-are-now", Pattern.compile("(?i)\\byou\\s+are\\s+now\\s"),
+                    "Write \"You are …\" or \"Your name is …\", without \"now\"."),
+            new InjectionRule("system-prompt-override", Pattern.compile("(?i)\\bsystem\\s+prompt\\s+override\\b"),
+                    "Describe the behavior you want, rather than asking to override the system prompt."),
+            new InjectionRule("hide-from-user", Pattern.compile("(?i)\\bdo\\s+not\\s+tell\\s+the\\s+user\\b"),
+                    "Write \"Keep … private\", rather than telling the agent to hide something from the user."),
             new InjectionRule("no-restrictions",
-                    Pattern.compile("(?i)\\bact\\s+as\\s+(?:if|though)\\s+you\\s+(?:have\\s+no|don'?t\\s+have)\\s+(?:restrictions|limits|rules)\\b")),
+                    Pattern.compile("(?i)\\bact\\s+as\\s+(?:if|though)\\s+you\\s+(?:have\\s+no|don'?t\\s+have)\\s+(?:restrictions|limits|rules)\\b"),
+                    "Name the limits the agent keeps, rather than saying it has none."),
             // exfiltration: fetch tools shipping a credential variable off-box
             new InjectionRule("credential-exfiltration",
-                    Pattern.compile("(?i)\\b(?:curl|wget)\\s[^\\n]*\\$\\{?\\w*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)")),
+                    Pattern.compile("(?i)\\b(?:curl|wget)\\s[^\\n]*\\$\\{?\\w*(?:KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)"),
+                    "Leave out commands that send a key or token with curl or wget."),
             // reading credential files
             new InjectionRule("credential-file-read",
-                    Pattern.compile("(?i)\\bcat\\s[^\\n]*(?:\\.env\\b|credentials|\\.netrc\\b|\\.pgpass\\b|\\.npmrc\\b|\\.pypirc\\b)")),
+                    Pattern.compile("(?i)\\bcat\\s[^\\n]*(?:\\.env\\b|credentials|\\.netrc\\b|\\.pgpass\\b|\\.npmrc\\b|\\.pypirc\\b)"),
+                    "Name the file in words, such as \"the .netrc file\", without the cat command."),
             // SSH persistence / key access
-            new InjectionRule("ssh-authorized-keys", Pattern.compile("(?i)authorized_keys")),
-            new InjectionRule("ssh-directory", Pattern.compile("(?i)(?:\\$HOME|~)/\\.ssh\\b")),
+            new InjectionRule("ssh-authorized-keys", Pattern.compile("(?i)authorized_keys"),
+                    "Write \"the SSH keys file\" in place of the file's name."),
+            new InjectionRule("ssh-directory", Pattern.compile("(?i)(?:\\$HOME|~)/\\.ssh\\b"),
+                    "Write \"the SSH folder\" in place of its path."),
     };
 
     /**
@@ -154,14 +167,27 @@ public final class MemorySafety {
     private static final Pattern INVISIBLE_CHARS =
             Pattern.compile("[\\u200B\\u200C\\u200D\\u2060\\uFEFF\\u202A-\\u202E\\u2066-\\u2069]");
 
-    // A joiner between two emoji is how a multi-part emoji such as a woman technologist is spelled. Matched
-    // forward, because a lookbehind cannot see a code point stored as a surrogate pair.
-    private static final Pattern EMOJI_JOINER = Pattern.compile(
-            "([\\p{IsExtended_Pictographic}\\x{FE0F}\\x{1F3FB}-\\x{1F3FF}])\\u200D(?=\\p{IsExtended_Pictographic})");
+    private static final String INVISIBLE_RULE = "invisible-character";
+    private static final String INVISIBLE_HINT = "It shows as nothing on screen. Delete it.";
+
+    /** One place a rule matched: {@code [start, end)} in UTF-16 units of the text scanned. */
+    public record InjectionMatch(String rule, int start, int end) {}
+
+    // A joiner between two emoji is how a multi-part emoji such as a woman technologist is spelled.
+    private static boolean isEmojiJoiner(String text, int index) {
+        if (text.charAt(index) != '\u200D' || index == 0 || index + 1 >= text.length()) return false;
+        int before = text.codePointBefore(index);
+        boolean joinsAfter = Character.isExtendedPictographic(before) || before == 0xFE0F
+                || (before >= 0x1F3FB && before <= 0x1F3FF);
+        return joinsAfter && Character.isExtendedPictographic(text.codePointAt(index + 1));
+    }
 
     private static boolean hasInvisibleChars(String text) {
-        var scanned = text.indexOf('‍') < 0 ? text : EMOJI_JOINER.matcher(text).replaceAll("$1");
-        return INVISIBLE_CHARS.matcher(scanned).find();
+        var matcher = INVISIBLE_CHARS.matcher(text);
+        while (matcher.find()) {
+            if (!isEmojiJoiner(text, matcher.start())) return true;
+        }
+        return false;
     }
 
     /**
@@ -181,11 +207,41 @@ public final class MemorySafety {
      */
     public static @Nullable String injectionRule(String text) {
         if (text == null || text.isBlank()) return null;
-        if (hasInvisibleChars(text)) return "invisible-character";
+        if (hasInvisibleChars(text)) return INVISIBLE_RULE;
         for (var rule : INJECTION_RULES) {
             if (rule.pattern().matcher(text).find()) return rule.name();
         }
         return null;
+    }
+
+    /**
+     * Every match of every rule behind {@link #injectionRule}, in text order: each invisible character
+     * on its own, and each pattern each time it matches. Empty exactly when {@code injectionRule} is null.
+     */
+    public static List<InjectionMatch> injectionMatches(@Nullable String text) {
+        if (text == null || text.isBlank()) return List.of();
+        var found = new ArrayList<InjectionMatch>();
+        var invisible = INVISIBLE_CHARS.matcher(text);
+        while (invisible.find()) {
+            if (!isEmojiJoiner(text, invisible.start())) {
+                found.add(new InjectionMatch(INVISIBLE_RULE, invisible.start(), invisible.end()));
+            }
+        }
+        for (var rule : INJECTION_RULES) {
+            var matcher = rule.pattern().matcher(text);
+            while (matcher.find()) found.add(new InjectionMatch(rule.name(), matcher.start(), matcher.end()));
+        }
+        found.sort(Comparator.comparingInt(InjectionMatch::start).thenComparingInt(InjectionMatch::end));
+        return found;
+    }
+
+    /** How to reword text so {@code rule} no longer matches, for the operator to read. */
+    public static String rewordingHint(String rule) {
+        if (INVISIBLE_RULE.equals(rule)) return INVISIBLE_HINT;
+        for (var candidate : INJECTION_RULES) {
+            if (candidate.name().equals(rule)) return candidate.hint();
+        }
+        throw new IllegalArgumentException("no injection rule is named " + rule);
     }
 
     private static final String REMOVAL_VERB =

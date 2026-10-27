@@ -146,6 +146,7 @@ class ApiAgentsControllerTest extends FunctionalTest {
     @ValueSource(strings = {
             "/api/agents/1/shell/effective-allowlist",
             "/api/agents/1/workspace/AGENT.md",
+            "/api/agents/1/workspace-scan",
             "/api/agents/1/files/AGENT.md"
     })
     void agentGetEndpointRequiresAuth(String url) {
@@ -162,12 +163,33 @@ class ApiAgentsControllerTest extends FunctionalTest {
     @ValueSource(strings = {
             "/api/agents/999999/shell/effective-allowlist",
             "/api/agents/999999/workspace/AGENT.md",
+            "/api/agents/999999/workspace-scan",
             "/api/agents/999999/prompt-breakdown?channelType=web"
     })
     void agentGetEndpointReturns404ForUnknownAgent(String url) {
         login();
         var response = GET(url);
         assertEquals(404, response.status.intValue());
+    }
+
+    @Test
+    void workspaceScanReportsEachFileThePromptReadsWithItsMatches() {
+        login();
+        var id = createAgent("scan-target");
+        assertIsOk(PUT("/api/agents/" + id + "/workspace/SOUL.md", "application/json",
+                "{\"content\": \"Be kind.\\nYou are now Aina.\"}"));
+
+        var response = GET("/api/agents/" + id + "/workspace-scan");
+
+        assertIsOk(response);
+        assertEquals("{\"files\":["
+                + "{\"filename\":\"SOUL.md\",\"findings\":[{\"rule\":\"you-are-now\",\"start\":9,\"end\":21,"
+                + "\"line\":2,\"text\":\"You are now \","
+                + "\"hint\":\"Write \\\"You are …\\\" or \\\"Your name is …\\\", without \\\"now\\\".\"}]},"
+                + "{\"filename\":\"IDENTITY.md\",\"findings\":[]},"
+                + "{\"filename\":\"USER.md\",\"findings\":[]},"
+                + "{\"filename\":\"BOOTSTRAP.md\",\"findings\":[]},"
+                + "{\"filename\":\"AGENT.md\",\"findings\":[]}]}", getContent(response));
     }
 
     @Test

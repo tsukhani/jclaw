@@ -8,12 +8,23 @@ import {
   PencilSquareIcon,
   PlusIcon,
   PuzzlePieceIcon,
+  ShieldCheckIcon,
   TrashIcon,
   XMarkIcon,
 } from '@heroicons/vue/24/outline'
 import { Save } from '@lucide/vue'
 import AgentWorkspaceManager from '~/components/agents/AgentWorkspaceManager.vue'
 import { renderMarkdown } from '~/utils/chat-markdown'
+import {
+  INVISIBLE_RULE,
+  backdropHtml,
+  findingText,
+  findingsHold,
+  markPreview,
+  mergeFindings,
+  removeHiddenCharacters,
+  withSentinels,
+} from '~/utils/injection-highlight'
 import type {
   Agent,
   AgentSkill,
@@ -22,9 +33,12 @@ import type {
   ConfigValueResponse,
   CoreMigrationStatus,
   EffectiveAllowlist,
+  PersonaFileScan,
+  PersonaFinding,
   PromptBreakdown,
   PromptBreakdownEntry,
   WorkspaceFileContent,
+  WorkspaceScanResponse,
 } from '~/types/api'
 import { effectiveThinkingLevels, findProviderModel, type ProviderModel } from '~/composables/useProviders'
 
@@ -131,6 +145,111 @@ function toggleWorkspacePreview() {
   if (showWorkspacePreview.value && !showWorkspaceEditor.value) return
   showWorkspacePreview.value = !showWorkspacePreview.value
 }
+// JF-130: the prompt-injection check of the saved files, run when an agent opens and again on Check files.
+const workspaceScan = ref<PersonaFileScan[] | null>(null)
+const workspaceScanning = ref(false)
+const workspaceScanError = ref('')
+// The check run on opening stays out of sight unless it finds something; one the operator asked for always reports.
+const workspaceScanAsked = ref(false)
+const workspaceScans = useLatestRequest()
+// The tab whose content the editor holds; workspaceTab moves first, while that content is still loading.
+const workspaceLoadedTab = ref('')
+const workspaceBackdropEl = ref<HTMLElement | null>(null)
+const workspaceTextareaEl = ref<HTMLTextAreaElement | null>(null)
+// A file full of hidden characters would list every one; the marks still show them all.
+const SHOWN_FINDINGS = 20
+
+function scanFindings(filename: string): PersonaFinding[] {
+  return workspaceScan.value?.find(f => f.filename === filename)?.findings ?? []
+}
+const scanFindingRows = computed(() =>
+  (workspaceScan.value ?? []).flatMap(f => f.findings.map(finding => ({ filename: f.filename, finding }))))
+// The open file's marks, while its findings still sit on its text: an unsaved edit or a write since the check moves them.
+const workspaceMarks = computed(() => {
+  const findings = scanFindings(workspaceLoadedTab.value)
+  if (!findings.length || workspaceDirty.value || !findingsHold(workspaceContent.value, findings)) return []
+  return mergeFindings(findings)
+})
+const workspaceScanShown = computed(() => workspaceScanError.value !== ''
+  || (workspaceScan.value !== null && (scanFindingRows.value.length > 0 || workspaceScanAsked.value)))
+// Only while the marks show, so each count is a character still sitting where the check found it.
+const workspaceHiddenCount = computed(() => workspaceMarks.value.length
+  ? scanFindings(workspaceLoadedTab.value).filter(f => f.rule === INVISIBLE_RULE).length
+  : 0)
+const workspaceMarksNote = computed(() => {
+  if (!scanFindings(workspaceLoadedTab.value).length || workspaceMarks.value.length) return ''
+  return workspaceDirty.value
+    ? 'The marks are hidden while this file has unsaved changes. Save it, and the files are checked again.'
+    : 'This file changed since the check. Click Check files again to see where.'
+})
+const workspacePreviewHtml = computed(() => workspaceMarks.value.length
+  ? markPreview(renderMarkdown(withSentinels(workspaceContent.value, workspaceMarks.value)))
+  : renderMarkdown(workspaceContent.value))
+
+async function checkWorkspaceFiles(asked: boolean) {
+  if (!editing.value) return
+  const agentId = editing.value.id
+  const request = workspaceScans.begin()
+  workspaceScanning.value = true
+  workspaceScanError.value = ''
+  try {
+    const data = await $fetch<WorkspaceScanResponse>(`/api/agents/${agentId}/workspace-scan`)
+    if (workspaceScans.isCurrent(request)) {
+      workspaceScan.value = data.files
+      workspaceScanAsked.value = asked
+    }
+  }
+  catch (e: unknown) {
+    if (workspaceScans.isCurrent(request) && asked) {
+      workspaceScanError.value = e instanceof Error ? e.message : 'Could not check the files.'
+    }
+  }
+  finally {
+    if (workspaceScans.isCurrent(request)) workspaceScanning.value = false
+  }
+}
+
+function resetWorkspaceScan() {
+  workspaceScans.begin()
+  workspaceScan.value = null
+  workspaceScanning.value = false
+  workspaceScanError.value = ''
+  workspaceScanAsked.value = false
+}
+
+/** Deletes the open file's hidden characters in the editor; the operator saves to keep the change. */
+function removeWorkspaceHiddenCharacters() {
+  workspaceContent.value = removeHiddenCharacters(workspaceContent.value, scanFindings(workspaceLoadedTab.value))
+}
+
+/** Opens the finding's file and selects the match in the editor. */
+async function showFinding(filename: string, finding: PersonaFinding) {
+  if (!editing.value) return
+  showWorkspaceEditor.value = true
+  if (workspaceLoadedTab.value !== filename) {
+    // Fixing one match and clicking the next is how the list is used, so it asks before dropping a fix.
+    if (workspaceDirty.value && !(await confirm({
+      title: 'Discard unsaved changes',
+      message: `${workspaceLoadedTab.value} has changes that are not saved. Open ${filename} and discard them?`,
+      confirmText: 'Discard and open',
+      variant: 'danger',
+    }))) return
+    await loadWorkspaceFile(editing.value.id, filename)
+  }
+  await nextTick()
+  const textarea = workspaceTextareaEl.value
+  if (!textarea || workspaceContent.value.slice(finding.start, finding.end) !== finding.text) return
+  textarea.focus()
+  textarea.setSelectionRange(finding.start, finding.end)
+}
+
+function syncWorkspaceBackdrop(event: Event) {
+  if (workspaceBackdropEl.value) workspaceBackdropEl.value.scrollTop = (event.target as HTMLTextAreaElement).scrollTop
+}
+// Marks that appear under an editor already scrolled would start at the top until the next scroll.
+watch(workspaceBackdropEl, (backdrop) => {
+  if (backdrop && workspaceTextareaEl.value) backdrop.scrollTop = workspaceTextareaEl.value.scrollTop
+}, { flush: 'post' })
 const agentTools = ref<AgentTool[]>([])
 const agentSkills = ref<AgentSkill[]>([])
 // One save per section at a time: a rollback that lands after a later save to the same row would undo it.
@@ -841,6 +960,8 @@ function editAgent(agent: Agent) {
   toolsError.value = null
   skillsError.value = null
   mcpError.value = null
+  resetWorkspaceScan()
+  void checkWorkspaceFiles(false)
   loadWorkspaceFile(agent.id, 'AGENT.md')
   loadAgentTools(agent.id)
   loadAgentSkills(agent.id)
@@ -1476,6 +1597,7 @@ async function loadWorkspaceFile(agentId: number, filename: string) {
   if (editing.value?.id !== agentId || workspaceTab.value !== filename) return
   workspaceContent.value = content
   workspaceBaseline.value = content
+  workspaceLoadedTab.value = filename
 }
 
 async function saveWorkspaceFile() {
@@ -1492,6 +1614,8 @@ async function saveWorkspaceFile() {
   // textarea diverges again. Capture before the await resolved so a late
   // keystroke doesn't get clobbered into the baseline.
   workspaceBaseline.value = saved
+  // After a fix, the clean result is the confirmation, so a check that had found something reports.
+  if (workspaceScan.value) void checkWorkspaceFiles(workspaceScanAsked.value || scanFindingRows.value.length > 0)
 }
 
 function cancel() {
@@ -2896,13 +3020,30 @@ const agentKinds = [
               class="px-4 py-2 text-xs font-mono transition-colors"
               @click="loadWorkspaceFile(editing.id, file)"
             >
-              {{ file }}
+              {{ file }}<span
+                v-if="scanFindings(file).length"
+                class="ml-1.5 px-1 rounded-sm bg-danger/15 text-danger"
+              >{{ scanFindings(file).length }}<span class="sr-only">{{ scanFindings(file).length === 1 ? ' prompt-injection match' : ' prompt-injection matches' }}</span></span>
             </button>
           </div>
           <!-- MacDown-style pane toggles: editor, preview, or both (split). At
                least one stays on, so a pressed-looking button can't be un-toggled
                into an empty panel. -->
           <div class="flex items-center gap-1 pr-2 shrink-0">
+            <button
+              type="button"
+              class="flex items-center gap-1 px-2 py-1 rounded text-xs text-fg-muted hover:text-fg-strong
+                     disabled:opacity-40 transition-colors"
+              :disabled="workspaceScanning"
+              title="Check these files for text that looks like a prompt injection"
+              @click="checkWorkspaceFiles(true)"
+            >
+              <ShieldCheckIcon
+                class="w-4 h-4"
+                aria-hidden="true"
+              />
+              {{ workspaceScanning ? 'Checking…' : 'Check files' }}
+            </button>
             <button
               type="button"
               :class="showWorkspaceEditor ? 'text-fg-strong bg-muted' : 'text-fg-muted'"
@@ -2933,6 +3074,67 @@ const agentKinds = [
             </button>
           </div>
         </div>
+        <div
+          v-if="workspaceScanShown"
+          class="px-4 py-2 border-b border-border text-xs space-y-1"
+          role="status"
+        >
+          <p
+            v-if="workspaceScanError"
+            class="text-danger"
+          >
+            {{ workspaceScanError }}
+          </p>
+          <p
+            v-else-if="!scanFindingRows.length"
+            class="text-emerald-700 dark:text-emerald-400"
+          >
+            No prompt-injection matches in these files.
+          </p>
+          <template v-else>
+            <p class="text-fg-primary">
+              A file with a match is left out of the agent's prompt until it no longer matches.
+            </p>
+            <ul>
+              <li
+                v-for="row in scanFindingRows.slice(0, SHOWN_FINDINGS)"
+                :key="`${row.filename}:${row.finding.start}:${row.finding.rule}`"
+              >
+                <button
+                  type="button"
+                  class="text-left font-mono text-fg-primary hover:underline"
+                  @click="showFinding(row.filename, row.finding)"
+                >
+                  {{ row.filename }}, line {{ row.finding.line }}: {{ row.finding.rule }}, “{{ findingText(row.finding) }}”
+                </button>
+                <div class="pl-4 text-fg-muted">
+                  {{ row.finding.hint }}
+                </div>
+              </li>
+            </ul>
+            <p
+              v-if="scanFindingRows.length > SHOWN_FINDINGS"
+              class="text-fg-muted"
+            >
+              And {{ scanFindingRows.length - SHOWN_FINDINGS }} more. The marks show them all.
+            </p>
+            <button
+              v-if="workspaceHiddenCount"
+              type="button"
+              class="px-2 py-1 rounded border border-border text-fg-primary hover:bg-muted transition-colors"
+              :title="`Delete the ${workspaceHiddenCount === 1 ? 'hidden character' : `${workspaceHiddenCount} hidden characters`} from ${workspaceLoadedTab}. Save the file to keep the change.`"
+              @click="removeWorkspaceHiddenCharacters"
+            >
+              Remove hidden characters
+            </button>
+          </template>
+          <p
+            v-if="workspaceMarksNote"
+            class="text-fg-muted"
+          >
+            {{ workspaceMarksNote }}
+          </p>
+        </div>
         <!-- Split editor / live-preview body. resize-y on the container grows
              both panes together, keeping them height-aligned. -->
         <div class="flex resize-y overflow-hidden h-96 min-h-32">
@@ -2943,14 +3145,27 @@ const agentKinds = [
           >
             <label
               :for="agentWorkspaceTextareaId"
-              class="flex w-full min-w-0"
+              class="relative flex w-full min-w-0"
             >
               <span class="sr-only">Workspace file contents</span>
+              <!-- The marks sit under the textarea, in a copy of its text laid out the same way: a textarea cannot style a range. -->
+              <!-- eslint-disable vue/no-v-html -- backdropHtml escapes the file's text -->
+              <div
+                v-if="workspaceMarks.length"
+                ref="workspaceBackdropEl"
+                class="workspace-backdrop absolute inset-0 overflow-hidden px-4 py-3 text-sm font-mono text-transparent
+                       whitespace-pre-wrap break-words pointer-events-none"
+                aria-hidden="true"
+                v-html="backdropHtml(workspaceContent, workspaceMarks)"
+              />
+              <!-- eslint-enable vue/no-v-html -->
               <textarea
                 :id="agentWorkspaceTextareaId"
+                ref="workspaceTextareaEl"
                 v-model="workspaceContent"
-                class="w-full h-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono
+                class="workspace-editor relative w-full h-full px-4 py-3 bg-transparent text-sm text-fg-primary font-mono
                        resize-none focus:outline-hidden"
+                @scroll="syncWorkspaceBackdrop"
               />
             </label>
           </div>
@@ -2959,11 +3174,11 @@ const agentKinds = [
             class="min-w-0 overflow-auto px-4 py-3"
             :class="showWorkspaceEditor ? 'w-1/2' : 'w-full'"
           >
-            <!-- eslint-disable vue/no-v-html -- renderMarkdown output is DOMPurify-sanitized -->
+            <!-- eslint-disable vue/no-v-html -- renderMarkdown output is DOMPurify-sanitized; markPreview only adds marks -->
             <div
               v-if="workspaceContent"
               class="md-preview text-sm text-fg-primary"
-              v-html="renderMarkdown(workspaceContent)"
+              v-html="workspacePreviewHtml"
             />
             <!-- eslint-enable vue/no-v-html -->
             <p
@@ -3579,6 +3794,7 @@ const agentKinds = [
  * `html.dark` overrides needed.
  */
 .md-preview { overflow-wrap: anywhere; }
+
 .md-preview > :first-child { margin-top: 0; }
 .md-preview > :last-child { margin-bottom: 0; }
 
@@ -3650,4 +3866,26 @@ html.dark .md-preview a { color: hsl(152 76% 60%); }
   overflow-wrap: break-word;
 }
 .md-preview th { color: var(--fg-strong); font-weight: 600; }
+
+/* JF-130's prompt-injection marks. The editor's backdrop must wrap exactly as the textarea above it does. */
+.workspace-backdrop, .workspace-editor { scrollbar-gutter: stable; }
+
+.injection-mark {
+  background: color-mix(in srgb, var(--danger) 28%, transparent);
+  color: inherit;
+  border-radius: 2px;
+}
+
+/* A zero-width character has no box to color, so a bar stands at its place without moving the text. */
+.injection-mark-hidden { position: relative; }
+
+.injection-mark-hidden::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 2px;
+  background: var(--danger);
+}
 </style>

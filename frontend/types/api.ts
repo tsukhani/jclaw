@@ -758,6 +758,30 @@ export interface WorkspaceFileContent {
 }
 
 /**
+ * One prompt-injection match in a persona file: `[start, end)` in UTF-16 units of the file, its 1-based line,
+ * and how to reword it so the rule no longer matches.
+ */
+export interface PersonaFinding {
+  rule: string
+  start: number
+  end: number
+  line: number
+  text: string
+  hint: string
+}
+
+/** One file of GET /api/agents/:id/workspace-scan, in the order the prompt reads them (JF-130). */
+export interface PersonaFileScan {
+  filename: string
+  findings: PersonaFinding[]
+}
+
+/** Shape returned by GET /api/agents/:id/workspace-scan. */
+export interface WorkspaceScanResponse {
+  files: PersonaFileScan[]
+}
+
+/**
  * One node of GET /api/agents/:id/workspace-tree (JCLAW-1247). `path` is root-relative with
  * forward slashes; `children` is an array for a dir and null for a file; `protected` marks the
  * five Standing Orders files at the root, which are never delete targets.
