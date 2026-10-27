@@ -36,15 +36,7 @@
  *   → anything else alphabetical. Powers the dropdown.
  */
 
-export interface LatencyHistogram {
-  count: number
-  p50?: number
-  p90?: number
-  p99?: number
-  p999?: number
-  min?: number
-  max?: number
-}
+import type { LatencyHistogram } from '~/types/api'
 
 export interface LatencyRow<H extends { count: number } = LatencyHistogram> {
   key: string

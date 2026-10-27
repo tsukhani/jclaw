@@ -105,10 +105,3 @@ export const ConversationSchema = z.object({
   modelProviderOverride: z.string().nullable().optional(),
   modelIdOverride: z.string().nullable().optional(),
 })
-
-export type MessageAttachment = z.infer<typeof MessageAttachmentSchema>
-export type ToolCallResultChip = z.infer<typeof ToolCallResultChipSchema>
-export type ToolCallResultStructured = z.infer<typeof ToolCallResultStructuredSchema>
-export type ToolCall = z.infer<typeof ToolCallSchema>
-export type Message = z.infer<typeof MessageSchema>
-export type Conversation = z.infer<typeof ConversationSchema>

@@ -14,7 +14,8 @@
  */
 import { z } from 'zod'
 import { CommandLineIcon, DocumentIcon, PhotoIcon, StopIcon, WrenchIcon } from '@heroicons/vue/24/outline'
-import { MessageAttachmentSchema, type MessageAttachment } from '~/types/schemas'
+import type { MessageAttachment } from '~/types/api'
+import { MessageAttachmentSchema } from '~/types/schemas'
 import { formatSize } from '~/utils/format'
 
 const props = defineProps<{

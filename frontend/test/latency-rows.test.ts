@@ -6,17 +6,18 @@ import {
   buildChartSeries,
   isCountSegment,
   listAvailableChannels,
-  type LatencyHistogram,
 } from '~/utils/latency-rows'
+import type { LatencyHistogram } from '~/types/api'
 
 const h = (count: number, p50 = count): LatencyHistogram => ({
   count,
-  p50,
-  p90: p50,
-  p99: p50,
-  p999: p50,
-  min: p50,
-  max: p50,
+  sum_ms: count * p50,
+  min_ms: p50,
+  max_ms: p50,
+  p50_ms: p50,
+  p90_ms: p50,
+  p99_ms: p50,
+  p999_ms: p50,
 })
 
 describe('buildLatencyRows (JCLAW-74 prologue nesting)', () => {
@@ -209,7 +210,7 @@ describe('buildLatencyRows (JCLAW-800 voice group)', () => {
     const voice = rows.find(r => r.key === 'voice')!
     expect(voice.isChild).toBe(false)
     expect(voice.label).toBe('Voice')
-    expect(voice.h.p50).toBe(7500) // parent carries voice_turn's histogram
+    expect(voice.h.p50_ms).toBe(7500) // parent carries voice_turn's histogram
     expect(rows.some(r => r.key === 'voice_turn')).toBe(false) // not repeated as its own row
     for (const k of ['voice_stt', 'voice_tts_synth', 'voice_reply']) {
       expect(rows.find(r => r.key === k)!.isChild).toBe(true)
@@ -274,7 +275,7 @@ describe('listAvailableChannels (JCLAW-102 dropdown options)', () => {
     const channels = listAvailableChannels({
       web: { total: h(3, 100) },
       telegram: {},
-      task: { total: { count: 0 } }, // zero-count still counts as no samples
+      task: { total: h(0) }, // zero-count still counts as no samples
     })
     expect(channels.map(c => c.key)).toEqual(['web'])
   })
