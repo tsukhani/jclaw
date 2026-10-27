@@ -119,6 +119,8 @@ describe('User Guide page', () => {
     expect(html).toContain('id="agents-creating-or-editing-an-agent"')
     // The Laya card and the Model Router's Laya hint both link here.
     expect(html).toContain('id="settings-laya-limits"')
+    // The Baseten card links here.
+    expect(html).toContain('id="settings-baseten-data"')
   })
 
   it('emits a font-weight rule for guide links', async () => {

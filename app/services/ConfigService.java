@@ -28,6 +28,7 @@ import play.cache.CacheConfig;
 import play.cache.Caches;
 import play.db.jpa.JPA;
 import services.database.DatabaseService;
+import services.decision.BasetenDecision;
 import services.decision.DecisionSettings;
 import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
@@ -503,6 +504,9 @@ public class ConfigService {
         }
         if (key.startsWith(PROVIDER_KEY_PREFIX + LayaDecision.PROVIDER + ".")) {
             return reservedProviderName(LayaDecision.PROVIDER, "the model router's Laya classifier");
+        }
+        if (key.startsWith(PROVIDER_KEY_PREFIX + BasetenDecision.PROVIDER + ".")) {
+            return reservedProviderName(BasetenDecision.PROVIDER, "the model router's Baseten classifier");
         }
         return null;
     }

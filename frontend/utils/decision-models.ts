@@ -1,4 +1,4 @@
-/** The names in `decision.ollama.models` or `decision.laya.models`, or [] when it is unset or not a JSON array of strings. */
+/** The names in `decision.ollama.models`, `decision.laya.models` or `decision.baseten.models`, or [] when it is unset or not a JSON array of strings. */
 export function parseDecisionModels(raw: string): string[] {
   if (!raw.trim()) return []
   try {
@@ -30,6 +30,26 @@ export const LAYA_DEFAULT_ADDRESS = 'http://localhost:8000'
 export function tickedLayaCheckpoints(raw: string): LayaCheckpoint[] {
   const ticked = parseDecisionModels(raw)
   return LAYA_CHECKPOINTS.filter(c => ticked.includes(c.name))
+}
+
+export interface BasetenModel {
+  /** What Baseten's API takes, and what `decision.baseten.models` stores. */
+  id: string
+  name: string
+  contextTokens: number
+  parameters: string
+}
+
+/** From Baseten's decision-models page; mammoth-1's size is from its ID. BasetenDecisionTest holds the IDs and names equal to `MODELS` in app/services/decision/BasetenDecision.java. */
+export const BASETEN_MODELS: readonly BasetenModel[] = [
+  { id: 'decision-models/baseten-elephant-9b-latest', name: 'elephant-1', contextTokens: 16384, parameters: '9B' },
+  { id: 'decision-models/baseten-mammoth-27b-latest', name: 'mammoth-1', contextTokens: 16384, parameters: '27B' },
+]
+
+/** The models ticked in `decision.baseten.models`, in the table's order; a stored ID that is no Baseten model is left out. */
+export function tickedBasetenModels(raw: string): BasetenModel[] {
+  const ticked = parseDecisionModels(raw)
+  return BASETEN_MODELS.filter(m => ticked.includes(m.id))
 }
 
 /** A context as the UI words it, such as `1,024 tokens`. */

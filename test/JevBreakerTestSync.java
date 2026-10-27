@@ -1,3 +1,4 @@
+import services.decision.BasetenDecision;
 import services.decision.JevApi;
 import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
@@ -12,9 +13,9 @@ import java.util.concurrent.locks.ReentrantLock;
  * open it for another class's run, which then sends nothing.
  *
  * <p>The Ollama decision provider's {@code decision:ollama} breaker rides the same lock (JCLAW-1336), and so
- * does Laya's {@code decision:laya} (JCLAW-1447).
+ * do Laya's {@code decision:laya} (JCLAW-1447) and Baseten's {@code decision:baseten} (JF-133).
  *
- * <p>{@link #acquire()} also drops all three breakers, so each test starts from fresh, closed ones.
+ * <p>{@link #acquire()} also drops all four breakers, so each test starts from fresh, closed ones.
  */
 public final class JevBreakerTestSync {
 
@@ -28,6 +29,7 @@ public final class JevBreakerTestSync {
         CircuitBreakers.remove(JevApi.BREAKER_NAME);
         CircuitBreakers.remove(OllamaDecision.BREAKER_NAME);
         CircuitBreakers.remove(LayaDecision.BREAKER_NAME);
+        CircuitBreakers.remove(BasetenDecision.BREAKER_NAME);
     }
 
     /**
@@ -39,6 +41,7 @@ public final class JevBreakerTestSync {
             CircuitBreakers.remove(JevApi.BREAKER_NAME);
             CircuitBreakers.remove(OllamaDecision.BREAKER_NAME);
             CircuitBreakers.remove(LayaDecision.BREAKER_NAME);
+            CircuitBreakers.remove(BasetenDecision.BREAKER_NAME);
         } finally {
             if (LOCK.isHeldByCurrentThread()) {
                 LOCK.unlock();

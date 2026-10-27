@@ -26,11 +26,11 @@ import java.util.function.Predicate;
 /**
  * One {@code POST /v1/systemone} at a time, for every decision provider that speaks it: TypeSafe AI's
  * JEV, for the Jev browser engine and the router's classifier, and an Ollama server's System One models
- * (JCLAW-1336) and the operator's {@code laya-serve} (JCLAW-1447), each for the router's classifier. A
- * port of jev-ultrafast's {@code model.post_json} and {@code model.validate_choice} (MIT, Browser Use;
- * notice in {@code conf/browser/jev-ultrafast-LICENSE}).
+ * (JCLAW-1336), the operator's {@code laya-serve} (JCLAW-1447) and Baseten's hosted models (JF-133), each for
+ * the router's classifier. A port of jev-ultrafast's {@code model.post_json} and {@code model.validate_choice}
+ * (MIT, Browser Use; notice in {@code conf/browser/jev-ultrafast-LICENSE}).
  *
- * <p>Each {@link Target} runs under its own breaker, so an outage of one provider never stops the other.
+ * <p>Each {@link Target} runs under its own breaker, so an outage of one provider never stops another.
  * JEV's, {@link #BREAKER_NAME}, is shared by both its consumers, so an outage that one of them
  * discovers stops the other sending too.
  */
@@ -149,6 +149,11 @@ public final class JevApi {
         if ((code == 401 || code == 403) && target.apiKey() != null) {
             throw new JevException("%s refused the %s API key (HTTP %d); the operator must update it "
                     .formatted(target.service(), target.name(), code) + "in Settings → Decision Providers");
+        }
+        if (code == 402 && target.apiKey() != null) {
+            throw new JevException(("%s asked for payment (HTTP 402); the operator must check the billing of the "
+                    + "account behind the %s API key in Settings → Decision Providers")
+                    .formatted(target.service(), target.name()), code);
         }
         // Status only: the body comes from a server whose address the operator chose (JCLAW-778).
         if (code == 429 || code >= 500) throw new JevException.Outage(target.name() + " returned HTTP " + code, false);

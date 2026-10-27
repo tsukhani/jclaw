@@ -9,6 +9,7 @@ import services.ConfigService;
 import services.OperatorAlerts;
 import services.PrivilegedConfig;
 import services.database.DatabaseService;
+import services.decision.BasetenDecision;
 import services.decision.DecisionSettings;
 import services.decision.LayaDecision;
 import services.telemetry.OtelConfig;
@@ -143,6 +144,10 @@ class ConfigServiceWriteRulesTest extends UnitTest {
                 + "classifier.", "provider.ollama-decision.baseUrl", "http://127.0.0.1:1");
         assertRefused("The provider name 'laya' is reserved for the model router's Laya classifier.",
                 "provider.laya.baseUrl", "http://127.0.0.1:1");
+        assertRefused("The provider name 'baseten-decision' is reserved for the model router's Baseten classifier.",
+                "provider.baseten-decision.apiKey", "x");
+        // Baseten also serves LLMs, and an operator may name that chat provider baseten.
+        assertAccepted("provider.baseten.apiKey", "bt-key");
     }
 
     @Test
@@ -269,6 +274,27 @@ class ConfigServiceWriteRulesTest extends UnitTest {
         assertEquals("laya****", ConfigService.maskValue(LayaDecision.API_KEY, "laya-secret-0123"));
         assertRefused("That is the saved value's mask, not a new value. Enter the whole new value, or leave "
                 + "decision.laya.apiKey unchanged.", LayaDecision.API_KEY, "laya****");
+    }
+
+    @Test
+    void theBasetenKeysAreRefusedAtTheWrite() {
+        assertRefused("decision.baseten.models must be a JSON array of Baseten model IDs "
+                + "(decision-models/baseten-elephant-9b-latest, decision-models/baseten-mammoth-27b-latest), such as "
+                + "[\"decision-models/baseten-elephant-9b-latest\"].", BasetenDecision.MODELS_KEY, "[\"tev1\"]");
+        assertAccepted(BasetenDecision.MODELS_KEY,
+                "[\"decision-models/baseten-elephant-9b-latest\",\"decision-models/baseten-mammoth-27b-latest\"]");
+
+        assertRefused("decision.baseten.apiKey must be printable ASCII with no spaces.", BasetenDecision.API_KEY,
+                "baseten key");
+        assertAccepted(BasetenDecision.API_KEY, "bt-key_1.2/3+4=");
+    }
+
+    @Test
+    void theBasetenKeyIsMaskedAndItsMaskIsNeverSavedOverIt() {
+        assertTrue(ConfigService.isSensitive(BasetenDecision.API_KEY));
+        assertEquals("base****", ConfigService.maskValue(BasetenDecision.API_KEY, "baseten-secret-0123"));
+        assertRefused("That is the saved value's mask, not a new value. Enter the whole new value, or leave "
+                + "decision.baseten.apiKey unchanged.", BasetenDecision.API_KEY, "base****");
     }
 
     @Test

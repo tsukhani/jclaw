@@ -360,6 +360,61 @@ describe('SettingsModelRouterPanel', () => {
     expect(c.find('[data-testid="router-laya-limits"]').exists()).toBe(false)
   })
 
+  it('offers each Baseten model ticked in Decision Providers with its context, disabled with a hint until a key is set', async () => {
+    entries = [...entries, { key: 'decision.baseten.models', value: JSON.stringify(['decision-models/baseten-elephant-9b-latest']) }]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    const options = c.findAll('[data-testid="router-baseten-option"]')
+    expect(options.map(o => [o.attributes('value'), o.text(), (o.element as HTMLOptionElement).disabled])).toEqual([
+      ['baseten-decision::decision-models/baseten-elephant-9b-latest', 'Baseten / elephant-1 (16,384 tokens) — needs a Baseten API key', true],
+    ])
+    const hint = c.find('[data-testid="router-baseten-key-hint"]')
+    expect(hint.text().replace(/\s+/g, ' ')).toBe('To classify with Baseten, set a Baseten API key in Settings → Decision Providers.')
+    expect(hint.find('a').attributes('href')).toBe('/settings?section=decision-providers')
+
+    entries = [...entries, { key: 'decision.baseten.apiKey', value: 'bt-s****' }]
+    clearNuxtData()
+    const keyed = await mountSuspended(Harness)
+    await flushPromises()
+    const enabled = keyed.find('[data-testid="router-baseten-option"]')
+    expect(enabled.text()).toBe('Baseten / elephant-1 (16,384 tokens)')
+    expect((enabled.element as HTMLOptionElement).disabled).toBe(false)
+    expect(keyed.find('[data-testid="router-baseten-key-hint"]').exists()).toBe(false)
+  })
+
+  it('picking a Baseten model writes the pair with the model\'s ID', async () => {
+    entries = [
+      ...entries,
+      { key: 'decision.baseten.apiKey', value: 'bt-s****' },
+      { key: 'decision.baseten.models', value: JSON.stringify(['decision-models/baseten-mammoth-27b-latest', 'elephant-1']) },
+    ]
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(c.findAll('[data-testid="router-baseten-option"]').map(o => o.text())).toEqual(['Baseten / mammoth-1 (16,384 tokens)'])
+
+    await c.find('select[aria-label="Prompt classifier model"]').setValue('baseten-decision::decision-models/baseten-mammoth-27b-latest')
+    await vi.waitFor(() => expect(ops).toHaveLength(3), { timeout: 5000 })
+    expect(ops).toEqual([
+      'DELETE router.classifier.model',
+      'POST router.classifier.provider=baseten-decision',
+      'POST router.classifier.model=decision-models/baseten-mammoth-27b-latest',
+    ])
+  })
+
+  it('offers no Baseten model, and no Baseten hint, until one is ticked', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(c.findAll('[data-testid="router-baseten-option"]')).toHaveLength(0)
+    expect(c.find('[data-testid="router-baseten-key-hint"]').exists()).toBe(false)
+  })
+
+  it('says a Baseten model sends the prompt to Baseten', async () => {
+    const c = await mountSuspended(Harness)
+    await flushPromises()
+    expect(c.text().replace(/\s+/g, ' ')).toContain(
+      'JEV sends them to TypeSafe AI, which may record or retain them, and a Baseten model sends them to Baseten.')
+  })
+
   it('shows the classifier timeout only once a classifier is picked, at the default until one is stored', async () => {
     const rules = await mountSuspended(Harness)
     await flushPromises()

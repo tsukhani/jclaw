@@ -312,6 +312,16 @@ class JevClientTest extends UnitTest {
     }
 
     @Test
+    void aRefusedPaymentIsNotRetriedAndSendsTheAgentToTheBillingBehindTheKey() {
+        var e = assertThrows(JevException.class,
+                () -> withJev((chain, _, _) -> reply(chain, 402, "{\"error\":\"payment required\"}"), this::decide));
+        assertEquals("TypeSafe asked for payment (HTTP 402); the operator must check the billing of the account behind "
+                + "the Jev API key in Settings → Decision Providers; no action executed", e.getMessage());
+        assertEquals(1, requests.size());
+        assertEquals(0, JevApi.breaker().stats().samples(), "a refused payment is not counted against TypeSafe");
+    }
+
+    @Test
     void aServerErrorThatPersistsEndsAfterThreeAttempts() {
         var e = assertThrows(JevException.class,
                 () -> withJev((chain, _, _) -> reply(chain, 503, "{}"), this::decide));

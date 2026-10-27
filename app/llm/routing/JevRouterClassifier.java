@@ -5,6 +5,7 @@ import com.google.gson.JsonObject;
 import llm.routing.PromptClassifier.Classification;
 import org.jspecify.annotations.Nullable;
 import services.EventLogger;
+import services.decision.BasetenDecision;
 import services.decision.JevApi;
 import services.decision.JevException;
 import services.decision.LayaDecision;
@@ -21,11 +22,11 @@ import java.util.stream.Collectors;
 
 /**
  * The router's classifier as one decision (JCLAW-1300), by TypeSafe's JEV, by a System One model on the
- * operator's Ollama server (JCLAW-1336) or by a Laya checkpoint on the operator's {@code laya-serve}
- * (JCLAW-1447). A single {@code POST /v1/systemone} asks the two questions the LLM classifier answers in
- * words, {@code task_class} and {@code effort}, about the first {@link RouterClassifier#MAX_PROMPT_CHARS}
- * characters of the prompt and nothing else. The provider gives a probability for every choice, so a
- * class it is unsure of is left to the keyword rules.
+ * operator's Ollama server (JCLAW-1336), by a Laya checkpoint on the operator's {@code laya-serve}
+ * (JCLAW-1447) or by one of Baseten's hosted models (JF-133). A single {@code POST /v1/systemone} asks
+ * the two questions the LLM classifier answers in words, {@code task_class} and {@code effort}, about the
+ * first {@link RouterClassifier#MAX_PROMPT_CHARS} characters of the prompt and nothing else. The provider
+ * gives a probability for every choice, so a class it is unsure of is left to the keyword rules.
  */
 public final class JevRouterClassifier {
 
@@ -101,6 +102,21 @@ public final class JevRouterClassifier {
             return failed("the Laya classifier's server address is refused (%s)".formatted(e.getMessage()));
         }
         return decide("Laya " + model, target, request(message, model), minConfidence, timeoutSeconds, () -> {});
+    }
+
+    /**
+     * {@link #classify}, by the Baseten model whose ID is {@code model} (JF-133), under that provider's own breaker.
+     * Never throws.
+     *
+     * @param apiKey the Baseten key; when null or blank nothing is sent
+     */
+    public static Verdict classifyWithBaseten(String message, @Nullable String apiKey, String model,
+                                              double minConfidence, int timeoutSeconds) {
+        if (apiKey == null || apiKey.isBlank()) {
+            return failed("the Baseten classifier has no Baseten API key; set one in Settings → Decision Providers");
+        }
+        return decide("Baseten " + BasetenDecision.name(model), BasetenDecision.target(apiKey.strip()),
+                request(message, model), minConfidence, timeoutSeconds, () -> {});
     }
 
     /** {@code label} names the provider in reasons and signals; {@code onTimeout} runs when the call timed out. */

@@ -19,12 +19,14 @@ import { test, expect, gotoPage, blockApiWrites } from './helpers'
 const PLAY = { name: 'Play JEV saying “My name is Jev”' }
 const OLLAMA_PLAY = { name: 'Play a llama’s call' }
 const LAYA_PLAY = { name: 'Play Laya shouting “Liar!”' }
+const BASETEN_PLAY = { name: 'Play a voice singing “I’m all about that bass”' }
 
 /** Each card's picture and clip, which the picture tests below check alike. */
 const CARDS = [
   { name: 'JEV', image: 'decision-jev-portrait', note: 'decision-jev-retention', clip: '/jev.mp3', play: PLAY },
   { name: 'Laya', image: 'decision-laya-portrait', note: 'decision-laya-about', clip: '/laya.mp3', play: LAYA_PLAY },
   { name: 'Ollama', image: 'decision-ollama-logo', note: 'decision-ollama-privacy', clip: '/ollama.mp3', play: OLLAMA_PLAY },
+  { name: 'Baseten', image: 'decision-baseten-portrait', note: 'decision-baseten-about', clip: '/bass.mp3', play: BASETEN_PLAY },
 ] as const
 
 async function openPanel(page: Page) {
@@ -105,10 +107,14 @@ async function stubLaya(page: Page, status: LayaDecisionStatus) {
   await page.route(url => url.pathname === '/api/decision/laya', route => route.fulfill({ json: status }))
 }
 
-/** Answer GET /api/config with the real entries, each card's model selection and the router's classifier replaced by `overrides`. */
+/**
+ * Answer GET /api/config with the real entries, each card's model selection, the Baseten key and the router's classifier
+ * replaced by `overrides`.
+ */
 async function stubConfig(page: Page, overrides: Record<string, string> = {}) {
   const replaced = new Set([
-    'decision.ollama.models', 'decision.laya.models', 'router.classifier.provider', 'router.classifier.model', ...Object.keys(overrides),
+    'decision.ollama.models', 'decision.laya.models', 'decision.baseten.models', 'decision.baseten.apiKey',
+    'router.classifier.provider', 'router.classifier.model', ...Object.keys(overrides),
   ])
   await page.route(url => url.pathname === '/api/config', async (route) => {
     if (route.request().method() !== 'GET') return route.fallback()
@@ -139,7 +145,7 @@ test.describe('UAT-23 decision providers', () => {
     // An unknown path answers 200 text/html from the SPA catch-all, so the status alone proves nothing.
     for (const [path, type] of [
       ['/jev.mp3', 'audio/'], ['/jev.webp', 'image/'], ['/ollama.mp3', 'audio/'], ['/ollama.webp', 'image/'],
-      ['/laya.mp3', 'audio/'], ['/laya.webp', 'image/'],
+      ['/laya.mp3', 'audio/'], ['/laya.webp', 'image/'], ['/bass.mp3', 'audio/'], ['/bass.webp', 'image/'],
     ] as const) {
       const res = await request.get(path)
       expect(res.status(), path).toBe(200)
@@ -205,14 +211,13 @@ test.describe('UAT-23 decision providers', () => {
     // The panel re-reads the config after a write, so a stubConfig route.fetch() can still be in flight at teardown.
     test.afterEach(({ page }) => page.unrouteAll({ behavior: 'ignoreErrors' }))
 
-    test('renders last, directly below the Laya card', async ({ page }) => {
+    test('renders directly below the Laya card', async ({ page }) => {
       await stubOllama(page, REACHABLE)
       await stubConfig(page)
       const writes = await blockApiWrites(page)
       await openPanel(page)
       await expect(page.getByTestId('decision-provider-ollama')).toBeVisible()
       await expectDirectlyBelow(page, 'decision-provider-laya', 'decision-provider-ollama')
-      await expect(page.locator('[data-testid="decision-provider-ollama"] + *')).toHaveCount(0)
       expect(writes()).toEqual([])
     })
 
@@ -362,6 +367,82 @@ test.describe('UAT-23 decision providers', () => {
       await expect(page).toHaveURL(/\/guide#settings-laya-limits$/)
       const heading = page.locator('#settings-laya-limits')
       await expect(heading).toHaveText('Laya\'s limits')
+      await expect(heading).toBeInViewport()
+      expect(writes()).toEqual([])
+    })
+  })
+
+  test.describe('the Baseten card', () => {
+    // The panel re-reads the config after a write, so a stubConfig route.fetch() can still be in flight at teardown.
+    test.afterEach(({ page }) => page.unrouteAll({ behavior: 'ignoreErrors' }))
+
+    test('renders last, directly below the Ollama card', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      await stubConfig(page)
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      await expect(page.getByTestId('decision-provider-baseten')).toBeVisible()
+      await expectDirectlyBelow(page, 'decision-provider-ollama', 'decision-provider-baseten')
+      await expect(page.locator('[data-testid="decision-provider-baseten"] + *')).toHaveCount(0)
+      expect(writes()).toEqual([])
+    })
+
+    test('without a key reads needs API key and lists both models', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      await stubConfig(page)
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      await expect(page.getByTestId('decision-baseten-status')).toHaveText('needs API key')
+      await expect(page.getByTestId('decision-baseten-models').locator('label')).toHaveText([
+        'elephant-1 16,384 tokens, 9B parameters', 'mammoth-1 16,384 tokens, 27B parameters',
+      ])
+      expect(writes()).toEqual([])
+    })
+
+    test('ticking a model sends one write that stores its ID in decision.baseten.models', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      await stubConfig(page)
+      const writes = await blockApiWrites(page)
+      const posts = recordConfigPosts(page)
+      await openPanel(page)
+      const box = page.getByTestId('decision-baseten-model-elephant-1').getByRole('checkbox')
+      await box.click()
+
+      await expect.poll(writes).toEqual(['POST /api/config'])
+      // Enabled again only once the write and its re-read finish, so the count below is final.
+      await expect(box).toBeEnabled()
+      expect(writes()).toEqual(['POST /api/config'])
+      expect(posts()).toHaveLength(1)
+      const { key, value } = posts()[0] as { key: string, value: string }
+      expect(key).toBe('decision.baseten.models')
+      expect(JSON.parse(value)).toEqual(['decision-models/baseten-elephant-9b-latest'])
+    })
+
+    test('the model the router uses is locked, and the card names it in use', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      await stubConfig(page, {
+        'decision.baseten.models': JSON.stringify(['decision-models/baseten-elephant-9b-latest']),
+        'router.classifier.provider': 'baseten-decision',
+        'router.classifier.model': 'decision-models/baseten-elephant-9b-latest',
+      })
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      const box = page.getByTestId('decision-baseten-model-elephant-1').getByRole('checkbox')
+      await expect(box).toBeChecked()
+      await expect(box).toBeDisabled()
+      await expect(page.getByTestId('decision-baseten-model-mammoth-1').getByRole('checkbox')).toBeEnabled()
+      await expect(page.getByTestId('decision-baseten-consumer-model-router')).toContainText('(elephant-1)')
+      expect(writes()).toEqual([])
+    })
+
+    test('the data link opens the user guide at Baseten\'s data and billing', async ({ page }) => {
+      await stubOllama(page, REACHABLE)
+      const writes = await blockApiWrites(page)
+      await openPanel(page)
+      await page.getByTestId('decision-baseten-data-link').click()
+      await expect(page).toHaveURL(/\/guide#settings-baseten-data$/)
+      const heading = page.locator('#settings-baseten-data')
+      await expect(heading).toHaveText('Baseten\'s data and billing')
       await expect(heading).toBeInViewport()
       expect(writes()).toEqual([])
     })

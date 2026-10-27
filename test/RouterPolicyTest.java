@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import play.test.UnitTest;
 import services.ConfigService;
+import services.decision.BasetenDecision;
 import services.decision.LayaDecision;
 import services.decision.OllamaDecision;
 
@@ -16,6 +17,9 @@ import java.util.UUID;
 
 /** JCLAW-1222: what a router policy write accepts, and how a class without its own list reads. */
 class RouterPolicyTest extends UnitTest {
+
+    private static final String ELEPHANT = "decision-models/baseten-elephant-9b-latest";
+    private static final String MAMMOTH = "decision-models/baseten-mammoth-27b-latest";
 
     private String provider;
 
@@ -171,12 +175,35 @@ class RouterPolicyTest extends UnitTest {
     }
 
     @Test
+    void aBasetenClassifierModelMustBeTheIdOfATickedModel() {
+        // JF-133. Only BasetenDecisionTest also writes decision.baseten.models, under the same lock.
+        assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_PROVIDER, BasetenDecision.PROVIDER),
+                "baseten-decision is not a registered provider, and needs none");
+        ConfigService.set(BasetenDecision.MODELS_KEY, "[\"" + ELEPHANT + "\"]");
+        ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, BasetenDecision.PROVIDER);
+        try {
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, ELEPHANT));
+            assertNull(RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, " " + ELEPHANT + " "));
+            // mammoth-1 is a Baseten model, but not a ticked one; elephant-1 is its name, not its ID.
+            for (var bad : new String[] {MAMMOTH, "elephant-1", "tev1", "jev-latest"}) {
+                assertEquals("router.classifier.model must be the ID of a Baseten model ticked in Settings > Decision "
+                        + "Providers (decision.baseten.models).", RouterPolicy.rejectionFor(RouterPolicy.CLASSIFIER_MODEL, bad),
+                        () -> "accepted " + bad);
+            }
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+            ConfigService.delete(BasetenDecision.MODELS_KEY);
+        }
+    }
+
+    @Test
     void aSelectionCannotDropTheTickedModelTheClassifierUses() {
         // JCLAW-1453, the reverse of the two tests above. The classifier is passed, not stored: see the class's lock.
         record Card(String key, Candidate classifier, String other) {}
         for (var card : List.of(
                 new Card(OllamaDecision.MODELS_KEY, new Candidate(OllamaDecision.PROVIDER, "tev1"), "nimble"),
-                new Card(LayaDecision.MODELS_KEY, new Candidate(LayaDecision.PROVIDER, "english"), "multilingual"))) {
+                new Card(LayaDecision.MODELS_KEY, new Candidate(LayaDecision.PROVIDER, "english"), "multilingual"),
+                new Card(BasetenDecision.MODELS_KEY, new Candidate(BasetenDecision.PROVIDER, ELEPHANT), MAMMOTH))) {
             var key = card.key();
             var classifier = card.classifier();
             var other = card.other();
@@ -225,6 +252,28 @@ class RouterPolicyTest extends UnitTest {
             ConfigService.delete(RouterPolicy.CLASSIFIER_MODEL);
             ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
             ConfigService.delete(LayaDecision.MODELS_KEY);
+        }
+    }
+
+    @Test
+    void aBasetenSelectionCannotDropTheRoutersModelByAWriteOrADelete() {
+        // JF-133. As above: both classifier halves are stored only under the lock.
+        ConfigService.set(BasetenDecision.MODELS_KEY, "[\"" + ELEPHANT + "\",\"" + MAMMOTH + "\"]");
+        ConfigService.set(RouterPolicy.CLASSIFIER_PROVIDER, BasetenDecision.PROVIDER);
+        ConfigService.set(RouterPolicy.CLASSIFIER_MODEL, ELEPHANT);
+        try {
+            var refusal = "decision.baseten.models must keep " + ELEPHANT + " while the Model Router uses it as its prompt "
+                    + "classifier; choose another classifier in Settings > Model Router first.";
+            assertEquals(refusal, ConfigService.setWithSideEffects(BasetenDecision.MODELS_KEY, "[\"" + MAMMOTH + "\"]"));
+            assertEquals(refusal, ConfigService.deleteWithSideEffects(BasetenDecision.MODELS_KEY));
+            assertEquals(List.of(ELEPHANT, MAMMOTH), BasetenDecision.selectedModels(), "both were refused");
+
+            assertNull(ConfigService.setWithSideEffects(BasetenDecision.MODELS_KEY, "[\"" + ELEPHANT + "\"]"));
+            assertEquals(List.of(ELEPHANT), BasetenDecision.selectedModels());
+        } finally {
+            ConfigService.delete(RouterPolicy.CLASSIFIER_MODEL);
+            ConfigService.delete(RouterPolicy.CLASSIFIER_PROVIDER);
+            ConfigService.delete(BasetenDecision.MODELS_KEY);
         }
     }
 

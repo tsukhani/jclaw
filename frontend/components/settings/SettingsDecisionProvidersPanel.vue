@@ -5,7 +5,7 @@
 // that belong to that consumer alone stay.
 import { SpeakerWaveIcon } from '@heroicons/vue/24/outline'
 import type { LayaDecisionStatus, OllamaDecisionModel, OllamaDecisionStatus } from '~/types/api'
-import type { LayaCheckpoint } from '~/utils/decision-models'
+import type { BasetenModel, LayaCheckpoint } from '~/utils/decision-models'
 
 const { configData, saving, refresh, editingKey, editValue, editError, updateEntry } = useSettingsConfig()
 
@@ -201,13 +201,57 @@ function checkpointLockedByRouter(name: string) {
 
 const layaBreaker = computed(() => breakersByName.value.get('decision:laya'))
 
+// JF-133: Baseten's hosted decision models. The endpoint is Baseten's own, so the card holds only the key.
+const BASETEN_API_KEY = 'decision.baseten.apiKey'
+const BASETEN_MODELS_KEY = 'decision.baseten.models'
+const BASETEN_PROVIDER = 'baseten-decision'
+const basetenSave = useSaveAttempt()
+const basetenError = basetenSave.saveError
+
+const basetenKeyConfigured = computed(() => configValue(BASETEN_API_KEY).trim().length > 0)
+const tickedBaseten = computed(() => tickedBasetenModels(configValue(BASETEN_MODELS_KEY)).map(m => m.id))
+
+function basetenNote(m: BasetenModel) {
+  return `${contextLabel(m.contextTokens)}, ${m.parameters} parameters`
+}
+
+async function toggleBasetenModel(id: string, box: HTMLInputElement) {
+  const next = BASETEN_MODELS.map(m => m.id)
+    .filter(i => i === id ? box.checked : tickedBaseten.value.includes(i))
+  saving.value = true
+  const saved = await basetenSave.attempt(async () => {
+    if (next.length === 0) await $fetch(`/api/config/${BASETEN_MODELS_KEY}`, { method: 'DELETE' })
+    else await $fetch('/api/config', { method: 'POST', body: { key: BASETEN_MODELS_KEY, value: JSON.stringify(next) } })
+  })
+  await refresh()
+  // Vue does not re-patch a `checked` that never changed, so a refused write would leave the box as clicked.
+  if (!saved) box.checked = tickedBaseten.value.includes(id)
+  saving.value = false
+}
+
+const routerBasetenModel = computed(() =>
+  configValue('router.classifier.provider').trim() === BASETEN_PROVIDER
+    ? configValue('router.classifier.model').trim()
+    : '')
+const routerBasetenName = computed(() =>
+  BASETEN_MODELS.find(m => m.id === routerBasetenModel.value)?.name ?? routerBasetenModel.value)
+
+// As on the Laya card: only while ticked, so a router model stored unticked can still be ticked.
+function basetenLockedByRouter(id: string) {
+  return routerBasetenModel.value === id && tickedBaseten.value.includes(id)
+}
+
+const basetenBreaker = computed(() => breakersByName.value.get('decision:baseten'))
+
 // Each clip's transcript, so what it says reaches a reader who cannot hear it (WCAG 1.2.1).
 const JEV_CLIP_LABEL = 'Play JEV saying “My name is Jev”'
 const OLLAMA_CLIP_LABEL = 'Play a llama’s call'
 const LAYA_CLIP_LABEL = 'Play Laya shouting “Liar!”'
+const BASETEN_CLIP_LABEL = 'Play a voice singing “I’m all about that bass”'
 const jevClip = ref<HTMLAudioElement>()
 const ollamaClip = ref<HTMLAudioElement>()
 const layaClip = ref<HTMLAudioElement>()
+const basetenClip = ref<HTMLAudioElement>()
 function playClip(audio: HTMLAudioElement | undefined) {
   if (!audio) return
   audio.currentTime = 0
@@ -798,6 +842,167 @@ function playClip(audio: HTMLAudioElement | undefined) {
           <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">circuit breaker</span>
           <BreakerControl
             :breaker="ollamaBreaker"
+            class="flex-1"
+            @changed="refreshBreakers()"
+          />
+        </div>
+      </div>
+    </div>
+
+    <div
+      class="bg-surface-elevated border border-border"
+      data-testid="decision-provider-baseten"
+    >
+      <div class="px-4 py-2.5 border-b border-border flex items-center gap-2">
+        <span class="text-sm font-medium text-fg-strong">Baseten</span>
+        <span
+          v-if="basetenKeyConfigured"
+          class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+          data-testid="decision-baseten-status"
+        >configured</span>
+        <span
+          v-else
+          class="text-xs text-amber-700 dark:text-amber-400 border border-amber-400/30 px-1"
+          data-testid="decision-baseten-status"
+        >needs API key</span>
+      </div>
+      <div class="px-4 py-2.5 flex items-start gap-3 text-xs text-fg-muted leading-relaxed border-b border-border">
+        <button
+          type="button"
+          class="group relative shrink-0 rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          :aria-label="BASETEN_CLIP_LABEL"
+          :title="BASETEN_CLIP_LABEL"
+          data-testid="decision-baseten-play"
+          @click="playClip(basetenClip)"
+        >
+          <!-- 3lh, as JEV's: the text beside it wraps to three lines in a 1330–1660 px window. -->
+          <img
+            src="/bass.webp"
+            alt=""
+            width="200"
+            height="268"
+            class="block h-[3lh] w-auto select-none"
+            data-testid="decision-baseten-portrait"
+          >
+          <span
+            class="absolute inset-0 flex items-center justify-center pointer-events-none opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 [@media(hover:none)]:opacity-100 motion-safe:transition-opacity"
+            aria-hidden="true"
+          >
+            <!-- JEV's light badge, so the cards' cues match. -->
+            <span class="rounded-full bg-white/75 p-1 text-neutral-900 shadow-sm backdrop-blur-xs">
+              <SpeakerWaveIcon class="w-3.5 h-3.5" />
+            </span>
+          </span>
+        </button>
+        <!-- eslint-disable-next-line vuejs-accessibility/media-has-caption -- its words are the button's name and tooltip -->
+        <audio
+          ref="basetenClip"
+          src="/bass.mp3"
+          preload="none"
+        />
+        <p data-testid="decision-baseten-about">
+          Decision models from Base Labs, Baseten's research team, which answer the same questions JEV does.
+          Baseten runs them; JClaw calls Baseten's own address with the key below. The Model Router's classifier
+          sends the first 4000 characters of each prompt to Baseten. Read
+          <NuxtLink
+            to="/guide#settings-baseten-data"
+            class="text-fg-strong underline"
+            data-testid="decision-baseten-data-link"
+          >Baseten's data and billing</NuxtLink> in the user guide before you tick one.
+        </p>
+      </div>
+      <div class="divide-y divide-border">
+        <div class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3">
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">apiKey</span>
+          <SecretField
+            v-model="editValue"
+            :saved="basetenKeyConfigured"
+            :editing="editingKey === BASETEN_API_KEY"
+            label="Baseten API key"
+            placeholder="Your Baseten API key"
+            removable
+            :busy="saving"
+            data-testid="decision-baseten-key"
+            @edit="editingKey = BASETEN_API_KEY"
+            @save="updateEntry(BASETEN_API_KEY)"
+            @cancel="editingKey = null"
+            @remove="editValue = ''; updateEntry(BASETEN_API_KEY)"
+          />
+        </div>
+        <ApiErrorAlert
+          v-if="editingKey === BASETEN_API_KEY"
+          :error="editError"
+          class="px-4 py-2.5"
+        />
+        <div
+          class="px-4 py-2 flex max-sm:flex-wrap items-start gap-3"
+          data-testid="decision-baseten-models"
+        >
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 py-0.5">decision models</span>
+          <div class="flex-1 min-w-0 space-y-1">
+            <label
+              v-for="m in BASETEN_MODELS"
+              :key="m.id"
+              class="flex flex-wrap items-center gap-2 text-sm text-fg-strong"
+              :for="`decision-baseten-model-${m.name}`"
+              :data-testid="`decision-baseten-model-${m.name}`"
+            >
+              <input
+                :id="`decision-baseten-model-${m.name}`"
+                type="checkbox"
+                :checked="tickedBaseten.includes(m.id)"
+                :disabled="saving || basetenLockedByRouter(m.id)"
+                @change="toggleBasetenModel(m.id, $event.target as HTMLInputElement)"
+              >
+              <!-- One line, as Laya's: the space between the two is what a screen reader hears between name and note. -->
+              <span class="font-mono">{{ m.name }}</span> <span class="text-xs text-fg-muted">{{ basetenNote(m) }}</span>
+            </label>
+            <p
+              class="text-xs text-fg-muted"
+              data-testid="decision-baseten-selection"
+            >
+              Only a ticked model can be the Model Router's classifier, and the one it is using cannot be unticked.
+            </p>
+          </div>
+        </div>
+        <ApiErrorAlert
+          :error="basetenError"
+          class="px-4 py-2.5"
+        />
+        <div
+          class="px-4 py-2 flex max-sm:flex-wrap items-start gap-3"
+          data-testid="decision-baseten-used-by"
+        >
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0 py-0.5">used by</span>
+          <ul class="flex-1 min-w-0 space-y-1">
+            <li
+              class="flex flex-wrap items-center gap-x-2 gap-y-1"
+              data-testid="decision-baseten-consumer-model-router"
+            >
+              <NuxtLink
+                to="/settings?section=model-router"
+                class="text-sm text-fg-strong underline"
+              >Model Router</NuxtLink>
+              <span class="text-xs text-fg-muted">prompt classifier{{ routerBasetenModel ? ` (${routerBasetenName})` : '' }}</span>
+              <span
+                v-if="routerBasetenModel"
+                class="text-xs text-green-700 dark:text-green-400 border border-green-400/30 px-1"
+              >in use</span>
+              <span
+                v-else
+                class="text-xs text-fg-muted border border-input px-1"
+              >not in use</span>
+            </li>
+          </ul>
+        </div>
+        <div
+          v-if="basetenBreaker"
+          class="px-4 py-2 flex max-sm:flex-wrap items-center gap-3"
+          data-testid="decision-baseten-breaker"
+        >
+          <span class="text-xs font-mono text-fg-muted w-48 max-sm:w-full shrink-0">circuit breaker</span>
+          <BreakerControl
+            :breaker="basetenBreaker"
             class="flex-1"
             @changed="refreshBreakers()"
           />

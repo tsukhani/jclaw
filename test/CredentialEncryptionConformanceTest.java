@@ -27,6 +27,7 @@ import services.AgentService;
 import services.ConfigService;
 import services.McpServerService;
 import services.Tx;
+import services.decision.BasetenDecision;
 import services.decision.DecisionSettings;
 import services.decision.LayaDecision;
 import services.telemetry.OtelConfig;
@@ -113,7 +114,7 @@ class CredentialEncryptionConformanceTest extends UnitTest {
             "provider.openai.apiKey", "search.exa.apiKey", "scanner.virustotal.apiKey", "scanner.malwarebazaar.authKey",
             "imagegen.local.hfToken", "web_scrape.stealth.hfToken", WebScrapeSettings.PROXY_PASSWORD,
             DataImpulsePlans.passwordKey("residential"), OtelConfig.KEY_SECRET_HEADERS, DecisionSettings.API_KEY,
-            LayaDecision.API_KEY);
+            LayaDecision.API_KEY, BasetenDecision.API_KEY);
 
     @Test
     void everyStoreKeepsItsCredentialEncrypted() {

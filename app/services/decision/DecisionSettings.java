@@ -20,7 +20,8 @@ public final class DecisionSettings {
     public static final String LEGACY_API_KEY = "browser.jev.apiKey";
 
     private static final List<String> KEYS = List.of(API_KEY, OllamaDecision.BASE_URL_KEY, OllamaDecision.MODELS_KEY,
-            OllamaDecision.KEEP_ALIVE_KEY, LayaDecision.BASE_URL_KEY, LayaDecision.API_KEY, LayaDecision.MODELS_KEY);
+            OllamaDecision.KEEP_ALIVE_KEY, LayaDecision.BASE_URL_KEY, LayaDecision.API_KEY, LayaDecision.MODELS_KEY,
+            BasetenDecision.API_KEY, BasetenDecision.MODELS_KEY);
 
     private DecisionSettings() {}
 
@@ -44,12 +45,18 @@ public final class DecisionSettings {
                     : "%s must be a JSON array of Laya checkpoints (%s), such as [\"english\"]."
                             .formatted(key, String.join(", ", LayaDecision.CHECKPOINTS));
         }
+        if (key.equals(BasetenDecision.MODELS_KEY)) {
+            var ids = BasetenDecision.MODELS.stream().map(BasetenDecision.Model::id).toList();
+            return BasetenDecision.isSelection(value) ? null
+                    : "%s must be a JSON array of Baseten model IDs (%s), such as [\"%s\"]."
+                            .formatted(key, String.join(", ", ids), ids.getFirst());
+        }
         if (key.equals(OllamaDecision.KEEP_ALIVE_KEY)) {
             return value == null || value.isBlank() || OllamaDecision.isKeepAlive(value.strip()) ? null
                     : "%s must be -1 (keep loaded), 0 (unload at once) or a number followed by s, m or h, such as 30m."
                             .formatted(key);
         }
-        if (!key.equals(API_KEY) && !key.equals(LayaDecision.API_KEY)) {
+        if (!key.equals(API_KEY) && !key.equals(LayaDecision.API_KEY) && !key.equals(BasetenDecision.API_KEY)) {
             return "%s is not a decision-provider setting; use one of %s.".formatted(key, String.join(", ", KEYS));
         }
         // The key rides an Authorization header, where OkHttp throws on anything but printable ASCII.

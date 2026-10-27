@@ -12,6 +12,7 @@ import { sectionGroups } from '~/components/settings/sections'
  * The key editor keeps the JCLAW-1274 behaviours it had in the Browser panel. Ollama's card (JCLAW-1336)
  * holds the server, its decision models and the router's use of them. Laya's card (JCLAW-1447) holds
  * the server the operator runs, its optional key, the checkpoints with their context, and its limits.
+ * Baseten's card (JF-133) holds its key and its two hosted models.
  */
 
 let stored: Map<string, string>
@@ -39,7 +40,7 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void>, o
   registerEndpoint('/api/breakers', () => breakers)
   registerEndpoint('/api/decision/ollama', () => ollama)
   registerEndpoint('/api/decision/laya', () => laya)
-  for (const key of ['decision.ollama.baseUrl', 'decision.ollama.models', 'decision.laya.baseUrl', 'decision.laya.models']) {
+  for (const key of ['decision.ollama.baseUrl', 'decision.ollama.models', 'decision.laya.baseUrl', 'decision.laya.models', 'decision.baseten.models']) {
     registerEndpoint(`/api/config/${key}`, {
       method: 'DELETE',
       handler: () => {
@@ -62,8 +63,8 @@ function baseEndpoints(opts: { failSaves?: boolean, holdSaves?: Promise<void>, o
         setResponseStatus(event, 403)
         return { error: 'invalid_request', message: 'decision.jev.apiKey must be printable ASCII with no spaces.' }
       }
-      // The API masks a key on read, as ConfigService.maskValue does.
-      stored.set(body.key, body.key.endsWith('apiKey') ? `${body.value.slice(0, 4)}****` : body.value)
+      // The API masks a key on read, as ConfigService.maskValue does; a blank one stays blank.
+      stored.set(body.key, body.key.endsWith('apiKey') && body.value ? `${body.value.slice(0, 4)}****` : body.value)
       opts.onSave?.(body)
       return { status: 'ok' }
     },
@@ -272,12 +273,11 @@ describe('Settings page — Decision Providers', () => {
   })
 
   describe('Ollama card (JCLAW-1336)', () => {
-    it('is the last card, directly below the Laya card', async () => {
+    it('sits directly below the Laya card', async () => {
       baseEndpoints()
       const component = await mountDecisionProviders()
       const laya = component.find('[data-testid="decision-provider-laya"]').element
       expect(laya.nextElementSibling?.getAttribute('data-testid')).toBe('decision-provider-ollama')
-      expect(laya.nextElementSibling?.nextElementSibling).toBeNull()
     })
 
     it('says a model on the server keeps the prompt there and links the guide for cloud models, without JEV\'s retention notice', async () => {
@@ -859,6 +859,238 @@ describe('Settings page — Decision Providers', () => {
       const breaker = isolated.find('[data-testid="decision-laya-breaker"]')
       expect(breaker.text()).toContain('isolated by you')
       expect(breaker.find('button[aria-label="Restore laya"]').exists()).toBe(true)
+    })
+  })
+
+  describe('Baseten card (JF-133)', () => {
+    const ELEPHANT = 'decision-models/baseten-elephant-9b-latest'
+    const MAMMOTH = 'decision-models/baseten-mammoth-27b-latest'
+    const box = (component: Awaited<ReturnType<typeof mountDecisionProviders>>, name: string) =>
+      component.find(`[data-testid="decision-baseten-model-${name}"] input`)
+
+    it('is the last card, directly below the Ollama card', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const ollama = component.find('[data-testid="decision-provider-ollama"]').element
+      expect(ollama.nextElementSibling?.getAttribute('data-testid')).toBe('decision-provider-baseten')
+      expect(ollama.nextElementSibling?.nextElementSibling).toBeNull()
+    })
+
+    it('without a key reads needs API key and lists both models with their context and size', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      expect(component.find('[data-testid="decision-baseten-status"]').text()).toBe('needs API key')
+      expect(component.find('[data-testid="decision-baseten-key"]').text()).toBe('(not set)')
+      const models = component.find('[data-testid="decision-baseten-models"]')
+      expect(models.findAll('label').map(l => words(l.text()))).toEqual([
+        'elephant-1 16,384 tokens, 9B parameters',
+        'mammoth-1 16,384 tokens, 27B parameters',
+      ])
+      expect(models.findAll('p').map(p => words(p.text()))).toEqual([
+        'Only a ticked model can be the Model Router\'s classifier, and the one it is using cannot be unticked.',
+      ])
+      expect(models.findAll('input').map(i => (i.element as HTMLInputElement).checked)).toEqual([false, false])
+      expect(component.find('[data-testid="decision-baseten-breaker"]').exists()).toBe(false)
+    })
+
+    it('says what the models are, that Baseten runs them and gets the prompt, and links the guide', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const about = component.find('[data-testid="decision-baseten-about"]')
+      expect(words(about.text())).toBe(
+        'Decision models from Base Labs, Baseten\'s research team, which answer the same questions JEV does. '
+        + 'Baseten runs them; JClaw calls Baseten\'s own address with the key below. The Model Router\'s classifier '
+        + 'sends the first 4000 characters of each prompt to Baseten. Read Baseten\'s data and billing in the user '
+        + 'guide before you tick one.')
+      expect(about.find('[data-testid="decision-baseten-data-link"]').attributes('href')).toBe('/guide#settings-baseten-data')
+      const card = component.find('[data-testid="decision-provider-baseten"]')
+      expect(card.text()).not.toContain('record or retain')
+      expect(card.find('[data-testid="decision-baseten-address"]').exists()).toBe(false)
+    })
+
+    it('shows the portrait beside the note, decorative and sized before it loads', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      const portrait = component.find('[data-testid="decision-baseten-portrait"]')
+      expect(portrait.attributes('src')).toBe('/bass.webp')
+      expect(portrait.attributes('alt')).toBe('')
+      expect([portrait.attributes('width'), portrait.attributes('height')]).toEqual(['200', '268'])
+      const play = component.find('[data-testid="decision-baseten-play"]')
+      expect(play.find('[data-testid="decision-baseten-portrait"]').exists()).toBe(true)
+      expect(play.element.nextElementSibling?.nextElementSibling?.getAttribute('data-testid')).toBe('decision-baseten-about')
+    })
+
+    it('plays the clip from the start when the portrait is clicked, fetching nothing before', async () => {
+      const playSpy = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue()
+      try {
+        baseEndpoints()
+        const component = await mountDecisionProviders()
+
+        const button = component.find('[data-testid="decision-baseten-play"]')
+        expect(button.attributes('type')).toBe('button')
+        expect(button.attributes('aria-label')).toBe('Play a voice singing “I’m all about that bass”')
+        expect(button.attributes('title')).toBe(button.attributes('aria-label'))
+        const audio = component.find('audio[src="/bass.mp3"]')
+        expect(audio.attributes('preload')).toBe('none')
+
+        ;(audio.element as HTMLAudioElement).currentTime = 2.1
+        await button.trigger('click')
+        expect(playSpy).toHaveBeenCalledTimes(1)
+        expect(playSpy.mock.contexts[0]).toBe(audio.element)
+        expect((audio.element as HTMLAudioElement).currentTime).toBe(0)
+      }
+      finally {
+        playSpy.mockRestore()
+      }
+    })
+
+    it('sets the key through the masked editor, and then reads configured', async () => {
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+
+      await component.find('button[aria-label="Edit Baseten API key"]').trigger('click')
+      const input = component.find('input[aria-label="Baseten API key"]')
+      expect(input.attributes('type')).toBe('password')
+      expect((input.element as HTMLInputElement).value).toBe('')
+      await input.setValue('bt-secret-123')
+      await component.find('button[aria-label="Save Baseten API key"]').trigger('click')
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.baseten.apiKey', value: 'bt-secret-123' }]))
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-baseten-key"]').text()).toBe('••••••••'))
+      expect(component.find('[data-testid="decision-baseten-status"]').text()).toBe('configured')
+      expect(component.html()).not.toContain('bt-secret-123')
+      expect(component.find('[data-testid="decision-jev-status"]').text()).toBe('needs API key')
+    })
+
+    it('Remove sends a blank key, and the card then reads needs API key', async () => {
+      stored.set('decision.baseten.apiKey', 'bt-s****')
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      expect(component.find('[data-testid="decision-baseten-status"]').text()).toBe('configured')
+
+      await component.find('button[aria-label="Edit Baseten API key"]').trigger('click')
+      await component.find('button[aria-label="Remove Baseten API key"]').trigger('click')
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.baseten.apiKey', value: '' }]))
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-baseten-status"]').text()).toBe('needs API key'))
+      expect(component.find('[data-testid="decision-baseten-key"]').text()).toBe('(not set)')
+    })
+
+    it('a refused key keeps the editor open with the reason on the Baseten card', async () => {
+      baseEndpoints({ failSaves: true })
+      const component = await mountDecisionProviders()
+
+      await component.find('button[aria-label="Edit Baseten API key"]').trigger('click')
+      await component.find('input[aria-label="Baseten API key"]').setValue('bt key')
+      await component.find('button[aria-label="Save Baseten API key"]').trigger('click')
+
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-provider-baseten"] [data-testid="api-error"]').exists()).toBe(true))
+      expect(component.find('input[aria-label="Baseten API key"]').exists()).toBe(true)
+      expect(component.find('[data-testid="decision-provider-jev"] [data-testid="api-error"]').exists()).toBe(false)
+    })
+
+    it('ticking a model stores the IDs in the table\'s order, and clearing the last one deletes the key', async () => {
+      stored.set('decision.baseten.models', JSON.stringify([MAMMOTH]))
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect((box(component, 'mammoth-1').element as HTMLInputElement).checked).toBe(true))
+
+      await box(component, 'elephant-1').setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT, MAMMOTH]) }]))
+      await vi.waitFor(() => expect(box(component, 'elephant-1').attributes('disabled')).toBeUndefined())
+      expect((box(component, 'elephant-1').element as HTMLInputElement).checked).toBe(true)
+
+      await box(component, 'mammoth-1').setValue(false)
+      await vi.waitFor(() => expect(posted).toHaveLength(2))
+      expect(posted[1]).toEqual({ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT]) })
+      await vi.waitFor(() => expect(box(component, 'elephant-1').attributes('disabled')).toBeUndefined())
+      await box(component, 'elephant-1').setValue(false)
+      await vi.waitFor(() => expect(deleted).toEqual(['decision.baseten.models']))
+    })
+
+    it('a stored ID that is no Baseten model is neither shown nor written back', async () => {
+      stored.set('decision.baseten.models', JSON.stringify(['elephant-1', ELEPHANT]))
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect((box(component, 'elephant-1').element as HTMLInputElement).checked).toBe(true))
+      expect(component.find('[data-testid="decision-baseten-models"]').findAll('label')).toHaveLength(2)
+
+      await box(component, 'mammoth-1').setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT, MAMMOTH]) }]))
+    })
+
+    it('the model the Model Router is using cannot be unticked, and the other still can', async () => {
+      stored.set('decision.baseten.models', JSON.stringify([ELEPHANT, MAMMOTH]))
+      stored.set('router.classifier.provider', 'baseten-decision')
+      stored.set('router.classifier.model', ELEPHANT)
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect((box(component, 'elephant-1').element as HTMLInputElement).checked).toBe(true))
+      expect(box(component, 'elephant-1').attributes('disabled')).toBeDefined()
+      expect(box(component, 'mammoth-1').attributes('disabled')).toBeUndefined()
+
+      await box(component, 'mammoth-1').setValue(false)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT]) }]))
+    })
+
+    it('a model the Model Router names but nobody ticked can still be ticked, and is then locked', async () => {
+      stored.set('router.classifier.provider', 'baseten-decision')
+      stored.set('router.classifier.model', ELEPHANT)
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(box(component, 'elephant-1').exists()).toBe(true))
+      expect(box(component, 'elephant-1').attributes('disabled')).toBeUndefined()
+
+      await box(component, 'elephant-1').setValue(true)
+      await vi.waitFor(() => expect(posted).toEqual([{ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT]) }]))
+      // Every box is disabled while the save runs, so wait for an unlocked one to clear first.
+      await vi.waitFor(() => expect(box(component, 'mammoth-1').attributes('disabled')).toBeUndefined())
+      expect(box(component, 'elephant-1').attributes('disabled')).toBeDefined()
+    })
+
+    it('a refused selection puts the box back to what is stored, with the reason on the card', async () => {
+      stored.set('decision.baseten.models', JSON.stringify([MAMMOTH]))
+      baseEndpoints({ failSaves: true })
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect((box(component, 'mammoth-1').element as HTMLInputElement).checked).toBe(true))
+
+      await box(component, 'elephant-1').setValue(true)
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-provider-baseten"] [data-testid="api-error"]').exists()).toBe(true))
+      await vi.waitFor(() => expect(box(component, 'elephant-1').attributes('disabled')).toBeUndefined())
+      expect((box(component, 'elephant-1').element as HTMLInputElement).checked).toBe(false)
+      expect(posted).toEqual([{ key: 'decision.baseten.models', value: JSON.stringify([ELEPHANT, MAMMOTH]) }])
+      expect(stored.get('decision.baseten.models')).toBe(JSON.stringify([MAMMOTH]))
+    })
+
+    it('shows the Model Router as not in use until it classifies with a Baseten model, then names it', async () => {
+      stored.set('router.classifier.provider', 'laya')
+      stored.set('router.classifier.model', 'english')
+      baseEndpoints()
+      const idle = await mountDecisionProviders()
+      const row = idle.find('[data-testid="decision-baseten-consumer-model-router"]')
+      expect(row.find('a').attributes('href')).toBe('/settings?section=model-router')
+      expect(row.text()).toContain('not in use')
+      expect(idle.find('[data-testid="decision-baseten-used-by"]').findAll('li')).toHaveLength(1)
+
+      clearNuxtData()
+      stored.set('router.classifier.provider', 'baseten-decision')
+      stored.set('router.classifier.model', MAMMOTH)
+      const using = await mountDecisionProviders()
+      const inUse = using.find('[data-testid="decision-baseten-consumer-model-router"]').text()
+      expect(inUse).toContain('prompt classifier (mammoth-1)')
+      expect(inUse).toContain('in use')
+      expect(inUse).not.toContain('not in use')
+      expect(inUse).not.toContain(MAMMOTH)
+      expect(using.find('[data-testid="decision-laya-consumer-model-router"]').text()).toContain('not in use')
+    })
+
+    it('shows its own breaker once the router has called it, with Isolate', async () => {
+      breakers = [jevBreaker({ name: 'decision:baseten', target: 'baseten' })]
+      baseEndpoints()
+      const component = await mountDecisionProviders()
+      await vi.waitFor(() => expect(component.find('[data-testid="decision-baseten-breaker"]').exists()).toBe(true))
+      expect(component.find('[data-testid="decision-baseten-breaker"] button[aria-label="Isolate baseten"]').exists()).toBe(true)
+      expect(component.find('[data-testid="decision-jev-breaker"]').exists()).toBe(false)
+      expect(component.find('[data-testid="decision-laya-breaker"]').exists()).toBe(false)
+      expect(component.find('[data-testid="decision-ollama-breaker"]').exists()).toBe(false)
     })
   })
 })

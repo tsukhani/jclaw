@@ -142,6 +142,11 @@ const layaClassifier = computed(() => configValue('router.classifier.provider').
   ? LAYA_CHECKPOINTS.find(c => c.name === configValue('router.classifier.model').trim())
   : undefined)
 
+// JF-133: the models ticked on the Baseten card, which need its key as JEV's option needs TypeSafe's.
+const basetenKeySet = computed(() => configValue('decision.baseten.apiKey').trim().length > 0)
+const basetenOptions = computed(() => tickedBasetenModels(configValue('decision.baseten.models'))
+  .map(m => ({ value: `baseten-decision::${m.id}`, label: `Baseten / ${m.name} (${contextLabel(m.contextTokens)})` })))
+
 async function saveClassifier(value: string) {
   saving.value = true
   await attempt(async () => {
@@ -391,8 +396,9 @@ function usageTone(fraction: number): string {
       questions with a probability for each choice, and leaves a prompt whose class it is unsure of to the
       keyword rules. Either costs one extra call before the reply starts and sees the first 4000 characters
       of the prompt, so a remote classifier is one more place your prompts go: JEV sends them to TypeSafe
-      AI, which may record or retain them. If the classifier is unreachable, slower than its timeout or
-      answers with something else, the keyword rules decide instead and the turn carries on.
+      AI, which may record or retain them, and a Baseten model sends them to Baseten. If the classifier is
+      unreachable, slower than its timeout or answers with something else, the keyword rules decide instead and
+      the turn carries on.
     </p>
     <div class="bg-surface-elevated border border-border divide-y divide-border">
       <div>
@@ -431,6 +437,15 @@ function usageTone(fraction: number): string {
               {{ o.label }}
             </option>
             <option
+              v-for="o in basetenOptions"
+              :key="o.value"
+              :value="o.value"
+              :disabled="!basetenKeySet"
+              data-testid="router-baseten-option"
+            >
+              {{ o.label }}{{ basetenKeySet ? '' : ' — needs a Baseten API key' }}
+            </option>
+            <option
               v-for="o in modelOptions"
               :key="o.value"
               :value="o.value"
@@ -445,6 +460,16 @@ function usageTone(fraction: number): string {
           data-testid="router-jev-key-hint"
         >
           To classify with JEV, set a TypeSafe API key in <NuxtLink
+            to="/settings?section=decision-providers"
+            class="text-fg-strong underline"
+          >Settings → Decision Providers</NuxtLink>.
+        </p>
+        <p
+          v-if="basetenOptions.length > 0 && !basetenKeySet"
+          class="px-4 pb-2.5 text-xs text-fg-muted"
+          data-testid="router-baseten-key-hint"
+        >
+          To classify with Baseten, set a Baseten API key in <NuxtLink
             to="/settings?section=decision-providers"
             class="text-fg-strong underline"
           >Settings → Decision Providers</NuxtLink>.
