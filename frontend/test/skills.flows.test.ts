@@ -394,6 +394,27 @@ describe('Skills page — view-skill flow (read-only viewer)', () => {
     expect(component.text()).toContain('web-search')
   })
 
+  it('makes a rendered code block reachable by keyboard, so a wide one can be scrolled without a mouse', async () => {
+    registerEndpoint('/api/skills/web-search/files', () => ({
+      files: [{ path: 'SKILL.md', isText: true }],
+      tools: [],
+      commands: [],
+      author: '',
+    }))
+    registerEndpoint('/api/skills/web-search/files/SKILL.md', () => ({
+      content: ['# Web Search', '', '```bash', 'curl https://example.test/search?q=jclaw', '```'].join('\n'),
+    }))
+    setupApi()
+    const component = await mountSuspended(Skills)
+    await flushPromises()
+
+    const webSearchRow = component.findAll('.group').find(r => r.text().includes('web-search'))
+    await webSearchRow!.find('button[title="View skill"]').trigger('click')
+    await vi.waitFor(() => expect(component.find('.prose-skill pre').exists()).toBe(true))
+
+    expect(component.find('.prose-skill pre').attributes('tabindex')).toBe('0')
+  })
+
   it('returns to the skills list when the Back button is clicked in the viewer', async () => {
     registerEndpoint('/api/skills/code-review/files', () => ({
       files: [{ path: 'SKILL.md', isText: true }],

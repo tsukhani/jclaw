@@ -764,7 +764,8 @@ const isMarkdownFile = computed(() => activeFile.value?.endsWith('.md') ?? false
 
 const renderedMarkdown = computed(() => {
   if (!isMarkdownFile.value || !fileContent.value) return ''
-  return DOMPurify.sanitize(marked.parse(fileContent.value) as string)
+  // A code block wider than the pane scrolls sideways; tabindex lets a keyboard reach that scroll (WCAG 2.1.1).
+  return DOMPurify.sanitize(marked.parse(fileContent.value) as string).replaceAll('<pre>', '<pre tabindex="0">')
 })
 
 // The viewer follows the route and the file list; a slow load for the previous skill or file

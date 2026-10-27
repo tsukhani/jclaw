@@ -14,11 +14,11 @@ const VISIBLE_MS = 8000
  * as "no anchor" and stays hidden. Plant a stub anchor reporting a realistic
  * header-pill rect so placement runs the way it does in a browser.
  */
-function plantAnchor() {
+function plantAnchor(left = 1800) {
   const el = document.createElement('a')
   el.setAttribute('data-star-anchor', '')
   el.getBoundingClientRect = () => ({
-    left: 1800, right: 1880, top: 12, bottom: 44, width: 80, height: 32, x: 1800, y: 12,
+    left, right: left + 80, top: 12, bottom: 44, width: 80, height: 32, x: left, y: 12,
     toJSON: () => ({}),
   })
   document.body.appendChild(el)
@@ -101,6 +101,28 @@ describe('GithubStarNudge', () => {
   it('does not burn its seen flag while suppressed', async () => {
     plantAnchor()
     await mountAndSettle({ suppressed: true })
+    expect(localStorage.getItem(SEEN_KEY)).toBeNull()
+  })
+
+  it('stays hidden below 640px wide and keeps its showing for a wider visit', async () => {
+    vi.stubGlobal('innerWidth', 639)
+    plantAnchor(500)
+    const c = await mountAndSettle()
+    expect(c.text()).not.toContain('Leave a star!')
+    expect(localStorage.getItem(SEEN_KEY)).toBeNull()
+  })
+
+  it('shows at 640px wide', async () => {
+    vi.stubGlobal('innerWidth', 640)
+    plantAnchor(540)
+    const c = await mountAndSettle()
+    expect(c.text()).toContain('Leave a star!')
+  })
+
+  it('stays hidden while the pill sits past the edge of the viewport', async () => {
+    plantAnchor(1880)
+    const c = await mountAndSettle()
+    expect(c.text()).not.toContain('Leave a star!')
     expect(localStorage.getItem(SEEN_KEY)).toBeNull()
   })
 
