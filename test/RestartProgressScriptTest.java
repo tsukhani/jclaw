@@ -19,6 +19,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -257,6 +258,56 @@ class RestartProgressScriptTest extends UnitTest {
         // Precompile deleted the class files it runs from; the narrator loaded them all at its start.
         assertEquals(List.of("done:Stopping JClaw", "running:Precompiling"), steps(probe("precompile").progress()));
         assertEquals(List.of("done:Stopping JClaw", "done:Precompiling", "running:Building the web app"), steps(probe("spa").progress()));
+    }
+
+    @Test
+    void aFileAddedToTheFrontendRebuildsTheWebAppWhateverItsOwnStamp() throws Exception {
+        sourceCheckout();
+        buildWebApp();
+        // As mv or a Finder copy leave it: older than the build, and not yet added to git.
+        olderThanTheBuild(Files.writeString(home.resolve("frontend/public/bass.mp3"), "mp3\n"));
+
+        assertTheWebAppIsRebuiltBecause("frontend/public/");
+    }
+
+    @Test
+    void aFileAddedBesideOnesGitHasNeverSeenRebuildsTheWebApp() throws Exception {
+        sourceCheckout();
+        Files.createDirectories(home.resolve("frontend/public/sounds"));
+        Files.writeString(home.resolve("frontend/public/sounds/a.mp3"), "mp3\n");
+        buildWebApp();
+        olderThanTheBuild(Files.writeString(home.resolve("frontend/public/sounds/b.mp3"), "mp3\n"));
+
+        assertTheWebAppIsRebuiltBecause("frontend/public/sounds/");
+    }
+
+    @Test
+    void aFileDeletedFromTheFrontendRebuildsTheWebApp() throws Exception {
+        sourceCheckout();
+        buildWebApp();
+        Files.delete(home.resolve("frontend/public/favicon.ico"));
+
+        assertTheWebAppIsRebuiltBecause("frontend/public/");
+    }
+
+    @Test
+    void whatATestRunLeavesInTheFrontendKeepsTheBuiltWebApp() throws Exception {
+        sourceCheckout();
+        buildWebApp();
+        Files.createDirectories(home.resolve("frontend/test-report"));
+        Files.writeString(home.resolve("frontend/test-report/index.html"), "<html></html>\n");
+
+        var run = harness(Map.of("JCLAW_AOT", "off"), false, "do_start_prod");
+        assertEquals(0, run.exit(), run.out());
+        assertTrue(run.out().lines().toList().contains("==> Skipping the SPA build and frontend dependencies (public/spa is up to date)"), run.out());
+        assertEquals(List.of(), calls().stream().filter(c -> c.startsWith("npx ") || c.startsWith("pnpm ")).toList());
+    }
+
+    private void assertTheWebAppIsRebuiltBecause(String newer) throws Exception {
+        var run = harness(Map.of("JCLAW_AOT", "off", "STUB_FAKE_NARRATOR", "1"), false, "do_start_prod");
+        assertEquals(0, run.exit(), run.out());
+        assertTrue(run.out().lines().toList().contains("==> Generating static SPA (" + newer + " is newer than public/spa)..."), run.out());
+        assertTrue(calls().contains("npx nuxi generate"), calls().toString());
     }
 
     @Test
@@ -504,6 +555,41 @@ class RestartProgressScriptTest extends UnitTest {
                 jar.closeEntry();
             }
         }
+    }
+
+    /** A source checkout whose frontend git tracks, not yet started. */
+    private void sourceCheckout() throws Exception {
+        Files.createDirectories(home.resolve("app"));
+        Files.createDirectories(home.resolve("frontend/public"));
+        Files.writeString(home.resolve("frontend/.gitignore"), "test-report/\n");
+        Files.writeString(home.resolve("frontend/public/favicon.ico"), "icon\n");
+        git("init", "-q");
+        git("add", "frontend");
+        Files.delete(home.resolve("server.pid"));
+    }
+
+    /** Builds the classes and the web app an hour ago and dates every source a day ago, so only what a test does next is newer. */
+    private void buildWebApp() throws IOException {
+        Files.createDirectories(home.resolve("precompiled/java"));
+        Files.createDirectories(home.resolve("public/spa"));
+        try (Stream<Path> paths = Files.walk(home)) {
+            for (var p : paths.filter(p -> !p.startsWith(home.resolve(".git"))).toList()) olderThanTheBuild(p);
+        }
+        var built = FileTime.fromMillis(System.currentTimeMillis() - 3_600_000);
+        Files.setLastModifiedTime(home.resolve("precompiled/java"), built);
+        Files.setLastModifiedTime(home.resolve("public/spa"), built);
+    }
+
+    private static Path olderThanTheBuild(Path p) throws IOException {
+        return Files.setLastModifiedTime(p, FileTime.fromMillis(System.currentTimeMillis() - 86_400_000));
+    }
+
+    private void git(String... args) throws Exception {
+        var cmd = new ArrayList<>(List.of("/usr/bin/git", "-C", home.toString()));
+        cmd.addAll(List.of(args));
+        var p = new ProcessBuilder(cmd).redirectErrorStream(true).start();
+        var out = new String(p.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        assertEquals(0, p.waitFor(), out);
     }
 
     private void stageJava() throws IOException {

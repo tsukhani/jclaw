@@ -255,8 +255,8 @@ Environment:
                           Example: JCLAW_JVM_OPTS='-XX:MaxDirectMemorySize=512m'
   JCLAW_FORCE_SPA_BUILD   Rebuild the SPA even when public/spa looks up to
                           date. The build is normally skipped unless a
-                          frontend file is newer than public/spa; set this
-                          when a change leaves no newer file (e.g. a
+                          frontend file or folder is newer than public/spa;
+                          set this when a change leaves none newer (e.g. a
                           build-time env var) and the SPA must be rebuilt.
 
 Load-test options (only used with the 'loadtest' command):
@@ -689,8 +689,8 @@ Environment:
                           Settings > Maintenance > Restart has the same switch.
   JCLAW_FORCE_SPA_BUILD   Rebuild the SPA even when public/spa looks up to
                           date. The build is normally skipped unless a
-                          frontend file is newer than public/spa; set this
-                          when a change leaves no newer file (e.g. a
+                          frontend file or folder is newer than public/spa;
+                          set this when a change leaves none newer (e.g. a
                           build-time env var) and the SPA must be rebuilt.
 
 Examples:
@@ -3738,11 +3738,16 @@ do_start_prod() {
         # public/spa's mtime is the threshold: the `cp -r` below stamps it at
         # build time (cp doesn't preserve mtimes without -p).
         #
-        # The inputs are the TRACKED files under the two build roots, asked of
-        # git rather than walked with find (JCLAW-1179). Everything the build
-        # itself writes is gitignored — node_modules, .nuxt, .output, .vite,
-        # and the four test-output directories — so enumerating tracked files
-        # excludes all of it by construction. The predecessor pruned a list of
+        # The inputs are the files under the two build roots that git does not
+        # ignore — tracked ones, and untracked ones not yet added, which the
+        # build ships all the same — asked of git rather than walked with find
+        # (JCLAW-1179). Everything the build itself writes is gitignored —
+        # node_modules, .nuxt, .output, .vite, and the four test-output
+        # directories — so the listing excludes all of it by construction.
+        # Each file's directory counts too, as in the precompile guard: an add,
+        # delete or rename whose file keeps an older stamp (mv, a Finder copy)
+        # shows only in its parent's mtime. frontend/ itself is skipped, since
+        # its own entries are that gitignored output. The predecessor pruned a list of
         # names instead, and the list was wrong: `pnpm test` and the e2e run
         # left test-report/, coverage/, test-results/ and playwright-report/
         # newer than the bundle, so running tests forced a rebuild and, with
@@ -3769,19 +3774,24 @@ do_start_prod() {
             # `-nt` is a bash builtin, so this stays one process however many
             # files git lists, and it is false for a tracked-but-deleted path
             # rather than an error.
-            spa_tracked=0
+            spa_listed=0
             while IFS= read -r -d '' spa_src; do
-                spa_tracked=$((spa_tracked + 1))
+                spa_listed=$((spa_listed + 1))
+                spa_src_dir="${spa_src%/*}"
                 if [[ "$SCRIPT_DIR/$spa_src" -nt "$SCRIPT_DIR/public/spa" ]]; then
                     spa_stale_file="$spa_src"
                     break
                 fi
-            done < <(/usr/bin/git -C "$SCRIPT_DIR" ls-files -z -- frontend docs/user-guide 2>/dev/null)
+                if [[ "$spa_src_dir" != frontend && "$SCRIPT_DIR/$spa_src_dir" -nt "$SCRIPT_DIR/public/spa" ]]; then
+                    spa_stale_file="$spa_src_dir/"
+                    break
+                fi
+            done < <(/usr/bin/git -C "$SCRIPT_DIR" ls-files -z --cached --others --exclude-standard -- frontend docs/user-guide 2>/dev/null)
 
             if [[ -n "$spa_stale_file" ]]; then
                 spa_rebuild_reason="$spa_stale_file is newer than public/spa"
-            elif [[ "$spa_tracked" -eq 0 ]]; then
-                spa_rebuild_reason="could not list tracked frontend sources"
+            elif [[ "$spa_listed" -eq 0 ]]; then
+                spa_rebuild_reason="could not list frontend sources"
             fi
         fi
 
